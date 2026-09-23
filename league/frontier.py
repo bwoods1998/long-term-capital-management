@@ -208,6 +208,7 @@ class FrontierMonth:
         self.clock = clock or _time.time
         self._at = float("-inf")
         self._value: Decimal | None = None
+        self._bonus: Decimal | None = None
 
     def remaining(self) -> Decimal | None:
         now = self.clock()
@@ -220,9 +221,21 @@ class FrontierMonth:
                 month = json.load(response).get("frontier") or {}
             value = Decimal(str(month["cap_usd"])) - Decimal(str(month["spent_usd"]))
             self._value = value if value.is_finite() else None
+            self._bonus = None
+            if month.get("base_cap_usd") is not None and self._value is not None:
+                # The cap in force less the configured month: what profit on the real accounts
+                # added (gateway/lib/equity.mjs). Absent from a gateway that does not index.
+                bonus = Decimal(str(month["cap_usd"])) - Decimal(str(month["base_cap_usd"]))
+                self._bonus = max(bonus, Decimal(0)) if bonus.is_finite() else None
         except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
-            self._value = None
+            self._value = self._bonus = None
         return self._value
+
+    def profit_bonus(self) -> Decimal | None:
+        """What the gateway's profit indexing adds to the month's cap, from the same reading as
+        `remaining`: None when the gateway cannot be read or does not index."""
+        self.remaining()
+        return self._bonus
 
 
 def frontier_tier(remaining: Decimal | None, reserve: Any) -> str:
