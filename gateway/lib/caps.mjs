@@ -142,10 +142,11 @@ function kalshiNotional(body, exit = false) {
   return { micro: picoToMicro(mulPico(count, price)) };
 }
 
-// Alpaca: `notional` is already the dollar amount. A `qty` is a quantity of the security, priced
-// with its own limit price where there is one and otherwise with the reference the router reads
-// from the venue's own quote -- never from the VM that is asking us to authorize the spend.
-// A short sale is worth what it sells, so the sign of the position never enters the notional.
+// Alpaca: `notional` is already the dollar amount. A `qty` is a quantity of the security. A limit
+// order is priced at its own limit price (a reference can raise that, never lower it); a market
+// order is priced only with the reference the router reads from the venue's own quote -- never
+// from the VM that is asking us to authorize the spend. A short sale is worth what it sells, so
+// the sign of the position never enters the notional.
 /** An OCC option symbol: root, YYMMDD, C or P, strike x 1000 in eight digits (`SPY261016C00740000`). */
 export const isOptionSymbol = symbol => /^[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}$/.test(String(symbol || ''));
 
@@ -186,17 +187,46 @@ function optionNotional(body) {
 // the symbol, here and in the router before it looks up a quote:
 //   - no `order_class` other than "simple" (mleg, bracket, oco and oto all add orders or legs that
 //     one price cannot meter) and no `legs` field of any kind;
+//   - a `type` of "market" or "limit", the two the House sends (`ltcm/broker.py` ORDER_TYPES). A
+//     stop, stop_limit or trailing_stop order fills at market once it triggers, and a trailing buy
+//     triggers only after the price has risen, so nothing in its body bounds what it spends: a
+//     trailing buy at 50% was metered at the ask and could not fill below one and a half times it.
+//     A market order carries no `limit_price` (the venue ignores it, so it prices nothing), and a
+//     limit order carries a positive one, checked where it is priced;
 //   - only the fields listed below, spelled exactly so. A venue whose JSON decoder matches keys
 //     case-insensitively (Go's does, and folds U+017F to "s" and U+212A to "k") would read
 //     `Order_Class`, `LEGS` or a second `SYMBOL` that this check never saw;
-//   - a top-level `symbol` in the venue's own spelling (upper case, no spaces), so a lower-case
-//     or padded option symbol cannot be taken for a stock.
+//   - a top-level `symbol` spelled as exactly one of the three instruments the gateway prices: a
+//     stock ticker, a crypto pair or a STANDARD OCC option symbol. An adjusted contract's OCC
+//     symbol has a digit in its root (`XYZ1261016P00005000`) and may deliver other than 100
+//     shares; spelled any looser way it was taken for a stock and a written put worth $5,000 was
+//     metered at $50.00, so it is refused rather than priced;
+//   - `qty` or `notional`, never both, checked where it is priced.
 // Paper orders are never metered and never reach this check.
 export const ALPACA_ORDER_FIELDS = new Set([
-  'symbol', 'qty', 'notional', 'side', 'type', 'time_in_force', 'limit_price', 'stop_price',
-  'trail_price', 'trail_percent', 'extended_hours', 'client_order_id', 'order_class', 'position_intent',
+  'symbol', 'qty', 'notional', 'side', 'type', 'time_in_force', 'limit_price',
+  'extended_hours', 'client_order_id', 'order_class', 'position_intent',
 ]);
-const ALPACA_SYMBOL = /^[A-Z0-9][A-Z0-9.\/-]{0,23}$/;
+//: The order types this gateway prices. Everything else is refused before a quote is read.
+export const ALPACA_ORDER_TYPES = new Set(['market', 'limit']);
+//: A US stock ticker, with an optional share class (`BRK.B`).
+const STOCK_SYMBOL = /^[A-Z]{1,5}(\.[A-Z]{1,2})?$/;
+//: A crypto pair in the venue's spelling (`BTC/USD`).
+const CRYPTO_PAIR = /^[A-Z]{2,10}\/[A-Z]{3,4}$/;
+//: What makes a symbol an option contract to the venue, whatever its root: YYMMDD, C or P, strike.
+const OCC_TAIL = /[0-9]{6}[CP][0-9]{8}$/;
+
+const present = (body, key) => body[key] !== undefined && body[key] !== null;
+
+/** Why this gateway will not price an Alpaca order symbol, or null when it names one it prices. */
+export function alpacaSymbolError(symbol) {
+  if (typeof symbol !== 'string' || symbol === '') return 'An Alpaca order needs a top-level symbol.';
+  if (isOptionSymbol(symbol) || STOCK_SYMBOL.test(symbol) || CRYPTO_PAIR.test(symbol)) return null;
+  if (OCC_TAIL.test(symbol)) {
+    return 'An Alpaca order symbol must be in the venue\'s own spelling, and an option must be a standard OCC symbol (a root of one to six capital letters, YYMMDD, C or P, an eight-digit strike): an adjusted contract is not priced here.';
+  }
+  return 'An Alpaca order symbol must be in the venue\'s own spelling: a stock ticker (AAPL, BRK.B), a crypto pair (BTC/USD) or a standard OCC option symbol.';
+}
 
 /** Why this gateway will not price an Alpaca order body, or null when its shape is one it prices. */
 export function alpacaShapeError(body) {
@@ -205,10 +235,16 @@ export function alpacaShapeError(body) {
   if ((has('order_class') && body.order_class !== 'simple') || has('legs')) {
     return 'Multi-leg, bracket, OCO and OTO orders (an order_class other than "simple", or legs) are not allowed through this gateway.';
   }
+  if (typeof body.type !== 'string' || !ALPACA_ORDER_TYPES.has(body.type)) {
+    return 'Only market and limit orders pass this gateway: a stop, stop_limit or trailing_stop order fills at market once it triggers, so nothing in it bounds what it spends.';
+  }
   const unknown = Object.keys(body).find(key => !ALPACA_ORDER_FIELDS.has(key));
   if (unknown !== undefined) return `Order field ${JSON.stringify(unknown.slice(0, 40))} is not one this gateway prices.`;
-  if (typeof body.symbol !== 'string' || body.symbol === '') return 'An Alpaca order needs a top-level symbol.';
-  if (!ALPACA_SYMBOL.test(body.symbol)) return 'An Alpaca order symbol must be in the venue\'s own spelling: upper case, no spaces.';
+  const symbol = alpacaSymbolError(body.symbol);
+  if (symbol) return symbol;
+  if (body.type === 'market' && present(body, 'limit_price')) {
+    return 'A market order carries no limit_price: the venue does not hold it to one, so it cannot price the order.';
+  }
   return null;
 }
 
@@ -216,19 +252,25 @@ function alpacaNotional(body, reference) {
   const shape = alpacaShapeError(body);
   if (shape) return { error: shape };
   if (isOptionSymbol(body.symbol)) return optionNotional(body);
-  const dollars = parsePico(body.notional);
-  if (dollars !== null && dollars > 0n) return { micro: picoToMicro(dollars) };
+  if (present(body, 'qty') && present(body, 'notional')) return { error: 'An Alpaca order carries qty or notional, not both.' };
+  if (present(body, 'notional')) {
+    const dollars = parsePico(body.notional);
+    if (dollars === null || dollars <= 0n) return { error: 'Order notional is not a positive dollar amount.' };
+    return { micro: picoToMicro(dollars) };
+  }
   const qty = parsePico(body.qty);
   if (qty === null || qty <= 0n) return { error: 'Order qty is missing or not positive.' };
-  const limit = parsePico(body.limit_price);
-  const stop = parsePico(body.stop_price);
-  let price = parsePico(reference);
-  for (const own of [limit, stop]) {
-    // The dearest of the caller's own prices and the venue's: an order can fill at its limit.
-    if (own !== null && own > 0n && (price === null || own > price)) price = own;
-  }
-  if (price === null || price <= 0n) {
-    return { error: `Cannot price this order: send a ${REFERENCE_HEADER} header, a limit price or a notional.` };
+  const ref = parsePico(reference);
+  let price;
+  if (body.type === 'limit') {
+    price = parsePico(body.limit_price);
+    if (price === null || price <= 0n) return { error: 'Cannot price this limit order: it needs a positive limit price.' };
+    // The dearer of the order's own limit and a reference: a reference can raise it, never lower it.
+    if (ref !== null && ref > price) price = ref;
+  } else {
+    // A market order: only the router's reference, read from the venue's own quote.
+    price = ref;
+    if (price === null || price <= 0n) return { error: 'Cannot price this market order: the gateway has no venue quote for it.' };
   }
   return { micro: picoToMicro(mulPico(qty, price)) };
 }

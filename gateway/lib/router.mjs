@@ -195,15 +195,21 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     } catch {
       return fail('An order body must be JSON.', 400);
     }
+    let reference = request.headers.get(REFERENCE_HEADER);
     if (target.venue === 'alpaca') {
-      // A multi-leg, bracket or symbol-less order is refused before its symbol is looked up or priced.
+      // A multi-leg, bracket, stop, trailing or symbol-less order is refused before its symbol is
+      // looked up or priced.
       const shape = alpacaShapeError(parsed);
       if (shape) return fail(shape, 400);
+      // A market order is priced from the venue's quote alone. The VM's header never prices it,
+      // and neither does a stray price field: until Sept 23, 2026 any truthy `limit_price` or
+      // `stop_price` (even "0" or "x") skipped the quote, and the header then priced 100 AAPL at $1.
+      if (parsed.type === 'market') reference = null;
     }
-    let reference = request.headers.get(REFERENCE_HEADER);
-    if (target.venue === 'alpaca' && !isOptionSymbol(parsed?.symbol) && !parsed?.notional && !parsed?.limit_price && !parsed?.stop_price) {
-      // A market order has no enforceable limit, so its reference comes from the venue's own
-      // quote, signed like every other call. An unpriceable order is refused, never passed.
+    if (target.venue === 'alpaca' && parsed.type === 'market' && !isOptionSymbol(parsed.symbol)
+        && (parsed.notional === undefined || parsed.notional === null)) {
+      // A market order in shares has no enforceable limit, so its reference comes from the venue's
+      // own quote, signed like every other call. An unpriceable order is refused, never passed.
       const symbol = String(parsed?.symbol || '');
       if (!/^[A-Za-z0-9.\/-]{1,24}$/.test(symbol)) return fail('Invalid symbol.', 400);
       const crypto = symbol.includes('/');

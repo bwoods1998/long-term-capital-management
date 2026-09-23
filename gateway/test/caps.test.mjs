@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createsOrder, notional, caps, normalizePath, allowedVenuePath, isOptionSymbol } from '../lib/caps.mjs';
+import { createsOrder, notional, caps, normalizePath, allowedVenuePath, isOptionSymbol, alpacaShapeError, alpacaSymbolError, ALPACA_ORDER_FIELDS } from '../lib/caps.mjs';
 import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
@@ -44,27 +44,25 @@ test('kalshi refuses a body it cannot price', () => {
 test('alpaca prices qty with the reference the router supplies', () => {
   const body = { symbol: 'BTC/USD', qty: '0.00015', side: 'buy', type: 'market' };
   assert.equal(usd(notional('alpaca', body, { reference: '64050.11' }).micro), '9.61');
-  assert.match(notional('alpaca', body).error, /X-LTCM-Reference-Price/);
+  assert.match(notional('alpaca', body).error, /no venue quote/);
 });
 
-test('alpaca uses notional directly and falls back to a limit or stop price', () => {
-  const aapl = extra => ({ symbol: 'AAPL', ...extra });
-  assert.equal(usd(notional('alpaca', aapl({ notional: '25' })).micro), '25.00');
+test('alpaca uses notional directly and prices a limit order at its limit', () => {
+  const aapl = extra => ({ symbol: 'AAPL', type: 'limit', ...extra });
+  assert.equal(usd(notional('alpaca', aapl({ type: 'market', notional: '25' })).micro), '25.00');
   assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' })).micro), '30.00');
-  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', stop_price: '60' })).micro), '30.00');
-  // The dearest of the reference and the order's own prices: a header cannot underprice a limit.
+  // The dearest of the reference and the order's own limit: a header cannot underprice a limit.
   assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' }), { reference: '0.01' }).micro), '30.00');
   assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' }), { reference: '70' }).micro), '35.00');
-  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60', stop_price: '80' })).micro), '40.00');
   // A short sale is worth what it sells.
   assert.equal(usd(notional('alpaca', aapl({ qty: '2', side: 'sell', limit_price: '10' })).micro), '20.00');
 });
 
 test('alpaca refuses a body it cannot price, and an unknown venue is never priced', () => {
-  assert.match(notional('alpaca', { symbol: 'AAPL' }).error, /qty/);
-  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '0', limit_price: '5' }).error, /qty/);
-  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '-1', limit_price: '5' }).error, /qty/);
-  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '1', limit_price: '0' }).error, /Cannot price/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', type: 'limit', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', type: 'limit', qty: '0', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', type: 'limit', qty: '-1', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', type: 'limit', qty: '1', limit_price: '0' }).error, /Cannot price/);
   assert.match(notional('alpaca', null).error, /body/);
   for (const venue of ['schwab', 'binance', '', undefined]) {
     const priced = notional(venue, { count: '1', price: '0.5', qty: '1', limit_price: '1', notional: '1' });
@@ -281,4 +279,82 @@ test('"simple" is Alpaca\'s default order class, so naming it on a single-leg op
   const opt = extra => ({ symbol: 'RIVN261002P00014000', qty: '1', side: 'buy', type: 'limit', limit_price: '0.14', position_intent: 'buy_to_open', time_in_force: 'day', order_class: 'simple', ...extra });
   assert.equal(usd(notional('alpaca', opt()).micro), '14.00');
   assert.match(notional('alpaca', opt({ side: 'sell', position_intent: 'sell_to_open' })).error, /long premium only/);
+});
+
+// ------------------------------------------------------- review of the B0 fix (Sept 23, 2026)
+// Each body below was forwarded by route() on the first B0 commit (and on main), metered far under
+// what it can spend.
+
+test('an adjusted option symbol is refused, never priced as a stock without the x100', () => {
+  // Measured: a written put of 10 contracts at $5.00 (premium $5,000) was metered at $50.00.
+  for (const symbol of ['TSLA1261016P00150000', 'XYZ1261016P00005000']) {
+    for (const [side, intent] of [['sell', 'sell_to_open'], ['buy', 'buy_to_open'], ['sell', 'sell_to_close']]) {
+      const body = { symbol, qty: '10', side, position_intent: intent, type: 'limit', limit_price: '5', time_in_force: 'day' };
+      const priced = notional('alpaca', body);
+      assert.match(priced.error ?? '', /standard OCC symbol/, `${symbol} ${intent}`);
+      assert.equal(priced.micro, undefined, `${symbol} ${intent} was priced`);
+      assert.match(alpacaShapeError(body) ?? '', /standard OCC symbol/);
+    }
+  }
+  // Nor is anything else that is not a stock ticker, a crypto pair or a standard OCC symbol.
+  for (const symbol of ['ABCDEFGHIJ1234567890', 'AAPLXY', 'AAPL1', 'BTC-USD', 'BTCUSD', 'A/B', 'SPY261016C0074000', '1INCH', 'BRK.BBB', 'BRK/B/C']) {
+    const body = { symbol, qty: '10', side: 'buy', type: 'limit', limit_price: '5', time_in_force: 'day' };
+    const priced = notional('alpaca', body);
+    assert.match(priced.error ?? '', /venue's own spelling/, symbol);
+    assert.equal(priced.micro, undefined, symbol);
+  }
+  // Every spelling the House sends still passes.
+  for (const symbol of ['AAPL', 'F', 'GOOGL', 'BRK.B', 'BTC/USD', 'SHIB/USD', 'AAVE/USD', 'LTC/USD', 'RIVN261002P00014000', 'SPY261016C00740000']) {
+    assert.equal(alpacaSymbolError(symbol), null, symbol);
+  }
+});
+
+test('only market and limit orders are priced: stop, stop_limit and trailing_stop are refused', () => {
+  // Measured: a buy stop at $0.01 was metered at $1.00 for 100 AAPL, and a trailing buy at 50%
+  // (which cannot fill below 1.5 x the ask) at the ask.
+  const aapl = { symbol: 'AAPL', side: 'buy', time_in_force: 'gtc' };
+  for (const body of [
+    { ...aapl, qty: '100', type: 'stop', stop_price: '0.01' },
+    { ...aapl, qty: '100', type: 'stop_limit', stop_price: '0.01', limit_price: '0.01' },
+    { ...aapl, qty: '0.29', type: 'trailing_stop', trail_percent: '50' },
+    { ...aapl, qty: '0.29', type: 'trailing_stop', trail_price: '1000' },
+    { ...aapl, qty: '1', limit_price: '5' },
+    { ...aapl, qty: '1', type: 'LIMIT', limit_price: '5' },
+    { ...aapl, qty: '1', type: ['limit'], limit_price: '5' },
+  ]) {
+    const priced = notional('alpaca', body, { reference: '230' });
+    assert.match(priced.error ?? '', /Only market and limit orders/, JSON.stringify(body));
+    assert.equal(priced.micro, undefined, JSON.stringify(body));
+  }
+  // A stop or trail field on a market or limit order is not a field this gateway prices.
+  for (const extra of [{ stop_price: '0.01' }, { trail_price: '1' }, { trail_percent: '50' }]) {
+    const priced = notional('alpaca', { ...aapl, qty: '1', type: 'limit', limit_price: '5', ...extra });
+    assert.match(priced.error ?? '', /not one this gateway prices/, JSON.stringify(extra));
+  }
+  assert.ok(!ALPACA_ORDER_FIELDS.has('stop_price') && !ALPACA_ORDER_FIELDS.has('trail_price') && !ALPACA_ORDER_FIELDS.has('trail_percent'));
+});
+
+test('a market order is priced by the reference alone, and a limit order by a positive limit', () => {
+  const market = { symbol: 'AAPL', qty: '100', side: 'buy', type: 'market', time_in_force: 'day' };
+  // A market order with a price field: on main the router skipped the venue quote and this was $1.00.
+  for (const limit_price of ['0.01', '0', 'x', 0]) {
+    const priced = notional('alpaca', { ...market, limit_price }, { reference: '0.01' });
+    assert.match(priced.error ?? '', /market order carries no limit_price/, JSON.stringify(limit_price));
+    assert.equal(priced.micro, undefined);
+  }
+  // A limit order whose limit is not a positive price is not priced from the reference instead.
+  for (const limit_price of [undefined, '0', 'x', '-1']) {
+    const priced = notional('alpaca', { ...market, type: 'limit', limit_price }, { reference: '0.01' });
+    assert.match(priced.error ?? '', /positive limit price/, JSON.stringify(limit_price));
+    assert.equal(priced.micro, undefined);
+  }
+  // qty and notional are exclusive, and a notional is a positive dollar amount.
+  assert.match(notional('alpaca', { ...market, notional: '0' }, { reference: '0.01' }).error ?? '', /not both/);
+  assert.match(notional('alpaca', { ...market, notional: '5' }, { reference: '0.01' }).error ?? '', /not both/);
+  const { qty: _, ...dollars } = market;
+  assert.match(notional('alpaca', { ...dollars, notional: '0' }).error ?? '', /positive dollar/);
+  assert.match(notional('alpaca', { ...dollars, notional: 'x' }).error ?? '', /positive dollar/);
+  assert.equal(usd(notional('alpaca', { ...dollars, notional: '25' }).micro), '25.00');
+  // The House's market order is priced from the reference the router read from the venue.
+  assert.equal(usd(notional('alpaca', market, { reference: '253' }).micro), '25300.00');
 });
