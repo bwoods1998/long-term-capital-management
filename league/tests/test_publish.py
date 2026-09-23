@@ -62,6 +62,21 @@ class CleaningTest(unittest.TestCase):
         self.assertEqual(clean_text("the data:5 rows"), "the data: 5 rows")
         self.assertEqual(clean_text("a\x00b"), "a b")
 
+    def test_limits_count_as_the_site_counts_so_an_emoji_never_pushes_text_past_them(self):
+        # The site measures JavaScript length (UTF-16 units): an emoji is two there, one in Python.
+        self.assertEqual(publish.js_length("📉"), 2)
+        self.assertEqual(publish.js_length("a‹é"), 3)
+        cut = clean_text("📉" * 400, 300)
+        self.assertEqual((len(cut), publish.js_length(cut)), (150, 300))
+        odd = clean_text("a" + "📉" * 400, 300)
+        self.assertEqual(odd, "a" + "📉" * 149, "a character is never split: 299 units, not a lone half of a pair")
+        mixed = clean_text(("drawdown 📉 after the veto; " * 40), 240)
+        self.assertLessEqual(publish.js_length(mixed), 240)
+        self.assertTrue(("drawdown 📉 after the veto; " * 40).startswith(mixed))
+        self.assertEqual(publish.js_length(clean_text("🚀" * 9000)), 8000, "payload strings: the site's 8000 is units too")
+        self.assertEqual(clean_text("plain text", 300), "plain text")
+        self.assertEqual(clean_text("x" * 301, 300), "x" * 300)
+
     def test_payload_keys_and_private_keys(self):
         self.assertEqual(clean({"ok": 1, "_code": "x", "BTC/USD": 2, "nested": {"_p": 1, "q": "<"}}), {"ok": 1, "nested": {"q": "‹"}})
 
@@ -447,7 +462,7 @@ class BoardTest(BoardCase):
         self.assertNotIn("le-name", ids)
         self.assertEqual(ids[-1], "le-79", "the newest fifty, oldest first")
         for move in out["moves"]:
-            self.assertLessEqual(len(move["reason"]), 300)
+            self.assertLessEqual(publish.js_length(move["reason"]), 300)
             self.assertNotIn("<", move["reason"])
             self.assertRegex(move["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
         stamp = now_iso(self.clock)
@@ -456,6 +471,35 @@ class BoardTest(BoardCase):
         self.assertIsNone(venue["stake_usd"])
         self.assertEqual(publish.site_board_move({**good, "at": "2026-09-09T00:00:00+00:00"}, stamp)["at"], "2026-09-09T00:00:00.000Z")
         self.assertIsNone(publish.site_board_move({**good, "at": later}, stamp))
+
+    def test_an_emoji_heavy_reason_stays_inside_the_sites_300_on_every_path(self):
+        # A frontier audit veto: up to 300 characters of model text behind the House's own words.
+        agent = self.seated()
+        veto = "the frontier audit after promotion vetoed it: " + "the edge 📉 is noise 🎲 and the fills 🚫 are optimistic; " * 12
+        self.assertGreater(len(veto), 300)
+        at = now_iso(self.clock)
+        cut = veto[:300]  # what the allocator's own trail keeps: 300 of Python's characters
+        self.assertGreater(publish.js_length(cut), 300)
+        self.house.allocator = FakeAllocator(self.board(agent, agents={agent.id: {
+            "band": "paper", "stake_usd": None, "evidence": None,
+            "last_move": {"at": at, "from_band": "bunt", "to_band": "paper", "reason": cut}}},
+            moves=[{"id": "le-veto", "at": at, "agent": agent.id, "venue": "alpaca", "from_band": "bunt", "to_band": "paper", "reason": cut}]))
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        reasons = [body["desks"][0]["last_move"]["reason"], body["board"]["moves"][-1]["reason"]]
+        # Without the allocator: the ledger's demote row is the trail.
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.clock.advance(5)
+        self.house.evaluator.demote(agent.id, veto)
+        self.house.allocator = None
+        self.clock.advance(5)
+        trail = self.publisher().checkpoint(self.house)["board"]["moves"][-1]
+        self.assertEqual((trail["from_band"], trail["to_band"]), ("bunt", "paper"))
+        reasons.append(trail["reason"])
+        for reason in reasons:
+            self.assertLessEqual(publish.js_length(reason), 300)
+            self.assertGreaterEqual(publish.js_length(reason), 299, "cut at the limit, not far short of it")
+            self.assertTrue(veto.startswith(reason), "a clean prefix: no character split")
 
     def test_band_moves_and_stake_changes_reach_the_tape_in_the_sites_templates_and_never_say_paper(self):
         agent = self.seated()
@@ -533,6 +577,23 @@ class SiteAcceptsTheBoardTest(BoardCase):
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
         self.house.allocator = FakeAllocator(self.board(agent))
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+
+    def test_the_site_accepts_a_move_whose_reason_is_full_of_emoji(self):
+        agent = self.seated()
+        veto = "the frontier audit after promotion vetoed it: " + "📉🎲🚫 noise " * 60
+        at = now_iso(self.clock)
+        self.house.allocator = FakeAllocator(self.board(agent, agents={agent.id: {
+            "band": "paper", "stake_usd": None, "evidence": None,
+            "last_move": {"at": at, "from_band": "bunt", "to_band": "paper", "reason": veto[:300]}}},
+            moves=[{"id": "le-veto", "at": at, "agent": agent.id, "venue": "alpaca", "from_band": "bunt", "to_band": "paper", "reason": veto[:300]}]))
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.clock.advance(5)
+        self.house.evaluator.demote(agent.id, veto)
+        self.house.allocator = None
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
 

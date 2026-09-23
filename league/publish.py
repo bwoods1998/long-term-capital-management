@@ -67,6 +67,27 @@ class PublishError(RuntimeError):
 
 
 # ------------------------------------------------------------------------------- cleaning
+def js_length(text: str) -> int:
+    """A string's length as JavaScript counts it (UTF-16 code units), which is how every one of the
+    site's validators measures text: a character outside the Basic Multilingual Plane, such as an
+    emoji, is two there and one in Python."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def js_cut(text: str, limit: int) -> str:
+    """The longest prefix of `text` at most `limit` long in JavaScript's count, never splitting a
+    character. Cutting by Python's count would let 300 characters with one emoji in them reach the
+    site as 301, and the site refuses the whole checkpoint for one field that is too long."""
+    if js_length(text) <= limit:
+        return text
+    units = 0
+    for index, char in enumerate(text):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > limit:
+            return text[:index]
+    return text
+
+
 def clean_text(value: Any, limit: int = 8000) -> str:
     text = str(value if value is not None else "")
     text = _CONTROL.sub(" ", text).replace("<", "‹")
@@ -79,7 +100,7 @@ def clean_text(value: Any, limit: int = 8000) -> str:
     text = _LINK.sub(link, text)
     text = _SCHEME.sub(lambda m: m.group(1) + ": ", text)
     text = _SECRET.sub("[removed] ", text)
-    return text[:limit]
+    return js_cut(text, limit)
 
 
 def clean(value: Any, depth: int = 0) -> Any:
