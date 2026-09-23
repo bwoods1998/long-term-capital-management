@@ -261,14 +261,28 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     - `graduations`: each graduate's latest state (`refused`, `holdout_rationed`, `replay_failed`,
       `replay_unavailable`, `holdout_failed`, `passed`, `waiting_probe`, `waiting_seat`,
       `refused_at_birth`, `born`), its line, family and agent;
-    - `meta`: cursors and stamps.
+    - `forward` (S2, Sept 23, 2026): one row per candidate and forward-window run: `window_start`
+      and `window_end` (epochs; the window starts at the hour after the program's code was frozen,
+      so no search, replay or holdout saw a step of it), `blocks`, `active_blocks`, `log_growth`,
+      `mean_log_growth`, `trades`, `tape_id`, `ok`, `error`. The latest row per candidate is its
+      forward record; the archive's `fitness` is never rewritten by it. `SELECT candidate,
+      active_blocks, mean_log_growth FROM forward f WHERE at = (SELECT MAX(at) FROM forward WHERE
+      candidate = f.candidate) ORDER BY mean_log_growth DESC` is the forward leaderboard;
+    - `meta`: cursors and stamps (`forward_at`: the last completed forward run).
   - **`lab.stats` ledger rows**, at most every ten minutes (`stats_every_minutes`), over the last
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
     `coverage` (cells by desk), `queued`, `spend` (OpenAI, the Sail estimate, the royalty balance),
     `born_total`, `refusal`, `llm` (`paused`: why Luna and Sol are being skipped, or null;
-    `skipped`: the Luna and Sol phases skipped since the process started), `closed_since` and
-    `waiting_seat` (`count`, `longest_hours`). A row is written only at the end of a lab step, and
+    `skipped`: the Luna and Sol phases skipped since the process started), `closed_since`,
+    `waiting_seat` (`count`, `longest_hours`) and, since S2 (Sept 23, 2026), `forward`
+    (`last_run_at`; `last_run` with `candidates`, `scored`, `batches`, `seconds` and `skipped` by
+    reason, for example `no forward data yet` or `the run's box seconds are spent`; `records`, the
+    candidates with a forward row; `ranked`, those with `forward_min_active_blocks` active blocks;
+    `positive`, those whose window wins; `priors`: the lessons whose ```lab-prior``` blocks are in
+    force and how many parameter forks each has paused since the process started). Forward windows
+    rank seats, cells and breeding and are never practice evidence: no `eval.*`, `holdout.*` or
+    `agent.born` row ever comes from them. A row is written only at the end of a lab step, and
     a step runs only while the lab is open, so `refusal` is the last reason a Luna or Sol call was
     refused or skipped inside a step (no model client, an OpenAI tier below `all`, the House's
     OpenAI allowance closed, or the lab's hourly line too small for the call's hold), or null.
@@ -278,7 +292,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     the Sail allowance closed or the Sail meter stopped, or a lab box that failed a batch in the
     last five minutes), no step runs and no `lab.stats` row is written: the rows stop, and
     `health.json` `lab` (`refusal`, `closed_since`, `closed_minutes`, `llm`, `waiting_seat` with
-    up to eight graduates, `queued`, `born_total`) says why.
+    up to eight graduates, each with its `forward` score for the seat market, `queued`,
+    `born_total`, `forward`) says why.
   - **`lab.graduate` rows**, one per candidate and outcome, carry the program's lineage, origin,
     author, parents, idea, fitness and cell. **`lab.royalty` rows** record each royalty charged to
     a graduate that earned a performance fee.
@@ -416,6 +431,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_usd_per_hour` | $0.20 | The price the lab records for its box's time (`lab.stats` `spend.sail_usd_estimate`, `batches.sail_usd`) |
 | | `lab.holdout_reserve`, `stats_every_minutes`, `max_queue`, `max_tapes_per_step` | 1, 10, 600, 4 | Not in `game.json`: defaults in `league/lab.py` `DEFAULTS`, which a `game.json` `lab` key of the same name overrides. The sealed-holdout evaluations of a living line the lab never spends (they stay with the line's own forks); how often a `lab.stats` row is written; the most candidates queued at once; search tapes built a step |
 | | `lab.closed_alert_minutes`, `seat_wait_alert_hours` | 30, 6 | Also `DEFAULTS` only (Sept 23, 2026): after how long closed the lab raises its one warning, and after how long waiting for a seat a graduate is named once |
+| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
