@@ -120,10 +120,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
-  digest needs the ratify. In force since the allocator's deploy: constitution `9fa83727…`, money
-  `44e8d48d…`, the grant ratified at 08:28:13Z on Sept 23, 2026 (101 agents, a $10 stake line). That
-  day's later deploys (the board and sliced exits; E3, E1, the Alpha Lab and the open desks)
-  changed no money rule and needed no ratify.
+  digest needs the ratify. In force since Deploy A of the learn-and-unblock run (17:34Z, Sept 23,
+  2026): constitution `52c6c7e5…`, money `1d63a56e…`, the grant re-ratified at 17:34:36Z (40 agents,
+  a $25 stake line). Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
+  line); that day's Deploys 2-7 changed no money rule and needed no ratify.
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
 - **The gateway.** Deploy with
