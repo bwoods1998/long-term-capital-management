@@ -504,6 +504,7 @@ class Researchers(LabCase):
 
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
+        self.lab.seed(force=True)  # its own program queued as a seed is not a submission
         self.house.game["lab"]["submit_max"] = 2
         programs = [{"code": KNOB.replace("50.0", f"{10 + n}.0")} for n in range(4)]
         out = self.lab.submit(agent, programs)

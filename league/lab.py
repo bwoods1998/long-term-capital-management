@@ -1400,7 +1400,7 @@ class Lab:
         stats = self._q("SELECT COUNT(*) AS n, SUM(eligible) AS e, SUM(gate) AS g FROM candidates WHERE niche=? AND evaluated>=?", (niche, since))[0]
         archived = {r["candidate"] for r in self._q("SELECT candidate FROM archive WHERE niche=?", (niche,))}
         own = []
-        for r in self._q("SELECT * FROM candidates WHERE author=? ORDER BY created DESC LIMIT 8", (agent.id,)):
+        for r in self._q("SELECT * FROM candidates WHERE author=? AND origin='agent' ORDER BY created DESC LIMIT 8", (agent.id,)):
             summary = json.loads(r["summary"] or "{}")
             own.append({**self._brief(r), "code_sha256": r["code_sha256"], "status": r["status"], "error": r["error"],
                         "passes_gate_numbers": bool(r["gate"]), "archived": r["id"] in archived, "graduated_as": born.get(r["id"]),
@@ -1430,7 +1430,8 @@ class Lab:
         niche = self._desk(agent.specialty or "")
         if niche is None:
             return {"error": "the lab searches desks the House can replay; yours is not one of them"}
-        waiting = int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE author=? AND status='queued'", (agent.id,))[0]["n"])
+        waiting = int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE author=? AND origin='agent' AND status='queued'",
+                              (agent.id,))[0]["n"])
         queued, refused = [], []
         for raw in list(candidates or [])[: max(0, limit)]:
             if waiting + len(queued) >= limit:
