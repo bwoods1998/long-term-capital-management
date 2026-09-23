@@ -179,6 +179,10 @@ never bypasses its expiry or risk ceiling; research funding alone does not enabl
 SPECIALTIES. You belong to one specialty for life and your children inherit it. The House shows
 you only its markets, refuses any entry outside it, and files your research notes under it. You
 are not a generalist: become the agent that knows this corner better than anyone trading it.
+Each venue also has an OPEN desk (kalshi-open, alpaca-open; 8 seats each) whose universe is every
+market of the venue (any Kalshi series; any US stock, ETF or coin against the dollar, never an
+option). A program is born there only when no one desk holds most of what its NEEDS name; it is
+shown what it names (12 at most), staked and judged exactly like any other.
 THE HORIZON RULE. A Kalshi entry must be expected to pay within {game['horizon']['kalshi_hour_max_hours']} hours (hourly
 strategies) or {game['horizon']['kalshi_day_max_hours']} (daily); a crypto position is closed by the House after {game['horizon']['crypto_max_hold_hours']} hours. Equities are
 not bounded. Fast results are how a record is built: a stake parked for a month proves nothing.

@@ -88,6 +88,7 @@ class CampaignBudget:
                 evidence TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS cost_reconciliations(id TEXT PRIMARY KEY, commitment TEXT NOT NULL,
                 evidence TEXT NOT NULL, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS gateway_bonus(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at REAL NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
@@ -186,10 +187,41 @@ class CampaignBudget:
                 return None
             policy = json.loads(row['policy'])
             added = dict(self.db.execute('SELECT kind, SUM(amount) FROM topups GROUP BY kind').fetchall())
-            if added:
-                policy['caps_usd'] = {k: usd(micro(v) + int(added.get(k) or 0)) for k, v in policy['caps_usd'].items()}
+            bonus = {'openai': self.gateway_bonus('openai')}
+            if added or any(bonus.values()):
+                policy['caps_usd'] = {k: usd(micro(v) + int(added.get(k) or 0) + bonus.get(k, 0)) for k, v in policy['caps_usd'].items()}
             return {**dict(row), 'policy': policy, 'meters': json.loads(row['meters']),
-                    'topups_usd': {k: usd(v) for k, v in added.items()}}
+                    'topups_usd': {k: usd(v) for k, v in added.items()},
+                    'gateway_bonus_usd': {k: usd(v) for k, v in bonus.items()}}
+
+    #: A mirrored gateway raise older than this no longer raises the House's line.
+    GATEWAY_BONUS_SECONDS = 1800
+
+    def gateway_bonus(self, kind: str) -> int:
+        """What the gateway's profit indexing adds to `kind`'s month now, in micro-dollars, as last
+        mirrored (`mirror_gateway_bonus`); 0 when never mirrored or not mirrored recently."""
+        with self.lock:
+            row = self.db.execute('SELECT amount, at FROM gateway_bonus WHERE id=?', (kind,)).fetchone()
+        if row is None or not 0 <= self.clock() - float(row[1]) <= self.GATEWAY_BONUS_SECONDS:
+            return 0
+        return int(row[0])
+
+    def mirror_gateway_bonus(self, kind: str, amount: Any) -> None:
+        """Profit-indexed compute (Sept 23, 2026). The gateway raises its OpenAI month by a share of
+        the verified profit on the real accounts, which it reads itself (gateway/lib/equity.mjs), and
+        reports the raise in `/v1/health` (`frontier.cap_usd` less `frontier.base_cap_usd`). The
+        burst's OpenAI line is raised by exactly that raise and never more, so compute that profit
+        bought can be spent; it falls when the raise falls, and lapses when the gateway has not been
+        read for `GATEWAY_BONUS_SECONDS`. Spend already committed is never reset."""
+        if kind != 'openai':
+            raise ValueError('only the OpenAI month is indexed to profit')
+        value = min(micro(amount), micro('1000'))
+        with self.lock:
+            row = self.db.execute('SELECT amount, at FROM gateway_bonus WHERE id=?', (kind,)).fetchone()
+            if row is not None and int(row[0]) == value and 0 <= self.clock() - float(row[1]) < 300:
+                return  # unchanged and fresh: the stamp is renewed every five minutes, not every read
+            self.db.execute('INSERT INTO gateway_bonus VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET amount=excluded.amount, at=excluded.at',
+                            (kind, value, self.clock()))
 
     def topped_up(self, kind: str, month: str) -> Decimal:
         """What the owner recorded adding at `kind`'s provider during the UTC calendar month

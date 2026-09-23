@@ -29,7 +29,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, cap, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. |
+| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, the cap in force and its profit-indexed parts, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. |
 | `POST` | `/v1/kill` | Engages the kill switch. The runtime token may: stopping is never gated. |
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
@@ -153,6 +153,42 @@ it returns, at the usage the provider reports, and the difference is given back.
 cost in `/v1/health`. The aggregate health display still rounds to cents. Meter receipts must
 retain microdollars: rounding a cheap Luna receipt to one cent previously created a false
 campaign reservation breach, found and corrected during the Jev comparison.
+
+### Compute follows profit (Sept 23, 2026)
+
+The month's cap grows with verified profit on the two real accounts:
+
+```
+cap = FRONTIER_MONTH_USD + COMPUTE_PROFIT_SHARE x max(0, venue_equity - EQUITY_BASELINE_USD)
+```
+
+The cap is also held to `FRONTIER_MONTH_MAX_USD` when that var is set.
+
+- **How equity is read.** The gateway reads `venue_equity` itself, read-only, with the venue keys it already holds:
+  - Kalshi: `GET /portfolio/balance`, cash plus the positions' value;
+  - Alpaca: `GET /v2/account`, `equity`.
+
+  The House cannot report its own profit to buy compute. Both reads round down, and a missing Kalshi position value counts as nothing.
+- **Caching.** A reading is kept ten minutes. It is taken again by the next `/v1/health` or `/v1/frontier/responses` after that.
+- **Dials:**
+  - `COMPUTE_PROFIT_SHARE`: 0.3.
+  - `EQUITY_BASELINE_USD`: the live grant's capital, $517.75 at Kalshi plus $500 at Alpaca, which is $1017.75.
+- **Arithmetic.** All in micro-dollars. The raise is rounded down.
+- **The old cap is the floor, and nothing fails open.** The cap is exactly `FRONTIER_MONTH_USD` when any of these is true:
+  - indexing is not configured (no share, a share outside 0 to 1, or no baseline);
+  - there is no month configured;
+  - either venue fails to answer, or answers without its field (half a reading is no reading);
+  - the last good reading is more than twenty minutes old.
+- **Health.** `/v1/health` `frontier` reports:
+  - the cap in force as `cap_usd`;
+  - the configured month as `base_cap_usd`;
+  - the parts as `profit_index`: `share`, `baseline_usd`, `max_cap_usd`, `equity_usd`, `kalshi_usd`, `alpaca_usd`, `profit_usd`, `bonus_usd`, `read_at`, `read_ok` and `reason`.
+- **The House's line.** The House's own OpenAI line (the burst in `league/campaigns.py`) is raised by exactly `cap_usd - base_cap_usd`, never more, and that raise lapses if the gateway has not been read for thirty minutes (`CampaignBudget.mirror_gateway_bonus`).
+- **Setting the baseline.** Set `EQUITY_BASELINE_USD` to the accounts' equity at the grant, so that only profit raises the cap. Check `profit_index.equity_usd` against it after deploying.
+- **The cap stays inside funded money.** The raise could otherwise pass the OpenAI account's prepaid credit. The owner's rule is that no cap exceeds funded money, so `FRONTIER_MONTH_MAX_USD` is set to the month ($408) and the raise buys nothing until the owner funds more.
+  - Health still reports what profit earned: `profit_index.earned_usd` beside the `bonus_usd` the cap carries.
+  - Raise `FRONTIER_MONTH_MAX_USD` with each OpenAI top-up bought from profit.
+- **Sail is not indexed.** Sail is prepaid and cannot be funded from profit; auto-recharge is the owner's decision.
 
 `FRONTIER_MODELS`, in dollars per million tokens. A model absent from it is a `403`: an unpriced
 call is an uncapped one.

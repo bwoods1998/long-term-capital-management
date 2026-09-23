@@ -313,6 +313,27 @@ it is paid. **The horizon rule:** the House refuses a Kalshi entry expected to p
 hours out for an `hour` strategy or 48 for a `day` strategy, and closes any crypto position held
 longer than 48 hours. Equities are not bounded. Exits are never refused.
 
+## The open desks: any market of the venue
+
+Every desk but two trades a listed corner of its venue. The two OPEN desks (`league/niches.json`,
+`"open": true`, 8 seats each) trade the whole venue:
+
+- `kalshi-open`: any Kalshi series (`NEEDS["series"]`), except the multivariate combos no listing
+  shows. The horizon rule holds; maker fees follow Kalshi's own schedule series by series.
+- `alpaca-open`: any US stock or ETF the account can trade and any coin Alpaca lists against the
+  dollar (`NEEDS["symbols"]`, e.g. `["COIN", "BTC/USD", "XLE"]`; stocks and coins may be mixed),
+  long only. Never an option: those are the options desk's (`NEEDS["asset_class"] = "option"`).
+  The venue judges what is tradable, and a refusal reaches `recent_order_outcomes`.
+
+A strategy is shown what its NEEDS name, twelve at most, as on any desk; one naming nothing it may
+trade is shown the first twelve of a discovery list (on Kalshi the daily survey's busiest series,
+those no desk covers first). A program with no desk of its own is born on the open desk only when
+no single desk holds most of what it names (`league/niches.py` `match`, `spanning`): it spans
+desks, or names markets no desk lists. One whose markets sit mostly on one desk is born on that
+desk, and the names outside it are cut. An open-desk agent is replayed, seated, bunted, staked and
+judged exactly like any other. Public data a strategy needs and the House does not fetch is asked
+for with the research tool `request_tool` (the toolsmith's queue); the owner keeps the egress allowlist.
+
 ## What `decide` returns
 
 ```python
@@ -378,3 +399,36 @@ The result is the per-block series of after-cost log growth of the account. Ever
 is recorded as a trial and counted against your own LINE -- yourself, your parent, your parent's
 parent, never your cousins -- when the deflated Sharpe ratio is computed: grinding many variants
 down one line raises the bar for every later one on it.
+
+## The Alpha Lab
+
+The House runs a search of its own (`league/lab.py`): thousands of programs a day, evaluated in
+batches on a dedicated box against the FIRST TWO THIRDS of the tape your desk is replayed on. It
+keeps, for each cell of a grid -- your desk, your horizon, how often a program trades, and how its
+block returns correlate with the live book's real-money returns -- the program with the best
+out-of-sample growth after fees, among those with the replay gate's minimum trades and blocks.
+Its programs come from the living agents' files, the foundry's cards, the founders, bounded
+parameter mutations, a cheap model's mutations and crossovers, and the frontier model's leaps.
+
+Two research tools reach it (offered only where it runs):
+
+- `lab_query`: the archive and leaderboard for your desk, in words and numbers, and the results of
+  the programs you submitted. Nobody's code is shown.
+- `lab_submit`: up to eight complete files a submission (and eight waiting at a time), each held to
+  the same checks as any candidate: the strategy check, literal `NEEDS` and `PARAMS` on your desk,
+  valid parameters. They are evaluated in the lab's next batches; read the results with
+  `lab_query` in a later pass. A submission is NOT a trial against your line and is NOT adopted: to
+  adopt or fork a program you still `replay` it.
+
+The fittest program of a cell that clears the replay gate's numbers is replayed by the House on the
+whole tape -- its last third never seen by the lab's search -- as a counted trial on its own new line,
+judged against its whole selection path: the lab lineage's earlier lines and, when it grew from an
+agent's program (a seed, a mutant of it, or that agent's own `lab_submit`), every trial on that
+agent's line, as that agent's own child would be. On the history store's development window it then
+goes to the sealed holdout, whose budget that path shares (one lab lineage across all its lines, and
+the line it grew from). Only then is it born, on paper, with `founder` `lab:<lineage>` and the agent it
+grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
+profit, a tenth of that fee is its royalty to the lab's compute line.
+
+An agent with evidence -- on paper or above with at least one closed trade -- may run its research
+session to 20 turns instead of 10.

@@ -202,6 +202,7 @@ class FakeSail:
         self.failing: dict[str, BaseException] = {}  # method name -> what it raises (until removed)
         self.answer = self.honest  # how `exec` answers: (box, argv, spec) -> (stdout, stderr, code)
         self.execs: list[dict] = []
+        self.timeouts: list[tuple] = []  # (call, path, timeout) the sandbox asked for
         self._n = 0
 
     # -- scripting
@@ -226,7 +227,7 @@ class FakeSail:
         return forged + f"warming up\n{marker} {spec['token']} {json.dumps(body)}\n" + forged.replace("00000000000000000000000000000000 ", ""), "", 0
 
     # -- the client's surface
-    def from_checkpoint(self, checkpoint, *, name):
+    def from_checkpoint(self, checkpoint, *, name, timeout=None):
         self._call("from_checkpoint", checkpoint, name)
         self._n += 1
         box = f"sb_{self._n:04d}"
@@ -246,13 +247,14 @@ class FakeSail:
         self._call("get", box)
         return {"sailbox_id": box, "status": self._box(box)["status"]}
 
-    def resume(self, box):
+    def resume(self, box, *, timeout=None):
         self._call("resume", box)
         self._box(box)["status"] = "running"
         return {}
 
-    def upload(self, box, path, content, *, mode=0o600):
+    def upload(self, box, path, content, *, mode=0o600, timeout=None):
         self._call("upload", box, path, mode)
+        self.timeouts.append(("upload", path, timeout))
         state = self._box(box)
         if state["status"] != "running":
             raise Boom(f"409: {box} is {state['status']}")
@@ -282,7 +284,7 @@ class FakeSail:
             state["status"] = "sleeping"
         return {}
 
-    def checkpoint(self, box, *, name=None, ttl_seconds=None):
+    def checkpoint(self, box, *, name=None, ttl_seconds=None, timeout=None):
         self._call("checkpoint", box, name, ttl_seconds)
         state = self._box(box)
         if state["status"] != "running":
@@ -432,8 +434,8 @@ class SailFirstRun(SailCase):
     def test_an_id_under_the_other_key_is_accepted(self):
         original = self.sail.from_checkpoint
 
-        def renamed(checkpoint, *, name):
-            row = original(checkpoint, name=name)
+        def renamed(checkpoint, *, name, timeout=None):
+            row = original(checkpoint, name=name, timeout=timeout)
             return {"id": row["sailbox_id"]}
 
         self.sail.from_checkpoint = renamed
