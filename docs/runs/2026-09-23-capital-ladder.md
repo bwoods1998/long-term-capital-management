@@ -358,5 +358,6 @@ Every 15 minutes `scripts/floor_watch.py` appends to the session log (the loop h
   - **Why the League never funds shard 3.** The first run's service (`ltcm/service.py`
     `_fund_kalshi_shards`) topped up shards 0 and 2 hourly, and the gateway allows exactly
     this one funds move (`POST /portfolio/intra_exchange_instance_transfer`, money between
-    shards of the owner's own account). The League House never ported it, and shard 3 was
-    never in its list.
+    shards of the owner's own account). The League has no shard code at all (nothing under
+    `league/` mentions a shard). Shard 2's $39.14 is what the first run left there, and shard 3
+    was never in the first run's list (`ltcm/config.json` `kalshi_shards.shards`).
