@@ -1,0 +1,9 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_41_symbol_price_grid",
+  "repair": {
+    "key": "strategy_defect:haghani-41:8d50f78b06f1",
+    "parent": "haghani-41"
+  },
+  "why": "Corrected child of haghani-41 for audit seq 224417: replace hard-coded cent rounding with published per-symbol price increments, buys down and sells up; preserve raw targets when no increment is supplied and compare resting orders against the same executable targets. Retains the parent's specialty and effective parameters. Born on rung 0 with no record and must qualify independently."
+}
