@@ -72,6 +72,16 @@ CENT = Decimal("0.01")
 #: desk woke at 13:29:55Z on a clock 4.3-4.6 s slow, saw a shut market, and 5 of its 8 agents did
 #: not wake again until 14:01Z or later.
 OPEN_WAKE_SECONDS = 5.0
+#: The floor's cheap invariants (`_floor_invariants`, Sept 23, 2026): how often the ledger's new rows
+#: are read, how many rows the first pass reads back (never the whole ledger), and what makes a
+#: desk quiet: offered markets on this many wakes inside the trailing hour and no intent from any
+#: of its agents.
+INVARIANTS_EVERY_SECONDS = 300.0
+INVARIANTS_FIRST_ROWS = 5000
+QUIET_DESK_SECONDS = 3600.0
+QUIET_DESK_WAKES = 3
+#: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
+REAL_BOOKS = ("kalshi", "alpaca")
 CONTRACT_PATH = Path(__file__).resolve().parent / "CONTRACT.md"
 #: An agent's resting entries are cancelled once none of its wakes has completed on their book for
 #: this many of its own wake intervals, and never sooner than `STALE_FLOOR_SECONDS` (see
@@ -2592,6 +2602,85 @@ class House:
                 self.alert("error", f"The expedition's {name} spending has stopped: {why} (${spent:.2f} of ${budget}). "
                                     + ("Research passes stop; agents still wake and trade." if kind == "sail" else "Merton's five pull-request roles stop. Audits are not paced and go on under the gateway's monthly cap."))
 
+    def _floor_invariants(self) -> None:
+        """Workstream B (Sept 23, 2026): the floor finds the next blocker itself. Two checks over the
+        ledger rows written since the last pass -- from a cursor saved in house.json, so never the
+        whole ledger, and on the first pass only the newest `INVARIANTS_FIRST_ROWS` -- each raised
+        as an ops warning once per condition:
+
+        - A desk offered markets for an hour with zero intents: `agent.woke` rows with `offered > 0`
+          on `QUIET_DESK_WAKES` or more wakes of the desk's agents inside the trailing hour, the
+          first of them most of an hour ago, and no intent from any agent of the desk in that hour
+          (a wake's `intents` count, or an `agent.intent` row). Told once a desk an hour. Its rules
+          are not firing on what it is shown: that wants a research pass, not more wakes.
+        - A real-money bunt frozen by a daily-loss rule: a `book.refused` row on a real book whose
+          reasons mention a daily loss, for an agent on rung 2. Told once an agent a day. The book's
+          daily rule is meant not to apply to a bunt (the plan's U1); this says if it ever does.
+        """
+        now = self.clock()
+        with self._state_lock:
+            state = self._state.setdefault("invariants", {})
+            if now - float(state.get("at") or 0) < INVARIANTS_EVERY_SECONDS:
+                return
+            state["at"] = now
+            cursor = state.get("cursor")
+            wakes: dict[str, list[list[Any]]] = {k: list(v) for k, v in (state.get("wakes") or {}).items()}
+            told_quiet: dict[str, float] = dict(state.get("quiet_told") or {})
+            told_frozen: dict[str, str] = dict(state.get("frozen_told") or {})
+        if cursor is None:
+            head = self.ledger.read(limit=1, newest=True)
+            cursor = max(0, (head[-1].seq if head else 0) - INVARIANTS_FIRST_ROWS)
+        alerts: list[str] = []
+        for row in self.ledger.iter(kinds=("agent.woke", "agent.intent", "book.refused"), after=int(cursor)):
+            cursor = row.seq
+            if row.kind == "book.refused":
+                name = str(row.payload.get("book") or "")
+                book = self.books.get(name)
+                real = book.real_money if book is not None else name in REAL_BOOKS
+                hit = next((str(r) for r in (row.payload.get("reasons") or ()) if "daily loss" in str(r).lower()), None)
+                if not real or hit is None or self.evaluator.rung(row.agent) != 2:
+                    continue
+                day = str(row.at)[:10]
+                if told_frozen.get(row.agent) == day:
+                    continue
+                told_frozen[row.agent] = day
+                alerts.append(f"{row.agent}: a real-money bunt on {name} was frozen by a daily-loss rule ({hit!r}). "
+                              "Rung 2 is meant to be governed by the allocator's stay drawdown, not the book's daily rule "
+                              "(Sept 23, 2026); if this stands, the rule is applying again.")
+                continue
+            agent = self.registry.get(row.agent)
+            if agent is None or not agent.specialty:
+                continue
+            at = _epoch(row.at)
+            if row.kind == "agent.intent":
+                wakes.setdefault(agent.specialty, []).append([at, row.agent, 0, 1])
+            elif row.payload.get("ok"):
+                wakes.setdefault(agent.specialty, []).append(
+                    [at, row.agent, int(row.payload.get("offered") or 0), int(row.payload.get("intents") or 0)])
+        for niche_id, rows in list(wakes.items()):
+            rows = [r for r in rows if now - float(r[0]) <= QUIET_DESK_SECONDS][-400:]  # eight seats waking every five minutes is 96 an hour
+            if not rows:
+                wakes.pop(niche_id)
+                continue
+            wakes[niche_id] = rows
+            offered = [r for r in rows if int(r[2]) > 0]
+            if (len(offered) < QUIET_DESK_WAKES or any(int(r[3]) for r in rows)
+                    or now - float(offered[0][0]) < QUIET_DESK_SECONDS * 0.75
+                    or now - float(told_quiet.get(niche_id) or float("-inf")) < QUIET_DESK_SECONDS):
+                continue
+            told_quiet[niche_id] = now
+            agents = sorted({str(r[1]) for r in offered})
+            alerts.append(f"{niche_id}: offered markets on {len(offered)} wakes in the last hour (offered "
+                          f"{', '.join(str(r[2]) for r in offered[-8:])}) and no agent of the desk wrote an intent "
+                          f"({', '.join(agents[:8])}). Its rules are not firing on what it is shown: a research pass, not more wakes.")
+        today = time.strftime("%Y-%m-%d", time.gmtime(now))
+        with self._state_lock:
+            state.update(cursor=int(cursor), wakes=wakes,
+                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_DESK_SECONDS},
+                         frozen_told={k: v for k, v in told_frozen.items() if v >= today})
+        for text in alerts:
+            self.alert("warning", text)
+
     # ---------------------------------------------------------------- seasons
     def survey_due(self) -> bool:
         every = float(self.settings.niche_survey_hours)
@@ -2859,11 +2948,23 @@ class House:
                     (share.quantity - share.filled for share in working.shares if share.agent == agent.id), ZERO)
         now = now_iso(self.clock)
         exits = []
+        held_back: dict[str, Decimal] = {}
         for holding in list(book.account(agent.id).holdings.values()):
             if holding.instrument.asset_class == "event":
                 continue  # a Kalshi contract is held to settlement: selling a favourite at the bid gives the edge back
             quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
             if quantity <= 0:
+                continue
+            if market_hours(holding.instrument, now) is False:
+                # A stock or an option sells only in the regular session: outside it the book refuses
+                # a market sell ("market orders outside regular hours are not permitted") and an
+                # option's bid is stale or gone. Measured Sept 22-23, 2026: 576 such refusals and 116
+                # "an option order must be a limit order", every one the House winding down a dead
+                # agent's position on every mark pass through the night. Hold the sale for the open
+                # instead: `_release_wind_downs` places it in the first tick after the bell, and the
+                # mark pass would within five minutes anyway. The hold is kept in house.json, so a
+                # restart keeps it; a coin or a Kalshi position is not held (their markets never close).
+                held_back[holding.instrument.key] = quantity
                 continue
             if holding.instrument.asset_class == "option":
                 # An option sells only at a limit (`Book.check`), so a market wind-down was refused on
@@ -2891,10 +2992,59 @@ class House:
                                         reason="the House is closing this account at the ask (a market sell would meet the House's own bid)",
                                         created_at=now, nonce=f"wind-down:{now}")
             exits.append(intent)
+        self._note_held_wind_downs(agent, book, held_back)
         if exits:
             book.submit(exits)
             book.poll()
         self._sweep(agent.id, book)
+
+    def _note_held_wind_downs(self, agent: Agent, book: Book, held_back: Mapping[str, Decimal]) -> None:
+        """Keep, in house.json, which of an abandoned account's positions wait for their market to
+        open (`_wind_down`), and say so once a position: the operator sees a held sale as one info
+        alert, never as a refused order every mark pass. A position sold, or no longer held back,
+        leaves the record."""
+        with self._state_lock:
+            held = self._state.setdefault("wind_down_held", {})
+            mine = dict((held.get(agent.id) or {}).get(book.name) or {})
+            new = [key for key in held_back if key not in mine]
+            mine = {key: (mine.get(key) or {"since": now_iso(self.clock), "quantity": str(held_back[key])}) for key in held_back}
+            books = dict(held.get(agent.id) or {})
+            if mine:
+                books[book.name] = mine
+            else:
+                books.pop(book.name, None)
+            if books:
+                held[agent.id] = books
+            else:
+                held.pop(agent.id, None)
+        for key in new:
+            self.alert("info", f"{agent.id}: {book.name} holds {held_back[key]} {key} for the open; the House sells it "
+                               "once the market opens, not before (a market sell outside regular hours is refused)")
+
+    def _release_wind_downs(self) -> None:
+        """Place the sales `_wind_down` held for the open (`wind_down_held` in house.json) in the
+        first tick after the regular session's bell, once a session: the mark pass would place them
+        within `mark_every_seconds` anyway, but a dead agent's stock should not wait even that long
+        once the market is there to take it. A hold whose agent is alive and back on that book, or
+        whose book is gone, is dropped: the sale is no longer the House's to make."""
+        held = self._state.get("wind_down_held") or {}
+        if not held:
+            return
+        last = float(self._state.get("wind_down_released") or 0)
+        if not (market_open_at(now_iso(self.clock)) and self._opened_since(last)):
+            return
+        self._state["wind_down_released"] = self.clock()
+        for agent_id, books in list(held.items()):
+            agent = self.registry.get(agent_id)
+            for name in list(books):
+                book = self.books.get(name)
+                if agent is None or book is None or agent_id not in book.accounts or (agent.alive and self.book_of(agent) is book):
+                    with self._state_lock:
+                        (self._state.get("wind_down_held") or {}).get(agent_id, {}).pop(name, None)
+                        if not (self._state.get("wind_down_held") or {}).get(agent_id):
+                            (self._state.get("wind_down_held") or {}).pop(agent_id, None)
+                    continue
+                self._retry_wind_down(agent, book)
 
     def _sweep(self, agent_id: str, book: Book) -> None:
         """Return a finished account's free cash to the House's side of the book."""
@@ -4466,6 +4616,10 @@ class House:
         for name, wakes in batches.items():
             submitted = self._submit_wakes(name, wakes)
             summary["orders"] += sum(1 for o in submitted if o.status not in ("refused", "duplicate"))
+        try:
+            self._release_wind_downs()  # a dead agent's stock or option, held for the open, sells at the bell
+        except Exception as exc:  # noqa: BLE001 - the mark pass retries every held sale within minutes
+            self.alert("warning", f"held wind-downs could not be released ({type(exc).__name__}: {str(exc)[:160]})")
         now = self.clock()
         marked_any = False
         for name, book in self.books.items():
@@ -4509,6 +4663,10 @@ class House:
                 summary["allocator"] = {k: len(v) if isinstance(v, list) else v for k, v in moved.items()}
             except Exception as exc:  # noqa: BLE001 - a pass that fails runs again at the next mark
                 self.alert("error", f"the allocator's pass failed ({type(exc).__name__}: {str(exc)[:200]})")
+        try:
+            self._floor_invariants()  # code over the ledger's new rows; costs nothing, so it runs while paused too
+        except Exception as exc:  # noqa: BLE001 - a check that fails this tick runs again on the next
+            self.alert("warning", f"the floor's invariants could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
         self._cancel_retired_research()
         for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
