@@ -74,7 +74,7 @@ from .constitution import CONSTITUTION
 from .ledger import now_iso
 from .seeds import SEEDS
 
-PROMPT_VERSION = "foundry-2026-09-23.3"
+PROMPT_VERSION = "foundry-2026-09-23.4"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -127,6 +127,12 @@ DEFAULTS: dict[str, Any] = {
     # `transfer_share` of recent calls take a family with an earned forward record to a desk of its
     # venue where it has never been tried, and ask Merton to adapt its mechanism there. 0 is off.
     "transfer_share": 0.0,
+    # Sept 23, 2026 (the learn-and-unblock run, S3/C3): the fast lane follows forward yield. A desk
+    # whose foundry-born agents have a negative pooled forward record over at least
+    # `fast_lane_min_blocks` active blocks gets no fast-lane call until one family there is positive
+    # over `fast_lane_reopen_blocks` active blocks; the open fast desks are ranked by that yield.
+    "fast_lane_min_blocks": 6,
+    "fast_lane_reopen_blocks": 3,
 }
 
 #: The bounded routes of `allocate`, in the order they are offered a call; `evidence` takes the rest.
@@ -200,6 +206,14 @@ Rules.
   them, the recorded feeds through NEEDS["feeds"]. Price the binary from spot and volatility over
   the time left, and bid as a maker only where the model clears the ask plus fees. Most Kalshi
   crypto series charge makers nothing (`desk.maker_fee_series` lists the exceptions).
+- On `kalshi-crypto-15m` MAKER ENTRIES ARE REQUIRED: a taker entry there costs 182 bps of notional
+  (measured on 178 shadow taker fills, Sept 23, 2026), which is the whole edge of any favourite or
+  fade on a fifteen-minute binary; the desk's taker programs ran -1.9% a block. Rest post-only bids
+  and let the fill rate be the cost, never the fee.
+- On any binary (Kalshi) market a position above 15% of the stake is a ONE-LOSS TRIAL: one lost
+  settlement of that size demotes the program from real money (the allocator's hysteresis line),
+  and two foundry strike programs lost $113.68 in ten settlements that way on Sept 23, 2026. Size
+  binary positions under 15% of the stake unless the modelled edge is measured, not hoped for.
 - Prefer `horizon_guidance.prefer` where the desk allows it: an hourly program is judged on hourly
   blocks and can reach the paper screen in hours; a daily one waits days for the same evidence.
 - Read `forward_on_this_desk`: what has actually made money forward here, on paper and real money.
@@ -309,6 +323,10 @@ class Foundry:
         self._allocation: tuple[float, Any] | None = None
         self._edge: tuple[float, dict[str, Any]] | None = None
         self._memo: dict[str, tuple[int, Any]] = {}
+        from .yield_ledger import YieldLedger
+
+        #: The hourly `ops.budget` yield row; None switches it off (tests that count budget rows).
+        self.yield_ledger: Any = YieldLedger(house)
         state = self._state()
         if "birth_cursor" not in state:
             # Label births from the moment the foundry is switched on. The earlier ones happened
@@ -375,8 +393,82 @@ class Foundry:
         return self._folded("evaluations", build)
 
     def born(self) -> dict[str, Agent]:
-        """Card id -> the agent born from it (its `founder` is `card:<id>`)."""
-        return {a.founder[5:]: a for a in self.house.registry.agents.values() if (a.founder or "").startswith("card:")}
+        """Card id -> the agent born from it (its `founder` is `card:<id>`, or the strategy's own name
+        for a merged corrected child admitted through `takes_strategy`)."""
+        by_strategy = {name: card["id"] for name, card in self.strategy_cards().items()}
+        out = {}
+        for a in self.house.registry.agents.values():
+            founder = str(a.founder or "")
+            if founder.startswith("card:"):
+                out[founder[5:]] = a
+            elif founder in by_strategy:
+                out[by_strategy[founder]] = a
+        return out
+
+    def strategy_cards(self) -> dict[str, dict[str, Any]]:
+        """Strategy name -> the latest card written for a merged strategy file (`takes_strategy`)."""
+        out: dict[str, dict[str, Any]] = {}
+        for card in sorted(self.cards().values(), key=lambda c: c["_seq"]):
+            if card.get("strategy"):
+                out[str(card["strategy"])] = card
+        return out
+
+    def takes_strategy(self, row: Mapping[str, Any]) -> bool:
+        """Admit a merged corrected child (a strategy row with a `repair`) the way a card is admitted:
+        replayed under its own line BEFORE any seat, born only on a pass (`_admit`), with the
+        strategy's own name as its founder so `House.enroll` (which counts founders) and the
+        engineer's `_child_born` see it exactly as before.
+
+        Why (measured Sept 23, 2026): `House.enroll` gave the engineer's corrected children a seat
+        at once, displacing the defective parent or the weakest resident, and `_retire_superseded`
+        then killed every agent on the old code -- before the child had passed replay. 16 were born,
+        9 passed, 7 died on rung 0 with 0 forward blocks; $0.70 a child. Now the seat is conditional
+        on the replay pass, and a child that fails never takes one.
+
+        Returns True when the foundry owns this strategy's admission (the card exists for this file
+        version: pending, judged or born), False when it cannot take it (no literal NEEDS, no desk
+        matches, the desk has no replay) so `enroll` keeps its own path."""
+        from . import niches as niches_module
+        from .safety import CodeRefused, check_code
+
+        name, code = str(row.get("name") or ""), str(row.get("code") or "")
+        if not name or not code.strip() or not isinstance(row.get("repair"), Mapping):
+            return False
+        sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
+        existing = self.strategy_cards().get(name)
+        if existing is not None:
+            return existing.get("code_sha256") == sha  # a new file version is a new admission
+        declared = static_needs(code)
+        if declared is None:
+            return False
+        try:
+            home = niches_module.match(declared, self.house.niches)
+        except Exception:  # noqa: BLE001 - an odd literal is the House's probe to judge
+            return False
+        if home is None or home.dormant or not home.replay:
+            return False
+        repair = dict(row["repair"])
+        mechanism = f"{name} ({sha[:12]}): {str(row.get('why') or '')[:1500]}"
+        ident = card_id(mechanism, home.id)
+        if ident in self.cards():
+            return False
+        desk = home.desk or home.id.split("-", 1)[-1]
+        line = f"{desk}-r{ident[:6]}"[:34]
+        payload = {
+            "id": ident, "mechanism": mechanism[:2000], "data": [], "edge_after_costs": "", "horizon": "",
+            "rejection": "the House's replay gate, before any seat", "niche": home.id, "venue": home.venue,
+            "author": "engineer", "lineage": [line], "parent_card": None, "created_for": f"repair:{name}",
+            "name": name[:20], "line_id": line, "family": str(row.get("family") or name)[:40], "created_epoch": self._now(),
+            "model": None, "prompt_version": PROMPT_VERSION, "transfer": None,
+            "strategy": name, "repair": {k: repair.get(k) for k in ("key", "parent") if repair.get(k) is not None},
+            "code_sha256": sha, "_code": code,
+        }
+        self.house.ledger.append("hypothesis.card", payload, id=f"hypothesis.card:{ident}")
+        try:
+            check_code(code)
+        except (CodeRefused, SyntaxError) as exc:
+            self._outcome(payload, "invalid", f"the strategy check refused it: {str(exc)[:200]}")
+        return True
 
     def calls(self) -> list[dict[str, Any]]:
         return self._folded("calls", lambda: [dict(e.payload, _at=e.at) for e in self.house.ledger.iter(kinds="merton.pass")
@@ -560,6 +652,52 @@ class Foundry:
         return out
 
     # ------------------------------------------------------ forward evidence
+    def desk_forward(self) -> dict[str, dict[str, Any]]:
+        """The forward ledger of the foundry's own children, per desk: the pooled log growth of every
+        card-born agent's active `eval.block` rows (dead or alive), by desk and by family, and whether
+        the desk's fast lane is `closed`.
+
+        Why (measured Sept 23, 2026, the learn-and-unblock study): the foundry was the only paid
+        source to reach real money ($0.26 a replay pass, 2 of 9 rung-2 agents ever), and also the
+        practice loss engine: its Kalshi crypto cards were -$272.96 of the -$361 shadow loss since
+        Sept 22 13:30Z, two BTC-strike cards -$113.68 in one day, `kalshi-crypto-strikes` -10.3% a
+        block (40 born, 2 replay passes ever), `kalshi-crypto-15m` -1.9% a block on taker entries.
+        A desk is closed to the fast lane once its foundry-born agents are negative over
+        `fast_lane_min_blocks` active blocks, until one family there is positive over
+        `fast_lane_reopen_blocks` active blocks; the calls go to the open fast desks by yield."""
+        def build():
+            house = self.house
+            children = {a.id: a for a in house.registry.agents.values() if str(a.founder or "").startswith("card:") and a.specialty}
+            desks: dict[str, dict[str, Any]] = {}
+            for entry in house.ledger.iter(kinds="eval.block"):
+                agent = children.get(entry.agent)
+                if agent is None or not entry.payload.get("active"):
+                    continue
+                try:
+                    growth = float(entry.payload.get("log_growth") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                row = desks.setdefault(agent.specialty, {"blocks": 0, "growth": 0.0, "agents": set(), "families": {}})
+                row["blocks"] += 1
+                row["growth"] += growth
+                row["agents"].add(agent.id)
+                family = row["families"].setdefault(agent.family, {"blocks": 0, "growth": 0.0})
+                family["blocks"] += 1
+                family["growth"] += growth
+            floor = int(self.settings["fast_lane_min_blocks"])
+            reopen = int(self.settings["fast_lane_reopen_blocks"])
+            out = {}
+            for desk, row in desks.items():
+                positive = [f for f, r in row["families"].items() if r["blocks"] >= reopen and r["growth"] > 0]
+                closed = row["blocks"] >= floor and row["growth"] < 0 and not positive
+                out[desk] = {"blocks": row["blocks"], "growth": round(row["growth"], 6),
+                             "per_block": round(row["growth"] / row["blocks"], 6) if row["blocks"] else 0.0,
+                             "agents": len(row["agents"]), "measured": row["blocks"] >= floor, "closed": closed,
+                             "positive_families": sorted(positive),
+                             "families": {f: {"blocks": r["blocks"], "growth": round(r["growth"], 6)} for f, r in sorted(row["families"].items())}}
+            return out
+        return self._folded("desk_forward", build)
+
     def forward_families(self) -> list[dict[str, Any]]:
         """Every family with an earned forward record on a desk, best evidence first: a living member
         whose House standing has `score_observations > 0` and `score_growth > 0`. One row per family
@@ -778,13 +916,21 @@ class Foundry:
                     f"{source['horizon']} block, {'on real money' if source['real_money'] else 'on paper'}) and has never "
                     f"been tried on {pick.niche}, the best-scored untried {source['venue']} desk ({pick.score:.4f})")
         fast_desks = set(settings.get("fast_desks") or [])
-        fast = [d for d in desks if d.niche in fast_desks and d.niche != best.niche]
+        forward = self.desk_forward()
+        closed = {desk for desk, row in forward.items() if row["closed"]}
+        fast = [d for d in desks if d.niche in fast_desks and d.niche != best.niche and d.niche not in closed]
         if fast and due("fast"):
             recent = self._recent_cards()
-            pick = min(fast, key=lambda d: (recent.get(d.niche, 0), -d.score, d.niche))
+            # Sept 23, 2026: the measured forward yield of the desk's own foundry children first (an
+            # unmeasured desk counts as zero), then the rotation by fewest recent cards, then score.
+            yield_of = lambda d: forward.get(d.niche, {}).get("per_block", 0.0) if forward.get(d.niche, {}).get("measured") else 0.0  # noqa: E731
+            pick = min(fast, key=lambda d: (-yield_of(d), recent.get(d.niche, 0), -d.score, d.niche))
+            shut = ", ".join(f"{desk} {forward[desk]['per_block']:+.4f} a block over {forward[desk]['blocks']}" for desk in sorted(closed & fast_desks))
             return pick, "fast", (f"fast-evidence share: {taken['fast']} of the last {len(window)} calls went to hourly, "
-                                  f"around-the-clock desks; {pick.niche} has the fewest recent cards of them "
-                                  f"({recent.get(pick.niche, 0)}), score {pick.score:.4f}: {pick.why}")
+                                  f"around-the-clock desks; {pick.niche} has the best forward yield of its foundry children "
+                                  f"({yield_of(pick):+.4f} a block over {forward.get(pick.niche, {}).get('blocks', 0)}) and the "
+                                  f"fewest recent cards ({recent.get(pick.niche, 0)}) of the open fast desks, score {pick.score:.4f}: {pick.why}"
+                                  + (f"; closed to the fast lane on forward losses: {shut}" if shut else ""))
         if due("exploration"):
             others = [d for d in desks if d.niche != best.niche] or desks
             pick = min(others, key=lambda d: (d.cards, d.trials, d.niche))
@@ -982,6 +1128,10 @@ class Foundry:
                 self.retire_exhausted()
                 with self.house._state_lock:
                     state["last_retire"] = now
+            # Sept 23, 2026: the hourly yield row (league/yield_ledger.py) rides on this tick, the
+            # one unpaid bookkeeping pass every House tick makes, until House.tick takes it directly.
+            if self.yield_ledger is not None and self.yield_ledger.due():
+                self.yield_ledger.tick()
         except Exception as exc:  # noqa: BLE001 - bookkeeping must never stop a tick
             self.house.alert("warning", f"hypothesis bookkeeping failed ({type(exc).__name__}: {str(exc)[:160]})")
         if not open_for_business or not self.enabled():
@@ -1287,6 +1437,7 @@ class Foundry:
                                                   "model": card.get("model"), "inputs_sha256": card.get("code_sha256"),
                                                   "outcome": outcome, "cost_usd": "0", "useful": outcome == "passed",
                                                   "detail": str(detail)[:600], "niche": card.get("niche"), "line_id": card.get("line_id"),
+                                                  **({"strategy": card["strategy"]} if card.get("strategy") else {}),
                                                   **extra}, id=key)
 
     def evaluate_all(self, idents: Sequence[str]) -> None:
@@ -1430,11 +1581,16 @@ class Foundry:
                     continue  # this desk is full of agents that have earned their seats
             code = self._code(card)
             desk = rank.get(niche.id, (0.0, None))[1]
-            why = (f"hypothesis card {card['id']} (Merton, foundry {card.get('created_for')}): {str(card.get('mechanism'))[:220]} "
-                   f"-- passed replay before birth ({evaluation.get('detail')}); desk evidence {desk.why if desk else 'unscored'}")
+            strategy = card.get("strategy")
+            if strategy:
+                why = (f"Merton, as engineer: the corrected child {strategy} (repair {(card.get('repair') or {}).get('key')}) "
+                       f"passed replay before birth ({evaluation.get('detail')}); {str(card.get('mechanism'))[:300]}")
+            else:
+                why = (f"hypothesis card {card['id']} (Merton, foundry {card.get('created_for')}): {str(card.get('mechanism'))[:220]} "
+                       f"-- passed replay before birth ({evaluation.get('detail')}); desk evidence {desk.why if desk else 'unscored'}")
             try:
                 child = house.spawn(card["line_id"], card["family"], code, reason=why[:1500], params=evaluation.get("params") or {},
-                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=f"card:{card['id']}")
+                                    endowment=rules["endowment_usd"], specialty=niche.id, founder=str(strategy) if strategy else f"card:{card['id']}")
             except ValueError as exc:
                 self._outcome_admission(card, "refused_at_birth", str(exc))
                 continue
@@ -1448,10 +1604,12 @@ class Foundry:
             if displaced is not None and displaced.alive:
                 house.kill(displaced, "displaced", house.postmortem(displaced, "displaced",
                            "a replay-passing hypothesis card takes the seat of the weakest eligible agent"))
-            self.record_birth(child, "hypothesis", f"a replay-passing hypothesis card for {niche.id}", {
+            self.record_birth(child, "repair" if strategy else "hypothesis",
+                              f"a merged corrected child ({strategy}) that passed replay before any seat" if strategy
+                              else f"a replay-passing hypothesis card for {niche.id}", {
                 "card": card["id"], "desk_score": desk.score if desk else None, "desk_evidence": desk.why if desk else None,
                 "replay_passed": True, "seated_on_paper": seated, "displaced": displaced.id if displaced else None,
-                "allocation": self._allocation_of(card)})
+                "allocation": self._allocation_of(card), **({"strategy": strategy, "repair": card.get("repair")} if strategy else {})})
             return child
         return None
 

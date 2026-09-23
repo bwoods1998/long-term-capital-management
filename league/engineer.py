@@ -311,6 +311,19 @@ class Engineer:
                                           "outside every Merton role's paths")
         if job.attempt >= int(settings["max_attempts"]):
             return self._dormant(job, f"attempt limit reached ({job.attempt} of {settings['max_attempts']}); costs kept")
+        if job.kind == "strategy_defect" and not self._scripted(job):
+            # Sept 23, 2026: a corrected child of a strategy nobody runs, or that never traded, buys
+            # nothing. Measured: 16 repair children born, 0 forward active blocks, 7 died on rung 0;
+            # $0.70 a born child. A defect of a dead parent is closed; a living parent that has not
+            # traded since its seat waits, free, until it does. (An audit veto's parent has reached
+            # the paper screen, so it has traded by construction and is not asked again.)
+            why = self._parent_idle(job)
+            if why:
+                if why.startswith("dead"):
+                    self.worklist.transition(job.key, "rejected", attempt=job.attempt, pr=job.pr,
+                                             note=f"not worth a patch: {why}; a repair of a strategy nobody runs buys nothing")
+                    return "rejected"
+                return None  # the parent lives but has not traded: the job waits at no cost
         scripted = self._scripted(job)
         prior = job.state
         packet = self._packet(job)
@@ -367,6 +380,23 @@ class Engineer:
             self._pass(job, attempt, cost, f"the attempt failed: {type(exc).__name__}", error=True)
             return self._after_failure(job, attempt, cost, f"patch {attempt} failed: {type(exc).__name__}: {str(exc)[:200]}")
         return self._propose(job, attempt, cost, answer)
+
+    def _parent_idle(self, job: Job) -> str:
+        """Why a strategy defect is not worth a paid patch now, or "" when its parent is alive and
+        has traded. The parent is the job's named agent (a `strategy_defect:<agent>:<sha>` key names
+        one); "traded" is any fill of its own at a venue (never the House's dust sweeps), which an
+        agent only has once seated. Read from the ledger, so no House callback is needed."""
+        parents = sorted(job.agents)
+        if not parents:
+            return ""
+        alive = [p for p in parents if self.ledger.last("agent.died", agent=p) is None
+                 and (self.code_of(p) is not None or self.ledger.get(f"born:{p}") is not None)]
+        if not alive:
+            return f"dead parent(s) {', '.join(parents[:4])}"
+        for parent in alive:
+            if any(e.payload.get("source") != "dust" for e in self.ledger.read(kinds="book.fill", agent=parent, limit=50, newest=True)):
+                return ""
+        return f"parent(s) {', '.join(alive[:4])} alive but without a fill since the seat"
 
     def _after_failure(self, job: Job, attempt: int, cost: Decimal, note: str, **extra: Any) -> str:
         if attempt >= int(self.settings["max_attempts"]):
@@ -557,6 +587,12 @@ class Engineer:
                 return None
             child = self._child_born(job)
             if child is False:
+                refused = self._child_refused(job)
+                if refused:
+                    # Sept 23, 2026: the corrected child is replayed before any seat (House.enroll ->
+                    # Foundry.takes_strategy); one that fails is never born, and its job is closed
+                    # with the replay's reasons rather than bought again.
+                    return self._dormant(job, f"the corrected child failed replay before any seat: {refused[:400]}")
                 return None  # a corrected strategy is only a fix once it is alive and judged on its own
             self.worklist.transition(job.key, "verified", attempt=job.attempt, pr=job.pr, commit=job.commit,
                                      note=f"no recurrence for {window / 3600:.2f} h after the fix was running ({job.last_status.get('release')})"
@@ -628,6 +664,24 @@ class Engineer:
             if entry.payload.get("founder") in names:
                 return entry.agent
         return False
+
+    def _child_refused(self, job: Job) -> str | None:
+        """The replay verdict that refused this job's corrected child before any seat (the foundry's
+        `hypothesis.evaluate` trace naming the strategy), or None while it is pending or was born."""
+        names = set()
+        for path in (job.carry.get("digests") or {}):
+            if path.startswith("league/strategies/") and path.endswith(".json"):
+                try:
+                    names.add(json.loads((self.repo / path).read_text(encoding="utf-8")).get("name"))
+                except (OSError, ValueError):
+                    continue
+        if not names:
+            return None
+        for entry in self.ledger.read(kinds="trace.record", limit=2000, newest=True):
+            p = entry.payload
+            if p.get("task") == "hypothesis.evaluate" and p.get("strategy") in names and p.get("outcome") not in (None, "passed"):
+                return f"{p.get('outcome')}: {str(p.get('detail') or '')[:300]}"
+        return None
 
     # ----------------------------------------------------------------------- evidence
     def _packet(self, job: Job) -> dict[str, Any]:
