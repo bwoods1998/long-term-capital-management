@@ -735,14 +735,132 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _spread_of(tape: dict) -> tuple[float, float]:
+    """(half spread as a fraction, spread stress) a tape declares, as every replay reads them."""
+    half_spread_bps = _num(tape.get("half_spread_bps"))
+    half_spread = (DEFAULT_HALF_SPREAD_BPS if half_spread_bps is None or half_spread_bps < 0 else half_spread_bps) / 10000.0
+    stress = _num(tape.get("spread_stress"))
+    stress = 1.0 if stress is None or stress < 1.0 else min(stress, 10.0)
+    return half_spread, stress
+
+
+def _bars_index(bars: Any) -> tuple[list[float], list[dict[str, Any]]] | None:
+    """`_bars_until` read once for a whole replay: the rows it can ever show, in tape order, with the
+    running maximum of their stamps. The rows shown at `now_ts` are the first `k` of them, `k` the
+    first place that maximum passes `now_ts` -- exactly where `_bars_until` stops reading."""
+    if not isinstance(bars, (list, tuple)):
+        return None
+    tops: list[float] = []
+    rows: list[dict[str, Any]] = []
+    top = -math.inf
+    for bar in bars:
+        if not isinstance(bar, dict):
+            continue
+        stamp = _parse_ts(bar.get("t"))
+        if stamp is None:
+            continue
+        top = max(top, stamp)
+        tops.append(top)
+        rows.append(bar)
+    return tops, rows
+
+
+class _Prepared:
+    """What a tape says that no strategy can change, read once.
+
+    A single replay reads each step as it walks it (`eager=False`), as it always has. A batch
+    (`run_batch`) reads the whole tape once, `eager=True`, before any candidate runs: the step
+    times, the block keys, every step's view of the market and the indexes over the recorded bars
+    and feeds are then shared by every candidate. A view is a pure function of its step and the
+    tape's spread, and nothing in the simulator writes to one, so a candidate walks exactly the
+    views it would have built itself."""
+
+    def __init__(self, tape: Any, *, eager: bool = False):
+        self.tape = tape
+        self.eager = eager
+        self.problem = _tape_problem(tape)
+        self._stamps: list[float] | None = None
+        self._keys: dict[str, list[str]] = {}
+        self._views: list[_View] | None = None
+        self._priced: list[dict[str, int]] | None = None
+        self._indexes: dict[tuple[str, str], Any] = {}
+        self._feeds: Any = None
+        if eager and self.problem is None:
+            self._read_all()
+
+    def _read_all(self) -> None:
+        tape = self.tape
+        steps = tape["steps"]
+        self._stamps = [_parse_ts(step["t"]) for step in steps]  # type: ignore[misc]
+        for horizon in ("hour", "day"):
+            self._keys[horizon] = [_block_key(ts, horizon) for ts in self._stamps]
+        if tape.get("asset_class") != "option":
+            if tape["venue"] == "alpaca":
+                half_spread, stress = _spread_of(tape)
+                self._views, self._priced = [], []
+                for step in steps:
+                    priced: dict[str, int] = {}
+                    self._views.append(_alpaca_view(step, half_spread, stress, priced))
+                    self._priced.append(priced)
+            else:
+                self._views = [_kalshi_view(step) for step in steps]
+        if isinstance(tape.get("feeds"), dict):
+            self._feeds = _feed_index(tape["feeds"])
+        for source in ("options_features", "observed_bars"):
+            series = tape.get(source)
+            if isinstance(series, dict):
+                for symbol, bars in series.items():
+                    self.index(source, symbol, bars or ())
+
+    def stamp(self, index: int, step: dict) -> float:
+        if self._stamps is not None:
+            return self._stamps[index]
+        stamp = _parse_ts(step["t"])
+        assert stamp is not None  # _tape_problem checked every step
+        return stamp
+
+    def block_key(self, index: int, ts: float, horizon: str) -> str:
+        keys = self._keys.get(horizon)
+        return keys[index] if keys is not None else _block_key(ts, horizon)
+
+    def view(self, index: int, step: dict, venue: str, half_spread: float, stress: float, priced: dict[str, int]) -> _View:
+        if self._views is not None:
+            for how, count in self._priced[index].items() if self._priced is not None else ():
+                priced[how] = priced.get(how, 0) + count
+            return self._views[index]
+        return _alpaca_view(step, half_spread, stress, priced) if venue == "alpaca" else _kalshi_view(step)
+
+    def feed_index(self) -> Any:
+        if self._feeds is None:
+            self._feeds = _feed_index(self.tape.get("feeds"))
+        return self._feeds
+
+    def index(self, source: str, symbol: str, bars: Any) -> Any:
+        key = (source, symbol)
+        if key not in self._indexes:
+            self._indexes[key] = _bars_index(bars)
+        return self._indexes[key]
+
+    def bars_until(self, source: str, symbol: str, bars: Any, now_ts: float, last: int | None = None) -> list[dict[str, Any]]:
+        """`_bars_until(bars, now_ts)`, or its `last` rows, answered from the index (`bars` is the
+        tape's own series for this symbol, the same object at every step of a replay)."""
+        found = self.index(source, symbol, bars)
+        if found is None:
+            return []
+        tops, rows = found
+        count = bisect.bisect_right(tops, now_ts)
+        return rows[max(0, count - last):count] if last else rows[:count]
+
+
 def run_replay(code: str, params: dict | None, tape: dict, *, stake: float = 200.0,
                limits: dict | None = None, oos_fraction: float = 0.34,
-               max_decide_seconds: float = 5.0, audit: bool = False) -> dict:
+               max_decide_seconds: float = 5.0, audit: bool = False, prepared: "_Prepared | None" = None) -> dict:
     """Walk `tape` with the strategy in `code` and return the per-block after-cost log growth.
 
     Never raises for a bad strategy or a bad tape: those come back as `{"ok": False, "error"}`.
     `audit=True` adds every fill (`fill_log`) and the strategy's last memory (`final_memory`)
-    to the result, for tests and for a person checking a run; the box never asks for it."""
+    to the result, for tests and for a person checking a run; the box never asks for it.
+    `prepared` is this same tape already read (`run_batch` reads it once for every candidate)."""
     code = code if isinstance(code, str) else str(code or "")
     sha = hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()
 
@@ -753,7 +871,9 @@ def run_replay(code: str, params: dict | None, tape: dict, *, stake: float = 200
         check_code(code)
     except CodeRefused as exc:
         return failed(f"refused: {_short(exc)}")
-    problem = _tape_problem(tape)
+    if prepared is None or prepared.tape is not tape:
+        prepared = _Prepared(tape)
+    problem = prepared.problem
     if problem:
         return failed(f"bad tape: {problem}")
     stake_usd = _num(stake)
@@ -770,13 +890,13 @@ def run_replay(code: str, params: dict | None, tape: dict, *, stake: float = 200
     try:
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink), _Deadline(max_decide_seconds) as deadline:
             return _replay(code, sha, params, tape, stake_usd, rung_limits, float(oos_fraction), deadline,
-                           bool(audit), failed)
+                           bool(audit), failed, prepared)
     finally:
         random.setstate(random_state)
 
 
 def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, limits: dict[str, float],
-            oos_fraction: float, deadline: _Deadline, audit: bool, failed: Any) -> dict:
+            oos_fraction: float, deadline: _Deadline, audit: bool, failed: Any, prepared: _Prepared) -> dict:
     seed = int(sha[:16], 16)
     try:
         compiled = compile(code, "<strategy>", "exec")  # once; the module body itself runs at every step
@@ -829,10 +949,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         except ImportError:  # in the agent's box the files sit side by side
             from options_replay import replay_options  # type: ignore
         return replay_options(decide, needs, effective, tape, stake, limits, oos_fraction, deadline, audit, failed, seed, sha, horizon)
-    half_spread_bps = _num(tape.get("half_spread_bps"))
-    half_spread = (DEFAULT_HALF_SPREAD_BPS if half_spread_bps is None or half_spread_bps < 0 else half_spread_bps) / 10000.0
-    stress = _num(tape.get("spread_stress"))
-    stress = 1.0 if stress is None or stress < 1.0 else min(stress, 10.0)
+    half_spread, stress = _spread_of(tape)
     priced: dict[str, int] = {}
     results = tape.get("results") if isinstance(tape.get("results"), dict) else {}
 
@@ -860,7 +977,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         return failed('unsupported input: required observed bars are missing')
     max_hours = _num(needs.get("max_hours_to_close"))
     # Recorded live feeds (`league/feeds.py`), shown only to a strategy that declares them.
-    feeds = _feed_index(tape.get("feeds")) if needs.get("feeds") and isinstance(tape.get("feeds"), dict) else None
+    feeds = prepared.feed_index() if needs.get("feeds") and isinstance(tape.get("feeds"), dict) else None
 
     account = _Account(venue, stake, limits, results, audit, tape.get("maker_fee_series") if isinstance(tape.get("maker_fee_series"), list) else (),
                        tape.get('settlements') if isinstance(tape.get('settlements'), dict) else None)
@@ -884,17 +1001,16 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
         previous_equity = block_equity
 
     decisions_walked = 0
-    for step in tape["steps"]:
+    for index, step in enumerate(tape["steps"]):
         now = step["t"]
-        now_ts = _parse_ts(now)
-        assert now_ts is not None  # _tape_problem checked every step
-        key = _block_key(now_ts, horizon)
+        now_ts = prepared.stamp(index, step)
+        key = prepared.block_key(index, now_ts, horizon)
         if key != block_key:
             if block_key is not None:
                 close_block()
             block_key, block_active = key, False
         steps_walked += 1
-        view = _alpaca_view(step, half_spread, stress, priced) if venue == "alpaca" else _kalshi_view(step)
+        view = prepared.view(index, step, venue, half_spread, stress, priced)
         held_before, fills_before = bool(account.positions), account.fills
 
         # (a) orders from earlier steps meet this step's range; closed markets settle.
@@ -927,7 +1043,9 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
             }
             if venue == "alpaca":
                 shown = wanted_symbols or sorted(history)
-                ctx["bars"] = {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in shown}
+                # Every history row is a plain dict this simulator made, so `dict.copy` is `dict(b)`,
+                # a third faster: these copies are most of a long equity replay's time.
+                ctx["bars"] = {s: list(map(dict.copy, history.get(s, [])[-bar_limit:])) for s in shown}
                 # A replay quote is made at this decision step, so it carries the step's own time as
                 # `t`, as a live quote carries its venue timestamp (CONTRACT.md). Without it, every
                 # strategy that refuses a stale or undated quote -- the careful ones -- never traded
@@ -941,14 +1059,15 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                 ctx["quotes"] = {s: dated(s) for s in shown if s in view.quotes}
                 if watched_symbols:
                     ctx["observed"] = {
-                        "bars": {s: [dict(b) for b in history.get(s, [])[-bar_limit:]] for s in watched_symbols},
+                        "bars": {s: list(map(dict.copy, history.get(s, [])[-bar_limit:])) for s in watched_symbols},
                         "quotes": {s: dated(s) for s in watched_symbols if s in view.quotes},
                     }
                 if needs.get("options_features") and isinstance(tape.get("options_features"), dict):
                     # Options-derived features, each row stamped with when it became available:
                     # the latest at or before this step, exactly what a live wake is handed.
                     ctx["options_features"] = {s: dict(rows[-1]) for s, rows in
-                                               ((s, _bars_until(tape["options_features"].get(s) or (), now_ts)) for s in shown) if rows}
+                                               ((s, prepared.bars_until("options_features", s, tape["options_features"].get(s) or (), now_ts, 1))
+                                                for s in shown) if rows}
             else:
                 shown_markets, watched_markets = [], []
                 for market in view.markets.values():
@@ -981,7 +1100,7 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                         ctx["observed"]["markets"] = watched_markets
                     if watched_symbols and observed_bars:
                         ctx["observed"]["bars"] = {
-                            s: [dict(b) for b in _bars_until(observed_bars.get(s) or (), now_ts)[-observed_limit:]]
+                            s: [dict(b) for b in prepared.bars_until("observed_bars", s, observed_bars.get(s) or (), now_ts, observed_limit)]
                             for s in watched_symbols
                         }
             if feeds is not None:
@@ -1120,6 +1239,273 @@ def digest(trades: list) -> dict:
     }
 
 
+# ------------------------------------------------------------------------------------- the batch
+#: The error a candidate the batch's time budget did not reach (or did not let finish) comes back with.
+NOT_EVALUATED = "not evaluated: batch budget"
+#: A candidate's own wall-clock limit in a batch. A single replay has only the box's limit, and a
+#: strategy that swallows its decide deadline inside an endless loop would hold the whole batch.
+CANDIDATE_SECONDS = 300.0
+#: Memory one candidate may add to what its process inherits, so a runaway one fails alone.
+CANDIDATE_MEMORY_MB = 2048
+
+
+def _batch_failure(exc: BaseException) -> dict:
+    """What `main` prints when a replay raises past `run_replay` (it never should)."""
+    return {"ok": False, "error": f"replay failed: {type(exc).__name__}: {_short(exc)}"}
+
+
+def _candidate_text(candidate: dict, tape: Any, prepared: "_Prepared | None", options: dict) -> str:
+    """One candidate's result as the JSON a single box run prints for it (`main`)."""
+    try:
+        result = run_replay(candidate.get("code"), candidate.get("params"), tape, prepared=prepared, **options)
+        return json.dumps(result, allow_nan=False)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # noqa: BLE001 - the box always answers
+        return json.dumps(_batch_failure(exc))
+
+
+def _malformed(candidate: Any) -> str | None:
+    if not isinstance(candidate, dict):
+        return "malformed candidate: a candidate is a dict"
+    if not isinstance(candidate.get("id"), str) or not candidate["id"]:
+        return "malformed candidate: every candidate has a string id"
+    return None
+
+
+def _workers() -> int:
+    try:
+        return max(1, len(os.sched_getaffinity(0)))  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
+def run_batch(candidates: list[dict], tape: dict, *, stake: float = 200.0, limits: dict | None = None,
+              oos_fraction: float = 0.34, max_decide_seconds: float = 5.0, budget_seconds: float | None = None,
+              workers: int | None = None, candidate_seconds: float | None = None,
+              memory_mb: int | None = CANDIDATE_MEMORY_MB, clock: Any = time.monotonic) -> list[dict]:
+    """Replay many strategies over ONE tape, read once.
+
+    `candidates` is `[{"id": str, "code": str, "params": dict}]`. The result is one dict per
+    candidate, in order: exactly what `run_replay(code, params, tape, stake=..., limits=...,
+    oos_fraction=..., max_decide_seconds=...)` returns for it, plus its `id`.
+
+    The tape is validated and read once (`_Prepared(eager=True)`: step times, block keys, every
+    step's market view, bar and feed indexes). Each candidate then runs in a process of its own,
+    forked from that one (`workers` at a time, one a CPU by default), so it is isolated as a single
+    replay is -- its own seed from its code, its own decide deadline, its prints sunk, the same
+    `check_code` refusal -- and nothing one candidate does to its interpreter reaches another. A
+    candidate that crashes its process, outlives `candidate_seconds` or outgrows `memory_mb` comes
+    back `{"ok": False, "error": ...}`; it never takes the batch down. Once `budget_seconds` (from
+    the call) is spent, no candidate starts and any still running is stopped: those come back
+    `{"ok": False, "error": "not evaluated: batch budget"}`. Where `os.fork` does not exist the
+    candidates run one after another in this process, without that isolation."""
+    started = clock()
+    candidates = list(candidates or [])
+    options = {"stake": stake, "limits": limits, "oos_fraction": oos_fraction, "max_decide_seconds": max_decide_seconds}
+    results: list[dict | None] = [None] * len(candidates)
+    todo: list[int] = []
+    for index, candidate in enumerate(candidates):
+        problem = _malformed(candidate)
+        if problem:
+            results[index] = {"ok": False, "error": problem, "id": candidate.get("id") if isinstance(candidate, dict) else None}
+        else:
+            todo.append(index)
+    try:
+        prepared: _Prepared | None = _Prepared(tape, eager=True)
+    except Exception:  # noqa: BLE001 - a tape the reader chokes on is read by each candidate as it always was
+        prepared = None
+    deadline = None if budget_seconds is None else started + max(0.0, float(budget_seconds))
+    limit = CANDIDATE_SECONDS if candidate_seconds is None else max(0.001, float(candidate_seconds))
+
+    def finish(index: int, text: str | None, error: str | None = None) -> None:
+        if text is not None:
+            try:
+                value = json.loads(text)
+            except ValueError:
+                value = None
+            if isinstance(value, dict):
+                value["id"] = candidates[index]["id"]
+                results[index] = value
+                return
+            error = error or "the candidate's process answered no result"
+        results[index] = {"ok": False, "error": error or "the candidate's process answered no result", "id": candidates[index]["id"]}
+
+    if not hasattr(os, "fork") or workers == 0:
+        for index in todo:
+            if deadline is not None and clock() >= deadline:
+                finish(index, None, NOT_EVALUATED)
+                continue
+            finish(index, _candidate_text(candidates[index], tape, prepared, options))
+    else:
+        _forked(candidates, todo, tape, prepared, options, finish, workers=max(1, int(workers or _workers())),
+                deadline=deadline, limit=limit, memory_mb=memory_mb, clock=clock)
+    return [r if r is not None else {"ok": False, "error": NOT_EVALUATED, "id": candidates[i].get("id")}
+            for i, r in enumerate(results)]
+
+
+def _forked(candidates: list[dict], todo: list[int], tape: Any, prepared: "_Prepared | None", options: dict, finish: Any, *,
+            workers: int, deadline: float | None, limit: float, memory_mb: int | None, clock: Any) -> None:
+    """Run `todo` in forked children, `workers` at a time; `finish(index, text, error)` gets each answer."""
+    import gc
+    import selectors
+    import warnings
+
+    queue = list(todo)
+    running: dict[int, dict[str, Any]] = {}  # read fd -> {index, pid, chunks, started}
+    selector = selectors.DefaultSelector()
+    gc.collect()
+    gc.freeze()  # the tape and its reading are shared by every child: the collector leaves them be
+
+    def reap(fd: int, error: str | None) -> None:
+        job = running.pop(fd)
+        selector.unregister(fd)
+        os.close(fd)
+        if error is not None:
+            try:
+                os.kill(job["pid"], signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            _, status = os.waitpid(job["pid"], 0)
+        except ChildProcessError:
+            status = 0
+        text = b"".join(job["chunks"]).decode("utf-8", "replace") if error is None else None
+        if error is None and not text:
+            how = (f"signal {os.WTERMSIG(status)}" if os.WIFSIGNALED(status) else f"exit {os.WEXITSTATUS(status)}")
+            error = f"the candidate's process died ({how}) before it answered"
+        finish(job["index"], text, error)
+
+    try:
+        while queue or running:
+            now = clock()
+            if deadline is not None and now >= deadline:
+                return  # `finally` stops what runs and answers what waits: not evaluated
+            while queue and len(running) < workers:
+                index = queue[0]
+                try:
+                    read_fd, write_fd = os.pipe()
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore", DeprecationWarning)  # a multi-threaded caller: the child only replays
+                            pid = os.fork()
+                    except OSError:
+                        os.close(read_fd)
+                        os.close(write_fd)
+                        raise
+                except OSError as exc:
+                    if running:
+                        break  # the box is out of processes or memory for now: wait for one to finish
+                    for waiting in queue:
+                        finish(waiting, None, f"the candidate's process could not start: {type(exc).__name__}: {_short(exc, 120)}")
+                    queue.clear()
+                    return
+                queue.pop(0)
+                if pid == 0:  # the child: replay one candidate, write its answer, and leave without cleanup
+                    try:
+                        os.close(read_fd)
+                        _child(write_fd, candidates[index], tape, prepared, options, memory_mb)
+                    finally:
+                        os._exit(0)
+                os.close(write_fd)
+                running[read_fd] = {"index": index, "pid": pid, "chunks": [], "started": clock()}
+                selector.register(read_fd, selectors.EVENT_READ)
+            waits = [job["started"] + limit for job in running.values()] + ([deadline] if deadline is not None else [])
+            timeout = max(0.0, min(waits) - clock()) if waits else None
+            for key, _ in selector.select(timeout=min(timeout, 1.0) if timeout is not None else 1.0):
+                chunk = os.read(key.fd, 1 << 20)
+                if chunk:
+                    running[key.fd]["chunks"].append(chunk)
+                else:
+                    reap(key.fd, None)
+            now = clock()
+            for fd, job in list(running.items()):
+                if now - job["started"] >= limit:
+                    reap(fd, f"timed out after {limit:g}s")
+    finally:
+        for fd in list(running):
+            reap(fd, NOT_EVALUATED)
+        for index in queue:
+            finish(index, None, NOT_EVALUATED)
+        selector.close()
+        gc.unfreeze()
+
+
+def _child(fd: int, candidate: dict, tape: Any, prepared: "_Prepared | None", options: dict, memory_mb: int | None) -> None:
+    """In a forked child: nothing it or the strategy prints reaches the box's stdout, its memory is
+    capped above what it inherited, and its one answer goes down the pipe."""
+    try:
+        sink = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(sink, 1)
+        os.dup2(sink, 2)
+        sys.stdout = sys.stderr = _Null()
+        if memory_mb:
+            try:
+                import resource
+
+                with open("/proc/self/statm", encoding="ascii") as handle:
+                    inherited = int(handle.read().split()[0]) * os.sysconf("SC_PAGE_SIZE")
+                cap = inherited + int(memory_mb) * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+            except (ImportError, OSError, ValueError):
+                pass  # no cap where the platform has none; the box's own limit is the backstop
+        text = _candidate_text(candidate, tape, prepared, options)
+    except BaseException as exc:  # noqa: BLE001 - a child always answers if it can
+        text = json.dumps(_batch_failure(exc))
+    data = text.encode("utf-8")
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
+    os.close(fd)
+
+
+def load_tape(path: str, digest: str | None = None) -> tuple[Any, str | None]:
+    """(tape, None), or (None, why) when the file is missing or is not the tape `digest` names.
+    A tape is kept gzipped, as the canonical JSON its digest is the SHA-256 of."""
+    import gzip
+
+    try:
+        with gzip.open(path, "rb") as handle:
+            raw = handle.read()
+    except (OSError, EOFError):
+        return None, "tape missing"
+    if digest and hashlib.sha256(raw).hexdigest() != digest:
+        return None, "tape does not match its digest"
+    return json.loads(raw), None
+
+
+def _main_batch(spec: dict) -> dict:
+    """The box's batch: run `run_batch` over the spec and answer a summary (the full results go to
+    `result_path`, gzipped, when the spec names one; the summary then carries their SHA-256)."""
+    started = time.monotonic()
+    tape = spec.get("tape")
+    if tape is None and spec.get("tape_path"):
+        tape, why = load_tape(str(spec["tape_path"]), spec.get("tape_digest"))
+        if why:
+            return {"ok": False, "error": why, "tape_missing": True}
+    loaded = time.monotonic() - started
+    options = {name: spec[name] for name in ("stake", "limits", "oos_fraction", "max_decide_seconds", "budget_seconds",
+                                               "workers", "candidate_seconds", "memory_mb") if spec.get(name) is not None}
+    if "budget_seconds" in options:  # the budget runs from the start of the program, loading included
+        options["budget_seconds"] = max(0.0, float(options["budget_seconds"]) - loaded)
+    results = run_batch(spec.get("candidates") or [], tape, **options)
+    body = {"results": results, "evaluated": sum(1 for r in results if r.get("error") != NOT_EVALUATED),
+            "seconds": round(time.monotonic() - started, 3), "load_seconds": round(loaded, 3), "workers": int(options.get("workers") or _workers())}
+    if not spec.get("result_path"):
+        return {"ok": True, **body}
+    import gzip
+
+    data = gzip.compress(json.dumps(body, allow_nan=False).encode("utf-8"), 6, mtime=0)
+    path = str(spec["result_path"])
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path + ".tmp", "wb") as handle:
+        handle.write(data)
+    os.replace(path + ".tmp", path)
+    return {"ok": True, "result_path": path, "sha256": hashlib.sha256(data).hexdigest(), "count": len(results),
+            "evaluated": body["evaluated"], "seconds": body["seconds"], "load_seconds": body["load_seconds"], "workers": body["workers"]}
+
+
 # ------------------------------------------------------------------------------ the box's entry
 def parse_result(stdout: str, token: str) -> dict | None:
     """The result a box run printed: the LAST line that starts `REPLAY-RESULT <token> `. A line
@@ -1142,17 +1528,21 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = True) -> int:
     """`python3 replay.py --spec spec.json`: run the spec and print one `REPLAY-RESULT <token> <json>`
     line, the last thing on the real stdout. Everything else the run prints goes nowhere, and the
     process ends with `os._exit` so nothing a strategy left behind can print after the result.
-    (`hard_exit=False` returns instead, for a caller in the same process.)"""
+    (`hard_exit=False` returns instead, for a caller in the same process.)
+
+    `python3 replay.py --batch spec.json` runs `run_batch` instead (`_main_batch`): the spec holds
+    `candidates` and the tape, inline or as `tape_path` (gzipped, checked against `tape_digest`)."""
     parser = argparse.ArgumentParser(description="Replay a strategy over a recorded tape (rung 0).")
     parser.add_argument("--spec", help="a JSON spec file; standard input when absent")
+    parser.add_argument("--batch", help="a JSON batch spec file: many candidates over one tape")
     args = parser.parse_args(argv)
     real = sys.__stdout__
     kept = sys.stdout, sys.stderr
     sys.stdout = sys.stderr = _Null()
     token = ""
     try:
-        if args.spec:
-            with open(args.spec, encoding="utf-8") as handle:
+        if args.spec or args.batch:
+            with open(args.batch or args.spec, encoding="utf-8") as handle:
                 raw = handle.read()
         else:
             raw = sys.stdin.read()
@@ -1160,9 +1550,12 @@ def main(argv: list[str] | None = None, *, hard_exit: bool = True) -> int:
         if not isinstance(spec, dict):
             raise ValueError("the spec is a JSON object")
         token = "".join(str(spec.get("token") or "").split())
-        options = {name: spec[name] for name in ("stake", "limits", "oos_fraction", "max_decide_seconds")
-                   if spec.get(name) is not None}
-        result = run_replay(spec.get("code"), spec.get("params"), spec.get("tape"), **options)
+        if args.batch:
+            result = _main_batch(spec)
+        else:
+            options = {name: spec[name] for name in ("stake", "limits", "oos_fraction", "max_decide_seconds")
+                       if spec.get(name) is not None}
+            result = run_replay(spec.get("code"), spec.get("params"), spec.get("tape"), **options)
         text = json.dumps(result, allow_nan=False)
     except KeyboardInterrupt:
         raise
