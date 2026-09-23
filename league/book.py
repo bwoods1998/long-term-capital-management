@@ -82,6 +82,16 @@ OPEN_STATUSES = ("new", "accepted", "partially_filled", "unknown")
 #: horizon rule asks again on a later wake, with a fresh intent, and the plan does not outlive the
 #: agent's wish by a trading session.
 EXIT_PLAN_TTL_SECONDS = 3600
+#: An order the venue never acknowledged (`new`, `unknown`) is "never arrived" only once the venue
+#: has said it has no such order on two polls at least this far apart (Sept 23, 2026, workstream B:
+#: 153 alpaca-paper orders were closed "the venue has no such order" on one look, 149 of them the
+#: venue's own 403 refusals an older adapter read as unknown, 4 of them lost in a gateway outage;
+#: none had a fill, but one look at a venue that answers 404 while it catches up would have lost
+#: one). And for this long after that verdict the book keeps asking, once a poll: an order the
+#: venue has after all is revived and its fill booked, never stranded as a position diff.
+NEVER_ARRIVED_SECONDS = 60
+NEVER_ARRIVED_RECHECK_SECONDS = 900
+NEVER_ARRIVED = "the venue has no such order"
 #: What the gateway counts an Alpaca market order at: the venue's own touch plus ten per cent
 #: (`gateway/lib/router.mjs`, "a market order may fill through the touch"). A slice sized on this
 #: price fits the gateway's per-order cap on its own pricing, not only on the book's.
@@ -308,6 +318,12 @@ class ExitPlan:
     created_at: str
     max_orders: int  # a bound on venue orders, so a market that keeps half-filling cannot loop
     ttl_seconds: int
+    #: In memory only: since when the plan's market has been shut (its market slices wait for the
+    #: open, `_advance_plan`), and when it last reopened, from which the time-to-live is counted
+    #: again. A restart forgets both and counts from `created_at`: a plan held over a close is then
+    #: closed at the open as "not finished", and the holder sells the rest with a fresh intent.
+    held_since: str | None = None
+    resumed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -475,6 +491,10 @@ class Book:
         #: until then: the startup poll books what filled during a restart, and only a reading of
         #: the venue says what is really still held.
         self._reconciled_here = False
+        #: Orders the venue said it has no record of: when a poll first heard so (`_venue_missed`),
+        #: and when the book closed one as never arrived (`_recheck_never_arrived` asks again).
+        self._missed: dict[str, str] = {}
+        self._never_arrived: dict[str, str] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -577,7 +597,7 @@ class Book:
                 account.realized += payout - holding.cost
                 del account.holdings[instrument.key]
         elif kind == "book.order":
-            self._apply_order(p)
+            self._apply_order(p, at)
         elif kind == "book.exit_plan":
             self._apply_exit_plan(p)
         elif kind == "book.cross_plan":
@@ -638,8 +658,12 @@ class Book:
             if holding.quantity <= 0:
                 del account.holdings[instrument.key]
 
-    def _apply_order(self, p: Mapping[str, Any]) -> None:
+    def _apply_order(self, p: Mapping[str, Any], at: str = "") -> None:
         order_id = str(p["order_id"])
+        if p.get("status") == "rejected" and p.get("reason") == NEVER_ARRIVED:
+            self._never_arrived[order_id] = at  # the poll keeps asking the venue about it for a while (`_recheck_never_arrived`)
+        else:
+            self._never_arrived.pop(order_id, None)
         working = self.orders.get(order_id)
         if working is None:
             working = self.orders[order_id] = Working(
@@ -1380,7 +1404,12 @@ class Book:
             return Outcome(first.id, first.agent, "unknown", str(exc), order_id)
         # Persist the acknowledgement as pollable until every fill has been attributed.
         # Recording `filled` first used to strand the venue position after a crash here.
-        self._order_row(base, "accepted" if order.filled_quantity > 0 else order.status, order.broker_order_id, suffix="sent")
+        # An answer that closes the order without a fill (the shadow book's "post-only order would
+        # cross", a market with no quote) carries the venue's reason on the row: 148 kalshi-shadow
+        # rejections by Sept 23, 2026 had an empty one, and only the wake's outcome knew why.
+        closed_unfilled = order.filled_quantity <= 0 and order.status not in OPEN_STATUSES
+        self._order_row(base, "accepted" if order.filled_quantity > 0 else order.status, order.broker_order_id, suffix="sent",
+                        reason=str(order.reason or "") if closed_unfilled else "")
         working = self.orders[order_id]
         self._attribute(working, order, now)
         if working.open and not working.rested:
@@ -1422,7 +1451,7 @@ class Book:
             # Order metadata folds are idempotent and do not move cash or positions.
             recorded = self.ledger.get(entry_id)
             if recorded is not None:
-                self._apply_order(recorded.payload)
+                self._apply_order(recorded.payload, recorded.at)
             raise
 
     def _base_of(self, working: Working) -> dict[str, Any]:
@@ -1677,10 +1706,23 @@ class Book:
                 break
             if any(w.status in ("new", "unknown") for w in slices):
                 break  # the venue has not said what became of a slice: the poll finds out before anything more is sent
+            if market and self.market_open is not None and self.market_open(intent.instrument, now) is False:
+                # A market sell of a stock or an option outside the regular session is refused
+                # ("market orders outside regular hours are not permitted"), so a plan begun in
+                # session whose later slices fell after the close was refused slice by slice until it
+                # timed out, and the rest of the position waited for a fresh intent (Sept 23, 2026,
+                # workstream B; the House holds a whole wind-down for the open the same way). The
+                # remaining slices wait here instead: nothing is refused, and the time-to-live counts
+                # again from the open, not through the night.
+                if plan.held_since is None:
+                    plan.held_since = now
+                break
+            if plan.held_since is not None:
+                plan.held_since, plan.resumed_at = None, now
             if len(slices) >= plan.max_orders:
                 self._close_plan(plan, f"{len(slices)} orders sent, the most one exit may send")
                 break
-            if _epoch_seconds(now) - _epoch_seconds(plan.created_at) > plan.ttl_seconds:
+            if _epoch_seconds(now) - _epoch_seconds(plan.resumed_at or plan.created_at) > plan.ttl_seconds:
                 self._close_plan(plan, f"not finished within {plan.ttl_seconds // 60} minutes")
                 break
             offered = sum((share.quantity - share.filled for w in self.orders.values() if w.open and w.side == "sell" and w.instrument.key == key
@@ -1750,17 +1792,59 @@ class Book:
                     order = self.broker.get_order(working.broker_order_id or working.order_id)
                 except RejectedOrder:
                     if working.status in ("new", "unknown"):
-                        # The venue has no such order: the submit never arrived.
-                        self._order_row(self._base_of(working), "rejected", None, suffix="never-arrived", reason="the venue has no such order")
+                        self._venue_missed(working, now)
                     continue
                 except BrokerError:
                     continue
+                self._missed.pop(working.order_id, None)
                 checked += 1
                 self._attribute(working, order, now)
+            checked += self._recheck_never_arrived(now)
             if self._reconciled_here:
                 # Every fill the venue reported is booked first: the next slice of an exit sizes
                 # off what is still held after them, never off what was held a pass ago.
                 self._advance_plans(now)
+        return checked
+
+    def _venue_missed(self, working: Working, now: str) -> None:
+        """The venue answered a poll about an order it never acknowledged with "no such order".
+        One such answer is remembered, not believed: the verdict "never arrived" -- which frees the
+        order's cash and stops the polling -- takes a second one at least `NEVER_ARRIVED_SECONDS`
+        later, so a venue answering 404 while it catches up with a write it took cannot make a fill
+        disappear. A restart forgets the first answer and asks twice again, which is the safe way round."""
+        first = self._missed.get(working.order_id)
+        if first is None:
+            self._missed[working.order_id] = now
+            return
+        if _epoch_seconds(now) - _epoch_seconds(first) < NEVER_ARRIVED_SECONDS:
+            return
+        self._missed.pop(working.order_id, None)
+        self._order_row(self._base_of(working), "rejected", None, suffix="never-arrived", reason=NEVER_ARRIVED)
+
+    def _recheck_never_arrived(self, now: str) -> int:
+        """Ask the venue once more, each poll for `NEVER_ARRIVED_RECHECK_SECONDS` after the verdict,
+        about every order closed as never arrived (`_never_arrived`, folded from the ledger so a
+        restart keeps asking). One the venue has after all is revived on the record (a `found` row
+        with the venue's own status) and its fills are booked as any order's: a rejected order the
+        venue then fills was otherwise a position the book did not know, a frozen book, and an
+        agent's entry lost from its record. Returns the orders checked."""
+        checked = 0
+        for order_id, since in list(self._never_arrived.items()):
+            if _epoch_seconds(now) - _epoch_seconds(since or now) > NEVER_ARRIVED_RECHECK_SECONDS:
+                self._never_arrived.pop(order_id, None)
+                continue
+            working = self.orders.get(order_id)
+            if working is None:
+                self._never_arrived.pop(order_id, None)
+                continue
+            try:
+                order = self.broker.get_order(working.broker_order_id or working.order_id)
+            except BrokerError:
+                continue  # still no such order, or no answer: asked again next poll until the window closes
+            checked += 1
+            self._order_row(self._base_of(working), "accepted" if order.filled_quantity > 0 else order.status, order.broker_order_id,
+                            suffix="found", reason="the venue has this order after all; it was closed as never arrived")
+            self._attribute(working, order, now)
         return checked
 
     def cancel(self, agent: str, order_id: str) -> Outcome:
@@ -2037,12 +2121,17 @@ class Book:
             # CASH only and leaves the position diff standing. The book froze for ever in exactly
             # the state the adoption exists to clear.
             self._unreconciled += 1
-            if not self._traded_yet():
+            if not self._traded_yet() and not result.position_diffs:
                 # A book that has never traded cannot have drifted: its first reading of the venue
                 # was taken across a moment that moved. (Sept 19, 2026: a leftover bid filled
                 # between the cash read and the position read of a new league's first baseline, and
                 # froze the book $40 short with no agent having traded at all.) It has nothing of
-                # its own to lose by reading again.
+                # its own to lose by reading again -- unless a POSITION differs too: then the cash
+                # is the price of units the venue holds and the book does not know (an order closed
+                # as never arrived that filled after all, `_recheck_never_arrived`), and a re-read
+                # that took that cash into the baseline left the book a fill's worth off for good
+                # once the units were booked (Sept 23, 2026). Both diffs stand, and are cleared
+                # together: by the revival, or by `_adopt_the_venue` on practice money.
                 self._baseline_row(self.baseline_cash + result.cash_diff, self.baseline_positions,
                                    f"re-read: the book has never traded and the venue was {result.cash_diff:+.4f} against its first reading")
                 result = self._reconcile()

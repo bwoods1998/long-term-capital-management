@@ -620,6 +620,9 @@ class PaperBookTest(BookCase):
         self.assertEqual(out.status, "unknown")
         self.assertFalse(self.book.reconcile().ok)  # an unknown order is not a reconciled book
         self.book.poll()
+        self.assertEqual(len(self.book.open_orders()), 1)  # one "no such order" is remembered, not believed (Sept 23, 2026)
+        self.clock.advance(61)
+        self.book.poll()
         self.assertEqual(self.book.open_orders(), [])
         self.assertEqual(self.book.account("a1").holdings, {})
         self.assertTrue(self.book.reconcile().ok)

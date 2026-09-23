@@ -421,7 +421,10 @@ class CryptoSlices(SliceCase):
         self.book.submit([self.intent("a1", self.instrument, "sell", held)])
         self.broker.submit = original
         book = self.restart()
-        book.poll()
+        book.poll()  # the venue has no such order: heard once, the slice stays unknown and the plan waits
+        self.assertFalse(book.reconcile().ok)
+        self.clock.advance(61)
+        book.poll()  # heard again a minute later: the slice is closed as never arrived
         self.assertTrue(book.reconcile().ok)
         book.poll()
         self.assertEqual(self.held(self.instrument), 0)

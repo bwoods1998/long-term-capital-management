@@ -268,7 +268,9 @@ class HouseTest(HouseCase):
         self.assertIn("could not finish winding down", self.house.ledger.last("ops.alert").payload["text"])
         self.broker.raise_on_submit = None
         self.clock.advance(301)
-        self.house.tick()  # the mark pass retries the exit
+        self.house.tick()  # the mark pass hears the venue has no such order: remembered, not yet believed
+        self.clock.advance(61)
+        self.house.tick()  # heard twice a minute apart, the lost exit is closed and the mark pass retries it
         self.assertEqual(book.account(agent.id).holdings, {})
 
     def test_a_few_cents_short_on_paper_is_a_warning_and_real_money_stays_an_error(self):
