@@ -100,6 +100,12 @@ an order whose notional cannot be established is `400` rather than a pass, and a
 venue cannot quote is `503`. Money is exact BigInt arithmetic throughout and every partial cent
 rounds **against** the order.
 
+An Alpaca order is priced only as one instrument named by a top-level `symbol` in the venue's own
+spelling (upper case, no spaces): an `order_class` other than `simple`, any `legs` field
+(multi-leg, bracket, OCO, OTO), a field outside `ALPACA_ORDER_FIELDS` in `lib/caps.mjs`, or a
+missing symbol is a `400` before any quote is read. Until Sept 23, 2026 a multi-leg order with no
+top-level symbol was priced as a stock, so a $210 debit spread was metered at $2.10.
+
 An order sent with `X-LTCM-Purpose: exit` skips the two dollar caps (not the order count, and not
 the kill switch), so a position can always be closed however the day's budget was spent. The
 header is the caller's own claim; the order count still bounds a VM that lies. The league's book

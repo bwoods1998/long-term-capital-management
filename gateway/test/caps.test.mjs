@@ -48,22 +48,23 @@ test('alpaca prices qty with the reference the router supplies', () => {
 });
 
 test('alpaca uses notional directly and falls back to a limit or stop price', () => {
-  assert.equal(usd(notional('alpaca', { symbol: 'AAPL', notional: '25' }).micro), '25.00');
-  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }).micro), '30.00');
-  assert.equal(usd(notional('alpaca', { qty: '0.5', stop_price: '60' }).micro), '30.00');
+  const aapl = extra => ({ symbol: 'AAPL', ...extra });
+  assert.equal(usd(notional('alpaca', aapl({ notional: '25' })).micro), '25.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' })).micro), '30.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', stop_price: '60' })).micro), '30.00');
   // The dearest of the reference and the order's own prices: a header cannot underprice a limit.
-  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }, { reference: '0.01' }).micro), '30.00');
-  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60' }, { reference: '70' }).micro), '35.00');
-  assert.equal(usd(notional('alpaca', { qty: '0.5', limit_price: '60', stop_price: '80' }).micro), '40.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' }), { reference: '0.01' }).micro), '30.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60' }), { reference: '70' }).micro), '35.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '0.5', limit_price: '60', stop_price: '80' })).micro), '40.00');
   // A short sale is worth what it sells.
-  assert.equal(usd(notional('alpaca', { qty: '2', side: 'sell', limit_price: '10' }).micro), '20.00');
+  assert.equal(usd(notional('alpaca', aapl({ qty: '2', side: 'sell', limit_price: '10' })).micro), '20.00');
 });
 
 test('alpaca refuses a body it cannot price, and an unknown venue is never priced', () => {
-  assert.match(notional('alpaca', {}).error, /qty/);
-  assert.match(notional('alpaca', { qty: '0', limit_price: '5' }).error, /qty/);
-  assert.match(notional('alpaca', { qty: '-1', limit_price: '5' }).error, /qty/);
-  assert.match(notional('alpaca', { qty: '1', limit_price: '0' }).error, /Cannot price/);
+  assert.match(notional('alpaca', { symbol: 'AAPL' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '0', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '-1', limit_price: '5' }).error, /qty/);
+  assert.match(notional('alpaca', { symbol: 'AAPL', qty: '1', limit_price: '0' }).error, /Cannot price/);
   assert.match(notional('alpaca', null).error, /body/);
   for (const venue of ['schwab', 'binance', '', undefined]) {
     const priced = notional(venue, { count: '1', price: '0.5', qty: '1', limit_price: '1', notional: '1' });
@@ -167,4 +168,117 @@ test('a v2 order is metered on the leg it trades, not the YES number on the wire
   assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '10.00', price: '0.0400' }, { exit: true }).micro), '9.60');
   // A body without a book side keeps the old reading.
   assert.equal(usd(notional('kalshi', { count: '100', price: '0.0125' }).micro), '1.25');
+});
+
+// ------------------------------------------------------------------------- multi-leg (Sept 23)
+// Found Sept 23, 2026: the option rules applied only when the TOP-LEVEL symbol was an option, so a
+// multi-leg order with no top-level symbol was priced as a stock, qty x limit with no x100 and no
+// long-premium check. These bodies are the ones that were measured.
+const PUT = 'SPY261016P00600000';
+const DEBIT_SPREAD = {
+  order_class: 'mleg', qty: '1', type: 'limit', limit_price: '2.10', time_in_force: 'day',
+  legs: [
+    { symbol: CALL, ratio_qty: '1', side: 'buy', position_intent: 'buy_to_open' },
+    { symbol: 'SPY261016C00745000', ratio_qty: '1', side: 'sell', position_intent: 'sell_to_open' },
+  ],
+};
+const WRITTEN_PUT = {
+  order_class: 'mleg', qty: '1', type: 'limit', limit_price: '0.25', time_in_force: 'day',
+  legs: [{ symbol: PUT, ratio_qty: '1', side: 'sell', position_intent: 'sell_to_open' }],
+};
+
+test('a multi-leg order is never priced as a stock: the $210 spread and the written put are refused', () => {
+  // On main these were metered at $2.10 and $0.25.
+  for (const [name, body] of [['debit spread', DEBIT_SPREAD], ['written put', WRITTEN_PUT]]) {
+    for (const extra of [{}, { symbol: 'SPY' }, { symbol: CALL }]) {
+      const priced = notional('alpaca', { ...body, ...extra }, { reference: '500' });
+      assert.match(priced.error ?? '', /Multi-leg/, `${name} ${JSON.stringify(extra)}`);
+      assert.equal(priced.micro, undefined, `${name} ${JSON.stringify(extra)} was priced`);
+    }
+  }
+  // Legs without an order_class, legs under "simple", an empty or non-array legs field, and an
+  // order_class other than "simple" are all refused.
+  const { order_class: _, ...legsAlone } = WRITTEN_PUT;
+  for (const body of [legsAlone, { ...legsAlone, order_class: 'simple' }, { ...legsAlone, symbol: PUT, side: 'buy', position_intent: 'buy_to_open' }]) {
+    assert.match(notional('alpaca', body).error ?? '', /Multi-leg/, JSON.stringify(body));
+  }
+  for (const legs of [[], {}, null, 'x']) {
+    assert.match(notional('alpaca', { symbol: 'AAPL', qty: '1', limit_price: '1', legs }).error ?? '', /Multi-leg/, JSON.stringify(legs));
+  }
+  for (const orderClass of ['mleg', 'bracket', 'oco', 'oto', 'MLEG', '', null, 0]) {
+    const body = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', limit_price: '1', order_class: orderClass };
+    assert.match(notional('alpaca', body).error ?? '', /Multi-leg/, JSON.stringify(orderClass));
+  }
+});
+
+test('a bracket, OCO or OTO order is refused: its child orders are not in the price', () => {
+  const bracket = {
+    symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', limit_price: '10', time_in_force: 'gtc',
+    order_class: 'bracket', take_profit: { limit_price: '12' }, stop_loss: { stop_price: '9' },
+  };
+  assert.match(notional('alpaca', bracket).error ?? '', /Multi-leg, bracket/);
+  // Child-order fields without an order_class are not fields this gateway prices either.
+  const { order_class: _, ...bare } = bracket;
+  assert.match(notional('alpaca', bare).error ?? '', /not one this gateway prices/);
+});
+
+test('an order field spelled any other way is refused, so a case-insensitive venue cannot read a leg this check never saw', () => {
+  const stock = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', limit_price: '2.10', time_in_force: 'day' };
+  for (const extra of [
+    { Order_Class: 'mleg', LEGS: WRITTEN_PUT.legs },
+    { ORDER_CLASS: 'mleg' },
+    { 'leg\u017f': WRITTEN_PUT.legs },          // U+017F folds to "s" in Go's encoding/json
+    { SYMBOL: PUT },                              // a second symbol the venue might read instead
+    { Symbol: PUT },
+    { 'position_intent ': 'sell_to_open' },
+  ]) {
+    const priced = notional('alpaca', { ...stock, ...extra });
+    assert.match(priced.error ?? '', /not one this gateway prices/, JSON.stringify(extra));
+    assert.equal(priced.micro, undefined);
+  }
+});
+
+test('a body with no top-level symbol, or a symbol not in the venue spelling, is refused', () => {
+  // On main a symbol-less limit order was priced as a stock at qty x limit.
+  for (const symbol of [undefined, '', null, 123, ['SPY'], { s: 'SPY' }]) {
+    const body = { qty: '1', side: 'buy', type: 'limit', limit_price: '60', ...(symbol === undefined ? {} : { symbol }) };
+    const priced = notional('alpaca', body);
+    assert.match(priced.error ?? '', /top-level symbol/, JSON.stringify(symbol));
+    assert.equal(priced.micro, undefined);
+  }
+  // A lower-case or padded option symbol is not taken for a stock and priced without the x100.
+  for (const symbol of ['spy261016p00600000', 'SPY   261016P00600000', ` ${PUT}`, `${PUT}\n`, 'aapl', 'BTC / USD']) {
+    const body = { symbol, qty: '1', side: 'sell', type: 'limit', limit_price: '0.25', position_intent: 'sell_to_open', time_in_force: 'day' };
+    const priced = notional('alpaca', body);
+    assert.match(priced.error ?? '', /venue's own spelling/, JSON.stringify(symbol));
+    assert.equal(priced.micro, undefined);
+  }
+  assert.match(notional('alpaca', []).error, /JSON object/);
+});
+
+test('ordinary stock, crypto and single-leg option orders are priced exactly as before', () => {
+  // The bodies ltcm/adapters/alpaca.py sends: symbol, qty, side, type, time_in_force,
+  // client_order_id, a limit price when there is one, and position_intent on an option.
+  const house = extra => ({ qty: '1', side: 'buy', type: 'market', time_in_force: 'day', client_order_id: 'oi-7', ...extra });
+  assert.equal(usd(notional('alpaca', house({ symbol: 'SPY', qty: '0.04' }), { reference: '660.00' }).micro), '26.40');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'IWM', qty: '3', type: 'limit', limit_price: '24.95' })).micro), '74.85');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'BRK.B', qty: '0.02', type: 'limit', limit_price: '480' })).micro), '9.60');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'LTC/USD', qty: '0.1923', type: 'limit', limit_price: '62.39', time_in_force: 'gtc' })).micro), '12.00');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'BTC/USD', qty: '0.00015', time_in_force: 'gtc' }), { reference: '64050.11' }).micro), '9.61');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'AAPL', notional: '25', qty: undefined })).micro), '25.00');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'AAPL', qty: '0.1', side: 'sell', extended_hours: false }), { reference: '230' }).micro), '23.00');
+  const opt = extra => house({ symbol: 'RIVN261002P00014000', type: 'limit', limit_price: '0.14', position_intent: 'buy_to_open', ...extra });
+  assert.equal(usd(notional('alpaca', opt()).micro), '14.00');
+  assert.equal(usd(notional('alpaca', opt({ side: 'sell', position_intent: 'sell_to_close', limit_price: '0.20' })).micro), '20.00');
+  assert.equal(usd(notional('alpaca', house({ symbol: 'SPY', qty: '0.04', order_class: 'simple' }), { reference: '660.00' }).micro), '26.40');
+  // A single-leg option is still long premium only.
+  assert.match(notional('alpaca', opt({ side: 'sell', position_intent: 'sell_to_open' })).error, /long premium only/);
+});
+
+test('"simple" is Alpaca\'s default order class, so naming it on a single-leg option changes nothing', () => {
+  // Main refused any truthy order_class on an option; the one class that is a single order now
+  // gets the single-leg option rules like an order that leaves the class out. The House sends none.
+  const opt = extra => ({ symbol: 'RIVN261002P00014000', qty: '1', side: 'buy', type: 'limit', limit_price: '0.14', position_intent: 'buy_to_open', time_in_force: 'day', order_class: 'simple', ...extra });
+  assert.equal(usd(notional('alpaca', opt()).micro), '14.00');
+  assert.match(notional('alpaca', opt({ side: 'sell', position_intent: 'sell_to_open' })).error, /long premium only/);
 });

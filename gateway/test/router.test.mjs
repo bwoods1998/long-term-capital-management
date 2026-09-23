@@ -611,6 +611,31 @@ test('a venue may carry a tighter per-order cap than the floor', async () => {
   assert.equal((await call(ask('POST', '/v1/alpaca/v2/orders', { body: order('3'), headers: { 'X-LTCM-Purpose': 'exit' } }), { settings })).response.status, 200);
 });
 
+test('a multi-leg order is refused before its symbol is quoted, priced or reserved, exits included', async () => {
+  // Sept 23, 2026: on main the written put was forwarded to the venue metered at $0.25, and the
+  // market spread under a stock symbol was quoted as SPY and forwarded.
+  const legs = [{ symbol: 'SPY261016P00600000', ratio_qty: '1', side: 'sell', position_intent: 'sell_to_open' }];
+  const writtenPut = { order_class: 'mleg', qty: '1', type: 'limit', limit_price: '0.25', time_in_force: 'day', legs };
+  const marketSpread = { symbol: 'SPY', order_class: 'mleg', qty: '1', side: 'buy', type: 'market', time_in_force: 'day', legs };
+  const quote = (url, init) => new Response(JSON.stringify(init.method === 'GET' ? { symbol: 'SPY', quote: { ap: 1, bp: 0.99 } } : { id: 'o1' }));
+  for (const [body, headers] of [[writtenPut, {}], [writtenPut, { 'X-LTCM-Purpose': 'exit' }], [marketSpread, {}]]) {
+    const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body, headers }), { reply: quote });
+    assert.equal(refused.response.status, 400, JSON.stringify(body));
+    assert.match(refused.body.error, /Multi-leg/);
+    assert.equal(refused.calls.length, 0, 'no quote read and nothing forwarded');
+    assert.equal((await refused.gate.status()).today.orders, 0);
+  }
+  // A symbol-less single order is refused for its symbol, before the router's quote lookup.
+  const bare = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { qty: '1', side: 'buy', type: 'limit', limit_price: '60', time_in_force: 'day' } }));
+  assert.equal(bare.response.status, 400);
+  assert.match(bare.body.error, /top-level symbol/);
+  assert.equal(bare.calls.length, 0);
+  // The House's own orders pass as before.
+  const ok = await call(ask('POST', '/v1/alpaca/v2/orders', { body: { ...ALPACA_ORDER, symbol: 'RIVN261002P00014000', limit_price: '0.14', position_intent: 'buy_to_open' } }));
+  assert.equal(ok.response.status, 200);
+  assert.equal((await ok.gate.status()).today.notional_usd, '14.00');
+});
+
 test('the paper account is its own venue: paper keys, paper host, no caps, no kill switch', async () => {
   const settings = { ALPACA_PAPER_KEY_ID: 'PK-PAPER', ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker' };
   const read = await call(ask('GET', '/v1/alpaca-paper/v2/account'), { settings });

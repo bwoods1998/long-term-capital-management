@@ -37,7 +37,7 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol } from './caps.mjs';
+import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
@@ -194,6 +194,11 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       parsed = body.text ? JSON.parse(body.text) : null;
     } catch {
       return fail('An order body must be JSON.', 400);
+    }
+    if (target.venue === 'alpaca') {
+      // A multi-leg, bracket or symbol-less order is refused before its symbol is looked up or priced.
+      const shape = alpacaShapeError(parsed);
+      if (shape) return fail(shape, 400);
     }
     let reference = request.headers.get(REFERENCE_HEADER);
     if (target.venue === 'alpaca' && !isOptionSymbol(parsed?.symbol) && !parsed?.notional && !parsed?.limit_price && !parsed?.stop_price) {

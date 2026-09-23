@@ -153,15 +153,15 @@ export const isOptionSymbol = symbol => /^[A-Z]{1,6}[0-9]{6}[CP][0-9]{8}$/.test(
 const OPTION_MULTIPLIER = 100n;
 
 // An option order is held to four rules the venue would not enforce for us. It is one leg (a
-// multi-leg order's worth cannot be read from one price). It carries its own limit price (there
-// is no independent quote to price a market order with). It is sized in contracts, never in
-// dollars. And it is LONG PREMIUM ONLY: it opens by buying and closes by selling, which Alpaca
-// itself then enforces from `position_intent` (a sell_to_close with nothing to close is rejected),
-// so no order through this gateway can write an option, and the most an option position can lose
-// is what was paid for it. Measured Sept 19, 2026: before this rule an option order was priced
-// at qty x limit with no multiplier, a hundredth of what it spends.
+// multi-leg order's worth cannot be read from one price; `alpacaShapeError` refuses one before
+// this is reached). It carries its own limit price (there is no independent quote to price a
+// market order with). It is sized in contracts, never in dollars. And it is LONG PREMIUM ONLY: it
+// opens by buying and closes by selling, which Alpaca itself then enforces from `position_intent`
+// (a sell_to_close with nothing to close is rejected), so no order through this gateway can write
+// an option, and the most an option position can lose is what was paid for it. Measured Sept 19,
+// 2026: before this rule an option order was priced at qty x limit with no multiplier, a
+// hundredth of what it spends.
 function optionNotional(body) {
-  if (body.order_class || Array.isArray(body.legs)) return { error: 'Multi-leg option orders are not allowed through this gateway.' };
   if (parsePico(body.notional) !== null) return { error: 'An option order is sized in contracts, not dollars.' };
   const intent = String(body.position_intent || '');
   const side = String(body.side || '');
@@ -176,7 +176,45 @@ function optionNotional(body) {
   return { micro: picoToMicro(mulPico(qty, limit) * OPTION_MULTIPLIER) };
 }
 
+// The only Alpaca order this gateway prices is one instrument named by a top-level `symbol`.
+// Found Sept 23, 2026: the option rules above applied only when the TOP-LEVEL symbol was an option
+// symbol, so a multi-leg order (`order_class: "mleg"` with a `legs` array and no top-level symbol)
+// fell through to the stock path and was priced at qty x limit, with no x100 and no long-premium
+// check: a $210 debit spread was metered at $2.10 and a written put at $0.25, so a spread of about
+// $7,500 fit under the $75 order cap. The House never builds such an order; the gateway is the
+// boundary that must hold if the House does not. So the shape is checked before anything reads
+// the symbol, here and in the router before it looks up a quote:
+//   - no `order_class` other than "simple" (mleg, bracket, oco and oto all add orders or legs that
+//     one price cannot meter) and no `legs` field of any kind;
+//   - only the fields listed below, spelled exactly so. A venue whose JSON decoder matches keys
+//     case-insensitively (Go's does, and folds U+017F to "s" and U+212A to "k") would read
+//     `Order_Class`, `LEGS` or a second `SYMBOL` that this check never saw;
+//   - a top-level `symbol` in the venue's own spelling (upper case, no spaces), so a lower-case
+//     or padded option symbol cannot be taken for a stock.
+// Paper orders are never metered and never reach this check.
+export const ALPACA_ORDER_FIELDS = new Set([
+  'symbol', 'qty', 'notional', 'side', 'type', 'time_in_force', 'limit_price', 'stop_price',
+  'trail_price', 'trail_percent', 'extended_hours', 'client_order_id', 'order_class', 'position_intent',
+]);
+const ALPACA_SYMBOL = /^[A-Z0-9][A-Z0-9.\/-]{0,23}$/;
+
+/** Why this gateway will not price an Alpaca order body, or null when its shape is one it prices. */
+export function alpacaShapeError(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'An order body must be a JSON object.';
+  const has = key => Object.prototype.hasOwnProperty.call(body, key);
+  if ((has('order_class') && body.order_class !== 'simple') || has('legs')) {
+    return 'Multi-leg, bracket, OCO and OTO orders (an order_class other than "simple", or legs) are not allowed through this gateway.';
+  }
+  const unknown = Object.keys(body).find(key => !ALPACA_ORDER_FIELDS.has(key));
+  if (unknown !== undefined) return `Order field ${JSON.stringify(unknown.slice(0, 40))} is not one this gateway prices.`;
+  if (typeof body.symbol !== 'string' || body.symbol === '') return 'An Alpaca order needs a top-level symbol.';
+  if (!ALPACA_SYMBOL.test(body.symbol)) return 'An Alpaca order symbol must be in the venue\'s own spelling: upper case, no spaces.';
+  return null;
+}
+
 function alpacaNotional(body, reference) {
+  const shape = alpacaShapeError(body);
+  if (shape) return { error: shape };
   if (isOptionSymbol(body.symbol)) return optionNotional(body);
   const dollars = parsePico(body.notional);
   if (dollars !== null && dollars > 0n) return { micro: picoToMicro(dollars) };
