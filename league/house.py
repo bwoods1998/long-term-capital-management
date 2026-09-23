@@ -40,7 +40,7 @@ from ltcm.broker import Instrument, money
 from . import seeds as seeds_module
 from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
-from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module
+from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, shards as shards_module
 from . import parameters
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
@@ -260,6 +260,9 @@ class House:
         #: Capital is the ladder (`league/allocator.py`, the owner's direction of Sept 23, 2026): when
         #: the constitution's `allocator.enabled`, bands and stakes follow evidence at every mark pass.
         self.allocator = allocator_module.Allocator(self, self.root)
+        #: Collateral on every Kalshi exchange shard the desks trade (`league/shards.py`, Sept 23, 2026):
+        #: an hourly pass on the ops lane, and one at once after an `insufficient_shard_balance` refusal.
+        self.shards: Any = shards_module.ShardFunder(self, self.root) if REAL_BOOK["kalshi"] in self.books else None
         # Slow work runs on daemon threads: a flex-window model call can take a quarter of an hour,
         # and a House that is told to stop must stop. (The provider settles an orphaned call later.)
         # Three lanes (measured on the first production start, Sept 19, 2026: with one two-slot queue,
@@ -4551,6 +4554,9 @@ class House:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         if self.lab is not None:
             self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
+        if self.shards is not None:
+            # Cheap on the tick (a cursor scan of new order rows); the venue calls run on the ops lane.
+            self.shards.tick()
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
@@ -4629,6 +4635,7 @@ class House:
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
             "feeds": self.feeds.health() if self.feeds is not None else None,
+            "shards": self.shards.health() if self.shards is not None else None,
             "deferred": deferred,
         }
         tmp = self.root / "health.tmp"
