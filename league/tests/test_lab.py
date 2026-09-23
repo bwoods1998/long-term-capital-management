@@ -736,6 +736,23 @@ class Researchers(LabCase):
         self.lab.evaluate_batch()  # and then the children
         self.assertEqual(self.lab.queued(), 0)
 
+    def test_breeding_is_not_starved_by_seeds_waiting_for_their_tapes(self):
+        """Sept 23, production: 191 seeds queued, each on its own tape (a few built a step), and the
+        step bred only when fewer than a batch were queued at all, so 4 elites with built tapes
+        produced no children and batches ran 1-6 candidates."""
+        self.house.game["lab"]["param_children"] = 8
+        self.queue(KNOB)
+        self.lab.evaluate_batch()  # an elite, its tape built
+        for n in range(40):  # seeds on NEEDS no tape is built for
+            self.lab._x("INSERT INTO candidates(id, code, code_sha256, params, needs, niche, venue, horizon, origin, author, lineage, parents, idea, priority, created, status)"
+                        " SELECT ?, code, ?, params, ?, niche, venue, horizon, 'seed', author, lineage, parents, idea, 1, ?, 'queued' FROM candidates LIMIT 1",
+                        (f"waiting{n}", f"sha{n}", json.dumps({"venue": "alpaca", "horizon": "hour", "symbols": [f"X{n}"]}), self.clock()))
+        self.assertGreaterEqual(self.lab.queued(), 40)
+        self.assertEqual(self.lab.ready_queued(), 0)
+        self.luna.programs = []
+        self.lab.breed()
+        self.assertGreater(self.lab.ready_queued(), 0)  # children of the elite, on its built tape
+
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
         self.lab.seed(force=True)  # its own program queued as a seed is not a submission

@@ -266,6 +266,7 @@ class House:
                        "feeds": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
+        self._standings_memo: dict[str, Any] | None = None  # one standings table a tick (`standings`)
         # What the tick put off because a box was busy (`_defer`): shown in health.json, told hourly.
         self._deferred: dict[str, dict[str, Any]] = {}
         self._deferred_told: dict[str, float] = {}
@@ -3768,8 +3769,18 @@ class House:
                 'earned_rung': row.score_rung}
 
     def standings(self) -> list[Standing]:
+        """Every living agent's standing. Inside a tick, on the tick's own thread, the table is built
+        once and reused while the living roster is unchanged (a birth or a death rebuilds it); anywhere
+        else it is built fresh."""
         epoch = float(self.game['economy']['epoch_seconds'])
-        return [self._standing(agent, epoch) for agent in self.registry.living()]
+        living = list(self.registry.living())
+        memo = getattr(self, "_standings_memo", None)
+        if memo is None or memo["thread"] != threading.get_ident():
+            return [self._standing(agent, epoch) for agent in living]
+        roster = tuple(a.id for a in living)
+        if memo["living"] != roster or memo["rows"] is None:
+            memo["rows"], memo["living"] = [self._standing(agent, epoch) for agent in living], roster
+        return list(memo["rows"])
 
     def _standing(self, agent, epoch):
         rung = self.evaluator.rung(agent.id)
@@ -4105,8 +4116,15 @@ class House:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
         is busy is retried on the next tick, and births wait for the probe box at most
         `probe_wait_seconds` (`_births`). What it put off is in health.json's `deferred`."""
-        with self._box_patience():
-            return self._tick()
+        # One standings table a tick (Sept 23, 2026): displacement, the refill and the foundry each
+        # ranked every living agent afresh, several ledger scans an agent each time, and a profile of the
+        # production tick found about 80% of its main thread there (191 s ticks at 10:53Z).
+        self._standings_memo = {"thread": threading.get_ident(), "living": None, "rows": None}
+        try:
+            with self._box_patience():
+                return self._tick()
+        finally:
+            self._standings_memo = None
 
     def _tick(self) -> dict[str, Any]:
         if self._burst and not self.campaigns.running():
