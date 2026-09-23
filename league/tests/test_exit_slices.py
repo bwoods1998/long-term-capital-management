@@ -577,14 +577,17 @@ class EquitySlices(SliceCase):
         self.assertEqual(len(self.sells()), 2)  # two $8 orders: the $10 minimum is Alpaca crypto's alone
         self.assertEqual(self.held(self.instrument), 0)
 
-    def test_one_whole_share_worth_more_than_the_cap_goes_as_one_unit(self):
+    def test_one_share_worth_more_than_the_cap_is_sold_in_fractional_slices_at_a_limit_too(self):
+        """Until A7 (Sept 23, 2026) a limit order was whole shares, so one share worth more than the cap
+        went as one unit at a limit; now it is sliced under the cap as a market exit always was."""
         self.seat()
         self.broker.set_quote(self.instrument, "65.00", "65.01")
         self.buy(self.instrument, "1")  # $71.51 on the gateway's pricing
         self.broker.set_quote(self.instrument, "90.00", "90.01")
         sell = self.intent("a1", self.instrument, "sell", "1", order_type="limit", limit_price="89.00")
         self.assertEqual(self.book.submit([sell])[0].status, "filled")
-        self.assertEqual([o.quantity for o, _, _ in self.sells()], [D("1")])
+        self.assertEqual([o.quantity for o, _, _ in self.sells()], [D("0.5"), D("0.5")])
+        self.assertTrue(all(o.time_in_force == "day" for o, _, _ in self.sells()))
         self.assertTrue(self.book.reconcile().ok)
 
 
