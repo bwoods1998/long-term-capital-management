@@ -103,9 +103,12 @@ class Rules(unittest.TestCase):
         self.assertEqual(limits_for(D("15"), "alpaca"), (D("12.00"), D("12.00")))  # $10 minimum + a fifth
         self.assertEqual(limits_for(D("25"), "alpaca"), (D("12.50"), D("12.50")))
         self.assertEqual(limits_for(D("100"), "alpaca"), (D("50.00"), D("50.00")))
-        with patch.object(allocator, "EXITS_SLICED", True):
-            self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("75")))  # every order within the gateway's cap
-        self.assertEqual(limits_for(D("400"), "alpaca"), (D("60.00"), D("60.00")))  # until exits are sliced: one order closes it
+        # Exits are sliced (PR #164): the position follows the stake; every Alpaca order stays within
+        # the gateway's $75 on its own pricing (a market order at the ask x 1.10).
+        self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("68.18")))
+        self.assertEqual(limits_for(D("400"), "kalshi"), (D("200.00"), D("75")))
+        with patch.object(allocator, "EXITS_SLICED", False):
+            self.assertEqual(limits_for(D("400"), "alpaca"), (D("54.54"), D("54.54")))  # one order closes it
         self.assertEqual(limits_for(D("10"), "kalshi"), (D("5.00"), D("5.00")))
 
 
@@ -292,7 +295,8 @@ class Mechanics(HouseCaseReal):
             with self.evidence_of(table):
                 self.tick()
             self.assertAlmostEqual(float(house.books["alpaca"].equity(a.id)), 100.0, delta=0.5)  # the stake targets equity
-            self.assertEqual(house.books["alpaca"].limits[a.id].max_position_usd, (house.books["alpaca"].account(a.id).staked / 2).quantize(D("0.01"), rounding="ROUND_DOWN"))
+            staked_now = house.books["alpaca"].account(a.id).staked
+            self.assertEqual(house.books["alpaca"].limits[a.id].max_position_usd, (max(staked_now, D("100")) / 2).quantize(D("0.01"), rounding="ROUND_DOWN"))
             staked = house.books["alpaca"].account(a.id).staked
             # A small change is ignored.
             table[a.id] = dict(e=4.2, w_paper=1.21, w_real=3.8, paper_trades=6, real_trades=12)
