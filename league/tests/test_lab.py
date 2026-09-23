@@ -779,6 +779,28 @@ class Researchers(LabCase):
         self.assertEqual(sizes.count(1), 3, sizes)
         self.assertEqual(self.lab.queued(), 0)
 
+    def test_after_a_restart_the_childrens_tape_is_built_on_the_largest_group_turn(self):
+        """Sept 23, 12:08-12:21Z: a restart emptied the tape cache, each step's tape budget went to
+        seeds in queue order, and no child of the archive was ever evaluated."""
+        self.house.game["lab"]["param_children"] = 12
+        self.house.game["lab"]["max_tapes_per_step"] = 1
+        self.queue(KNOB)
+        self.lab.evaluate_batch()
+        self.luna.programs = []
+        self.lab.breed()
+        children = self.lab.queued()
+        variants = [KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["ETH/USD"]'),
+                    KNOB.replace('"timeframe": "5Min"', '"timeframe": "15Min"')]
+        for n, code in enumerate(variants):
+            self.lab.admit(code, niche=self.niche, origin="seed", author="house", lineage=f"seed:{n}", parents=[], idea=f"seed {n}")
+        self.lab._tapes.clear()  # a restart
+        sizes = []
+        for _ in range(4):
+            self.lab._tapes_built = 0  # a new step: one tape
+            out = self.lab.evaluate_batch()
+            sizes.append(out["candidates"] if out else 0)
+        self.assertIn(children, sizes, sizes)  # the children's tape was built and they ran together
+
     def test_submissions_are_capped(self):
         agent = self.seated("sawtooth", KNOB)
         self.lab.seed(force=True)  # its own program queued as a seed is not a submission
