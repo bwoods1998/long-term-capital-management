@@ -125,9 +125,14 @@ class Constrain(unittest.TestCase):
     def test_match_places_a_strategy_by_what_it_asks_to_see_and_never_in_a_dormant_niche(self):
         self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["SPY", "NVDA", "QQQ"]}, self.niches).id, "alpaca-index-etfs")
         self.assertEqual(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXEPLGAME"]}, self.niches).id, "kalshi-sports")
-        self.assertIsNone(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXFEDDECISION"]}, self.niches))
+        # A series no desk lists has a home since Sept 23, 2026: the open desk of its venue (`OpenDesks`).
+        self.assertEqual(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXFEDDECISION"]}, self.niches).id, "kalshi-open")
         self.assertIsNone(niches.match({"venue": "kalshi", "horizon": "hour", "series": ["KXEPLGAME"]}, self.niches))  # sports is judged by the day
-        self.assertIsNone(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["F", "SOFI"]}, self.niches))  # only options hold those, and it did not say options
+        # Only options hold those as a LISTED universe, and it did not say options: the shares are the open desk's.
+        self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["F", "SOFI"]}, self.niches).id, "alpaca-open")
+        without_open = {k: v for k, v in self.niches.items() if not v.open}
+        self.assertIsNone(niches.match({"venue": "kalshi", "horizon": "day", "series": ["KXFEDDECISION"]}, without_open))
+        self.assertIsNone(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["F", "SOFI"]}, without_open))
         self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "asset_class": "option", "symbols": ["SPY", "F"]}, self.niches).id, "alpaca-options")
         self.assertEqual(niches.match({"venue": "alpaca", "horizon": "day", "symbols": ["SPY"]}, self.niches).id, "alpaca-index-etfs")  # the same ticker, as shares
 
@@ -226,7 +231,8 @@ class InTheHouse(HouseCase):
         self.assertEqual(child.specialty, "alpaca-crypto-majors")
 
     def test_a_strategy_in_no_open_specialty_is_not_born(self):
-        nowhere = BUYER.replace('"symbols": ["BTC/USD"]', '"symbols": ["ZZZZ"]')
+        # A pair against the euro: no desk lists it, and even the open desk trades coins against the dollar only.
+        nowhere = BUYER.replace('"symbols": ["BTC/USD"]', '"symbols": ["BTC/EUR"]')
         with self.assertRaisesRegex(ValueError, "no open specialty"):
             self.house.spawn("nowhere", "test-family", nowhere, reason="test")
         self.house.niches["alpaca-options"].dormant, self.house.niches["alpaca-options"].dormant_reason = True, "closed for the test"
