@@ -107,6 +107,17 @@ class CardsFirst(FoundryCase):
         self.assertEqual(sum(1 for a in young if self.house.registry.get(a.id).alive), len(young) - 1)
         self.assertEqual(self.foundry.inventory(), [])
 
+    def test_a_card_never_overfills_a_full_league_whose_seats_are_all_earned(self):
+        self.call()
+        resident = self.seated("resident")
+        self.house.evaluator.promote(resident.id, 2, "test: real money")
+        self.rules.update(newcomer_seconds=600, max_population=1)
+        self.clock.advance(601)
+        self.assertIsNone(self.house._refill(self.rules))
+        self.assertEqual([a.id for a in self.house.registry.living()], [resident.id])
+        self.assertEqual(len(self.foundry.inventory()), 1)
+        self.assertEqual(self.house._state["seat_refusals"]["cards"]["count"], 1)
+
 
 class EvidencedNewcomers(SeatCase):
     def test_replay_only_code_and_never_traded_seats_make_way_inside_their_grace(self):

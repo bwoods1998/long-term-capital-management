@@ -4540,7 +4540,10 @@ class House:
             if waiters["cards"] and self.hypotheses is not None and self.hypotheses.enabled() and self.clock() - last >= every:
                 reserved = self._reserved_desks(waiters, below="cards")
                 loser = self._weakest(rules, evidenced=True, exclude=self._keep_for(reserved)) if full else None
-                child = self.hypotheses.refill(rules, living=living, loser=loser, mutations=False, reserved=reserved)
+                # A full league with nobody to displace seats no card: the foundry would otherwise
+                # put one on a desk with room and overfill the league by one.
+                child = None if full and loser is None else \
+                    self.hypotheses.refill(rules, living=living, loser=loser, mutations=False, reserved=reserved)
                 if child is None:
                     self._refuse_birth("cards", len(waiters["cards"]),
                                        "none could be seated: its desk is full of residents that may not be displaced, "
