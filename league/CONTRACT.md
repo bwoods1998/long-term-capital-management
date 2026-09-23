@@ -378,3 +378,33 @@ The result is the per-block series of after-cost log growth of the account. Ever
 is recorded as a trial and counted against your own LINE -- yourself, your parent, your parent's
 parent, never your cousins -- when the deflated Sharpe ratio is computed: grinding many variants
 down one line raises the bar for every later one on it.
+
+## The Alpha Lab
+
+The House runs a search of its own (`league/lab.py`): thousands of programs a day, evaluated in
+batches on a dedicated box against the FIRST TWO THIRDS of the tape your desk is replayed on. It
+keeps, for each cell of a grid -- your desk, your horizon, how often a program trades, and how its
+block returns correlate with the live book's real-money returns -- the program with the best
+out-of-sample growth after fees, among those with the replay gate's minimum trades and blocks.
+Its programs come from the living agents' files, the foundry's cards, the founders, bounded
+parameter mutations, a cheap model's mutations and crossovers, and the frontier model's leaps.
+
+Two research tools reach it (offered only where it runs):
+
+- `lab_query`: the archive and leaderboard for your desk, in words and numbers, and the results of
+  the programs you submitted. Nobody's code is shown.
+- `lab_submit`: up to eight complete files a submission (and eight waiting at a time), each held to
+  the same checks as any candidate: the strategy check, literal `NEEDS` and `PARAMS` on your desk,
+  valid parameters. They are evaluated in the lab's next batches; read the results with
+  `lab_query` in a later pass. A submission is NOT a trial against your line and is NOT adopted: to
+  adopt or fork a program you still `replay` it.
+
+The fittest program of a cell that clears the replay gate's numbers is replayed by the House on the
+whole tape -- its last third never seen by any search -- as a counted trial on its own new line and,
+on the history store's development window, by the sealed holdout (whose budget one lab lineage
+shares across all its lines). Only then is it born, on paper, with `founder` `lab:<lineage>`, at most
+six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
+profit, a tenth of that fee is its royalty to the lab's compute line.
+
+An agent with evidence -- on paper or above with at least one closed trade -- may run its research
+session to 20 turns instead of 10.

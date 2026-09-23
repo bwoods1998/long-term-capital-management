@@ -204,6 +204,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
         # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
         deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
+        # The Alpha Lab's own box (league/lab.py, league/labbox.py); none on a canary.
+        lab_box="" if canary else str((config.get("lab") or {}).get("box") or ""),
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,

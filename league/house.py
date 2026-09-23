@@ -123,6 +123,8 @@ class Settings:
     deep_replay_days: int = 0  # 0: deep_replay.DEV_DAYS by horizon (252 daily, 63 hourly)
     holdout_gate: bool = True
     holdout_lineage_budget: int = 3
+    # The Alpha Lab's box (`league/config.json` `lab.box`): with `game.json` `lab.enabled`, the lab runs.
+    lab_box: str = ""
 
 
 
@@ -297,6 +299,10 @@ class House:
                     book.open_baseline()
             except Exception as exc:  # noqa: BLE001 - a venue that is down now is reconciled on a later tick
                 self.alert("warning", f"{name}: could not initialize venue accounting ({type(exc).__name__}: {str(exc)[:160]})")
+        # The Alpha Lab (league/lab.py): built only when game.json switches it on and a lab box is
+        # configured; its tools for researchers, and longer sessions for agents with evidence.
+        from .lab import attach as attach_lab
+        attach_lab(self)
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -4005,6 +4011,8 @@ class House:
             self._background("engineer", self.engineer.step)
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
+        if self.lab is not None:
+            self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
