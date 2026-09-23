@@ -1,18 +1,18 @@
 {
-  "_about": "Owner's direction, Sept 21, 2026: make the learn-research-trade-fail-or-succeed loop as rapid as possible and use every input. Applied on top of the funded burst policy (whose record and spend caps are unchanged). Measured before: Luna sessions median 12 s, Sail pro_flex 241 s (p90 1,178 s); Sail was the underused budget. 20:26 UTC: all 16 research workers were busy with Sail sessions (multi-turn, replays inside), so 24. 22:10 UTC, owner adds $200 OpenAI and $100 Sail and asks for more gas: research every 5 min (winners every ~1.7), 32/8 workers, a newcomer every 2 min, population 64, Luna (median 12 s) back to three quarters. 23:55 UTC: rung-0 agents, which write all new code, averaged 8 research sessions in four hours on a $2 endowment and were displaced (median life 4.3 h); the endowment is 8. Sept 22, 2026 (overnight rebuild): Merton's burst cadence is re-allocated by measured yield (merton_schedule_hours). Lifetime to Sept 22: the operator ran 54 passes and nearly always left the dials unchanged (its one merge was harmful), the designer ran 16 and never changed game.json, the toolsmith's 8 PRs were all refused by CI, the architect landed 4 strategies from 6 PRs, the teacher merged 13 of 13. At burst cadence the first three cost about $5 an hour at campaign prices; that attention now goes to the hypothesis foundry and the repair engineer, which have their own caps. Role backoff on empty passes still applies. Sept 23, 2026 (owner: 'do 1-5 right now fully'): research every 15 minutes with 16 workers (84% of sessions abstained, most by agents with no record; the unproven wait three intervals), and 12 replay workers, because the foundry's cards now queue for replay beside every agent's own.",
+  "_about": "Owner's direction, Sept 21, 2026: make the learn-research-trade-fail-or-succeed loop as rapid as possible and use every input. Applied on top of the funded burst policy (whose record and spend caps are unchanged). Measured before: Luna sessions median 12 s, Sail pro_flex 241 s (p90 1,178 s); Sail was the underused budget. 20:26 UTC: all 16 research workers were busy with Sail sessions (multi-turn, replays inside), so 24. 22:10 UTC, owner adds $200 OpenAI and $100 Sail and asks for more gas: research every 5 min (winners every ~1.7), 32/8 workers, a newcomer every 2 min, population 64, Luna (median 12 s) back to three quarters. 23:55 UTC: rung-0 agents, which write all new code, averaged 8 research sessions in four hours on a $2 endowment and were displaced (median life 4.3 h); the endowment is 8. Sept 22, 2026 (overnight rebuild): Merton's burst cadence is re-allocated by measured yield (merton_schedule_hours). Lifetime to Sept 22: the operator ran 54 passes and nearly always left the dials unchanged (its one merge was harmful), the designer ran 16 and never changed game.json, the toolsmith's 8 PRs were all refused by CI, the architect landed 4 strategies from 6 PRs, the teacher merged 13 of 13. At burst cadence the first three cost about $5 an hour at campaign prices; that attention now goes to the hypothesis foundry and the repair engineer, which have their own caps. Role backoff on empty passes still applies. Sept 23, 2026 (owner: 'do 1-5 right now fully'): research every 15 minutes with 16 workers (84% of sessions abstained, most by agents with no record; the unproven wait three intervals), and 12 replay workers, because the foundry's cards now queue for replay beside every agent's own. Sept 23, 2026, later (owner: 'address all the largest gaps'): population 96, because the foundry's cards passed replay about half the time while three waited for seats in a league capped at 64 and research is now paced by record, so a seat costs little; and Merton's scheduled roles by measured yield again -- operator every 24 h, designer 48 h (almost never changed anything), toolsmith 6 h, architect 4 h, teacher 2 h -- because their one round at 01:39Z cost $2.41 of the September OpenAI line. And research moves to Luna (0.95 of agents; 0.05 stays on Sail as the comparison): measured 01:39-02:10Z Sept 23, a Sail pro_asap session cost about $0.06 and a Luna one about $0.011 (a valid strategy $0.011 on Luna against $0.12-0.22 on DeepSeek, Sept 22), and Sail research was most of the ~$35 a day that leaves about three days of Sail credit, while the OpenAI month resets on Oct 1.",
   "research_minutes": 15,
   "research_workers": 16,
   "replay_workers": 12,
   "newcomer_seconds": 120,
-  "max_population": 64,
-  "luna_fraction": 0.75,
+  "max_population": 96,
+  "luna_fraction": 0.95,
   "sail_profile": "pro_asap",
   "endowment_usd": 8,
   "merton_schedule_hours": {
-    "operator": 4,
-    "designer": 12,
-    "toolsmith": 3,
-    "architect": 2,
-    "teacher": 1
+    "operator": 24,
+    "designer": 48,
+    "toolsmith": 6,
+    "architect": 4,
+    "teacher": 2
   }
 }

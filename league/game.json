@@ -49,7 +49,7 @@
     ],
     "max_population": [
       8,
-      64
+      128
     ],
     "min_population": [
       4,
