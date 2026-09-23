@@ -34,8 +34,9 @@ Existing gateway and account caps remain additional ceilings. Allowances are cei
 spending targets. Unused money does not accelerate tomorrow's calls. Model roles cannot edit
 campaign policy, accounting or the experiment archive.
 
-Jev's external gateway lane now has a $20 experiment envelope and 500,000-call ceiling, with
-the overnight burst expiry. Three retained commitments ($1 plus $9 plus $10) back it inside foundation-review,
+Jev's external gateway lane now has a $20 experiment envelope and 500,000-call ceiling. It was
+to expire with the overnight burst; since the owner resumed the game the unused allowance
+continues with no end date (`TYPESAFE_PERSISTENT` in `gateway/wrangler.jsonc`). Three retained commitments ($1 plus $9 plus $10) back it inside foundation-review,
 reducing that allocation's available OpenAI headroom by $20. This is a cross-provider earmark;
 the internal `openai` label is not a vendor invoice. Actual Jev usage is reported separately by
 the gateway. Keep the backing hold until the route closes/expires and billing is reconciled.
@@ -58,12 +59,16 @@ pre-phase expenditure remains historical expenditure and is not erased or called
 
 - **Durable model commitments.** Sail requests reserve conservative token costs before POST;
   detached response identities and eventual costs survive restarts. Frontier calls also reserve
-  before transmission. Frontier usage is booked at conservative premium rates when that exceeds
-  the gateway's cost estimate, so a missing pricing premium cannot release too much budget.
-  Unknown costs, timeouts and rejected responses without confirmed billing
-  keep their holds. Over-reservation costs or a decreasing vendor expenditure counter close new
-  admission. The Sail period expenditure counter includes non-model costs and cannot be hidden
-  by a top-up. Missing/stale meter readings stop new paid research and paper wakes.
+  before transmission. Since Sept 23, 2026 a verified frontier call settles at the gateway's
+  metered cost, which prices cache and long-context premiums from the provider's usage block;
+  until then it was booked at conservative premium rates whenever those exceeded the gateway's
+  figure. A refused frontier call (HTTP 4xx) settles at $0. Other unknown costs, timeouts and
+  rejected responses without confirmed billing keep their holds, with one exception: a Sail
+  hold older than an hour with no response is absorbed into the Sail meter, which already
+  counts any charge the vendor made (`CampaignBudget.absorb_stale`). A settled cost above its
+  reservation closes new admission. The Sail meter reads the account balance (since Sept 22,
+  2026), so it includes non-model costs, and a top-up is never credited back. Missing/stale meter
+  readings stop new paid research and paper wakes.
 - **Live capital is separately activated.** The base phase blocks promotions into live rungs and new live buy intents. The persistent owner grant releases earned access without a timer, using current venue cash. The older pilot expires with the burst; see the persistent activation above.
   Existing position polling, reconciliation and exits continue. At expiry, new paid campaigns and
   paper wakes stop; essential hosting and existing risk management continue. This is application
@@ -149,8 +154,8 @@ On the House, with its installed Python and the current release as working direc
 /workspace/.venv/bin/python -m league.experiments MANIFEST_HASH --root /workspace/state
 ```
 
-The progress command is read-only. It reports the policy, booked model costs (including the
-frontier's conservative pricing bound),
+The progress command is read-only. It reports the policy, booked model costs (a frontier call
+at its conservative pricing bound until Sept 23, 2026, at the gateway's metered cost since),
 unresolved commitments, vendor counters, archived trial coverage, unfinished jobs, latency
 percentiles, durable research state, session conclusions and recorder coverage. Housekeeping
 `merton:follow` polls are separate from model-pass latency. Worker latency counts attempts,

@@ -4,6 +4,12 @@ Written at the end of the overnight build (Sept 20, 2026). Every command runs fr
 `~/Work/long-term-capital-management` on your Mac unless it says otherwise. Nothing here asks you
 to paste a secret into a chat or a file.
 
+> Since then (Sept 23, 2026): real money is on, the owner's persistent live grant is active, and
+> the House deploys attested merged code by itself. Sections 1 to 3 describe the switch as it was
+> made; the thresholds in them are updated to the constitution in force. The running league is
+> operated from [operations.md](operations.md), and its state is in the
+> [README's status](../README.md#status).
+
 ## What state things are in right now
 
 - **Nothing is trading and nothing is publishing.** The gateway's kill switch is engaged. The
@@ -61,8 +67,10 @@ published checkpoint the dot goes green and says "live".
 - **Equity and option strategies do nothing until Monday 09:30 New York**; over the weekend the two
   option founders and the six equity ones research (the option chain and Friday's closing quotes are readable).
 
-Nothing can reach real money in this mode. The earliest an agent can become eligible is after 15
-active blocks and 10 closed trades with growth above zero and a drawdown under 15%: about a day
+Nothing can reach real money in this mode. Under the rules in force since Sept 23, 2026 the
+earliest an agent can become eligible is after 4 active hourly blocks (2 daily, or 1 for a daily
+Kalshi agent whose 3 trades have settled on paper) and 3 closed trades, with growth above zero
+and a drawdown under 15%. At the build it was 15 active blocks and 10 closed trades: about a day
 for the fastest hourly agents, two to three weeks for a daily one.
 
 ## 3. Turning real money on (your call, any time)
@@ -83,15 +91,28 @@ python3 scripts/floor_box.py deploy
 python3 scripts/gateway_admin.py unkill
 ```
 
+A third switch has been yours since Sept 21: the persistent live grant,
+`python3 scripts/live_trading.py --enable <identity>`
+([persistent earned live trading](runs/2026-09-21-persistent-live-trading.md)). The campaign
+admits no agent to real money without it, and a change to any money rule leaves it inactive until
+you re-ratify it for the same capital (`--ratify <identity>`; see [operations](operations.md)).
+
 What changes: the House opens a book on the real Kalshi and Alpaca accounts and records their
-baselines. **Still no order is sent** until an agent has (a) cleared the paper screen (15 active
-blocks, 10 closed trades, growth above zero, a drawdown under 15%) and (b) passed Merton's audit.
-Then it gets a $25 real stake and positions of at most $10. The screen is easy on purpose, and what
-it may cost you is capped in dollars: at most 4 agents hold real money on that rung at once, and
-when the rung has lost $50 net it closes, everyone on it goes back to paper, and you get an email.
-Reopening it is yours: raise `tuition.max_loss_usd` in `league/constitution.py`, re-pin the digest
-the test prints, and deploy. To reach a quarter-Kelly stake an agent must then show a lower
-confidence bound on its growth above zero over 30 active blocks of REAL fills. The gateway's caps stand behind all of it: $75 an order, $4,000
+baselines. **Still no order is sent** until an agent has cleared the paper screen: 4 active hourly
+blocks or 2 daily (1 for a daily Kalshi agent with 3 settled trades), or 10 completed exposures;
+3 closed trades; growth above zero, the block in progress counted; a drawdown under 15%. Then it
+takes a $60 real stake with positions and orders of at most $30, and Merton's audit follows on
+that rung (since Sept 23, 2026). A veto sends it back to paper, and so does a 20% loss since
+promotion. An agent with a known defect is audited before it is promoted. The screen is easy on
+purpose, and what it may cost you is capped in dollars. While the grant is active its envelope is
+the cap: 16 agents, a $1,017.75 loss line, and $500 on Alpaca and $517.75 on Kalshi. Without a
+grant it is the constitution's tuition: at most 4 agents on that rung at once, and a $50 net
+loss. When a line is reached everyone on that rung goes back to paper (for a venue's line, the
+agents on that venue), and the aggregate line also raises an error alert. The constitution's line is raised by changing `tuition.max_loss_usd` in
+`league/constitution.py`, re-pinning the digest the test prints and deploying; the grant's
+envelope is fixed. To reach a larger stake an agent must then show a lower confidence bound on
+its growth above zero over 5 active blocks or 10 completed exposures of REAL fills, with 3 closed
+trades; it is then sized at half of Kelly on that bound. The gateway's caps stand behind all of it: $75 an order, $4,000
 and 2,000 orders a day. If the real account has open orders the House did not send, it refuses to
 open that book and says so in `status`; cancel them at the venue.
 
@@ -164,6 +185,10 @@ a day, stop it, pause it, and clear the public tape (`POST /api/capital/reset?co
 with the publish token) so the watchdog sees nothing to revive.
 
 ## 7. What the fortnight is expected to cost
+
+Superseded since September 20, 2026, when production spending moved to the funded campaign
+([phase one](phase-one.md)); the fourteen-day pacer below remains only for compatibility and
+fixtures. Kept for the record.
 
 This replaces the thrifty estimate below it: on Sept 19 you asked for both budgets to be USED, in
 full, over fourteen days (Sept 19 to Oct 2). `python3 -m league status` and the public tape's

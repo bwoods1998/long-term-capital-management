@@ -14,9 +14,9 @@ Model turns spend credits even without a purchased replay or search. Counting re
 
 ## Before spending again
 
-1. Record current credits, the House's current audit charge and operating floor, and estimated additional operating costs to reach the next eligible evidence review. Avoid double-counting costs already covered by the floor. The supplied record does not specify these dollar requirements; obtain them rather than inventing a fixed reserve.
+1. Record current credits and the estimated operating costs to reach the next eligible evidence review. Since Sept 23, 2026 the House pays for the promotion audit (`audit.house_pays`), so it needs no reserve; when this lesson was written the agent paid for it and had to hold an audit and operating credit floor. The supplied record does not specify the operating costs; obtain them rather than inventing a fixed reserve.
 2. Protect that amount from discretionary research. If it cannot be established or funded, defer optional sweeps and research turns; do not assume another replay pass replenishes credits.
-3. Read the actual hold. For `audit_credits`, another strategy variant does not resolve the stated funding shortfall. For `audit_cooldown`, wait until the recorded retry eligibility rather than paying for repeated audit attempts.
+3. Read the actual hold. For `audit_credits` (a hold that does not occur while the House pays), another strategy variant does not resolve the stated funding shortfall. For `audit_cooldown`, wait until the recorded retry eligibility rather than paying for repeated audit attempts.
 4. Preserve every statistical and risk gate. A funded audit is permission to evaluate, not permission to promote or trade live.
 
 ## Check the change

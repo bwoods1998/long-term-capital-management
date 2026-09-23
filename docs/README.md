@@ -7,21 +7,38 @@ now; everything under "History" describes something that no longer runs.
 
 ## The system as it is now
 
+- [Project overview](../README.md): the game, the trust zones, the constitution, Merton's six jobs,
+  what is public, how to run things, status and known limits.
+- [Operating the league](operations.md): the operator's page. How to pause, inspect, deploy, roll
+  back and recover the running league, how a money rule is deployed and the live grant
+  re-ratified, and the switches.
+- [Dynamism II](runs/2026-09-23-dynamism-ii.md) (Sept 23): the latest execution record. Merged
+  repairs seated, the audit after promotion, the settled lane, the budget following the owner's
+  real spend, and the foundry on fast markets.
+- [The overnight rebuild](runs/2026-09-22-overnight-rebuild.md) (Sept 22): the learning loop
+  rebuilt around evidence, and the dynamism revision that followed it.
+- [Run records](runs/README.md): every record of the current league, newest first.
 - [Persistent earned live trading](runs/2026-09-21-persistent-live-trading.md): owner activation without a calendar expiry, full ladder, current venue cash and preserved research budgets.
 - [Game gate audit and former live-learning window](runs/2026-09-21-game-gate-audit.md): completed-exposure qualification, reward continuity and evidence-based replacement.
 - [Two-hour watch and accelerated overnight run](runs/2026-09-20-evening-watch.md): runtime findings, fixes, spend and acceptance.
 
 - [Active foundation phase](phase-one.md): the funded campaign, current limits and reproducibility contract.
-- [Latest foundation progress](runs/2026-09-20-foundation-progress.md): deployed changes, verified
+- [Foundation progress](runs/2026-09-20-foundation-progress.md) (Sept 20): deployed changes, verified
   runtime state, first reproduced replay, Jev probe and unresolved issues.
 - [Chief architect handoff and $10,000 plan](design/2026-09-20-chief-architect-handoff.md): the
   next architecture, independent acceptance, incentives and evidence-gated capital releases.
 - [Model-routing evidence](runs/2026-09-20-model-routing.md): matched coding tasks, costs,
-  failures and the implemented Luna grant path.
+  failures and the implemented Luna grant path. The
+  [Sept 22 routing, caching and economics run](runs/2026-09-22-model-routing-experiment.md)
+  follows it.
 - [Jev's role and measured comparison](design/2026-09-20-typesafe-pilot.md): a funded integration,
   shared semantic features, recursive question discovery and development-probe results.
-- [Project overview](../README.md): the game, the trust zones, the constitution, Merton's six jobs,
-  what is public, how to run things, status and known limits.
+- [Jev as the cheap sensor and router](design/2026-09-22-jev-sensor.md) (Sept 22): the research
+  gate, inactivity reasons, triage, hypothesis links and exposure, with no order, promotion,
+  spending or merge authority.
+- Contracts in force: [event capital and feedback](contracts/2026-09-21-event-capital-and-feedback.md),
+  [Kalshi fill accounting](contracts/2026-09-21-kalshi-fill-accounting.md) and the
+  [public game ladder](contracts/2026-09-21-game-ladder.md).
 - [The game](proposals/2026-09-19-the-game.md): the design memo for the rebuild. What the first run
   measured, what the venues reward, why the frontier model audits and never picks, and the game
   that follows from it.
@@ -99,8 +116,8 @@ Run notes, oldest first:
   data.
 - [The pause and the clean slate](runs/2026-09-19-pause-and-reset.md) (Sept 19): what was closed,
   what was archived, what was wiped.
-- [Run records and lab reports](runs/README.md): what the first run's generated lab reports
-  measured and how to read them.
+- [Run records and lab reports](runs/README.md): the index of every run record, the current
+  league's first, and how to read the first run's generated lab reports.
 
 ### Portfolio Agent (before September 15, 2026)
 

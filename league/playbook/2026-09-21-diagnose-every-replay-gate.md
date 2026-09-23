@@ -13,10 +13,10 @@ These are gate diagnoses, not explanations of trading losses. Displacement is no
 
 Write a failure checklist from the actual replay report:
 
-1. Closed trades: current minimum **20**.
+1. Closed trades: minimum **10** since Sept 22, 2026 21:25 UTC (**20** when this lesson was written).
 2. Replay blocks: current minimum **20**; out-of-sample blocks: **8**.
 3. Out-of-sample growth: must be above zero. Do not substitute the reported overall return.
-4. Deflated Sharpe: current minimum **0.5**, with the recorded trial count retained. Old reports using 0.75 describe an earlier gate.
+4. Deflated Sharpe: no minimum since Sept 22, 2026 21:25 UTC (**0.5** when this lesson was written; reports using 0.75 describe an earlier gate). The trial count is still recorded. Read `qualification_policy.replay` for the rules in force.
 
 For every failed item, state what new evidence the proposed expenditure could produce. More trades alone cannot repair hilibrand-13's measured out-of-sample failure. A higher deflated score alone cannot repair hawkins-7's insufficient sample. Do not widen entries merely to manufacture qualifying trades.
 
