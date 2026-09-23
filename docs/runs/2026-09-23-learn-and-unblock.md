@@ -36,14 +36,14 @@ Execution record for the owner's goal of Sept 23, 2026: execute
 | 0.6 | Study snapshot taken (read-only sqlite backups) | done 16:28Z |
 | 0.7 | Study (L), Wave 0 and cleanup (H) launched together | done 16:38Z |
 | L | The agent study, `docs/research/2026-09-23-agent-study.md` | version 1 committed 17:13Z (`a8af31e`); refresh at 20:37Z and 23:52Z |
-| U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | PR #198, in review |
-| U2 | Durable Kalshi shard funding | PR #197 (CI green), in review |
-| U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | PR #198, in review |
-| C2 | The lab decoupled from the OpenAI tier | PR #195 (CI green) |
+| U1 | Daily-loss rules as constitution keys (real bunts: stay drawdown; real halt per venue) | live 17:34Z (Deploy A), mechanism verified; no live instance yet |
+| U2 | Durable Kalshi shard funding | live 17:34Z; first pass 17:36:49Z read all shards, no move needed; a shard-3 fill is the sports-window check (~23:00Z) |
+| U5 | Winners compound (`bunt_usd × clamp(W_real, 1, swing_at)`) | live 17:34Z; verified 17:36Z (mullins-2 re-staked toward $34.84) |
+| C2 | The lab decoupled from the OpenAI tier | live 17:34Z; verified once the tier drops below "all" |
 | C3 | OpenAI pacing | PR #194 (updater); burn re-read hourly |
-| A7 | Fractional one-day stock limits; wind-down sells held to the open | PRs #198 (book) + #196 (House) |
-| V1 | `kalshi-open` maker fees | PR #196 |
-| Deploy A | Wave 0, ratified at promotion if the digest moved | ⟨pending⟩ |
+| A7 | Fractional one-day stock limits; wind-down sells held to the open | live 17:34Z; verified by an agent's practice fractional limit order (to 20:00Z) and the next out-of-hours wind-down |
+| V1 | `kalshi-open` maker fees | live 17:34Z (163 series listed; regression test) |
+| Deploy A | Wave 0, ratified at promotion if the digest moved | done 17:34:17Z, ratified 17:34:36Z on `1d63a56e` |
 | Wave 1 / Deploy B | from the study | builders launched 17:03Z (seats, loop, bugs; lab to follow) |
 | Wave 2 / Deploy C | from the refreshed study | ⟨pending⟩ |
 | O | Level-3 options design and pure pieces on a pushed branch | ⟨pending⟩ |
@@ -268,3 +268,20 @@ Execution record for the owner's goal of Sept 23, 2026: execute
   branch (the study): two README table conflicts, no code conflicts. Money digest `1d63a56e`
   (full `52c6c7e5`), pinned. **PR #200** opened at 17:24Z for Deploy A; the full suites run
   locally on the final tree (recorded below).
+- 17:32Z — PR #200's CI green on both Pythons (3.11 7m04s, 3.14 7m49s, gateway); merged as
+  `b40e737` and deployed at once from `~/Work/ltcm-deploy` (`deploy_ratify.sh`), so no
+  protected range waited on main.
+- **17:34:17Z — Deploy A promoted:** release `20260923T173244Z-8c7467281a19` (was
+  `main-417d92cc3e00`). **17:34:36Z — the grant `earned-live-20260921` re-ratified** (19 s after
+  promotion) on money digest `1d63a56e` (constitution `52c6c7e5`): the same capital, `max_agents`
+  101 → 40, `stake_usd` 10 → 25. The House restarted at 17:35:40Z on the new release.
+- 17:37Z — **verified on the box** (read-only): health fresh (tick 84 s, 96 living, nothing
+  stopped, no book frozen), the grant active on `1d63a56e`, `frontier_tier` "all". The shard
+  funder's first pass ran at 17:36:49Z on its own lane: balances shard 0 $372.81, 2 $36.60,
+  3 $22.77, every wanted shard above the $20 floor so nothing moved, 0 unattributed, the
+  series→shard map learned from the listings (`KXBTC15M` 2, ...). The lab kept running with its
+  LLM-skip counters started; 24 graduates wait for seats. The invariants' cursor was set from
+  the head. `wind_down_held` is empty. **The first allocator pass under the new rules (17:36:21Z)
+  lent mullins-2 $24.75 toward a $34.84 target** (`bunt_usd` $30 × W_real 1.1616; E 1.1815; it had
+  been swept to $10.09): U5 and the $30 bunt verified live on the earner. The watchdog's
+  10-minute watch runs to about 17:45Z.

@@ -879,6 +879,28 @@ dynamism revisions followed that evening:
   tapes first. From 12:44Z it evaluated about 200 candidates per 10 minutes in batches of 32.
   None of Deploys 3-6 changed a money rule; the grant stayed on money digest `44e8d48d`. The
   execution record has the watch that followed.
+- **Deploy 7 (#187, #189, #190), 15:29Z.** The gateway refuses multi-leg, symbol-less, stop and
+  adjusted-option Alpaca orders (version `3e79ad85`); real-money limits shown to agents are the
+  ones the book enforces, stock and options desks wake just after the open, and trading agents on
+  those desks keep their seats until they close 5 trades or have had 3 sessions. No money rule
+  changed. The investigation behind it is
+  [the Alpaca stocks and level-3 options proposal](docs/proposals/2026-09-23-alpaca-stocks-and-level-3-options.md).
+
+**The Sept 23 learn-and-unblock run** ([plan](docs/goals/LTCM_LEARN_AND_UNBLOCK.md),
+[execution record](docs/runs/2026-09-23-learn-and-unblock.md),
+[the agent study](docs/research/2026-09-23-agent-study.md); T0 16:22:40Z, deadline 02:22:40Z):
+- **Deploy A (#200: #195, #196, #197, #198, #199 and their reviews), 17:34Z.** Release
+  `20260923T173244Z-8c7467281a19` was promoted at 17:34:17Z and the grant re-ratified 19 s later on
+  money digest `1d63a56e…` (max_agents 40). What changed: the two daily-loss rules are constitution
+  keys (a real bunt is governed by the allocator's 35% stay drawdown, not the book's 10% daily rule;
+  the real book's halt is 8% of that venue's grant capital), a bunt keeps what it makes
+  (`bunt_usd × clamp(W_real, 1, swing_at)`), the Kalshi bunt is $30, the swing line 1.25 and the
+  swing stake `bunt × E²`, the options bunt is $80, stock limit orders may be fractional (`day`),
+  wind-down sells of stocks and options wait for the open, `kalshi-open` lists its maker-fee
+  series, the House funds every Kalshi exchange shard its desks trade (`league/shards.py`), the
+  Alpha Lab keeps running below the "all" OpenAI tier, and four invariants raise ops alerts (a
+  quiet desk, a bunt frozen by a daily-loss rule, a lab closed 30 minutes, a graduate waiting 6
+  hours). The first allocator pass re-staked mullins-2 from $10.09 toward $34.84.
 
 Known limits:
 
