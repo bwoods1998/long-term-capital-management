@@ -925,6 +925,27 @@ class KalshiBookTest(BookCase):
         self.assertEqual(self.book.account("a1").cash, D("100") - D("5.20") - fee)
         self.assertTrue(self.book.reconcile().ok)
 
+    def test_a_resting_limit_filled_later_is_booked_as_the_makers_fill_it_was(self):
+        """Sept 23, 2026: a Kalshi limit order that rested and was filled later paid no fee (the
+        maker's, on most series) and was booked as a taker fill; the auditor read that as an
+        unexplained zero-fee taker execution and vetoed the best paper agent."""
+        self.book.reconcile()
+        self.seat("a1", usd="100", position="50", order="50")
+        self.broker.set_quote(event(), "0.49", "0.52")
+        out = self.book.submit([self.intent("a1", event(), "buy", "10", order_type="limit", limit_price=D("0.45"))])[0]
+        self.assertEqual(out.status, "resting")
+        self.broker.fill_resting(out.order_id, "10")
+        self.book.poll()
+        fill = [e.payload for e in self.ledger.iter(kinds="book.fill", agent="a1")][-1]
+        self.assertEqual(D(fill["fee"] if "fee" in fill else fill.get("fee_usd", "0")), 0)
+        self.assertEqual(fill["liquidity"], "maker")
+        self.assertTrue(self.book.reconcile().ok)
+        # A taker fill keeps its label and its fee.
+        taker = self.book.submit([self.intent("a1", event(), "buy", "5")])[0]
+        self.assertEqual(taker.status, "filled")
+        fill = [e.payload for e in self.ledger.iter(kinds="book.fill", agent="a1")][-1]
+        self.assertEqual(fill["liquidity"], "taker")
+
     def test_queued_buys_reserve_cash_fees_as_well_as_principal(self):
         self.book.reconcile()
         self.book.real_money = False  # isolate per-agent cash from the real floor's exposure caps
