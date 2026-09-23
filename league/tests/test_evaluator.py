@@ -24,10 +24,31 @@ from league.ledger import Ledger
 BASE = datetime(2026, 9, 20, 0, 0, tzinfo=timezone.utc)
 ALPHA = float(CONSTITUTION["ladder"]["alpha"])
 
+
+def before_swing(constitution):
+    """The constitution as it stood before the owner's swing-and-bunt revision (Sept 23, 2026 ~03:10
+    UTC). The mechanics tests below were written against these numbers; the mechanics did not
+    change with them, and `SwingAndBunt` tests the new values against the real constitution."""
+    c = copy.deepcopy(constitution)
+    ladder = c["ladder"]
+    ladder["promotion_alpha"] = ladder["alpha"]
+    ladder["look_every_active_blocks"] = 5
+    ladder["micro"]["min_active_blocks"] = 5
+    ladder["family"].update(alpha=0.05, min_member_active_blocks=10)
+    ladder["death"]["max_drawdown"] = 0.30
+    ladder["paper"].update(min_active_blocks=4, min_active_blocks_day=2, max_drawdown=0.15)
+    ladder["replay"].pop("min_oos_growth", None)
+    c["rungs"]["3"].update(kelly_fraction=0.5, max_share_of_venue=0.4)
+    return c
+
+
+#: The real constitution of Sept 23, 2026 before the swing-and-bunt revision.
+PRE_SWING = before_swing(CONSTITUTION)
+
 #: The confidence bound is the gate out of the micro rung. These tests of the bound seat their
 #: agents on paper (as they did when paper used it too), under a constitution whose paper gate is
 #: the bound as well: the rule under test is the same code at either rung.
-BOUND = copy.deepcopy(CONSTITUTION)
+BOUND = copy.deepcopy(PRE_SWING)
 BOUND["ladder"].pop("completed_exposures")  # isolate the original single-route statistical tests
 BOUND["ladder"]["micro"]["min_active_blocks"] = 30
 BOUND["ladder"]["paper"] = {"gate": "bound", "min_active_blocks": 30}
@@ -39,7 +60,7 @@ BOUND["ladder"]["replay"] = {"min_trades": 20, "min_blocks": 20, "min_deflated_s
 
 #: The Sept 21, 2026 fast-lane values these mechanics tests were written against. The owner moved
 #: the numbers on Sept 22 (see `Sept22Values`); the mechanics under test did not change.
-FAST_LANE = copy.deepcopy(CONSTITUTION)
+FAST_LANE = copy.deepcopy(PRE_SWING)
 FAST_LANE["ladder"]["paper"] = {"gate": "screen", "min_active_blocks": 6, "min_active_blocks_day": 2, "max_drawdown": 0.15}
 FAST_LANE["ladder"]["min_closed_trades"] = 5
 FAST_LANE["ladder"]["paper_death"] = {"min_active_blocks": 10, "max_loss": 0.10, "unprofitable_blocks": 30}
@@ -1547,12 +1568,13 @@ class Screen(EvalCase):
 
 
 class Sept22Values(EvalCase):
-    """The owner's Sept 22, 2026 dynamism revision, against the REAL constitution: one active day
-    or four active hours, three closed trades, growth above zero and the drawdown screen."""
+    """The owner's Sept 22, 2026 dynamism revision, against the constitution as it stood before the
+    swing-and-bunt revision: two active days or four active hours, three closed trades, growth above
+    zero and the drawdown screen."""
 
     def setUp(self):
         super().setUp()
-        self.ev = Evaluator(self.ledger)  # the real constitution
+        self.ev = Evaluator(self.ledger, constitution=PRE_SWING)
 
     run_blocks = Screen.run_blocks
 
@@ -1588,13 +1610,14 @@ class Sept22Values(EvalCase):
 
 
 class Sept23Values(EvalCase):
-    """The owner's Sept 23, 2026 revision, against the REAL constitution: an event-contract agent
-    with three settled trades is screened after one finished day; the screen counts the block in
-    progress; and the screen's own "next look" is the look it really takes."""
+    """The owner's first Sept 23, 2026 revision, against the constitution as it stood before the
+    swing-and-bunt revision of the same night: an event-contract agent with three settled trades is
+    screened after one finished day; the screen counts the block in progress; and the screen's own
+    "next look" is the look it really takes."""
 
     def setUp(self):
         super().setUp()
-        self.ev = Evaluator(self.ledger)  # the real constitution
+        self.ev = Evaluator(self.ledger, constitution=PRE_SWING)
 
     def seated(self, book):
         self.ev.seat("a", 1, "test")
@@ -1659,12 +1682,99 @@ class Sept23Values(EvalCase):
         self.assertIn("the next look is at 4", self.ev.judge("a", "alpaca-paper", horizon="hour").reason)
 
 
-class Family(EvalCase):
-    """A small edge is proved across a family before it is proved in any one member."""
+class SwingAndBunt(EvalCase):
+    """The owner's swing-and-bunt revision (Sept 23, 2026 ~03:10 UTC), against the REAL
+    constitution: bunts are cheap and fast; swings are earned, and death keeps its own budget."""
 
     def setUp(self):
         super().setUp()
-        self.ev = Evaluator(self.ledger)
+        self.ev = Evaluator(self.ledger)  # the real constitution
+
+    run_blocks = Screen.run_blocks
+
+    def test_the_screen_is_three_hours_or_one_day(self):
+        self.assertEqual((self.ev._gate_blocks(1, "day"), self.ev._gate_blocks(1, "hour")), (1, 3))
+        self.assertEqual(self.run_blocks([0.004, -0.003]).decision, "hold")
+        self.setUp()
+        self.assertEqual(self.run_blocks([0.004, -0.003, 0.004]).decision, "eligible")
+
+    def test_one_finished_day_screens_a_daily_agent(self):
+        self.ev.seat("a", 1, "test")
+        self.stake("a", 200, at())
+        self.mixed_trades("a", n=3)
+        self.block("a", 0.004)
+        verdict = self.ev.judge("a", "paper", horizon="day")
+        self.assertEqual(verdict.decision, "eligible", verdict.reason)
+
+    def test_a_volatile_winner_clears_a_screen_the_old_limit_held(self):
+        growth = [0.10, 0.10, -0.22] + [0.03] * 3  # up 22%, then down 20% from the peak, up overall
+        verdict = self.run_blocks(growth, judge_at=(6,))
+        self.assertGreater(sum(growth), 0)
+        self.assertGreater(verdict.numbers["recent_drawdown"], 0.15)
+        self.assertEqual(verdict.decision, "eligible", verdict.reason)
+
+    def test_promotion_spends_its_own_budget_and_death_keeps_alpha(self):
+        ladder = self.ev.ladder
+        self.assertGreater(ladder["promotion_alpha"], ladder["alpha"])
+        self.ev.seat("a", 2, "test")
+        self.stake("a", 60, at(), book="real")
+        self.mixed_trades("a", n=12, book="real")
+        for i in range(ladder["death"]["min_active_blocks"]):
+            self.block("a", 0.004 if i % 2 == 0 else -0.003, book="real", start=60.0)
+        self.ev.judge("a", "real")
+        look = [e.payload for e in self.ledger.iter(kinds="eval.verdict", agent="a") if e.payload.get("decision") == "look"][-1]
+        share = ladder["completed_exposures"]["promotion_alpha_share"]
+        self.assertTrue(look["tested_promotion"] and look["tested_death"])
+        self.assertAlmostEqual(look["alpha_spent"], stats.spend(ladder["promotion_alpha"] * (1 - share), 1))
+        self.assertAlmostEqual(look["alpha_death"], stats.spend(ladder["alpha"] * (1 - share), 1))
+
+    def test_the_first_bound_on_real_money_is_read_after_three_active_blocks(self):
+        self.ev.seat("a", 2, "test")
+        self.stake("a", 60, at(), book="real")
+        self.mixed_trades("a", n=12, book="real")
+        for g in (0.004, 0.003):
+            self.block("a", g, book="real", start=60.0)
+        self.assertIn("the next look is at 3", self.ev.judge("a", "real").reason)
+        self.block("a", 0.004, book="real", start=60.0)
+        self.ev.judge("a", "real")
+        looks = [e.payload for e in self.ledger.iter(kinds="eval.verdict", agent="a") if e.payload.get("decision") == "look"]
+        self.assertEqual(len(looks), 1)
+        self.assertTrue(looks[0]["tested_promotion"])
+
+    def test_the_oos_floor_admits_near_breakeven_trading_but_not_a_program_that_sat_out(self):
+        base = {"ok": True, "trades": 12, "blocks": [{"log_growth": 0.001 * (i % 3 - 1)} for i in range(20)]}
+
+        def oos_reasons(oos):
+            reasons = self.ev._replay_reasons("fam", {**base, "out_of_sample": oos}, None)[1]
+            return [r for r in reasons if "out-of-sample" in r or "out of sample" in r]
+
+        self.assertEqual(oos_reasons({"blocks": 8, "mean_log_growth": -0.0003, "active_blocks": 5}), [])
+        self.assertEqual(oos_reasons({"blocks": 8, "mean_log_growth": 0.0, "active_blocks": 0}),
+                         ["it did not trade out of sample: no out-of-sample block was active"])
+        self.assertEqual(oos_reasons({"blocks": 8, "mean_log_growth": 0.0}),
+                         ["it did not trade out of sample: no out-of-sample block was active"])
+        self.assertEqual(oos_reasons({"blocks": 8, "mean_log_growth": -0.0006, "active_blocks": 5}),
+                         ["out-of-sample growth is not above -0.050% a block"])
+        self.assertEqual(len(oos_reasons({"blocks": 7, "mean_log_growth": 0.01, "active_blocks": 7})), 1)
+
+    def test_a_swing_inside_the_death_limit_lives(self):
+        self.assertEqual(self.ev.ladder["death"]["max_drawdown"], 0.40)
+        self.ev.seat("a", 2, "test")
+        self.stake("a", 60, at(), book="real")
+        for g in (0.2, math.log(0.7)):  # up 22%, then down 30% from the peak: ordinary luck at full Kelly
+            self.block("a", g, book="real", start=60.0)
+        self.assertNotEqual(self.ev.judge("a", "real").decision, "die")
+        self.block("a", math.log(0.85), book="real", start=60.0)  # now down 40.5% from the peak
+        self.assertEqual(self.ev.judge("a", "real").decision, "die")
+
+
+class Family(EvalCase):
+    """A small edge is proved across a family before it is proved in any one member. Written against
+    the family rule before the swing-and-bunt revision (alpha 0.05, members of 10 active blocks)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ev = Evaluator(self.ledger, constitution=PRE_SWING)
         self.hours = 0
 
     def member(self, name, growth, *, pnls=(0.2, -0.1) * 6):
@@ -1845,11 +1955,12 @@ class TheScreensDrawdownIsRecent(unittest.TestCase):
         self.assertIn("over its last", verdict.reason)
 
     def test_death_still_reads_the_whole_stay(self):
+        limit = float(self.evaluator.ladder["death"]["max_drawdown"])  # 40% since swing and bunt (30% before)
         self.evaluator.seat("a2", 1, "test")
-        self.blocks("a2", [-0.40] + [0.01] * 40)
+        self.blocks("a2", [math.log(1 - limit - 0.03)] + [0.01] * 60)
         verdict = self.evaluator.judge("a2", "kalshi-shadow", horizon="hour")
         self.assertEqual(verdict.decision, "die")
-        self.assertIn("past the 30% limit", verdict.reason)
+        self.assertIn(f"past the {limit:.0%} limit", verdict.reason)
 
 
 class AFreeCheckIsNotRationed(unittest.TestCase):

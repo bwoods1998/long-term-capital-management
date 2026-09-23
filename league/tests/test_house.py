@@ -116,7 +116,9 @@ class Lessons(HouseCase):
         replay, paper = CONSTITUTION["ladder"]["replay"], CONSTITUTION["ladder"]["paper"]
         self.assertIn(f"**{replay['min_trades']} closed trades**", text)
         self.assertIn(f"**{paper['min_active_blocks']} active hourly blocks**", text)
-        self.assertIn(f"**{paper['min_active_blocks_day']} finished active days**", text)
+        self.assertIn(f"**{paper['min_active_blocks_day']} finished active day", text)
+        self.assertIn(f"above {replay['min_oos_growth']:+.2%} a block", text)
+        self.assertIn(f"under **{paper['max_drawdown']:.0%}**", text)
         self.assertEqual(replay["min_deflated_sharpe"], 0.0)
         self.assertIn("No deflated-Sharpe minimum", text)
         self.assertEqual(paper["audit"], "after")

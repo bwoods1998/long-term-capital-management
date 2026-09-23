@@ -68,9 +68,9 @@ published checkpoint the dot goes green and says "live".
   option founders and the six equity ones research (the option chain and Friday's closing quotes are readable).
 
 Nothing can reach real money in this mode. Under the rules in force since Sept 23, 2026 the
-earliest an agent can become eligible is after 4 active hourly blocks (2 daily, or 1 for a daily
-Kalshi agent whose 3 trades have settled on paper) and 3 closed trades, with growth above zero
-and a drawdown under 15%. At the build it was 15 active blocks and 10 closed trades: about a day
+earliest an agent can become eligible is after 3 active hourly blocks (1 finished day for a daily
+agent) and 3 closed trades, with growth above zero and a drawdown under 25% (the owner's
+swing-and-bunt revision, Sept 23, 2026 ~03:10 UTC). At the build it was 15 active blocks and 10 closed trades: about a day
 for the fastest hourly agents, two to three weeks for a daily one.
 
 ## 3. Turning real money on (your call, any time)
@@ -98,9 +98,9 @@ admits no agent to real money without it, and a change to any money rule leaves 
 you re-ratify it for the same capital (`--ratify <identity>`; see [operations](operations.md)).
 
 What changes: the House opens a book on the real Kalshi and Alpaca accounts and records their
-baselines. **Still no order is sent** until an agent has cleared the paper screen: 4 active hourly
-blocks or 2 daily (1 for a daily Kalshi agent with 3 settled trades), or 10 completed exposures;
-3 closed trades; growth above zero, the block in progress counted; a drawdown under 15%. Then it
+baselines. **Still no order is sent** until an agent has cleared the paper screen: 3 active hourly
+blocks or 1 finished day, or 10 completed exposures; 3 closed trades; growth above zero, the block
+in progress counted; a drawdown under 25%. Then it
 takes a $60 real stake with positions and orders of at most $30, and Merton's audit follows on
 that rung (since Sept 23, 2026). A veto sends it back to paper, and so does a 20% loss since
 promotion. An agent with a known defect is audited before it is promoted. The screen is easy on
@@ -111,8 +111,9 @@ loss. When a line is reached everyone on that rung goes back to paper (for a ven
 agents on that venue), and the aggregate line also raises an error alert. The constitution's line is raised by changing `tuition.max_loss_usd` in
 `league/constitution.py`, re-pinning the digest the test prints and deploying; the grant's
 envelope is fixed. To reach a larger stake an agent must then show a lower confidence bound on
-its growth above zero over 5 active blocks or 10 completed exposures of REAL fills, with 3 closed
-trades; it is then sized at half of Kelly on that bound. The gateway's caps stand behind all of it: $75 an order, $4,000
+its growth above zero -- the lower 80% bound, promotion's alpha of 0.20 spent across looks -- over
+3 active blocks or 10 completed exposures of REAL fills, with 3 closed trades; it is then sized at
+full Kelly on that bound, up to 60% of the venue's cash, so the swing grows with the evidence. The gateway's caps stand behind all of it: $75 an order, $4,000
 and 2,000 orders a day. If the real account has open orders the House did not send, it refuses to
 open that book and says so in `status`; cancel them at the venue.
 

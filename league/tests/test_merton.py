@@ -478,7 +478,9 @@ class DesignerSourceAndRuntime(unittest.TestCase):
         house.clock = lambda: 1500
         shown = evidence_from(house)('designer')
         self.assertEqual(shown['learning_window']['remaining_seconds'], 500)
-        self.assertEqual(shown['qualification_policy']['micro']['min_active_blocks'], 5)
+        from league.constitution import CONSTITUTION
+        self.assertEqual(shown['qualification_policy']['micro']['min_active_blocks'],
+                         CONSTITUTION['ladder']['micro']['min_active_blocks'])  # 3 since swing and bunt
         self.assertEqual(shown['qualification_policy']['completed_exposures']['min_episodes'], 10)
         self.assertIsNone(shown['live_pilot'])
 

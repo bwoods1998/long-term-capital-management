@@ -87,14 +87,15 @@ class DailyScreenGrace(HouseCase):
                                                 "end_equity": 99.0, "flow": 0.0, "log_growth": -0.01, "active": True},
                                  agent=agent.id)
 
-    def test_a_trading_daily_agent_keeps_its_seat_until_two_days_have_closed(self):
+    def test_a_trading_daily_agent_keeps_its_seat_until_the_screens_days_have_closed(self):
+        from league.constitution import CONSTITUTION
+        days = int(CONSTITUTION["ladder"]["paper"]["min_active_blocks_day"])  # 1 since swing and bunt (2 before)
         agent = self.daily("weather")
         self.fill(agent)
         self.clock.advance(self.grace + 1)
-        self.assertIsNone(self.house._weakest(self.rules))
-        self.closed_day(agent, "2026-09-21")
-        self.assertIsNone(self.house._weakest(self.rules))
-        self.closed_day(agent, "2026-09-22")
+        for n in range(days):
+            self.assertIsNone(self.house._weakest(self.rules))
+            self.closed_day(agent, f"2026-09-{21 + n}")
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)
 
     def test_a_daily_agent_that_never_traded_keeps_the_plain_grace(self):
@@ -103,9 +104,11 @@ class DailyScreenGrace(HouseCase):
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)
 
     def test_the_protection_ends_a_day_after_the_screen_could_have_looked(self):
+        from league.constitution import CONSTITUTION
+        days = int(CONSTITUTION["ladder"]["paper"]["min_active_blocks_day"])
         agent = self.daily("stuck")
         self.fill(agent)
-        self.clock.advance(3 * 86400 - 60)
+        self.clock.advance((days + 1) * 86400 - 60)
         self.assertIsNone(self.house._weakest(self.rules))
         self.clock.advance(61)
         self.assertEqual(self.house._weakest(self.rules).id, agent.id)

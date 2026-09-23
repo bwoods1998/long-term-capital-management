@@ -12,7 +12,13 @@ from league.episodes import completed
 from league.evaluator import Evaluator
 from league.ledger import Ledger
 from league import stats
+from league.constitution import CONSTITUTION
 from league.tests.fakes import Clock
+
+#: Promotion's error budget and the completed-exposure route's share of it (0.20 and 0.10 since the
+#: owner's swing-and-bunt revision of Sept 23, 2026; 0.05 and 0.025 before).
+FULL = CONSTITUTION['ladder'].get('promotion_alpha', CONSTITUTION['ladder']['alpha'])
+HALF = FULL * CONSTITUTION['ladder']['completed_exposures']['promotion_alpha_share']
 
 
 class Episodes(unittest.TestCase):
@@ -138,7 +144,7 @@ class Episodes(unittest.TestCase):
         self.assertEqual(verdict.decision, 'eligible', verdict)
         self.assertEqual((verdict.numbers['episodes'], verdict.numbers['active_blocks']), (10, 0))
         self.assertGreater(verdict.numbers['lcb'], 0)
-        self.assertEqual(verdict.numbers['alpha_spent'], stats.spend(.025, 1))
+        self.assertEqual(verdict.numbers['alpha_spent'], stats.spend(HALF, 1))
         self.assertEqual(self.ev.rung('a'), 2)  # evaluator qualifies; House owns admission
 
     def test_losing_and_lopsided_controls_do_not_scale(self):
@@ -177,19 +183,19 @@ class Episodes(unittest.TestCase):
         looks = [e.payload for e in self.ledger.iter(kinds='eval.verdict', agent='a')
                  if e.payload.get('decision') == 'episode-look']
         self.assertEqual(len(looks), 2)
-        self.assertEqual([r['alpha_spent'] for r in looks], [stats.spend(.025, k) for k in (1, 2)])
-        self.assertLess(sum(r['alpha_spent'] for r in looks), .025)
+        self.assertEqual([r['alpha_spent'] for r in looks], [stats.spend(HALF, k) for k in (1, 2)])
+        self.assertLess(sum(r['alpha_spent'] for r in looks), HALF)
 
     def test_legacy_full_alpha_looks_do_not_get_a_second_error_budget(self):
         self.add('eval.verdict', {'decision': 'look', 'rung': 2, 'active_blocks': 30,
-                                 'alpha_spent': stats.spend(.05, 1)})
+                                 'alpha_spent': stats.spend(FULL, 1)})
         self.record(['.15'] * 7 + ['-.01'] * 3)
         self.ev.judge('a', 'real')
         budget = self.ev._episode_allowance('a', self.ev._rung_entered('a'), 'promotion')
-        self.assertAlmostEqual(budget, .025 - stats.spend(.025, 1))
-        # Already spent + the entire remaining block series + the new episode series <= .05.
-        total = stats.spend(.05, 1) + (.025 - stats.spend(.025, 1)) + budget
-        self.assertAlmostEqual(total, .05)
+        self.assertAlmostEqual(budget, HALF - stats.spend(HALF, 1))
+        # Already spent + the entire remaining block series + the new episode series <= the budget.
+        total = stats.spend(FULL, 1) + (HALF - stats.spend(HALF, 1)) + budget
+        self.assertAlmostEqual(total, FULL)
 
     def test_open_loser_stale_mark_or_unmarked_fill_cannot_hide_behind_closed_winners(self):
         self.record(['.15'] * 7 + ['-.01'] * 3)

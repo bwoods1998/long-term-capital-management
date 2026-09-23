@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from league.book import Book
 from league.capital import kelly_stake, recommend, resize
+from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.tests.fakes import FakeBroker
 from league.tests.test_house import BUYER, HouseCase
@@ -25,15 +26,19 @@ class KellyStakeTest(unittest.TestCase):
         stake, numbers = kelly_stake(growth, D(25), D(100000))
         self.assertGreater(numbers["lcb"], 0)
         self.assertLess(numbers["lcb"], numbers["mean"])
-        on_the_mean = D(25) * D(str(0.5 * numbers["mean"] / numbers["variance"]))  # half Kelly since the learning surge
+        # The same fraction of Kelly (full since the owner's swing and bunt, Sept 23, 2026) on the MEAN
+        # would be larger: the stake is sized on the lower bound.
+        fraction = CONSTITUTION["rungs"]["3"]["kelly_fraction"]
+        on_the_mean = D(25) * D(str(fraction * numbers["mean"] / numbers["variance"]))
         self.assertLess(stake, on_the_mean)
         self.assertGreater(stake, D(25))
 
     def test_the_venue_share_is_a_ceiling(self):
         growth = [(0.006 if i % 3 else -0.002) for i in range(90)]
         stake, numbers = kelly_stake(growth, D(25), D(400))
-        self.assertEqual(stake, D("160.00"))  # 40% of the venue's cash (learning surge), whatever Kelly says
-        self.assertEqual(numbers["ceiling_usd"], "160.00")
+        share = D(str(CONSTITUTION["rungs"]["3"]["max_share_of_venue"]))  # 60% since swing and bunt (40% before)
+        self.assertEqual(stake, (D(400) * share).quantize(D("0.01")))  # whatever Kelly says
+        self.assertEqual(numbers["ceiling_usd"], str((D(400) * share).quantize(D("0.01"))))
 
 
 class RecommendationTest(HouseCase):

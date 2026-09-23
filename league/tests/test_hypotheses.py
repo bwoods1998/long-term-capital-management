@@ -6,6 +6,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from league.constitution import CONSTITUTION
 from league.economy import load_game
 from league.frontier import Answer
 from league.house import House, Settings
@@ -375,7 +376,8 @@ class FastEvidence(FoundryCase):
         self.earn(winner)
         packet = self.foundry.packet(self.DESK)
         self.assertEqual(packet["horizon_guidance"]["prefer"], "hour")
-        self.assertIn("4 active hourly blocks", packet["horizon_guidance"]["paper_screen"]["hour"])
+        hours = CONSTITUTION["ladder"]["paper"]["min_active_blocks"]  # 3 since swing and bunt (Sept 23, 2026)
+        self.assertIn(f"{hours} active hourly blocks", packet["horizon_guidance"]["paper_screen"]["hour"])
         rows = packet["forward_on_this_desk"]
         self.assertEqual((rows[0]["members"], rows[0]["on_paper"], rows[0]["earning"]), (1, 1, 1))
         self.assertIn("quarter of the taker", packet["fees"]["kalshi_maker"])

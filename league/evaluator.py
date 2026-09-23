@@ -157,9 +157,15 @@ class Evaluator:
         # A floor below zero (owner revision, Sept 23, 2026) lets a near-breakeven idea earn a paper
         # seat: forward fills judge it there, and `paper_death` takes the seat back from a loser.
         floor = float(rules.get("min_oos_growth", 0.0))
-        if int(oos.get("blocks") or 0) < rules["min_oos_blocks"] or float(oos.get("mean_log_growth") or 0.0) <= floor:
+        mean_oos = float(oos.get("mean_log_growth") or 0.0)
+        # The floor admits near-breakeven TRADING, never a program that sat the test out: flat
+        # out of sample reads exactly zero, which is above a negative floor.
+        idle_oos = floor < 0 and (int(oos["active_blocks"]) == 0 if oos.get("active_blocks") is not None else mean_oos == 0.0)
+        if int(oos.get("blocks") or 0) < rules["min_oos_blocks"] or mean_oos <= floor:
             reasons.append("out-of-sample growth is not above zero" if floor == 0.0 else
                            f"out-of-sample growth is not above {floor:+.3%} a block")
+        elif idle_oos:
+            reasons.append("it did not trade out of sample: no out-of-sample block was active")
         if deflated is None or deflated["dsr"] < rules["min_deflated_sharpe"]:
             shown = "undefined" if deflated is None else f"{deflated['dsr']:.3f}"
             reasons.append(f"deflated Sharpe {shown} against {len(trials)} trials, {rules['min_deflated_sharpe']} needed")

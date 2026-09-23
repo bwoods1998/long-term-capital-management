@@ -74,7 +74,7 @@ from .constitution import CONSTITUTION
 from .ledger import now_iso
 from .seeds import SEEDS
 
-PROMPT_VERSION = "foundry-2026-09-23.2"
+PROMPT_VERSION = "foundry-2026-09-23.3"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -208,9 +208,17 @@ Rules.
   markets, timing, entry or exit), and each is still a falsifiable card with its own `rejection` test;
   say in `mechanism` what carries over and what might not. You see its mechanism in words, never code.
 - It must TRADE on the replay tape: `replay_gate` needs at least min_trades closed trades and
-  min_blocks blocks within `replay_window`, positive out-of-sample growth, and a deflated Sharpe at
-  least min_deflated_sharpe. A program that never fires cannot pass; one that trades noise after fees
-  will not either. Most replays fail: be specific rather than hopeful.
+  min_blocks blocks within `replay_window`, out-of-sample growth above min_oos_growth a block (zero
+  when it is not stated), and a deflated Sharpe at least min_deflated_sharpe. A program that never
+  fires cannot pass; one that trades noise after fees will not either. Be specific rather than hopeful.
+- Size by conviction. The owner's rule, after Druckenmiller: swing big when you see the ball, bunt
+  when you don't. Every program should scale its position with the edge its signal measures -- the
+  minimum useful size when the signal is marginal (a bunt: cheap evidence, many closed trades), up to
+  `limits` when the modelled edge is large and the setup has paid before -- never one fixed size for
+  every signal. Growth is scored in log terms, so the right size is near Kelly: large only when the
+  edge is large relative to its variance. Say in `edge_after_costs` how the size follows the edge.
+- The owner accepts volatility for speed and discovery: prefer bold, distinct mechanisms that trade
+  often enough to be judged within days over timid ones that barely fire.
 - Respect `horizon_rule` and `limits`. No shorts, no leverage; exits are always allowed.
 - Read `replay_view`: replay does not supply everything a live wake does (quotes there have no
   timestamp). A program that requires a missing field never trades on replay and cannot pass.
