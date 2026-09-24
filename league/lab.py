@@ -69,7 +69,10 @@ blocked like any other; anything else a queued row's NEEDS, tape or result raise
 guarded on its own (`_guarded`): its warning names the `phase` and carries the traceback
 (`_traceback`, private), and the phases after it still run. `failures_alert_after` failed steps in a
 row raise one error alert and set `failing_since` in health.json (kept in `meta`, so a restart does
-not reset it); a step that works again clears it with an info.
+not reset it); a step that works again clears it with an info. The lab's tape index (tape key ->
+when it was built, the lab's tape id, the House's tape id, its source) is kept in `meta` too, so
+after a restart `ready_queued` counts the rows whose tape the House holds or rebuilds from its own
+disk, and the step evaluates before it breeds.
 
 **Forward windows (S2, Sept 23, 2026).** Every `forward_every_minutes` the lab replays its archived
 elites and its graduates waiting for seats (`forward_windows`) on tape data that arrived AFTER their
@@ -211,6 +214,11 @@ RESERVED_ORIGINS = ("agent", "luna", "sol")
 #: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
 #: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
 TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
+#: How long a search tape is used before it is built again (the House rebuilds its own tapes daily),
+#: and how long the tape index (`Lab._tape_index`) keeps a tape the lab built.
+SEARCH_TAPE_SECONDS = 6 * 3600
+#: Tapes the persisted index keeps at most (its newest); the search copies in memory are six.
+TAPE_INDEX_MAX = 64
 #: The tail of a traceback an alert carries (`_traceback`, a private key: `ledger.public_view`
 #: strips it from everything published).
 TRACEBACK_CHARS = 2000
@@ -635,6 +643,10 @@ class Lab:
         #: blocked for an error of the lab's own (`_block_row`), told at the end of each step.
         self._failures: list[dict[str, str]] = []
         self._row_errors: list[dict[str, str]] = []
+        #: The tape index: every search tape built in the last `SEARCH_TAPE_SECONDS`, tape key ->
+        #: {at, ident, house, source}, persisted in `meta` `tape_index` so a restart keeps it
+        #: (`_ready_keys`). The search copies themselves stay in memory (`_tapes`).
+        self._tape_index: dict[str, dict[str, Any]] = self._load_tape_index()
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
@@ -836,8 +848,9 @@ class Lab:
         """The lab's line in health.json (`House._health`, every tick): whether it may work now and
         why not, since when it has been closed, whether its step is failing (`failing_since`, set
         after `failures_alert_after` failures in a row; `failures_in_a_row`; the last `error`), the
-        paid phases skipped and why, the graduates waiting for seats. Cheap (a few small queries),
-        and never raises."""
+        paid phases skipped and why, the graduates waiting for seats, and its tapes (search copies in
+        memory, tapes in the persisted index). Cheap (a few small queries, no lock the House's tape
+        builds hold), and never raises."""
         try:
             since = self._meta("closed_since")
             waiting = self.waiting()
@@ -846,6 +859,7 @@ class Lab:
                 "closed_since": _iso(float(since)) if since is not None else None,
                 "closed_minutes": round((self._now() - float(since)) / 60, 1) if since is not None else 0,
                 **self._failing(),
+                "tapes": {"search_copies": len(self._tapes), "indexed": len(self._tape_index)},
                 "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
                 "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0,
                                  "graduates": [{k: r[k] for k in ("candidate", "line", "niche", "since", "hours", "forward")} for r in waiting[:8]]},
@@ -1009,8 +1023,9 @@ class Lab:
         return int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE status='queued'")[0]["n"])
 
     def ready_queued(self) -> int:
-        """Queued candidates whose search tape is built and fresh: what the next batches can run now."""
-        fresh = {key for key, hit in self._tapes.items() if self._now() - hit[0] < 6 * 3600}
+        """Queued candidates whose search tape the next batches can have without fetching anything
+        (`_ready_keys`): what they can run now."""
+        fresh = self._ready_keys()
         if not fresh:
             return 0
         count = 0
@@ -1020,6 +1035,24 @@ class Lab:
             except (TypeError, ValueError):
                 continue
         return count
+
+    def _ready_keys(self) -> set[str]:
+        """The tape keys a batch can have now without a fetch: a fresh search copy in memory; or, from
+        the tape index (which a restart keeps), a tape the lab built in the last `SEARCH_TAPE_SECONDS`
+        that the House holds in its cache (an agent's replay built it again) or rebuilds from its own
+        disk (the history store's development window: `source` "history-dev"). D1, Sept 24, 2026:
+        after the 23:40Z restart the in-memory copies were gone, `ready_queued()` was 0 and every
+        step went to `breed()` first. Takes the House's tape lock: the step's lane only, never the
+        tick (`health` does not call it)."""
+        now = self._now()
+        ready = {key for key, hit in self._tapes.items() if now - hit[0] < SEARCH_TAPE_SECONDS}
+        fresh = {key: entry for key, entry in self._tape_index.items() if key not in ready and now - entry["at"] < SEARCH_TAPE_SECONDS}
+        if fresh:
+            house = self.house
+            with house._tape_lock:
+                held = set(house._tapes)
+            ready |= {key for key, entry in fresh.items() if entry["source"] == "history-dev" or entry["house"] in held}
+        return ready
 
     def admit(self, code: str, *, niche: Any, origin: str, author: str, lineage: str, parents: Sequence[str] = (),
               idea: str = "", priority: int | None = None) -> str:
@@ -1138,10 +1171,11 @@ class Lab:
         history store holds ADA/USD only from 2026-02-01, so an hourly development window
         (2025-09-12..2025-11-14) of ADA/USD alone is fetched and empty; this function read the
         cut's first step outside its guard, and one queued Luna child asking for ADA/USD alone
-        failed every step for over two hours with an IndexError."""
+        failed every step for over two hours with an IndexError. Every tape built is entered in the
+        tape index (`_index_tape`), which a restart keeps."""
         key = tape_key(needs)
         hit = self._tapes.get(key)
-        if hit is not None and self._now() - hit[0] < 6 * 3600:  # the House rebuilds its own tapes daily
+        if hit is not None and self._now() - hit[0] < SEARCH_TAPE_SECONDS:  # the House rebuilds its own tapes daily
             return hit[1], hit[2]
         failed = self._tape_errors.get(key)
         if failed is not None and self._now() - failed[0] < 3600:
@@ -1170,16 +1204,21 @@ class Lab:
             if needs.get("venue") == "alpaca" and observed.get("series"):
                 raise LabError("unsupported input: cross-venue event observations are not recorded on equity tapes")
             check_dev_only(tape, house.holdout_window)
-        except (LabError, TimeoutError):
+        except TimeoutError:
+            raise
+        except LabError:
+            self._forget_tape(key)
             raise
         except Exception as exc:  # noqa: BLE001 - no tape is a blocked candidate, not a crash
             message = f"{type(exc).__name__}: {str(exc)[:200]}"
             self._tape_errors[key] = (self._now(), message)
+            self._forget_tape(key)
             raise LabError(message) from None
         if not tape.get("steps"):
             message = (f"unsupported input: the House's tape for these NEEDS has no steps ({str(tape_id)[:120]}): "
                        "nothing was recorded in its window")
             self._tape_errors[key] = (self._now(), message)
+            self._forget_tape(key)
             if tape_id not in cached:
                 with house._tape_lock:
                     house._tapes.pop(tape_id, None)
@@ -1196,7 +1235,57 @@ class Lab:
         if len(self._tapes) >= 6:
             self._tapes.pop(next(iter(self._tapes)))
         self._tapes[key] = (self._now(), ident, cut)
+        source = tape.get("source") if isinstance(tape.get("source"), Mapping) else {}
+        self._index_tape(key, ident, str(tape_id), "history-dev" if source.get("window") else "live")
         return ident, cut
+
+    def _load_tape_index(self) -> dict[str, dict[str, Any]]:
+        """The tape index as `meta` `tape_index` holds it, its fresh entries only, oldest first."""
+        try:
+            raw = json.loads(self._meta("tape_index") or "{}")
+        except ValueError:
+            return {}
+        now, rows = self._now(), []
+        for key, entry in (raw.items() if isinstance(raw, dict) else ()):
+            try:
+                row = {"at": float(entry["at"]), "ident": str(entry["ident"]), "house": str(entry["house"]), "source": str(entry["source"])}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if now - row["at"] < SEARCH_TAPE_SECONDS:
+                rows.append((str(key), row))
+        return dict(sorted(rows, key=lambda item: item[1]["at"]))
+
+    def _index_tape(self, key: str, ident: str, house_id: str, source: str) -> None:
+        """Enter a search tape just built in the tape index and persist it. What is kept, and why:
+        the tape key (the NEEDS it serves), when it was built (fresh for `SEARCH_TAPE_SECONDS`), its
+        lab id (what `batches.tape_id` and `candidates.tape_id` name it), the House's own tape id
+        (whether the House holds it now) and its source ("history-dev" when the House rebuilds it
+        from the history store on its own disk, "live" when it must fetch). Not the tape: a search
+        copy is some MB and is cut again from the House's tape. Never raises: an index that cannot
+        be written costs a breeding step after a restart, never a candidate."""
+        self._tape_index.pop(key, None)
+        self._tape_index[key] = {"at": self._now(), "ident": ident, "house": house_id, "source": source}
+        self._save_tape_index()
+
+    def _forget_tape(self, key: str) -> None:
+        """A tape that failed or was refused is not one a batch can have."""
+        if self._tape_index.pop(key, None) is not None:
+            self._save_tape_index()
+
+    def _save_tape_index(self) -> None:
+        now = self._now()
+        kept = [(k, e) for k, e in self._tape_index.items() if now - e["at"] < SEARCH_TAPE_SECONDS][-TAPE_INDEX_MAX:]
+        self._tape_index = dict(kept)
+        try:
+            self._set_meta("tape_index", json.dumps(self._tape_index))
+        except Exception as exc:  # noqa: BLE001 - see `_index_tape`
+            text = f"the lab could not keep its tape index ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                try:
+                    self.house.alert("warning", text)
+                except Exception:  # noqa: BLE001
+                    pass
 
     # --------------------------------------------------------------- evaluate
     def _next_batch(self) -> tuple[str, dict[str, Any], list[sqlite3.Row]] | None:
@@ -1296,6 +1385,7 @@ class Lab:
                 for key, hit in list(self._tapes.items()):
                     if hit[1] == tape_id:
                         self._tapes.pop(key)
+                        self._forget_tape(key)
                         self._tape_errors[key] = (self._now(), f"unsupported input: {str(exc)[:200]}")
                 for r in chosen:
                     self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?",

@@ -11,8 +11,8 @@ first_day 2026-02-01, 61 empty chunks, 7 done), so the development window of an 
 IndexError out of `_next_batch` on every step, before any batch, for as long as the row stayed at
 the front of the queue (a poison pill: nothing ever moved it).
 
-These tests hold the fix at that site, the rule that one candidate never stops the lab, and the
-step's traceback and escalation.
+These tests hold the fix at that site, the rule that one candidate never stops the lab, the step's
+traceback and escalation, and the tape index that lets a restart skip the breeding step.
 """
 
 from __future__ import annotations
@@ -264,6 +264,69 @@ class TheStepSaysWhy(StepCase):
         self.assertEqual(self.lab.health()["failures_in_a_row"], 0)
         self.assertEqual(self.alerts("info", "works again"), [])  # never escalated, so nothing to take back
         self.assertEqual(self.alerts("error"), [])
+
+
+class ARestart(StepCase):
+    """After the 23:40Z restart `ready_queued()` was 0 (the lab's tape cache is in memory), so every
+    step went to `breed()` first. The lab's tape index is kept in `meta` now."""
+
+    def setUp(self):
+        super().setUp()
+        self.house.settings.deep_replay_days = 3  # a short development window: the replays stay fast
+        self.house.game["lab"]["batch_size"] = 4
+        self.needs = static_literal(KNOB, "NEEDS")
+
+    def rows(self, needs, count, prefix, age=3600.0):
+        return [self.insert(f"{prefix}{n}", needs, niche=DESK, origin="param", priority=2,
+                            code=IDLE.replace("nothing to do", f"nothing to do {prefix}{n}"), age=age - n) for n in range(count)]
+
+    def test_the_tape_index_is_kept_in_meta_and_read_back_fresh(self):
+        self.rows(self.needs, 2, "a")
+        self.assertEqual(self.lab.evaluate_batch()["candidates"], 2)
+        index = json.loads(self.lab._meta("tape_index"))
+        self.assertEqual(len(index), 1)
+        (key, entry), = index.items()
+        ident = self.lab._tapes[key][1]
+        self.assertEqual(entry["ident"], ident)
+        self.assertEqual(entry["source"], "live")  # no history for BTC/USD here: the House's live tape
+        self.assertTrue(entry["house"].startswith("alpaca:BTC/USD"))
+        self.restart()
+        self.assertEqual(self.lab._tape_index[key]["ident"], ident)
+        self.clock.advance(7 * 3600)
+        self.restart()
+        self.assertEqual(self.lab._tape_index, {})  # older than a search tape is kept: not ready, not kept
+
+    def test_after_a_restart_rows_on_tapes_the_house_holds_are_ready_and_the_step_evaluates_first(self):
+        self.history(["BTC/USD"], "5Min", "2025-11-01", "2025-11-14")
+        tape_id, tape = self.house.tape_for(self.needs)
+        self.assertTrue(tape["steps"] and tape["source"]["window"])  # a development tape from the store
+        live = {**self.needs, "symbols": ["ETH/USD"]}  # not in the store: the House's live tape
+        self.house._tapes.clear()
+        deep_rows, live_rows = self.rows(self.needs, 10, "d"), self.rows(live, 6, "l", age=1800.0)
+        while self.lab.evaluate_batch():  # builds both tapes, evaluates a batch on each
+            self.lab._tapes_built = 0
+            if self.lab.queued() <= 12:
+                break
+        waiting_deep = sum(self.candidate(r)["status"] == "queued" for r in deep_rows)
+        waiting_live = sum(self.candidate(r)["status"] == "queued" for r in live_rows)
+        self.assertGreaterEqual(waiting_deep, 4)
+        self.assertGreaterEqual(waiting_live, 1)
+        self.clock.advance(120)  # a deploy's restart takes its minutes
+        self.house._tapes.clear()
+        self.restart()
+        # The development tape is rebuilt from the House's own disk (the history store): ready. The live
+        # one needs a fetch: not ready, until the House holds it again (an agent's replay built it).
+        self.assertEqual(self.lab.ready_queued(), waiting_deep)
+        self.house.tape_for(live)
+        self.assertEqual(self.lab.ready_queued(), waiting_deep + waiting_live)
+        calls = []
+        breed, batch = self.lab.breed, self.lab.evaluate_batch
+        with patch.object(self.lab, "breed", side_effect=lambda: calls.append("breed") or breed()), \
+                patch.object(self.lab, "evaluate_batch", side_effect=lambda: calls.append("batch") or batch()):
+            out = self.lab.step()
+        self.assertEqual(calls[0], "batch")  # before the index, a restart made every step breed first
+        self.assertNotIn("error", out)
+        self.assertGreaterEqual(out["evaluated"], 4)
 
 
 if __name__ == "__main__":
