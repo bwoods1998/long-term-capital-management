@@ -139,15 +139,19 @@ or never swings at all.
             # C3 (the close-the-gaps run, Sept 24, 2026): what a practice agent's sizing CAN do for its family's proof.
             # Scaled alike, every bet proves nothing faster; sized by conviction, the record weighs most where the
             # edge is (an event weighs what it put at risk), so an informative conviction proves the family sooner.
+            # An uninformed one does not disprove it sooner (the review of #262, `families.pool`: unequal weights are
+            # fewer effective events, n_eff = (sum w)^2 / sum w^2; a losing family sized at random showed a negative
+            # pooled record after 40 events 79% of the time, sized flat 86%): both the proof and the disproof wait.
             sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE. An event is measured per dollar it put at risk\n"
                       "  and weighs what it put at risk against your usual size on that book: scaling every bet up or down\n"
                       "  proves nothing faster, a big losing bet counts for its dollars, and a token size measures fees and fills\n"
                       "  you will never pay trading real money: size a practice position the way your code would size it with\n"
-                      "  real money. What proves (or disproves) a family faster is MORE independent events, and CONVICTION:\n"
-                      "  sized by the edge your code measures on each bet, the record weighs most where that edge is, so a\n"
-                      "  conviction-sized practice record earns your family's proof sooner than one flat size when the\n"
-                      "  conviction is real, and disproves it sooner when it is not. This is information, never an order: your\n"
-                      "  size is your code's.\n")
+                      "  real money. What proves (or disproves) a family faster is MORE independent events. CONVICTION helps\n"
+                      "  only when it is real: sized by the edge your code measures on each bet, the record weighs most where\n"
+                      "  that edge is, so a conviction-sized practice record earns your family's proof sooner than one flat\n"
+                      "  size when the edge is there; sizes that carry no information count as fewer independent events, and\n"
+                      "  the proof and the disproof both come later. This is information, never an order: your size is your\n"
+                      "  code's.\n")
         else:
             sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE: a conviction-sized practice record proves (or\n"
                       "  disproves) your family faster than a token one. Information, never an order: your size is your code's.\n")

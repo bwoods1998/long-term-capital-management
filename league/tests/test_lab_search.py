@@ -135,10 +135,31 @@ class PracticeSizing(unittest.TestCase):
         from league.rules import rules_text
 
         text = " ".join(rules_text(load_game()).split())
-        self.assertIn("What proves (or disproves) a family faster is MORE independent events, and CONVICTION", text)
-        self.assertIn("a conviction-sized practice record earns your family's proof sooner than one flat size when the "
-                      "conviction is real, and disproves it sooner when it is not", text)
+        self.assertIn("What proves (or disproves) a family faster is MORE independent events. CONVICTION helps only when it is real", text)
+        self.assertIn("a conviction-sized practice record earns your family's proof sooner than one flat size when the edge is there", text)
         self.assertIn("This is information, never an order: your size is your code's.", text)
+
+    def test_an_uninformed_conviction_is_not_said_to_disprove_a_family_sooner(self):
+        """The review of #262: the line said a conviction-sized record 'disproves it sooner when it is not [real]'. Under
+        `families.pool` unequal weights are fewer effective events: a losing family sized at random, not flat, shows a
+        negative pooled record less often (the review's simulation: 79% against 86% after 40 events)."""
+        import random
+
+        from league.families import pool
+        from league.rules import rules_text
+
+        text = " ".join(rules_text(load_game()).split())
+        self.assertNotIn("disproves it sooner", text)
+        self.assertIn("sizes that carry no information count as fewer independent events, and the proof and the disproof both "
+                      "come later", text)
+        rng = random.Random(11)
+        negative = {"flat": 0, "uninformed": 0}
+        for _ in range(600):
+            values = [rng.gauss(-0.01, 0.06) for _ in range(40)]
+            for sizes in negative:
+                groups = {str(i): [(v, 1.0 if sizes == "flat" else rng.lognormvariate(0, 0.8))] for i, v in enumerate(values)}
+                negative[sizes] += pool(groups, 10, 0.8)["mean_log"] < 0
+        self.assertGreater(negative["flat"], negative["uninformed"])
         self.assertEqual(text.count("SIZE ON PRACTICE IS YOURS"), 1)  # said once, beside the family's pooled proof
         self.assertNotIn("paper", text[text.index("SIZE ON PRACTICE"):text.index("never an order")].lower())
 
