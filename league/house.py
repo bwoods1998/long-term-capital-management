@@ -5242,12 +5242,16 @@ class House:
         return len(latest)
 
     def _retained_waiting(self, *, expired: bool = False) -> list[dict[str, Any]]:
-        """The retained candidates waiting for a seat (house.json `retained`), longest wait first; those
-        past `RETAINED_TTL_SECONDS` only with `expired` (the admission pass drops them)."""
+        """The retained candidates waiting for a seat (house.json `retained`) in the order the admission
+        pass seats them: a proven family's first -- the seat follows proof at the family level (at T0 only
+        mullins-14's weather-favorites was proven among fourteen authors that had died holding candidates
+        that day, and it had died after ten of them) -- then the longest wait. Those past
+        `RETAINED_TTL_SECONDS` only with `expired` (the admission pass drops them)."""
         now = self.clock()
         rows = [dict(r) for r in (self._state.get("retained") or {}).values()
                 if expired or now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS]
-        return sorted(rows, key=lambda r: (float(r.get("since") or 0), str(r.get("session"))))
+        return sorted(rows, key=lambda r: (not self._family_proven(r.get("family"), r.get("venue")),
+                                           float(r.get("since") or 0), str(r.get("session"))))
 
     def _admit_orphan(self, entry: Mapping[str, Any], rules: Mapping[str, Any], rows: Sequence[dict[str, Any]]) -> Agent | None:
         """Seat one retained candidate of a dead author (S3), under the lifecycle lock: born on its author's

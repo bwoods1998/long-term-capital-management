@@ -333,7 +333,7 @@ status is exposed in health and agent research context; qualification is distinc
    candidate to the seat queue (`_hand_off_retained`: its admission goes `orphaned`, a `retained`
    waiter in house.json), and the admission pass of `_refill` adopts, once an author, the candidates
    cancelled with authors that died within `RETAINED_TTL_SECONDS` (72 h) before this rule
-   (`_adopt_orphans`); `_admit_orphan` seats them first -- House-staked, born on the author's line with
+   (`_adopt_orphans`); `_admit_orphan` seats them first, a proven family's before the rest, then the longest wait -- House-staked, born on the author's line with
    the author as parent, seated on paper, a `retained` birth route -- dropping one that cannot be born,
    that a living agent already runs, or that is past the 72 hours. `SEAT_WAITERS` ranks them with the
    graduates. **Seats holding none** (S4): the hourly watch lists the residents off real money with no

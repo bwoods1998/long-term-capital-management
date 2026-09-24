@@ -315,6 +315,25 @@ class RetainedCandidates(EvidenceCase):
         self.assertEqual(self.row(session)["status"], "admitted")
         self.assertEqual(self.house.evaluator.rung(child.id), 1)
 
+    def test_a_proven_familys_retained_candidate_is_seated_before_an_older_unproven_one(self):
+        """At T0 fourteen authors had died holding candidates within the day; only mullins-14's family
+        (weather-favorites) was proven, and it died after ten of them: the seat follows proof first."""
+        older = self.seated("older")
+        self.queued(older, self.retained(BUYER + "\n# an unproven family's\n"), "research:older:1")
+        self.house.kill(older, "displaced", "test")
+        self.clock.advance(3600)
+        author = self.house.spawn("author", "proven-family", BUYER + "\n# its own\n", reason="a test agent")
+        self.house.evaluator.seat(author.id, 1, "test")
+        self.queued(author, self.retained(BUYER + "\n# a proven family's\n"), "research:author:1")
+        self.house.kill(author, "displaced", "test")
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.clock.advance(601)
+        with self.proven("proven-family"):
+            self.assertEqual([w["author"] for w in self.house.seat_waiters(fresh=True)["retained"]], [author.id, older.id])
+            child = self.house._refill(self.rules)
+        self.assertEqual(child.parent, author.id)
+        self.assertEqual(self.row("research:older:1")["status"], "orphaned")
+
     def test_a_candidate_nobody_can_make_room_for_waits_is_told_and_expires(self):
         author = self.seated("author")
         self.queued(author, self.retained(BUYER + "\n# waiting\n"), "research:author:1")

@@ -256,7 +256,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     7 days, null where the median was never reached and the plain 12-hour grace stands).
     `retained` waiters are the latest replay-passed research candidates of residents that died
     holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
-    admission pass on their author's line, dropped after 72 hours.
+    admission pass on their author's line (a proven family's first, then the longest wait), dropped
+    after 72 hours.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
