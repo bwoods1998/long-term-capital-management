@@ -542,7 +542,10 @@ trigger is recorded, so what each kind of evidence bought is measured.
 A pass the model's provider breaks (a server error: HTTP 500, 502, 503, 504 or 529) is not yours
 to pay for and does not count (Sept 24, 2026): what its turns were charged is refunded to your
 credits at once, it is not counted as a pass anywhere, and you may research again fifteen minutes
-later. A pass your own model ended -- it ran out of room, or it hit your daily cap -- is a pass.
+later. A pass your own model ended -- it ran out of room, or it hit your daily cap -- is not
+refunded and starts your research clock again like any pass; like every failure of the model
+call, it moves no streak and is not one of the passes you are given before your seat can go to
+another.
 Research on Sail waits, too, while the House's research on Sail has spent its hourly cap; a pass
 already under way finishes, and the next begins once the hour's spend is under the cap again.
 
