@@ -596,6 +596,23 @@ class EvidenceClockTest(ScoreboardCase):
                                                    "km_median_h": 9.0, "censored_longest_h": 4.0})
         self.assertEqual(clocks["alpaca-crypto-alts"]["median_reached_h"], 3.0)
 
+    def test_the_houses_closing_sale_is_not_the_members_settlement(self):
+        """A member with two closes that died holding a third position did not reach its third
+        settlement when the House sold that position (the House's own clock since the B-seats review)."""
+        f = self.floor
+        f.born("h-1", 0, venue="alpaca", desk="alpaca-crypto-alts", horizon="hour")
+        f.buy("h-1", 1, "alpaca-paper", "SOL/USD", right=None)
+        f.sell("h-1", 2, "alpaca-paper", "SOL/USD", 0.1)
+        f.sell("h-1", 3, "alpaca-paper", "SOL/USD", 0.1)
+        f.died("h-1", 4)
+        f.sell("h-1", 4.5, "alpaca-paper", "SOL/USD", -0.2, reason="the House is closing this account")
+        f.row("ops.job", "house", 6, {})
+        snap = f.snapshot()
+        agents, trades, *_ = self.parts(snap)
+        clocks = gs.evidence_clocks(snap, agents, trades, gs.own_fills(snap))["desks"]
+        self.assertEqual(clocks["alpaca-crypto-alts"]["reached"], 0)
+        self.assertEqual(clocks["alpaca-crypto-alts"]["censored_longest_h"], 3.0)
+
     def test_the_kaplan_meier_median(self):
         self.assertEqual(gs.kaplan_meier_median([(4, False), (9, True)]), 9)
         # Four at risk: an event at 1 h (0.75), one censored at 2 h, an event at 3 h (0.75 x 2/3 = 0.5).
