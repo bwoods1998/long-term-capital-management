@@ -751,6 +751,29 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.rebalance()
         self.assertEqual(len(rows()), written)  # nothing changed: nothing
 
+    def test_a_family_record_row_is_not_written_again_because_the_clock_moved(self):
+        """Review of #242: the capacity estimate's rates move with the clock alone (a window that slides), so on the T0
+        snapshot 36 of the 43 families followed changed digest every five minutes with no new trade: about 10,000 rows a
+        day burying the state changes the rows exist to record."""
+        self.records.stop()  # the real family record, from the ledger
+        try:
+            a = self.agent()
+            for i in range(6):  # a member's bids an hour apart, measured by the capacity estimate
+                self.house.ledger.append("book.order", {
+                    "book": "kalshi-shadow", "order_id": f"o{i}", "side": "buy", "status": "new", "limit_price": "0.90", "quantity": "10",
+                    "instrument": {"market_id": f"KXHIGHNY-26SEP{i + 1:02d}-B72.5", "multiplier": "1"},
+                    "shares": [{"agent": a.id, "quantity": "10"}]})
+                self.clock.advance(3600)
+            rows = lambda: [e.payload for e in self.house.ledger.iter(kinds="family.record") if e.payload["family"] == "weather-favorites"]  # noqa: E731
+            self.house.allocator.rebalance()
+            self.assertEqual(len(rows()), 1)
+            self.assertIsNotNone(rows()[0]["capacity"]["markets_per_day"])
+            self.clock.advance(301)
+            self.house.allocator.rebalance()
+            self.assertEqual(len(rows()), 1)  # nothing but the clock moved: no row
+        finally:
+            self.records.start()
+
     def test_the_states_survive_a_restart_through_the_ledger(self):
         agents, _ = self.swinging()
         self.clock.advance(301)

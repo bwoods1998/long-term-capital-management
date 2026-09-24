@@ -1117,7 +1117,7 @@ class Allocator:
                 continue
             row = self._family_row(record)
             key = families.key_of(family, venue)
-            digest = families.row_digest(row)
+            digest = families.row_digest(families.change_view(row))  # never for the clock alone (review of #242)
             if digests.get(key) == digest:
                 continue
             digests[key] = digest

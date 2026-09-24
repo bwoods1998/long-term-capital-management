@@ -795,6 +795,17 @@ def row_digest(row: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(row, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+def change_view(row: Mapping[str, Any]) -> dict[str, Any]:
+    """What makes a `family.record` row worth writing again: everything but the capacity estimate's rates, which move with
+    the clock alone (markets and settlements a day over a window that slides; review of #242, Sept 24, 2026: 36 of the 43
+    families followed on the T0 snapshot changed digest every five minutes with no new trade, about 10,000 rows a day
+    burying the state changes the rows exist to record). Whether capacity binds a swing stays in it, and a row written
+    for any other change carries the capacity of that moment."""
+    view = {k: v for k, v in row.items() if k != "capacity"}
+    view["capacity_binds"] = bool((row.get("capacity") or {}).get("binds"))
+    return view
+
+
 def restore_states(ledger: Any) -> dict[str, dict[str, Any]]:
     """The states the ledger's last `family.record` rows carry, for an allocator whose own state file has none
     (a first start under this code keeps nothing to restore: every family starts from its record)."""
