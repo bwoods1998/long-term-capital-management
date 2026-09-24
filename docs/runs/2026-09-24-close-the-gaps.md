@@ -615,3 +615,25 @@ the last note:
 Compute at 09:37Z: the OpenAI month is at $442.50 of $607, with $164.50 left and $2.40 settled in the
 last hour. Sail has $165.44 on the House line and burned about $2.60 in four hours under the $2/h
 research cap (it was about $37 a day before).
+
+### The resume (14:30Z Sept 24, in the US session)
+
+The session that ran this record was cut off in the night after the T+8 note; the owner resumed
+at 14:26Z during the stock session. Read on the box at 14:24-14:35Z (the scoreboard's reading and
+the numbers are in the plan's new section "Where the run stands at the resume"):
+- The floor runs `main-786bc2285e1a` (Deploy B plus Merton's #208, #217, #264, #266-#268 shipped
+  by the updater at 11:46Z); the grant is active on `c02ed852`; 112 living; no book frozen; the
+  floor's real P&L +$10.66 marked, the first positive reading since the grant (today's realized
+  Kalshi +$22.02: meriwether-h2d625d +$19.47 on 5, meriwether-h7d7702 +$16.30 on 1; the five
+  15-minute crypto probes −$27.29 on 23). Three Alpaca crypto-alts probes since 13:29Z (haghani-62,
+  haghani-r42c38c, haghani-63; resting SOL and XRP limit buys, no fill yet).
+- **Deploy C never shipped.** `c/integration` (36 commits) and `c-search/review` (8 review fixes)
+  existed only on this machine; both were pushed at 14:33Z. They merge cleanly (`merge-tree` exit
+  0); no money rule changes; owner deploy, no ratify.
+- The scoreboard at 14:28Z: 1 proven family (real n 5, capacity $83/day); 9 promotions since
+  Deploy A, all probes, −$6.07 on 8; proven $20 / unproven $169; median life 5.8 h, 66% of 140
+  deaths before 3 fills (26 of the last 32 displaced without a fill: the chain #265 fixes);
+  lab 101 batches an hour, 14 of 54 graduates LLM-written, 53 waiters at 46.6 h (28 of them for
+  the 4-seat `kalshi-crypto-strikes` desk); 0 self-cross refusals; 9 of 12 recorders, `kalshi-open`
+  idle. Tick 95-175 s (C-perf is in Deploy C).
+- The plan gained a "Wave 3" section (PR #269) with the resume's order of work.
