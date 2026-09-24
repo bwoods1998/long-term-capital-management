@@ -80,9 +80,14 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
 - **What the pause is, on the record:** the ledger shows the two Sept 22 wake holes as a pause
   lifting at 15:28:11Z (every kind of work resumed in that second) and a Sail allowance closing at
   11:01Z on Sept 21. Neither is a scheduler fault, and the House now says which markets a stop
-  leaves unattended: a warning once per half hour for each round-the-clock desk (coins, Kalshi)
-  with living members and no wake for 30 minutes while the House is NOT paused
-  (`House._order_path_invariants`); and a warning once a day when an intent is refused for an agent
+  leaves unattended: a warning for each round-the-clock desk (coins, Kalshi) with living members
+  and no wake for 30 minutes, or for twice its briskest member's `wake_minutes` when that is longer,
+  while the House is NOT paused, told once per that long (`House._order_path_invariants`). The clock
+  starts at the latest of the desk's last wake, the House's start, a pause and its oldest living
+  member's birth. Sept 24, 2026: kalshi-attention's one member, waking every 30 minutes as scheduled,
+  was called unwoken twelve times that day at 30 or 31 minutes, and kalshi-open was called unwoken
+  "for 146 minutes" 29 seconds after its first member ever was born (the clock had started at the
+  House's own start); since then neither is a warning. And a warning once a day when an intent is refused for an agent
   that is not alive (the House's own wind-down walking into a wall each mark pass, as 607 "no seat"
   and 576 "outside regular hours" refusals did on Sept 21-23 before anyone read the ledger).
 
@@ -268,7 +273,13 @@ watch.
     not recorded yet) or a site that refuses the House (`polls`: RealClearPolling's bot wall) shows
     in `failing` with its reason and is not warned about hourly. Each recording feed also writes an
     hourly `data.coverage` ledger row (`asset: feed`, `host`, `status`: current, partial or
-    unavailable).
+    unavailable). An `earnings` stock is named in the hourly "feeds: N of 24 earnings polls failed 3
+    times in a row" warning only after three failed polls in a row (`Source.warn_after`), and EDGAR is
+    given 45 s to answer (Sept 24, 2026: its browse feed took a median 6.4 s, 44% of polls over 10 s,
+    and 31 of 995 polls hit the old 30 s read timeout, every stock read at its next poll; a failed
+    pass is asked again five minutes later and reads back a day before the last good poll, so one
+    timeout loses no filing). `failing` shows a stock at its first failure. A warning quotes each URL
+    without its query, so the reason (a read timeout, an HTTP status) is on the line.
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `tick_steps` (Sept 24, 2026): where the tick's time went, on the monotonic clock. `last`: the
     last tick's `at`, `total_seconds` (from its start to its health block written) and `steps`, the
@@ -743,7 +754,16 @@ watch.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
-  (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer)
+  (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer).
+  Since Sept 24, 2026 an offer is a market of a series the program's NEEDS names that resolves inside
+  its horizon (`House._offered`): the busiest live series a desk shows a program whose own series
+  have nothing in its window (`ctx["note"]`) is not one, and such a wake is `shut` (nothing in its
+  window), not `barren` -- greenwich-h4cb387, NFL props within six hours ten hours before the game,
+  was shown UEFA and DJI markets and called quiet at 14:58Z. A desk whose offered agents are all day
+  programs is told only after a day without an intent (`QUIET_DESK_DAY_SECONDS`, counted from its first
+  unanswered offer since its last intent, once a day), and the warning says for how many hours:
+  kalshi-sports, whose favourites programs trade around game time, was told six times on Sept 24
+  while two of its agents made the floor's profit
   and `<agent>: a real-money bunt on <book> was frozen by a daily-loss rule` (once an agent a day:
   the book's daily rule is meant not to apply to a rung-2 bunt; if this fires, it is applying).
 - **An exit that met the House's own resting order** (D3, Sept 24, 2026). It is no longer refused
@@ -766,9 +786,17 @@ watch.
   "no price is left above the House's own best bid to rest this exit at" (a House bid at the top of an
   event's range, or a stale quote, while a cross is not allowed) and "no ask to rest this exit at".
   A crossed book reconciles to the cent: the venue saw only the cancel.
-- **"does not reconcile" on a paper book, by cents.** This is a warning, not an error (#108): it is
-  the venue's end-of-day fee activity. An error means real money, or positions that disagree; read
-  the `book.reconciled` rows.
+- **A practice book's cents are dust, not a freeze** (Sept 24, 2026, `book.PRACTICE_DUST_USD`). A
+  practice book's cash difference under $1.00, with every position agreeing and no order in doubt, is
+  booked to the House row at once: a `book.fill` row with `source: dust` and a `detail` beginning
+  "practice book:". The cents are Alpaca's option fees (the OCC clearing fee, $0.03 on a one-contract
+  buy and $0.02 on a sale, is taken from cash at the fill but listed as a FEE activity only the next
+  morning), a maker's refund on a crypto fill, and cent rounding on fractional fills. Until then they
+  froze `alpaca-paper` (every Alpaca practice entry refused, 11 on Sept 24) until more fills raised the
+  per-fill tolerance or three readings adopted the venue, and a freeze at 15:37:27Z rolled Deploy C
+  back inside its watch. A "does not reconcile" warning on a practice book now means a dollar or
+  more, or cents beside an order whose outcome is unknown; an error means real money, or positions
+  that disagree. Read the `book.reconciled` rows. A real book is unchanged: its cents still freeze it.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:
   `{"key", "kind", "summary", "agents", "severity"}`. It is admitted whatever its priority.
   `{"drill": "<stamp>"}` plants the labelled synthetic drill; `scripts/repair_drill.py --plant`
