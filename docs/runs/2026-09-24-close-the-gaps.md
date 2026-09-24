@@ -166,6 +166,25 @@ recorded for the next open; live verification uses the markets that trade around
   calls in the hour: the research backlog and the six Merton roles that were overdue; $2.52 settled,
   $8.59 of in-flight holds). Watched hourly; L2 pauses the unproductive roles in Wave 1.
 
+- 02:15Z — PR #222 merged (the House publishes the probe band; the site accepts it since #6).
+- 02:17:34Z — **the first Alpaca real agent:** haghani-56 (alpaca-crypto-alts, family
+  crypto-alts-reversion) promoted to an Alpaca bunt, "E 1.0104 is at or above 1.01 on 10 closed trades",
+  under the T0 rules. Its family's pooled record is negative (n 156, lcb −0.0016): after Deploy A it is
+  a $25 probe, the same stake.
+- 02:27Z — PR #223 merged (the scoreboard); the T0 reading is below. Z's report: D4 must count closed
+  trades per event too (the A-money build does); the event rule groups `KXRAIN-26SEP21-ATL/-CHI/...`
+  into one event (Kalshi's own grouping; conservative); practice rows are growth on a $200 purse and
+  real rows on a $30 stake, so real rows dominate the pooled mean beyond their weight. Kept for
+  Deploy A (account growth is the unit W is measured in; a return-on-risk check agrees that
+  weather-favorites is proven and disagrees on sports-central-run-under, negative on practice returns
+  at risk); C1 revisits the normalization with more data.
+- 02:3xZ — the in-box updater shipped main (release `main-84a377f23768`): a House restart.
+- 02:42Z — OpenAI: the gateway month $409.54 (+$4.09 since 01:57Z). The hour's costs on the ledger:
+  Luna research 126 sessions $2.69, Sail `pro_asap` research 8 sessions $0.90 ($0.11 a session),
+  consultant 3 passes $1.18, and the architect, toolsmith, designer and teacher once each ($2.46: the
+  roles that were overdue while the tier was below "all"). L2 (Wave 1) pauses the four roles until the
+  floor's real P&L is positive.
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
