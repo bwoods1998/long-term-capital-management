@@ -4916,7 +4916,8 @@ class House:
                         continue
             # S3 (R2): its desk's evidence clock has run with no positive record of its own; a newcomer with a winning
             # forward window need not wait for the record the protections below exist to let it measure.
-            stale = scored and standing.rung == 1 and not idle_pause and self._stale_seat(agent, opportunity, clock, grace, keeps_hours, now)
+            stale = (scored and standing.rung == 1 and not idle_pause and self._stale_seat(agent, opportunity, clock, grace, keeps_hours, now)
+                     and not self._awaits_settlement(agent))
             if keeps_hours:
                 if traded and not stale and self._trading_pending(agent, book, opportunity, now, rules):
                     kept("a trader short of its record")
@@ -5007,6 +5008,18 @@ class House:
             return False
         mine = self._resident_forward(agent)
         return mine is None or mine <= 0
+
+    def _awaits_settlement(self, agent: Agent) -> bool:
+        """Whether a practice resident holds an event contract still to settle (the review of #276, Sept 24, 2026). S3
+        takes a seat whose desk's evidence clock has run with no positive record; a resident holding open event positions
+        is waiting for exactly the settlements that clock measures, and displaced now its wind-down would sell them at
+        the bid on the practice book and lose them (before S3 the trading protection kept such a trader until 3
+        settlements or 3 sessions). So S3 waits for them; the other rules still apply to it."""
+        book = self.book_of(agent)
+        if book is None or book.real_money or agent.id not in book.accounts:
+            return False
+        held = list(book.account(agent.id).holdings.values())  # copied at once: wakes run beside this
+        return any(h.instrument.asset_class == "event" and h.quantity != 0 for h in held)
 
     def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
         """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its

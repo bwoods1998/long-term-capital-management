@@ -204,6 +204,26 @@ class StaleSeats(EvidenceCase):
                 self.assertEqual(why, {"real money": 1, "a winner": 1, "a proven family's member": 1})
             self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=scored).id, member.id)
 
+    def test_a_resident_holding_an_event_contract_to_settle_is_not_stale(self):
+        """The review of #276: S3 displaced a stale trader holding open event positions, and its wind-down sold them at the
+        bid, losing the settlements its desk's evidence clock waits for. It waits for them now."""
+        from decimal import Decimal
+
+        from league.book import Holding
+        from league.venues import instrument_for
+
+        self.desk_clock(3.7)
+        trader = self.trader()
+        scored = Newcomer(forward=0.0005)
+        contract = instrument_for("kalshi-shadow", {"symbol": "KXMLBTOTAL-26SEP241840MILPHI-8", "right": "no"})
+        account = self.house.book_of(trader).account(trader.id)
+        account.holdings[contract.key] = Holding(contract, Decimal("5"), Decimal("4.60"))
+        self.clock.advance(4 * 3600)
+        with patch.object(self.house, "_resident_forward", return_value=None), patch.object(self.house, "_forward_scorable", return_value=True):
+            self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=scored), "its contracts have not settled")
+            del account.holdings[contract.key]  # settled
+            self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=scored).id, trader.id)
+
     def test_one_stale_seat_a_desk_a_tick(self):
         self.desk_clock(3.7)
         first, second = self.trader("first"), self.trader("second")

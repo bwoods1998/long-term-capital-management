@@ -416,7 +416,8 @@ watch.
       closed since) with no positive record of its own (no winning standing, no positive forward
       window), past the S1 forward rule and the trading and screen protections; never inside its
       clock or fair chance, a real-money seat, a winner, a proven family's member by an unproven
-      newcomer, or one holding a position while its market is shut; one a desk a tick. At 15:06Z 29
+      newcomer, one holding a position while its market is shut, or one holding an event contract
+      still to settle (the settlements its clock waits for; `_awaits_settlement`); one a desk a tick. At 15:06Z 29
       practice seats were stale by this test (10 index ETFs, 5 options, 4 crypto-15m, 3 megacaps, 2
       crypto majors, 2 sports, 2 sports props, 1 attention); one waiter had a winning window
       (a megacaps graduate, +0.000102 a block over 3 active blocks).
