@@ -722,6 +722,77 @@ class OpenInterest(RecorderCase):
                          {"perp_open_interest_history": "oi", "kalshi_open_interest_history": None, "perpetual_open_interest": "perps"})
 
 
+# ---------------------------------------------------------------------------- the owner's keys
+class Keyed(RecorderCase):
+    """EIA's and The Odds API's recorders go live with no code change once the owner places a key and
+    allows the host; until then they wait -- poll nothing, and are never said to fail."""
+
+    KEY = "eia-" + "7" * 36
+
+    def transport(self):
+        from ltcm.data.eia import HOST
+        from ltcm.tests.test_data_keyed import WTI
+
+        return FakeTransport({HOST + "/v2/petroleum/pri/spt/data/?*": WTI})
+
+    def test_off_without_the_key_or_the_host_and_on_with_both(self):
+        fake = self.transport()
+        waiting = self.recorder({"eia": ["WTI"]}, transports={"eia": fake}, environ={}, allowed_hosts=["api.eia.gov"])
+        self.assertEqual((waiting.keys("eia"), waiting.due(), waiting.run()["polled"]), ([], False, []))
+        self.assertEqual(fake.calls, [])
+        self.assertIn("waiting for the owner's key: EIA_API_KEY", waiting.describe()["eia"]["waiting_for"])
+        self.assertIn("EIA_API_KEY", waiting.health()["eia"]["waiting_for"])
+        self.assertEqual(waiting.health()["eia"]["failing"], [])  # waiting is not failing
+        self.assertEqual([e.payload["feed"] for e in self.ledger.iter(kinds="data.coverage")], [])
+        no_host = FeedRecorder(path=Path(self.dir.name) / "no-host.sqlite", transports={"eia": fake}, clock=self.clock,
+                               keys={"eia": ["WTI"]}, environ={"EIA_API_KEY": self.KEY}, allowed_hosts=["api.open-meteo.com"])
+        self.addCleanup(no_host.close)
+        self.assertEqual(no_host.keys("eia"), [])
+        self.assertIn("hosts --add api.eia.gov", no_host.waiting_for("eia"))
+        live = FeedRecorder(path=Path(self.dir.name) / "live.sqlite", transports={"eia": fake}, clock=self.clock, ledger=self.ledger,
+                            keys={"eia": ["WTI"]}, environ={"EIA_API_KEY": self.KEY}, allowed_hosts=["api.eia.gov"])
+        self.addCleanup(live.close)
+        self.assertIsNone(live.waiting_for("eia"))
+        live.run()
+        row = live.latest({"eia": ["KXWTI"]}, self.clock())["eia"]["WTI"]
+        self.assertEqual((row["t"], row["value"], row["period"]), ("2026-09-24T03:30:00.000Z", 71.05, "2026-09-22"))
+        self.assertEqual(fake.calls[-1]["query"]["api_key"], self.KEY)
+
+    def test_the_owners_key_is_never_stored_nor_said(self):
+        down = FakeTransport(default=TransportError(f"GET https://api.eia.gov/v2/petroleum/pri/spt/data/?api_key={self.KEY} failed: timed out"))
+        store = self.recorder({"eia": ["WTI"]}, transports={"eia": down}, environ={"EIA_API_KEY": self.KEY}, allowed_hosts=["api.eia.gov"])
+        out = store.run()
+        self.assertTrue(out["failed"])
+        text = json.dumps([out["failed"], self.alerts, store.health(), store.describe()["eia"],
+                           store.db.execute("SELECT * FROM polls").fetchall()])
+        self.assertNotIn(self.KEY, text)
+        self.assertIn("api_key=***", text)
+
+    def test_the_repository_records_the_keyed_hosts_as_not_yet_allowed(self):
+        hosts = feeds.league_hosts()
+        self.assertIn("ensemble-api.open-meteo.com", hosts)
+        self.assertIn("www.sec.gov", hosts)
+        self.assertNotIn("api.eia.gov", hosts)
+        self.assertNotIn("api.the-odds-api.com", hosts)
+        for name, source in feeds.RECORDERS.items():
+            self.assertIn(source.host, hosts + ("api.eia.gov", "api.the-odds-api.com"), name)  # every recorder reads a host on record
+        store = FeedRecorder(path=Path(self.dir.name) / "defaults.sqlite", clock=self.clock, environ={"ODDS_API_KEY": "x" * 32})
+        self.addCleanup(store.close)
+        self.assertIn("hosts --add api.the-odds-api.com", store.waiting_for("consensus"))
+
+    def test_the_consensus_recorder_reads_the_odds_api_per_league(self):
+        from ltcm.data.oddsapi import HOST
+        from ltcm.tests.test_data_keyed import GAMES
+
+        fake = FakeTransport({HOST + "/v4/sports/americanfootball_nfl/odds?*": GAMES})
+        store = self.recorder({"consensus": ["nfl"]}, transports={"consensus": fake}, environ={"ODDS_API_KEY": "o" * 32},
+                              allowed_hosts=["api.the-odds-api.com"])
+        store.run()
+        row = store.latest({"consensus": ["KXNFLGAME"]}, self.clock())["consensus"]["nfl"]
+        self.assertEqual((row["league"], row["events"][0]["books"], row["t"]), ("nfl", 2, "2026-09-24T03:30:00.000Z"))
+        self.assertEqual(request_feed("consensus_win_probabilities_sports"), "consensus")
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime

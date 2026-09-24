@@ -2735,6 +2735,110 @@ class OpenInterestHistory(Source):
         return interest and bool(words & _DERIVATIVES | (words & {"crypto", "btc", "eth", "okx"})) and bool(words & (_HISTORY | {"point"}))
 
 
+class EiaPrices(Source):
+    """EIA's WTI, Brent, gasoline and diesel prices, for the kalshi-prices desk. The OWNER's step: a
+    free key (`EIA_API_KEY` in the House's .env) and api.eia.gov on the box's allowlist. Until both,
+    it waits -- polls nothing, and is never said to fail."""
+
+    name = "eia"
+    host = "api.eia.gov"
+    env = "EIA_API_KEY"
+    source = "eia: api.eia.gov/v2 petroleum/pri/spt (RWTC, RBRTE, daily) and petroleum/pri/gnd (gasoline and diesel retail, weekly)"
+    cadence = "every two hours"
+    what = ("per series (WTI, BRENT, GASOLINE, DIESEL), EIA's newest published value: {series, what, period, value, units, "
+            "recent: the five newest [{period, value}]}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on; EIA publishes a period, never "
+                     "the moment its value appeared, so nothing is backfilled")
+    every = 7200.0
+    gap = 3 * 7200.0
+    timeout = 30.0
+    example = "WTI"
+    note = "AAA's daily gasoline average, which KXAAAGAS* settles on, is not EIA's and is not recorded."
+    ALIASES = {"KXWTI": "WTI", "CRUDE": "WTI", "KXBRENT": "BRENT", "KXBRENTD": "BRENT", "GAS": "GASOLINE", "KXDIESEL": "DIESEL",
+               "KXDIESELW": "DIESEL", "KXDIESELD": "DIESEL"}
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        from ltcm.data.eia import SERIES
+
+        return list(SERIES)
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.eia import SERIES
+
+        text = str(raw or "").strip().upper()
+        text = self.ALIASES.get(text, text)
+        return text if text in SERIES else None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        return {"transport": transport, "clock": clock}
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data.eia import Eia
+
+        client = Eia(recorder.owner_key(self.env), fetcher["transport"], timeout=self.timeout, clock=fetcher["clock"])
+        out: dict[str, Any] = {}
+        for key in keys:
+            try:
+                out[key] = client.series(key)
+            except Exception as exc:  # noqa: BLE001 - a series that fails is a failed poll of that series
+                out[key] = exc
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        return "eia" in words or (bool(words & {"wti", "brent", "crude", "gasoline", "diesel"})
+                                  and bool(words & {"fixing", "fixings", "spot", "price", "prices", "settlement"}))
+
+
+class OddsConsensus(Source):
+    """The consensus win probability across US sportsbooks, from The Odds API, for the sports desk.
+    The OWNER's step: a paid key (`ODDS_API_KEY` in the House's .env) and api.the-odds-api.com on the
+    box's allowlist; each call spends his credits, so a league is asked every three hours."""
+
+    name = "consensus"
+    host = "api.the-odds-api.com"
+    env = "ODDS_API_KEY"
+    source = "the odds api: api.the-odds-api.com/v4/sports/<sport>/odds (h2h, US books, American odds)"
+    cadence = "every three hours a league (each call spends the owner's credits)"
+    what = ("per league, each game The Odds API lists: {id, commence_time, home, away, books (how many priced it), consensus: "
+            "{home, away, draw} (the mean of the books' de-vigged probabilities), last_update}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on; nothing is backfilled (the "
+                     "historical odds endpoint is a separate paid product)")
+    every = 3 * 3600.0
+    gap = 3 * 3 * 3600.0
+    timeout = 30.0
+    example = "nfl"
+    note = "consensus is None for a game no book prices."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        from ltcm.data.oddsapi import SPORTS
+
+        return [league for league in recorder.keys("sports") if league in SPORTS]
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.oddsapi import SPORTS
+
+        key = _sports_key(raw)
+        return key if key in SPORTS else None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        return {"transport": transport, "clock": clock}
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data.oddsapi import OddsApi
+
+        client = OddsApi(recorder.owner_key(self.env), fetcher["transport"], timeout=self.timeout, clock=fetcher["clock"])
+        out: dict[str, Any] = {}
+        for key in keys:
+            try:
+                out[key] = {"league": key, "events": client.odds(key)}
+            except Exception as exc:  # noqa: BLE001 - a league that fails is a failed poll of that league
+                out[key] = exc
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        return "consensus" in words and bool(words & {"odds", "probability", "probabilities", "moneyline", "moneylines", "win"})
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
@@ -2743,7 +2847,7 @@ def _register(*sources: Source) -> dict[str, Source]:
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
 RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
                                          ReferenceRates(), ParYields(), SportsOdds(), TsaVolumes(), ApprovalPolls(),
-                                         OpenInterestHistory())
+                                         OpenInterestHistory(), EiaPrices(), OddsConsensus())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():
