@@ -3310,9 +3310,13 @@ class Lab:
             "forward": self.forward_stats(),
             # E1 (Sept 24, 2026): the written programs' share of the window's evaluations, beside the
             # share of each batch reserved for them, and what the last graduation pass held back and why.
+            # Evaluated means run on the lab box ('evaluated' or 'failed', as `evaluated` above counts its
+            # batches' rows): a row blocked for its tape or its NEEDS carries an `evaluated` stamp too, and
+            # was not (the review of #262: 5 of the 108 written programs stamped in T0's hour were blocked).
             "reserved": {"share": _share(self.settings.get("reserved_share")),
-                         "evaluated": int(self._q(f"SELECT COUNT(*) AS n FROM candidates WHERE evaluated>=? AND status!='queued' AND origin IN "
-                                                  f"({','.join('?' for _ in RESERVED_ORIGINS)})", (since, *RESERVED_ORIGINS))[0]["n"])},
+                         "evaluated": int(self._q(f"SELECT COUNT(*) AS n FROM candidates WHERE evaluated>=? AND status IN ('evaluated', 'failed')"
+                                                  f" AND origin IN ({','.join('?' for _ in RESERVED_ORIGINS)})",
+                                                  (since, *RESERVED_ORIGINS))[0]["n"])},
             "held": self._held or None,
         }
 

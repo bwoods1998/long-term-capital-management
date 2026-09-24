@@ -49,6 +49,18 @@ class ReservedShare(LabCase):
         self.assertEqual([r["origin"] for r in chosen].count("luna"), 4)
         self.assertEqual({r["id"] for r in chosen[:4]} <= set(children), True)
 
+    def test_the_hours_count_of_written_programs_evaluated_leaves_out_the_blocked(self):
+        """The review of #262: `lab.stats` `reserved.evaluated` counted every written program stamped `evaluated` in the
+        hour, and a row blocked for its tape is stamped too (5 of the 108 counted in T0's hour were blocked)."""
+        self.queue(SAME_TAPE[0], origin="luna")
+        self.lab.evaluate_batch()
+        blocked = self.lab.admit(SAME_TAPE[1], niche=self.niche, origin="luna", author="luna", lineage="founder:test")
+        self.lab._x("UPDATE candidates SET status='blocked', error='unsupported input: a test', evaluated=? WHERE id=?",
+                    (self.clock(), blocked))
+        stats = self.lab.stats()
+        self.assertEqual(stats["reserved"]["evaluated"], 1)
+        self.assertEqual(stats["evaluated"], 1)  # what the hour's batches ran, the same unit
+
     def test_the_share_is_held_to_its_bounds(self):
         self.assertEqual(RESERVED_SHARE_BOUNDS, (0.33, 0.75))
         self.assertEqual(reserved_quota(32, 0.5), 16)
