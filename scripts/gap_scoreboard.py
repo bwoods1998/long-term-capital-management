@@ -73,7 +73,8 @@ THE SEVEN METRICS (numbers in brackets: the plan's baseline at 00:50Z Sept 24)
 4. `deaths_in_window`: `agent.died` in the window: median life (born to died, hours), overall and for
    day-horizon agents (`agent.born` `horizon`, else the desk's only horizon), and the share that died
    with fewer than 3 of their own fills (venue or cross fills on any book; the House's closing sales
-   are the House's, not the agent's) [14.3 h; 68%].
+   are the House's, not the agent's) [14.3 h; 68%]; and the same for the agents that held a practice
+   seat before they died (a replay-only agent has no book and can never fill).
 5. `lab_loop`: `lab.sqlite` `batches` in the last hour and an hour over the window; the LLM share of
    born graduates (candidate origin `luna`/`sol`/`agent` against `param`/`seed`) [2 of 18]; waiters
    (graduations `passed`, waiting since their `lab.graduate:<id>:passed` ledger row as `Lab.waiting`
@@ -822,8 +823,15 @@ def real_dollars(snap: Snapshot, agents: Mapping[str, Agent], families: Families
 
 
 # ---------------------------------------------------------------------------------- metric 4
-def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[Row]], since: float, now: float) -> dict[str, Any]:
-    """Deaths in the window: median life, overall and on day-horizon agents; deaths before 3 fills."""
+def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[Row]], since: float, now: float,
+                     rungs: Rungs | None = None) -> dict[str, Any]:
+    """Deaths in the window: median life, overall and on day-horizon agents; deaths before 3 fills.
+
+    With `rungs`, the same for the agents that held a practice seat (rung 1 or more at any point
+    before their death): a replay-only agent (rung 0) has no book and can never fill, so while the
+    House makes way with them the overall share before 3 fills measures who was chosen to die, not
+    whether traders are killed before their evidence (B-seats' measure on the T0 snapshot, Sept 24,
+    2026: 41 of the 72 deaths that remain under the evidence clock are rung-0 replay-only code)."""
     horizons = desk_horizons()
     dead = sorted((a for a in agents.values() if a.died is not None and since <= a.died <= now), key=lambda a: a.died)
 
@@ -843,7 +851,20 @@ def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[R
             "day_desk_deaths": len(day_desk_dead), "median_life_day_desk_h": lived(day_desk_dead),
             "before_3_fills": len(few), "share_before_3_fills": _r(len(few) / len(dead)) if dead else None,
             "causes": dict(Counter(str(a.cause) for a in dead)),
-            "day_horizon_before_3_fills": sum(1 for a in few if day(a))}
+            "day_horizon_before_3_fills": sum(1 for a in few if day(a)),
+            **(seated_deaths(dead, few, rungs, lived) if rungs is not None else {})}
+
+
+def seated_deaths(dead: Sequence[Agent], few: Sequence[Agent], rungs: Rungs, lived: Any) -> dict[str, Any]:
+    """The deaths of agents that held a practice seat before they died (`Rungs`: a change to rung 1
+    or more before the death row), their median life and the share of them that died before 3 fills."""
+    def seated(agent: Agent) -> bool:
+        return any(int(r.p.get("to_rung") or 0) >= 1 for r in rungs.changes.get(agent.id) or () if r.seq < (agent.died_seq or 0))
+
+    held = [a for a in dead if seated(a)]
+    held_few = [a for a in few if seated(a)]
+    return {"seated_deaths": len(held), "median_life_seated_h": lived(held), "seated_before_3_fills": len(held_few),
+            "share_seated_before_3_fills": _r(len(held_few) / len(held)) if held else None}
 
 
 # ---------------------------------------------------------------------------------- metric 5
@@ -1178,7 +1199,7 @@ def scoreboard(snap: Snapshot, *, since: float | None = None, baseline: float | 
             "1": real_bounds(snap, families, intents),
             "2": allocator_promotions(snap, agents, rungs, trades, still_open, families, baseline),
             "3": real_dollars(snap, agents, families),
-            "4": deaths_in_window(agents, fills, since, snap.now),
+            "4": deaths_in_window(agents, fills, since, snap.now, rungs),
             "5": lab_loop(snap, agents, rungs, since),
             "6": {"self_cross": self_cross_exits(snap), "stacked": stacked_promotions(snap, agents, trades, baseline)},
             "7": {"recorders": recorders_live(snap, hosts), "idle_desks": idle_desks(snap, agents)},
@@ -1233,9 +1254,11 @@ def summary_rows(board: Mapping[str, Any]) -> list[tuple[str, str, str, str]]:
          "allocator_promotions"),
         ("3", "real dollars in proven / unproven families; Alpaca real agents",
          f"{_usd(three['proven_usd'])} / {_usd(three['unproven_usd'])}; {three['alpaca_real_agents']}", "real_dollars"),
-        ("4", "median life (h), all / day-horizon; deaths before 3 fills",
+        ("4", "median life (h), all / day-horizon; deaths before 3 fills (of them, agents that held a practice seat)",
          f"{four['median_life_h']} / {four['median_life_day_h']} h over {four['deaths']} deaths; "
-         f"{four['before_3_fills']} ({_pct(four['share_before_3_fills'])})", "deaths_in_window"),
+         f"{four['before_3_fills']} ({_pct(four['share_before_3_fills'])}); seated: {four.get('seated_deaths')} deaths, "
+         f"median {four.get('median_life_seated_h')} h, {four.get('seated_before_3_fills')} "
+         f"({_pct(four.get('share_seated_before_3_fills'))}) before 3 fills", "deaths_in_window"),
         ("5", "lab batches an hour; LLM share of born graduates; waiters, longest wait; supersessions",
          f"{five.get('batches_last_hour')} in the last hour; {five.get('born_graduates_llm')} of {five.get('born_graduates')}; "
          f"{five['waiters']} at {five['longest_wait_h']} h; {five['superseded_in_window']} superseded in the window "
@@ -1309,6 +1332,10 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
     out.append(f"{pre}day-horizon agents: {d['day_horizon_deaths']} deaths, median {d['median_life_day_h']} h, "
                f"{d['day_horizon_before_3_fills']} before 3 fills; on day-only desks: {d['day_desk_deaths']} deaths, "
                f"median {d['median_life_day_desk_h']} h")
+    if "seated_deaths" in d:
+        out.append(f"{pre}agents that held a practice seat: {d['seated_deaths']} deaths, median {d['median_life_seated_h']} h, "
+                   f"{d['seated_before_3_fills']} ({_pct(d['share_seated_before_3_fills'])}) before 3 fills; the rest never "
+                   f"left replay (rung 0) and could not fill")
     section("5. the lab and the loop [lab_loop]")
     f = m["5"]
     out.append(f"{pre}batches: {f.get('batches_last_hour')} in the last hour, {f.get('batches_an_hour_in_window')} an hour over the "

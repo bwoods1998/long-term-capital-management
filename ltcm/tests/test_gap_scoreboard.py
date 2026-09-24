@@ -358,6 +358,37 @@ class DeathsTest(ScoreboardCase):
         four = gs.scoreboard(f.snapshot(), since=ts(15), hosts=())["metrics"]["4"]
         self.assertEqual(four["deaths"], 2)
 
+    def test_deaths_among_agents_that_held_a_practice_seat(self):
+        """A replay-only agent (rung 0) cannot fill: the seated measure leaves it out, and a seat taken
+        after the death, or a seat never taken, does not count."""
+        f = self.floor
+        f.born("r-0", 0, desk="kalshi-crypto-15m")  # replay only: never seated
+        f.born("s-1", 0)
+        f.verdict("s-1", 1, "seat", 0, 1)
+        f.buy("s-1", 2, "kalshi-shadow", "KXS1-26SEP24-1")
+        f.born("s-2", 0)
+        f.verdict("s-2", 1, "seat", 0, 1)
+        for i in range(3):
+            f.buy("s-2", 2 + i, "kalshi-shadow", f"KXS2-26SEP24-{i}")
+        f.verdict("s-2", 6, "demote", 1, 0)  # back to replay before it died: it held a seat
+        f.born("late", 0)
+        f.died("r-0", 10)
+        f.died("s-1", 12)
+        f.died("s-2", 20)
+        f.died("late", 21)
+        f.verdict("late", 22, "seat", 0, 1)  # after the death: not a seat it held
+        f.row("ops.job", "house", 23, {})
+        four = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["4"]
+        self.assertEqual(four["deaths"], 4)
+        self.assertEqual(four["before_3_fills"], 3)
+        self.assertEqual(four["seated_deaths"], 2)
+        self.assertEqual(four["median_life_seated_h"], 16.0)
+        self.assertEqual(four["seated_before_3_fills"], 1)
+        self.assertEqual(four["share_seated_before_3_fills"], 0.5)
+        text = gs.render_text(gs.scoreboard(f.snapshot(), hosts=()), markdown=True)
+        self.assertIn("seated: 2 deaths", text)
+        self.assertIn("agents that held a practice seat: 2 deaths", text)
+
 
 # --------------------------------------------------------------------------------- metric 5
 class LabTest(ScoreboardCase):
