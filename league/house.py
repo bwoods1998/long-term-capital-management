@@ -674,6 +674,8 @@ class House:
         #: (parent, its code, child, its code) -> when L1 last found no corrected entry there
         #: (`_supersede_by_research`): the look is taken again at most hourly a pair.
         self._supersede_seen: dict[tuple[str, str, str, str], float] = {}
+        #: (agent, keeps hours) -> (what it was read from, its program's opportunity) (`_program_opportunity`).
+        self._opportunities: dict[tuple[str, bool], tuple[tuple[int, int | None], tuple[float, int]]] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -4903,15 +4905,15 @@ class House:
                 # Has it traded since its current program's opportunity? Read for every desk when an
                 # evidenced newcomer asks (a never-traded seat is what it may take); the plain
                 # tournament reads it only where the session rules below need it.
-                traded = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id, after=opportunity_seq)), None) is not None
+                traded = bool(self.ledger.read(kinds="book.fill", agent=agent.id, after=opportunity_seq, limit=1))
             book = None
             if keeps_hours:
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
                 # not at a weekend birth. Replay-only agents still have their normal deadline.
-                first = next((e for e in self.ledger.iter(kinds=("agent.woke", "book.fill"), agent=agent.id, after=opportunity_seq)
-                              if e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0)), None)
+                first = self._first_row(("agent.woke", "book.fill"), agent.id, opportunity_seq,
+                                        lambda e: e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0))
                 if first is None:
                     kept("never offered a session since its program's opportunity")
                     continue
@@ -5047,12 +5049,22 @@ class House:
         On a desk that keeps hours (`keeps_hours`), a rewrite of an agent that has never traded is NOT
         a new opportunity (Sept 23, 2026): research rewrote idle stock agents every few hours (mcentee-34
         three times in eight), each rewrite restarted the clock, and the agents that never traded
-        outlived the ones that did."""
-        opportunity, opportunity_seq = _epoch(agent.born_at), 0
+        outlived the ones that did.
+
+        Remembered for each agent until it has a new `agent.born`, `agent.strategy` or `eval.verdict` row or its
+        first fill (R6-perf, Sept 24, 2026): the seat market asks for every resident on every question, and in six
+        ticks of a full league on a copy of the 17:27Z snapshot that was 2,256 reads of each agent's every verdict
+        (81,096 rows parsed, 3.2 s). The answer is a fold of exactly those rows, so the same rows are the same answer."""
         first_fill = None
         if keeps_hours:
-            found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
-            first_fill = None if found is None else found.seq
+            found = self.ledger.read(kinds="book.fill", agent=agent.id, limit=1)  # its first fill, one row
+            first_fill = found[0].seq if found else None
+        newest = self.ledger.read(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id, limit=1, newest=True)
+        read_from = (newest[-1].seq if newest else 0, first_fill)
+        hit = self._opportunities.get((agent.id, keeps_hours))
+        if hit is not None and hit[0] == read_from:
+            return hit[1]
+        opportunity, opportunity_seq = _epoch(agent.born_at), 0
         signature = None
         for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
             p = entry.payload
@@ -5070,7 +5082,22 @@ class House:
                     signature = current
             elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
                 opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+        self._opportunities[(agent.id, keeps_hours)] = (read_from, (opportunity, opportunity_seq))
         return opportunity, opportunity_seq
+
+    def _first_row(self, kinds: Any, agent_id: str, after: int, match: Callable[[Any], Any], *, page: int = 64) -> Any:
+        """The first of an agent's rows of `kinds` after `after` that `match` accepts, or None: the rows `ledger.iter`
+        gives, in the same order, read `page` at a time instead of 5,000 (R6-perf, Sept 24, 2026), so a question its
+        first rows answer parses only those. In six ticks of a full league on a copy of the 17:27Z snapshot, the seat
+        market's "offered a session since its program's opportunity?" parsed 60,495 rows in 414 questions."""
+        while True:
+            batch = self.ledger.read(kinds=kinds, agent=agent_id, after=after, limit=page)
+            for entry in batch:
+                if match(entry):
+                    return entry
+            if len(batch) < page:
+                return None
+            after = batch[-1].seq
 
     def _own_fills(self, agent_id: str, *, after: int = 0, enough: int = FORWARD_RULE_FILLS) -> int:
         """The agent's own fills after a ledger position, counted up to `enough`: venue and cross fills
