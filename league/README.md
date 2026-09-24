@@ -454,7 +454,15 @@ status is exposed in health and agent research context; qualification is distinc
    mutation and reaches real money through the bunt line on its own record. While births are owed its
    desk gives a newcomer of another family no seat and is reserved from cards and merged strategies.
    No birth for a family at its measured capacity (E3) or a losing one. A member that inherited the
-   family's name with other code is not its program (meriwether-h2d625d-2).
+   family's name with other code is not its program (meriwether-h2d625d-2). **A new program, a new
+   family** (Sept 24, 2026): a research fork (`fork` with code) or a retained candidate
+   (`_admit_orphan`) whose NEEDS name other markets (venue, series, symbols) or another style than its
+   parent's program now is born into a family of its own (`_program_family`: `<desk>-<style>-<6 hex>`,
+   rooted in the parent's family; the parent stays on its birth row), so a different mechanism never
+   inherits a family's proof; a fix of the same program (the same markets and style) keeps the family,
+   whose record already splits maker and taker. On the 15:06Z snapshot 98 children had been born into
+   their parent's family with other code beyond PARAMS (39 living); 71 (28 living) named other markets
+   or another style and would have had their own. Agents already born keep their ledger's family.
    **Corrected children supersede** (L1, gated by
    the constitution's `allocator.corrected_child_supersedes`): `_supersede_by_research`, beside
    `_retire_superseded` in `enroll`, retires a living parent whose research child passed replay and

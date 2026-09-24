@@ -11,6 +11,7 @@ bred it: no House mutation is staked while anyone waits, and a fork needs a free
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -389,3 +390,100 @@ class ProvenFamily(EvidenceCase):
     def test_an_unproven_family_is_never_bred_first(self):
         self.assertEqual(self.house._proven_programs(), [])
         self.assertIsNone(self.house._proven_births(self.rules))
+
+
+#: meriwether-h2d625d's shape: KXMLBTOTAL central run-unders (sports-central-run-under, the proven family) ...
+RUN_UNDER = '''
+NEEDS = {"venue": "kalshi", "horizon": "day", "style": "central-run-entertainment-premium", "series": ["KXMLBTOTAL"],
+         "max_hours_to_close": 48, "wake_minutes": 30}
+PARAMS = {}
+
+def decide(ctx):
+    return {"intents": [], "thought": "wait for a central under before play"}
+'''
+#: ... meriwether-h2d625d-2's: a moneyline-favourites file its parent never ran, on other series, another style ...
+MONEYLINE_FAVOURITES = RUN_UNDER.replace('"central-run-entertainment-premium"', '"sports-moneyline-deep-favourites"').replace(
+    '["KXMLBTOTAL"]', '["KXNCAAFGAME", "KXEPLGAME"]').replace("wait for a central under before play", "buy a deep favourite")
+#: ... and a fix of the same program: the same markets and style, a maker entry instead of a taker one.
+RUN_UNDER_MAKER_FIX = RUN_UNDER.replace("wait for a central under before play", "rest a post-only bid at the bid")
+
+
+class NewCodeFamilies(EvidenceCase):
+    """The family-attribution defect (Sept 24, 2026): a research fork or a retained candidate with NEW code was born into its
+    parent's family whatever it traded, so a different mechanism inherited the family's proof -- meriwether-h2d625d-2, a CFB
+    and soccer moneyline-favourites file, carries sports-central-run-under, the KXMLBTOTAL run-unders' proven family. On the
+    15:06Z snapshot 98 children had been born into their parent's family with other code beyond PARAMS (39 living), and 71 of
+    them (28 living) named other markets or another style."""
+
+    def setUp(self):
+        super().setUp()
+        self.house.close(wait=None)  # a House with a Kalshi practice book too, as test_seat_evidence's RetainedCandidates
+        from league.economy import load_game
+        from league.house import House, Settings
+        from league.sandbox import LocalSandbox
+        from league.tests.fakes import FakeBroker
+
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        self.house = House(Path(self.dir.name) / "house-families", brokers={"alpaca-paper": self.broker,
+                                                                             "kalshi-shadow": FakeBroker("kalshi-shadow", family="kalshi")},
+                           sandbox=LocalSandbox(Path(self.dir.name) / "boxes-families"), alpaca_data=self.data, clock=self.clock,
+                           settings=Settings(mark_every_seconds=0, research=False), game=game)
+        self.rules = self.house.game["economy"]
+
+    def retained(self, code):
+        """A replay-passed research candidate as the admission queue keeps it (test_seat_evidence's RetainedCandidates)."""
+        from league import niches as niches_module
+        from league.lab import static_literal
+
+        needs = niches_module.constrain(static_literal(code, "NEEDS"), self.house.niches[DESK])
+        return {"code": code, "params": static_literal(code, "PARAMS"), "needs": needs, "passed": True, "purpose": "a retained candidate",
+                "numbers": {"trades": 40, "passed": True, "return_pct": 12.0}}
+
+    def queued(self, author, candidate, session):
+        from league.admissions import Admissions
+
+        queue = Admissions(self.house.ledger)
+        row = queue.enqueue(author.id, self.house._generation(author.id), candidate, session)
+        queue.record(row, "deferred", "niche is full; waiting for an eligible seat")
+        return row
+
+    def parent(self):
+        parent = self.house.spawn("meriwether", "sports-central-run-under", RUN_UNDER, reason="the run-unders")
+        self.house.evaluator.seat(parent.id, 1, "test")
+        self.house.economy.grant(parent.id, "100", "test: a parent that can fork")
+        self.assertEqual(parent.specialty, "kalshi-sports")
+        return parent
+
+    def test_a_research_fork_with_other_markets_and_style_is_born_into_its_own_family(self):
+        parent = self.parent()
+        child = self.house.fork(parent, code=MONEYLINE_FAVOURITES, reason="a research candidate", passed_replay=True)
+        root = hashlib.sha256("sports-central-run-under|sports-moneyline-deep-favourites".encode()).hexdigest()[:6]
+        self.assertEqual(child.family, f"sports-moneyline-deep-favourites-{root}")
+        self.assertLessEqual(len(child.family), 40)
+        self.assertEqual(child.parent, parent.id, "its parent is on its birth row as before")
+        born = self.house.ledger.get(f"born:{child.id}").payload
+        self.assertEqual(born["family"], child.family)
+        self.assertIn("born into its own family", born["reason"])
+        again = self.house.fork(parent, code=MONEYLINE_FAVOURITES.replace("buy a deep favourite", "buy a deeper favourite"),
+                                reason="another research candidate", passed_replay=True)
+        self.assertEqual(again.family, child.family, "one research direction from one family is one family")
+
+    def test_a_fix_of_the_same_program_keeps_its_family(self):
+        parent = self.parent()
+        child = self.house.fork(parent, code=RUN_UNDER_MAKER_FIX, reason="a maker fix", passed_replay=True)
+        self.assertEqual(child.family, "sports-central-run-under", "the same markets and style: a fix of the family's program")
+        self.assertNotIn("born into its own family", self.house.ledger.get(f"born:{child.id}").payload["reason"])
+
+    def test_a_retained_candidate_on_other_markets_is_born_into_its_own_family(self):
+        author = self.seated("author")
+        candidate = self.retained(BUYER.replace('"BTC/USD"', '"ETH/USD"'))  # the same desk, another market
+        self.queued(author, candidate, "research:author:1")
+        self.house.kill(author, "displaced", "test")
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.clock.advance(601)
+        child = self.house._refill(self.rules)
+        self.assertEqual(child.parent, author.id)
+        self.assertNotEqual(child.family, author.family)
+        self.assertTrue(child.family.startswith("crypto-majors-test-buyer-"), child.family)

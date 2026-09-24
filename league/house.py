@@ -1469,12 +1469,50 @@ class House:
     def members(self, niche_id: str) -> int:
         return sum(1 for a in self.registry.living() if a.specialty == niche_id)
 
+    @staticmethod
+    def _markets_and_style(needs: Mapping[str, Any]) -> tuple[str, frozenset[str], frozenset[str], str]:
+        """What a program trades and what it says it is: its venue, its series and symbols (as sets), and its NEEDS
+        `style` (lowercase, dashes; never cut short)."""
+        style = re.sub(r"[^a-z0-9-]+", "-", str(needs.get("style") or "").lower()).strip("-")
+        return (str(needs.get("venue") or "").lower(), frozenset(str(s).upper() for s in needs.get("series") or ()),
+                frozenset(str(s).upper() for s in needs.get("symbols") or ()), style)
+
+    def _program_family(self, parent: Agent, family: str, needs: Mapping[str, Any], niche: Any) -> str:
+        """The family a child with NEW code is born into (Sept 24, 2026): its parent's (`family`) when its NEEDS name the
+        same markets -- venue, series, symbols -- and the same style as the parent's program now (a fix of the same
+        program: a maker entry, a price floor, a guard; the family record already splits maker and taker), else a family
+        of its own, named from its desk and its style and rooted in the parent's family (`<desk>-<style>-<6 hex>`: the
+        same research direction from one family is one family), so a different mechanism never inherits a family's
+        proof. Measured on the 15:06Z snapshot: 98 children had been born into their parent's family with code other
+        than the parent's program beyond PARAMS (39 of the 112 living); 71 of them (28 living) named other markets or
+        another style -- meriwether-h2d625d-2 among them, a CFB and soccer moneyline-favourites file carrying the
+        KXMLBTOTAL run-unders' proven family (sports-central-run-under) -- and 27 were fixes of the same program."""
+        mine, theirs = self._markets_and_style(needs), self._markets_and_style(parent.needs or {})
+        if mine == theirs:
+            return family
+        style = mine[3] or "program"
+        desk = niche.id.split("-", 1)[-1] if niche is not None else (mine[0] or "desk")
+        base = style if style.startswith(desk) else f"{desk}-{style}"
+        root = hashlib.sha256(f"{parent.family}|{style}".encode("utf-8")).hexdigest()[:6]
+        return f"{base[:33].rstrip('-')}-{root}"
+
+    def _candidate_family(self, parent: Agent, candidate: Mapping[str, Any], niche: Any) -> str:
+        """The family a research candidate of `parent` will be born into (`_program_family`), read from the NEEDS it was
+        replayed on: what it asks for a seat as, and what a retained one waits as (a proven family's first)."""
+        code, needs = candidate.get("code"), candidate.get("needs")
+        if not code or not isinstance(needs, Mapping) or code_sha(str(code)) == parent.code_sha256:
+            return parent.family
+        return self._program_family(parent, parent.family, needs, niche)
+
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
               # `name` is the line the agent is numbered from. Empty means "the desk its NEEDS put
               # it on": that is how the architect's strategies join a desk rather than arriving
               # with a slug of their own.
               params: Mapping[str, Any] | None = None, endowment: Any | None = None, keep_probe_awake: bool = False,
-              specialty: str | None = None, founder: str | None = None, described: Any | None = None) -> Agent:
+              specialty: str | None = None, founder: str | None = None, described: Any | None = None,
+              # A research fork's or a retained candidate's NEW code: born into its own family when its NEEDS name other
+              # markets or another style than this agent's program (`_program_family`).
+              new_code_of: Agent | None = None) -> Agent:
         # A strategy's NEEDS are read by running its module body, so that happens in a box too: one
         # sealed probe box the House keeps for the purpose, never the House's own process.
         # `described`: that probe's run of this same code, made by a caller that must not call Sail
@@ -1503,6 +1541,12 @@ class House:
             if keep_probe_awake:
                 self.sandbox.rest(PROBE_BOX)
             raise ValueError(f"{name}: {exc}") from exc
+        if new_code_of is not None and code_sha(code) != new_code_of.code_sha256:
+            own = self._program_family(new_code_of, family, needs, niche)
+            if own != family:
+                reason = (f"{reason} [born into its own family {own}, not {family}: its NEEDS name other markets or another "
+                          f"style than {new_code_of.id}'s program]").strip()
+                family = own
         agent = self.registry.born(
             name=name or (niche.desk if niche else ""), family=family, code=code, needs=needs, params={**info.get("params", {}), **dict(params or {})},
             parent=parent, reason=reason, specialty=niche.id if niche else None, founder=founder,
@@ -4403,7 +4447,8 @@ class House:
         if child_params is None:
             return None
         child = self.spawn(parent.line or parent.name, parent.family, child_code, parent=parent.id, params=child_params, reason=reason or "a parameter mutation of its parent",
-                           endowment=rules["endowment_usd"] if staked_by_house else None, described=described)
+                           endowment=rules["endowment_usd"] if staked_by_house else None, described=described,
+                           new_code_of=parent if code else None)  # a different program is born into its own family
         if staked_by_house:
             self._state["last_staked"][parent.id] = self.clock()
         else:
@@ -6454,7 +6499,8 @@ class House:
                 # It asks as its parent's family (S1, Sept 24, 2026). A living author's candidate waits out a new
                 # paper seat's grace, as before; a dead author's retained one is evidenced (`_admit_orphan`).
                 loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,),
-                                      newcomer=Newcomer(family=parent.family, venue=parent.venue, what=f"{parent.id}'s research candidate"))
+                                      newcomer=Newcomer(family=self._candidate_family(parent, candidate, niche), venue=parent.venue,
+                                                        what=f"{parent.id}'s research candidate"))
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
                 return None
@@ -6576,7 +6622,8 @@ class House:
         `orphaned` (written once) and a waiter is kept in house.json (`retained`, by session)."""
         died = _epoch(author.died_at) if author.died_at else self.clock()
         numbers = (row.get("_candidate") or {}).get("numbers") or {}
-        entry = {"session": row["session"], "author": author.id, "family": author.family, "venue": author.venue,
+        entry = {"session": row["session"], "author": author.id, "venue": author.venue,
+                 "family": self._candidate_family(author, row.get("_candidate") or {}, self.niche_of(author)),
                  "niche": author.specialty or "", "since": died, "trades": numbers.get("trades"),
                  "return_pct": numbers.get("return_pct")}
         if row.get("status") != "orphaned":
@@ -6690,7 +6737,8 @@ class House:
         loser = None
         if niche_full or len(living) >= int(rules["max_population"]):
             loser = self._weakest(rules, specialty=niche.id if niche_full else None, evidenced=True,
-                                  newcomer=Newcomer(family=author.family, venue=author.venue, what=f"the retained candidate of {author.id}"))
+                                  newcomer=Newcomer(family=self._candidate_family(author, candidate, niche), venue=author.venue,
+                                                    what=f"the retained candidate of {author.id}"))
             if loser is None:
                 queue.record(row, "orphaned", f"waiting for an eligible seat: {'its desk' if niche_full else 'the league'} is full of "
                                               "residents that may not be displaced")
@@ -6725,7 +6773,7 @@ class House:
                     self.kill(loser, "displaced", self.postmortem(loser, "displaced",
                               f"the retained research candidate of {author.id}, which died holding it, takes the seat"))
                 child = self.spawn(author.line or author.name, author.family, candidate["code"], parent=author.id,
-                                   params=candidate["params"], endowment=rules["endowment_usd"], described=described,
+                                   params=candidate["params"], endowment=rules["endowment_usd"], described=described, new_code_of=author,
                                    reason=f"the retained research candidate of {author.id}, which died holding it: {purpose}"[:1500])
             except Exception as exc:  # noqa: BLE001 - an unknown write is kept for inspection, never retried
                 if isinstance(exc, ValueError) and loser is None:

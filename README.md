@@ -500,7 +500,8 @@ warning an hour naming its desk, how many wait there and the rule that holds the
 its own ($1.00 is what the House stakes when it cannot; during the funded burst the threshold is
 $2.00 and the House stakes $8). An agent above rung 0 never edits itself, because its record belongs to its code: an
 improvement is a child, a mutation of its parameters or new code its researcher wrote, and the child
-answers for itself from replay up — unless it has NO record at all (no holding, no working order, no active
+answers for itself from replay up (and since Sept 24, 2026 a child whose NEEDS name other markets or another style than its
+parent's program is born into a family of its own: a different mechanism never inherits its parent's proof) — unless it has NO record at all (no holding, no working order, no active
 block, no closed trade), in which case code that passes replay simply becomes its own, with no fork to pay for:
 there is nothing for new code to inherit unfairly and no position to leave it holding. **And if its own rules
 have not fired for ten wakes with a live market in front of them, a file that merely TRADES on the tape becomes
