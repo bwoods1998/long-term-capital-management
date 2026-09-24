@@ -291,7 +291,10 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     `cards`, `strategies`) and `waiters_by_desk`; `reserved_desks` (desks a waiting graduate,
     retained candidate or card has first claim on); from the hourly watch, `displaceable`
     (residents an evidenced newcomer with no proof and no forward score could take now),
-    `never_traded_past_grace`, `waiting_over_an_hour` and `at`; and `last_refused_birth` a class
+    `never_traded_past_grace` (of those, the ones that never traded: replay-only seats and paper seats
+    past their fair chance -- since Sept 24, 2026 a never-traded paper seat is not an evidenced
+    newcomer's before its desk's evidence clock, capped at the plain grace and never under an hour,
+    has run), `waiting_over_an_hour` and `at`; and `last_refused_birth` a class
     (`count`, `why`, `at`). A warning `ops.alert` says once an hour a class when graduates,
     retained candidates, cards or merged strategies cannot be born and why, and once an hour when
     more than `economy.seat_waiters_warning` (8) newcomers have waited over an hour. A

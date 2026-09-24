@@ -675,8 +675,11 @@ closed trades or settlements (or your desk's sessions). What can take it is a ne
 evidence than you have: an Alpha Lab graduate that passed the House's replay and the sealed
 holdout, a foundry card that passed replay, the retained candidate of an agent that died holding
 it, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
-still on rung 0 (replay only) or have not traded since your current program was given its chance;
-on a desk that keeps an exchange's hours, not before your first regular session has closed. A
+still on rung 0 (replay only) or have not traded since your current program was given its chance --
+once you have had a fair chance to trade (since Sept 24, 2026: your desk's evidence clock, at most
+the plain grace and never under an hour, from that chance; a newcomer seated a minute ago is not
+the next newcomer's to take); on a desk that keeps an exchange's hours, not before your first
+regular session has closed. A
 House mutation -- the House's own copy of a parent with its parameters moved -- is staked only when
 no such newcomer waits, at most every ten minutes, never into a desk's last seat while nobody on
 that desk trades, never in place of a desk's only trading member, and never from a family whose

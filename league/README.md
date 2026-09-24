@@ -300,7 +300,10 @@ status is exposed in health and agent research context; qualification is distinc
    held from cards and merged strategies, a waiting card's from merged strategies
    (`_reserved_desks`). Each of the three asks `_weakest(..., evidenced=True)`: a newcomer with
    forward evidence may take a rung-0 seat, or a rung-1 seat that has never traded since its
-   current program's opportunity, inside its holder's grace (a desk that keeps hours only once its
+   current program's opportunity, inside its holder's grace -- once that seat has had its fair
+   chance (`_fair_chance`, Sept 24, 2026: its desk's evidence clock capped at the plain grace, never
+   under an hour; after Deploy B evidenced waiters took each other's seats 33 s to 14 min after
+   birth) -- (a desk that keeps hours only once its
    first regular session has closed, #190), and never a trader short of its record on any desk,
    a winner, real money or a position held through a shut market. Replay-only code ranks before
    code that passed replay, and at most one resident a desk is displaced in a tick. A waiter class
