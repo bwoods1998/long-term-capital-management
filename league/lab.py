@@ -2229,7 +2229,12 @@ class Lab:
         - "forward": its forward window loses (`forward_score` at or below zero). The search tape only
           admits; data that came after the code was frozen ranks, and a losing window keeps a
           candidate from graduating whatever its search fitness (study of Sept 23, 17:05Z: replay did
-          not predict practice, 0 of 20 passes positive after 6 active blocks).
+          not predict practice, 0 of 20 passes positive after 6 active blocks). A candidate with no
+          window of its own is judged by the windows of its mechanism (`_mechanism_forward`: the other
+          programs of its desk with its code beyond PARAMS): held while their mean loses. The review of
+          #262: only elites, waiting graduates and residents are ever scored, so walking a cell past an
+          elite held for a losing window reached its untested parameter twins -- on the T4 snapshot 2 of
+          the 26 cells on offer offered one, the twin of a window losing 0.0699 a block.
         - "idle": its desk wrote no intent in `idle_desk_hours` while its members were offered markets,
           and no feed the desk asked for arrived in that time (`_idle_desk`).
         - "nudge": no code change beyond PARAMS (`mechanism_digest`) relative to a living program of its
@@ -2242,14 +2247,19 @@ class Lab:
           measured the T4 queue and waiting list)."""
         ident, niche = str(row["id"]), str(row["niche"])
         scores = self.forward_scores() if scores is None else scores
+        cache = {} if cache is None else cache
         forward = scores.get(ident)
         if forward is not None and forward <= 0:
             return (f"forward: its forward window loses ({forward:+.6f} a block on data after its code was frozen); "
                     "the search tape only admits")
+        if forward is None:
+            mechanism = self._mechanism_forward(row, scores, cache)
+            if mechanism is not None and mechanism[0] <= 0:
+                return (f"forward: it has no window of its own, and the {mechanism[1]} forward window(s) of its mechanism on {niche} "
+                        f"(the same code beyond PARAMS) lose {mechanism[0]:+.6f} a block on average; the search tape only admits")
         idle = self._idle_desk(niche)
         if idle:
             return f"idle: {idle}"
-        cache = {} if cache is None else cache
         twins = self._twins(row, cache)
         if twins:
             if f"median:{niche}" not in cache:
@@ -2278,13 +2288,42 @@ class Lab:
             self._digests[key] = mechanism_digest(code) if code is not None else None
         return self._digests[key]
 
+    def _row_mechanism(self, row: Mapping[str, Any]) -> str | None:
+        """`_mechanism` of a candidate row, read with its code or without it (by its hash and id)."""
+        keys = row.keys() if hasattr(row, "keys") else ()
+        return self._mechanism(row["code"] if "code" in keys else None, key=row["code_sha256"] if "code_sha256" in keys else None,
+                               ident=str(row["id"]))
+
+    def _mechanism_forward(self, row: Mapping[str, Any], scores: Mapping[str, float],
+                           cache: dict[str, Any]) -> tuple[float, int] | None:
+        """(the mean ranked forward score, how many) of the OTHER programs of the candidate's desk that are its
+        mechanism beyond PARAMS (`mechanism_digest`), or None when none has a ranked window: what a program with no
+        window of its own is judged by (`_hold`; the review of #262). The lab's ranked windows are grouped by desk
+        and mechanism once a pass (`cache`)."""
+        if "mechanisms" not in cache:
+            grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
+            ranked = list(scores)
+            for start in range(0, len(ranked), 500):
+                chunk = ranked[start:start + 500]
+                marks = ",".join("?" for _ in chunk)
+                for found in self._q(f"SELECT id, niche, code_sha256 FROM candidates WHERE id IN ({marks})", chunk):
+                    digest = self._mechanism(None, key=found["code_sha256"], ident=found["id"])
+                    if digest is not None:
+                        grouped.setdefault((str(found["niche"]), digest), []).append((str(found["id"]), float(scores[found["id"]])))
+            cache["mechanisms"] = grouped
+        digest = self._row_mechanism(row)
+        if digest is None:
+            return None
+        windows = [score for ident, score in cache["mechanisms"].get((str(row["niche"]), digest), ()) if ident != str(row["id"])]
+        if not windows:
+            return None
+        return math.fsum(windows) / len(windows), len(windows)
+
     def _twins(self, row: Mapping[str, Any], cache: dict[str, Any] | None = None) -> list[str]:
         """The living agents of the candidate's desk whose current program is the candidate's beyond its
         parameters (`mechanism_digest`), its lineage's first: the programs it would only nudge. The desk's
         programs are read once a graduation pass (`cache`)."""
-        keys = row.keys() if hasattr(row, "keys") else ()
-        digest = self._mechanism(row["code"] if "code" in keys else None, key=row["code_sha256"] if "code_sha256" in keys else None,
-                                 ident=str(row["id"]))
+        digest = self._row_mechanism(row)
         if digest is None:
             return []
         cache = {} if cache is None else cache

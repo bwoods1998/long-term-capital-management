@@ -288,6 +288,27 @@ class Holds(ForwardCase):
         self.assertEqual([w["candidate"] for w in self.house._waiting_graduates()], [nudge])
 
 
+class MechanismWindows(ForwardCase):
+    """The review of #262: only elites, waiting graduates and residents are ever forward-scored, so a cell walked past
+    its elite held for a losing window reached that elite's parameter twins, which have no window of their own (T4: 2
+    of the 26 cells on offer, one the twin of a window losing 0.0699 a block). No program here is a living one's nudge."""
+
+    def test_a_losing_window_is_not_dodged_by_an_untested_parameter_twin(self):
+        loser = self.elite(with_params(KNOB, {"notional": 40.0}), origin="param", lineage="founder:gone")
+        twin = self.elite(with_params(KNOB, {"notional": 30.0}), origin="param", lineage="founder:gone")
+        self.assertEqual(self.candidate(loser)["cell"], self.candidate(twin)["cell"])
+        self.forward_row(loser, -0.002)
+        self.assertEqual(self.lab.graduate(), [])
+        self.assertEqual(self.lab._held["counts"], {"forward": 2})
+        self.assertIn("its mechanism", self.lab._hold(self.candidate(twin)))
+        other = self.elite(SPARSE, origin="luna", lineage="founder:gone")  # another mechanism: the loser's window is not its
+        self.assertIsNone(self.lab._hold(self.candidate(other)))
+        self.clock.advance(1)
+        self.forward_row(loser, 0.002)  # the mechanism's window wins: the twin is released
+        self.assertIsNone(self.lab._hold(self.candidate(twin)))
+        self.assertEqual(self.lab.graduate()[0]["state"], "born")
+
+
 class Search(ForwardCase):
     def record(self, state="unproven", **extra):
         return {"family": "test-family", "venue": "alpaca", "state": state, "n": 12, "mean_log": 0.01,

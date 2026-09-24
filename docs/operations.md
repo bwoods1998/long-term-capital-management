@@ -237,7 +237,7 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
     `indexed`: the tapes built in the last six hours that a restart remembers). Since E1 (Sept 24,
     2026): `held`, what the last graduation pass held back (`at`, `counts` by reason: `forward`, a
-    losing forward window; `idle`, a desk offered markets for 48 h with no intent and no feed it
+    losing forward window, its own or, with none, its mechanism's on average; `idle`, a desk offered markets for 48 h with no intent and no feed it
     asked for since; `nudge`, the same program beyond PARAMS as a living one on its desk without a
     forward score above the desk's median), or null.
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.

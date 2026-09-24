@@ -676,7 +676,8 @@ queue's oldest programs and to the largest groups of parameter mutants. A progra
   with a forward score above the desk's living median (above zero while no resident of the desk has
   one): a nudge of a program the desk already runs has to beat the desk on data it has not seen;
 - never while its own forward window loses, whatever its search fitness: the search tape admits,
-  data that came after the code was frozen ranks;
+  data that came after the code was frozen ranks; and, with no window of its own, never while the
+  windows of its mechanism on the desk (its code beyond `PARAMS`) lose on average;
 - never onto a desk whose members were offered markets for 48 hours and wrote no order, unless a
   feed the desk asked for (a tool request answered -- the toolsmith's "cannot be a pure tool" is a
   refusal, not an answer --, a recorded feed its programs declare) arrived in that time.
