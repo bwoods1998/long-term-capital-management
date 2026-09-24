@@ -719,17 +719,17 @@ recorded for the next open; live verification uses the markets that trade around
     is that measurement: taken at the fill, listed the same day at 18:52Z). The restart's first reconcile counted the
     fills since the last good one (a cent each) and booked the cents to the House; the fee row was then booked when
     listed; the book reconciles. Exits were never blocked (a frozen book refuses only entries).
-- 19:12Z — **R5's drain, completed** (`r5/drain-hold`, b8b3d98, `house.py` only). A draining probe was lent nothing more
+- 18:56Z — **Cleanup:** the merged Wave 3 worktrees and branches are removed (r2/seats, r2/review, r5/family-probe,
+  r5/review, r6/bugs, r6/option-fees, r6/practice-dust, d/deploy; PRs #273, #276, #278-#281 merged). The 39 remote
+  branches left from Sept 19-23 are all unmerged and stay (deleting unmerged work is not authorized). A lesson: the
+  r2/seats worktree was removed at 18:55Z while its builder's local suite was still running there (its PR was merged
+  and green; the run was lost): a builder's worktree waits for its report.
+- 19:00Z — **R5's drain, completed** (`r5/drain-hold`, b8b3d98, `house.py` only). A draining probe was lent nothing more
   but could still buy (krasker-14's second contract at 18:52:30Z). After each allocator pass the House now holds the
   entries of every probe listed in `probes_waiting_flat` the way an agent holds its own (X1 `pause_entries`: buys held
   at the wake, resting buys cancelled, sells go on; a House row under session `house:drain`), and releases it with a
   `resume_entries` row once the pass no longer lists it; a research resume is refused meanwhile; an agent's own pause
   is left alone. Seven tests; in adversarial review before it ships with the perf pass (Deploy E).
-- 19:05Z — **Cleanup:** the merged Wave 3 worktrees and branches are removed (r2/seats, r2/review, r5/family-probe,
-  r5/review, r6/bugs, r6/option-fees, r6/practice-dust, d/deploy; PRs #273, #276, #278-#281 merged). The 39 remote
-  branches left from Sept 19-23 are all unmerged and stay (deleting unmerged work is not authorized). A lesson: the
-  r2/seats worktree was removed at 18:55Z while its builder's local suite was still running there (its PR was merged
-  and green; the run was lost): a builder's worktree waits for its report.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
