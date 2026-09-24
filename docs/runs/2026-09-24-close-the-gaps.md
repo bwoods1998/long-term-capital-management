@@ -388,6 +388,20 @@ recorded for the next open; live verification uses the markets that trade around
   simulated House over hours; it timed out the same way before Deploy A and passes in CI), ltcm 1,852,
   no failure. C-tools (#249) stays out: its review was still running at the cut; it rides Deploy C.
   Wave 2 (C-search, C-site) was started at 07:50Z from the integration branch, so it builds on Deploy B.
+- 08:23Z — **C-tools (#249) review: twelve defects, eleven fixed** on `c-tools/review` (#258). Its
+  majors: a pause or resume counted as a new strategy (it cancelled the agent's waiting candidate,
+  dropped an audit in flight and set an approval aside); an in-place edit bought a fresh 12 h seat grace
+  and wiped the agent's trading record for the seat market; "one edit replay a day" read only the
+  newest 400 research rows (26 agents write 400 inside a day); resting buys stayed up for up to a day
+  after a pause (a bid filled an hour after one); an audited swing raised its notional in place. And
+  X2 changes nothing on the venue's real rows: every cached market carries `expected_expiration_time`,
+  and for diesel and the token/share weeklies it is the week-out deadline although they paid within
+  12 h of close, so the 71 diesel and 62 other refusals would continue. Decided: the horizon judges
+  such a series by its close plus its measured settle lag (the p95 over its last 20+ settled markets,
+  from the House's own cache, no look-ahead in replay); a paused agent is not promoted, is not active
+  for the seat market or the stuck rule, and after 24 h paused its idle real stake shrinks toward the
+  probe by free cash. `allocator.py` and `evaluator.py` change (code only, no digest move): #258 rides
+  Deploy C. The wake skip was found sound (holidays, half days, a failed calendar).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
