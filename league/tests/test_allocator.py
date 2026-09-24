@@ -35,6 +35,18 @@ IDLE = LADDER.replace("ladder-test", "idle-test").replace('''def decide(ctx):'''
 def _unused(ctx):''')
 
 
+def base_usd(venue, usd):
+    """Both tiers' base at `venue` (Sept 24, 2026: an unproven family's agent is a PROBE staked
+    `probe_bunt_usd`, a proven one's a bunt at `bunt_usd`; the bunt band's mechanics are the same on
+    either base, and the test agents' families are unproven)."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    for key in ("bunt_usd", "probe_bunt_usd"):
+        stack.enter_context(patch.dict(CONSTITUTION["allocator"][key], {venue: usd}))
+    return stack
+
+
 def ev(**kw):
     base = dict(agent="a", venue="alpaca", rung=1, w_paper=1.0, w_real=1.0, e=1.0, paper_trades=0, paper_settled=0,
                 real_trades=0, real_pnl=0.0, real_drawdown=0.0, haircut_log=0.0, real_seen=False)
@@ -79,7 +91,9 @@ class Rules(unittest.TestCase):
         p = P()
         line = p["bunt_at"] * p["hysteresis"]
         self.assertEqual(target_band(ev(rung=2, e=line + 0.001), p)[0], "bunt")  # below entry, above exit: stays
-        self.assertEqual(target_band(ev(rung=2, e=line - 0.001), p)[0], "paper")
+        # The exit applies once the stay has `hysteresis_after_settled` real results (P2, Sept 24, 2026).
+        self.assertEqual(target_band(ev(rung=2, e=line - 0.001, real_stay_closed=3), p)[0], "paper")
+        self.assertEqual(target_band(ev(rung=2, e=line - 0.001, real_stay_closed=2), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=1.1, real_trades=8), p)[0], "swing")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=0.99, real_trades=8), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=1.1, real_trades=7), p)[0], "bunt")
@@ -87,7 +101,7 @@ class Rules(unittest.TestCase):
         self.assertEqual(target_band(ev(rung=3, e=swing_exit + 0.01, w_real=0.95), p)[0], "swing")
         self.assertEqual(target_band(ev(rung=3, e=swing_exit - 0.01, w_real=1.0), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=3, e=2.0, w_real=0.89), p)[0], "bunt")
-        self.assertEqual(target_band(ev(rung=3, e=0.5, w_real=0.5), p)[0], "paper")
+        self.assertEqual(target_band(ev(rung=3, e=0.5, w_real=0.5, real_stay_closed=3), p)[0], "paper")
 
     def test_a_real_drawdown_sends_a_bunt_or_a_swing_back_to_paper_at_once(self):
         p = P()
@@ -120,11 +134,12 @@ class Rules(unittest.TestCase):
         # Exits are sliced (PR #164): the position follows the stake; every Alpaca order stays within
         # the gateway's $75 on its own pricing (a market order at the ask x 1.10).
         self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("68.18")))
-        self.assertEqual(limits_for(D("400"), "kalshi"), (D("200.00"), D("75")))
+        self.assertEqual(limits_for(D("400"), "kalshi"), (D("80.00"), D("75")))  # a fifth on an event book (Sept 24, 2026)
         with patch.object(allocator, "EXITS_SLICED", False):
             self.assertEqual(limits_for(D("400"), "alpaca"), (D("54.54"), D("54.54")))  # one order closes it
-        self.assertEqual(limits_for(D("10"), "kalshi"), (D("5.00"), D("5.00")))
-        self.assertEqual(limits_for(D("30"), "kalshi"), (D("15.00"), D("15.00")))  # the Kalshi bunt since Sept 23, 2026 ~17:00 UTC
+        # P2 (Sept 24, 2026): a Kalshi position is `position_share_event`, a fifth of the stake.
+        self.assertEqual(limits_for(D("10"), "kalshi"), (D("2.00"), D("2.00")))  # the Kalshi probe
+        self.assertEqual(limits_for(D("30"), "kalshi"), (D("6.00"), D("6.00")))  # the Kalshi bunt since Sept 23, 2026 ~17:00 UTC
 
 
 class EvidenceOnTheBooks(HouseCase):
@@ -205,6 +220,15 @@ class HouseCaseReal(unittest.TestCase):
             broker.set_quote(instrument_for(broker.venue, {"symbol": "BTC/USD"}), f"{self.price - 2:.2f}", f"{self.price + 2:.2f}")
         self.data.price = self.price
 
+    def proven_family(self):
+        """Only a proven family's agent swings (the close-the-gaps run, Sept 24, 2026): a test of the swing
+        band's mechanics seats a proven family's agent."""
+        from league.tests.test_promotion_on_proof import canned
+
+        proven = patch.object(allocator, "family_record", return_value=canned("alloc-test", "alpaca", proven=True, n=12, bound=0.002))
+        proven.start()
+        self.addCleanup(proven.stop)
+
     def agent(self, name="climber", code=LADDER):
         agent = self.house.spawn(name, "alloc-test", code, reason="test", endowment="2.5")
         self.house.evaluator.seat(agent.id, 1, "test: straight to paper")
@@ -246,20 +270,23 @@ class Mechanics(HouseCaseReal):
         self.assertEqual(real.limits[a.id].max_position_usd, D("12.50"))
         self.assertTrue(house.books["alpaca-paper"].account(a.id).swept)
         promote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "promote"][-1]
-        self.assertEqual((promote["band_from"], promote["band_to"], promote["via"]), ("paper", "bunt", "allocator"))
+        # Its family ("alloc-test") has no proven record: a PROBE, the first real stake of an unproven
+        # family (Sept 24, 2026). On Alpaca a probe and a bunt are both $25.
+        self.assertEqual((promote["band_from"], promote["band_to"], promote["via"]), ("paper", "probe", "allocator"))
         self.assertEqual(promote["stake_usd"], "25")
-        self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "bunt")
-        # Its evidence falls below the bunt line with hysteresis: straight back to paper.
-        table[a.id] = dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=2)
+        self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "probe")
+        # Its evidence falls below the bunt line with hysteresis after three real results in its stay
+        # (the one-loss trial, Sept 24, 2026): straight back to paper.
+        table[a.id] = dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=3, real_stay_closed=3)
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(house.evaluator.rung(a.id), 1)
         demote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
-        self.assertEqual((demote["band_from"], demote["band_to"]), ("bunt", "paper"))
+        self.assertEqual((demote["band_from"], demote["band_to"]), ("probe", "paper"))
         paper = house.books["alpaca-paper"].account(a.id)
         self.assertTrue(paper.funded and not paper.swept and paper.cash > D("199"))  # staked afresh on paper
         moves = house.allocator.board()["moves"]
-        self.assertEqual([(m["from_band"], m["to_band"]) for m in moves if m["agent"] == a.id], [("paper", "bunt"), ("bunt", "paper")])
+        self.assertEqual([(m["from_band"], m["to_band"]) for m in moves if m["agent"] == a.id], [("paper", "probe"), ("probe", "paper")])
 
     def test_the_envelope_is_never_exceeded_and_the_best_evidence_is_seated_first(self):
         house = self.house
@@ -288,6 +315,7 @@ class Mechanics(HouseCaseReal):
         self.assertLessEqual(house.allocator.committed("alpaca"), house.allocator.capital("alpaca"))
 
     def test_the_first_swing_is_audited_and_its_stake_follows_the_evidence(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
@@ -321,6 +349,7 @@ class Mechanics(HouseCaseReal):
             self.assertEqual(house.books["alpaca"].account(a.id).staked, staked)
 
     def test_shrinking_never_forces_a_sale(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
@@ -360,7 +389,7 @@ class Mechanics(HouseCaseReal):
             self.assertEqual(alloc.target_stake(a, "bunt"), D("24.00"))
             swing = alloc.target_stake(a, "swing", ev(venue="alpaca", e=4.0))
             self.assertEqual(swing, D("24.00"))  # 30 (0.6 of $50) halved to 15, floored at 24
-            with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}):
+            with base_usd("alpaca", "60"):
                 self.assertEqual(alloc.target_stake(a, "bunt"), D("30.00"))  # a stake above the floor is halved
         with patch.object(type(alloc), "floor_pnl", return_value=D("-10")):  # -20%: still throttled
             self.assertTrue(alloc._throttle())
@@ -466,8 +495,10 @@ class GrantAndDigest(unittest.TestCase):
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual(grant["constitution_digest"], money_digest())
-        self.assertEqual(grant["stake_usd"], "25")  # the smallest bunt (Alpaca; Kalshi is $30 since Sept 23, 2026 ~17:00 UTC)
-        self.assertEqual(grant["max_agents"], 40)  # floor($1,017.75 / $25)
+        # The smallest real stake: the Kalshi probe since Sept 24, 2026 (the smallest bunt, Alpaca's $25,
+        # before: 40 seats).
+        self.assertEqual(grant["stake_usd"], "10")
+        self.assertEqual(grant["max_agents"], 101)  # floor($1,017.75 / $10)
         with patch.dict(CONSTITUTION["allocator"], {"enabled": False}):
             old = policy({"kalshi": "517.75", "alpaca": "500"})
             self.assertNotEqual(old["constitution_digest"], grant["constitution_digest"])
@@ -594,9 +625,11 @@ class NoFlapping(HouseCaseReal):
             rung = h.evaluator.rung(ag.id) if rung is None else rung
             left = allocator.left_real_at(h, ag.id)
             cooling = rung == 1 and left is not None and h.clock() - left < 3600
-            # A record that would flap: good enough for a bunt on paper, a loser on real money.
+            # A record that would flap: good enough for a bunt on paper, a loser on real money (past its
+            # one-loss trial: three real results in the stay, Sept 24, 2026).
             return ev(agent=ag.id, venue=ag.venue, rung=rung, e=1.10 if rung == 1 else 0.70, w_paper=1.21,
-                      w_real=1.0 if rung == 1 else 0.64, paper_trades=6, cooling=cooling)
+                      w_real=1.0 if rung == 1 else 0.64, paper_trades=6, cooling=cooling,
+                      real_stay_closed=0 if rung == 1 else 3)
 
         rungs = []
         with patch.object(allocator, "evidence", side_effect=fake):
@@ -622,7 +655,11 @@ class NoFlapping(HouseCaseReal):
                 break
         self.assertTrue(real.account(a.id).holdings)
         self.price *= 0.6
-        self.tick()  # marked down: its real evidence falls, it is sent back to paper
+        # Marked down: its real evidence falls, and it is sent back to paper. What is under test is that
+        # the loss persists there, not the one-loss trial (Sept 24, 2026), which would hold the seat
+        # until three real results are in: the exit applies at once here.
+        with patch.dict(CONSTITUTION["allocator"], {"hysteresis_after_settled": 0}):
+            self.tick()
         row = allocator.evidence(house, house.registry.get(a.id))
         self.assertEqual(house.evaluator.rung(a.id), 1)
         self.assertLess(row.w_real, 0.9)  # the loss is still in its evidence on paper
@@ -701,6 +738,7 @@ class LifecycleRegressions(HouseCaseReal):
         self.assertEqual(allocator.audit_standing(house, a), "none")  # an error is not a verdict
 
     def test_a_drifting_swing_keeps_its_positions_and_is_not_swung_again_at_once(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
@@ -819,7 +857,7 @@ class BuntGrowth(HouseCaseReal):
         a bunt seated at $10 before the raise stayed at $10 (meriwether-h2d625d on the 21:31Z board,
         W_real 0.9978, stake $10, target $30). It is lent up to the base, net of what it was lent."""
         a, book = self.bunted()
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}):  # the base raised under it
+        with base_usd("alpaca", "40"):  # the base raised under it
             row = self.sized(a, book, 0.9978, "24.95")
             self.assertEqual((row["stake_usd"], row["moved_usd"]), ("40", "15.00"))  # 40 - 25 lent, not 40 - 24.95
             self.assertEqual(book.account(a.id).staked, D("40"))
@@ -829,7 +867,7 @@ class BuntGrowth(HouseCaseReal):
         """The #198 review, item 4: a bunt halved by the throttle stayed halved when it lifted."""
         a, book = self.bunted()
         alloc = self.house.allocator
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}), \
+        with base_usd("alpaca", "60"), \
                 patch.object(type(alloc), "headroom", return_value=D("1000")):  # the test House's $50 envelope aside
             self.sized(a, book, 0.95, "24")  # lent up to the $60 base
             self.assertEqual(book.account(a.id).staked, D("60"))
@@ -846,7 +884,7 @@ class BuntGrowth(HouseCaseReal):
     def test_lending_up_to_the_base_stays_inside_the_envelope(self):
         a, book = self.bunted()
         alloc = self.house.allocator
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}), \
+        with base_usd("alpaca", "40"), \
                 patch.object(type(alloc), "headroom", return_value=D("6.50")):
             row = self.sized(a, book, 0.99, "25")
             self.assertEqual(row["moved_usd"], "6.50")  # 15 owed to the base, 6.50 of room
@@ -858,7 +896,14 @@ class BuntGrowth(HouseCaseReal):
         evidence = ev(agent=a.id, venue="alpaca", rung=2, w_real=1.2, e=1.2, real_trades=3)
         alloc._evidence = {a.id: evidence}
         self.assertEqual(alloc.seat_stake(a), D("30.00"))
-        self.assertEqual(alloc.limits(a, D("25")), limits_for(D("30"), "alpaca"))
+        # The limits follow the target the account holds: a bunt that made its $5 (W_real 1.2, equity $30)
+        # is limited on $30, one target with the seat, the packet and the board. A raise the allocator has
+        # not lent is not yet the account's stake (review of #224, Sept 24, 2026): lent $25 and holding
+        # $25, it is limited on $25 until the raise lands.
+        real = book.equity
+        with patch.object(book, "equity", side_effect=lambda agent: D("30") if agent == a.id else real(agent)):
+            self.assertEqual(alloc.limits(a, D("25")), limits_for(D("30"), "alpaca"))
+        self.assertEqual(alloc.limits(a, D("25")), limits_for(D("25"), "alpaca"))
         self.assertEqual(D(alloc.context(evidence, "bunt")["stake_usd"]), D("30"))
         with self.evidence_of({a.id: dict(e=1.2, w_paper=1.0, w_real=1.2, paper_trades=6, real_trades=3)}):
             alloc.rebalance()

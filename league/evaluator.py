@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from . import stats
 from .constitution import CONSTITUTION
@@ -61,6 +61,105 @@ def _per_exposure(rows: Sequence[Mapping[str, Any]]) -> list[float]:
 
 #: Books whose trades end in a settlement (an event contract's outcome), paper and real.
 EVENT_BOOKS = ("kalshi-shadow", "kalshi")
+
+
+def event_key(instrument: Mapping[str, Any] | None) -> str | None:
+    """The EVENT an event contract belongs to: what one bet is, for counting settlements (D4, the
+    close-the-gaps run, Sept 24, 2026). Kalshi's market ticker is SERIES-EVENT-MARKET and no fill or
+    settlement payload names the event, so:
+
+    - an explicit `event_ticker` (or `event`) on the instrument wins, if a payload ever carries one;
+    - otherwise the ticker's first two `-` segments. That is the ticker without its last segment
+      for every three-segment ticker -- `KXMLBTOTAL-26SEP231840MILPHI-6` is strike 6 of
+      `KXMLBTOTAL-26SEP231840MILPHI`, `KXBTCD-26SEP2401-T62999.99` a strike of `KXBTCD-26SEP2401`
+      -- and it keeps a player prop (`KXMLBHIT-26SEP222140LAAATH-LAAMTROUT27-4`: SERIES-GAME-
+      PLAYER-LINE) on its game, as Kalshi's event ticker and the House's tapes do (`league/tapes.py`
+      falls back to the same two segments), where dropping only the last segment would count one
+      event per player of one game. Measured on the T0 snapshot (2026-09-24 01:42Z): 1,427 of the
+      1,439 Kalshi fill and settlement rows carry three-segment tickers across 43 series; the other
+      12 are KXMLBHIT/KXMLBHR props;
+    - a name with fewer than three segments is its own event; None without one."""
+    if not isinstance(instrument, Mapping):
+        return None
+    explicit = instrument.get("event_ticker") or instrument.get("event")
+    if explicit:
+        return str(explicit).strip().upper()
+    ticker = str(instrument.get("market_id") or instrument.get("symbol") or "").strip().upper()
+    if not ticker:
+        return None
+    parts = ticker.split("-")
+    return "-".join(parts[:2]) if len(parts) >= 3 else ticker
+
+
+def per_event(book: str, constitution: Mapping[str, Any] | None = None) -> bool:
+    """Whether closed trades on `book` count once per event: an event book, under the constitution's
+    `allocator.independent_settlements: "event"` (Sept 24, 2026; "trade" counts every settlement)."""
+    rules = (constitution or CONSTITUTION).get("allocator") or {}
+    return book in EVENT_BOOKS and str(rules.get("independent_settlements") or "trade") == "event"
+
+
+def count_key(seq: int, payload: Mapping[str, Any], by_event: bool) -> str:
+    """What one closed row (a settlement or a sale that left a position flat) counts toward: its event
+    when `by_event`, else itself -- as is a row that names no market, which is never merged."""
+    if by_event:
+        key = event_key(payload.get("instrument"))
+        if key is not None:
+            return key
+    return f"#{seq}"
+
+
+def staked_base(stakes: Sequence[tuple[int, float]], until_seq: int | None = None) -> float:
+    """The stake a closed trade is measured against (`Evaluator.trade_returns`): what is lent now, net
+    of every sweep; or, read through a fixed ledger position (`until_seq`), the most the agent was ever
+    lent up to it, so that sweeping an account cannot erase or rescale the trades it closed."""
+    if until_seq is None:
+        return sum(usd for _, usd in stakes)
+    staked = running = 0.0
+    for seq, usd in stakes:
+        if seq <= until_seq:
+            running += usd
+            staked = max(staked, running)
+    return staked
+
+
+def closed_trade_rows(entries: Iterable[Any], book: str, *, since_seq: int = 0,
+                      until_seq: int | None = None) -> tuple[list[dict[str, Any]], list[float]]:
+    """The closed trades in one agent's `book.fill` and `book.settle` rows (oldest first) on `book`,
+    after `since_seq` and at or before `until_seq`, exactly as `Evaluator.trade_returns` has always
+    counted them, and the cash each entry put at risk. One trade is one instrument gone flat: a
+    settlement, or the sale that left it flat with the partial sales before it summed in (a position
+    sold in ten fills is one trade; an option is its contract, expiry and strike, not every contract
+    on the underlying). Each row is {"seq", "key", "instrument", "made" (dollars), "settled", and
+    "entry_seq" and "liquidity" of the position's first buy, read even before `since_seq`; "taker"
+    when a fill does not say, as `Book` reads it}. Shared since Sept 24, 2026 by `trade_returns` and
+    the allocator's family record, which must never count a trade differently."""
+    rows: list[dict[str, Any]] = []
+    entries_cash: list[float] = []
+    running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
+    opened: dict[str, tuple[int, str]] = {}  # the open position's first buy: (seq, liquidity)
+    for entry in entries:
+        p = entry.payload
+        if p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
+            continue
+        inst = p.get("instrument") or {}
+        key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
+        sale = entry.kind == "book.fill" and p.get("realized") is not None and p.get("source") != "dust"
+        if entry.kind == "book.fill" and p.get("side") == "buy" and p.get("source") != "dust":
+            opened.setdefault(key, (entry.seq, str(p.get("liquidity") or "taker")))
+        first = opened.pop(key, None) if entry.kind == "book.settle" or (sale and p.get("flat", True)) else opened.get(key)
+        if entry.seq <= since_seq:
+            continue
+        row = {"seq": entry.seq, "key": key, "instrument": inst, "entry_seq": first[0] if first else None,
+               "liquidity": first[1] if first else "taker"}
+        if entry.kind == "book.settle":
+            rows.append({**row, "made": running.pop(key, 0.0) + float(p["pnl"]), "settled": True})
+        elif sale:
+            running[key] = running.get(key, 0.0) + float(p["realized"])
+            if p.get("flat", True):
+                rows.append({**row, "made": running.pop(key), "settled": False})
+        elif p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
+            entries_cash.append(-float(p["cash_delta"]))
+    return rows, entries_cash
 
 
 def block_key(at: str, horizon: str) -> str:
@@ -319,36 +418,34 @@ class Evaluator:
         from .accounting import evidence_cutoffs
         since_seq = max(since_seq, evidence_cutoffs(self.ledger, agent).get(book, 0))
         stakes = [(e.seq, float(e.payload["usd"])) for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
-        if until_seq is None:
-            staked = sum(usd for _, usd in stakes)
-        else:
-            staked = running_stake = 0.0
-            for seq, usd in stakes:
-                if seq <= until_seq:
-                    running_stake += usd
-                    staked = max(staked, running_stake)
+        staked = staked_base(stakes, until_seq)
         if staked <= 0:
             return [], 0.0
-        returns, risked = [], []
-        running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
-        for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent):
-            p = entry.payload
-            if entry.seq <= since_seq or p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
-                continue
-            inst = p.get("instrument") or {}
-            # One trade is one instrument gone flat: for an option that is the contract (its expiry
-            # and strike), not every contract on the same underlying and side.
-            key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
-            if entry.kind == "book.settle":
-                returns.append((running.pop(key, 0.0) + float(p["pnl"])) / staked)
-            elif p.get("realized") is not None and p.get("source") != "dust":
-                running[key] = running.get(key, 0.0) + float(p["realized"])
-                if p.get("flat", True):
-                    returns.append(running.pop(key) / staked)
-            elif p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
-                risked.append(-float(p["cash_delta"]) / staked)
+        rows, entries = closed_trade_rows(self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent), book,
+                                          since_seq=since_seq, until_seq=until_seq)
+        returns = [row["made"] / staked for row in rows]
+        risked = [cash / staked for cash in entries]
         # With no entry seen since the rung began (contracts carried in), assume all of it was at risk.
         return returns, (sum(risked) / len(risked) if risked else 1.0)
+
+    def independent_closed(self, agent: str, book: str, *, since_seq: int = 0) -> int:
+        """The agent's closed trades on `book` after `since_seq` and its evidence cutoff, every
+        settlement and every sale that left a position flat, counted once per EVENT on the event
+        books under `allocator.independent_settlements: "event"` (D4, Sept 24, 2026:
+        meriwether-h7d7702 reached the bunt line "on 6 closed trades" that were two games), once per
+        row otherwise. The gates that move an agent toward real money read this; W does not."""
+        from .accounting import evidence_cutoffs
+
+        since_seq = max(since_seq, evidence_cutoffs(self.ledger, agent).get(book, 0))
+        by_event = per_event(book, self.c)
+        keys = set()
+        for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=since_seq):
+            p = entry.payload
+            if p.get("book") != book:
+                continue
+            if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)):
+                keys.add(count_key(entry.seq, p, by_event))
+        return len(keys)
 
     def judge(self, agent: str, book: str, *, peers: Sequence[str] = (), family: str = "", horizon: str = "hour") -> Verdict:
         """Look at an agent on the book of its current rung and say what the rules say.
@@ -480,8 +577,11 @@ class Evaluator:
             return self._decide(agent, rung, "die", "the upper bound on its growth is below zero", numbers)
         if not gate or active < blocks_needed:
             return Verdict(agent, rung, "hold", "the evidence does not decide yet", numbers)
-        if len(returns) < int(self.ladder["min_closed_trades"]):
-            return Verdict(agent, rung, "hold", f"{len(returns)} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
+        # The count that gates promotion is of INDEPENDENT closed trades (D4, Sept 24, 2026: one an
+        # event on the event books); the statistics above still read every trade.
+        closed = self.independent_closed(agent, book, since_seq=entered)
+        if closed < int(self.ladder["min_closed_trades"]):
+            return Verdict(agent, rung, "hold", f"{closed} closed trades; {self.ladder['min_closed_trades']} needed before any promotion", numbers)
         if gate.get("gate", "bound") == "screen":
             limit = float(gate["max_drawdown"])
             window = int(self.ladder.get("screen_drawdown_blocks", 30))
@@ -626,8 +726,11 @@ class Evaluator:
         rule = (self._gate(rung) or {}).get("settled_day") if rung == 1 and horizon == "day" else None
         if not isinstance(rule, Mapping) or book not in EVENT_BOOKS:
             return None
-        settled = sum(1 for e in self.ledger.iter(kinds="book.settle", agent=agent, after=since_seq)
-                      if e.payload.get("book") == book)
+        # One settlement an EVENT under `allocator.independent_settlements: "event"` (D4, Sept 24, 2026):
+        # three strikes of one game are one market outcome, not three.
+        by_event = per_event(book, self.c)
+        settled = len({count_key(e.seq, e.payload, by_event) for e in self.ledger.iter(kinds="book.settle", agent=agent, after=since_seq)
+                       if e.payload.get("book") == book})
         needed = int(rule["min_settled_trades"])
         return {"blocks": int(rule["min_active_blocks"]), "needed": needed, "settled": settled, "open": settled >= needed}
 
