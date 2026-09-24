@@ -135,7 +135,7 @@ from .ledger import now_iso
 #: and the updater share. A colon cannot be in an agent id, so it cannot collide with `replay:<agent>`.
 LAB_JOB = "replay:lab:step"
 
-PROMPT_VERSION = "lab-2026-09-23.1"
+PROMPT_VERSION = "lab-2026-09-24.1"
 
 #: The dials, overridden by `game.json` `lab`.
 DEFAULTS: dict[str, Any] = {
@@ -146,6 +146,10 @@ DEFAULTS: dict[str, Any] = {
     # cannot run more than an hour an hour).
     "box_usd_per_hour": "0.20",
     "batch_size": 32,
+    # E1 (the close-the-gaps run, Sept 24, 2026): the share of each batch reserved for the programs someone
+    # wrote (`RESERVED_ORIGINS`: an agent's submission, Luna's and Sol's) whenever any wait on the chosen tape
+    # (`reserved_quota`, held to `RESERVED_SHARE_BOUNDS`). It was a third.
+    "reserved_share": 0.5,
     "param_children": 16,
     "llm_children": 6,
     "leap_every": 10,
@@ -200,6 +204,12 @@ DEFAULTS: dict[str, Any] = {
     # A tape the House fails to build the same way this many hourly tries in a row is unsupported input and
     # its rows are blocked (Sept 24, 2026: three submissions failed every hour and sat at the queue's front).
     "tape_failures_before_block": 12,
+    # E1 (the close-the-gaps run, Sept 24, 2026): no graduate is born onto a desk whose members were offered
+    # markets for this many hours and wrote no intent, unless a feed the desk asked for arrived in that time
+    # (`_idle_desk`; the attention desk went 48 h without an intent at T0 and still received graduates). 0 is off.
+    "idle_desk_hours": 48,
+    # The deep-market desks (E1): Sol's leaps go to them first (`leap`). game.json names them.
+    "deep_desks": [],
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -222,9 +232,12 @@ STATUSES = ("queued", "evaluated", "failed", "invalid", "blocked")
 #: behind the parameter mutants, which share their elite's tape and arrive in dozens, none of the
 #: lab's 394 Luna and Sol children was evaluated in its first six hours.
 PRIORITY = {"agent": 0, "seed": 1, "param": 2, "luna": 1, "sol": 1}
-#: The origins a third of every batch is reserved for (`_next_batch`), when any are queued: the
-#: programs someone wrote, against the free mutants of what is already in the archive.
+#: The origins `reserved_share` of every batch is reserved for (`_next_batch`), when any wait on its
+#: tape: the programs someone wrote, against the free mutants of what is already in the archive.
 RESERVED_ORIGINS = ("agent", "luna", "sol")
+#: `lab.reserved_share` as the plan bounds it (docs/goals/LTCM_CLOSE_THE_GAPS.md, "Risk-free dials"; `game.json`
+#: `lab_bounds` says the same and `economy.check_bounds` refuses a game file outside it): enforced where it is read.
+RESERVED_SHARE_BOUNDS = (0.33, 0.75)
 #: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
 #: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
 TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
@@ -417,6 +430,112 @@ def tape_key(needs: Mapping[str, Any]) -> str:
     return json.dumps({k: v for k, v in dict(needs).items() if k not in TAPE_KEY_IGNORED}, sort_keys=True)
 
 
+def _share(share: Any) -> float:
+    low, high = RESERVED_SHARE_BOUNDS
+    try:
+        return min(max(float(share), low), high)
+    except (TypeError, ValueError):
+        return low
+
+
+def batch_turn(turn: int, share: Any) -> str:
+    """Whose turn batch number `turn` (1, 2, ...) is (`Lab._next_batch`; E1, Sept 24, 2026): "reserved" for
+    `share` of the turns (held to its bounds) -- the tape where the programs someone wrote wait, the most rows
+    first -- and the others alternating "queue" (the queue's oldest row: a seed or a lone row keeps its turn)
+    and "largest" (the largest group of any origin: the batch the box fills). A step builds at most
+    `max_tapes_per_step` tapes, one a turn, so this is also how a step's builds are shared. With the half:
+    queue, reserved, largest, reserved, and again."""
+    share = _share(share)
+
+    def quota(t: int) -> int:  # ceil(t x share): turn t is reserved when it moves between t and t + 1
+        return math.ceil(round(t * share, 9))
+
+    if quota(turn + 1) > quota(turn):
+        return "reserved"
+    others = turn - (quota(turn + 1) - quota(1))  # the turns up to this one that were not reserved
+    return "queue" if others % 2 == 1 else "largest"
+
+
+def reserved_quota(size: int, share: Any) -> int:
+    """How many of a batch's `size` rows the reserved origins may claim first: `share` of it, rounded up,
+    at least one; `share` held to `RESERVED_SHARE_BOUNDS` (a game file outside them is refused by CI too)."""
+    return max(1, math.ceil(round(int(size) * _share(share), 9)))
+
+
+#: NEEDS keys that are knobs of how one program runs, not what it is (E1, Sept 24, 2026): a program that
+#: differs from another only in these and its PARAMS literal is the same mechanism (`mechanism_digest`).
+MECHANISM_IGNORED_NEEDS = TAPE_KEY_IGNORED
+
+
+def mechanism_digest(code: str) -> str | None:
+    """What a program IS, beyond its parameters (E1, the close-the-gaps run, Sept 24, 2026): a digest of
+    its syntax tree without the module's PARAMS literal, without any docstring or bare string, and with
+    its NEEDS literal read without `MECHANISM_IGNORED_NEEDS` (a style label, parameter bounds, the wake
+    cadence, a market window). Two programs with one digest differ only in parameters: a nudge, as 16 of
+    the lab's 18 born graduates were at T0 (an impulse floor 0.0006 -> 0.000686). Comments and layout
+    never count. None for a file that does not parse."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PARAMS" for t in node.targets):
+            continue
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "NEEDS" for t in node.targets):
+            try:
+                needs = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                needs = None
+            if isinstance(needs, dict):
+                kept = {k: v for k, v in needs.items() if k not in MECHANISM_IGNORED_NEEDS}
+                body.append(ast.parse(f"NEEDS = {json.dumps(kept, sort_keys=True, default=str)!r}").body[0])
+                continue
+        body.append(node)
+    for node in ast.walk(ast.Module(body=body, type_ignores=[])):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            node.body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                                                      and isinstance(n.value.value, str))] or [ast.Pass()]
+    body = [n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str))]
+    return hashlib.sha256(ast.dump(ast.Module(body=body, type_ignores=[])).encode()).hexdigest()[:24]
+
+
+def family_at_capacity(record: Mapping[str, Any] | None, rule: Mapping[str, Any] | None) -> bool:
+    """Whether the family ledger says a family is at its measured capacity (E3, Sept 24, 2026), read from
+    what `league/families.py` computed, never measured again here: its family swing's stake is held by
+    capacity (`swing.limit`), or `families.capacity_holds` says the fill rate at twice its current position
+    size is under `capacity_fill_ratio` of the rate at that size, both measured on `capacity_min_markets`
+    markets (`record["capacity"]`: its `fill_rates` and `size_usd`). More search on such a family finds
+    no more room: the markets it bids are full at the size it can already put in them."""
+    from .families import capacity_holds
+
+    if not isinstance(record, Mapping):
+        return False
+    swing = record.get("swing") if isinstance(record.get("swing"), Mapping) else {}
+    if swing.get("limit") == "capacity":
+        return True
+    cap = record.get("capacity") if isinstance(record.get("capacity"), Mapping) else {}
+    try:
+        size = float(cap.get("size_usd") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if rule is None or size <= 0 or not isinstance(cap.get("fill_rates"), Mapping):
+        return False
+    return capacity_holds(cap["fill_rates"], size, 2 * size, ratio=float(rule.get("capacity_fill_ratio", 0.5)),
+                          min_markets=int(rule.get("capacity_min_markets", 5)))
+
+
+#: A parent's own forward window in its breeding weight (`Lab._pick_parent`, E1, Sept 24, 2026): a window
+#: that wins doubles it, one that loses quarters it, none leaves it; within the lineage weight's bounds.
+FORWARD_BREEDING = (2.0, 0.25)
+
+
+def forward_factor(score: float | None) -> float:
+    if score is None:
+        return 1.0
+    return FORWARD_BREEDING[0] if score > 0 else FORWARD_BREEDING[1]
+
+
 def forward_cut(tape: Mapping[str, Any], cut: float) -> dict[str, Any] | None:
     """The forward window of a tape: only the steps strictly after `cut` (an epoch), so a replay of
     it sees no step any search, replay or holdout saw. On an Alpaca tape the bars of the steps
@@ -591,7 +710,11 @@ different rate, or earns when the live book does not, wins a cell of its own.
 The House refuses, before any replay, a file that breaks these rules:
 - the strategy contract below, exactly: literal NEEDS and PARAMS dicts, decide(ctx), allowed imports only;
 - NEEDS stays on the desk in `desk`: its venue, one of its horizons, markets inside its universe. Keep the parent's
-  NEEDS unless your change needs other data;
+  NEEDS unless your change needs other data: a program on the parent's data runs in the parent's next batch, while
+  one with NEEDS of its own waits for a tape of its own (the lab builds a few a step);
+- a program that differs from the parent only in PARAMS (or in NEEDS style, parameter_rules, wake_minutes or
+  max_hours_to_close) is a nudge: it graduates only when its forward results beat the desk's living programs.
+  Change the mechanism;
 - PARAMS is a literal dict; every new numeric knob has bounds in NEEDS["parameter_rules"]["bounds"];
 - it must TRADE on the tape: `gate` says how many closed trades and blocks a program needs to be scored at all.
 
@@ -658,6 +781,12 @@ class Lab:
         self._prior_skips: dict[str, int] = {}
         #: A resident's program's lab id, by (agent, code, parameters) (`resident_candidate`, S2).
         self._resident_ids: dict[tuple[str, str, str], str | None] = {}
+        #: E1 (Sept 24, 2026): each desk's idleness as last read (`_idle_desk`: when, and why it is idle or
+        #: None), the programs' mechanism digests by code hash (`_twins`), and what the last graduation
+        #: pass held back and why (`held`, in `stats` and health.json).
+        self._idle: dict[str, tuple[float, str | None]] = {}
+        self._digests: dict[str, str | None] = {}
+        self._held: dict[str, Any] = {}
         #: D1 (Sept 24, 2026): what the step's phases raised (`_guarded`) and the queued rows it
         #: blocked for an error of the lab's own (`_block_row`), told at the end of each step.
         self._failures: list[dict[str, str]] = []
@@ -885,6 +1014,8 @@ class Lab:
                 "queued": self.queued(),
                 "born_total": int(self._q("SELECT COUNT(*) AS n FROM graduations WHERE state='born'")[0]["n"]),
                 "forward": self.forward_stats(),
+                # E1 (Sept 24, 2026): what the last graduation pass held back, by reason (`_hold`).
+                "held": self._held or None,
             }
         except Exception as exc:  # noqa: BLE001 - health is written on the tick
             return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
@@ -1355,18 +1486,32 @@ class Lab:
 
     # --------------------------------------------------------------- evaluate
     def _next_batch(self) -> tuple[str, dict[str, Any], list[sqlite3.Row]] | None:
-        """(lab tape id, search tape, the rows to evaluate) of the next batch: the queue's front,
-        grouped by the tape they need, one tape a batch. None when nothing is ready.
+        """(lab tape id, search tape, the rows to evaluate) of the next batch: the queued rows grouped by
+        the tape they need, one tape a batch, at most one tape BUILT a batch (a step builds at most
+        `max_tapes_per_step`). None when nothing is ready.
 
-        Every other batch serves the largest group ready (below). Its tape must get built too: the
-        step builds at most `max_tapes_per_step` new tapes, and in queue order they all went to seeds
-        (one row a tape), so after a restart emptied the cache the children's tapes were never built
-        and no child was evaluated (Sept 23, 12:08-12:21Z: 104 evaluated, all seeds or submissions,
-        500 children queued). On those turns the rows are visited largest group first -- after the
-        rows of the reserved origins (an agent's submissions, Luna's and Sol's programs), whose tapes
-        are built before anyone else's, and a third of the batch is theirs when any wait on the
-        chosen tape (Sept 23, 2026: in six hours 1,358 parameter mutants were evaluated and none of
-        the 394 LLM-written children)."""
+        Whose turn it is decides which tape (`batch_turn`, E1 of the close-the-gaps run, Sept 24, 2026):
+        - "reserved", `reserved_share` of the turns (half): the tape where the programs someone wrote
+          wait (an agent's submission first, then Luna's and Sol's), grouped by tape, the one with the
+          most rows waiting first; with none waiting, the largest group;
+        - "queue", every other remaining turn: the queue's oldest row's tape (a seed, or a lone row of any
+          origin, keeps its turn);
+        - "largest": the largest group of any origin, the batch the box fills.
+        And whatever the turn, `reserved_share` of the batch (`reserved_quota`) is the written programs'
+        when any wait on the chosen tape; the rest is filled with whatever else waits on it.
+
+        Why the shares (measured): on Sept 23 the 394 Luna and Sol children waited six hours behind
+        1,358 parameter mutants (so a third of every batch went to them, and their tapes were built
+        first); then, after Deploy A (Sept 24, 05:37Z), the lab ran 63 batches of 84 candidates in its
+        first hour, 1.3 a batch: 65 of the 69 Luna children queued at T4 asked for NEEDS of their own
+        (other symbols 42, bars 27), so each needed a tape, the step's four builds all went to them and
+        the archive's mutants, 24 to 42 to a tape, never ran. Built one a turn, the builds are shared:
+        on the T4 queue the first hour after a restart evaluates far more candidates a build (the PR
+        of Sept 24 has the numbers) while the written programs still get half the builds.
+
+        A row the lab cannot serve now never decides a turn (Sept 24, 2026: three submissions whose tape
+        never built sat at priority 0): its tape's failure is kept for the hour (`_tape_errors`) and the
+        turn goes to the next tape in its order."""
         settings = self.settings
         size = int(settings["batch_size"])
         # A wide look: rows whose tape is not built yet are passed over (at most `max_tapes_per_step` new
@@ -1375,6 +1520,7 @@ class Lab:
         if not rows:
             return None
         self._batch_turn = getattr(self, "_batch_turn", 0) + 1
+        turn = batch_turn(self._batch_turn, settings.get("reserved_share"))
 
         def needs_key(row: sqlite3.Row) -> str:
             try:
@@ -1382,61 +1528,44 @@ class Lab:
             except (TypeError, ValueError):
                 return str(row["needs"])
 
-        # An agent's submission is served first -- one that CAN be served: a row whose tape failed this hour
-        # is not the queue's front (Sept 24, 2026: three submissions whose tape never built sat at priority 0,
-        # and the largest-group turn never ran while they did).
-        now = self._now()
-        failed = {key for key, (at, _) in self._tape_errors.items() if now - at < 3600}
-        front = next((r for r in rows if needs_key(r) not in failed), rows[0])
-        largest_turn = int(front["priority"]) != 0 and self._batch_turn % 2 == 0
-        if largest_turn:
-            sizes: dict[str, int] = {}
-            for row in rows:
-                sizes[needs_key(row)] = sizes.get(needs_key(row), 0) + 1
-            rows = sorted(rows, key=lambda row: (row["origin"] not in RESERVED_ORIGINS, -sizes[needs_key(row)]))
-        groups: dict[str, list[sqlite3.Row]] = {}  # in the order of each tape's first ready row
-        tapes: dict[str, dict[str, Any]] = {}
+        groups: dict[str, list[sqlite3.Row]] = {}  # tape key -> its rows, in queue order; keys in queue order
         for row in rows:
+            groups.setdefault(needs_key(row), []).append(row)
+        position = {key: n for n, key in enumerate(groups)}
+        order = list(groups)
+        if turn == "largest":
+            order.sort(key=lambda key: (-len(groups[key]), position[key]))
+        elif turn == "reserved":
+            def mine(key: str) -> int:
+                return sum(1 for r in groups[key] if r["origin"] in RESERVED_ORIGINS)
+
+            order.sort(key=lambda key: (not mine(key), not any(r["origin"] == "agent" for r in groups[key]),
+                                        -len(groups[key]), position[key]))
+        for key in order:
+            group = groups[key]
             try:
-                tape_id, tape = self._search_tape(json.loads(row["needs"]))
+                tape_id, tape = self._search_tape(json.loads(group[0]["needs"]))
             except TimeoutError:
                 continue  # its tape waits for the next step
             except LabError as exc:
-                if isinstance(exc, SealedTape) or "unsupported input" in str(exc) or "invalid" in str(exc).lower():
-                    self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?", (str(exc)[:300], self._now(), row["id"]))
-                else:  # a venue or store that failed now: to the back of the queue, tried again after the hour's cache
-                    self._x("UPDATE candidates SET created=?, error=? WHERE id=?", (self._now(), str(exc)[:300], row["id"]))
+                # One answer for the tape is one for every row on it (`_search_tape` reads only the tape key).
+                for row in group:
+                    if isinstance(exc, SealedTape) or "unsupported input" in str(exc) or "invalid" in str(exc).lower():
+                        self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?", (str(exc)[:300], self._now(), row["id"]))
+                    else:  # a venue or store that failed now: to the back of the queue, tried again after the hour's cache
+                        self._x("UPDATE candidates SET created=?, error=? WHERE id=?", (self._now(), str(exc)[:300], row["id"]))
                 continue
             except Exception as exc:  # noqa: BLE001 - D1 (Sept 24, 2026): one row never stops the lab
-                # Anything else this row's NEEDS or tape raise escaped the walk before: nothing moved the
+                # Anything else these rows' NEEDS or tape raise escaped the walk before: nothing moved the
                 # row, so it failed every step from the front of the queue.
-                if not self._block_row(row, exc, "the lab could not read its NEEDS or its tape"):
-                    raise
+                for row in group:
+                    if not self._block_row(row, exc, "the lab could not read its NEEDS or its tape"):
+                        raise
                 continue
-            groups.setdefault(tape_id, []).append(row)
-            tapes[tape_id] = tape
-        if not groups:
-            return None
-        # Queue order decides the tape: the one the queue's first ready row needs (an agent's own
-        # submission, then a seed, then children, oldest first), and the batch is filled with whatever
-        # else waits on it. Largest group first starved a lone submission or seed for as long as
-        # breeding kept two children of one elite queued, which the step does whenever the queue runs low.
-        #
-        # But seeds each carry their own NEEDS, so their groups are one row, and with a queue of seeds
-        # ahead every batch was a single candidate (Sept 23, 2026 on the lab box: 60 evaluated in an
-        # hour, 543 queued, children of the archive's elites waiting 32 to a tape). So an agent's
-        # submission is always served first, and otherwise batches alternate: queue order, then the
-        # largest group ready now. Seeds still get every other batch; children run 32 at a time.
-        first = next(iter(groups))
-        if not largest_turn:
-            tape_id = first
-        else:
-            tape_id = max(groups, key=lambda key: len(groups[key]))
-        group = groups[tape_id]
-        reserved = [r for r in group if r["origin"] in RESERVED_ORIGINS][: max(1, size // 3)]
-        taken = {r["id"] for r in reserved}
-        chosen = (reserved + [r for r in group if r["id"] not in taken])[:size]
-        return tape_id, tapes[tape_id], chosen
+            reserved = [r for r in group if r["origin"] in RESERVED_ORIGINS][: reserved_quota(size, settings.get("reserved_share"))]
+            taken = {r["id"] for r in reserved}
+            return tape_id, tape, (reserved + [r for r in group if r["id"] not in taken])[:size]
+        return None
 
     def evaluate_batch(self) -> dict[str, Any] | None:
         """One batch on the lab box (`_next_batch`). None when nothing could be evaluated."""
@@ -1591,7 +1720,16 @@ class Lab:
         again for its real one, -1 for a death that was not redundancy), each lineage its own
         forward windows (`lineage_forward`, S2, Sept 23, 2026: +1 when the pooled window wins,
         -1 when it loses), and royalties +1. A lineage whose graduates or windows lose is searched
-        less; one that earns is searched more; nothing here moves anyone's rung or band."""
+        less; one that earns is searched more; nothing here moves anyone's rung or band.
+
+        The family ledger (E1 and E3 of the close-the-gaps run, Sept 24, 2026; `league/families.py`,
+        read through the allocator): every lineage in the archive adds its family's score (`_family_score`:
+        the family of the agents it grew from, `Allocator.family` read through `families.score`, as
+        `Allocator.lineage_score` reads it: +1 for a proven or swinging family, -1 for one whose pooled
+        record is negative past the proof's count), so a lineage whose family has a
+        positive pooled record gets more of Luna's calls, which pick their parent by these weights; and a
+        lineage whose family is at its measured capacity (`family_at_capacity`) weighs 0: no more search
+        there (`_pick_parent` passes it over)."""
         now = self._now()
         if self._weights is not None and now - self._weights[0] < 600:
             return self._weights[1]
@@ -1608,16 +1746,47 @@ class Lab:
                 score_of[row["lineage"]] = score_of.get(row["lineage"], 0) + 1
             elif record["positive"] is False and float(record["log_growth"]) < 0:
                 score_of[row["lineage"]] = score_of.get(row["lineage"], 0) - 1
+        full: set[str] = set()
+        for row in self._q("SELECT DISTINCT c.lineage AS lineage FROM archive a JOIN candidates c ON c.id = a.candidate"):
+            family = self._family_score(row["lineage"])
+            if family is None:
+                continue
+            score, at_capacity = family
+            if score:
+                score_of[row["lineage"]] = score_of.get(row["lineage"], 0) + score
+            if at_capacity:
+                full.add(row["lineage"])
         royalties: dict[str, Decimal] = {}
         for entry in self.house.ledger.iter(kinds="lab.royalty"):
             lineage = str(entry.payload.get("lineage") or "")
             royalties[lineage] = royalties.get(lineage, Decimal(0)) + Decimal(str(entry.payload.get("usd") or 0))
         weights = {}
-        for lineage in set(score_of) | set(royalties):
+        for lineage in set(score_of) | set(royalties) | full:
             base = 2.0 ** max(-3, min(3, score_of.get(lineage, 0) + (1 if royalties.get(lineage, 0) > 0 else 0)))
-            weights[lineage] = base * (1.0 + float(royalties.get(lineage, Decimal(0))))
+            weights[lineage] = 0.0 if lineage in full else base * (1.0 + float(royalties.get(lineage, Decimal(0))))
         self._weights = (now, weights)
         return weights
+
+    def _family_score(self, lineage: str) -> tuple[int, bool] | None:
+        """(the family ledger's score of the family a lineage grew from, whether that family is at its
+        measured capacity), from the allocator (`Allocator.family`, `families.score`), or None for a lineage
+        that grew from no registry agent (a Sol leap) or while there is no allocator. Never raises: a family
+        that cannot be read weighs nothing either way."""
+        from .families import score as family_score, swing_rule
+
+        allocator = getattr(self.house, "allocator", None)
+        if allocator is None or not hasattr(allocator, "family"):
+            return None
+        registry = self.house.registry
+        agent = next((a for a in (registry.get(i) for i in self._origin(lineage)) if a is not None), None)
+        if agent is None or not agent.family:
+            return None
+        try:
+            record = allocator.family(agent.family, agent.venue)
+            return (family_score(record, str(record.get("state") or "unproven")),
+                    family_at_capacity(record, swing_rule()))
+        except Exception:  # noqa: BLE001 - see above
+            return None
 
     def _floor_score(self, agent: Any, min_trades: int) -> int:
         """What one born graduate adds to its lineage's search score, in [-2, 2]: from the
@@ -1668,12 +1837,26 @@ class Lab:
         return sorted(rows, key=rank)
 
     def _pick_parent(self, niche: str | None = None) -> sqlite3.Row | None:
+        """The elite a parameter child or a Luna batch is bred from, drawn by weight: its lineage's
+        (`lineage_weights`, where the family ledger's score and capacity are) times its own forward
+        window's (`forward_factor`, E1, Sept 24, 2026: a winning window doubles it, a losing one quarters
+        it; before, breeding read only the lineage's pooled windows and the order `elites` ranks never
+        reached it). A lineage at its family's capacity is not drawn at all."""
         rows = [r for r in self.elites(niche) if self._desk(r["niche"]) is not None]
         if not rows:
             return None
         weights = self.lineage_weights()
-        scale = [max(0.01, weights.get(r["lineage"], 1.0)) for r in rows]
-        return self._rng.choices(rows, weights=scale, k=1)[0]
+        scores = self.forward_scores()
+        pool, scale = [], []
+        for row in rows:
+            weight = weights.get(row["lineage"], 1.0)
+            if weight <= 0:
+                continue  # E3: its family is at its measured capacity
+            pool.append(row)
+            scale.append(max(0.01, weight) * forward_factor(scores.get(row["id"])))
+        if not pool:
+            return None
+        return self._rng.choices(pool, weights=scale, k=1)[0]
 
     def breed(self) -> int:
         """Children for the next batch: parameter mutants of elites (free), then one paid call
@@ -1871,16 +2054,20 @@ class Lab:
         return True
 
     def leap(self) -> bool:
-        """One Sol call for the replayable desk whose grid is emptiest, told the archive's shape and
-        the league's edge map."""
+        """One Sol call for a replayable desk, told the archive's shape and the league's edge map: the
+        deep-market desks first (`deep_desks`: stocks, index ETFs, the crypto majors, the open desks; E1 of
+        the close-the-gaps run, Sept 24, 2026: the search had nudged parameters on thin Kalshi markets, where
+        the one earning family's capacity was measured at about $7.81 a day), the one whose grid is emptiest;
+        the other desks when no deep desk can be searched."""
         from .hypotheses import REPLAY_VIEW
         from .house import CONTRACT_PATH
 
         desks = [n for n in self.house.niches.values() if self._desk(n.id) is not None]
         if not desks:
             return False
+        deep = {str(d) for d in (self.settings.get("deep_desks") or [])}
         filled = {r["niche"]: r["n"] for r in self._q("SELECT niche, COUNT(*) AS n FROM archive GROUP BY niche")}
-        niche = min(desks, key=lambda n: (filled.get(n.id, 0), self._rng.random()))
+        niche = min(desks, key=lambda n: (n.id not in deep, filled.get(n.id, 0), self._rng.random()))
         cells = [{**describe_cell(r["cell"]), "fitness": r["elite_fitness"], "idea": r["idea"], "origin": r["origin"],
                   "trades_per_day": (json.loads(r["summary"] or "{}")).get("trades_per_day")} for r in self.elites(niche.id)]
         foundry = getattr(self.house, "hypotheses", None)
@@ -1929,17 +2116,45 @@ class Lab:
 
     def graduate(self) -> list[dict[str, Any]]:
         """The fittest gate-passing elites, one at a time, through the House's replay, the sealed
-        holdout where it applies, and birth. Passers waiting for a seat go first."""
+        holdout where it applies, and birth. Passers waiting for a seat go first.
+
+        E1 (the close-the-gaps run, Sept 24, 2026): the order is `elites`' (a winning forward window
+        first), and a candidate the evidence does not support is HELD, before the House's replay and
+        again before its birth (`_hold`): a losing forward window, a desk idle for `idle_desk_hours`, or
+        a parameter change of a program the desk already runs without a forward score above the desk's
+        living median. A held candidate is not tried and not refused: it graduates when the reason goes
+        (its window wins, the desk trades again, a feed it asked for arrives). What was held, and why, is
+        `held` in `stats` and health.json."""
         settings = self.settings
         out = []
+        scores = self.forward_scores()
+        held: dict[str, int] = {}
+        cache: dict[str, Any] = {}  # the desks' medians and living programs, read once a pass
+
+        def hold(row: Mapping[str, Any]) -> str | None:
+            reason = self._hold(row, scores=scores, cache=cache)
+            if reason:
+                kind = reason.split(":", 1)[0]
+                held[kind] = held.get(kind, 0) + 1
+            return reason
+
         # A passer that found its desk or the league full is asked again at most every ten minutes: each
-        # try ranks every living agent under the House's lifecycle lock (Deploy 3 review).
+        # try ranks every living agent under the House's lifecycle lock (Deploy 3 review). So is one held.
         for row in self._q("SELECT g.candidate, g.lineage, c.code_sha256 FROM graduations g JOIN candidates c ON c.id = g.candidate"
-                           " WHERE g.state='passed' AND (g.detail NOT LIKE '%earned their seats%' OR g.at < ?) ORDER BY g.at",
-                           (self._now() - 600,)):
+                           " WHERE g.state='passed' AND ((g.detail NOT LIKE '%earned their seats%' AND g.detail NOT LIKE 'held:%')"
+                           " OR g.at < ?) ORDER BY g.at", (self._now() - 600,)):
             # A birth a crash interrupted is finished whatever the cap: its agent already exists.
-            if self.births_last_hour() >= int(settings["max_births_per_hour"]) and self._born_already(row["lineage"], row["code_sha256"]) is None:
+            resumed = self._born_already(row["lineage"], row["code_sha256"])
+            if self.births_last_hour() >= int(settings["max_births_per_hour"]) and resumed is None:
                 continue
+            if resumed is None:
+                candidate = self._q("SELECT * FROM candidates WHERE id=?", (row["candidate"],))[0]
+                reason = hold(candidate)
+                if reason:
+                    grad = self._q("SELECT line, family FROM graduations WHERE candidate=?", (row["candidate"],))[0]
+                    out.append(self._record(candidate, "held", f"held: {reason}", line=grad["line"], family=grad["family"],
+                                            table_state="passed"))
+                    continue
             out.append(self._birth(row["candidate"]))
         budget = int(settings["max_graduations_per_step"])
         # An infrastructure failure is not the candidate's: it may be tried again after an hour.
@@ -1948,15 +2163,224 @@ class Lab:
         # Seeds are parents, never graduates: a living agent's own program, a card or a founder has had
         # its own chance. Neither is a program a living agent already runs.
         running = {a.code_sha256 for a in self.house.registry.living()}
-        for row in self.elites():
+        # A cell graduates its best program that may graduate: past one that is held, never past one that was
+        # tried (as its elite alone was before E1).
+        decided: set[str] = set()
+        for row in self._graduation_order(scores):
             if budget <= 0 or self.births_last_hour() >= int(settings["max_births_per_hour"]):
                 break
-            if (row["id"] in tried or not row["gate"] or row["origin"] == "seed" or row["code_sha256"] in running
-                    or self._desk(row["niche"]) is None):
+            if row["cell"] in decided or row["code_sha256"] in running or self._desk(row["niche"]) is None:
+                continue
+            if hold(row):
+                continue
+            decided.add(row["cell"])
+            if row["id"] in tried or not row["gate"]:
                 continue
             budget -= 1
             out.append(self._graduate_one(row))
+        self._held = {"at": now_iso(self.house.clock), "counts": held}
         return out
+
+    def _graduation_order(self, scores: Mapping[str, float] | None = None) -> list[sqlite3.Row]:
+        """What graduation considers, in its order (E1, Sept 24, 2026): for each cell of the archive, in
+        `elites`' order, the cell's gate-passing programs other than seeds ranked as `elites` ranks (a winning
+        forward window first, then fitness on the search tape, a losing window last), so a cell's elite comes
+        first -- and when it may not graduate (`_hold`: a nudge, a losing window; a seed, or a program a
+        living agent runs), the next program of its cell may (`graduate`). Keeping only the elite, a cell whose
+        fittest program on the search tape was a parameter nudge of a living program would never graduate the
+        mechanism changes beside it: on the T4 snapshot (05:28Z Sept 24) 12 of the 26 cells with a graduate to
+        offer offered one that was not their elite (a seed's cell, or one whose elite is a nudge)."""
+        scores = self.forward_scores() if scores is None else scores
+
+        def rank(row: sqlite3.Row) -> tuple[int, float]:
+            forward = scores.get(row["id"])
+            if forward is None:
+                return 1, -float(row["fitness"] or 0.0)
+            return (0 if forward > 0 else 2), -forward
+
+        cells: dict[str, list[sqlite3.Row]] = {}
+        for row in self._q("SELECT * FROM candidates WHERE gate=1 AND status='evaluated' AND cell IS NOT NULL AND origin!='seed'"):
+            cells.setdefault(row["cell"], []).append(row)
+        out: list[sqlite3.Row] = []
+        for elite in self.elites():
+            out.extend(sorted(cells.pop(elite["cell"], []), key=rank))
+        return out
+
+    # ------------------------------------------------------------ the holds (E1)
+    def _hold(self, row: Mapping[str, Any], *, scores: Mapping[str, float] | None = None,
+              cache: dict[str, Any] | None = None) -> str | None:
+        """Why this candidate may not graduate now, or None (E1 of the close-the-gaps run, Sept 24, 2026).
+        Each reason starts with its kind and a colon (`held` counts them):
+
+        - "forward": its forward window loses (`forward_score` at or below zero). The search tape only
+          admits; data that came after the code was frozen ranks, and a losing window keeps a
+          candidate from graduating whatever its search fitness (study of Sept 23, 17:05Z: replay did
+          not predict practice, 0 of 20 passes positive after 6 active blocks).
+        - "idle": its desk wrote no intent in `idle_desk_hours` while its members were offered markets,
+          and no feed the desk asked for arrived in that time (`_idle_desk`).
+        - "nudge": no code change beyond PARAMS (`mechanism_digest`) relative to a living program of its
+          desk -- every living member of its lineage there, and any other: a program the desk already
+          runs is not a new mechanism whoever's line it is on -- unless its forward score is above the
+          desk's living median (`_desk_median`: the residents' ranked forward scores). A desk whose
+          residents have no ranked score yet has no median, and the candidate's own window must then
+          win (above zero): so a desk still waiting for its residents' windows keeps its code-changing
+          graduates, and its nudges wait for a window of their own, never for good (the PR of Sept 24
+          measured the T4 queue and waiting list)."""
+        ident, niche = str(row["id"]), str(row["niche"])
+        scores = self.forward_scores() if scores is None else scores
+        forward = scores.get(ident)
+        if forward is not None and forward <= 0:
+            return (f"forward: its forward window loses ({forward:+.6f} a block on data after its code was frozen); "
+                    "the search tape only admits")
+        idle = self._idle_desk(niche)
+        if idle:
+            return f"idle: {idle}"
+        cache = {} if cache is None else cache
+        twins = self._twins(row, cache)
+        if twins:
+            if f"median:{niche}" not in cache:
+                cache[f"median:{niche}"] = self._desk_median(niche)
+            median = cache[f"median:{niche}"]
+            bar = 0.0 if median is None else median
+            if forward is None or forward <= bar:
+                where = (f"the desk's living median {median:+.6f}" if median is not None
+                         else "zero (no resident of the desk has a ranked forward score yet)")
+                mine = "no forward score yet" if forward is None else f"its forward score {forward:+.6f}"
+                return (f"nudge: a parameter change of {twins[0]}'s program on {niche} ({len(twins)} living program(s) with "
+                        f"the same code beyond PARAMS); it graduates with a code change or a forward score above {where}, "
+                        f"and has {mine}")
+        return None
+
+    def _mechanism(self, code: str) -> str | None:
+        key = hashlib.sha256(str(code).encode("utf-8")).hexdigest()
+        if key not in self._digests:
+            if len(self._digests) >= 4096:
+                self._digests.clear()
+            self._digests[key] = mechanism_digest(code)
+        return self._digests[key]
+
+    def _twins(self, row: Mapping[str, Any], cache: dict[str, Any] | None = None) -> list[str]:
+        """The living agents of the candidate's desk whose current program is the candidate's beyond its
+        parameters (`mechanism_digest`), its lineage's first: the programs it would only nudge. The desk's
+        programs are read once a graduation pass (`cache`)."""
+        digest = self._mechanism(row["code"])
+        if digest is None:
+            return []
+        cache = {} if cache is None else cache
+        key = f"programs:{row['niche']}"
+        if key not in cache:
+            programs: dict[str, list[Any]] = {}
+            for agent in self.house.registry.living():
+                if agent.specialty == row["niche"]:
+                    programs.setdefault(self._mechanism(agent.code) or "", []).append(agent)
+            cache[key] = programs
+        origin = set(self._origin(str(row["lineage"])))
+        founder = f"lab:{row['lineage']}"[:120]
+        twins = cache[key].get(digest) or []
+        return [a.id for a in sorted(twins, key=lambda a: (a.id not in origin and a.founder != founder, a.id))]
+
+    def _desk_median(self, niche: str) -> float | None:
+        """The median of the desk's living residents' ranked forward scores (`resident_forward`, S2), or
+        None while none has one."""
+        values = sorted(v for v in (self.resident_forward(a, ranked=True) for a in self.house.registry.living()
+                                    if a.specialty == niche) if v is not None)
+        if not values:
+            return None
+        middle = len(values) // 2
+        return values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2
+
+    def _idle_desk(self, niche: str) -> str | None:
+        """Why the desk counts as idle for a graduation (E1, Sept 24, 2026), or None: its members, living or
+        dead in the window, were offered markets in the last `idle_desk_hours` (`agent.woke` `offered`) and
+        wrote no intent (`agent.intent`), and no feed the desk asked for arrived in that time
+        (`_feed_arrived`). A desk that was offered nothing is shut by the calendar, not idle. Read at most
+        every ten minutes a desk: a few indexed reads an agent."""
+        now = self._now()
+        hit = self._idle.get(niche)
+        if hit is not None and now - hit[0] < 600:
+            return hit[1]
+        try:
+            reason = self._idle_reason(niche, now)
+        except Exception as exc:  # noqa: BLE001 - a record that cannot be read holds nobody back
+            reason = None
+            self._forward_warn(f"the lab could not read whether {niche} is idle ({type(exc).__name__}: {str(exc)[:160]})")
+        self._idle[niche] = (now, reason)
+        return reason
+
+    def _idle_reason(self, niche: str, now: float) -> str | None:
+        hours = float(self.settings.get("idle_desk_hours") or 0)
+        if hours <= 0:
+            return None
+        since = now - hours * 3600
+        ledger = self.house.ledger
+        members = [a for a in list(self.house.registry.agents.values()) if a.specialty == niche
+                   and (a.alive or (_ts(a.died_at) or 0.0) >= since)]
+        if not members:
+            return None  # nobody sat there in the window: nothing is measured
+        last = None
+        for agent in members:
+            entry = ledger.last("agent.intent", agent=agent.id)
+            at = _ts(entry.at) if entry is not None else None
+            if at is not None and (last is None or at > last):
+                last = at
+        if last is not None and last >= since:
+            return None
+        offered = 0
+        for agent in members:
+            for entry in reversed(ledger.read(kinds="agent.woke", agent=agent.id, limit=300, newest=True)):
+                at = _ts(entry.at)
+                if at is None or at < since:
+                    break
+                offered += int(entry.payload.get("offered") or 0) > 0
+            if offered:
+                break
+        if not offered:
+            return None
+        arrived = self._feed_arrived(niche, since)
+        if arrived:
+            return None
+        quiet = f"since {_iso(last)}" if last is not None else "ever"
+        return (f"{niche} was offered markets and wrote no intent in {hours:g} h (none {quiet}), and no feed it asked for "
+                f"arrived since {_iso(since)}")
+
+    def _feed_arrived(self, niche: str, since: float) -> str | None:
+        """A feed the desk asked for that arrived after `since`, or None: a `tool.fulfilled` row for a
+        `tool.request` of one of its agents, living or dead (the recorders of Deploy B answer requests that
+        way, `feeds.fulfil_requests`), or a recorded feed its programs declare (`NEEDS["feeds"]`) or its
+        requests name (`feeds.request_feed`) whose recording began then (its first `data.coverage` row with
+        data)."""
+        from .feeds import request_feed, requested
+
+        ledger = self.house.ledger
+        agents = {a.id: a for a in list(self.house.registry.agents.values()) if a.specialty == niche}
+        asked: dict[str, str] = {}
+        feeds: set[str] = set()
+        for entry in ledger.iter(kinds="tool.request"):
+            if entry.agent in agents:
+                asked[entry.id] = str(entry.payload.get("name") or "")
+                feed = request_feed(entry.payload.get("name"))
+                if feed:
+                    feeds.add(feed)
+        for entry in ledger.iter(kinds="tool.fulfilled"):
+            at = _ts(entry.at)
+            if at is not None and at >= since and str(entry.payload.get("request") or "") in asked:
+                return f"the request {asked[str(entry.payload['request'])][:80]!r} was answered at {_iso(at)}"
+        for agent in agents.values():
+            if agent.alive:
+                feeds |= set(requested((agent.needs or {}).get("feeds")))
+        if not feeds:
+            return None
+        began: dict[str, float] = {}
+        for entry in ledger.iter(kinds="data.coverage"):
+            p = entry.payload
+            feed = str(p.get("feed") or "")
+            if p.get("asset") != "feed" or feed not in feeds or feed in began or not p.get("start"):
+                continue
+            start = _ts(p["start"])
+            if start is not None:
+                began[feed] = start
+        fresh = sorted(feed for feed, start in began.items() if start >= since)
+        return f"the {fresh[0]} feed began recording at {_iso(began[fresh[0]])}" if fresh else None
 
     def _names(self, row: Mapping[str, Any]) -> tuple[str, str]:
         niche = self.house.niches[row["niche"]]
@@ -2735,7 +3159,9 @@ class Lab:
                      "Fitness is out-of-sample mean log growth per block after fees; a program needs the replay gate's trades and "
                      "blocks to be scored. The fittest program of a cell that clears the gate's numbers is replayed by the House on "
                      "the whole tape (its last third unseen by the lab's search) and, on the history store, by the sealed holdout; only "
-                     "then is it born. Submitting is not a trial against you, but a program that grew from your line is "
+                     "then is it born, and only with a change to its code beyond PARAMS relative to the desk's living programs or a "
+                     "forward score above the desk's living median, never on a losing forward window, and never onto a desk that "
+                     "wrote no order in 48 hours of markets unless a feed it asked for arrived. Submitting is not a trial against you, but a program that grew from your line is "
                      "judged at graduation against every trial on your line, as your own child would be. To adopt or fork "
                      "a program you still `replay` it."),
         }
@@ -2806,6 +3232,12 @@ class Lab:
             "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0},
             # S2 (Sept 23, 2026): the forward windows' last run and records, and the priors in force.
             "forward": self.forward_stats(),
+            # E1 (Sept 24, 2026): the written programs' share of the window's evaluations, beside the
+            # share of each batch reserved for them, and what the last graduation pass held back and why.
+            "reserved": {"share": _share(self.settings.get("reserved_share")),
+                         "evaluated": int(self._q(f"SELECT COUNT(*) AS n FROM candidates WHERE evaluated>=? AND status!='queued' AND origin IN "
+                                                  f"({','.join('?' for _ in RESERVED_ORIGINS)})", (since, *RESERVED_ORIGINS))[0]["n"])},
+            "held": self._held or None,
         }
 
     def publish(self, *, force: bool = False) -> dict[str, Any] | None:
