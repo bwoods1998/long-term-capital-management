@@ -60,7 +60,7 @@ recorded for the next open; live verification uses the markets that trade around
 | Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | done: promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`, watch passed 08:41:13Z |
 | E | The lab as a search; the foundry brief; capacity | built (#262, 08:58Z), in review; rides Deploy C |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
-| W | The site's mechanism ledger | site deployed 08:55Z (`a4d25790`); publisher #261 merged, shipping through the updater; to verify on the checkpoint |
+| W | The site's mechanism ledger | **verified** 10:14Z: site `a4d25790` (08:55Z), publisher shipped by the updater 09:35:40Z; the checkpoint carries families, the lab line and every desk's family state |
 | Deploy C | Wave 2 | ⟨pending⟩ |
 | Watch | At least three hours after the last deploy | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
@@ -500,6 +500,11 @@ recorded for the next open; live verification uses the markets that trade around
   `observed_bars`, fixed in Deploy B's `league/ci.py`. A close-and-reopen first re-ran CI on a stale
   merge ref; the judge job runs `league.ci` from the PR branch's own checkout, so `gh pr update-branch`
   gave it the fixed CI code; Merton's judge then passed both and merged them itself.
+- 09:35:40Z — **W verified.** The updater shipped the publisher (#261) as `main-e4bb1962d296` (promoted
+  09:35:40Z, verdict 09:45:43Z). The live checkpoint at 10:14:22Z carries `board.families` (the proven
+  family sports-central-run-under: bound +0.204, capacity $56.93 a day, stake $30, one real member;
+  47 unproven), `board.lab` (715 tested in the last hour, 15 graduates waiting) and the family state on
+  all 112 desks; blakewoods.us/capital shows them.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
