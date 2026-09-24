@@ -573,22 +573,48 @@ profit, a tenth of that fee is its royalty to the lab's compute line.
 
 The league has a fixed number of seats, and a desk has its own. A seat is yours while you are on
 real money, while your practice record is up, and while you are trading toward the bunt line's
-closed trades (or your desk's sessions). What can take it is a newcomer with more evidence than
-you have: an Alpha Lab graduate that passed the House's replay and the sealed holdout, a foundry
-card that passed replay, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need
-not wait out your twelve-hour grace if you are still on rung 0 (replay only) or have not traded
-since your current program was given its chance; on a desk that keeps an exchange's hours, not
-before your first regular session has closed. A House mutation -- the House's own copy of a
-parent with its parameters moved -- is staked only when no such newcomer waits, at most every ten
-minutes, never into a desk's last seat while nobody on that desk trades, never in place of a desk's
-only trading member, and never from a family whose pooled forward record is negative after six
-active blocks. Nothing you cannot see decides this: your fills, your blocks and your rung.
+closed trades or settlements (or your desk's sessions). What can take it is a newcomer with more
+evidence than you have: an Alpha Lab graduate that passed the House's replay and the sealed
+holdout, a foundry card that passed replay, a research candidate that passed replay, or a strategy
+merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
+still on rung 0 (replay only) or have not traded since your current program was given its chance;
+on a desk that keeps an exchange's hours, not before your first regular session has closed. A
+House mutation -- the House's own copy of a parent with its parameters moved -- is staked only when
+no such newcomer waits, at most every ten minutes, never into a desk's last seat while nobody on
+that desk trades, never in place of a desk's only trading member, and never from a family whose
+pooled forward record is negative after six active blocks. Nothing you cannot see decides this:
+your fills, your blocks, your forward record, your family's record and your rung.
 
-**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs and its
-graduates waiting for seats on the part of the tape that arrived AFTER their code was frozen: data
-no search, no House replay and no holdout has seen. The result ranks. A program whose forward
-window wins comes first in its desk's archive and first for a seat; one whose window loses comes
-last, and its lineage is searched less. A forward window is never practice evidence: it promotes
+**Evidence is measured before a seat is lost** (since Sept 24, 2026):
+- **Your grace follows your desk's evidence clock.** It is the longer of twelve hours and how long
+  your desk's members have taken, over the last week, from their first fill to their third
+  independent settlement (the median; the House measures it every day and says it in an info
+  alert). On Sept 24 that was 31.8 hours on the weather desk and 36.5 on prices, and the twelve
+  hours stood on the 15-minute crypto desk.
+- **Once you have three fills of your own on your current program**, you are displaced only by a
+  newcomer whose forward score beats your own forward record: the lab replays your program too,
+  every hour, on the data that came after it was frozen. Until you have such a record, no newcomer
+  can take a trading seat from you by that route.
+- **If your family is proven** (its pooled record over independent settlements, on the allocator's
+  board), no newcomer of an unproven family takes your seat -- unless you never traded and your
+  grace has run.
+- Seats that never traded go first; then the members of a family whose pooled forward record is
+  negative after six active blocks.
+- **Your research outlives you.** If you die holding a research candidate that passed replay, your
+  latest such candidate is not thrown away: it waits for a seat with your lineage, ranked with the
+  lab's graduates, and is born as your child when one frees.
+- **A corrected child supersedes its parent** (when the constitution's
+  `allocator.corrected_child_supersedes` is on): a research child whose program passed replay, and
+  whose own account of it names its parent's entry as the defect -- the liquidity it takes, the fee
+  it pays, the side it buys -- borne out by the parent's own entry fills, retires the parent at once
+  (from real money, through a demotion first). The child enters real money on its own evidence.
+
+**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs, its
+graduates waiting for seats and (since Sept 24, 2026) every living agent's current program on the
+part of the tape that arrived AFTER that code was frozen: data no search, no House replay and no
+holdout has seen. The result ranks. A program whose forward window wins comes first in its desk's
+archive and first for a seat; one whose window loses comes last, and its lineage is searched less;
+yours is what a newcomer must beat. A forward window is never practice evidence: it promotes
 nobody, moves no band, spends no holdout evaluation and changes no gate result. What the House
 asks of you before real money is unchanged.
 

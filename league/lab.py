@@ -77,7 +77,11 @@ disk, and the step evaluates before it breeds.
 **Forward windows (S2, Sept 23, 2026).** Every `forward_every_minutes` the lab replays its archived
 elites and its graduates waiting for seats (`forward_windows`) on tape data that arrived AFTER their
 code was frozen: the tape is cut at the hour after the candidate's evaluation (or its graduation),
-so no search, no House replay and no holdout has seen a step of it. Replay fills, on the lab box's
+so no search, no House replay and no holdout has seen a step of it. Since Sept 24, 2026 (S2 of the
+close-the-gaps run) every living resident's current program is scored too, its window cut after the
+program was frozen (its birth or its latest rewrite), so the House's seat market can compare a
+newcomer's forward score with the resident's own record (`resident_forward`) before a trader's seat
+is taken. Replay fills, on the lab box's
 lane, bounded per run. The record (`forward` table, one row per candidate and run, never the
 archive's fitness) RANKS: seats (`forward_score`, which the House's seat market reads), the archive's
 cell ordering (`elites`: a program whose forward window wins comes before every untested one, one
@@ -2478,10 +2482,11 @@ class Lab:
 
     def forward_windows(self, *, force: bool = False) -> dict[str, Any] | None:
         """One forward-window run (S2, Sept 23, 2026), every `forward_every_minutes`: the due
-        elites and waiting graduates (`forward_due`) are replayed on the lab box on the steps of
-        their tape that came after their code was frozen (`forward_cut`, at the hour after the
-        freeze, so one batch serves every candidate frozen in that hour), and each gets one row of
-        the `forward` table. Bounded: `forward_candidates_per_run` candidates, `forward_box_seconds`
+        elites, waiting graduates and living residents' programs (`forward_due`) are replayed on the
+        lab box on the steps of their tape that came after their code was frozen (`forward_cut`, at
+        the hour after the freeze, so one batch serves every candidate frozen in that hour; a
+        resident's on the `forward_resident_cut_hours` grid after its program's freeze), and each
+        gets one row of the `forward` table. Bounded: `forward_candidates_per_run` candidates, `forward_box_seconds`
         of box time. What it never does: write to the ledger, touch a candidate's fitness, gate or
         cell, the archive, the holdout or anyone's rung. The stamp `forward_at` is set after the
         run, so a run a crash interrupts is run again next step, least recently scored first."""

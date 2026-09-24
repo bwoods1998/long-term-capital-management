@@ -238,15 +238,25 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `insufficient_shard_balance` is a warning alert naming the agent, market and shard, and the
     next pass runs at once. `scripts/kalshi_shard.py balance` reads the same breakdown by hand,
     and `transfer` still moves collateral by hand when the funder is blocked.
-  - `seats` (Sept 23, 2026, the seat market): `waiters` by class (`graduates`, `cards`,
-    `strategies`) and `waiters_by_desk`; `reserved_desks` (desks a waiting graduate or card has
-    first claim on); from the hourly watch, `displaceable` (residents a newcomer with forward
-    evidence could take now), `never_traded_past_grace`, `waiting_over_an_hour` and `at`; and
-    `last_refused_birth` a class (`count`, `why`, `at`). A warning `ops.alert` says once an hour a
-    class when graduates, cards or merged strategies cannot be born and why, and once an hour when
+  - `seats` (Sept 23, 2026, the seat market): `waiters` by class (`graduates`, `retained`,
+    `cards`, `strategies`) and `waiters_by_desk`; `reserved_desks` (desks a waiting graduate,
+    retained candidate or card has first claim on); from the hourly watch, `displaceable`
+    (residents an evidenced newcomer with no proof and no forward score could take now),
+    `never_traded_past_grace`, `waiting_over_an_hour` and `at`; and `last_refused_birth` a class
+    (`count`, `why`, `at`). A warning `ops.alert` says once an hour a class when graduates,
+    retained candidates, cards or merged strategies cannot be born and why, and once an hour when
     more than `economy.seat_waiters_warning` (8) newcomers have waited over an hour. A
     `displaceable` of zero with waiters is the market stalled: every seat is real money, a winner,
-    a trader short of its record, or a desk not yet through its first session.
+    a trader short of its record, a proven family's trader, a trader with three fills and no worse
+    forward record, or a desk not yet through its first session. Since Sept 24, 2026 (S1-S4, the
+    close-the-gaps run) also `seats_holding_none` (`count` and the first 40 `ids`: residents off
+    real money with no ranked forward score, no fill since their program's opportunity and no
+    grace left -- seats that carry no evidence) and `evidence_clocks` (`at`, and `hours` by desk:
+    the median hours from a member's first fill to its third independent settlement over the last
+    7 days, null where the median was never reached and the plain 12-hour grace stands).
+    `retained` waiters are the latest replay-passed research candidates of residents that died
+    holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
+    admission pass on their author's line, dropped after 72 hours.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -327,8 +337,12 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
       names it), `house` (the House's tape id) and `source` (`history-dev`, rebuilt from the
       history store on the House's disk; `live`, fetched), for the tapes of the last six hours.
       A `blocked` candidate's `error` says why: unsupported input (a sealed tape, missing
-      observed bars, a tape with no steps: nothing was recorded in its window), or "the lab could
-      not read its NEEDS or its tape" / "the lab could not score its result" with the exception.
+      observed bars, a tape with no steps: nothing was recorded in its window; since Sept 24, 2026
+      also NEEDS the House's tape reader refuses for their size, "ask for a shorter window", and a
+      tape that failed "the same way N times in a row"), or "the lab could not read its NEEDS or its
+      tape" / "the lab could not score its result" with the exception. `meta` `tape_failures`
+      (Sept 24, 2026): tape key -> the folded error of its failed builds in a row, `tries` and
+      `since`; at `tape_failures_before_block` (12) hourly tries the rows are blocked with one warning.
   - **`lab.stats` ledger rows**, at most every ten minutes (`stats_every_minutes`), over the last
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
@@ -506,6 +520,25 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   times in a day). One info alert names what is held (`wind_down_held` in `house.json`), and the
   House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
   wind down at once.
+- **"booked ... as dust instead of selling it"** (info, Sept 24, 2026): a wind-down found a holding
+  the venue will not trade -- worth under a cent at its mark, or under the venue's minimal order
+  quantity where the asset record states one -- and moved it off the account onto the House row, as
+  the reconciliation books position dust (two `book.fill` rows with `source: dust`); the account then
+  closes. Before, haghani-h426990's 0.000000001 LINK/USD was sent every five minutes and refused 107
+  times ("order qty must be >= minimal qty of order 0.000000002").
+- **"the House's sale of ... was refused 3 times in a row"** (warning): the same refusal of a
+  House-sent sale, by the venue or the book, three times in a row; the sale is not sent again until
+  the holding changes (`wind_down_refusals` in `house.json` keeps the count and the order id). Read
+  the refusal it names; clear the entry by hand only once its cause is fixed.
+- **"... was superseded by its research child ..."** (info): L1, when the constitution's
+  `allocator.corrected_child_supersedes` is on. The parent's research child passed replay and its
+  own account names the parent's entry as the defect (taker liquidity, the fee, the side), and the
+  parent's own entry fills bear it out; the parent was demoted from real money (a `demote` verdict,
+  `band_to: paper`, `superseded_by`) and retired `superseded`. The child enters real money when the
+  allocator's rules seat it on its own evidence.
+- **"the desks' evidence clocks ..."** (info, at most daily): the House measured each desk's
+  evidence clock and the seat grace follows it (`house.json` `evidence_clocks`); a measurement that
+  fails is a warning and the last reading stands.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
@@ -592,6 +625,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
+| | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS` | 7 d, 1 d, 3, 72 h, 3 | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |
 | | `research.gate.enabled`, `after`, `max_factor`, `sample_percent` | on, 2, 8, 10 | Back off research whose passes come back empty while nothing about the agent has changed; a 10% sample still runs. The routine epoch payout is not a trigger (Sept 23, 2026) |
@@ -611,11 +645,13 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_usd_per_hour` | $0.20 | The price the lab records for its box's time (`lab.stats` `spend.sail_usd_estimate`, `batches.sail_usd`) |
 | | `lab.holdout_reserve`, `stats_every_minutes`, `max_queue`, `max_tapes_per_step` | 1, 10, 600, 4 | Not in `game.json`: defaults in `league/lab.py` `DEFAULTS`, which a `game.json` `lab` key of the same name overrides. The sealed-holdout evaluations of a living line the lab never spends (they stay with the line's own forks); how often a `lab.stats` row is written; the most candidates queued at once; search tapes built a step |
 | | `lab.closed_alert_minutes`, `seat_wait_alert_hours` | 30, 6 | Also `DEFAULTS` only (Sept 23, 2026): after how long closed the lab raises its one warning, and after how long waiting for a seat a graduate is named once |
+| | `lab.forward_resident_cut_hours`, `tape_failures_before_block` | 6, 12 | `DEFAULTS` only (Sept 24, 2026): every living resident's program is scored in the forward runs too (S2), its window cut after its program was frozen on this grid of hours so the residents of one tape share a batch; a tape that fails the same way this many hourly tries in a row is unsupported input and its queued rows are blocked (one warning) |
 | | `lab.failures_alert_after`, `row_errors_per_step` | 5, 8 | `DEFAULTS` only (D1, Sept 24, 2026): failed steps in a row before the one error alert and `health.json` `lab.failing_since`; queued rows a step may block for an error of the lab's own before the step fails instead |
-| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour. But `forward_box_seconds` is the run's own time and the tapes it builds fill it: on Sept 23 (22:11Z, 23:14Z) a run scored 4 and 5 of its 48 due and skipped the rest, so 25 graduates waiting for seats need several hourly runs. Since D1 a waiting graduate's first window comes before an elite's |
+| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites, waiting graduates and (since Sept 24, 2026) every living resident's program on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour. But `forward_box_seconds` is the run's own time and the tapes it builds fill it: on Sept 23 (22:11Z, 23:14Z) a run scored 4 and 5 of its 48 due and skipped the rest, so 25 graduates waiting for seats need several hourly runs. Since D1 a waiting graduate's first window comes before an elite's |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
+| `league/constitution.py` | `allocator.corrected_child_supersedes` | on (Deploy B) | L1 (Sept 24, 2026): a research child that passed replay with a fix to its real-money parent's entry mechanism (liquidity, fee, side, borne out by the parent's own entry fills) supersedes the parent at once, demoted from real money through the evaluator and retired `superseded` (`House._supersede_by_research`). Absent or false: only merged repairs supersede (`_retire_superseded`). A money rule: re-ratify after a change |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
 | | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5; crypto 4, equity 2, option 24 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional at the rate of the fill's asset class (A8, Sept 23, 2026 ~22:00 UTC: each class's practice optimism against the order's reference at intent time, the larger of the notional-weighted mean and the round-trip reading, rounded up, never below 2; `docs/research/queries/2026-09-23/A8-haircut.py`). Options tightened from 10, crypto and stocks loosened to what was measured. A plain number charges every class (the rollback); a class not named pays the table's largest rate |
