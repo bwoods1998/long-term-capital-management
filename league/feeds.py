@@ -1651,6 +1651,8 @@ class FeedRecorder:
     def _after_pass(self, out: Mapping[str, Any]) -> None:
         failed: dict[str, list[tuple[str, str]]] = {}
         for feed, key, error in out.get("failed") or []:
+            if NOT_LISTED in str(error) or BLOCKED in str(error):
+                continue  # a key the source does not list, or a site that refuses the House: said in health, not hourly
             failed.setdefault(feed, []).append((key, error))
         for feed, rows in failed.items():
             polled = len(self.keys(feed))
@@ -1770,6 +1772,9 @@ UNCHANGED = object()
 #: How a recorder of Sept 24, 2026 says a key does not exist at its source (a ticker with no EDGAR
 #: filer, a coin OKX does not list): not a failure, and asked again after `UNLISTED_SECONDS`.
 NOT_LISTED = "not listed:"
+#: How a recorder says its source refused the House outright (a bot wall): no data, asked rarely,
+#: never warned about every hour -- health and describe() show it as the key's error.
+BLOCKED = "blocked:"
 #: How often the House's `.env` and the allowlist the repository records are read again.
 ENV_SECONDS = 300.0
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1781,7 +1786,7 @@ _WEATHER_SERIES = re.compile(r"^KX(?:HIGH|LOW|RAIN|SNOW)[A-Z]*$")
 def _unlisted(error: Any) -> bool:
     """Does a poll's error say the key does not exist at its source (not that the source failed)?"""
     text = str(error or "")
-    return UNLISTED in text or NOT_LISTED in text
+    return UNLISTED in text or NOT_LISTED in text or BLOCKED in text
 
 
 def _cadence(feed: str) -> tuple[float, float]:
@@ -2563,6 +2568,97 @@ class SportsOdds(Source):
         return sporting and priced
 
 
+def _trades_series(niches: Mapping[str, Any], prefix: str) -> bool:
+    """Does any open Kalshi desk list or trade a series starting with `prefix`?"""
+    return any(str(series).upper().startswith(prefix) for niche in niches.values()
+               if getattr(niche, "venue", "") == "kalshi" and not getattr(niche, "dormant", False)
+               for series in getattr(niche, "universe", ()))
+
+
+class TsaVolumes(Source):
+    """The TSA's daily checkpoint throughput, which Kalshi's KXTSAW settles on: an HTML table, read
+    defensively. The page says no time a day's number appeared, so it is stamped at receipt."""
+
+    name = "tsa"
+    host = "www.tsa.gov"
+    source = "tsa: www.tsa.gov/travel/passenger-volumes (the checkpoint table, an HTML page)"
+    cadence = "every 30 minutes (the TSA posts the previous day's number on weekday mornings)"
+    what = ("checkpoint: the TSA's daily checkpoint throughput, {latest: {date, travelers}, days: the 14 newest [{date, "
+            "travelers}], newest first}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay; the page "
+                     "says no time a day's number appeared, so nothing is backfilled")
+    batch = True
+    every = 1800.0
+    gap = 3 * 1800.0
+    example = "checkpoint"
+    note = "A page that changes shape is a failed poll, never a guessed number."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return ["checkpoint"] if _trades_series(recorder.niches(), "KXTSA") else []
+
+    def key_of(self, raw: Any) -> str | None:
+        return "checkpoint" if str(raw or "").strip().lower() in ("checkpoint", "tsa", "kxtsaw", "passengers", "throughput") else None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.attention import Attention
+
+        return Attention(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        days = fetcher.tsa()
+        return {"checkpoint": {"latest": days[0], "days": days[:14]}} if "checkpoint" in keys else {}
+
+    def asks(self, words: set[str]) -> bool:
+        return "tsa" in words or ("checkpoint" in words and bool(words & {"volume", "volumes", "passenger", "passengers",
+                                                                           "throughput", "travelers", "travel"}))
+
+
+class ApprovalPolls(Source):
+    """The RealClearPolling average of the president's approval, which Kalshi's KXTRUMPAPPROVE
+    settles on. Sept 24, 2026: the site answers any automated client with a DataDome captcha; the
+    House never gets around a bot wall, so until the owner names another source this records the
+    refusal (`BLOCKED`), and nothing else."""
+
+    name = "polls"
+    host = "www.realclearpolling.com"
+    source = "rcp: www.realclearpolling.com/polls/approval/donald-trump/approval-rating (the RCP Average row, an HTML page)"
+    cadence = "every six hours"
+    what = "trump_approval: the RealClearPolling average, {approve, disapprove, spread, dates}"
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on; the page says no time an "
+                     "average appeared, so nothing is backfilled")
+    batch = True
+    every = 6 * 3600.0
+    gap = 3 * 6 * 3600.0
+    example = "trump_approval"
+    note = "Blocked by the site's bot check since Sept 24, 2026: no row is recorded until that changes."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return ["trump_approval"] if _trades_series(recorder.niches(), "KXTRUMPAPPROVE") else []
+
+    def key_of(self, raw: Any) -> str | None:
+        return "trump_approval" if str(raw or "").strip().lower() in ("trump_approval", "approval", "kxtrumpapprove", "trumpapprove") \
+            else None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.attention import Attention
+
+        return Attention(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data import DataError
+        from ltcm.data.attention import Blocked
+
+        if "trump_approval" not in keys:
+            return {}
+        try:
+            return {"trump_approval": fetcher.approval()}
+        except Blocked as exc:
+            return {"trump_approval": DataError(f"{BLOCKED} {exc}")}
+
+    def asks(self, words: set[str]) -> bool:
+        return "approval" in words and bool(words & {"poll", "polls", "polling", "average", "rating", "rcp", "trump"})
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
@@ -2570,7 +2666,7 @@ def _register(*sources: Source) -> dict[str, Source]:
 #: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
 RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
-                                         ReferenceRates(), ParYields(), SportsOdds())
+                                         ReferenceRates(), ParYields(), SportsOdds(), TsaVolumes(), ApprovalPolls())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():

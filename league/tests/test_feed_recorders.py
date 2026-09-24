@@ -623,6 +623,44 @@ class Odds(RecorderCase):
                           "resolved_sports_moneyline_price_outcome_": None, "live_sports_scores": "sports"})
 
 
+# ------------------------------------------------------------------------------------ attention
+class Attention(RecorderCase):
+    def transport(self):
+        from ltcm.data.attention import RCP_APPROVAL_URL, TSA_URL
+        from ltcm.tests.test_data_attention import rcp_wall, tsa_page
+
+        return FakeTransport({TSA_URL: (200, {"content-type": "text/html"}, tsa_page()),
+                              RCP_APPROVAL_URL: (403, {"content-type": "application/json"}, rcp_wall())})
+
+    def test_tsa_is_recorded_at_receipt_and_a_bot_wall_is_blocked_never_a_number(self):
+        store = self.recorder({"tsa": ["checkpoint"], "polls": ["trump_approval"]}, transports=self.transport())
+        out = store.run()
+        row = store.latest({"tsa": ["KXTSAW"], "polls": ["KXTRUMPAPPROVE"]}, self.clock())
+        self.assertEqual(sorted(row), ["tsa"])  # the approval average is absent: unavailable, never a number
+        self.assertEqual((row["tsa"]["checkpoint"]["t"], row["tsa"]["checkpoint"]["latest"]), ("2026-09-24T03:30:00.000Z",
+                                                                                            {"date": "2026-09-22", "travelers": 2077346}))
+        self.assertEqual(len(row["tsa"]["checkpoint"]["days"]), 14)
+        self.assertEqual(store.latest({"tsa": ["checkpoint"]}, self.clock() - 0.001), {})
+        blocked = [e for f, k, e in out["failed"] if f == "polls"]
+        self.assertTrue(blocked and feeds.BLOCKED in blocked[0] and "DataDome" in blocked[0], out["failed"])
+        self.assertEqual(self.alerts, [])  # a bot wall is said in health, not warned about every hour
+        self.assertEqual(store.health()["polls"]["failing"], ["trump_approval"])
+        self.assertEqual(store.describe()["polls"]["failing_now"], ["trump_approval"])
+        self.assertIn("DataDome", store.coverage({"polls": ["trump_approval"]})["polls"]["trump_approval"]["last_error"])
+        self.clock.advance(3600)
+        self.assertEqual([k for f, k in store._plan() if f == "polls" and store._next.get((f, k), 0) <= self.clock()], [])  # asked every six hours
+        self.assertEqual({name: request_feed(name) for name in ("tsa_checkpoint_volumes", "attention_underlying_value_feed",
+                                                                "trump_approval_polling_average", "rotten_tomatoes_point_in_time_feed")},
+                         {"tsa_checkpoint_volumes": "tsa", "attention_underlying_value_feed": None,
+                          "trump_approval_polling_average": "polls", "rotten_tomatoes_point_in_time_feed": None})
+
+    def test_the_attention_recorders_follow_the_desk(self):
+        desks = niches.load()
+        store = FeedRecorder(path=Path(self.dir.name) / "desks.sqlite", clock=self.clock, niches=desks)
+        self.addCleanup(store.close)
+        self.assertEqual((store.keys("tsa"), store.keys("polls")), (["checkpoint"], ["trump_approval"]))
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime
