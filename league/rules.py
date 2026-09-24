@@ -115,8 +115,40 @@ or never swings at all.
                          "your rank: capital follows it at every mark pass.")
         weights = alloc.get("evidence") or {}
         bunt = alloc["bunt_usd"]
+        probe = alloc.get("probe_bunt_usd") or bunt
+        proof = alloc.get("family_proven") or {}
         w = float(weights.get("paper_weight", 0.5))
         need = float(alloc["bunt_at"]) ** (1 / w) if w > 0 else float(alloc["bunt_at"])
+        per_event = str(alloc.get("independent_settlements") or "trade") == "event"
+        after = int(alloc.get("hysteresis_after_settled") or 0)
+        event_share = float(alloc.get("position_share_event") or alloc["position_share"])
+        # Promotion on proof (the close-the-gaps run, Sept 24, 2026): what the agents read about it.
+        counted = (" On Kalshi trades and settlements count ONCE PER EVENT: strikes stacked on one game are one\n"
+                   "  bet, not three, and move you no faster." if per_event else "")
+        lopsided = (" (a favourites record also\n  passes the loss-rate test: a run of small wins with no loss proves nothing yet)"
+                    if proof.get("lopsided_gate") is True else "")
+        proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
+  Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
+  when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
+  settlements (one an event; practice at {float(proof.get('practice_weight', 0.5)):g} weight, real money at {float(proof.get('real_weight', 1)):g}) and the one-sided
+  {float(proof.get('confidence', 0.8)):.0%} lower bound on their mean log growth an event is above zero{lopsided}. A probe becomes a bunt the pass
+  after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
+  nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
+  settlements, never by one agent's three lucky ones.
+""" if alloc.get("probe_bunt_usd") else "")
+        trial_text = (f"""  ONE EARLY LOSS IS NOT A DEMOTION: that exit line applies once you have {after} independent real
+  settlements in your stay on real money (closed trades at Alpaca); until then only losing
+  {float(alloc['real_drawdown_demote']):.0%} of your real record from its high, or DRIFT (your real edge falling far below the practice
+  record that earned the seat: haghani-37 went back after one 2% loss on Sept 23), sends you back to practice. (Sept 23, 2026: four of
+  the allocator's nine new bunts were sent back by their first loss.) After them, one lost position
+  larger than about {1 - float(alloc['hysteresis']):.0%} of your stake can drop E under the line, and a binary contract loses
+  its whole position: keep positions small until your wins have built a buffer.
+""" if after > 0 else f"""  A FRESH BUNT IS A ONE-LOSS TRIAL if you let it be: with W_real at 1, one lost position larger than
+  about {1 - float(alloc['hysteresis']):.0%} of your stake drops E under the exit line, and a binary contract loses its whole
+  position (Sept 23, 2026: huang-h427345 was sent back to paper by one $2.55 settlement on a $10 bunt).
+  Keep a bunt's positions under that share until your wins have built a buffer; a bunt keeps what it
+  makes, so the buffer grows with every win.
+""")
         rungs_text = f"""- CAPITAL IS THE LADDER (the owner's rule since Sept 23, 2026). Your rank is your capital, and it
   moves at every mark pass, around the clock, with NO calendar gates, NO looks and NO screens.
   EVIDENCE IS WEALTH: W_paper is your paper account's wealth multiple since you were seated
@@ -130,20 +162,16 @@ or never swings at all.
   purse proves an edge twenty times slower than one that trades the whole of it.
 - The bands. PAPER (rung 1): trade forward on paper. BUNT (rung 2): E >= {alloc['bunt_at']} (paper up about
   {need - 1:.1%} on the whole purse) with {alloc['bunt_min_trades']} closed trades (or {alloc['bunt_min_settled']} settlements on Kalshi) puts you on REAL
-  money at once: ${bunt['kalshi']} at Kalshi, ${bunt['alpaca']} at Alpaca, a position up to {float(alloc['position_share']):.0%} of it. SWING (rung 3):
-  E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
+  money at once, as a probe or a bunt (below): a position up to {event_share:.0%} of the stake on Kalshi, {float(alloc['position_share']):.0%} at
+  Alpaca.{counted} SWING (rung 3), for a PROVEN family's member only (a probe stays a probe
+  until its family is proven): E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
   frontier model; your stake is the bunt x min(E, {alloc['e_cap']})^{alloc['kappa']}, up to {float(alloc['max_share_of_venue']):.0%} of the venue, so it
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
-- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
+{proof_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
   {alloc['swing_exit_w_real']}; losing {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to paper at once.
-  A FRESH BUNT IS A ONE-LOSS TRIAL if you let it be: with W_real at 1, one lost position larger than
-  about {1 - float(alloc['hysteresis']):.0%} of your stake drops E under the exit line, and a binary contract loses its whole
-  position (Sept 23, 2026: huang-h427345 was sent back to paper by one $2.55 settlement on a $10 bunt).
-  Keep a bunt's positions under that share until your wins have built a buffer; a bunt keeps what it
-  makes, so the buffer grows with every win.
-  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
+{trial_text}  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
   capital per venue, plus realized profit there) is full, the best E is seated first and a newcomer
-  with better evidence displaces the weakest flat bunt. If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
+  with better evidence displaces the weakest flat bunt (a probe only a probe). If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
   real stake is halved until it is back above {-float(alloc['throttle']['restore_above']):.0%} down.
 - PERFORMANCE FEE: {float(alloc['performance_fee_share']):.0%} of every dollar of realized REAL profit (a settlement or a sale) is paid to
   you as compute credits. Stars buy frontier research, consults and forks with it; losses cost nothing extra.

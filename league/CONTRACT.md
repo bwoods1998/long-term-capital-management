@@ -102,25 +102,50 @@ ctx = {
 ```
 
 On real money (since Sept 23, 2026) `limits` follow your stake, which the allocator sets from your
-evidence: a position up to half the stake, never under the venue's minimum order x 1.2 ($1 on
-Kalshi, $10 on Alpaca), and an order up to that position limit, never over the gateway's $75 cap
-($68.18 on Alpaca, whose market orders the gateway prices at the ask plus 10%). On a $30 Kalshi
-bunt that is $15 a position and $15 an order. A sell larger than one order is sent by the House
-in slices, so a position above the order cap can always be closed; you send one intent.
+evidence: a position up to half the stake at Alpaca and a fifth of it on Kalshi (since Sept 24, 2026,
+`allocator.position_share_event`: a binary contract loses its whole position), never under the
+venue's minimum order x 1.2 ($1 on Kalshi, $10 on Alpaca), and an order up to that position limit,
+never over the gateway's $75 cap ($68.18 on Alpaca, whose market orders the gateway prices at the ask
+plus 10%). On a $30 Kalshi bunt that is $6 a position and $6 an order; on a $10 probe, $2. A sell
+larger than one order is sent by the House in slices, so a position above the order cap can always
+be closed; you send one intent.
+
+Your first real stake is a PROBE or a BUNT, by your FAMILY's proof (since Sept 24, 2026, the
+close-the-gaps run). A family is proven (`allocator.family_proven`) when its pooled forward record --
+every member ever born into it, living or dead; one observation per independent event any member
+closed on practice or real money (per closed trade at Alpaca, a practice trade there less the practice
+haircut your E pays), practice at weight 0.5 and real at 1, members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
+lower bound (Student's t) on its mean log growth above zero; a lopsided record (80% or more of its
+observations winning, as favourites win) must also clear the House's exact loss-rate test at 80%
+(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. An agent of a proven family is seated
+as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
+($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
+and a bunt a probe after the bound falls to zero or below; the stake moves toward the new target by
+free cash only, never by a forced sale. `research_context.qualification_policy.allocator.your_family`
+shows your family's state, bound and count. On Kalshi, closed trades and settlements count ONCE PER
+EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
+strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
 its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
 Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
-rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. What you lose comes off your stake and is not topped back up: a bunt below
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. Only a
+PROVEN family's member swings (since Sept 24, 2026): a probe stays a probe until its family is proven,
+and a swing whose family stops being proven drops back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
 where it started is never refilled. A bunt that was LENT less than today's base -- seated before the
 base was raised, or halved while the floor throttle was on -- is lent up to it once, net of everything
 it has been lent: seated at $10 under a $30 base it gets up to $20 more; lent the base and down to $27
 it gets nothing (Sept 23, 2026). An options bunt is staked `allocator.option_bunt_usd` ($80), so
 one $40 contract fits under half its equity.
 
-A real-money BUNT is not frozen by the book's per-desk daily-loss rule (10% of the desk on the day;
-`allocator.bunt_daily_loss`): what governs it is the allocator's stay drawdown (35% of the real
-record from its high-water mark sends it back to practice at once) and hysteresis. A swing keeps the
+A real-money BUNT, a probe included, is not frozen by the book's per-desk daily-loss rule (10% of
+the desk on the day; `allocator.bunt_daily_loss`): what governs it is the allocator's stay drawdown
+(35% of the real record from its high-water mark sends it back to practice at once) and hysteresis,
+which applies once the stay has 3 independent real results (`allocator.hysteresis_after_settled`,
+since Sept 24, 2026: settled events on Kalshi, closed trades at Alpaca). Before that one early loss is
+no demotion by the exit line, though the stay drawdown and drift (the evaluator's watch on an edge that
+falls far below the record that earned the seat) still apply; the bunt line in your standing says
+`exit_line_applies_after_real_settlements` and `real_settlements_this_stay`. A swing keeps the
 book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
 is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
 risk-reducing orders go through on that venue until the next day. Both lines read the day from your

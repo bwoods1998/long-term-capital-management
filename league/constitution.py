@@ -253,7 +253,10 @@ CONSTITUTION: dict[str, Any] = {
         # been swept from $60 to $5.11 of equity, where its next miss is -57%. The allocator swept
         # $144.19 of bunt equity to cash in 13 moves that day. At $30 a typical Kalshi position
         # ($2.70, meriwether's sports bet) is a -9% loss and a bunt survives several. The grant's
-        # seats follow the smallest bunt (`live_trading.policy`: floor($1,017.75 / $25) = 40).
+        # seats follow the smallest real stake (`live_trading.policy`): the probe since Sept 24, 2026
+        # (`probe_bunt_usd` below), floor($1,017.75 / $10) = 101; floor($1,017.75 / $25) = 40 before.
+        # Since the close-the-gaps run (Sept 24, 2026) this is a PROVEN family's bunt (`family_proven`
+        # below); an unproven family's first real stake is a probe.
         "bunt_usd": {"kalshi": "30", "alpaca": "25"},
         "venue_minimum_usd": {"kalshi": "1", "alpaca": "10"},
         # 1.25, not 1.5 (same revision, inside the table's 1.25-1.5): at their historic rates the only
@@ -315,6 +318,95 @@ CONSTITUTION: dict[str, Any] = {
         # blocker 6). At $80 one $40 contract fits under half the stake, inside the $500 Alpaca
         # envelope and under the $75 order cap.
         "option_bunt_usd": "80",
+        # ---- Promotion on proof: the close-the-gaps run, Deploy A (docs/goals/LTCM_CLOSE_THE_GAPS.md,
+        # D4 and P1-P3; each key below carries one row of that plan's closed "Money-rule bounds" table).
+        # The owner, Sept 23-24, 2026: "I deeply want to speed up the dynamism of agents moving up and
+        # down the levels of the game as quickly as possible and aggressively aligned on incentives so
+        # star traders can compound and run wild and profit exponentially and losing agents die off",
+        # and "being bold and ambitious and not afraid to take risks both in our approach and the
+        # agents (im fine with volatility and lose on my portfolio to achieve the north star goal)".
+        # The evidence (the gap review, Sept 24, 2026 00:19-00:50Z): the allocator's nine promotions to
+        # real money (08:28Z Sept 23 to 00:17Z Sept 24) all ran unproven mechanisms -- 15-minute crypto
+        # taker momentum at 182 bps, MLB-total takers at a 7% fee, 20c ETH-strike longshots, a lab
+        # graduate -- and settled -$18.62 on 16 settlements: 6 negative, 4 demoted after one loss, 0
+        # positive at 00:30Z. The design memo's own warning: the best of 50 edgeless agents shows a 75%
+        # win rate after 20 trades. The one proven mechanism, resting bids on weather favourites
+        # (mullins-2, W_real 1.19 on 10 of 10 winning real settlements), held $66 while nine unproven
+        # bunts held $256 (the T0 board).
+        #
+        # `independent_settlements` (row "allocator.independent_settlements"): "event" counts closed
+        # trades and settlements once per distinct EVENT on the event books (kalshi-shadow, kalshi):
+        # the market ticker's event (`evaluator.event_key`), so three strikes of one game that all
+        # settle are one settlement. `bunt_min_trades`, `bunt_min_settled`, `swing_min_real_trades`,
+        # `hysteresis_after_settled` and the family record read these counts; W is unchanged (money is
+        # money). "trade" restores one count per settlement. Evidence: meriwether-h7d7702 bought
+        # strikes 7, 8 and 9 of one MLB total (KXMLBTOTAL-26SEP231310WSHDET-7/-8/-9, settled seq
+        # 363205-363209) and was promoted at 20:07:05Z Sept 23 "on 3 closed trades" -- one game -- and
+        # again at 00:39:48Z Sept 24 "on 6 closed trades": two games (WSHDET and MINSF).
+        "independent_settlements": "event",
+        # `max_event_share` (row "allocator.max_event_share", 0.2-0.5): a real book's exposure to one
+        # event -- holdings there at cost, working buys on every market of the event, and the new order
+        # -- is at most this share of the agent's EQUITY on that book (`league/book.py` refuses the entry
+        # that would pass it). A quarter is under the 35% stay drawdown, so one upset cannot demote a bunt
+        # by itself; meriwether-h7d7702's MILPHI-6/-7/-8 were $17.36 of one game on a $200 purse.
+        "max_event_share": "0.25",
+        # `probe_bunt_usd` (row "allocator.probe_bunt_usd", Kalshi $5-15, Alpaca $20-25): an agent whose
+        # family is not proven is seated on real money as a PROBE at this stake; a member of a proven
+        # family as a bunt at `bunt_usd`. Pocket change for an unproven mechanism, the owner's full bunt
+        # for a proven one. Alpaca's probe is $25, the bunt's own floor: Alpaca takes no crypto order
+        # under $10 and the book refuses an order over half an account. An options probe is still
+        # staked `option_bunt_usd` ($80): one contract cannot be cut smaller.
+        "probe_bunt_usd": {"kalshi": "10", "alpaca": "25"},
+        # `family_proven` (row "allocator.family_proven": >= 10-20 independent settlements, practice at
+        # 0.5, real at 1, a one-sided 80% lower bound above zero): a family is PROVEN when its pooled
+        # forward record (`allocator.family_record`: every member ever born, living or dead; one
+        # observation per independent event, correlated members pooled into one) has at least
+        # `min_independent_settlements` observations and its lower bound on mean log growth per
+        # observation, at `confidence` (Student's t on the effective count), is above zero. Proof at
+        # the family level, money at the agent level: a mechanism is proven by its family's record,
+        # never by one agent's three lucky settlements.
+        #
+        # `lopsided_gate` (the same row: its lower bound computed honestly; adopted by the main session
+        # on the review of #224, Sept 24, 2026): a LOPSIDED record -- `ladder.lopsided_win_rate` (80%) or
+        # more of its observations winning, as favourites win -- must also clear the House's exact
+        # loss-rate lower bound at the same confidence (`stats.lopsided_growth_lcb`: a Clopper-Pearson
+        # upper bound on the loss rate times the worst loss, the family's mean cash at risk an entry
+        # until a whole loss is seen), the lower bound `Evaluator._judge_family` and `judge` already hold
+        # such records to beside their t bounds. Until a loss is on the record a t bound is badly
+        # anti-conservative (`league/stats.py`). Evidence: simulated, an edgeless family buying 93c
+        # favourites passes the t bound alone at its 10th observation about 49% of the time (97c: about
+        # 74%), not 20%; crypto-15m-favorites was proven at 11:17Z Sept 20 on ten small wins and unproven
+        # by its eleventh, a loss (106 observations and a mean of -0.0021 at T0); at T0 weather-favorites
+        # (buys at 93c on average) has a t bound of +0.0033 and a loss-rate bound of -0.0125: 2 losses in
+        # 16 give an 80% upper bound of 25% on the loss rate, against a breakeven near 7% at 93c. False
+        # restores the t bound alone. `min_independent_settlements` stays 10: raising it does not change
+        # a symmetric record's false-positive rate at a look, and the gate is what fixes the lopsided one.
+        "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
+                          "confidence": "0.8", "lopsided_gate": True},
+        # `hysteresis_after_settled` (row "allocator.hysteresis_after_settled", 0-5): the hysteresis
+        # exit (E under `bunt_at` x `hysteresis`) sends an agent from real money back to practice only
+        # once it has this many independent real closed results in its current stay (settled events on
+        # Kalshi, closed trades on Alpaca); before that only the stay drawdown (`real_drawdown_demote`,
+        # unchanged) and death apply. Evidence: a $30 bunt at `position_share` 0.5 could hold $15, and
+        # one lost position over ~15% of the stake took E under 0.8585 -- 4 of the nine promotions were
+        # demoted after one loss; huang-l23cdb7 lost $8.51 in 90 minutes on positions of 24-26% of its
+        # stake; meriwether-h7d7702 was demoted at 23:33:37Z Sept 23 on a MARK (E 0.8038) with no real
+        # settlement in its stay, and its position then settled +$16.31 (seq 398760).
+        "hysteresis_after_settled": 3,
+        # `position_share_event` (row "allocator.position_share_event", 0.15-0.5 on event books): on
+        # Kalshi a real position is at most this share of the stake ($6 of a $30 bunt, $2 of a $10
+        # probe), never under the venue minimum x 1.2. A binary contract loses its whole position, so
+        # a fifth keeps one miss inside the stay drawdown. Alpaca keeps `position_share` 0.5.
+        "position_share_event": "0.2",
+        # `longshot_floor_real` (row "allocator.longshot_floor_real", 0.15-0.35 on real books;
+        # `league/book.py` reads it): no opening buy on a real event book under this price. Evidence:
+        # 20c ETH strikes lost twice on real money; the rules text's measured "cheap contracts lose".
+        "longshot_floor_real": "0.30",
+        # `real_entry_liquidity` (row "allocator.real_entry_liquidity"; `league/book.py` reads it): a
+        # real entry on an event book is post-only unless the agent's family's pooled TAKER record is
+        # positive (`Allocator.family_taker`). Evidence: the taker mechanisms were the loss engine of
+        # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
+        "real_entry_liquidity": "maker_unless_family_taker_positive",
     },
 }
 
@@ -357,4 +449,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '34adf385c77230c0ceafbac328d576ef80620aafd37c26b7f656fefcb1bd7c20'
+PINNED_DIGEST = '8116302ee038c5ae7929b24c00486d6f675a99d3c1268329ce5497cd4157b034'

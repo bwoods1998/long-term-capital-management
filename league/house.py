@@ -901,8 +901,9 @@ class House:
         position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
         allocated = rung >= 2 and agent is not None and allocator_module.enabled()
         if allocated:
-            # Bands of capital: a real position is `position_share` of the allocator's stake, never
-            # under the venue's minimum order, every order within the gateway's cap.
+            # Bands of capital: a real position is `position_share` of the allocator's stake
+            # (`position_share_event` on Kalshi since Sept 24, 2026), never under the venue's minimum
+            # order, every order within the gateway's cap.
             position, order = self.allocator.limits(agent, staked if staked is not None else Decimal(0))
         elif rung >= 3 and staked is not None:
             position, order = capital.scaled_limits(staked)  # rung 3's limits follow its stake
@@ -2782,6 +2783,12 @@ class House:
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
+            if rung == 2 and allocator_module.enabled() and self.allocator.tier(agent) != "bunt":
+                # Only a proven family's agent swings (Sept 24, 2026): a swing audit that finishes after its
+                # family's record stopped being proven does not commit (`Allocator.family` never raises).
+                self._promotion_status(agent, verdict, 'family', "its family's pooled record is not proven: "
+                                                                  "only a proven family's agent swings")
+                return
             authorization = self.campaigns.live_authorization() if self.campaigns else None
             if rung == 1 and allocator_module.enabled():
                 # A known defect's bunt, committed after its audit: the allocator's envelope decides.
@@ -4364,6 +4371,10 @@ class House:
                 'allocator': ({**{k: v for k, v in (CONSTITUTION.get('allocator') or {}).items()},
                                'your_band': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('band'),
                                'your_evidence': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('evidence'),
+                               # P1 (Sept 24, 2026): your family's pooled record decides whether real money
+                               # starts as a probe or a bunt (`allocator.family_proven`).
+                               'your_family': {k: (self.allocator.board().get('agents') or {}).get(agent.id, {}).get(k)
+                                               for k in ('family', 'family_state', 'family_bound', 'family_n')},
                                'note': 'While enabled, the paper screen and the micro bound above no longer promote: bands and '
                                        'stakes follow E = W_paper^paper_weight x W_real at every mark pass.'}
                               if allocator_module.enabled() else None),
@@ -4749,9 +4760,13 @@ class House:
                    note=("W_paper is after the practice haircut, and more trading pays more of it; the dollars are "
                          "the gain on your paper equity now that would put E on the line. Crossing it is judged by "
                          "the allocator at its next pass, as for everyone; nothing here changes the line."))
-        if row.get("band") in ("bunt", "swing", "star"):
-            # Already on real money: the line it now has to hold is the bunt line with hysteresis.
-            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6))
+        if row.get("band") in ("probe", "bunt", "swing", "star"):
+            # Already on real money: the line it now has to hold is the bunt line with hysteresis, once
+            # `hysteresis_after_settled` independent real settlements are in this stay (P2, Sept 24, 2026:
+            # before that only the stay drawdown sends it back).
+            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6),
+                       exit_line_applies_after_real_settlements=int(r.get("hysteresis_after_settled") or 0),
+                       real_settlements_this_stay=int(ev.get("stay_closed") or 0))
         return out
 
     def standings(self) -> list[Standing]:

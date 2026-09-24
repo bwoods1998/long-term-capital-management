@@ -54,6 +54,7 @@ This module is a money judge: `league/ci.py` forbids Merton's pull requests to t
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -61,15 +62,20 @@ import threading
 from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 
+from . import stats
 from .constitution import CONSTITUTION
 from .ledger import HOUSE, now_iso
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
-BANDS = ("replay", "paper", "bunt", "swing", "star")
-RUNG_OF = {"replay": 0, "paper": 1, "bunt": 2, "swing": 3, "star": 3}
+#: A PROBE (Sept 24, 2026) is rung 2 staked `probe_bunt_usd`, for an agent whose family has not proven its
+#: mechanism; a member of a proven family is a bunt. A first-class band: the board's rows and summary and
+#: the verdicts' `band_from`/`band_to` say it, and the publisher (#222) and the site (personal-site #6)
+#: know it. Only the rung and the book's daily-loss rule (`band_of`) read "bunt" for both.
+BANDS = ("replay", "paper", "probe", "bunt", "swing", "star")
+RUNG_OF = {"replay": 0, "paper": 1, "probe": 2, "bunt": 2, "swing": 3, "star": 3}
 PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 EVENT_BOOKS = ("kalshi-shadow", "kalshi")
@@ -113,12 +119,20 @@ class Evidence:
     haircut_log: float  # the log wealth taken off the paper record by the execution haircut
     real_seen: bool  # the agent has ever had a real account
     cooling: bool = False  # demoted within `reentry_cooldown_hours`: no move up until it passes
+    #: Independent real results in the current stay on real money (P2, Sept 24, 2026): settled or
+    #: sold-flat events on Kalshi, closed trades on Alpaca, since `real_stay_start`. The hysteresis exit
+    #: waits for `hysteresis_after_settled` of them.
+    real_stay_closed: int = 0
+    #: Whether the agent's family's pooled record is proven (`Allocator.family`), set by the pass before
+    #: any band is read. Only a proven family's agent swings (Sept 24, 2026: every real-money agent is a
+    #: probe or a proven family's member). None where no pass set it: no family gate.
+    family_proven: bool | None = None
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
                 "trades": int(self.paper_trades), "settled": int(self.paper_settled),
                 "real_trades": int(self.real_trades), "real_pnl": round(self.real_pnl, 4),
-                "real_drawdown": round(self.real_drawdown, 4)}
+                "real_drawdown": round(self.real_drawdown, 4), "stay_closed": int(self.real_stay_closed)}
 
 
 def _haircut_rate(bps: Any, asset_class: Any) -> float:
@@ -168,24 +182,270 @@ def _paper_haircut(house: Any, agent: str, book_name: str, bps: Any) -> float:
     return min(total, 5.0)
 
 
-def closed_trades(house: Any, agent: str, book_name: str) -> tuple[int, int]:
-    """(closed trades, settlements) on one book since its evidence cutoff: every settlement, and every
-    sale that left the position flat, counted as `Evaluator.trade_returns` counts them, but never
-    dropped because the net stake is zero or less after sweeps (Sept 23, 2026 review)."""
-    from .accounting import evidence_cutoffs
+def closed_trades(house: Any, agent: str, book_name: str, *, since_seq: int = 0) -> tuple[int, int]:
+    """(closed trades, settlements) on one book since its evidence cutoff (and after `since_seq`):
+    every settlement, and every sale that left the position flat, counted as `Evaluator.trade_returns`
+    counts them, but never dropped because the net stake is zero or less after sweeps (Sept 23, 2026
+    review).
 
-    cutoff = evidence_cutoffs(house.ledger, agent).get(book_name, 0)
-    closed = settled = 0
+    INDEPENDENT on the event books (D4, the close-the-gaps run, Sept 24, 2026): under the constitution's
+    `independent_settlements: "event"` each counts once per distinct EVENT (`evaluator.event_key`), so
+    three strikes of one game that all settle are one settlement and one closed trade, and a flat sale
+    counts toward its event the same way. meriwether-h7d7702 reached the bunt line "on 6 closed trades"
+    at 00:39:48Z Sept 24 that were two games. Alpaca books count every closed trade. W is unchanged."""
+    from .accounting import evidence_cutoffs
+    from .evaluator import count_key, per_event
+
+    cutoff = max(evidence_cutoffs(house.ledger, agent).get(book_name, 0), int(since_seq or 0))
+    by_event = per_event(book_name)
+    closed: set[str] = set()
+    settled: set[str] = set()
     for entry in house.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=cutoff):
         p = entry.payload
         if p.get("book") != book_name:
             continue
         if entry.kind == "book.settle":
-            closed += 1
-            settled += 1
+            key = count_key(entry.seq, p, by_event)
+            closed.add(key)
+            settled.add(key)
         elif p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True):
-            closed += 1
-    return closed, settled
+            closed.add(count_key(entry.seq, p, by_event))
+    return len(closed), len(settled)
+
+
+# ------------------------------------------------------------ the family record
+#: What the family record folds from the ledger (`TradeTape`): every agent's fills, settlements and
+#: stakes, and the two kinds that move an agent's evidence cutoff (`accounting.evidence_cutoffs`).
+TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline")
+_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price")
+_TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event", "multiplier", "asset_class")
+
+
+class TapeRow(NamedTuple):
+    seq: int
+    kind: str
+    payload: dict
+
+
+class TradeTape:
+    """Every agent's fills, settlements and stakes, read from the ledger BY KIND after a cursor and
+    kept in a compact form, with each agent's evidence cutoffs folded exactly as
+    `accounting.evidence_cutoffs` computes them (the latest correction or repair baseline on a book).
+
+    The family record reads every member of a family, living or dead. Read agent by agent that was
+    ~500 indexed reads a pass (1.4 s on the T0 snapshot of Sept 24, 2026); by kind it is one read of
+    ~3,000 rows (0.09 s) once, then only the rows that are new at each pass."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.rows: dict[str, list[TapeRow]] = {}
+        self.cutoffs: dict[str, dict[str, int]] = {}
+        self._lock = threading.Lock()
+
+    def refresh(self, ledger: Any) -> int:
+        """Fold what is new on the ledger; the ledger position it now stands at."""
+        with self._lock:
+            for entry in ledger.iter(kinds=TAPE_KINDS, after=self.cursor):
+                self._fold(entry)
+                self.cursor = entry.seq
+            return self.cursor
+
+    def _cut(self, agent: Any, book: Any, seq: int) -> None:
+        if agent and book:
+            cuts = self.cutoffs.setdefault(str(agent), {})
+            cuts[str(book)] = max(cuts.get(str(book), 0), seq)
+
+    def _fold(self, entry: Any) -> None:
+        p = entry.payload
+        if entry.kind == "book.fill_correction":
+            self._cut(entry.agent, p.get("book"), entry.seq)
+        elif entry.kind == "book.baseline":
+            for repair in p.get("repairs") or []:
+                if isinstance(repair, Mapping):
+                    self._cut(repair.get("agent"), p.get("book"), entry.seq)
+        elif entry.agent != HOUSE:
+            keep = {k: p[k] for k in _TAPE_FIELDS if k in p}
+            instrument = p.get("instrument")
+            if isinstance(instrument, Mapping):
+                keep["instrument"] = {k: instrument[k] for k in _TAPE_INSTRUMENT if k in instrument}
+            self.rows.setdefault(entry.agent, []).append(TapeRow(entry.seq, entry.kind, keep))
+
+
+def _family_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    rule = dict(rules(constitution).get("family_proven") or {})
+    return {"min_independent_settlements": int(rule.get("min_independent_settlements", 10)),
+            "practice_weight": float(rule.get("practice_weight", 0.5)), "real_weight": float(rule.get("real_weight", 1)),
+            "confidence": float(rule.get("confidence", 0.8)),
+            # The House's loss-rate bound for a lopsided record, beside the t bound (Sept 24, 2026; the
+            # constitution's comment has the evidence). Absent or false: the t bound alone.
+            "lopsided_gate": rule.get("lopsided_gate") is True}
+
+
+def _log1p(r: float) -> float:
+    """ln(1 + r), a whole loss or worse floored at `stats.RUIN` as `stats.log_growth` floors it; a
+    return that is not a number (a malformed row) is no growth."""
+    if r <= -1.0:
+        return stats.RUIN
+    return max(stats.RUIN, math.log1p(r)) if math.isfinite(r) else 0.0
+
+
+def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidence: float, *,
+          win_rate: float | None = None, risk: float = 1.0) -> dict[str, Any]:
+    """One observation per group (an event, or a trade where nothing groups them): the weighted mean
+    of its members' values at the largest of their weights -- correlated bets are never counted as
+    independent. Then the weighted mean m, the reliability-weighted sd s, n_eff = (sum w)^2 / sum w^2
+    and the one-sided lower bound m - t(confidence, n_eff - 1) * s / sqrt(n_eff) on Student's t (the
+    coordinator's precision, Sept 24, 2026; no bound under two effective observations). `positive`
+    when there are `min_n` observations and the bound is above zero.
+
+    With `win_rate` (the ladder's `lopsided_win_rate`), a LOPSIDED record -- that share or more of its
+    observations winning: favourites, many small wins and a rare whole loss -- must also clear the
+    House's exact loss-rate gate at the same confidence (`stats.lopsided_growth_lcb`, the rule
+    `Evaluator._judge_family` and `judge` apply beside their t bounds): until a loss is on the record
+    a t bound is badly anti-conservative (`stats`' own note). Review of #224, Sept 24, 2026: an
+    edgeless 93c favourites family passes the t bound alone at its 10th observation about half the
+    time, and crypto-15m-favorites was proven on 10 small wins on Sept 20 before its 11th lost."""
+    observations = []
+    for units in groups.values():
+        if units:
+            total = sum(w for _, w in units)
+            observations.append((math.fsum(v * w for v, w in units) / total, max(w for _, w in units)))
+    out: dict[str, Any] = {"n": len(observations), "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "positive": False}
+    if not observations:
+        return out
+    weight = math.fsum(w for _, w in observations)
+    squares = math.fsum(w * w for _, w in observations)
+    mean = math.fsum(v * w for v, w in observations) / weight
+    n_eff = weight * weight / squares
+    out.update(n_eff=n_eff, mean_log=mean)
+    if n_eff >= 2:
+        sd = math.sqrt(math.fsum(w * (v - mean) ** 2 for v, w in observations) / (weight - squares / weight))
+        out.update(sd=sd, bound=mean - stats.t_quantile(confidence, n_eff - 1) * sd / math.sqrt(n_eff))
+    gate = None
+    if win_rate is not None:
+        returns = [math.expm1(v) for v, _ in observations]
+        lopsided = stats.lopsided(returns, win_rate)
+        gate = stats.lopsided_growth_lcb(returns, risk, 1.0 - confidence) if lopsided else None
+        out.update(lopsided=lopsided, loss_gate=gate)
+    out["positive"] = bool(out["n"] >= min_n and out["bound"] is not None and out["bound"] > 0 and (gate is None or gate > 0))
+    return out
+
+
+def _practice_charges(rows: list[TapeRow], book: str, bps: Any) -> dict[str, list[tuple[int, float]]]:
+    """The execution haircut of each venue or cross fill of one member on `book`, in dollars, by the
+    instrument key a closed trade carries (`evaluator.closed_trade_rows`): `bps` (a number, or a table
+    by asset class: `_haircut_rate`) of the fill's notional, as `_paper_haircut` charges the paper
+    record the allocator's E reads."""
+    charges: dict[str, list[tuple[int, float]]] = {}
+    for r in rows:
+        p = r.payload
+        if r.kind != "book.fill" or p.get("book") != book or p.get("source") not in ("venue", "cross"):
+            continue
+        inst = p.get("instrument") or {}
+        try:
+            notional = abs(float(p["quantity"]) * float(p["price"]) * float(inst.get("multiplier") or 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
+        charges.setdefault(key, []).append((r.seq, notional * _haircut_rate(bps, inst.get("asset_class")) / 10_000.0))
+    return charges
+
+
+def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None = None,
+                  through: int | None = None) -> dict[str, Any]:
+    """A family's pooled forward record (P1, the close-the-gaps run, Sept 24, 2026): the proof that
+    moves a family's real stakes from probes to bunts. Read-only; a pure function of the ledger and
+    the registry. The scoreboard (`scripts/gap_scoreboard.py`) implements the same definition:
+
+    - members: every agent ever born into `family` on `venue`, living or dead;
+    - observations: one per distinct EVENT (`evaluator.event_key`) that any member closed -- settled,
+      or sold flat -- on the practice book or the real book since that member's evidence cutoff; on
+      Alpaca, where nothing groups trades, one per closed trade. A member's value on an event is the
+      sum of the log growths ln(1 + r) of its closed trades there, r as `Evaluator.trade_returns`
+      computes it read through that trade's own ledger position: its result over the most the member
+      had been lent on that book by then, so a later sweep, a death or a raise never erases or
+      rescales a closed trade (huang-6's $25 trades were not shrunk by its later $60 stake);
+    - an event several members traded is ONE observation: the weighted mean of their values (real at
+      `real_weight`, practice at `practice_weight`) at the largest weight among them (`_pool`);
+    - pooled: mean, sd, n_eff and the one-sided `confidence` lower bound; `proven` with at least
+      `min_independent_settlements` observations and the bound above zero;
+    - the maker and taker records apart: a member's observation is "taker" when its first entry fill
+      on that event (on that trade, on Alpaca) was a taker fill (`book.fill` `liquidity`);
+    - an Alpaca PRACTICE trade pays the execution haircut the allocator's E takes off the same fills
+      (`evidence.alpaca_paper_haircut_bps` on each entry and exit fill's notional, `_paper_haircut`):
+      practice fills there look optimistic, and the proof that moves real money must not read them
+      rawer than E does (review of #224, Sept 24, 2026). Kalshi's practice book fills conservatively
+      and, like every real book, is not haircut.
+    """
+    from .evaluator import closed_trade_rows, event_key, per_event, staked_base
+
+    tape = tape if tape is not None else TradeTape()
+    # Inside a pass the tape already holds the pass's ledger position: no read at all.
+    head = tape.cursor if through is not None and int(through) <= tape.cursor else tape.refresh(house.ledger)
+    through = head if through is None else min(int(through), head)
+    rule = _family_rule()
+    books = {PAPER_BOOK[venue]: rule["practice_weight"], REAL_BOOK[venue]: rule["real_weight"]}
+    haircut = (rules().get("evidence") or {}).get("alpaca_paper_haircut_bps", 0)
+    registry = house.registry
+    with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
+        members = sorted(a.id for a in list(registry.agents.values()) if a.family == family and a.venue == venue)
+    units: dict[str, list[tuple[float, float, str, str]]] = {}
+    real_keys: set[str] = set()
+    risked: list[float] = []  # each entry's cash over what had been lent then, as `trade_returns` reads its risk
+    for member in members:
+        rows = tape.rows.get(member) or []
+        cutoffs = tape.cutoffs.get(member) or {}
+        for book, weight in books.items():
+            stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
+            if staked_base(stakes, through) <= 0:
+                continue  # never lent anything on this book: no record there
+            for r in rows:
+                p = r.payload
+                if (r.kind == "book.fill" and p.get("book") == book and p.get("side") == "buy" and p.get("source") in ("venue", "cross")
+                        and cutoffs.get(book, 0) < r.seq <= through):
+                    lent = staked_base(stakes, r.seq)
+                    if lent > 0:
+                        with contextlib.suppress(KeyError, TypeError, ValueError):
+                            risked.append(-float(p["cash_delta"]) / lent)
+            closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book,
+                                          since_seq=cutoffs.get(book, 0), until_seq=through)
+            by_event = per_event(book)
+            charges = _practice_charges(rows, book, haircut) if book == "alpaca-paper" else {}
+            mine: dict[str, list[Any]] = {}  # observation -> [sum of log growths, (first entry seq, its liquidity)]
+            for row in closed:
+                lent = staked_base(stakes, row["seq"])  # `trade_returns` read through this trade's position
+                if lent <= 0:
+                    continue
+                key = (event_key(row["instrument"]) if by_event else None) or f"{book}:{member}:{row['seq']}"
+                unit = mine.setdefault(key, [0.0, (math.inf, "taker")])
+                opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
+                paid = math.fsum(c for seq, c in charges.get(row["key"], ()) if opened <= seq <= row["seq"])
+                unit[0] += _log1p((row["made"] - paid) / lent)
+                entry = (row["entry_seq"] if row["entry_seq"] is not None else row["seq"], row["liquidity"])
+                if entry[0] < unit[1][0]:
+                    unit[1] = entry
+            for key, (value, (_, liquidity)) in mine.items():
+                units.setdefault(key, []).append((value, weight, liquidity, member))
+                if book == REAL_BOOK[venue]:
+                    real_keys.add(key)
+    minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
+    win_rate = float(CONSTITUTION["ladder"]["lopsided_win_rate"]) if rule["lopsided_gate"] else None
+    risk = math.fsum(risked) / len(risked) if risked else 1.0  # with no entry seen, all of it was at risk
+
+    def side(liquidity: str | None) -> dict[str, Any]:
+        chosen = {k: [u for u in group if liquidity is None or (u[2] == "taker") == (liquidity == "taker")] for k, group in units.items()}
+        pooled = _pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()}, minimum, confidence,
+                       win_rate=win_rate, risk=risk)
+        pooled["members"] = len({u[3] for group in chosen.values() for u in group})
+        return pooled
+
+    whole = side(None)
+    return {"family": family, "venue": venue, "through": through, "members": len(members),
+            "members_counted": whole.pop("members"), "n": whole["n"], "n_eff": whole["n_eff"], "mean_log": whole["mean_log"],
+            "sd": whole["sd"], "bound": whole["bound"], "proven": whole["positive"],
+            "state": "proven" if whole["positive"] else "unproven", "real_n": len(real_keys),
+            "lopsided": whole.get("lopsided"), "loss_gate": whole.get("loss_gate"), "risk_per_entry": risk,
+            "maker": side("maker"), "taker": side("taker"), "rule": rule}
 
 
 def real_stay_start(house: Any, agent: str) -> int | None:
@@ -252,6 +512,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     e = (w_paper ** float(weights.get("paper_weight", 0.5))) * w_real
     paper_closed, settled = closed_trades(house, agent.id, paper_name)
     real_closed, _ = closed_trades(house, agent.id, real_name)
+    stay_closed = closed_trades(house, agent.id, real_name, since_seq=stay)[0] if stay is not None else 0
     left = left_real_at(house, agent.id)
     hours = float(r.get("reentry_cooldown_hours", 1.0))
     cooling = rung in (1, 2) and left is not None and house.clock() - left < hours * 3600
@@ -264,7 +525,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     return Evidence(agent=agent.id, venue=agent.venue, rung=rung, w_paper=w_paper, w_real=w_real, e=e,
                     paper_trades=paper_closed, paper_settled=settled if paper_name in EVENT_BOOKS else 0, real_trades=real_closed,
                     real_pnl=real_pnl, real_drawdown=real["drawdown"] if stay is not None else 0.0, haircut_log=haircut,
-                    real_seen=seen, cooling=cooling)
+                    real_seen=seen, cooling=cooling, real_stay_closed=stay_closed)
 
 
 # --------------------------------------------------------------------- bands
@@ -284,6 +545,13 @@ def _params() -> dict[str, Any]:
         "performance_fee_share": float(r.get("performance_fee_share", 0.2)),
         "throttle": dict(r.get("throttle") or {"halve_below": -0.30, "restore_above": -0.15}),
         "bunt_usd": {k: _d(v) for k, v in (r.get("bunt_usd") or {"kalshi": "10", "alpaca": "15"}).items()},
+        # The close-the-gaps run (Sept 24, 2026): an unproven family's first real stake is a probe, the
+        # hysteresis exit waits for a few real settlements, and an event book's position is a fifth.
+        # Without the keys every bunt is `bunt_usd`, the exit applies at once, and a Kalshi position's
+        # share is `position_share`, as on every other book.
+        "probe_bunt_usd": {k: _d(v) for k, v in (r.get("probe_bunt_usd") or r.get("bunt_usd") or {"kalshi": "10", "alpaca": "15"}).items()},
+        "hysteresis_after_settled": int(r.get("hysteresis_after_settled") or 0),
+        "position_share_event": float(r.get("position_share_event") or r.get("position_share", 0.5)),
         "profit_indexed_envelope": bool(r.get("profit_indexed_envelope", True)),
         # The learn-and-unblock run (Sept 23, 2026 ~16:00 UTC): a bunt keeps what it makes, and an
         # options bunt is staked one affordable contract. See the constitution for the evidence.
@@ -312,17 +580,41 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
         if ev.cooling:
             return "paper", "back from real money within the re-entry cooldown"
         if bunt_ready(ev, p):
-            return "bunt", f"E {ev.e:.4f} is at or above {p['bunt_at']:g} on {ev.paper_trades} closed trades"
+            from .evaluator import per_event
+
+            counted = f"{ev.paper_trades} closed trades" + (f" ({ev.paper_settled} settled)" if ev.venue == "kalshi" else "")
+            if per_event(PAPER_BOOK.get(ev.venue, "")):
+                counted += ", one an event"  # D4 (Sept 24, 2026): stacked strikes on one game are one bet
+            return "bunt", f"E {ev.e:.4f} is at or above {p['bunt_at']:g} on {counted}"
         return "paper", "E below the bunt line or too few trades"
     if ev.real_drawdown >= p["real_drawdown_demote"]:
         return "paper", f"down {ev.real_drawdown:.0%} of its real record from its high-water mark: back to paper at once"
-    if ev.e < p["bunt_at"] * p["hysteresis"]:
-        return "paper", f"E {ev.e:.4f} fell below {p['bunt_at'] * p['hysteresis']:.4f} (the bunt line with hysteresis)"
+    line = p["bunt_at"] * p["hysteresis"]
+    if ev.e < line:
+        if ev.real_stay_closed >= p["hysteresis_after_settled"]:
+            return "paper", f"E {ev.e:.4f} fell below {line:.4f} (the bunt line with hysteresis)"
+        # The one-loss trial (P2, Sept 24, 2026): the exit waits for `hysteresis_after_settled` independent
+        # real results in this stay. A $30 bunt could hold a $15 position and one lost position over ~15%
+        # of the stake took E under the line: 4 of the allocator's nine promotions were demoted after one
+        # loss. Until then only the stay drawdown (above) and death apply; a swing still drops to a bunt
+        # at its own floor (below).
+        if rung == 2:
+            return "bunt", (f"E {ev.e:.4f} is under the exit line {line:.4f}, which applies after "
+                            f"{p['hysteresis_after_settled']} real settlements in this stay ({ev.real_stay_closed} so far): "
+                            "one early loss is not a demotion")
     if rung == 2:
         if swing_ready(ev, p) and not ev.cooling:
+            if ev.family_proven is False:
+                # The agent-level swing is the second route for a PROVEN family's agent only (the close-
+                # the-gaps run, Sept 24, 2026): an unproven family's agent stays a probe, whatever its
+                # own E on a few real settlements says (the plan's gap 2).
+                return "bunt", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, but its family's pooled record is not "
+                                "proven: only a proven family's agent swings")
             return "swing", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, W_real {ev.w_real:.4f}, "
                              f"{ev.real_trades} real closed trades")
         return "bunt", "holds the bunt band"
+    if ev.family_proven is False:
+        return "bunt", "its family's pooled record is no longer proven: an unproven family's agent is a probe, not a swing"
     if ev.e < p["swing_at"] * p["hysteresis"] or ev.w_real < p["swing_exit_w_real"]:
         return "bunt", (f"E {ev.e:.4f} or W_real {ev.w_real:.4f} fell below the swing band's floor "
                         f"({p['swing_at'] * p['hysteresis']:.4f} / {p['swing_exit_w_real']:g})")
@@ -351,11 +643,19 @@ def swing_stake(ev: Evidence, venue_capital: Decimal, p: Mapping[str, Any]) -> D
     return max(base, min(stake, ceiling))
 
 
+def _position_share(venue: str, p: Mapping[str, Any]) -> float:
+    """The share of a real stake one position may hold: `position_share_event` on an event book (P2,
+    Sept 24, 2026: a fifth, so one binary miss stays inside the stay drawdown), `position_share` else."""
+    return float(p["position_share_event"] if REAL_BOOK.get(venue) in EVENT_BOOKS else p["position_share"])
+
+
 def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) -> tuple[Decimal, Decimal]:
-    """(max position, max order) for a real account staked `stake`: `position_share` of the stake,
-    never under the venue's minimum order (Alpaca crypto takes nothing under $10), and every order
+    """(max position, max order) for a real account staked `stake`: `position_share` of the stake
+    (`position_share_event` on Kalshi since Sept 24, 2026: $6 of a $30 bunt, $2 of a $10 probe), never
+    under the venue's minimum order x 1.2 (Alpaca crypto takes nothing under $10), and every order
     within the gateway's per-order cap."""
     p = _params()
+    share = _position_share(venue, p)
     cap = order_cap if order_cap is not None else _d(CONSTITUTION["order_caps"]["max_order_usd"])
     if order_cap is None and venue == "alpaca":
         # The gateway counts an Alpaca market order at the touch plus ten per cent
@@ -366,7 +666,7 @@ def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) 
     # A fifth above the venue's minimum: a minimum-sized order must still fit after its fee and a
     # price-grid step (Alpaca takes no crypto order under $10; a $15 bunt must be able to place one).
     minimum = (_d((rules().get("venue_minimum_usd") or {}).get(venue, "1")) * _d("1.2")).quantize(CENT)
-    position = max((stake * _d(p["position_share"])).quantize(CENT, rounding=ROUND_DOWN), minimum)
+    position = max((stake * _d(share)).quantize(CENT, rounding=ROUND_DOWN), minimum)
     if not EXITS_SLICED:
         position = min(position, (cap * _d("0.8")).quantize(CENT))
     order = max(min(position, cap), minimum)
@@ -384,6 +684,13 @@ class Allocator:
         self._board: dict[str, Any] = {"enabled": enabled(), "agents": {}, "moves": [], "bands": {}, "throttle": {}}
         self.state = self._load()
         self._evidence: dict[str, Evidence] = {}
+        #: The family records of this pass (P1, Sept 24, 2026), each computed once a pass from `_tape`
+        #: read through `_through`, the pass's ledger position; readers between passes (the book's
+        #: `family_taker`) see the last pass's.
+        self._tape = TradeTape()
+        self._families: dict[tuple[str, str], dict[str, Any]] = {}
+        self._through: int | None = None
+        self._family_alerted: set[tuple[str, str, str]] = set()  # (family, venue, error): each told once
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -512,16 +819,108 @@ class Allocator:
                                                                if now else "the floor recovered: stakes are restored")})
         return now
 
+    # ------------------------------------------------------------ families
+    def _begin_pass(self) -> None:
+        """A new pass reads every family afresh, once, through the ledger position it starts at. A ledger
+        that cannot be read now leaves the tape where it stood: the pass goes on (Sept 24, 2026)."""
+        try:
+            self._through = self._tape.refresh(self.house.ledger)
+        except Exception as exc:  # noqa: BLE001 - an unreadable ledger must not stop the pass or its exits
+            self._family_error("the family records' tape", "", exc)
+            self._through = self._tape.cursor
+        self._families = {}
+
+    def _family_error(self, family: str, venue: str, exc: BaseException) -> None:
+        """One warning per family and distinct error, however many wakes and passes meet it."""
+        why = f"{type(exc).__name__}: {str(exc)[:160]}"
+        key = (family, venue, why)
+        if key in self._family_alerted:
+            return
+        self._family_alerted.add(key)
+        try:
+            self.house.alert("warning", f"allocator: {family}{' at ' + venue if venue else ''} could not be read ({why}); "
+                                        "until it can, its agents count as an unproven family's: probes, no swing, "
+                                        "post-only real entries")
+        except Exception:  # noqa: BLE001 - the alert is a courtesy; the fallback is the protection
+            pass
+
+    def _unreadable_family(self, family: str, venue: str, exc: BaseException) -> dict[str, Any]:
+        """What a family counts as while its record cannot be computed: unproven, with no taker record."""
+        self._family_error(f"the {family} family's record", venue, exc)
+        try:
+            rule = _family_rule()
+        except Exception:  # noqa: BLE001 - a malformed rule is no reason to raise into a wake
+            rule = {"min_independent_settlements": 10, "practice_weight": 0.5, "real_weight": 1.0, "confidence": 0.8,
+                    "lopsided_gate": True}
+        side = {"n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "positive": False, "members": 0}
+        return {"family": family, "venue": venue, "through": self._through, "members": 0, "members_counted": 0,
+                "n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "proven": False, "state": "unproven",
+                "real_n": 0, "lopsided": None, "loss_gate": None, "risk_per_entry": None,
+                "maker": dict(side), "taker": dict(side), "rule": rule,
+                "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+    def family(self, family: str, venue: str) -> dict[str, Any]:
+        """The family's pooled record (`family_record`), computed once a pass and kept until the next.
+        Never raises: it is on every wake's path (`limits` -> `seat_stake` -> `tier`), on the book's
+        order path (`family_taker`) and in the pass, and a record that cannot be computed is an
+        UNPROVEN family's until the next pass tries again (review of #224, Sept 24, 2026)."""
+        key = (family, venue)
+        record = self._families.get(key)
+        if record is None:
+            try:
+                record = family_record(self.house, family, venue, tape=self._tape, through=self._through)
+            except Exception as exc:  # noqa: BLE001 - see the docstring: exits must run
+                record = self._unreadable_family(family, venue, exc)
+            self._families[key] = record
+        return record
+
+    def tier(self, agent: Any) -> str:
+        """"bunt" when the agent's family is proven (`family_proven`), else "probe" (P1, Sept 24, 2026)."""
+        return "bunt" if self.family(agent.family, agent.venue)["proven"] else "probe"
+
+    def family_summary(self, agent: Any) -> dict[str, Any]:
+        """The family record as a verdict, the board and an audit carry it."""
+        r = self.family(agent.family, agent.venue)
+        split = ("n", "mean_log", "bound", "positive", "members")
+        return {"family": agent.family, "state": r["state"], "n": r["n"], "n_eff": r["n_eff"], "mean_log": r["mean_log"],
+                "sd": r["sd"], "bound": r["bound"], "real_n": r["real_n"], "members": r["members"],
+                "members_counted": r["members_counted"], "through": r["through"],
+                "maker": {k: r["maker"][k] for k in split}, "taker": {k: r["taker"][k] for k in split}, "rule": r["rule"]}
+
+    def family_taker(self, agent_id: str) -> dict[str, Any] | None:
+        """The agent's family's pooled TAKER record, for the book's `real_entry_liquidity` rule (P3, Sept 24,
+        2026: a real entry on an event book is post-only unless this is `positive`): {"family", "positive",
+        "n", "mean_log", "bound"}. None while the allocator is off or for an agent it does not know."""
+        if not enabled():
+            return None
+        agent = self.house.registry.get(agent_id)
+        if agent is None:
+            return None
+        taker = self.family(agent.family, agent.venue)["taker"]
+        return {"family": agent.family, "positive": bool(taker["positive"]), "n": int(taker["n"]),
+                "mean_log": float(taker["mean_log"]), "bound": taker["bound"]}
+
+    def _family_note(self, agent: Any) -> str:
+        r = self.family(agent.family, agent.venue)
+        bound = "no bound yet" if r["bound"] is None else f"bound {r['bound']:+.5f}"
+        return (f"its family {agent.family} is {r['state']} ({r['n']} independent settlements, {bound}; "
+                f"proven at {r['rule']['min_independent_settlements']} with the bound above zero)")
+
     # ------------------------------------------------------------- stakes
     def target_stake(self, agent: Any, band: str, ev: Evidence | None = None) -> Decimal:
         p = _params()
         base = p["bunt_usd"].get(agent.venue, _d("10"))
+        if band in ("bunt", "probe") and (band == "probe" or self.tier(agent) == "probe"):
+            # P1 (Sept 24, 2026): a bunt of an unproven family is a probe, pocket change for an unproven
+            # mechanism. `bunt_growth` then keeps what it makes on the probe's own base.
+            base = p["probe_bunt_usd"].get(agent.venue, base)
         niche = self.house.niche_of(agent)
         if niche is not None and niche.asset_class == "option":
             # One option contract cannot be cut smaller: an options bunt is one contract's premium,
             # and since Sept 23, 2026 (A2a) `option_bunt_usd`, $80: the book holds a position and an
             # order to half the account's equity, so at $40 the $40 contract the bunt was staked for
-            # could never be bought and the chain was filtered at contracts the book refused.
+            # could never be bought and the chain was filtered at contracts the book refused. A probe
+            # too (Sept 24, 2026): a probe cannot hold a smaller contract than a bunt.
             base = max(base, p["option_bunt_usd"])
             p = {**p, "bunt_usd": {**p["bunt_usd"], agent.venue: base}}
         if band in ("swing", "star") and ev is not None:
@@ -530,9 +929,11 @@ class Allocator:
             stake = bunt_stake(ev, base, p)
         if self.state.get("throttle"):
             # Halved, but never under the smallest stake that can still trade: a position is at most
-            # `position_share` of the stake and must hold the venue's minimum order (x1.2), or the
-            # seat would hold capital and never open anything (Sept 23, 2026 review).
-            tradable = (_d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")) * _d("1.2") / _d(p["position_share"])).quantize(CENT)
+            # `position_share` of the stake (`position_share_event` on Kalshi) and must hold the venue's
+            # minimum order (x1.2), or the seat would hold capital and never open anything (Sept 23,
+            # 2026 review).
+            tradable = (_d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")) * _d("1.2")
+                        / _d(_position_share(agent.venue, p))).quantize(CENT)
             stake = max((stake / 2).quantize(CENT, rounding=ROUND_DOWN), min(tradable, stake))
         return stake
 
@@ -544,8 +945,18 @@ class Allocator:
         return self.target_stake(agent, band, ev)
 
     def limits(self, agent: Any, staked: Decimal) -> tuple[Decimal, Decimal]:
+        """(max position, max order) for a real account lent `staked` net: a share of its stake, which
+        at a new seat is the target `House.seat` is about to lend. A raise the allocator has not lent
+        is not yet the account's stake: while the target is above both what the account was lent and
+        what it holds, the limits follow what it holds. (Review of #224, Sept 24, 2026: a $10 probe
+        whose family was proven while the envelope had no room for the $20 raise was given the $30
+        bunt's $6 position at its next wake, and a $3.00 position, 30% of its stake, filled.)"""
         target = self.seat_stake(agent)
-        return limits_for(max(staked, target) if staked > 0 else target, agent.venue)
+        if staked <= 0:
+            return limits_for(target, agent.venue)
+        book = self.house.book_of(agent)
+        held = book.equity(agent.id) if book is not None and agent.id in book.accounts else staked
+        return limits_for(min(max(staked, target), max(staked, held)), agent.venue)
 
     # ---------------------------------------------------- facts for the books
     def band_of(self, agent_id: str) -> str | None:
@@ -581,9 +992,13 @@ class Allocator:
         grant = self.grant()
         policy = (grant or {}).get("policy") or {}
         seated = sum(1 for a in self.house.registry.living() if a.venue == ev.venue and self.house.evaluator.rung(a.id) >= 2)
+        tier = (self.tier(agent) if band in ("bunt", "probe") else None) if agent is not None else None
         return {
             "allocator": "capital is the ladder (league/allocator.py): stakes follow evidence inside the grant's per-venue envelope",
-            "band_to": band, "stake_usd": str(stake), "max_position_usd": str(position), "max_order_usd": str(order),
+            "band_to": tier or band, "stake_usd": str(stake), "max_position_usd": str(position), "max_order_usd": str(order),
+            # P1 (Sept 24, 2026): a probe is judged as a probe -- pocket change for an unproven family's
+            # mechanism -- and a bunt as a proven family's member, on the family's pooled record.
+            "tier": tier, "family": self.family_summary(agent) if agent is not None else None,
             "venue": ev.venue, "venue_capital_usd": str(self.capital(ev.venue)), "venue_headroom_usd": str(self.headroom(ev.venue)),
             "venue_at_risk_usd": str(self.at_risk(ev.venue)), "seated_on_real_money_at_venue": seated,
             "fits": bool(self.headroom(ev.venue) >= stake),
@@ -604,6 +1019,7 @@ class Allocator:
         p = _params()
         summary: dict[str, Any] = {"moves": [], "sized": [], "deaths": [], "fees": 0}
         with house._lifecycle_lock:
+            self._begin_pass()
             self._pay_fees(p, summary)
             throttle = self._throttle()
             living = [a for a in house.registry.living()]
@@ -616,6 +1032,9 @@ class Allocator:
                     evid[agent.id] = evidence(house, agent, rungs[agent.id])
                 except Exception as exc:  # noqa: BLE001 - one agent's unreadable record must not stop the pass
                     house.alert("warning", f"allocator: {agent.id}'s evidence could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+                    continue
+                # Only a proven family's agent swings (Sept 24, 2026); `family` never raises.
+                evid[agent.id].family_proven = bool(self.family(agent.family, agent.venue)["proven"])
             self._evidence = evid
             live_ok = {v: self._live_open(v) for v in REAL_BOOK}
             # 1. Deaths on paper wealth.
@@ -680,15 +1099,23 @@ class Allocator:
         guard = getattr(house, "campaigns", None)
         return not guard or guard.allows_live(2)
 
-    def _numbers(self, ev: Evidence, band_from: str, band_to: str, stake: Decimal | None, why: str) -> dict[str, Any]:
-        return {"via": "allocator", "band_from": band_from, "band_to": band_to,
-                "stake_usd": None if stake is None else str(stake), "evidence": ev.row(), "reason_detail": why}
+    def _numbers(self, ev: Evidence, band_from: str, band_to: str, stake: Decimal | None, why: str,
+                 agent: Any = None) -> dict[str, Any]:
+        """A band move's verdict numbers; a move to a probe or a bunt carries the family record that
+        decided which (P1, Sept 24, 2026)."""
+        out = {"via": "allocator", "band_from": band_from, "band_to": band_to,
+               "stake_usd": None if stake is None else str(stake), "evidence": ev.row(), "reason_detail": why}
+        if agent is not None and band_to in ("probe", "bunt"):
+            out["family"] = self.family_summary(agent)
+        return out
 
     def _move_down(self, agent: Any, ev: Evidence, band: str, why: str, summary: dict[str, Any]) -> None:
         house = self.house
         old = house.book_of(agent)
         band_from = self._band_now(agent, ev)
         target = RUNG_OF[band]
+        if band == "bunt":
+            band = self.tier(agent)  # a swing lands on rung 2 as a probe or a bunt, by its family (Sept 24, 2026)
         numbers = self._numbers(ev, band_from, band, None, why)
         while house.evaluator.rung(agent.id) > max(target, 1):
             house.evaluator.demote(agent.id, why, numbers)
@@ -699,7 +1126,11 @@ class Allocator:
         summary["moves"].append({"agent": agent.id, "from": band_from, "to": band, "why": why})
 
     def _band_now(self, agent: Any, ev: Evidence) -> str:
-        return self._board["agents"].get(agent.id, {}).get("band") or band_of_rung(ev.rung)
+        if ev.rung == 2:
+            return self.tier(agent)  # "probe" or "bunt" (Sept 24, 2026), as the board says it
+        band = self._board["agents"].get(agent.id, {}).get("band")
+        # The last board's band while it is still the agent's rung's (a star is a swing); else the rung's.
+        return band if band is not None and RUNG_OF.get(band) == ev.rung else band_of_rung(ev.rung)
 
     def _bunt(self, agent: Any, ev: Evidence, why: str, p: Mapping[str, Any], summary: dict[str, Any], displaced_at: set[str]) -> None:
         house = self.house
@@ -737,12 +1168,14 @@ class Allocator:
             house._start_audit(agent, verdict, generation)
             return
         if self.headroom(venue) < stake:
-            weakest = self._weakest_bunt(venue, ev.e, displaced_at)
+            newcomer = self.tier(agent)
+            weakest = self._weakest_bunt(venue, ev.e, displaced_at, tier=newcomer)
             if weakest is None:
                 # The reason stays the same while the wait does (a `progress` row is written only when
                 # it changes); the moving numbers ride along as detail.
                 house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "envelope",
-                                        f"the {venue} envelope cannot seat another ${stake} bunt and no weaker flat bunt can be displaced",
+                                        f"the {venue} envelope cannot seat another ${stake} {newcomer} and no weaker flat "
+                                        + ("probe" if newcomer == "probe" else "bunt") + " can be displaced",
                                         capital_usd=str(self.capital(venue)), headroom_usd=str(self.headroom(venue)))
                 return
             other, other_ev = weakest
@@ -755,21 +1188,27 @@ class Allocator:
             house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "venue_cash",
                                     f"the {venue} account's free cash cannot take another ${stake} stake now")
             return
-        numbers = self._numbers(ev, "paper", "bunt", stake, why)
-        house.evaluator.promote(agent.id, 2, f"bunt: {why}", numbers)
+        tier = self.tier(agent)
+        numbers = self._numbers(ev, "paper", tier, stake, why, agent)
+        house.evaluator.promote(agent.id, 2, f"{tier}: {why}; {self._family_note(agent)}", numbers)
         if source is not None:
             house._move_books(agent, source)  # winds the paper account down; seat() lends the bunt stake
         real = house.books.get(REAL_BOOK[venue])
         if real is None or not real.account(agent.id).funded:
             # The stake did not land: straight back, in the same pass, rather than hold an unfunded seat.
-            house.evaluator.demote(agent.id, "the bunt's stake could not be lent; back to paper", self._numbers(ev, "bunt", "paper", None, why))
+            house.evaluator.demote(agent.id, f"the {tier}'s stake could not be lent; back to paper", self._numbers(ev, tier, "paper", None, why))
             house.seat(agent)
-            house.alert("warning", f"allocator: {agent.id}'s ${stake} bunt could not be staked on {venue}; it stays on paper")
+            house.alert("warning", f"allocator: {agent.id}'s ${stake} {tier} could not be staked on {venue}; it stays on paper")
             return
-        house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", "the allocator seated it as a bunt")
-        summary["moves"].append({"agent": agent.id, "from": "paper", "to": "bunt", "why": why, "stake_usd": str(stake)})
+        house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", f"the allocator seated it as a {tier}")
+        summary["moves"].append({"agent": agent.id, "from": "paper", "to": tier, "why": why, "stake_usd": str(stake)})
 
-    def _weakest_bunt(self, venue: str, e: float, displaced_at: set[str]) -> tuple[Any, Evidence] | None:
+    def _weakest_bunt(self, venue: str, e: float, displaced_at: set[str], *, tier: str = "bunt") -> tuple[Any, Evidence] | None:
+        """The flat rung-2 agent with the weakest E under `e` that a newcomer of `tier` may displace, or None.
+        A probe displaces only a probe: an agent's own E on a few settlements is the statistic the family's
+        proof replaced (the plan's gap 2), so it never sends a proven family's bunt back to practice to seat
+        an unproven mechanism's pocket change (review of #224, Sept 24, 2026). A proven family's newcomer
+        displaces either."""
         if venue in displaced_at:
             return None  # one displacement a venue a pass: no churn
         house = self.house
@@ -781,6 +1220,8 @@ class Allocator:
                 continue
             if ev.e >= e or book is None:
                 continue
+            if tier == "probe" and self.tier(agent) != "probe":
+                continue  # capital follows proof: an unproven newcomer never displaces a proven family's bunt
             account = book.account(agent_id)
             if account.holdings or book.open_orders(agent_id):
                 continue  # displacing never forces a sale
@@ -816,9 +1257,10 @@ class Allocator:
             house._start_audit(agent, verdict, generation)
             return
         stake = self.target_stake(agent, "swing", ev)
-        house.evaluator.promote(agent.id, 3, f"swing: {why}", self._numbers(ev, "bunt", "swing", stake, why))
+        band_from = self._band_now(agent, ev)  # "probe" or "bunt": the tape says what the board said (review of #224)
+        house.evaluator.promote(agent.id, 3, f"swing: {why}", self._numbers(ev, band_from, "swing", stake, why))
         house._promotion_status(agent, verdict, "promoted", "the allocator moved it to the swing band")
-        summary["moves"].append({"agent": agent.id, "from": "bunt", "to": "swing", "why": why, "stake_usd": str(stake)})
+        summary["moves"].append({"agent": agent.id, "from": band_from, "to": "swing", "why": why, "stake_usd": str(stake)})
 
     def _size(self, agent: Any, ev: Evidence, band: str, p: Mapping[str, Any]) -> dict[str, Any] | None:
         """Move a real account's stake toward its target: up to the envelope's headroom, down by free
@@ -871,9 +1313,10 @@ class Allocator:
             house.alert("warning", f"allocator: {agent.id}'s stake could not move by {delta} ({exc})")
             return None
         house.seat(agent)  # the limits follow the stake
-        row = {"band": band, "stake_usd": str(target), "moved_usd": str(delta), "equity_usd": str(equity.quantize(CENT)),
+        named = self.tier(agent) if band == "bunt" else band  # a rung-2 stake is a probe's or a bunt's (Sept 24, 2026)
+        row = {"band": named, "stake_usd": str(target), "moved_usd": str(delta), "equity_usd": str(equity.quantize(CENT)),
                "via": "allocator", "evidence": ev.row(),
-               "reason": f"{band} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")}
+               "reason": f"{named} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")}
         house.ledger.append("eval.verdict", {"decision": "size", "rung": house.evaluator.rung(agent.id), "book": book.name, **row}, agent=agent.id)
         return {"agent": agent.id, **row}
 
@@ -927,8 +1370,14 @@ class Allocator:
                     target = str(self.target_stake(agent, "swing" if rung >= 3 else "bunt", ev))
             if rung >= 3 and ev is not None and ev.w_real >= p["star_min_w_real"]:
                 swings.append((ev.real_pnl, agent.id))
+            record = self.family(agent.family, agent.venue)
+            if rung == 2:
+                band = self.tier(agent)  # P1 (Sept 24, 2026): "probe" or "bunt", by the family's proof
+            # `league/publish.py` sends the site only the fields it knows: the family fields are for the
+            # watch and the scoreboard until the site learns them (W).
             agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target, "evidence": ev.row() if ev else None,
-                                "venue": agent.venue, "last_move": None}
+                                "venue": agent.venue, "last_move": None, "family": agent.family,
+                                "family_state": record["state"], "family_bound": record["bound"], "family_n": record["n"]}
         for _, agent_id in sorted(swings, reverse=True)[:p["stars"]]:
             agents[agent_id]["band"] = "star"
         moves = self._moves()
@@ -999,6 +1448,9 @@ def _verdict(agent_id: str, rung: int, why: str, ev: Evidence, allocator: "Alloc
 
     book = PAPER_BOOK[ev.venue] if rung <= 1 else REAL_BOOK[ev.venue]
     band = "bunt" if rung <= 1 else "swing"
+    if band == "bunt" and allocator is not None:
+        agent = allocator.house.registry.get(agent_id)
+        band = allocator.tier(agent) if agent is not None else band  # a probe or a bunt (Sept 24, 2026)
     numbers: dict[str, Any] = {"via": "allocator", "book": book, "evidence": ev.row(), "E": ev.e, "band_to": band}
     if allocator is not None:
         numbers["allocation_context"] = allocator.context(ev, band)
