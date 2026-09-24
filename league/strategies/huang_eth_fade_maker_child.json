@@ -1,0 +1,8 @@
+{
+  "family": "crypto-15m-lab-335592",
+  "name": "huang_eth_fade_maker_child",
+  "repair": {
+    "key": "order_refusal:kalshi:a real entry on crypto-#m-lab-# must be a post-only limit until the family's pooled taker record is "
+  },
+  "why": "Corrected child of huang-l5aa23e. Its current ETH prior-window fade entry buys at the ask without post_only, causing repeated real-entry liquidity refusals while the family's pooled taker bound is negative. Preserve its specialty, parameters, signal, sizing and cancellation behavior, but bid at the selected leg's bid with post_only on every book. Born at rung 0 with no record; qualification and the absence of recurring liquidity refusals must be established independently."
+}
