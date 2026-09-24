@@ -346,6 +346,20 @@ recorded for the next open; live verification uses the markets that trade around
   anytime-valid bound (about 3x wider at n = 30: real edges would need months) and leaving it (a
   money rule that swings on noise four times in ten repeats gap 2 at larger stakes).
 
+- 07:50Z — **B-seats (#245) review: not safe as built; four majors and four minors fixed** on
+  `b-seats/review` (#254). L1 would have retired meriwether-h2d625d, the floor's best real record
+  (sports-central-run-under, the one proven family), on its first pass: the "defect" its child fixed
+  was in a moneyline-favourites file the parent never ran (the plan's own L1 example misread the same
+  pair). Now L1 counts only an account of the parent's CURRENT program, every route needs a claimed
+  defect, and a liquidity or fee fix must be a program whose buys are post-only (read statically: 145
+  of 145 post-only programs in the snapshot recognised); a move TO market orders no longer reads as a
+  maker fix. Also: dust was valued at a $0.01 stub bid (a $6 LINK holding booked as dust); a trader the
+  lab can never score (options) kept its seat forever; a stopped wind-down never retried; an admission
+  that failed to seat its child cancelled the displaced author's retained candidate; a test that
+  #242's key would break. On the T0 snapshot the fixed L1 supersedes no parent, so row 5's "real-money
+  parents with a corrected child" starts at 0. Decided: L1 also skips a parent whose family's taker
+  record is proven (X0 allows its taker entries); the reviewer is adding that, `seats_holding_none`
+  in `floor_watch.py`, and checks of two more suspects.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
