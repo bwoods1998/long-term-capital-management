@@ -509,7 +509,13 @@ watch.
     `family_forward`; on Alpaca its working bids are cancelled first (the demotion path's own first step),
     and while it still holds a position the demotion would sell, or a buy is still in question at the venue,
     it keeps its seat (its own exits go on, nothing is sold for it, it is lent nothing more), the pass summary
-    lists it in `probes_waiting_flat`, and one info alert says why ("now: holding", "reserved"). A gate that
+    lists it in `probes_waiting_flat`, and one info alert says why ("now: holding", "reserved"). While it
+    waits, the House holds its entries the way an agent holds its own (`House._hold_draining_probes`: an
+    `agent.strategy` `pause_entries` row under session `house:drain`, its resting buys cancelled, every sell
+    goes on; house.json `drain_holds`), and releases the hold with a `resume_entries` row once the pass no
+    longer lists it; a research request to resume is refused meanwhile. An agent that paused itself is left
+    as it is. Sept 24, 2026: krasker-14, an $80 options probe on options-pullback (19 blocks, -0.383), bought a
+    second real contract at 18:52:30Z while it waited, before the hold existed. A gate that
     cannot be read this pass (a failed fold or forward read) holds every probe promotion at
     `family_unreadable` and demotes nobody.
 - **Ledger rows from the Sept 23 revision:**

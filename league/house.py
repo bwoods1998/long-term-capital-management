@@ -2127,6 +2127,74 @@ class House:
                                        why="its own pause_entries: its entries are held until it resumes them").status)
         return out
 
+    #: The House's own entry controls (the R5 drain hold) are recorded under this research session.
+    DRAIN_SESSION = "house:drain"
+
+    def _hold_draining_probes(self, moved: Mapping[str, Any]) -> None:
+        """R5's drain, completed (Sept 24, 2026). A probe on a losing family goes back to practice once it is flat
+        (`allocator.family_probe`: an Alpaca probe holding a coin, a stock or an option is never sold for it), and until
+        then it was lent nothing more -- but it could still buy: krasker-14, an $80 options probe on options-pullback (19
+        active blocks, -0.383), bought a second real contract ($15) at 18:52:30Z, nine minutes into Deploy D, while it
+        waited to be flat. A probe the allocator reports waiting (`probes_waiting_flat`, every pass) now has its entries
+        held the way an agent holds its own (X1 `pause_entries`: buys held at the wake, its resting buys cancelled, every
+        sell goes on) by a House row under `DRAIN_SESSION`, so it drains; the hold is released by a House row once the
+        allocator no longer reports it (it went back to practice, died, or its family's record turned). An agent that had
+        paused itself is left as it is, and a research request to resume is refused while the hold stands
+        (`_control_refusal`). Kept in house.json `drain_holds` (agent -> since) across restarts."""
+        waiting = {str(a) for a in (moved.get("probes_waiting_flat") or ())}
+        with self._state_lock:
+            holds = dict(self._state.get("drain_holds") or {})
+        changed = False
+        for agent_id in sorted(waiting):
+            agent = self.registry.get(agent_id)
+            if agent is None or not agent.alive:
+                continue
+            paused = self.registry.entries_paused(agent_id)
+            if paused and agent_id not in holds:
+                continue  # its own pause: the drain needs no row of the House's
+            if paused:
+                continue  # held already
+            family = agent.family
+            self._house_control(agent, "pause_entries",
+                                f"the House holds this probe's entries while it goes back to practice: its family {family}'s pooled "
+                                "forward record is losing (allocator.family_probe), so it only exits until it is flat")
+            holds[agent_id] = now_iso(self.clock)
+            changed = True
+            book = self.book_of(agent)
+            if book is not None:
+                try:
+                    self._cancel_paused_entries(agent, book)
+                except Exception as exc:  # noqa: BLE001 - the hold stands; its next wake cancels again
+                    self.alert("warning", f"{agent_id}: its resting buys could not be cancelled at the drain hold "
+                                          f"({type(exc).__name__}: {str(exc)[:160]}); its next wake asks again")
+        for agent_id in sorted(set(holds) - waiting):
+            agent = self.registry.get(agent_id)
+            if agent is not None and agent.alive and self.registry.entries_paused(agent_id):
+                self._house_control(agent, "resume_entries", "the House releases its drain hold: the allocator no longer holds "
+                                                             "this agent as a probe waiting to go back to practice")
+            holds.pop(agent_id, None)
+            changed = True
+        if changed:
+            with self._state_lock:
+                self._state["drain_holds"] = holds
+
+    def _house_control(self, agent: Agent, control: str, note: str) -> None:
+        """Record an entry control (X1) the House makes itself: the row an agent's own `pause_entries` or `resume_entries`
+        writes, under `DRAIN_SESSION`, so every reader of `Registry.entries_paused` treats it alike."""
+        paused = self.registry.entries_paused(agent.id)
+        prior = self.ledger.last("agent.strategy", agent=agent.id)
+        carried = str((prior.payload if prior is not None else {}).get("reason") or "")
+        row: dict[str, Any] = {"code_sha256": agent.code_sha256, "params": dict(agent.params), "needs": dict(agent.needs),
+                               "wake_minutes": agent.wake_minutes, "_code": agent.code, "control": control, "note": note[:600],
+                               "session": self.DRAIN_SESSION, **({"reason": carried} if carried else {})}
+        if control == "pause_entries":
+            row.update(entries="paused", was={"entries": "open"})
+        else:
+            row.update(entries="open", was={"entries": "paused", "since": (paused or {}).get("since")})
+        stamp = now_iso(self.clock)
+        self.ledger.append("agent.strategy", row, agent=agent.id, id=f"control:{self.DRAIN_SESSION}:{agent.id}:{control}:{stamp}")
+        self.registry.refresh()
+
     def _submit_wakes(self, book_name: str, outcomes: Sequence[Mapping[str, Any]]) -> list[Any]:
         """Validate again at the batched order boundary: a wake may have waited for other boxes."""
         with self._lifecycle_lock:
@@ -7059,6 +7127,12 @@ class House:
         trade PARAMS the auditor never saw, and nothing audits a seated swing again (review of #249:
         a swing raised its notional 30 -> 37 in place and kept the band). Called under the lifecycle
         lock, as audits are started under it."""
+        if control == "resume_entries":
+            with self._state_lock:
+                held = (self._state.get("drain_holds") or {}).get(agent.id)
+            if held:
+                return (f"the House holds your entries since {held}: your family's pooled forward record is losing, so a probe on it only "
+                        "exits until it is flat and goes back to practice (allocator.family_probe); the hold ends then")
         if control != "edit_params":
             return ""
         with self._state_lock:
@@ -7928,6 +8002,7 @@ class House:
             try:
                 moved = self.allocator.rebalance()
                 summary["allocator"] = {k: len(v) if isinstance(v, list) else v for k, v in moved.items()}
+                self._hold_draining_probes(moved)
             except Exception as exc:  # noqa: BLE001 - a pass that fails runs again at the next mark
                 self.alert("error", f"the allocator's pass failed ({type(exc).__name__}: {str(exc)[:200]})")
         lap("allocator")
