@@ -55,6 +55,10 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
   `max_share_of_venue` of it: FAMILY caps, shared by its members, because members of one family
   bid the same markets (mullins-2 and mullins-6 both held KXRAIN-26SEP22-SATX on real money): two
   members each at full Kelly on the family's bound are twice Kelly on one mechanism.
+- **The probe gate** (`probe_rule`, `losing`, `gaining`; R5, Sept 24, 2026): no probe on a family whose pooled forward
+  record (the House's `family_forward`: active blocks and summed log growth, every member ever born) is at or below zero
+  after `losing_min_blocks` active blocks, and none from a family one of whose probes went back to practice until its
+  record since then is positive over as many (`Allocator.probe_gate`).
 
 A money judge: `league/ci.py` forbids Merton's pull requests to touch it.
 """
@@ -290,6 +294,19 @@ def swing_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] 
             # Full Kelly on the lower bound, as the constitution's scaled rung (`rungs.3.kelly_fraction`).
             "kelly_fraction": float((c.get("rungs") or {}).get("3", {}).get("kelly_fraction", 1.0)),
             "max_share_of_venue": float(allocator.get("max_share_of_venue", 0.6))}
+
+
+def probe_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """`allocator.family_probe` (R5 of the close-the-gaps run, Sept 24, 2026), or None where the constitution has none: a
+    probe is then seated on any family's record. `losing_min_blocks` is the losing line's count of active blocks (and the
+    count a family's record since a probe's demotion must be positive over); `hold` is whether a probe demoted from real
+    money holds its family (`reseat: "gain_since_demotion"`)."""
+    allocator = (constitution or CONSTITUTION).get("allocator") or {}
+    rule = allocator.get("family_probe")
+    if not isinstance(rule, Mapping):
+        return None
+    return {"losing_min_blocks": int(rule.get("losing_min_blocks", 6)), "reseat": str(rule.get("reseat") or ""),
+            "hold": str(rule.get("reseat") or "") == "gain_since_demotion"}
 
 
 def position_share(venue: str, constitution: Mapping[str, Any] | None = None) -> float:
@@ -916,6 +933,12 @@ def losing(blocks: int, growth: float, minimum: int) -> bool:
     `minimum` active blocks. A record that nets to zero is not a loss (six blocks of +0.01 and -0.01 sum to
     -3.5e-18 in floating point)."""
     return blocks >= minimum and growth <= -1e-9
+
+
+def gaining(blocks: int, growth: float, minimum: int) -> bool:
+    """The mirror of `losing`: a pooled forward record POSITIVE over at least `minimum` active blocks, the turn a family
+    held by a probe's demotion waits for (`allocator.family_probe`). A record that nets to zero has not turned."""
+    return blocks >= minimum and growth >= 1e-9
 
 
 def score(record: Mapping[str, Any], state: str) -> int:
