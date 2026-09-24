@@ -1,0 +1,9 @@
+{
+  "family": "crypto-15m-doge-flat-spot-no",
+  "name": "huang_passive_continuation_child",
+  "repair": {
+    "key": "strategy_defect:huang-h51fdd3-5:44d8045ad374",
+    "parent": "huang-h51fdd3-5"
+  },
+  "why": "Corrected child of huang-h51fdd3-5. Retains BTC/SOL 15-minute probability-continuation signal qualification, hourly horizon, frozen parameters and risk budget, but replaces marketable entry limits with same-leg passive post-only bids after a through-ask refusal. Respects the real-entry price floor by abstaining, not raising bids. Starts at rung 0 and must qualify independently; sparse activity is not treated as permission to weaken the signal or risk controls."
+}
