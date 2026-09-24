@@ -777,7 +777,7 @@ The `league/` modules:
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
 | `seeds/` | The fourteen founding programs. |
 | `pacer.py` | The legacy fourteen-day expedition pacer, kept for compatibility and fixtures; production is paced by the funded campaign (`campaigns.py`). |
-| `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
+| `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. A failed try waits 30 minutes, doubling with each failure in a row up to six hours (Sept 24, 2026: Sail's checkpoint service answered 503 and the House had tried at every tick); the House's error alert carries `began_at`, the first failure of the run, so the watchdog inherits an outage that began before a promotion. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season; the two open desks (`open: true`) and `match`/`spanning`, which seat a program on one desk or, when it spans desks, on its venue's open desk. |
 | `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop, which since Sept 23, 2026 never waits on a box that background work holds and builds the standings table once. |

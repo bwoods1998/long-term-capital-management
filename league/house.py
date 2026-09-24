@@ -3926,8 +3926,15 @@ class House:
 
     def _run_backup(self) -> None:
         row = self.backup.run()
+        failed = self.backup.failures_in_a_row() if not row.get("ok") else []
         if not row.get("ok"):
-            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}). The ledger lives on one disk until one succeeds.")
+            # `began_at` is the first failure of the run (Sept 24, 2026): the watchdog inherits an error whose condition
+            # began before a promotion, so a Sail outage that started earlier does not roll back the release under watch.
+            began = now_iso(lambda: float((failed[0] if failed else row).get("at_epoch") or self.clock()))
+            wait = int(self.backup.retry_after(max(1, len(failed))) // 60)
+            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}); {max(1, len(failed))} "
+                                f"tr{'y' if len(failed) <= 1 else 'ies'} in a row since {began}, the next in {wait} minutes. The ledger "
+                                "lives on one disk until one succeeds.", began_at=began, failures=max(1, len(failed)))
 
     # -------------------------------------------------------------- expedition
     def _note_stopped(self, reason: str) -> None:
