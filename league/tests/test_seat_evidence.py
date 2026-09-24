@@ -473,12 +473,19 @@ class CorrectedChildren(EvidenceCase):
         self.assertEqual(self.house.evaluator.rung(child.id), 1, "the allocator seats the child on its own evidence")
 
     def test_without_the_constitution_key_nothing_is_superseded(self):
+        """Off and absent alike, whatever the live constitution says (B-families' #242 turns it on for Deploy B:
+        the review of #245 found this test asserted the key's absence from the constitution itself)."""
         parent = self.parent()
         self.child(parent, TAKER_FIX)
-        self.assertNotIn("corrected_child_supersedes", {k for k, v in CONSTITUTION["allocator"].items() if v})
-        self.assertEqual(self.house._supersede_by_research(), 0)
+        with patch.dict(CONSTITUTION["allocator"], {"corrected_child_supersedes": False}):
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        with patch.dict(CONSTITUTION["allocator"], {}):
+            CONSTITUTION["allocator"].pop("corrected_child_supersedes", None)
+            self.assertEqual(self.house._supersede_by_research(), 0)
         self.assertTrue(self.house.registry.get(parent.id).alive)
         self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 1, "and on, the same pair is superseded")
 
     def test_a_maker_parent_is_not_superseded_by_a_child_that_mentions_post_only(self):
         """mullins-2, the floor's best real record, rests maker bids; mullins-14's reason says "post-only"."""
