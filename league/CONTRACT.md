@@ -667,6 +667,24 @@ the line it grew from). Only then is it born, on paper, with `founder` `lab:<lin
 grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
+**What graduates** (since Sept 24, 2026). Half of each batch is kept for the programs someone wrote --
+your `lab_submit`, the cheap model's and the frontier model's -- wherever they wait, and half of the
+lab's turns build the tape where most of them wait; the rest of its turns and of each batch go to the
+queue's oldest programs and to the largest groups of parameter mutants. A program graduates only:
+- with a change to its code beyond `PARAMS` relative to every living program of its desk (its style,
+  its parameter bounds, its wake cadence and its market window in `NEEDS` count as parameters), or
+  with a forward score above the desk's living median (above zero while no resident of the desk has
+  one): a nudge of a program the desk already runs has to beat the desk on data it has not seen;
+- never while its own forward window loses, whatever its search fitness: the search tape admits,
+  data that came after the code was frozen ranks;
+- never onto a desk whose members were offered markets for 48 hours and wrote no order, unless a
+  feed the desk asked for (a tool request answered, a recorded feed its programs declare) arrived in
+  that time.
+A program held back is not refused: it graduates when the reason goes. The lab breeds from a
+program by its own forward window as well as its lineage's, and more from lineages whose family's
+pooled record is proven; a family at its measured capacity (the family ledger's estimate: its markets
+are full at the size it trades) is not searched further.
+
 ## Your seat
 
 The league has a fixed number of seats, and a desk has its own. A seat is yours while you are on
