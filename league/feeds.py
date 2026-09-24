@@ -1203,6 +1203,13 @@ class FeedRecorder:
         with self._lock:
             return bool((self._load_stats().get((feed, key)) or {}).get("last_error"))
 
+    def _failed_in_a_row(self, feed: str, key: str, count: int) -> bool:
+        """Did the key's last `count` polls (a history feed's backfill pages among them) all fail?"""
+        with self._lock:
+            rows = self.db.execute("SELECT ok FROM polls WHERE feed = ? AND key = ? ORDER BY finished DESC LIMIT ?",
+                                   (feed, key, int(count))).fetchall()
+        return len(rows) >= int(count) and not any(ok for (ok,) in rows)
+
     def waiting_for(self, feed: str) -> str | None:
         """Why a keyed recorder (`Source.env`: The Odds API's, EIA's) polls nothing yet -- the owner
         has not placed its key in the House's environment, or its host is not on the allowlist the
@@ -1703,12 +1710,17 @@ class FeedRecorder:
         for feed, key, error in out.get("failed") or []:
             if NOT_LISTED in str(error) or BLOCKED in str(error):
                 continue  # a key the source does not list, or a site that refuses the House: said in health, not hourly
+            after = RECORDERS[feed].warn_after if feed in RECORDERS else 1
+            if after > 1 and not self._failed_in_a_row(feed, key, after):
+                continue  # read in full at its next poll (`Source.warn_after`): health's `failing` says it meanwhile
             failed.setdefault(feed, []).append((key, error))
         for feed, rows in failed.items():
             polled = len(self.keys(feed))
             by_key = dict(rows)  # a key whose live poll and backfill page both failed is one key
-            sample = "; ".join(f"{key}: {error[:120]}" for key, error in list(by_key.items())[:3])
-            self._warn(feed, f"feeds: {len(by_key)} of {polled} {feed} polls failed ({sample})")
+            sample = "; ".join(f"{key}: {_brief(error)[:120]}" for key, error in list(by_key.items())[:3])
+            after = RECORDERS[feed].warn_after if feed in RECORDERS else 1
+            self._warn(feed, f"feeds: {len(by_key)} of {polled} {feed} polls failed{f' {after} times in a row' if after > 1 else ''} "
+                             f"({sample})")
         with self._lock:
             venues = dict(self._venues)
         silent = [venue for venue, answered in venues.items() if answered == 0]
@@ -1839,6 +1851,13 @@ def _unlisted(error: Any) -> bool:
     return UNLISTED in text or NOT_LISTED in text or BLOCKED in text
 
 
+def _brief(error: Any) -> str:
+    """An error as a warning quotes it: each URL without its query. Sept 24, 2026: EDGAR's query took
+    the whole 120 characters of "TransportError: GET https://www.sec.gov/cgi-bin/browse-edgar?action=
+    getcompany&CIK=NFLX&type=8-K&..." and the reason (a read timeout) never reached the warning."""
+    return re.sub(r"(https?://[^\s?]+)\?\S*", r"\1", str(error or ""))
+
+
 def _cadence(feed: str) -> tuple[float, float]:
     """(every, offset) of a history feed's passes (`_aligned`)."""
     if feed in RECORDERS:
@@ -1937,6 +1956,10 @@ class Source:
     #: The most keys the House polls (what one strategy may DECLARE is `MAX_KEYS`).
     max_keys = 64
     timeout = TIMEOUT
+    #: How many of a key's polls in a row must fail before the hourly warning names it (`_after_pass`);
+    #: health's `failing` names it at once either way. One, unless the source says a failed poll is
+    #: read in full at the next one.
+    warn_after = 1
     #: Seconds between a history source's keys in a live pass (OKX's statistics allow five requests
     #: in two seconds).
     pause = 0.0
@@ -2307,7 +2330,20 @@ class EarningsHistory(Source):
     lookback_days = 370
     backfill_days = 370
     max_keys = 32
-    timeout = 30.0
+    #: EDGAR's browse feed is slow, not down. Measured Sept 24, 2026 on the House box: of 995 polls from
+    #: 08:33Z the median took 6.4 s and 44% over 10 s (from 10:00 to 12:59Z nearly every one, at 10.2 s),
+    #: 18 answered after 20-29 s, and 31 (3.1%) hit the old 30 s read timeout ("The read operation timed
+    #: out"). Ten reads timed from the box at 15:4xZ took 0.3-26.4 s (one an HTTP 503 after 12.6 s), the
+    #: wait all before the first byte: the connection opened at once. Not SEC's ten-a-second ceiling (the
+    #: recorder asks about once every 25 s) and not the ticker lookup (a numeric CIK was answered no
+    #: faster). 45 s reads the slow tail and still gives the one feeds slot back inside a live board's minute.
+    timeout = 45.0
+    #: A stock is named in the hourly warning only after three failed polls in a row: a failed pass is
+    #: asked again five minutes later (`RETRY_SECONDS`) and a live poll reads back to a day before the
+    #: last good one, so one slow answer loses no filing. Sept 24, 2026: every one of the 31 timed-out
+    #: stocks was read at its next poll (29 of 30 at once; NFLX twice in a row, the longest run), and
+    #: the warning had named them hourly ("3 of 24 earnings polls failed").
+    warn_after = 3
     example = "AAPL"
     note = ("A stock with no row has had no announcement in the searched span, or files its results another way (a foreign "
             "issuer's 6-K is not recorded); the next date is the earnings_date feed.")

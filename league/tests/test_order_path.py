@@ -211,6 +211,36 @@ class OrderPathInvariants(HouseCase):
         self.house._order_path_invariants()
         self.assertEqual(len(self.alerts("round-the-clock")), 3)  # woken within the half hour: nothing to say
 
+    def test_a_desk_whose_first_member_was_just_born_is_not_late(self):
+        """Sept 24, 2026: kalshi-open's first member ever was born at 14:12:14Z, and at 14:12:43Z the
+        desk was called unwoken "for 146 minutes": the clock had started at the House's own start
+        (11:46:38Z), when the desk had no one to wake."""
+        self.clock.advance(146 * 60)
+        coin = self.seated("coin")
+        self.house.registry.get(coin.id).specialty = "alpaca-crypto-alts"
+        self.clock.advance(29)
+        self.house._order_path_invariants()
+        self.assertEqual(self.alerts("round-the-clock"), [])
+        self.clock.advance(1801)
+        self.house._order_path_invariants()
+        (told,) = self.alerts("round-the-clock")
+        self.assertIn("alpaca-crypto-alts: no wake on a round-the-clock desk for 30 minutes", told)  # from its birth
+
+    def test_a_desk_of_half_hour_members_is_late_at_an_hour_not_at_its_next_wake(self):
+        """Sept 24, 2026: kalshi-attention's one member woke every 30-31 minutes, as scheduled, and the
+        desk was called unwoken twelve times that day, at 30 or 31 minutes each."""
+        coin = self.seated("coin")
+        member = self.house.registry.get(coin.id)
+        member.specialty, member.wake_minutes = "alpaca-crypto-alts", 30
+        self.house.wake(coin)
+        self.clock.advance(31 * 60)
+        self.house._order_path_invariants()
+        self.assertEqual(self.alerts("round-the-clock"), [])  # a tick past its schedule is not a stopped desk
+        self.clock.advance(30 * 60)
+        self.house._order_path_invariants()
+        (told,) = self.alerts("round-the-clock")
+        self.assertIn("alpaca-crypto-alts: no wake on a round-the-clock desk for 61 minutes", told)
+
 
 # ---------------------------------------------------------------- the venue's "no such order"
 class NeverArrived(BookCase):
