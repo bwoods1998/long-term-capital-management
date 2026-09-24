@@ -142,8 +142,11 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * `spent` is every call's cost or hold. `inflight` (Sept 24, 2026) is the part of it that is
      * still a hold: calls reserved and not yet settled, and calls cut off before they could settle
      * (a deploy or a crash mid-call), whose worst case stays in `spent` for good. `spent` falls
-     * whenever a call settles below its worst case; `spent - inflight`, what is settled, only
-     * rises. The House meters OpenAI with both (league/campaigns.py `observe_month`).
+     * whenever a call settles below its worst case; `spent - inflight`, what is settled, rises,
+     * except once: a hold the code before Sept 24, 2026 reserved was never counted in flight, so
+     * when it settles below its worst case the settled figure falls by the difference. The House
+     * meters OpenAI with both and keeps the highest settled figure (league/campaigns.py
+     * `observe_month`).
      */
     frontierMonth(at = now()) {
       const month = new Date(at).toISOString().slice(0, 7);

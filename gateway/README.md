@@ -257,7 +257,10 @@ House absorbs its own hold into this month six hours later (below).
 - `inflight_usd`: the holds of calls reserved and not yet settled, to the microdollar. A call cut
   off before it could settle (a deploy or a crash mid-call) stays here, and in `spent_usd`, for the
   rest of the month. A hold reserved before Sept 24, 2026 was never counted here.
-- `settled_usd`: `spent_usd` less `inflight_usd`, to the microdollar. It only rises.
+- `settled_usd`: `spent_usd` less `inflight_usd`, to the microdollar. It rises, except once at
+  this deploy: a call the code before it reserved was never counted in flight, so when that call
+  settles below its worst case, `settled_usd` falls by the difference. The House keeps the
+  highest reading, so a fall only delays its check.
 - `previous`: the month that ended, with its `spent_usd` and `settled_usd` as they stood when it
   ended, or null. The next month's first call keeps it (`FRONTIER_PREVIOUS_KEY`). A call still in
   flight at midnight is refused its settle (its month has ended), so the old month keeps its whole
