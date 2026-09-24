@@ -426,7 +426,7 @@ recorded for the next open; live verification uses the markets that trade around
   negative pooled record) and huang-l55a341 (1 of 1). L1 as reviewed applies to practice parents too
   (the plan's text names real-money ones); both supersessions are within its rule. The board carries
   `capacity` per agent. The final head's full local suites: league 2,896 tests, ltcm 1,853, 0 failures.
-- 08:50Z — **Cleanup after Deploy B:** 11 merged worktrees and 12 merged branches (local and origin)
+- 08:43Z — **Cleanup after Deploy B:** 11 merged worktrees and 12 merged branches (local and origin)
   removed, the merged `ltcm-hosts` worktree and `ops/feed-hosts` branch too; 50 merged local branches
   of earlier runs deleted; two unmerged branches that existed only locally
   (`astra/teacher/first-night-of-replays-ec3f3563`, `night/tick-never-blocks-e1-local`) pushed to
