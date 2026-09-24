@@ -1,5 +1,5 @@
 {
-  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns.",
+  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns. Sept 24, 2026 (the close-the-gaps run, R2 and R3): economy.proven_family_members (4, bounds 1-8) is how many living members a proven family's program runs on before the House stops breeding it first (`House._proven_births`: House mutations of the program that proved the family, first in the seat queue on its desk; at 15:06Z the one proven family, sports-central-run-under, ran its program on one member and needed 15 real independent settlements for its swing, with 5); economy.population_runway_days (1.5, bounds 1.5-7) is the Sail runway (days of the measured burn over the reserve) above which the population grows toward turbo.json max_population, and economy.max_population_short_runway (112, bounds 64-128) is where it is held otherwise (`House._population_rule`; 4.5 days at 15:06Z).",
   "economy": {
     "epoch_seconds": 21600,
     "daily_pool_usd": "0.50",
@@ -27,7 +27,10 @@
     "line_exhausted_trials": 15,
     "explore_every": 5,
     "losing_family_min_blocks": 6,
-    "seat_waiters_warning": 8
+    "seat_waiters_warning": 8,
+    "proven_family_members": 4,
+    "population_runway_days": 1.5,
+    "max_population_short_runway": 112
   },
   "bounds": {
     "daily_pool_usd": [
@@ -65,6 +68,18 @@
     "displace_trading_after_sessions": [
       1,
       10
+    ],
+    "proven_family_members": [
+      1,
+      8
+    ],
+    "population_runway_days": [
+      "1.5",
+      "7"
+    ],
+    "max_population_short_runway": [
+      64,
+      128
     ]
   },
   "audit": {
