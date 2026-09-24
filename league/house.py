@@ -27,6 +27,7 @@ import os
 import re
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
@@ -423,6 +424,24 @@ def _replay_rules_key() -> str:
     """The replay gate's rules, hashed: a replay verdict is only as current as the rules it was reached under."""
     return hashlib.sha256(json.dumps(CONSTITUTION["ladder"]["replay"], sort_keys=True).encode()).hexdigest()[:16]
 
+
+class _TickLaps:
+    """The seconds each step of one tick took, on the monotonic clock (`time.perf_counter`, well
+    under a microsecond a lap): `lap(step)` books the time since the previous lap to `step`, so every
+    moment of the tick belongs to exactly one step (health.json `tick_steps`, `House._tick_steps`)."""
+
+    __slots__ = ("began", "last", "seconds")
+
+    def __init__(self) -> None:
+        self.began = self.last = time.perf_counter()
+        self.seconds: dict[str, float] = {}
+
+    def lap(self, step: str) -> None:
+        now = time.perf_counter()
+        self.seconds[step] = self.seconds.get(step, 0.0) + (now - self.last)
+        self.last = now
+
+
 class House:
     def __init__(
         self,
@@ -570,6 +589,13 @@ class House:
                        "shards": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
+        #: The tick's own clock (health.json `tick_steps`, Sept 24, 2026): the laps of the tick in hand,
+        #: the last tick's, the ticks of the last hour (at, stamp, seconds a step) and each background
+        #: lane's last run (`_background`; its time is not the tick's).
+        self._laps: _TickLaps | None = None
+        self._tick_last: dict[str, Any] | None = None
+        self._tick_hour: deque[tuple[float, str, dict[str, float]]] = deque(maxlen=self.TICK_STEPS_KEPT)
+        self._lane_last: dict[str, dict[str, Any]] = {}
         self._standings_memo: dict[str, Any] | None = None  # one standings table a tick (`standings`)
         # What the tick put off because a box was busy (`_defer`): shown in health.json, told hourly.
         self._deferred: dict[str, dict[str, Any]] = {}
@@ -2763,9 +2789,10 @@ class House:
         if running is not None and running.is_alive():
             return False
 
-        lane = self._lanes["research" if key.startswith("research:") else "replay" if key.startswith("replay")
-                           else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:")
-                           else "shards" if key.startswith("shards:") else "ops"]
+        lane_name = ("research" if key.startswith("research:") else "replay" if key.startswith("replay")
+                     else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:")
+                     else "shards" if key.startswith("shards:") else "ops")
+        lane = self._lanes[lane_name]
         with self._state_lock:
             self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
@@ -2777,6 +2804,7 @@ class House:
                     return
                 queued_at = self._job_status[key]["queued_at"]
                 started_at = self.clock()
+                began = time.perf_counter()  # the lane's run for health.json `tick_steps.background`
                 with self._state_lock:
                     self._job_status[key]["started_at"] = started_at
                 job_id = f"{key}:{queued_at:.6f}"
@@ -2801,6 +2829,8 @@ class House:
                         pass  # a missing finish remains visible as interrupted work after restart
                     with self._state_lock:
                         self._job_status.pop(key, None)
+                        self._lane_last[lane_name] = {"key": key, "state": state, "seconds": round(time.perf_counter() - began, 3),
+                                                      "at": now_iso(self.clock)}
 
         thread = threading.Thread(target=job, name=f"league-slow:{key}"[:60], daemon=True)
         self._jobs[key] = thread
@@ -6336,18 +6366,62 @@ class House:
     def tick(self) -> dict[str, Any]:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
         is busy is retried on the next tick, and births wait for the probe box at most
-        `probe_wait_seconds` (`_births`). What it put off is in health.json's `deferred`."""
+        `probe_wait_seconds` (`_births`). What it put off is in health.json's `deferred`, and what
+        each of its steps took in `tick_steps`."""
         # One standings table a tick (Sept 23, 2026): displacement, the refill and the foundry each
         # ranked every living agent afresh, several ledger scans an agent each time, and a profile of the
         # production tick found about 80% of its main thread there (191 s ticks at 10:53Z).
         self._standings_memo = {"thread": threading.get_ident(), "living": None, "rows": None}
+        self._laps = _TickLaps()
         try:
             with self._box_patience():
                 return self._tick()
         finally:
             self._standings_memo = None
+            self._laps = None
+
+    #: health.json `tick_steps`: the ticks kept for `slowest_hour` (at most, whatever their age) and
+    #: how many of its steps it lists.
+    TICK_STEPS_KEPT = 240
+    TICK_STEPS_SLOWEST = 8
+
+    def _lap(self, step: str) -> None:
+        """The time since the tick's previous lap is `step`'s (`_TickLaps`); nothing outside a tick."""
+        laps = self._laps
+        if laps is not None:
+            laps.lap(step)
+
+    def _tick_steps(self, at: str) -> dict[str, Any]:
+        """health.json `tick_steps` (Sept 24, 2026). Written last in a tick's health, which ends the
+        tick's laps: `last` (the tick's `at`, `total_seconds` and each step's seconds, `health`, the
+        health block itself, included), `slowest_hour` (each step's slowest in the ticks of the last
+        hour on the House's clock, slowest first, with that tick's `at`), `ticks_in_hour`, and
+        `background` (each lane's last job: its key, state, seconds and when it ended; beside the tick,
+        never in its time). Measured on the box, Sept 24, 2026 08:40-08:50Z: ticks of 51-64 s landing
+        70-80 s apart, and nothing that said which step cost what."""
+        laps, self._laps = self._laps, None
+        now = self.clock()
+        if laps is not None:
+            laps.lap("health")
+            steps = {step: round(seconds, 3) for step, seconds in laps.seconds.items()}
+            self._tick_last = {"at": at, "total_seconds": round(laps.last - laps.began, 3), "steps": steps}
+            self._tick_hour.append((now, at, steps))
+        while self._tick_hour and now - self._tick_hour[0][0] > 3600:
+            self._tick_hour.popleft()
+        slowest: dict[str, tuple[float, str]] = {}
+        for _, stamp, steps in self._tick_hour:
+            for step, seconds in steps.items():
+                if seconds > slowest.get(step, (-1.0, ""))[0]:
+                    slowest[step] = (seconds, stamp)
+        with self._state_lock:
+            background = {lane: dict(row) for lane, row in sorted(self._lane_last.items())}
+        return {"last": self._tick_last, "ticks_in_hour": len(self._tick_hour),
+                "slowest_hour": [{"step": step, "seconds": seconds, "at": stamp} for step, (seconds, stamp)
+                                 in sorted(slowest.items(), key=lambda kv: (-kv[1][0], kv[0]))[:self.TICK_STEPS_SLOWEST]],
+                "background": background}
 
     def _tick(self) -> dict[str, Any]:
+        lap = self._lap
         if self._burst and not self.campaigns.running():
             self.game = deepcopy(self._base_game)
             self.economy.game, self.economy.rules = self.game, self.game['economy']
@@ -6359,6 +6433,7 @@ class House:
             self._burst = None
         summary: dict[str, Any] = {"at": now_iso(self.clock), "woke": [], "orders": 0, "deaths": [], "reconciled": {}}
         self._replay_rules_changed()
+        lap("replay_rules")
         if self.options_history is not None and self.settings.options_replay:
             today, hour = _new_york(self.clock)
             # Once a day after the session's bars are final; a failed run is tried again hourly.
@@ -6375,6 +6450,7 @@ class House:
                     and self._background("feeds:requests", self._fulfil_feed_requests)):
                 self._feed_requests_at = self.clock()
         living_before = {a.id for a in self.registry.living()}
+        lap("feeds")
         for name, book in self.books.items():
             try:
                 advance = getattr(book.broker, "advance", None)
@@ -6391,14 +6467,17 @@ class House:
                                 self._state["settled"][name] = stamp
             except Exception as exc:  # noqa: BLE001 - one venue's outage must not stop the others
                 self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
+            lap(f"poll:{name}")
         try:
             self._cancel_stale_resting()
         except Exception as exc:  # noqa: BLE001 - a guard that fails this tick runs again on the next
             self.alert("warning", f"stale resting orders could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        lap("cancel_stale")
         try:
             self._order_path_invariants()  # code over house.json and the ledger's new refusals; runs while paused too
         except Exception as exc:  # noqa: BLE001 - a check that fails this tick runs again on the next
             self.alert("warning", f"the order path's invariants could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        lap("order_path_invariants")
         # Past the monthly compute line only agents holding real money are woken, so they can exit.
         open_for_business = self.budget is None or self.budget.check() == "open"
         stopped_because = "" if open_for_business else f"the Sail meter's monthly line or reserve (league/budget.py mode {getattr(self.budget, 'mode', '?')})"
@@ -6413,7 +6492,9 @@ class House:
                 self.frontier_tier()
             except Exception as exc:  # noqa: BLE001 - an unread month is an unread meter, never a failed tick
                 self.alert("warning", f"the gateway's frontier month could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+            lap("meter")
             self._absorb_stale_holds(sail=metered)
+            lap("hold_absorb")
             allowed = self.pacer.may_spend("sail")
             if open_for_business and not metered:
                 stopped_because = "the campaign's Sail meter is unread or failed (meter_health in campaigns.sqlite)"
@@ -6432,6 +6513,7 @@ class House:
         batches: dict[str, list[Mapping[str, Any]]] = {}
         waking = [a for a in self.due() if self.economy.alive(a.id)
                   and (open_for_business or self._holds_real_money(a) or (pause and self._holds_position(a)))]
+        lap("due")
         # Each wake is mostly waiting on the agent's box, so they run side by side; every agent
         # has its own box and its own lock, and the ledger and the books are thread-safe.
         with ThreadPoolExecutor(max_workers=max(1, min(self.settings.wake_workers, len(waking) or 1))) as pool:
@@ -6440,13 +6522,16 @@ class House:
             summary["woke"].append(agent.id)
             if outcome.get("intents"):
                 batches.setdefault(outcome["book"], []).append(outcome)
+        lap("wakes")
         for name, wakes in batches.items():
             submitted = self._submit_wakes(name, wakes)
             summary["orders"] += sum(1 for o in submitted if o.status not in ("refused", "duplicate"))
+            lap(f"submit:{name}")
         try:
             self._release_wind_downs()  # a dead agent's stock or option, held for the open, sells at the bell
         except Exception as exc:  # noqa: BLE001 - the mark pass retries every held sale within minutes
             self.alert("warning", f"held wind-downs could not be released ({type(exc).__name__}: {str(exc)[:160]})")
+        lap("wind_downs")
         now = self.clock()
         marked_any = False
         for name, book in self.books.items():
@@ -6477,6 +6562,7 @@ class House:
                     self.alert("warning" if minor else "error", f"{name} does not reconcile: {result.detail}")
             except Exception as exc:  # noqa: BLE001
                 self.alert("warning", f"{name}: could not mark or reconcile ({type(exc).__name__}: {str(exc)[:200]})")
+            lap(f"mark:{name}")
             for agent in self.registry.living():
                 if self.book_of(agent) is book:
                     if pause and not book.real_money:
@@ -6490,6 +6576,7 @@ class House:
                     self._retry_wind_down(agent, book)
                     self._observe_wind_down(agent, book)
                     self._sweep(agent.id, book)
+            lap(f"judge:{name}")
         if marked_any and allocator_module.enabled():
             # Capital is the ladder: bands and stakes follow the evidence of this very mark pass.
             try:
@@ -6497,21 +6584,26 @@ class House:
                 summary["allocator"] = {k: len(v) if isinstance(v, list) else v for k, v in moved.items()}
             except Exception as exc:  # noqa: BLE001 - a pass that fails runs again at the next mark
                 self.alert("error", f"the allocator's pass failed ({type(exc).__name__}: {str(exc)[:200]})")
+        lap("allocator")
         try:
             self._floor_invariants()  # code over the ledger's new rows; costs nothing, so it runs while paused too
         except Exception as exc:  # noqa: BLE001 - a check that fails this tick runs again on the next
             self.alert("warning", f"the floor's invariants could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        lap("floor_invariants")
         self._cancel_retired_research()
         for agent in self.research_order() if open_for_business else []:
             if self.research_due(agent):
                 # Persist before dispatch, so queued work also survives process exit.
                 self.queue_research(agent)
+        lap("research")
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
         if open_for_business and self.semantic_lab is not None and self.semantic_lab.due():
             self._background('semantic-lab', self.semantic_lab.run)
+        lap("schedule")
         if self.jev_floor is not None:
             self.jev_floor.tick(open_for_business)
+        lap("jev")
         if self.backup is not None and self.backup.due():
             self._background("backup", self._run_backup)
         # Both are code over the ledger and cost nothing, so they run while the House is paused too.
@@ -6519,12 +6611,15 @@ class House:
             self._background("pre-audit", self.pre_audit.run, self)
         if self.consult_recovery is not None and self.consult_recovery.due():
             self._background("consult-recovery", self._recover_consults)
+        lap("schedule")
         self._history_coverage()
+        lap("history_coverage")
         if self.updater is not None and self.updater.due():
             self._background("update", self._update)
         if self.budget is not None and getattr(self.budget, "pacer", None) is None:
             self.budget.pacer = self.pacer
         self._pace_inference()
+        lap("schedule")
         if open_for_business and self.merton is not None:
             allowed = TIER_ROLES[self.frontier_tier()]
             for role in self.merton.due():
@@ -6539,13 +6634,17 @@ class House:
             # The repair worklist: its sources, its free follow-ups and at most one paid patch a
             # step, each against its own per-job ceiling and the day's frontier allowance.
             self._background("engineer", self.engineer.step)
+        lap("merton")
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
+        lap("hypotheses")
         if self.lab is not None:
             self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
+        lap("lab")
         if self.shards is not None:
             # Cheap on the tick (a cursor scan of new order rows); the venue calls run on the shards lane.
             self.shards.tick()
+        lap("shards")
         if open_for_business and self.economy.payout_due():
             self.learn()
             with self._lifecycle_lock:
@@ -6562,27 +6661,34 @@ class House:
             self.ledger.append("ops.budget", {"what": "expedition", **self.pacer.report()})
             if self.auditor is not None:
                 self.auditor.score()
+        lap("payout")
         # Outside every gate, because this is the one thing that says a budget is gone and it used
         # to sit inside the payout that a spent budget closes -- it could only be delivered while
         # the condition it announces was false. It tells the owner once per kind; a tick is cheap.
         self._expedition_notices()
+        lap("notices")
         try:
             self._enforce_horizon()
         except Exception as exc:  # noqa: BLE001 - a venue that is down now is asked again next tick
             self.alert("warning", f"the horizon rule could not close a position ({type(exc).__name__}: {str(exc)[:160]})")
+        lap("horizon")
         if self.settings.real_money:
             self._enforce_tuition()
+        lap("tuition")
         # Culling is not spending: an agent whose credits reached zero should still die, and its
         # post-mortem still be written, when the meter has stopped the floor. Only the refill that
         # follows it costs anything, and that waits for business.
         self.keep_population(refill=open_for_business, clock=not pause)
         summary["deaths"] = sorted(living_before - {a.id for a in self.registry.living()})
+        lap("population")
         self._save_state()
+        lap("save_state")
         if self.publisher is not None:
             try:
                 self.publisher.publish(self)
             except Exception as exc:  # noqa: BLE001 - the site is downstream of the floor, never upstream
                 self.alert("warning", f"publishing failed ({type(exc).__name__}: {str(exc)[:200]})")
+        lap("publish")
         self._health(summary)
         return summary
 
@@ -6652,6 +6758,7 @@ class House:
             "failures": failures,
             "research_economy": economy,
         }
+        health["tick_steps"] = self._tick_steps(str(summary["at"]))  # last: its `health` step is this block
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.root / "health.json")
