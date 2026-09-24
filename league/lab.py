@@ -241,6 +241,11 @@ RESERVED_SHARE_BOUNDS = (0.33, 0.75)
 #: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
 #: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
 TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
+#: How the toolsmith answers a tool request it cannot build (`Commons.fulfil`, and `Merton._fulfil_deployed`
+#: when the answer rides a merged change): a `tool.fulfilled` row whose outcome begins with these words is a
+#: refusal, whatever its `status` (`Commons._requests` folds the 'answered' ones as blocked; the 'deployed'
+#: ones of Sept 22, 2026, 15:29Z say "BLOCKED" in the same words). No feed arrived (`Lab._feed_arrived`).
+DECLINED = "cannot be a pure tool"
 #: How long a search tape is used before it is built again (the House rebuilds its own tapes daily),
 #: and how long the tape index (`Lab._tape_index`) keeps a tape the lab built.
 SEARCH_TAPE_SECONDS = 6 * 3600
@@ -2362,9 +2367,13 @@ class Lab:
     def _feed_arrived(self, niche: str, since: float) -> str | None:
         """A feed the desk asked for that arrived after `since`, or None: a `tool.fulfilled` row for a
         `tool.request` of one of its agents, living or dead (the recorders of Deploy B answer requests that
-        way, `feeds.fulfil_requests`), or a recorded feed its programs declare (`NEEDS["feeds"]`) or its
-        requests name (`feeds.request_feed`) whose recording began then (its first `data.coverage` row with
-        data)."""
+        way, `feeds.fulfil_requests`), never the toolsmith's refusal (`DECLINED`), or a recorded feed its
+        programs declare (`NEEDS["feeds"]`) or its requests name (`feeds.request_feed`) whose recording began
+        then (its first `data.coverage` row with data).
+
+        The review of #262 (Sept 24, 2026): on the T0 and T4 snapshots the "answer" that let seven of the eight
+        desks with one past the rule was the toolsmith's "cannot be a pure tool ... BLOCKED" (the rows of Sept
+        22, 15:29Z and Sept 23, 02:17Z), which says that nothing will arrive."""
         from .feeds import request_feed, requested
 
         ledger = self.house.ledger
@@ -2379,8 +2388,11 @@ class Lab:
                     feeds.add(feed)
         for entry in ledger.iter(kinds="tool.fulfilled"):
             at = _ts(entry.at)
-            if at is not None and at >= since and str(entry.payload.get("request") or "") in asked:
-                return f"the request {asked[str(entry.payload['request'])][:80]!r} was answered at {_iso(at)}"
+            if at is None or at < since or str(entry.payload.get("request") or "") not in asked:
+                continue
+            if str(entry.payload.get("outcome") or "").strip().lower().startswith(DECLINED):
+                continue  # a refusal: nothing arrived
+            return f"the request {asked[str(entry.payload['request'])][:80]!r} was answered at {_iso(at)}"
         for agent in agents.values():
             if agent.alive:
                 feeds |= set(requested((agent.needs or {}).get("feeds")))

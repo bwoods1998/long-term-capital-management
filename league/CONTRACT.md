@@ -678,8 +678,8 @@ queue's oldest programs and to the largest groups of parameter mutants. A progra
 - never while its own forward window loses, whatever its search fitness: the search tape admits,
   data that came after the code was frozen ranks;
 - never onto a desk whose members were offered markets for 48 hours and wrote no order, unless a
-  feed the desk asked for (a tool request answered, a recorded feed its programs declare) arrived in
-  that time.
+  feed the desk asked for (a tool request answered -- the toolsmith's "cannot be a pure tool" is a
+  refusal, not an answer --, a recorded feed its programs declare) arrived in that time.
 A program held back is not refused: it graduates when the reason goes. The lab breeds from a
 program by its own forward window as well as its lineage's, and more from lineages whose family's
 pooled record is proven; a family at its measured capacity (the family ledger's estimate: its markets

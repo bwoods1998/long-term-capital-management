@@ -221,6 +221,23 @@ class Holds(ForwardCase):
         self.clock.advance(601)  # a desk's idleness is read every ten minutes
         self.assertEqual(self.lab.graduate()[0]["state"], "born")
 
+    def test_a_toolsmiths_refusal_is_not_a_feed_that_arrived(self):
+        """The review of #262: on the T0 and T4 snapshots seven of the eight desks with an "answered" request had
+        only the toolsmith's "cannot be a pure tool ... BLOCKED" (Sept 22, 15:29Z, status 'deployed'; Sept 23,
+        02:17Z): a refusal, not a feed. The desk stays idle, and nothing is born onto it."""
+        self.elite(SPARSE, origin="luna", lineage="founder:new")
+        self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 3}, agent=self.resident.id)
+        asked = self.house.ledger.append("tool.request", {"name": "live_sports_score_feed", "description": "scores"},
+                                         agent=self.resident.id)
+        for status in ("deployed", "answered", None):
+            self.house.ledger.append("tool.fulfilled", {"request": asked.id, "status": status,
+                                                        "change": "merton/toolsmith/realized-volatility-and-blocked-data-feeds",
+                                                        "outcome": "cannot be a pure tool: scores are external observations absent "
+                                                                   "from ctx. BLOCKED; the House's data owners must integrate them."})
+        self.assertIn("wrote no intent in 48 h", self.lab._idle_desk(self.niche.id))
+        self.assertEqual(self.lab.graduate(), [])
+        self.assertEqual(self.lab._held["counts"], {"idle": 1})
+
     def test_a_desk_that_traded_or_was_offered_nothing_is_not_idle(self):
         self.assertIsNone(self.lab._idle_desk(self.niche.id))  # offered nothing: the calendar's doing
         self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 3}, agent=self.resident.id)
