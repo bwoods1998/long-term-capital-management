@@ -869,14 +869,19 @@ class FeedRecorder:
             if self._unlisted_now(feed, key, began):
                 continue
             if source is not None:
+                # Only this feed's own live passes count here, never a backfill page (review of #234,
+                # Sept 24, 2026): a key whose history was still being paged was skipped by the hourly
+                # pass, and its newest hour (or a new 8-K) waited a whole hour more.
                 with self._lock:
-                    last = (self._load_stats().get((feed, key)) or {}).get("last_poll")
+                    last = self.state(feed).get("head_polled", {}).get(key)
                 if last is not None and began - float(last) < RETRY_SECONDS:
                     continue  # polled in this cycle, before the pass gave way
                 if asked and self._urgent_due():
                     out["polled"].append(feed)
                     self._schedule(feed, "*", self.clock())  # behind the board, then on from here
                     return
+                with self._lock:
+                    self.state(feed).setdefault("head_polled", {})[key] = began
             if asked and (feed == "funding" or (source is not None and source.pause)):
                 self._sleep(OKX_PAUSE if feed == "funding" else source.pause)
             asked += 1

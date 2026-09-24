@@ -750,6 +750,21 @@ class OpenInterest(RecorderCase):
                                                                 "perpetual_open_interest")},
                          {"perp_open_interest_history": "oi", "kalshi_open_interest_history": None, "perpetual_open_interest": "perps"})
 
+    def test_a_backfill_page_does_not_make_the_hourly_pass_skip_the_key(self):
+        """Review of #234 (Sept 24, 2026): the hourly pass skipped every key polled in the last five
+        minutes -- meant for the keys a pass that gave way had already polled -- and a backfill page
+        counts as a poll, so while a key's history was still being paged its newest hour waited a
+        whole hour more for the next pass (a new 8-K the same way, for the earnings feed)."""
+        okx = OkxOi(self.clock, since="2026-06-01T00:00:00Z")  # a long history: the backfill takes many passes
+        store = self.recorder({"oi": ["BTC"]}, transports={"oi": okx.transport()}, backfill_pages=1)
+        store.run()  # 03:30: the head and one backfill page
+        self.clock.set("2026-09-24T04:01:10Z")
+        store.run()  # a backfill pass: one more page of BTC's history
+        self.clock.set("2026-09-24T04:02:40Z")
+        store.run()  # the hourly pass, due at 04:02:30
+        self.assertEqual(feeds.stamp(self.stamps(store, "oi", "BTC")[-1]), "2026-09-24T04:00:00.000Z")
+        self.assertFalse(store.coverage({"oi": ["BTC"]})["oi"]["BTC"]["backfill"]["complete"], "the backfill is still running")
+
 
 # ---------------------------------------------------------------------------- the owner's keys
 class Keyed(RecorderCase):
