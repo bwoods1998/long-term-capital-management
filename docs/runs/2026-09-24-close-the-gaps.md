@@ -105,9 +105,10 @@ recorded for the next open; live verification uses the markets that trade around
    ratifies the moment the watchdog promotes.
 2. **Compute truth and the owner's funding.**
    - At T0 the gateway's month read $394.46 of $408 (tier "audits": the House's OpenAI line read $7.94
-     after 51 holds with no response, $106.86, of which 49 are older than 6 h: 19 aged 6-24 h, $23.96;
-     30 older than 24 h, $74.40). Sail $169.87 (the owner's $100 already in), burn $40.45 a day on the
-     24-hour average, runway 3.95 days. Jev $16.16 of $42.
+     after 49 holds with no response older than 6 h, $98.36; in the 01:42Z snapshot: 19 aged 6-24 h,
+     $23.96, and 30 older than 24 h, $74.40, plus 2 new ones, $8.50, made after the top-up). Sail
+     $169.87 (the owner's $100 already in), burn $40.45 a day on the 24-hour average, runway 3.95
+     days. Jev $16.16 of $42.
    - 01:36:00Z: `scripts/campaign_topup.py --id topup-20260924-owner --sail 100 --openai 200` recorded
      the owner's top-up (House lines after: Sail $168.22, OpenAI $207.94; burst caps OpenAI $778, Sail
      $275).
