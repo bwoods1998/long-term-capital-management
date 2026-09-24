@@ -50,15 +50,15 @@ class TheTickSteps(HouseCase):
         'floor_invariants'" under a seven-way parallel run. A House's first tick pays its first epoch,
         and that loads every playbook lesson onto the ledger (`House.learn`): 51 lessons by then, 3.1 s
         with the temp directory on disk (0.13 s when the test was written), more under load, against a
-        1.0 s slow step. So the first tick is ticked first and left more than an hour behind: the next
-        epoch is six hours off, and the slow tick pays none."""
+        1.0 s slow step. So a warm tick pays it and is left more than an hour behind: the next epoch is
+        six hours off, and the slow tick pays none."""
         self.house.tick()
         self.clock.advance(3601)
 
     def slow_tick(self):
         invariants = self.house._floor_invariants
 
-        def slow():  # a House's first tick also pays its first epoch (0.13 s idle): the slow step is well clear of it
+        def slow():  # the warm tick has paid the first epoch: no other step of a tick comes near this
             time.sleep(SLOW_STEP_SECONDS)
             return invariants()
 
