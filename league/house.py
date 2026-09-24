@@ -3734,7 +3734,8 @@ class House:
             return True
         since = now_iso(lambda: last)
         for kind in ("book.fill", "book.settle", "eval.verdict", "agent.strategy"):
-            row = self.ledger.last(kind, agent=agent.id)
+            # A pause or resume of its entries restates its strategy (X1): not a new one.
+            row = allocator_module.adopted_strategy(self.ledger, agent.id) if kind == "agent.strategy" else self.ledger.last(kind, agent=agent.id)
             if row is not None and row.at > since:
                 self._gate_note(agent, "run", f"new {kind} since the last pass", streak, last)
                 return True

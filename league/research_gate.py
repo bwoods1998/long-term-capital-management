@@ -80,6 +80,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .allocator import RESTATING_CONTROLS
 from .jev import sha
 from .ledger import now_iso
 
@@ -373,6 +374,11 @@ class ResearchGate:
             if entry.kind == "audit.verdict":
                 counts[f"audit.verdict:{'approve' if entry.payload.get('approve') else 'refuse'}"] += 1
                 continue
+            if entry.kind == "agent.strategy" and entry.payload.get("control") in RESTATING_CONTROLS:
+                # Its own pause or resume of its entries (X1) restates its strategy: no code change,
+                # no news, and it must not buy the next paid session (review of #249). An in-place
+                # edit is a new strategy, as an in-place rewrite is.
+                continue
             counts[entry.kind] += 1
         found = [f"{kind}:{n}" for kind, n in sorted(counts.items())]
         found += self._about_it(agent, after)
@@ -642,7 +648,7 @@ def report(ledger: Any, *, sensor: Any = None, after: int = 0) -> dict[str, Any]
             continue
         finished += 1
         outcome = session_outcome(after_rows[0].payload)
-        adopted = any(e.seq > sample.seq and e.seq <= after_rows[0].seq
+        adopted = any(e.seq > sample.seq and e.seq <= after_rows[0].seq and e.payload.get("control") not in RESTATING_CONTROLS
                       for e in ledger.read(kinds="agent.strategy", agent=sample.agent, after=sample.seq, limit=5))
         if outcome == "candidate" or adopted:
             misses += 1

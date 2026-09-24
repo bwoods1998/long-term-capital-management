@@ -55,6 +55,25 @@ class EvidenceOnlyGate(GateCase):
         self.assertTrue(self.house.research_due(idle), "an idle agent's research is pulled forward as before")
         self.assertEqual((self.gates(idle.id)[-1]["reason"], self.gates(idle.id)[-1]["record"]), ("clock", "idle"))
 
+    def test_its_own_pause_is_no_trigger_and_its_edit_is(self):
+        """Review of #249: a pause or resume row (X1) restates the strategy in force; read as a code
+        change it bought the agent its next paid session. An in-place edit is a new strategy."""
+        agent = self.evidence_ready()
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent))
+        self.house.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": "pause_entries",
+                                                    "session": "s1", "note": "the live rule keeps adding losing positions"},
+                                 agent=agent.id, id="control-request:s1:0")
+        self.assertEqual(self.house._apply_controls(agent.id, "s1"), ["pause_entries"])
+        self.clock.advance(60)
+        self.assertFalse(self.house.research_due(agent), "its own pause bought a research session")
+        current = self.house.registry.get(agent.id)
+        self.house.ledger.append("agent.strategy", {"code_sha256": current.code_sha256, "params": {**current.params, "notional": 10.0},
+                                                    "needs": current.needs, "_code": current.code, "control": "edit_params"}, agent=agent.id)
+        self.clock.advance(60)
+        self.assertTrue(self.house.research_due(agent))
+        self.assertIn("agent.strategy:1", self.gates()[-1]["triggers"])
+
     def test_the_heartbeat_still_wakes_an_agent_nothing_ever_happens_to(self):
         agent = self.evidence_ready(max_skip_hours=5)
         self.clock.advance(self.interval)
