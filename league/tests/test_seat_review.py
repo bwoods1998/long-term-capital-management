@@ -262,3 +262,23 @@ class CapsBeforeTheSearchSeats(ReviewCase):
         self.house.tick()  # the first tick after a restart: the cap is niches.json's until the search is read
         self.assertEqual(seen, [2], "held at its members before the foundry (and the lab after it) could seat anyone there")
         self.assertEqual(self.house.niches[DESK].max_members, 2)
+
+
+class ProvenRecordThatCannotBeRead(ReviewCase):
+    """Every waiter source of the seat queue is read under a guard ("read again on the next tick") except R3's
+    `_waiting_proven`, which reads the allocator's family records, every living member's rung and fills, and the lab's
+    mechanism digests. `seat_waiters` is on every seat question -- the lab's step, `_displaceable` for a desk, `enroll`,
+    `_refill`, health -- and `_proven_births` runs first in every birth pass, where only a SandboxError is caught: one
+    exception there stopped every birth and failed the tick ("tick failed", an error the watchdog reads) until it
+    cleared."""
+
+    def test_a_proven_record_that_cannot_be_read_stops_no_seat_question_and_no_birth_pass(self):
+        idle = self.resident("idle")
+        self.clock.advance(3601)
+        with patch.object(self.house, "_proven_programs", side_effect=KeyError("to_rung")):
+            self.assertEqual(self.house.seat_waiters(fresh=True)["proven"], [])
+            self.assertEqual(self.house._weakest(self.rules, specialty=DESK, evidenced=True).id, idle.id)
+            self.assertIsNone(self.house._proven_births(self.rules))
+            self.house._births(self.rules)  # the rest of the birth pass runs
+            self.house.seat_waiters(fresh=True)
+        self.assertEqual(len(alerts(self.house, "warning", "proven famil", "KeyError")), 1, "told once an hour")

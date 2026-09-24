@@ -5560,13 +5560,32 @@ class House:
                         "wanted": max(0, target - len(running)), "held": held, "record": record})
         return out
 
+    def _read_proven(self) -> list[dict[str, Any]]:
+        """`_proven_programs`, or [] with a warning at most once an hour when it cannot be read (the review of #276,
+        Sept 24, 2026). It reads the allocator's family records, every living member's rung and fills, and the lab's
+        mechanism digests; unguarded, one exception there stopped every seat question (`seat_waiters` is on the lab's
+        step, `_displaceable` for a desk, `enroll`, `_refill`) and every birth pass, failing the tick until it cleared,
+        where every other waiter source is read again on the next tick."""
+        try:
+            return self._proven_programs()
+        except Exception as exc:  # noqa: BLE001 - no birth is owed and no desk held until it can be read
+            now = self.clock()
+            with self._state_lock:
+                tell = now - float(self._state.get("proven_read_told") or 0) >= 3600
+                if tell:
+                    self._state["proven_read_told"] = now
+            if tell:
+                self.alert("warning", f"the proven families' programs could not be read ({type(exc).__name__}: {str(exc)[:160]}): "
+                                      "no birth is owed and no desk is held for them until they can")
+            return []
+
     def _waiting_proven(self) -> list[dict[str, Any]]:
         """R3: a proven family's program that runs on fewer than `economy.proven_family_members` living members waits
         for a seat on its anchor's desk, first of every class (`SEAT_WAITERS`), until it has them. It waits from when
         the House first saw it short (house.json `seat_seen`)."""
         now = self.clock()
         out = []
-        for row in self._proven_programs():
+        for row in self._read_proven():
             if row["wanted"] <= 0 or row["held"]:
                 continue
             with self._state_lock:
@@ -5600,7 +5619,7 @@ class House:
         proven family (sports-central-run-under: pooled n 19, bound +0.204, real n 5), one member running its program
         (meriwether-h2d625d, on real money), so three births are owed at the default four."""
         now = self.clock()
-        for row in self._proven_programs():
+        for row in self._read_proven():
             if row["wanted"] <= 0 or row["held"]:
                 continue
             family, anchor = row["family"], row["anchor"]
