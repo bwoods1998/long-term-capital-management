@@ -63,6 +63,10 @@ class CampaignBudget:
     #: cost settled on it is added to the line beside the meter, never hidden inside
     #: `max(settled, measured)`.
     METER_COVERS = {"sail": "", "openai": "frontier:"}
+    #: The longest a frontier call can take from the House's reservation to its settle: the House's
+    #: own read gives up at 600 s (the gateway's upstream at 570 s); a call made before a gateway
+    #: reading by more than this was settled at the gateway before that reading, or never answered.
+    CALL_LIFE_SECONDS = 900
     #: A reservation asks a registered reader (`meter_reader`) for a new reading once the last one is
     #: this old, so a reading is never 180 s stale (`ready`) merely because a tick ran long.
     METER_READ_SECONDS = 60
@@ -930,9 +934,16 @@ class CampaignBudget:
                 self.db.execute("COMMIT")
                 return {"absorbed": 0, "usd": "0", "retry": True,
                         "why": "the gateway reports no settled figure to check its month against yet"}
+            # Only the calls the gateway's last reading must already hold: made at least a call's life
+            # before that reading (`CALL_LIFE_SECONDS`). A call the House settled after the reading was
+            # settled at the gateway after it too, so counting it compared a moving House figure with a
+            # reading up to a tick old. Measured Sept 24, 2026, the first half hour after Deploy A: the
+            # House had settled $4.1177 since the anchor against the gateway's $4.1045 of growth, 52
+            # seconds of calls apart, and while research ran nothing could ever be released.
             since = int(self.db.execute(
-                "SELECT COALESCE(SUM(cost),0) FROM commitments WHERE kind=? AND rowid>? AND substr(id,1,?)=? AND cost IS NOT NULL",
-                (kind, int(month["anchor_row"]), len(prefix), prefix)).fetchone()[0])
+                "SELECT COALESCE(SUM(cost),0) FROM commitments WHERE kind=? AND rowid>? AND substr(id,1,?)=? AND cost IS NOT NULL"
+                " AND created < ?",
+                (kind, int(month["anchor_row"]), len(prefix), prefix, float(month["at"]) - self.CALL_LIFE_SECONDS)).fetchone()[0])
             growth = int(month["settled_carried"]) + int(month["settled_high"] or 0) - int(month["anchor_settled"])
             check = {"anchor_at": month["anchor_at"], "anchor_row": int(month["anchor_row"]),
                      "house_settled_since_micro_usd": since, "gateway_settled_growth_micro_usd": growth}

@@ -302,11 +302,26 @@ class StaleOpenAIHolds(Floor):
         g = self.metered()
         self.read("8.00", "8.00")
         self.call("frontier:after", "1.00", "0.30")
+        self.advance(0.3 * HOUR)  # older than a call's life before the reading below
         self.read("8.30", "8.10")  # the gateway settled $0.10 while the House settled $0.30
         out = g.absorb_stale("openai", older_than_seconds=SIX_HOURS)
         self.assertEqual(out["absorbed"], 0)
         self.assertFalse(out.get("retry"))
         self.assertIn("less than", out["why"])
+
+    def test_a_call_the_house_settled_after_the_gateways_last_reading_does_not_hold_the_release(self):
+        """Sept 24, 2026, the first half hour after Deploy A: the House settles each call the moment
+        it answers, while the gateway's month is read once a tick, so the House's settled sum since the
+        anchor ran ahead of the gateway's growth by the last minute of calls ($4.1177 against $4.1045)
+        and nothing could be released while research ran. Only calls older than a call's life before
+        the reading are compared."""
+        g = self.anchored()
+        self.advance(0.3 * HOUR)  # the two lost calls are past six hours
+        self.read("8.30", "8.30")  # the gateway's last reading
+        self.call("frontier:just-answered", "1.00", "0.20")  # settled at the House after that reading
+        out = g.absorb_stale("openai", older_than_seconds=SIX_HOURS, evidence={"by": "test"})
+        self.assertEqual((out["absorbed"], out["usd"]), (2, "5"))
+        self.assertEqual(out["check"]["since_anchor_usd"], "0.3")
 
     def test_nothing_is_released_while_the_meter_is_stale(self):
         g = self.anchored()
@@ -525,7 +540,7 @@ class TheHouseAbsorbs(HouseCase):
         guard.reserve("frontier:after", "foundation-review", "1.00")  # an audit, answered
         guard.settle("frontier:after", "0.30")
         gateway.frontier = {**gateway.frontier, "spent_usd": "8.30", "settled_usd": "8.300000"}
-        self.clock.advance(61)
+        self.clock.advance(CampaignBudget.CALL_LIFE_SECONDS + 1)  # the check compares calls a call's life old
         self.house.tick()
         absorbed = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "holds absorbed"]
         self.assertEqual(len(absorbed), 1)
@@ -539,6 +554,49 @@ class TheHouseAbsorbs(HouseCase):
         self.house.tick()
         again = [e for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "holds absorbed"]
         self.assertEqual(len(again), 1, "once every ten minutes, and nothing is left to release")
+
+
+class AStalledRelease(HouseCase):
+    """The invariant (Sept 24, 2026): a release that keeps being refused is said once, with the
+    check's numbers, and its end is said too. The first check of the OpenAI release refused every try
+    for as long as research ran, and nothing on the ledger or in health said so."""
+
+    def test_a_release_refused_for_half_an_hour_is_said_once_with_its_numbers(self):
+        self.house.game["frontier_reserve"] = RESERVE
+        path = self.house.root / "campaigns-test.sqlite"
+        guard = CampaignBudget(path, rules("sail"), clock=self.clock)
+        guard.observe_balance("sail", "100.00")
+        guard.activate_burst("night", night("30"))
+        guard.reserve("frontier:lost-1", "foundation-review", "2.00")
+        guard.close()
+        self.clock.advance(6.5 * HOUR)
+        guard = CampaignBudget(path, rules("sail", "openai"), clock=self.clock)
+        self.addCleanup(guard.close)
+        gateway = Gateway({"month": "2026-09", "spent_usd": "8.00", "settled_usd": "8.000000", "cap_usd": "20.00",
+                           "base_cap_usd": "20.00"})
+        self.house.campaigns = guard
+        self.house.frontier_month = FrontierMonth("https://gw.test", lambda: "t" * 20, opener=gateway,
+                                                  clock=self.clock, meter=guard)
+        self.house.tick()  # the anchor
+        guard.reserve("frontier:after", "foundation-review", "1.00")
+        guard.settle("frontier:after", "0.30")
+        gateway.frontier = {**gateway.frontier, "spent_usd": "8.30", "settled_usd": "8.100000"}  # the gateway lags
+        told = lambda: [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "have not been released" in str(e.payload.get("text"))]
+        for _ in range(4):  # 4 tries ten minutes apart: refused each time
+            self.clock.advance(601)
+            self.house.tick()
+        self.assertEqual(len(told()), 1, "said once, past half an hour")
+        self.assertIn("grown less than", told()[0]["text"])
+        self.assertEqual(told()[0]["check"]["gateway_growth_usd"], "0.1")
+        self.clock.advance(601)
+        self.house.tick()
+        self.assertEqual(len(told()), 1, "never twice")
+        gateway.frontier = {**gateway.frontier, "settled_usd": "8.300000"}  # the gateway catches up
+        self.clock.advance(601)
+        self.house.tick()
+        absorbed = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "holds absorbed"]
+        self.assertEqual(len(absorbed), 1)
+        self.assertTrue(any("being released again" in str(e.payload.get("text")) for e in self.house.ledger.iter(kinds="ops.alert")))
 
 
 class AnUnreadMonth(HouseCase):
