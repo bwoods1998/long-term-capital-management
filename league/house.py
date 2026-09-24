@@ -4911,17 +4911,25 @@ class House:
         dropped as stale when the generation moves (a veto of an agent already on real money would
         then never be acted on), and `allocator.audit_standing` reads no verdict from before it (a veto
         would be set aside before its cooldown). So none is made while an audit of the agent runs or
-        is owed, or while its latest audit is a veto. Called under the lifecycle lock, as audits are
-        started under it."""
+        is owed, or while its latest audit is a veto. Nor while an audit's approval of the strategy as
+        it runs stands and the agent is on real money (rung 2 or above: a swing's first entry is
+        audited, a known defect's bunt is audited, and the auditor reads the PARAMS): the edit would
+        trade PARAMS the auditor never saw, and nothing audits a seated swing again (review of #249:
+        a swing raised its notional 30 -> 37 in place and kept the band). Called under the lifecycle
+        lock, as audits are started under it."""
         if control != "edit_params":
             return ""
         with self._state_lock:
             auditing = agent.id in (self._state.get(self.AUDITS) or {})
         if auditing or self._audit_owed(agent) is not None:
             return "an audit of your strategy is under way or owed; a change recorded now would set its verdict aside. Ask again after it"
-        if allocator_module.audit_standing(self, agent) == "vetoed":
+        standing = allocator_module.audit_standing(self, agent)
+        if standing == "vetoed":
             return ("the latest audit of your strategy vetoed it; a change recorded now would read as new code to the audit check, "
                     "so none is made while the veto stands")
+        if standing == "approved" and self.evaluator.rung(agent.id) >= 2:
+            return ("an audit approved your strategy as it runs and you stand on real money: an edit in place would trade PARAMS "
+                    "that audit never saw. Pause your entries, or replay the changed file for a new agent")
         return ""
 
     def _apply_controls(self, agent_id: str, session: str) -> list[str]:

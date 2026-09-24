@@ -550,7 +550,10 @@ ask; the House applies it when your research pass ends, as it does a retained ca
 A pause or a resume is always made: it restates your strategy, so it sets no audit's verdict aside
 and moves nothing an audit, a promotion or your candidate waiting for a seat is keyed to. No edit is
 made while an audit of your strategy is running or owed, or while its latest audit is a veto (an
-edit is a new strategy and would set the audit's verdict aside); the House says so on your record.
+edit is a new strategy and would set the audit's verdict aside), nor on real money while an audit's
+approval of your strategy as it runs stands (a swing's first entry is audited: you would trade PARAMS
+that audit never saw; pause, or replay the changed file for a new agent). The House says so on your
+record.
 
 ## How replay scores it
 

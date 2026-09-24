@@ -313,6 +313,22 @@ class InPlaceEdit(ControlCase):
         second = self.edit({"notional_usd": 25})
         self.assertEqual(second["numbers"]["trials"], first["numbers"]["trials"] + 1)
 
+    def test_a_strategy_an_audit_approved_for_real_money_is_not_edited_in_place(self):
+        """Review of #249: a swing (its first entry is audited, and the auditor reads the PARAMS) raised
+        its notional 30 -> 37 in place and kept the band: nothing audits a seated swing again."""
+        result = self.edit({"notional_usd": 20})  # replayed while on paper
+        self.assertTrue(result["passed"], result)
+        self.house.evaluator.seat(self.agent.id, 3, "test: its swing's first entry was audited meanwhile")
+        self.house.ledger.append("audit.verdict", {"approve": True, "summary": "approved at notional 30"}, agent=self.agent.id)
+        self.assertEqual(self.apply(self.agent, "edit_params", params=result["params"], was=result["was"],
+                                    code_sha256=result["code_sha256"]), [])
+        self.assertIn("an audit approved your strategy", self.not_applied(self.agent)[0])
+        self.clock.advance(24 * 3600 + 1)
+        self.assertIn("an audit approved your strategy", self.edit({"notional_usd": 37}).get("error", ""))
+        self.assertEqual(len(self.replays), 1)  # refused before any replay
+        self.assertEqual(self.house.registry.get(self.agent.id).params["notional_usd"], 30.0)
+        self.assertEqual(self.apply(self.agent, "pause_entries", session="s2"), ["pause_entries"])  # it can still hold its entries
+
     def test_an_edit_replayed_before_its_strategy_changed_is_not_applied(self):
         result = self.edit({"notional_usd": 20})
         self.apply(self.agent, "pause_entries", n=0)  # a pause does not change the strategy

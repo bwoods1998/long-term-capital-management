@@ -521,7 +521,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
   and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
   and any the House did not make (status `not_applied`, with the reason: for an edit, an audit
-  running or owed, a standing veto or a strategy changed after its replay; already paused). A
+  running or owed, a standing veto, an approval standing on real money or a strategy changed after
+  its replay; already paused). A
   paused agent's wakes show `held` (buys the House held, never a refusal) and its resting buys are
   cancelled.
   `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
