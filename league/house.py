@@ -4478,6 +4478,8 @@ class House:
         now = self.clock()
         out: list[tuple[float, str]] = []
         for agent in self.registry.living():
+            if now - _epoch(agent.born_at) < grace:
+                continue  # its program's opportunity is no older than its birth: its grace still runs
             rung = self.evaluator.rung(agent.id)
             if rung >= 2:
                 continue
