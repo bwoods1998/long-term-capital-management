@@ -476,6 +476,32 @@ class LabTest(ScoreboardCase):
         self.assertEqual(five["real_money_parents_with_passing_child"], 1)
         self.assertEqual((five["of_them_superseded"], five["of_them_still_on_real_money"]), (0, 1))
 
+    def test_a_waiter_that_left_the_houses_seat_queue_is_never_counted(self):
+        """R2 (Sept 24, 2026): a graduate or card whose desk the search closed leaves the House's queue with a
+        `seat-expired:<class>:<id>` row; the lab's table still says `passed`, the foundry's record still says it passed."""
+        f = self.floor
+        now = 10.0
+        lab = sqlite3.connect(f.root / "lab.sqlite")
+        lab.executescript("CREATE TABLE batches(id TEXT PRIMARY KEY, at REAL NOT NULL);"
+                          "CREATE TABLE candidates(id TEXT PRIMARY KEY, origin TEXT NOT NULL);"
+                          "CREATE TABLE graduations(candidate TEXT PRIMARY KEY, state TEXT NOT NULL, at REAL NOT NULL);")
+        for ident in ("g1", "g2"):
+            lab.execute("INSERT INTO candidates VALUES (?, 'param')", (ident,))
+            lab.execute("INSERT INTO graduations VALUES (?, 'passed', ?)", (ident, ts(now - 1)))
+        lab.commit()
+        lab.close()
+        for ident in ("g1", "g2"):
+            f.row("lab.graduate", "house", now - 5, {"candidate": ident, "state": "passed"}, ident=f"lab.graduate:{ident}:passed")
+        f.row("route.decision", "house", now - 1, {"task": "seat:graduates:g2", "route": "expired"}, ident="seat-expired:graduates:g2")
+        for card in ("c1", "c2"):
+            f.row("hypothesis.card", "house", 0, {"id": card, "niche": "kalshi-crypto-15m", "created_epoch": ts(0)})
+            f.row("trace.record", "house", now - 3, {"task": "hypothesis.evaluate", "id": card, "outcome": "passed"})
+        f.row("route.decision", "house", now - 1, {"task": "seat:cards:c2", "route": "expired"}, ident="seat-expired:cards:c2")
+        f.row("ops.job", "house", now, {})
+        five = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["5"]
+        self.assertEqual((five["graduates_waiting"], five["graduates_left_the_queue"], five["cards_waiting"]), (1, 1, 1))
+        self.assertEqual(five["waiters"], 2)
+
 
 # --------------------------------------------------------------------------------- metric 6
 class ExitsAndStackingTest(ScoreboardCase):

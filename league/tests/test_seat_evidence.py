@@ -186,12 +186,18 @@ class TheEvidenceClock(EvidenceCase):
             self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=-0.002)), "a worse forward record")
             self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=-0.001)), "an equal one is not better")
             self.assertEqual(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.0005)).id, trader.id)
-            self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=Newcomer(forward=0.0005)),
+            self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=Newcomer(forward=-0.0005)),
                               "a trader short of its record keeps its seat against an evidenced newcomer (`_trading_pending` stands)")
+            # R2's S3 (Sept 24, 2026): past its desk's clock (the plain grace here, where none is measured) with no positive
+            # record of its own, its seat is stale, and a newcomer with a winning forward window takes it.
+            self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=Newcomer(forward=0.0005)).id, trader.id)
         with patch.object(self.house, "_resident_forward", return_value=None):
             with patch.object(self.house, "_forward_scorable", return_value=True):
-                self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)),
+                self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=-0.01)),
                                   "no forward record of its own YET: nothing to compare, so it keeps its seat")
+                # R2's S3 (Sept 24, 2026): the wait for its record ends with its desk's clock (the plain grace here): past
+                # it, with no positive record of its own, a newcomer with a winning forward window takes the seat.
+                self.assertEqual(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)).id, trader.id)
             with patch.object(self.house, "_forward_scorable", return_value=False):
                 self.assertEqual(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)).id, trader.id,
                                  "no record it could ever have (the lab never scores it): judged as before, never kept for good")

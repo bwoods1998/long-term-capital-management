@@ -259,6 +259,8 @@ class Cards(FoundryCase):
 class Allocation(FoundryCase):
     def test_allocation_follows_evidence_and_ignores_how_empty_a_desk_is(self):
         etf_code = PASSER.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]').replace("sawtooth", "etf")
+        # The desk's cap is the test's own (niches.json's moves with the waiters: 18 since R2, Sept 24, 2026).
+        self.house.niches["alpaca-index-etfs"].max_members = 5
         etfs = [self.house.spawn("scholes", "etf-family", etf_code, reason="test") for _ in range(4)]  # 1 open seat of 5
         crypto = self.house.spawn("rosenfeld", "crypto-family", PASSER, reason="test")                  # 4 open seats of 5
         for n, agent in enumerate(etfs * 3):
