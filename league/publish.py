@@ -154,11 +154,14 @@ def hours_between(start: str | None, end: str) -> float | None:
 
 # ------------------------------------------------------------------------- the capital board
 # The allocator's bands, lowest first (Workstream A, Sept 23, 2026). The site's validators know these
-# five words and no others (capital/schema.js `BANDS`). "paper" is the House's word: the page says
-# "Practice", and so does every sentence published here.
-BANDS = ("replay", "paper", "bunt", "swing", "star")
-REAL_BANDS = ("bunt", "swing", "star")
-BAND_LABELS = {"replay": "Replay", "paper": "Practice", "bunt": "Bunt", "swing": "Swing", "star": "Star"}
+# words and no others (capital/schema.js `BANDS`). "paper" is the House's word: the page says
+# "Practice", and so does every sentence published here. "probe" (Sept 24, 2026, the close-the-gaps
+# run's P1): a first real stake at pocket-change size for an agent whose family has not proven its
+# edge; a member of a proven family is a "bunt". Both are rung 2 and the page's Level 2; the site has
+# accepted the band since personal-site #6 (deployed 01:55Z Sept 24), before any board carried it.
+BANDS = ("replay", "paper", "probe", "bunt", "swing", "star")
+REAL_BANDS = ("probe", "bunt", "swing", "star")
+BAND_LABELS = {"replay": "Replay", "paper": "Practice", "probe": "Probe", "bunt": "Bunt", "swing": "Swing", "star": "Star"}
 RUNG_BANDS = ("replay", "paper", "bunt", "swing")  # before the allocator: rung 0..3
 MAX_BOARD_MOVES = 50
 MULTIPLE_PLACES = 6  # wealth multiples and E, as unsigned decimal strings: "1.034512"
