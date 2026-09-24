@@ -101,7 +101,13 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 health failure the House announced), is earlier than the reading taken just before the promotion is
 inherited, reported in the deploy's detail and never a rollback. The lab's idle hour therefore never
 rolls a release back (it cannot begin inside a ten-minute watch); a canary inherits nothing and
-refuses on any of them, though a canary runs no lab; `league.watchdog status` shows them all.
+refuses on any of them, though a canary runs no lab; `league.watchdog status` shows them all. A frozen
+book counts only in a `health.json` the new House wrote (dated at or after its first `ops.started`
+since the promotion): until its first tick finishes, the file is the old process's, and a freeze in
+it is reported as `frozen_by_previous_process`, never a rollback (Sept 24, 2026: Deploy C was rolled
+back at 15:39:27Z on a practice-book freeze the old House recorded 30 s before the promotion). The
+old file still goes stale after `max_age_seconds`, and a House that never restarts still fails the
+watch.
 
 - **The updater (automatic).** Every 30 minutes the House reads `main`'s head and deploys it by
   itself. It does so only if both of these hold:
