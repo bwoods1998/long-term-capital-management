@@ -273,15 +273,15 @@ class HouseTest(HouseCase):
         self.house.tick()  # heard twice a minute apart, the lost exit is closed and the mark pass retries it
         self.assertEqual(book.account(agent.id).holdings, {})
 
-    def test_a_few_cents_short_on_paper_is_a_warning_and_real_money_stays_an_error(self):
+    def test_a_few_cents_short_on_paper_is_dust_and_a_real_shortfall_stays_an_error(self):
         agent = self.seated()
         self.house.tick()  # it buys; the paper book reconciles
-        self.broker.cash -= Decimal("0.06")  # the venue's fee activity has not posted yet
+        self.broker.cash -= Decimal("0.06")  # two option fills' fees: taken at the fill, listed the next morning
         self.clock.advance(301)
         self.house.tick()
-        alerts = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "does not reconcile" in e.payload["text"]]
-        self.assertTrue(alerts)
-        self.assertEqual({a["level"] for a in alerts}, {"warning"})
+        # Sept 24, 2026: booked as dust at once (`book.PRACTICE_DUST_USD`), never a freeze -- nor an alert.
+        self.assertFalse([e for e in self.house.ledger.iter(kinds="ops.alert") if "does not reconcile" in e.payload["text"]])
+        self.assertTrue(all(book.frozen is None for book in self.house.books.values() if not book.real_money))
         self.broker.cash -= Decimal("5.00")  # more than cents: an error
         self.clock.advance(301)
         self.house.tick()

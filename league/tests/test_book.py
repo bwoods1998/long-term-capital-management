@@ -840,6 +840,114 @@ class PaperBookTest(BookCase):
         self.assertGreater(self.ledger.verify(), 5)
 
 
+class PracticeCentsTest(BookCase):
+    """A practice book's cents are dust at once, never a freeze (`PRACTICE_DUST_USD`, Sept 24, 2026).
+
+    14:39:07Z: `alpaca-paper` read "cash differs by -0.0322" -- the $0.03 OCC clearing fee Alpaca
+    takes at a one-contract option fill and lists only the next morning, and $0.0022 of rounding on a
+    $28 BTC buy -- and refused every Alpaca practice entry until 14:51:06Z. At 15:37:27Z the same
+    shape (-0.0269) froze the book inside Deploy C's watch and rolled the release back."""
+
+    def reconciled_buy(self):
+        self.seat("a1")
+        self.broker.set_quote(BTC, "80000", "80010")
+        self.book.submit([self.intent("a1", BTC, "buy", "0.0005")])
+        self.assertTrue(self.book.reconcile().ok)
+
+    def practice_dust(self):
+        return [e for e in self.ledger.iter(kinds="book.fill")
+                if e.payload.get("source") == "dust" and "practice book" in str(e.payload.get("detail") or "")]
+
+    def test_an_option_fills_fee_and_a_buys_rounding_are_dust_at_once_not_a_freeze(self):
+        self.reconciled_buy()
+        agents_cash = self.book.account("a1").cash
+        self.broker.cash -= D("0.0322")  # 14:39:07Z: one fill since the last reconciliation allows a cent
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertIsNone(self.book.frozen)
+        self.assertEqual(result.dust_booked, D("-0.0322"))
+        dust = self.practice_dust()
+        self.assertEqual([(e.agent, e.payload["cash_delta"]) for e in dust], [(HOUSE, "-0.03220000")])
+        self.assertIn("booked at once instead of freezing entries", dust[0].payload["detail"])
+        self.assertEqual(self.book.account("a1").cash, agents_cash)  # the House's cents, never the agent's record
+        entry = self.book.submit([self.intent("a1", BTC, "buy", "0.0001")])[0]
+        self.assertEqual(entry.status, "filled", entry.detail)  # 14:48Z this was "frozen until it reconciles"
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_cents_either_way_in_turn_are_each_dust_and_never_freeze(self):
+        """The live readings of 15:27-15:37Z: +0.0300 (a maker's AVAX sale charged $0.04 against the
+        $0.07 taker fee the book assumed) and then -0.0269 (an option buy's fee less a stock sale's
+        rounding). Each is booked as it is read; the House row's dust nets them."""
+        self.reconciled_buy()
+        self.broker.cash += D("0.0300")
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("0.0269")
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertIsNone(self.book.frozen)
+        self.assertEqual([e.payload["cash_delta"] for e in self.practice_dust()], ["0.03000000", "-0.02690000"])
+        self.assertEqual(self.book.reconcile().cash_diff, D("0"))
+
+    def test_cents_beside_a_position_difference_still_freeze(self):
+        self.reconciled_buy()
+        inst, held = self.broker.held[BTC.key]
+        self.broker.held[BTC.key] = (inst, held + D("0.0001"))  # $8 of coin no fill explains
+        self.broker.cash -= D("0.03")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok)
+        self.assertIn("positions differ", result.detail)
+        self.assertIn("frozen", self.book.submit([self.intent("a1", BTC, "buy", "0.0001")])[0].detail)
+        self.assertEqual(self.practice_dust(), [])
+
+    def test_cents_beside_an_order_in_doubt_still_freeze(self):
+        self.reconciled_buy()
+        self.broker.lose_next_submit = True  # the venue's answer to this order is lost
+        self.book.submit([self.intent("a1", BTC, "buy", "0.0001")])
+        self.broker.cash -= D("0.03")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok)
+        self.assertIn("outcome is unknown", result.detail)
+        self.assertIn("cash differs by -0.0300", result.detail)
+        self.assertEqual(self.practice_dust(), [])
+
+    def test_a_dollar_or_more_still_freezes_a_practice_book_until_it_adopts_the_venue(self):
+        from league.book import ADOPT_AFTER
+
+        self.reconciled_buy()
+        self.broker.cash -= D("1.00")
+        for _ in range(ADOPT_AFTER - 1):
+            result = self.book.reconcile()
+            self.assertFalse(result.ok)
+            self.assertIn("cash differs by -1.0000", result.detail)
+        self.assertTrue(self.book.reconcile().ok)  # the third reading adopts the venue, as before
+        self.assertEqual(self.practice_dust(), [])
+        self.assertIn("adopted the venue", self.ledger.last("book.baseline").payload["note"])
+
+
+class RealBookCentsTest(BookCase):
+    """A real-money book is unchanged: cents it cannot explain still freeze it (the freeze is the
+    point there), and nothing is booked as practice dust."""
+
+    venue = "alpaca"
+    real = True
+    cash = "1000"
+
+    def test_cents_still_freeze_a_real_book(self):
+        btc = Instrument("crypto", "BTC-USD", "alpaca", market_id="BTC/USD")
+        self.book.reconcile()
+        self.seat("a1")
+        self.broker.set_quote(btc, "80000", "80010")
+        self.assertEqual(self.book.submit([self.intent("a1", btc, "buy", "0.0005")])[0].status, "filled")
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("0.0322")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok)
+        self.assertIn("cash differs by -0.0322", self.book.frozen)
+        for _ in range(5):
+            self.assertFalse(self.book.reconcile().ok)  # and it never adopts the venue
+        self.assertFalse([e for e in self.ledger.iter(kinds="book.fill") if "practice book" in str(e.payload.get("detail") or "")])
+
+
 class KalshiBookTest(BookCase):
     venue = "kalshi"
     family = "kalshi"
