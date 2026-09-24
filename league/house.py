@@ -5408,9 +5408,12 @@ class House:
     def _follow_the_search(self) -> dict[str, dict[str, int]]:
         """R2 (3), Sept 24, 2026: fewer seats where the search is closed. While the foundry closes a desk
         (`Foundry._closed_desks`, `_search_closed_desks`), its cap is held at its living members, never above its
-        niches.json cap: no newcomer is born there -- not the lab's graduates that passed before the rule, not a
-        card, not a House mutation -- and nobody is displaced for it; it shrinks as its members die. The niches.json
-        cap comes back when the desk reopens. Returns desk -> {"cap", "base", "members"} for the desks held.
+        niches.json cap: no newcomer from outside is born there -- not the lab's graduates that passed before the
+        rule, not a card, not a House mutation -- and no evidenced newcomer is given a seat there (`_displaceable`); it
+        shrinks as its members die. Two ways still end one for one there, never growing it: a resident's own research
+        candidate (`_admission_gate`, the plain tournament: a resident past its grace makes way), and a merged corrected
+        child whose defect a resident still runs (`enroll`, which then retires the defect). The niches.json cap comes
+        back when the desk reopens. Returns desk -> {"cap", "base", "members"} for the desks held.
         At 15:06Z: kalshi-crypto-15m, 10 members, closed (and cut to 8 in niches.json: see its note)."""
         closed = self._search_closed_desks()
         base = getattr(self, "_base_caps", None)
