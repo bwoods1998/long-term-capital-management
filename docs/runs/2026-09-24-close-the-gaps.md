@@ -57,7 +57,7 @@ recorded for the next open; live verification uses the markets that trade around
 | L | The loop's joints | live 08:31Z (Deploy B, #247 + L1 in #254); hourly: Sail research <= $2/h, Merton pauses, repeated warnings escalated |
 | I | Feed recorders on the allowed hosts | live 08:31Z (Deploy B, #250); EIA and Odds wait for the owner's keys; to verify: `data.coverage` rows |
 | X1/X2 | Pause and size-down tools; the horizon rule | reviewed (#258: 11 of 12 fixed; X2 by measured settle lag in progress); rides Deploy C |
-| Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`; watch in progress |
+| Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | done: promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`, watch passed 08:41:13Z |
 | E | The lab as a search; the foundry brief; capacity | building since 07:50Z (C-search) |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
 | W | The site's mechanism ledger | building since 07:50Z (C-site) |
@@ -415,6 +415,23 @@ recorded for the next open; live verification uses the markets that trade around
   of Deploy A's code: 48 holds with no response, $86.86, released when the House's settled calls since
   the anchor and the gateway's growth were equal to the cent ($13.74). The race #246 fixes made that
   moment rare; it now compares only calls the reading must hold.
+- 08:41:13Z — **Deploy B's watch passed** (DEPLOY-EXIT 0). At 08:41Z: grant active on `c02ed852`, 112
+  living, no book frozen, no repeating warning, no health failure, tick 51 s. `family.record` rows for
+  49 families (sports-central-run-under proven, n 19, at-risk bound +0.204, stake $30). Recorders
+  reporting coverage: weather, nws, rates, treasury, odds, tsa current; forecast, earnings,
+  earnings_date, oi partial (backfilling); polls unavailable (RCP's bot wall, as designed);
+  `consensus` (The Odds API) and `eia` waiting for the owner's keys. Merton: no role paused (real
+  P&L +$13.88 over 58 settlements in 24 h). L1's first pass superseded two practice parents whose
+  children fixed a taker entry: haghani-37 (19 of 19 entry fills takers, crypto-alts-reversion,
+  negative pooled record) and huang-l55a341 (1 of 1). L1 as reviewed applies to practice parents too
+  (the plan's text names real-money ones); both supersessions are within its rule. The board carries
+  `capacity` per agent. The final head's full local suites: league 2,896 tests, ltcm 1,853, 0 failures.
+- 08:50Z — **Cleanup after Deploy B:** 11 merged worktrees and 12 merged branches (local and origin)
+  removed, the merged `ltcm-hosts` worktree and `ops/feed-hosts` branch too; 50 merged local branches
+  of earlier runs deleted; two unmerged branches that existed only locally
+  (`astra/teacher/first-night-of-replays-ec3f3563`, `night/tick-never-blocks-e1-local`) pushed to
+  origin. The main checkout fast-forwarded to `3faf146`; its untracked
+  `docs/goals/LTCM_OVERNIGHT_GOAL.md` (Sept 21) is left for the owner.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
