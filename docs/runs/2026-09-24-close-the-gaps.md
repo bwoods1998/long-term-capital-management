@@ -762,3 +762,34 @@ the numbers are in the plan's new section "Where the run stands at the resume"):
   the 4-seat `kalshi-crypto-strikes` desk); 0 self-cross refusals; 9 of 12 recorders, `kalshi-open`
   idle. Tick 95-175 s (C-perf is in Deploy C).
 - The plan gained a "Wave 3" section (PR #269) with the resume's order of work.
+
+### T+16 (17:27Z Sept 24; the resumed run's first note, T0' + 2:22)
+
+`scripts/gap_scoreboard.py --take snap-T16 --baseline 2026-09-24T05:37:31Z` from `~/Work/ltcm-deploy` at `84e1d0f`
+(ledger 547,400 rows to 17:27:42Z; window the last 24 h; release `20260924T163119Z-cb03f8aa33a8`).
+
+| # | Metric | T0 | T+8 | T0' (15:06Z) | T+16 (17:27Z) |
+|---|---|---|---|---|---|
+| 1 | Families proven (House record); real-bound families; capacity | 2 (n 2, 5) | 1 | 1; 1, $82.17/day | **2**: sports-central-run-under (pooled n 19, real n 5, bound +0.204, $77.79/day) and megacaps-chip-demand-relay (pooled n 10 practice, bound +0.0016, $0.46/day, no real member); 1 real-bound |
+| 2 | Promotions since Deploy A: settled, share positive | — | 0 | 9 probes, −$6.07 on 8, 0 | 10 probes, −$6.65 on 12, 2 positive |
+| 3 | Real $ proven / unproven (board `stake_usd`, the net loan); Alpaca real agents | $96.56 / $168.98; 0 | $20.54 / $122.35; 1 | $20.06 / $168.94; 3 | $20.06 / $238.94; **4** (krasker-14's $80 options probe) |
+| 4 | Median life all / day-horizon; deaths before 3 fills | 14.38 / 19.83 h; 66% | 9.59 / 5.79 h; 61% | 5.84 / 5.09 h; 66% | 5.21 / 5.09 h over 140; 66% (24-h window; since Deploy C′ at 16:32:40Z: 3 deaths, 0 before 3 fills) |
+| 5 | Lab batches last hour; LLM share of graduates; waiters, longest | 0; 2/18; 30 at 33.8 h | 106; 14/50; 23 at 41.7 h | 71; 14/54; 56 at 47.3 h | 70; 14/56; 40 (23 graduates, 17 cards) at 49.6 h |
+| 6 | Self-cross refusals of sells (6 h); stacked promotions | 26; 4/11 | 8; 0 | 0; 1/9 | 0; 1/10 |
+| 7 | Recorders; idle desks | 0/12; 1 | 9/12; 0 | 9/12; 1 | 9/12; 0 |
+
+**State.** Deploy C shipped at the second attempt: the first (15:37:57Z) was rolled back by a practice-book freeze the
+old House recorded (the watchdog judged the old process's file); Deploy C′ (#274, with the practice-dust fix #273, the
+watchdog fix and CI's 20-minute tests job) was promoted at 16:32:40Z and passed its watch. **R1 in its first hour
+(16:32:40-17:23Z):** `tick_steps` live; the lab holds nudges and losing windows (graduate waiters 41 → 23); agents use
+the in-place parameter edit (16 `edit_params` rows); L1 superseded london-l440e61 by its fee-fixed child at 17:11:05Z;
+the foundry wrote its first open-desk cards (kalshi-open, 17:15Z); 3 deaths, none before 3 fills, no newborn displaced;
+no practice freeze (3 dust rows booked). **Not met:** the tick, 43-67 s after the restart, then 87-173 s (the hour's
+slowest steps: publish 87.7 s, population 67.7, schedule 52.3): a perf builder profiles it on the T+16 snapshot
+(`r6/perf`). Diesel's horizon judge waits for its lags (2 series recorded). In review or building for Deploy D: R2 and
+R3 (#276, the seat market's capacity and the proven family's births; its review `r2/review`), R5 (`r5/family-probe`,
+the third digest change), R6 (#278 practice option fees in `book.py`; #279 earnings timeout, idle-desk counts, the
+tick-steps flake). Real money: Kalshi +$22 realized today (the sports and crypto-strike families +$49.41, the 15-minute
+crypto probes −$28.49); a probe on a losing family was seated twice more since T0' (huang-h51fdd3-6 lost $1.20 and was
+demoted; krasker-14 holds $80 on options-pullback, 19 blocks −0.383). Compute at 16:37Z: OpenAI $471.76 of $607; Sail
+$160.76 (runway 4.5 days).
