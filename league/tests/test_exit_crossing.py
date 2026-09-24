@@ -237,6 +237,32 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual(self.crossed_fills("buyer"), [])
         self.assertTrue(self.book.reconcile().ok)
 
+    def test_a_bid_whose_cancel_the_venue_confirms_late_is_told_why(self):
+        """Review of #226: the House cancelled a peer's bid to cross an exit, the venue confirmed the cancel only
+        after the pass had given the cross up, and the poll closed the bid with no reason at all: the peer lost
+        its resting bid to the House and its record said nothing about it."""
+        held = self.hold("seller", self.inst, "1.62")
+        bid = self.rest_bid("buyer", self.inst, "3", "12.17")
+        pending = lambda order_id: self.broker.get_order(order_id)  # noqa: E731 - Alpaca's pending_cancel reads as open
+        with patch.object(self.broker, "cancel", side_effect=pending):
+            self.book.submit([self.intent("seller", self.inst, "sell", held)])
+        self.assertEqual(self.crossed_fills("buyer"), [])
+        self.broker.orders[bid].status = "cancelled"  # the venue finishes the House's cancel
+        self.book.poll()
+        told = [row for row in order_outcomes(self.ledger, "buyer", self.book.name) if row.get("order_id") == bid][-1]
+        self.assertEqual(told["status"], "cancelled")
+        self.assertIn("confirmed the cancel too late for the cross, so nothing was crossed", told["reason"])
+
+    def test_the_agents_own_later_cancel_is_not_told_as_the_houses(self):
+        held = self.hold("seller", self.inst, "1.62")
+        bid = self.rest_bid("buyer", self.inst, "3", "12.17")
+        pending = lambda order_id: self.broker.get_order(order_id)  # noqa: E731
+        with patch.object(self.broker, "cancel", side_effect=pending):
+            self.book.submit([self.intent("seller", self.inst, "sell", held)])
+        self.assertEqual(self.book.cancel("buyer", bid).status, "cancelled")  # the bidder withdraws it itself
+        told = [row for row in order_outcomes(self.ledger, "buyer", self.book.name) if row.get("order_id") == bid][-1]
+        self.assertEqual((told["status"], told["reason"]), ("cancelled", ""))
+
     def test_a_cancel_confirmed_on_a_later_read_is_still_crossed(self):
         """Alpaca answers a cancel with 204 and passes the order through `pending_cancel` (read as open):
         the House reads it again a moment later before it gives the cross up."""

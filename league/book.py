@@ -208,6 +208,11 @@ OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would
 PEER_CROSS_WHY = ("cancelled by the House to cross another agent's exit inside the House at your limit, as a maker "
                   "(see your cross fill); the rest of this bid is not re-placed: bid again at your next wake if you "
                   "still want it")
+#: What that peer is told when the venue confirmed the House's cancel only after the pass had given the cross up
+#: (`_clear_the_way`: two re-reads, then doubt): its bid is gone and nothing was crossed (review of #226).
+PEER_UNCROSSED_WHY = ("cancelled by the House to cross another agent's exit inside the House, but the venue confirmed "
+                      "the cancel too late for the cross, so nothing was crossed: bid again at your next wake if you "
+                      "still want it")
 
 
 # --------------------------------------------------------------------------------------- data
@@ -601,6 +606,10 @@ class Book:
         #: and when the book closed one as never arrived (`_recheck_never_arrived` asks again).
         self._missed: dict[str, str] = {}
         self._never_arrived: dict[str, str] = {}
+        #: Why the House cancelled an order whose cancel the venue had not confirmed within the pass (`_clear_the_way`),
+        #: for the cancelled row a later poll writes (`_attribute`): the agent reads its orders' latest rows. In memory
+        #: only: after a restart that row carries no reason, as before (review of #226, Sept 24, 2026).
+        self._cancel_why: dict[str, str] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -1572,6 +1581,7 @@ class Book:
             self.cancel(intent.agent, working.order_id, why=OWN_CROSS_WHY)
             self._await_cancel(working, now, why=OWN_CROSS_WHY)
             if working.open:
+                self._cancel_why[working.order_id] = OWN_CROSS_WHY
                 doubt = doubt or f"the venue has not confirmed the cancel of your own order {working.order_id}"
             elif working.status == "cancelled":
                 withdrawn.append(working.order_id)  # one that filled first is booked, and is no longer in the way
@@ -1601,6 +1611,7 @@ class Book:
             self.cancel(share.agent, working.order_id, why=PEER_CROSS_WHY)
             self._await_cancel(working, now, why=PEER_CROSS_WHY)
             if working.open:
+                self._cancel_why[working.order_id] = PEER_UNCROSSED_WHY
                 doubt = f"the venue has not confirmed the cancel of the House's resting bid {working.order_id}"
                 break
             if working.status != "cancelled":
@@ -2260,6 +2271,10 @@ class Book:
                             suffix=f"allocation:{text(filled)}", allocation=plan)
             self._finish_allocation(working)
         if order.status != working.status:
+            if order.status not in OPEN_STATUSES:
+                told = self._cancel_why.pop(working.order_id, "")
+                if not reason and order.status == "cancelled":
+                    reason = told  # the House's own cancel, confirmed only now (`_clear_the_way`)
             self._order_row(self._base_of(working), order.status, order.broker_order_id or working.broker_order_id, suffix=f"{order.status}:{text(filled)}",
                             reason=reason)
 
@@ -2613,6 +2628,7 @@ class Book:
             if not working.open:
                 return Outcome("", agent, "refused", f"order is already {working.status}", order_id)
             now = now_iso(self.clock)
+            self._cancel_why.pop(order_id, None)  # a new cancel says its own why
             reference = working.broker_order_id or working.order_id
             try:
                 self.broker.cancel(reference)
