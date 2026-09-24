@@ -404,6 +404,12 @@ class FamilySwingOnTheFloor(KalshiHouse):
 
         def audit(agent, verdict, **kwargs):
             self.verdicts.append(verdict)
+            family = verdict.numbers.get("family_swing")
+            if family:
+                # As the real auditor writes a family swing's verdict (`Auditor.audit`): against the member, naming the family.
+                row = {"approve": self.auditor.approve, "summary": "test", "family_swing": family}
+                self.house.ledger.append("audit.verdict", row, agent=agent.id)
+                return row
             return approve(agent, verdict)
 
         self.auditor.audit = audit
@@ -505,6 +511,30 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.rebalance()
         self.assertEqual(alloc.family_state(agents[0]), "swing")
         self.assertEqual(len(self.verdicts), 1)
+
+    def test_the_family_swings_audit_is_not_its_members_own(self):
+        """Review of #242: the family's verdict is written against one member (the one with the most real trades), but it
+        judged the FAMILY's stake. Read as that member's own, its approval let the member take the agent-level swing (rung
+        3, up to 60% of the venue) without the audit that route requires, and a veto would hold its own promotions."""
+        (a, b), book = self.seated_bunts()
+        alloc = self.house.allocator
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        self.rebalance(); self.house.wait(5); self.rebalance()
+        self.assertEqual(alloc.family_state(a), "swing")
+        rep = self.house.registry.get(alloc.state["family_audits"]["weather-favorites@kalshi"]["agent"])
+        self.assertEqual(allocator.audit_standing(self.house, rep), "none")
+        self.assertIsNone(self.house._audit_wait(rep))  # the family's verdict starts no cooldown of its own
+        for x in (a, b):
+            self.table[x.id] = dict(e=1.30, w_paper=1.21, w_real=1.1, real_trades=8, real_stay_closed=8, paper_trades=6, paper_settled=6)
+        before = len(self.verdicts)
+        self.rebalance()
+        self.house.wait(5)
+        self.assertIn(rep.id, [v.agent for v in self.verdicts[before:]])  # its own agent-level swing was audited
+        self.assertEqual(self.house.evaluator.rung(rep.id), 3)  # and the approval of that audit, not its family's, seated it
+        self.auditor.approve = False  # a family veto is the family's too: it holds none of the member's own promotions
+        self.house.ledger.append("audit.verdict", {"approve": False, "summary": "test", "family_swing": "weather-favorites@kalshi"},
+                                 agent=rep.id)
+        self.assertEqual(allocator.audit_standing(self.house, rep), "approved")
 
     def test_the_envelope_bounds_every_increase(self):
         """A $200 envelope holding the family's two $30 bunts and nine $10 probes of another family has $50 of
@@ -789,6 +819,13 @@ class FamilyPacket(unittest.TestCase):
             from league.auditor import SYSTEM
 
             self.assertIn("FAMILY SWING", SYSTEM)
+            # A call that fails names the family too (review of #242): the House's own audit readers skip it, and the
+            # allocator reads it back after a restart instead of asking again before the error cooldown.
+            import urllib.error
+
+            failed = case.auditor(urllib.error.URLError("no route")).audit(agent, verdict, charge=False)
+            self.assertTrue(failed["error"])
+            self.assertEqual(case.ledger.last("audit.verdict", agent=agent.id).payload["family_swing"], "favourites@kalshi")
         finally:
             case.ledger.close()
             case.dir.cleanup()

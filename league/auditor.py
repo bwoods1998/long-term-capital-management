@@ -200,6 +200,10 @@ class Auditor:
         """`charge=False`: the House pays (game.json `audit.house_pays`, Sept 23, 2026). The cost is
         still recorded on the verdict and still booked against the owner's frontier allowance."""
         packet = self.packet(agent, verdict)
+        # Whose verdict this is when it judged a family swing (Sept 24, 2026), on every row this audit writes, a failed
+        # call's included: the allocator reads it back after a restart (`Allocator._family_verdict_on_ledger`), and the
+        # House's own audit readers never take it for the member's own verdict (review of #242).
+        family = {"family_swing": packet["test_passed"]["family_swing"]} if packet["test_passed"].get("family_swing") else {}
         try:
             # 12,000, as Merton's own passes get: reasoning tokens are spent out of this budget
             # before a single character of the JSON is written, and an audit that runs out of room
@@ -209,7 +213,7 @@ class Auditor:
             # No audit, no promotion: a gate that fails open is not a gate.
             self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300],
                 "policy_digest": packet['audit_policy_digest'],
-                "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
+                "summary": "the audit could not run; the agent stays on paper", **family}, agent=agent.id)
             return {"approve": False, "error": str(exc)}
         if answer.cost_usd > 0 and charge:
             self.economy.charge(agent.id, answer.cost_usd, "frontier audit", detail={"model": answer.model})
@@ -237,9 +241,7 @@ class Auditor:
             "model": answer.model,
             "book": packet["test_passed"].get("book"),
             "blocks_at_audit": len(packet["paper_blocks"]),
-            # Whose verdict this is when it judged a family swing (Sept 24, 2026): the allocator reads it back
-            # after a restart (`Allocator._family_verdict_on_ledger`).
-            **({"family_swing": packet["test_passed"]["family_swing"]} if packet["test_passed"].get("family_swing") else {}),
+            **family,
         }
         self.ledger.append("audit.verdict", row, agent=agent.id)
         return row

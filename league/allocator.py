@@ -274,12 +274,15 @@ def left_real_at(house: Any, agent: str) -> float | None:
 def audit_standing(house: Any, agent: Any) -> str:
     """"approved" when the latest real audit verdict on the agent's CURRENT code approved it,
     "vetoed" when it refused, "none" when there is none (errors are not verdicts; a verdict from
-    before the agent last adopted code does not speak for the code it runs now)."""
+    before the agent last adopted code does not speak for the code it runs now). A family swing's
+    verdict (`family_swing` on the row) is its FAMILY's, written against one member: it judged the
+    family's stake, never this agent's own promotion (review of #242, Sept 24, 2026: the member it was
+    written against took the agent-level swing, up to 60% of the venue, on its family's approval)."""
     adopted = house.ledger.last("agent.strategy", agent=agent.id)
     since = adopted.seq if adopted is not None else 0
     latest = None
     for entry in house.ledger.iter(kinds="audit.verdict", agent=agent.id, after=since):
-        if not entry.payload.get("error"):
+        if not entry.payload.get("error") and not entry.payload.get("family_swing"):
             latest = entry.payload
     if latest is None:
         return "none"
