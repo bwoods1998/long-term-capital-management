@@ -638,6 +638,34 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         self.assertGreater(book.account(a.id).holdings[btc.key].quantity, 0)  # the fill, less the venue's fee in the coin
         self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
 
+    def test_a_cancel_the_venue_does_not_answer_never_stops_the_pass(self):
+        """The R5 adversarial review (Sept 24, 2026): `HttpTransport` raises `TransportError` -- not a `BrokerError` -- when the
+        gateway does not answer, and `Book.cancel` lets it through, so the drain's cancel stopped the whole pass (no
+        promotion, no stake, no board, no allocator.json, an error alert) at every pass the gateway stayed silent while a
+        probe on a losing family rested a bid. The probe waits -- a cancel that got no answer may yet have been taken,
+        and a fill may yet come -- and the pass goes on."""
+        from ltcm.data import TransportError
+
+        a = self.seated()
+        book, _, order_id = self.resting_bid(a)
+        self.losing()
+        other = self.house.spawn("mullins", "alloc-other", IDLE, reason="test", endowment="2.5")
+        self.house.evaluator.seat(other.id, 1, "test: straight to practice")
+        self.house._state["tried"][other.id] = other.code_sha256
+        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6), other.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}
+        silent = TransportError("DELETE https://gateway/v2/orders/x failed: timed out")
+        with patch.object(self.real, "cancel", side_effect=silent), self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)  # it waits: its bid stands
+        self.assertTrue(book.open_orders(a.id))
+        self.assertEqual(self.house.evaluator.rung(other.id), 2)  # the pass went on: another family's newcomer is seated
+        failed = [e for e in self.house.ledger.iter(kinds="ops.alert") if "allocator's pass failed" in str(e.payload.get("text"))]
+        self.assertEqual(failed, [])
+        with self.evidence_of(table):
+            self.tick()  # the gateway answers again: the bid is cancelled, and flat, it goes back to practice
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.assertIn(order_id, self.real.cancelled)
+
     def test_a_buy_the_book_still_asks_the_venue_about_keeps_the_probe_seated(self):
         """A buy closed as never arrived may be revived with its fill for a quarter of an hour (`Book._reserved_cash`): its
         fill after a demotion would be sold by the wind-down's retry (the R5 review, Sept 24, 2026)."""

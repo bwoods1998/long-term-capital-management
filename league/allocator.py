@@ -1581,7 +1581,16 @@ class Allocator:
             book = self.house.books.get(REAL_BOOK[agent.venue])
             for working in book.open_orders(agent.id):
                 if working.side == "buy" and working.instrument.asset_class != "event":
-                    book.cancel(agent.id, working.order_id, why=f"the allocator: {why}")
+                    try:
+                        book.cancel(agent.id, working.order_id, why=f"the allocator: {why}")
+                    except Exception as exc:  # noqa: BLE001 - a venue that does not answer never stops the pass
+                        # `HttpTransport` raises `TransportError`, not a `BrokerError`, when the gateway does not answer, and
+                        # `Book.cancel` lets it through: the whole pass stopped here at every pass it stayed silent (the R5
+                        # adversarial review, Sept 24, 2026). The bid stands on the book until a read says otherwise, so
+                        # the probe waits ("working") and the cancel is asked again at the next pass.
+                        self._family_error(f"{agent.id}'s cancel of {working.order_id}", agent.venue, exc,
+                                           then="the probe keeps its seat until the venue answers; the cancel is asked again "
+                                                "at the next pass")
             obstacle = self._unflat(agent)
         if obstacle is not None:
             summary.setdefault("probes_waiting_flat", []).append(agent.id)
