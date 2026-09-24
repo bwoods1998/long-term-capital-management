@@ -813,6 +813,40 @@ class TrialOnTheFloor(KalshiHouse):
         demote = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
         self.assertEqual((demote["band_from"], demote["band_to"]), ("swing", "probe"))
 
+    def test_a_probe_that_swings_is_on_the_tape_as_a_probe(self):
+        """Review of #224 (Sept 24, 2026): the move up from a probe says "probe", as the board and the
+        move down say it; it had said "bunt -> swing" for an agent staked and shown as a probe."""
+        a = self.seated_probe()
+        ready = dict(self.READY, e=1.30, w_paper=1.21, w_real=1.1, real_trades=8, real_stay_closed=8)
+        with patch.object(allocator, "audit_standing", return_value="approved"), self.evidence_of({a.id: ready}):
+            summary = self.house.allocator.rebalance()
+        self.assertEqual(self.house.evaluator.rung(a.id), 3)
+        promote = self.promote_row(a)
+        self.assertEqual((promote["band_from"], promote["band_to"]), ("probe", "swing"))
+        self.assertEqual([(m["from"], m["to"]) for m in summary["moves"] if m["agent"] == a.id], [("probe", "swing")])
+
+    def test_a_probe_whose_stake_could_not_be_lent_is_named_a_probe(self):
+        """Review of #224: a probe whose stake does not land goes straight back, and the tape and the
+        alert say a probe went back, not a bunt."""
+        from league.book import Book, BookError
+
+        a = self.agent()
+        stake = Book.stake
+
+        def refuse(book, agent, usd, *args, **kwargs):
+            if book.real_money and agent == a.id:
+                raise BookError("test: the venue refused the loan")
+            return stake(book, agent, usd, *args, **kwargs)
+
+        with patch.object(Book, "stake", refuse), self.evidence_of({a.id: self.READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        demote = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
+        self.assertEqual((demote["band_from"], demote["band_to"]), ("probe", "paper"))
+        self.assertIn("probe's stake could not be lent", demote["reason"])
+        alerts = [e.payload.get("message") or e.payload.get("text") or str(e.payload) for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertTrue(any("$10 probe could not be staked" in m for m in alerts), alerts[-3:])
+
     def test_the_throttle_never_halves_a_probe_under_a_tradable_stake(self):
         a = self.agent()
         alloc = self.house.allocator

@@ -1078,9 +1078,9 @@ class Allocator:
         real = house.books.get(REAL_BOOK[venue])
         if real is None or not real.account(agent.id).funded:
             # The stake did not land: straight back, in the same pass, rather than hold an unfunded seat.
-            house.evaluator.demote(agent.id, "the bunt's stake could not be lent; back to paper", self._numbers(ev, "bunt", "paper", None, why))
+            house.evaluator.demote(agent.id, f"the {tier}'s stake could not be lent; back to paper", self._numbers(ev, tier, "paper", None, why))
             house.seat(agent)
-            house.alert("warning", f"allocator: {agent.id}'s ${stake} bunt could not be staked on {venue}; it stays on paper")
+            house.alert("warning", f"allocator: {agent.id}'s ${stake} {tier} could not be staked on {venue}; it stays on paper")
             return
         house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", f"the allocator seated it as a {tier}")
         summary["moves"].append({"agent": agent.id, "from": "paper", "to": tier, "why": why, "stake_usd": str(stake)})
@@ -1132,9 +1132,10 @@ class Allocator:
             house._start_audit(agent, verdict, generation)
             return
         stake = self.target_stake(agent, "swing", ev)
-        house.evaluator.promote(agent.id, 3, f"swing: {why}", self._numbers(ev, "bunt", "swing", stake, why))
+        band_from = self._band_now(agent, ev)  # "probe" or "bunt": the tape says what the board said (review of #224)
+        house.evaluator.promote(agent.id, 3, f"swing: {why}", self._numbers(ev, band_from, "swing", stake, why))
         house._promotion_status(agent, verdict, "promoted", "the allocator moved it to the swing band")
-        summary["moves"].append({"agent": agent.id, "from": "bunt", "to": "swing", "why": why, "stake_usd": str(stake)})
+        summary["moves"].append({"agent": agent.id, "from": band_from, "to": "swing", "why": why, "stake_usd": str(stake)})
 
     def _size(self, agent: Any, ev: Evidence, band: str, p: Mapping[str, Any]) -> dict[str, Any] | None:
         """Move a real account's stake toward its target: up to the envelope's headroom, down by free
