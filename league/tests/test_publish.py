@@ -326,6 +326,78 @@ class PublisherTest(HouseCase):
         self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], ["DeepSeek V4 Flash", "gpt-6-astra"])
 
 
+class CheckpointFoldsTest(HouseCase):
+    """Sept 24, 2026 (R6-perf): the checkpoint summed the whole ledger on every tick (every charge twice,
+    every model request, each agent's every verdict, the newest 10,000 wakes: about 250,000 rows a tick on
+    a copy of the 17:27Z snapshot). It folds them once and then reads only the new rows; the body is the
+    one a publisher reading the whole ledger afresh draws."""
+
+    FOLDED = ("credit.charge", "ops.budget", "provider.request", "merton.pass", "audit.verdict", "agent.woke",
+              "agent.intent", "eval.verdict")
+
+    def rows(self, agents):
+        ledger = self.house.ledger
+        today, yesterday = now_iso(self.clock)[:10], now_iso(lambda: self.clock() - 86400)[:10]
+        for i, agent in enumerate(agents):
+            for what, usd in (("tokens: research", "0.0123"), ("sandbox seconds", "0.004"), ("web search", "0.01"), ("merton", "0.25")):
+                ledger.append("credit.charge", {"usd": str(D(usd) * (i + 1)), "what": what}, agent=agent.id)
+            ledger.append("credit.charge", {"usd": "0.5", "what": "tokens: yesterday"}, agent=agent.id, at=yesterday + "T10:00:00.000Z")
+            ledger.append("agent.intent", {"book": "alpaca-paper"}, agent=agent.id)
+            ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper"}, agent=agent.id)
+            ledger.append("eval.verdict", {"decision": "look", "look": i + 1, "active_blocks": 3, "mean": 0.01, "lcb": -0.01,
+                                           "ucb": 0.03, "alpha_spent": 0.001, "drawdown": 0.02 * (i + 1)}, agent=agent.id)
+        ledger.append("agent.woke", {"ok": True}, agent=agents[0].id, at=yesterday + "T23:59:00.000Z")
+        ledger.append("ops.budget", {"what": "sail", "spent_usd": "0.31", "balance_usd": 100}, at=today + "T00:10:00.000Z")
+        ledger.append("ops.budget", {"what": "sail", "spent_usd": "1.20"}, at=yesterday + "T12:00:00.000Z")
+        ledger.append("ops.budget", {"what": "expedition", "spent_usd": "9.99"})  # not the Sail meter: not in the sums
+        ledger.append("provider.request", {"profile": "flash_flex", "_body": "private"})
+        ledger.append("merton.pass", {"role": "teacher", "cost_usd": "0"})
+
+    def publisher(self, name):
+        return Publisher("https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / f"{name}.json", tape="test",
+                         opener=FakeSite(), clock=self.clock)
+
+    def body(self, publisher):
+        return json.loads(json.dumps(publisher.checkpoint(self.house), default=str))
+
+    def test_new_rows_are_folded_onto_the_old_sums_and_the_body_is_a_fresh_read_s(self):
+        from unittest.mock import patch
+
+        first, second = self.seated("first"), self.seated("second", code=BUYER.replace("test-buyer", "test-second"))
+        self.rows([first, second])
+        standing = self.publisher("standing")
+        before = self.body(standing)
+        self.assertEqual(before, self.body(self.publisher("fresh-before")))
+        self.house.tick()
+        self.rows([second, first])  # every folded kind again, after the standing publisher's cursor
+        self.house.evaluator.promote(first.id, 2, "fixture evidence")
+        self.house.evaluator.demote(first.id, "fixture drift")
+        self.house.ledger.append("provider.request", {"profile": "pro_flex"})
+        self.house.ledger.append("audit.verdict", {"agent": second.id, "cost_usd": "0.42"})
+        with patch.object(self.house.ledger, "read", wraps=self.house.ledger.read) as read:
+            after = self.body(standing)
+        whole = [c.kwargs for c in read.call_args_list if c.kwargs.get("after", 0) == 0 and not c.kwargs.get("newest")
+                 and set([c.kwargs["kinds"]] if isinstance(c.kwargs.get("kinds"), str) else c.kwargs.get("kinds") or ()) & set(self.FOLDED)]
+        self.assertEqual(whole, [], "a checkpoint after the first reads none of the folded kinds from the start")
+        self.assertEqual(after, self.body(self.publisher("fresh-after")))
+        # And the sums are the whole ledger's, as the full read made them.
+        ledger, today = self.house.ledger, now_iso(self.clock)[:10]
+        charges = list(ledger.iter(kinds="credit.charge"))
+        desk = {row["id"]: row for row in after["desks"]}[first.id]
+        self.assertEqual(desk["cost_usd"], money(sum((D(e.payload["usd"]) for e in charges if e.agent == first.id), D(0)), 4))
+        self.assertEqual(desk["orders"], ledger.count(kinds="agent.intent", agent=first.id))
+        self.assertEqual(desk["gate"]["evidence"]["lifecycle"]["last_move"]["decision"], "demote")
+        self.assertEqual(desk["max_drawdown_pct"], money(D("0.04") * 100, 4))  # its latest look's drawdown
+        self.assertEqual(after["run"]["sail_model_spend_total_usd"],
+                         money(sum((D(e.payload["usd"]) for e in charges if "token" in e.payload["what"]), D(0)), 4))
+        self.assertEqual(after["run"]["sail_model_spend_today_usd"],
+                         money(sum((D(e.payload["usd"]) for e in charges if "token" in e.payload["what"] and e.at[:10] == today), D(0)), 4))
+        self.assertEqual(after["run"]["sail_spend_total_usd"], money(D("0.31") + D("1.20") + D("0.31") + D("1.20"), 4))
+        self.assertEqual(after["run"]["sessions_today"], sum(1 for e in ledger.iter(kinds="agent.woke") if e.at[:10] == today))
+        self.assertIn(before["run"]["models_used"][0], after["run"]["models_used"])
+        self.assertGreater(len(after["run"]["models_used"]), len(before["run"]["models_used"]))
+
+
 class FakeAllocator:
     """The allocator's published contract (Workstream A): `board()` and nothing else."""
 

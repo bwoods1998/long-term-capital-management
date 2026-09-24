@@ -678,6 +678,8 @@ class House:
         #: (parent, its code, child, its code) -> when L1 last found no corrected entry there
         #: (`_supersede_by_research`): the look is taken again at most hourly a pair.
         self._supersede_seen: dict[tuple[str, str, str, str], float] = {}
+        #: (agent, keeps hours) -> (what it was read from, its program's opportunity) (`_program_opportunity`).
+        self._opportunities: dict[tuple[str, bool], tuple[tuple[int, int | None], tuple[float, int]]] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -4711,40 +4713,52 @@ class House:
         return 'openai' if profile == 'openai_luna' else 'sail'
 
     def research_due(self, agent: Agent) -> bool:
+        """Is a research pass due for this agent now: every check below must pass.
+
+        The campaign's budget (`pacer.may_spend`) is asked after the checks that read and write nothing
+        (Sept 24, 2026, R6-perf): it cost 17.7 ms a call on a copy of the 17:27Z snapshot (a scan of
+        campaigns.sqlite's 50,360 commitments and two sums over them), and this was asked of every
+        living agent on every tick, about 2 s of a tick's CPU there, though most agents are not due for
+        their own reasons (a pass in hand, its interval not over). The answer is the same conjunction of
+        the same checks. The Sail research cap and the gate, which write (an `ops.budget` row when the
+        cap opens or closes, `research.gate` rows), are still asked only after the budget, as before."""
         if self._closing.is_set() or not agent.alive or self.researcher is None or not self.settings.research:
             return False
         if self.paused():
             return False
         kind = self._research_budget_kind(agent)
-        if not self.pacer.may_spend(kind):
-            return False
         if self.deploying():
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
         if pending:
+            if self.clock() < pending["available"]:
+                return False
+            if not self.pacer.may_spend(kind):
+                return False
             # A job still `queued` has bought nothing yet: the tick enqueues every due agent at once and
             # the research lane's workers take them in turn (up to 34 waited at once, Sept 24 00Z), so it
             # waits for the Sail cap like a new session; one under way resumes (review of #236).
-            if pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped():
-                return False
-            return self.clock() >= pending["available"]
-        if kind == "sail" and self._sail_research_capped():
-            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
+            return not (pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped())
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
         last = max(float(self._state["last_research"].get(agent.id) or 0), self.research_jobs.last_finished(agent.id))
         # A new execution failure is actionable evidence. Give it one prompt response,
-        # retaining the provider budget, earned-credit and durable-job checks above.
+        # retaining the provider budget, earned-credit and durable-job checks.
         refusal = self.ledger.last('book.refused', agent=agent.id)
         book = self.book_of(agent)
-        if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
-                and _epoch(refusal.at) > last and self.clock() - last >= 60):
-            return True
-        interval = self.research_interval_hours(agent) * 3600
-        if self.clock() - last < interval:
+        prompt = (refusal is not None and book is not None and refusal.payload.get('book') == book.name
+                  and _epoch(refusal.at) > last and self.clock() - last >= 60)
+        interval = 0.0
+        if not prompt:
+            interval = self.research_interval_hours(agent) * 3600
+            if self.clock() - last < interval:
+                return False
+        if not self.pacer.may_spend(kind):
             return False
-        return self._gate(agent, last, interval)
+        if kind == "sail" and self._sail_research_capped():
+            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
+        return True if prompt else self._gate(agent, last, interval)
 
     def _gate(self, agent: Agent, last: float, interval: float) -> bool:
         """Back off research that keeps coming back empty while nothing about the agent has changed.
@@ -5027,15 +5041,15 @@ class House:
                 # Has it traded since its current program's opportunity? Read for every desk when an
                 # evidenced newcomer asks (a never-traded seat is what it may take); the plain
                 # tournament reads it only where the session rules below need it.
-                traded = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id, after=opportunity_seq)), None) is not None
+                traded = bool(self.ledger.read(kinds="book.fill", agent=agent.id, after=opportunity_seq, limit=1))
             book = None
             if keeps_hours:
                 # The rebuilt league was born on a Saturday. Twelve wall-clock hours later
                 # its equity agents were displaced before their first market session. Start
                 # their paper-seat grace at an actual offered opportunity (or a legacy fill),
                 # not at a weekend birth. Replay-only agents still have their normal deadline.
-                first = next((e for e in self.ledger.iter(kinds=("agent.woke", "book.fill"), agent=agent.id, after=opportunity_seq)
-                              if e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0)), None)
+                first = self._first_row(("agent.woke", "book.fill"), agent.id, opportunity_seq,
+                                        lambda e: e.kind == "book.fill" or (e.payload.get("ok") and int(e.payload.get("offered") or 0) > 0))
                 if first is None:
                     kept("never offered a session since its program's opportunity")
                     continue
@@ -5177,12 +5191,22 @@ class House:
         On a desk that keeps hours (`keeps_hours`), a rewrite of an agent that has never traded is NOT
         a new opportunity (Sept 23, 2026): research rewrote idle stock agents every few hours (mcentee-34
         three times in eight), each rewrite restarted the clock, and the agents that never traded
-        outlived the ones that did."""
-        opportunity, opportunity_seq = _epoch(agent.born_at), 0
+        outlived the ones that did.
+
+        Remembered for each agent until it has a new `agent.born`, `agent.strategy` or `eval.verdict` row or its
+        first fill (R6-perf, Sept 24, 2026): the seat market asks for every resident on every question, and in six
+        ticks of a full league on a copy of the 17:27Z snapshot that was 2,256 reads of each agent's every verdict
+        (81,096 rows parsed, 3.2 s). The answer is a fold of exactly those rows, so the same rows are the same answer."""
         first_fill = None
         if keeps_hours:
-            found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
-            first_fill = None if found is None else found.seq
+            found = self.ledger.read(kinds="book.fill", agent=agent.id, limit=1)  # its first fill, one row
+            first_fill = found[0].seq if found else None
+        newest = self.ledger.read(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id, limit=1, newest=True)
+        read_from = (newest[-1].seq if newest else 0, first_fill)
+        hit = self._opportunities.get((agent.id, keeps_hours))
+        if hit is not None and hit[0] == read_from:
+            return hit[1]
+        opportunity, opportunity_seq = _epoch(agent.born_at), 0
         signature = None
         for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
             p = entry.payload
@@ -5200,7 +5224,22 @@ class House:
                     signature = current
             elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
                 opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+        self._opportunities[(agent.id, keeps_hours)] = (read_from, (opportunity, opportunity_seq))
         return opportunity, opportunity_seq
+
+    def _first_row(self, kinds: Any, agent_id: str, after: int, match: Callable[[Any], Any], *, page: int = 64) -> Any:
+        """The first of an agent's rows of `kinds` after `after` that `match` accepts, or None: the rows `ledger.iter`
+        gives, in the same order, read `page` at a time instead of 5,000 (R6-perf, Sept 24, 2026), so a question its
+        first rows answer parses only those. In six ticks of a full league on a copy of the 17:27Z snapshot, the seat
+        market's "offered a session since its program's opportunity?" parsed 60,495 rows in 414 questions."""
+        while True:
+            batch = self.ledger.read(kinds=kinds, agent=agent_id, after=after, limit=page)
+            for entry in batch:
+                if match(entry):
+                    return entry
+            if len(batch) < page:
+                return None
+            after = batch[-1].seq
 
     def _own_fills(self, agent_id: str, *, after: int = 0, enough: int = FORWARD_RULE_FILLS) -> int:
         """The agent's own fills after a ledger position, counted up to `enough`: venue and cross fills

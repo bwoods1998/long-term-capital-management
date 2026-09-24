@@ -373,7 +373,7 @@ class Foundry:
         self._scores: tuple[float, list[DeskScore]] | None = None
         self._allocation: tuple[float, Any] | None = None
         self._edge: tuple[float, dict[str, Any]] | None = None
-        self._memo: dict[str, tuple[int, Any]] = {}
+        self._memo: dict[str, tuple[Any, Any]] = {}  # fold name -> (what it was read from, the fold) (`_folded`)
         from .yield_ledger import YieldLedger
 
         #: The hourly `ops.budget` yield row; None switches it off (tests that count budget rows).
@@ -386,14 +386,44 @@ class Foundry:
             with house._state_lock:
                 state["birth_cursor"] = house.ledger.head()[0]
 
+    #: What each fold read through `_folded` depends on besides the ledger rows of its kinds: whether it reads
+    #: the registry's agents (their family, desk and founder, which a birth sets and nothing changes), and the
+    #: settings it reads. A fold not named here (`blocked`, which also reads the clock) is rebuilt whenever
+    #: the ledger has grown.
+    FOLD_INPUTS: dict[str, tuple[tuple[str, ...], bool, tuple[str, ...]]] = {
+        "cards": (("hypothesis.card",), False, ()),
+        "evaluations": (("trace.record",), False, ()),
+        "calls": (("merton.pass",), False, ()),
+        "retired": (("hypothesis.retired", "repair.status", "eval.trial"), False, ()),
+        "desk_forward": (("eval.block",), True, ("fast_lane_min_blocks", "fast_lane_reopen_blocks")),
+        "tried": (("merton.pass", "hypothesis.card"), True, ()),
+        "families": (("eval.trial", "hypothesis.card"), True, ()),
+    }
+
     def _folded(self, name: str, build: Any) -> Any:
-        """A fold of the ledger, rebuilt only when the ledger has grown (several are read per tick)."""
-        head = self.house.ledger.head()[0]
+        """A fold of the ledger, rebuilt only when what it reads has changed (several are read per tick).
+
+        Sept 24, 2026 (R6-perf): keyed on the ledger's head, every fold was rebuilt whenever ANY row was
+        appended, and on the box the research threads append every few seconds, so nearly every read
+        rebuilt its fold from all its rows (8,206 `trace.record` rows for `evaluations`, 2,555 `eval.trial`
+        for `retired` and `families`, ... on the 17:27Z snapshot; the tick's `hypotheses` step took 6.4 s at
+        17:25Z and 20.6 s at its slowest that hour, and health and the refill read the same folds). A fold
+        in `FOLD_INPUTS` is now keyed on the newest row of its own kinds (the ledger is append-only: no new
+        row of them is no change to it), the registry's agent count when it reads agents, and its settings."""
+        inputs = self.FOLD_INPUTS.get(name)
+        if inputs is None:
+            key: Any = self.house.ledger.head()[0]
+        else:
+            kinds, agents, dials = inputs
+            newest = self.house.ledger.read(kinds=kinds, limit=1, newest=True)
+            settings = self.settings if dials else {}
+            key = (newest[-1].seq if newest else 0, len(self.house.registry.agents) if agents else None,
+                   tuple(settings.get(dial) for dial in dials))
         hit = self._memo.get(name)
-        if hit is not None and hit[0] == head:
+        if hit is not None and hit[0] == key:
             return hit[1]
         value = build()
-        self._memo[name] = (head, value)
+        self._memo[name] = (key, value)
         return value
 
     # ------------------------------------------------------------------ dials

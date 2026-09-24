@@ -389,6 +389,34 @@ class StaleReservationTests(ProviderCase):
         self.assertIsNotNone(row["cost_usd"])
         self.assertEqual(provider.spent_today("earnings-01"), Decimal(row["cost_usd"]))
 
+    def test_the_stale_sweep_reads_the_open_requests_by_index_in_the_table_s_order(self):
+        """Sept 24, 2026 (R6-perf): the House runs this sweep every tick, and on the box it was a full scan of
+        a 1.73 GB table (5.0-5.9 s) to find one request. It now reads `requests_open`, and finds exactly the
+        rows the full scan found, in the same order (rowid), whatever order the index holds them in."""
+        from ltcm.provider import STALE_REQUESTS_SQL
+
+        provider = self.provider(FakeTransport())
+        rows = [  # (status, updated_at): interleaved so the index's order (status, then time) is not the table's
+            ("completed", "2026-09-19T01:00:00.000Z"), ("prepared", "2026-09-20T05:00:00.000Z"),
+            ("dispatched", "2026-09-21T02:00:00.000Z"), ("prepared", "2026-09-19T03:00:00.000Z"),
+            ("abandoned", "2026-09-19T04:00:00.000Z"), ("dispatched", "2026-09-19T09:00:00.000Z"),
+            ("dispatched", "2026-09-24T23:00:00.000Z"),  # touched after the cutoff: not stale
+            ("prepared", "2026-09-22T00:00:00.000Z"),
+        ]
+        for i, (status, updated) in enumerate(rows):
+            provider._db.execute(
+                "INSERT INTO requests (id, desk_id, session_id, profile, request_key, body, status, response_id, reserved_usd,"
+                " created_at, updated_at) VALUES (?, 'd', 's', 'pro_flex', ?, '{}', ?, ?, '0.10', ?, ?)",
+                (f"req-{9 - i}", f"k{i}", status, "resp_x" if status == "dispatched" else None, updated, updated))
+        cutoff = "2026-09-24T17:30:48"
+        full_scan = [dict(r) for r in provider._db.execute(  # the query as it was, and the table scan it ran
+            "SELECT * FROM requests NOT INDEXED WHERE status IN ('prepared', 'dispatched') AND updated_at < ?", (cutoff,))]
+        self.assertEqual([r["request_key"] for r in full_scan], ["k1", "k2", "k3", "k5", "k7"])
+        self.assertEqual([dict(r) for r in provider._db.execute(STALE_REQUESTS_SQL, (cutoff,))], full_scan)
+        plan = " | ".join(str(step[-1]) for step in provider._db.execute("EXPLAIN QUERY PLAN " + STALE_REQUESTS_SQL, (cutoff,)))
+        self.assertNotRegex(plan, r"\bSCAN (TABLE )?requests\b")
+        self.assertIn("requests_open", plan)
+
     def test_spent_today_reconciles_at_most_once_a_minute(self):
         transport = FakeTransport(RuntimeError("died"))
         provider = self.provider(transport, poll_timeout=900.0)
