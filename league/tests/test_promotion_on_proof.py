@@ -674,6 +674,16 @@ class ProbesAndBunts(KalshiHouse):
         self.assertIsNone(alloc.family_taker("nobody"))
         with patch.object(allocator, "enabled", return_value=False):
             self.assertIsNone(alloc.family_taker(a.id))
+        # The TAKER record, not the family's proof: a family proven on resting bids (weather favourites,
+        # every observation a maker's) has no taker record, and its real entries stay post-only. Review
+        # of #224: answering with the whole record's proof passed every other test.
+        record = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        record["taker"] = {"n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "positive": False, "members": 0}
+        self.families["weather-favorites"] = record
+        alloc.rebalance()
+        self.assertEqual(alloc.tier(a), "bunt")
+        self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
+                                                   "mean_log": 0.0, "bound": None})
 
     def test_the_audit_judges_a_probe_as_a_probe(self):
         a = self.agent()
@@ -802,6 +812,21 @@ class TrialOnTheFloor(KalshiHouse):
         row = allocator.evidence(self.house, self.house.registry.get(a.id))
         self.assertEqual((row.real_stay_closed, row.real_trades), (2, 2))
         self.assertEqual(row.row()["stay_closed"], 2)
+
+    def test_the_trial_counts_this_stays_real_results_not_a_past_stays(self):
+        """P2: the exit waits for real results IN THE CURRENT STAY. Review of #224: counting every real
+        result the agent ever had passed every other test; an agent back on real money after a stay
+        with three real settlements would have no trial at all."""
+        a = self.seated_probe()
+        for ticker in ("KXHIGHNY-26SEP24-B72.5", "KXHIGHCHI-26SEP24-B70.5", "KXHIGHMIA-26SEP24-B88.5"):
+            self.house.ledger.append("book.settle", {"book": "kalshi", "pnl": "0.10", "cost": "1", "payout": "1", "quantity": "1",
+                                                     "instrument": LedgerCase.inst(ticker, venue="kalshi")}, agent=a.id)
+        agent = self.house.registry.get(a.id)
+        self.assertEqual(allocator.evidence(self.house, agent).real_stay_closed, 3)
+        self.house.evaluator.demote(a.id, "test: back to practice")
+        self.house.evaluator.promote(a.id, 2, "test: a new stay on real money")
+        row = allocator.evidence(self.house, agent)
+        self.assertEqual((row.real_trades, row.real_stay_closed), (3, 0))
 
     def test_a_swing_of_an_unproven_family_drops_to_a_probe(self):
         a = self.seated_probe()
