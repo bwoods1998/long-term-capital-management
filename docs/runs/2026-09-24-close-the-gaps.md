@@ -790,6 +790,6 @@ slowest steps: publish 87.7 s, population 67.7, schedule 52.3): a perf builder p
 R3 (#276, the seat market's capacity and the proven family's births; its review `r2/review`), R5 (`r5/family-probe`,
 the third digest change), R6 (#278 practice option fees in `book.py`; #279 earnings timeout, idle-desk counts, the
 tick-steps flake). Real money: Kalshi +$22 realized today (the sports and crypto-strike families +$49.41, the 15-minute
-crypto probes −$28.49); a probe on a losing family was seated twice more since T0' (huang-h51fdd3-6 lost $1.20 and was
-demoted; krasker-14 holds $80 on options-pullback, 19 blocks −0.383). Compute at 16:37Z: OpenAI $471.76 of $607; Sail
+crypto probes −$28.49); since T0' one more probe was seated on a losing family (krasker-14, $80 on options-pullback,
+19 blocks −0.383) and one seated before it lost again and was demoted (huang-h51fdd3-6, −$1.20). Compute at 16:37Z: OpenAI $471.76 of $607; Sail
 $160.76 (runway 4.5 days).
