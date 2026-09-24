@@ -238,3 +238,27 @@ class PopulationAtTheRunwayFloor(SeatCase):
             self.house.keep_population(refill=False)
         self.assertEqual(self.rules["max_population"], 112)
         self.assertEqual(len(alerts(self.house, "warning", "could not follow the search")), 1)
+
+
+class CapsBeforeTheSearchSeats(ReviewCase):
+    """R2 (3) holds a desk the search closes at its members (`_follow_the_search`), in the tick's population step. The
+    foundry's and the lab's steps come earlier in the same tick (and the lab's runs on its own thread), and the House
+    reads each desk's niches.json cap afresh at every start: after a restart, the first tick's foundry and lab steps saw
+    a closed desk's full cap, so the lab could seat one of the graduates that passed before the rule (3 for
+    kalshi-crypto-15m at 15:06Z) on a desk the search closes once its members fell under that cap."""
+
+    def test_a_closed_desks_cap_is_held_before_the_foundry_and_the_lab_take_seats(self):
+        seen = []
+
+        class Foundry(NoFoundryCards):
+            def tick(inner, open_for_business=True):
+                seen.append(self.house.niches[DESK].max_members)
+
+        self.resident("first"), self.resident("second")
+        base = self.house.niches[DESK].max_members
+        self.assertGreater(base, 2)
+        self.house.hypotheses = Foundry({DESK: f"no family on {DESK} has a positive forward record over 3 active blocks there"})
+        self.house._data_cache.pop("search_closed", None)
+        self.house.tick()  # the first tick after a restart: the cap is niches.json's until the search is read
+        self.assertEqual(seen, [2], "held at its members before the foundry (and the lab after it) could seat anyone there")
+        self.assertEqual(self.house.niches[DESK].max_members, 2)

@@ -426,7 +426,8 @@ status is exposed in health and agent research context; qualification is distinc
    takes that resident's seat), no card is admitted onto a closed desk (`_refill` passes the closed
    desks to the foundry as reserved), and an evidenced newcomer is given no seat on a desk the search
    closes (`_displaceable`). While the foundry closes a desk the House holds its cap at its members
-   (`_follow_the_search`); it gets its niches.json cap back when it reopens. Graduates wait from the
+   (`_follow_the_search`, read in each tick before the foundry's and the lab's steps, so the first tick
+   after a restart never shows them niches.json's cap); it gets its niches.json cap back when it reopens. Graduates wait from the
    ledger's `lab.graduate:<id>:passed` row, cards from their passing evaluation, merged strategies
    from when the House first saw them (their desk read from their literal NEEDS). **S3, a stale seat**
    (`_stale_seat`): a newcomer with a winning forward window takes the seat of a practice resident

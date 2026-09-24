@@ -7871,6 +7871,13 @@ class House:
             # step, each against its own per-job ceiling and the day's frontier allowance.
             self._background("engineer", self.engineer.step)
         lap("merton")
+        # R2: a desk the search closes is held at its members BEFORE the foundry's and the lab's steps, which seat
+        # newcomers by the desks' caps (the lab's on its own thread); read only in the population step below, the first
+        # tick after a restart showed them a closed desk's niches.json cap (the review of #276). Cached: cheap twice.
+        try:
+            self._follow_the_search()
+        except Exception as exc:  # noqa: BLE001 - the caps stand as they are; the population step tries again
+            self.alert("warning", f"the seat market's caps could not follow the search ({type(exc).__name__}: {str(exc)[:160]})")
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         lap("hypotheses")
