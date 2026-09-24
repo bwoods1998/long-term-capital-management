@@ -2404,9 +2404,13 @@ class Lab:
             feed = str(p.get("feed") or "")
             if p.get("asset") != "feed" or feed not in feeds or feed in began or not p.get("start"):
                 continue
-            start = _ts(p["start"])
-            if start is not None:
-                began[feed] = start
+            # When the House first held its data: the row's own time, not `start`, which is where the data
+            # begin. The review of #262: a backfilled feed's first row starts months back (T4: `vol` from
+            # 2026-07-24 and `funding` from 2026-06-25, both first recorded Sept 23, 03:56Z), so read from
+            # `start` a feed whose recording began in the window never arrived.
+            recorded = _ts(entry.at)
+            if recorded is not None:
+                began[feed] = recorded
         fresh = sorted(feed for feed, start in began.items() if start >= since)
         return f"the {fresh[0]} feed began recording at {_iso(began[fresh[0]])}" if fresh else None
 

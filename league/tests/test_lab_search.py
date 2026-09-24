@@ -20,6 +20,7 @@ import unittest
 from unittest.mock import patch
 
 from league.economy import check_bounds, load_game
+from league.ledger import now_iso
 
 from league.lab import (FORWARD_BREEDING, RESERVED_SHARE_BOUNDS, batch_turn, family_at_capacity, forward_factor, mechanism_digest,
                         reserved_quota, with_params)
@@ -237,6 +238,20 @@ class Holds(ForwardCase):
         self.assertIn("wrote no intent in 48 h", self.lab._idle_desk(self.niche.id))
         self.assertEqual(self.lab.graduate(), [])
         self.assertEqual(self.lab._held["counts"], {"idle": 1})
+
+    def test_a_backfilled_feed_arrives_when_its_recording_began_not_where_its_history_starts(self):
+        """The review of #262: a backfilled feed's first `data.coverage` row starts where its history does (T4: `vol`
+        from 2026-07-24, first recorded Sept 23, 03:56Z); its recording began in the window, so the desk is not idle."""
+        self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 3}, agent=self.resident.id)
+        self.house.ledger.append("tool.request", {"name": "btc_dvol_history", "description": "Deribit DVOL"}, agent=self.resident.id)
+        self.assertIn("wrote no intent in 48 h", self.lab._idle_desk(self.niche.id))
+        self.house.ledger.append("data.coverage", {"asset": "feed", "feed": "vol", "status": "current", "start": "2026-07-24T04:00:00.000Z",
+                                                   "end": "2026-09-09T23:00:00.000Z", "recorded_at": now_iso(self.clock)})
+        self.clock.advance(601)  # a desk's idleness is read every ten minutes
+        self.assertIsNone(self.lab._idle_desk(self.niche.id))
+        self.clock.advance(49 * 3600)  # arrived more than 48 hours ago: no longer an excuse
+        self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 2}, agent=self.resident.id)
+        self.assertIn("wrote no intent in 48 h", self.lab._idle_desk(self.niche.id))
 
     def test_a_desk_that_traded_or_was_offered_nothing_is_not_idle(self):
         self.assertIsNone(self.lab._idle_desk(self.niche.id))  # offered nothing: the calendar's doing
