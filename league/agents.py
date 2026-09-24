@@ -83,6 +83,8 @@ class Registry:
     def __init__(self, ledger: Ledger):
         self.ledger = ledger
         self.agents: dict[str, Agent] = {}
+        #: agent id -> {"since", "note", "session"} while its entries are paused (`entries_paused`).
+        self.paused: dict[str, dict[str, Any]] = {}
         self._cursor = 0
         self._lock = threading.RLock()
         self.refresh()
@@ -112,6 +114,12 @@ class Registry:
             agent.params = dict(p.get("params") or {})
             agent.needs = dict(p.get("needs") or agent.needs)
             agent.wake_minutes = int(p.get("wake_minutes") or agent.wake_minutes)
+            # X1 (Sept 24, 2026): an agent's own pause and resume of its entries are `agent.strategy`
+            # rows too (`House._apply_controls`), restating the strategy in force with `control`.
+            if p.get("control") == "pause_entries":
+                self.paused[agent_id] = {"since": at, "note": p.get("note"), "session": p.get("session")}
+            elif p.get("control") == "resume_entries":
+                self.paused.pop(agent_id, None)
         elif kind == "agent.died" and agent_id in self.agents:
             agent = self.agents[agent_id]
             agent.alive = False
@@ -121,6 +129,13 @@ class Registry:
     # ------------------------------------------------------------------ reads
     def get(self, agent_id: str) -> Agent | None:
         return self.agents.get(agent_id)
+
+    def entries_paused(self, agent_id: str) -> dict[str, Any] | None:
+        """{"since", "note", "session"} while the agent has paused its entries (`pause_entries`),
+        else None. Folded from the ledger like everything else here, so a restart keeps it."""
+        with self._lock:
+            found = self.paused.get(agent_id)
+            return dict(found) if found else None
 
     def living(self) -> list[Agent]:
         with self._lock:
