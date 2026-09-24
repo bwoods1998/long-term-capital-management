@@ -409,6 +409,23 @@ class FamilyRecord(FamilyCase):
         rec = self.record()
         self.assertAlmostEqual(rec["mean_log"] * rec["n"], sum(math.log1p(r) for r in returns), places=12)
 
+    def test_a_trade_is_measured_against_what_had_been_lent_by_then(self):
+        """huang-6 traded a $25 stake that was raised to $60 later (Sept 21, 2026): its early trades grew
+        its wealth by what they made over $25, and a later raise must not shrink them. Each row is
+        `trade_returns` read through that row's own ledger position."""
+        self.member("m1")
+        self.stake(25, agent="m1", book="kalshi")
+        self.settle("KXDOGE15M-26SEP211445-45", "4.253", agent="m1", book="kalshi")
+        self.stake(35, agent="m1", book="kalshi")
+        self.settle("KXDOGE15M-26SEP212145-45", "-9.552", agent="m1", book="kalshi")
+        self.stake(-54.7117, agent="m1", book="kalshi")
+        rec = self.record()
+        self.assertEqual(rec["n"], 2)
+        self.assertAlmostEqual(rec["mean_log"], (math.log1p(4.253 / 25) + math.log1p(-9.552 / 60)) / 2, places=12)
+        ev_ = Evaluator(self.ledger)
+        first = self.ledger.head()[0] - 3  # the first settlement's seq
+        self.assertAlmostEqual(ev_.trade_returns("m1", "kalshi", until_seq=first)[0][0], 4.253 / 25, places=12)
+
     def test_the_tape_reads_only_new_rows(self):
         self.member("m1")
         self.stake(200, agent="m1")

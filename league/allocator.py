@@ -320,9 +320,9 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
       or sold flat -- on the practice book or the real book since that member's evidence cutoff; on
       Alpaca, where nothing groups trades, one per closed trade. A member's value on an event is the
       sum of the log growths ln(1 + r) of its closed trades there, r as `Evaluator.trade_returns`
-      computes it read through this pass's fixed ledger position (`through`): a trade's result over
-      the most the member was ever lent on that book, so a sweep or a death never erases or rescales
-      a closed trade;
+      computes it read through that trade's own ledger position: its result over the most the member
+      had been lent on that book by then, so a later sweep, a death or a raise never erases or
+      rescales a closed trade (huang-6's $25 trades were not shrunk by its later $60 stake);
     - an event several members traded is ONE observation: the weighted mean of their values (real at
       `real_weight`, practice at `practice_weight`) at the largest weight among them (`_pool`);
     - pooled: mean, sd, n_eff and the one-sided `confidence` lower bound; `proven` with at least
@@ -348,17 +348,19 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
         cutoffs = tape.cutoffs.get(member) or {}
         for book, weight in books.items():
             stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
-            staked = staked_base(stakes, through)
-            if staked <= 0:
+            if staked_base(stakes, through) <= 0:
                 continue  # never lent anything on this book: no record there
             closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book,
                                           since_seq=cutoffs.get(book, 0), until_seq=through)
             by_event = per_event(book)
             mine: dict[str, list[Any]] = {}  # observation -> [sum of log growths, (first entry seq, its liquidity)]
             for row in closed:
+                lent = staked_base(stakes, row["seq"])  # `trade_returns` read through this trade's position
+                if lent <= 0:
+                    continue
                 key = (event_key(row["instrument"]) if by_event else None) or f"{book}:{member}:{row['seq']}"
                 unit = mine.setdefault(key, [0.0, (math.inf, "taker")])
-                unit[0] += _log1p(row["made"] / staked)
+                unit[0] += _log1p(row["made"] / lent)
                 entry = (row["entry_seq"] if row["entry_seq"] is not None else row["seq"], row["liquidity"])
                 if entry[0] < unit[1][0]:
                     unit[1] = entry
