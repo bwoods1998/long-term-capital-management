@@ -533,6 +533,76 @@ class Earnings(RecorderCase):
         store._poll_history("earnings", {"polled": [], "stored": 0, "failed": []})
         self.assertEqual([t for t, _, _ in edgar.asked[asked:]], ["MSFT", "NVDA"])  # on from where it stopped, AAPL not asked twice
 
+    # -- EDGAR's slow answers (Sept 24, 2026) -------------------------------------------------------------
+    @staticmethod
+    def slow_edgar(filings: dict, slow: dict) -> Edgar:
+        """An EDGAR whose browse feed times out for the stocks in `slow` (ticker -> timeouts left; -1:
+        every time), the way it did 31 times in 995 polls on Sept 24, 2026."""
+        edgar = Edgar(filings)
+        feed = edgar.feed
+
+        def answer(method, url, body):
+            ticker = query(url)["CIK"]
+            left = slow.get(ticker, 0)
+            if left:
+                slow[ticker] = left - 1 if left > 0 else left
+                raise TransportError(f"GET {url} failed: The read operation timed out")
+            return feed(method, url, body)
+
+        edgar.feed = answer
+        return edgar
+
+    def earnings_warnings(self):
+        return [text for _, text in self.alerts if "earnings polls failed" in text]
+
+    def test_one_slow_answer_is_read_at_the_next_poll_and_not_warned(self):
+        """Sept 24, 2026: the hourly warning named every timed-out stock ("3 of 24 earnings polls failed
+        (NFLX: TransportError: GET https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NFLX&
+        type=8-K&dateb=&owner=include&st...") though each was read at its next poll, 29 of 30 at once."""
+        filings = {"AAPL": quarters("2025-10-30", 4), "NFLX": quarters("2025-10-16", 4)}
+        edgar = self.slow_edgar(filings, {"NFLX": 1})
+        store = self.recorder({"earnings": ["AAPL", "NFLX"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        out = store.run()
+        self.assertEqual([key for feed, key, _ in out["failed"] if feed == "earnings"], ["NFLX"])  # the pass saw it fail
+        self.assertEqual(self.earnings_warnings(), [])  # and the next request read it: nothing to tell
+        self.clock.advance(600)
+        store.run()
+        self.assertEqual(store.latest({"earnings": ["NFLX"]}, self.clock())["earnings"]["NFLX"]["accepted"], "2026-07-16T20:30:28Z")
+        self.assertEqual(self.earnings_warnings(), [])
+
+    def test_a_stock_that_keeps_failing_is_warned_with_its_reason_not_its_query(self):
+        filings = {"AAPL": quarters("2025-10-30", 4), "NFLX": quarters("2025-10-16", 4)}
+        edgar = self.slow_edgar(filings, {"NFLX": -1})
+        store = self.recorder({"earnings": ["AAPL", "NFLX"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        store.run()  # the live poll and the backfill page: two failures in a row
+        self.assertEqual(self.earnings_warnings(), [])
+        self.assertEqual(store.health()["earnings"]["failing"], ["NFLX"])  # health says it at once
+        self.clock.advance(feeds.RETRY_SECONDS)
+        store.run()  # the third
+        warned = self.earnings_warnings()
+        self.assertEqual(len(warned), 1, self.alerts)
+        self.assertIn("feeds: 1 of 2 earnings polls failed 3 times in a row (NFLX: TransportError: GET "
+                      "https://www.sec.gov/cgi-bin/browse-edgar failed: The read operation timed out)", warned[0])
+        self.assertNotIn("AAPL", warned[0])
+
+    def test_edgar_is_given_forty_five_seconds_to_answer(self):
+        """Sept 24, 2026: 18 of 964 good polls answered after 20-29 s, and 31 hit the 30 s timeout."""
+        from ltcm.data.edgar import BROWSE_URL
+
+        edgar = Edgar({"AAPL": quarters("2025-10-30", 4)})
+
+        class Timed(FakeTransport):
+            timeouts: list = []
+
+            def get(self, url, headers=None, timeout=None):
+                self.timeouts.append(timeout)
+                return super().get(url, headers=headers, timeout=timeout)
+
+        transport = Timed({BROWSE_URL + "?*": lambda method, url, body: edgar.feed(method, url, body)})
+        store = self.recorder({"earnings": ["AAPL"]}, transports={"earnings": transport}, backfill_pages=10)
+        self.assertEqual(store.run()["failed"], [])
+        self.assertEqual(set(transport.timeouts), {45.0})
+
     def test_needs_and_requests_for_earnings(self):
         self.assertEqual(requested({"earnings": ["aapl", "SPY", "BTC/USD", "VALE"], "earnings_date": ["HOOD", "XYZ"]}),
                          {"earnings": ["AAPL", "VALE"], "earnings_date": ["HOOD"]})
