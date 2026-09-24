@@ -23,10 +23,11 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
 2. **The judges do not change by this path.** A candidate that changes any file the RUNNING
    release's `league/ci.py` lists as `FORBIDDEN` (the constitution, the ledger, the book, the
    evaluator, the auditor, this file, the watchdog, ci.py itself, the campaign and live-money
-   files...) or whose `.github/workflows/` differ from `TRUSTED_WORKFLOWS_SHA256` is refused. Those
-   files decide what "passed" means -- the workflow file decides what the attestation above even
-   attests -- so a commit that changes them reaches the box only as the owner's own deploy
-   (`scripts/floor_box.py deploy`), never through the gate it would loosen.
+   files, the horizon rule's answer `resolution.py`...) or whose `.github/workflows/` differ from
+   `TRUSTED_WORKFLOWS_SHA256` is refused. Those files decide what "passed" means -- the workflow
+   file decides what the attestation above even attests -- so a commit that changes them reaches
+   the box only as the owner's own deploy (`scripts/floor_box.py deploy`), never through the gate
+   it would loosen.
 3. **The trusted content checks.** The RUNNING release's copy of `league/ci.py` (strategies and
    tools pass the safety check and replay without error, `game.json` is inside its bounds,
    `config.json` moved only its operating dials from the release it replaces) is run against the

@@ -136,6 +136,14 @@ class Recovery(unittest.TestCase):
         self.ledger.append("agent.research", {"tool": "replay", "session": "research:huang:1", "arguments": {}}, agent="huang")
         self.assertEqual([r for r in extract(self.rows()) if r["kind"] == "strategy_defect"], [])
 
+    def test_its_own_pause_or_edit_is_not_the_fix(self):
+        """Review of #249: an agent's pause of its entries (an `agent.strategy` row restating its code) read
+        as the fix Merton named, so the defect never reached the repair queue."""
+        self.consult("mullins", DEFECT_ANSWER)
+        for control in ("pause_entries", "edit_params"):
+            self.ledger.append("agent.strategy", {"code_sha256": "ab", "params": {}, "needs": {}, "control": control}, agent="mullins")
+        self.assertEqual(len([r for r in extract(self.rows()) if r["kind"] == "strategy_defect"]), 1)
+
     def test_a_strategy_adopted_before_the_consult_does_not_count(self):
         self.ledger.append("agent.strategy", {"code_sha256": "ab", "params": {}, "needs": {}, "reason": "research"}, agent="mullins")
         self.consult("mullins", DEFECT_ANSWER)

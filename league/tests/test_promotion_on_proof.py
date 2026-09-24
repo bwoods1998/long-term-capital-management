@@ -602,6 +602,17 @@ class ProbesAndBunts(KalshiHouse):
 
     READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
 
+    def test_the_board_shows_the_honest_bound_that_decides_the_proof(self):
+        """A lopsided record's t bound flatters it; the loss-rate gate decides (weather favourites at T0: t bound
+        +0.0033, honest bound -0.2112). The board, the watch and the agents read the honest one."""
+        a = self.agent()
+        self.families["weather-favorites"] = {**canned("weather-favorites"), "bound": 0.0033, "honest_bound": -0.2112,
+                                              "lopsided": True, "loss_gate": -0.2112}
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        row = self.house.allocator.board()["agents"][a.id]
+        self.assertEqual((row["family_state"], row["family_bound"]), ("unproven", -0.2112))
+
     def test_an_unproven_familys_agent_is_seated_as_a_probe(self):
         a = self.agent()
         with self.evidence_of({a.id: self.READY}):

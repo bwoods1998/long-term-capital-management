@@ -49,9 +49,19 @@ import re
 import threading
 import time
 import urllib.parse
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 from typing import Any, Callable, Iterable
+
+# The horizon rule's answer lives in `league/resolution.py`, a money judge (`ci.FORBIDDEN`): the book,
+# the House, the live view and a replay tape read it; the names stay importable from here.
+from .resolution import (  # noqa: F401 - re-exported
+    CLOSE, DEADLINE, DEADLINE_AFTER_CLOSE_SECONDS, SCHEDULED, SETTLE_LAG, SETTLE_LAG_KEEP, SETTLE_LAG_MARKETS,
+    SETTLE_LAG_MIN_MARKETS, SETTLE_LAG_QUANTILE, Resolution, SettleLags, expected_of, is_deadline, resolution, resolve_time,
+    series_of,
+)
 
 DATA_URL = "https://data.alpaca.markets"
 CRYPTO_BARS_PATH = "/v1beta3/crypto/us/bars"
@@ -78,6 +88,28 @@ CANDLE_WARMUP_SECONDS = DAY
 #: A settled listing can still grow for this long after its markets close (a weather market is
 #: paid the next morning): `ltcm.history.LISTING_SETTLE_SECONDS`, the line past which it caches.
 LISTING_SETTLE_SECONDS = 12 * 3600
+#: What `KalshiData` keeps of a settled market once its day has settled (`_settled_day`): every
+#: field the tape reads from the row -- `_settled_events` (ticker, event_ticker, title, result,
+#: open_time, close_time, settlement_ts), `listed_close` and `_listed_stop` (can_close_early,
+#: latest_expiration_time, scheduled_close_time), `resolve_time` (expected_expiration_time,
+#: expiration_time) and `parse_strike` (floor_strike, cap_strike). A row read back from memory has
+#: these and no other: a new reader of the settled rows adds its field here.
+SETTLED_FIELDS = ("ticker", "event_ticker", "title", "result", "open_time", "close_time", "settlement_ts", "can_close_early",
+                  "latest_expiration_time", "scheduled_close_time", "expected_expiration_time", "expiration_time",
+                  "floor_strike", "cap_strike")
+#: Of those, the times: held as epoch seconds, `parse_time`'s own answer, which it reads back
+#: unchanged. Sept 24, 2026: the tape's own parse of these strings, row by row on every build, was
+#: about half of what a settled day cost it (`_settled_day`); History's parse was the other half.
+SETTLED_TIMES = frozenset({"open_time", "close_time", "settlement_ts", "latest_expiration_time", "scheduled_close_time",
+                           "expected_expiration_time", "expiration_time"})
+#: The bound of that memory, in rows (a day with no market counts as one); the least recently used
+#: day leaves first. Measured Sept 24, 2026 on the real settled listings of the owner's History
+#: cache: a held row costs 240-245 bytes for KXBTC, KXBTCD, KXETH and KXETHD (History's parsed row
+#: 3,350-3,470), and 347 on average over 3,134 series-days of the other series (weather, sports,
+#: props: six markets a day at the median, so less repeats within a day). 400,000 rows is at most
+#: about 140 MB; a 14-day window of those four crypto-strike series is 293,888 rows (KXETHD alone
+#: 6,940 a day, 1.7 MB held).
+SETTLED_MEMO_ROWS = 400_000
 
 _SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9./]{0,19}$")
 _SERIES = re.compile(r"^[A-Z0-9][A-Z0-9._]{0,39}$")
@@ -515,22 +547,6 @@ def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
     return min(listed, resolve_time(row, listed))
 
 
-def resolve_time(row: "dict[str, Any]", close_ts: float) -> float:
-    """When a market is expected to pay: its scheduled `expiration_time`, which a listing shows
-    from the day it opens and never changes. (Measured Sept 19, 2026: a game's `close_time` is two
-    days after kickoff and it really closes when a winner is declared, near its expiration; a
-    weather market stops trading at `close_time` and is paid at its expiration, 14 hours later.)
-    The close stands in when there is no usable expiration."""
-    for key in ("expected_expiration_time", "expiration_time"):
-        try:
-            value = parse_time(row.get(key)) if row.get(key) else None
-        except TapeError:
-            value = None
-        if value is not None and value > 0:
-            return value
-    return close_ts
-
-
 #: A market that may close early lists a close well after it will really stop trading. The live
 #: view asks this much further ahead, and keeps what is expected to RESOLVE inside the window.
 EARLY_CLOSE_SLACK_SECONDS = 72 * 3600
@@ -546,6 +562,24 @@ def _day_windows(start_ts: float, end_ts: float) -> "list[tuple[int, int]]":
         out.append((lo, hi))
         lo = hi + 1
     return out
+
+
+def _held(field: str, value: Any, pool: "dict[Any, Any]") -> Any:
+    """A settled row's field as `KalshiData`'s memo holds it: a time (`SETTLED_TIMES`) as epoch
+    seconds, what `parse_time` makes of it and reads back unchanged, and a time it cannot read as it
+    was, so it fails the same way later; one object for equal text, decimals and times within a day
+    (`pool`). Only immutable values are shared, and a decimal only with one of the same digits."""
+    if field in SETTLED_TIMES and isinstance(value, str):
+        key = ("time", value)
+        if key not in pool:
+            try:
+                pool[key] = parse_time(value)
+            except TapeError:
+                pool[key] = value
+        return pool[key]
+    if isinstance(value, (str, Decimal)):
+        return pool.setdefault((type(value), str(value)), value)
+    return value
 
 
 class KalshiData:
@@ -572,6 +606,9 @@ class KalshiData:
         self.sleep = sleep
         self._listings: dict[str, tuple[float, float, list[Any]]] = {}  # series -> (read at, window end, raw rows)
         self._listing_locks: dict[str, threading.Lock] = {}
+        #: When each deadline-type series' markets pay after their close (`SettleLags`), fed by every
+        #: tape's settled markets; the House sets one persisted beside its state. None: the deadline.
+        self.settle_lags: "SettleLags | None" = None
         self._pace = threading.Lock()
         self._last_call = 0.0
         #: How long the settled listing of a day still settling is served from memory before the part
@@ -579,6 +616,12 @@ class KalshiData:
         self.settled_listing_ttl = 600.0
         self._settling: dict[tuple[str, int], tuple[float, float, dict[str, Any]]] = {}  # (series, day) -> (read at, settled by, rows)
         self._settling_lock = threading.Lock()
+        #: Days whose every market had settled, kept after their first read (`_settled_day`): only
+        #: `SETTLED_FIELDS`, at most `settled_memo_rows` rows, the least recently used day out first
+        #: (0: nothing is kept and every read is History's). Under `_settling_lock`.
+        self.settled_memo_rows = SETTLED_MEMO_ROWS
+        self._settled_memo: "OrderedDict[tuple[str, int], tuple[tuple[Any, ...], ...]]" = OrderedDict()
+        self._settled_memo_held = 0
 
     def _paced(self, **query: Any) -> Any:
         """One venue read: never sooner than `min_interval` after the last, and a rate-limit
@@ -643,20 +686,28 @@ class KalshiData:
 
     # ----------------------------------------------------------------- horizon
     def resolves_at(self, ticker: str) -> "float | None":
-        """When this market is expected to pay (epoch seconds), or None when it cannot be told.
-        A market's schedule does not change, so an answer is kept for the life of the process."""
+        """When this market is expected to pay (epoch seconds), or None when it cannot be told:
+        `resolution_of`'s time, what the book's horizon rule judges."""
+        found = self.resolution_of(ticker)
+        return None if found is None else found.due
+
+    def resolution_of(self, ticker: str) -> "Resolution | None":
+        """`resolution` of this market now -- when it is expected to pay and what that is judged by --
+        or None when it cannot be told. A market's listing (its close, its expected expiration) does
+        not change, so the row is read once for the life of the process (a failed read is asked
+        again); the settle lag it may be judged by (`settle_lags`) moves at most daily."""
         ticker = str(ticker or "").upper()
-        cache = self.__dict__.setdefault("_resolves", {})
-        if ticker in cache:
-            return cache[ticker]
-        try:
-            raw = self.market_data.market(ticker)
-            row = raw.get("market", raw) if isinstance(raw, dict) else None
-            close_ts = parse_time(row.get("close_time"))
-        except Exception:  # noqa: BLE001 - not knowing is an answer: the book refuses the entry
-            return None
-        cache[ticker] = resolve_time(row, close_ts)
-        return cache[ticker]
+        cache = self.__dict__.setdefault("_resolution_rows", {})
+        if ticker not in cache:
+            try:
+                raw = self.market_data.market(ticker)
+                row = raw.get("market", raw) if isinstance(raw, dict) else None
+                close_ts = parse_time(row.get("close_time"))
+            except Exception:  # noqa: BLE001 - not knowing is an answer: the book refuses the entry
+                return None
+            cache[ticker] = (row, close_ts)
+        row, close_ts = cache[ticker]
+        return resolution(row, close_ts, lags=self.settle_lags, at=float(self.clock()))
 
     # ---------------------------------------------------------------- snapshot
     def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = 200, max_age: "float | None" = None) -> "list[dict[str, Any]]":
@@ -672,14 +723,15 @@ class KalshiData:
         rows: dict[str, tuple[float, dict[str, Any]]] = {}
         for name in names:
             for raw in self._listing(name, now, horizon_ts, max_age):
-                shown = self._live_row(raw, name, now, horizon_ts)
+                shown = self._live_row(raw, name, now, horizon_ts, lags=self.settle_lags)
                 if shown is not None:
                     rows[shown[1]["market"]] = shown
         ordered = sorted(rows.values(), key=lambda pair: (pair[0], pair[1]["market"]))
         return [row for _, row in ordered[: max(0, int(limit))]]
 
     @staticmethod
-    def _live_row(raw: Any, series: str, now: float, horizon_ts: float) -> "tuple[float, dict[str, Any]] | None":
+    def _live_row(raw: Any, series: str, now: float, horizon_ts: float,
+                  lags: "SettleLags | None" = None) -> "tuple[float, dict[str, Any]] | None":
         if not isinstance(raw, dict) or not raw.get("ticker"):
             return None
         if str(raw.get("status") or "active").lower() not in ("open", "active"):
@@ -688,7 +740,7 @@ class KalshiData:
             close_ts = parse_time(raw.get("close_time"))
         except TapeError:
             return None
-        resolve_ts = resolve_time(raw, close_ts)
+        resolve_ts = resolve_time(raw, close_ts, lags=lags, at=now)  # what the horizon rule judges (`resolution`)
         # What a strategy should plan around: the sooner of the listed close and the expected result.
         stop_ts = min(close_ts, resolve_ts) if raw.get("can_close_early") else close_ts
         if not now < close_ts or not now < stop_ts <= horizon_ts:
@@ -759,6 +811,8 @@ class KalshiData:
             raise TapeError("a tape's end must come after its start")
 
         events, listed = self._settled_events(names, start_ts, end_ts)
+        if self.settle_lags is not None:
+            self.settle_lags.save()
         by_time: dict[int, list[dict[str, Any]]] = {}
         results: dict[str, str] = {}
         settlements: dict[str, str] = {}
@@ -779,7 +833,8 @@ class KalshiData:
             for market in members:
                 if len(results) >= cap:
                     break
-                rows = self._market_steps(market, (candles or {}).get(market["ticker"]) or [], start_ts, end_ts, step)
+                rows = self._market_steps(market, (candles or {}).get(market["ticker"]) or [], start_ts, end_ts, step,
+                                          resolve_at=self._resolve_at(market))
                 if not rows:
                     continue
                 results[market["ticker"]] = market["result"]
@@ -830,14 +885,30 @@ class KalshiData:
         Sept 24, 2026 (L4): a tape's first window began at the tape's own start, which moves with
         the clock, so that URL never repeated and the cache never answered it, and the day still
         settling was read whole every time: KXETHD's listing was read again, seven pages at a time,
-        for every Kalshi tape the House built (2,183 `[history] kalshi settled` lines in the log)."""
+        for every Kalshi tape the House built (2,183 `[history] kalshi settled` lines in the log).
+
+        A settled day is then kept in memory (`_remember_settled`) and read from History once a
+        process. Sept 24, 2026 (C-perf): after L4 the disk cache answered, but every page was
+        decompressed and every row parsed again for every tape (about 3,200 of those log lines every
+        30 minutes, CPU under the GIL beside the tick); measured on the real rows of KXBTC, KXBTCD,
+        KXETH and KXETHD, a 14-day tape of the four took about 58 s, the second build as slow as the
+        first, half of it History's parse and half the tape's parse of the same rows' times."""
         now = float(self.clock())
         last = day + DAY - 1
         settled_by = now - LISTING_SETTLE_SECONDS
         if last <= settled_by:
+            memo = self.settled_memo_rows > 0
             with self._settling_lock:
                 self._settling.pop((name, day), None)
-            return list(self.history.kalshi_settled(name, start_ts=day, end_ts=last) or [])
+                held = self._settled_memo.get((name, day)) if memo else None
+                if held is not None:
+                    self._settled_memo.move_to_end((name, day))
+            if held is None:
+                rows = self.history.kalshi_settled(name, start_ts=day, end_ts=last) or []
+                if not memo:
+                    return list(rows)
+                held = self._remember_settled((name, day), rows)
+            return [dict(zip(SETTLED_FIELDS, values)) for values in held]
         with self._settling_lock:
             held = self._settling.get((name, day))
         if held is not None and now - held[0] < self.settled_listing_ttl:
@@ -858,6 +929,28 @@ class KalshiData:
             self._settling[(name, day)] = (now, settled_by, rows)
         return list(rows.values())
 
+    def _remember_settled(self, key: "tuple[str, int]", rows: "Iterable[Any]") -> "tuple[tuple[Any, ...], ...]":
+        """A settled day as the memo holds it: each row's `SETTLED_FIELDS` in that order, its times as
+        epoch seconds, and one object for each text, decimal or time the day repeats (an event's
+        ladder repeats its title, event, times and strikes on every market). The day is kept unless
+        it alone is over `settled_memo_rows`, and the least recently used days leave until the memo
+        is within it. What is returned is what every later read gets, so the first tape of a day
+        reads the rows the next ones do."""
+        pool: dict[Any, Any] = {}
+        held = tuple(tuple(_held(field, row.get(field), pool) for field in SETTLED_FIELDS) for row in rows if isinstance(row, dict))
+        with self._settling_lock:
+            bound = int(self.settled_memo_rows)
+            if max(1, len(held)) <= bound:
+                replaced = self._settled_memo.pop(key, None)  # two tapes that missed the same day at once
+                if replaced is not None:
+                    self._settled_memo_held -= max(1, len(replaced))
+                self._settled_memo[key] = held
+                self._settled_memo_held += max(1, len(held))
+            while self._settled_memo and self._settled_memo_held > bound:
+                _, gone = self._settled_memo.popitem(last=False)
+                self._settled_memo_held -= max(1, len(gone))
+        return held
+
     def _settled_events(self, names: "list[str]", start_ts: float, end_ts: float) -> "tuple[dict[str, list[dict[str, Any]]], int]":
         """The settled yes/no markets closing in [start, end], grouped by event, and their count.
         The listing is read a whole UTC day at a time (`_settled_day`) and cut to the window here."""
@@ -869,6 +962,8 @@ class KalshiData:
                     rows = self._settled_day(name, day)
                 except Exception as exc:
                     raise TapeError(f"kalshi settled {name} {iso(day)}..{iso(day + DAY - 1)}: {type(exc).__name__}: {exc}") from exc
+                if self.settle_lags is not None:
+                    self.settle_lags.observe(row for row in rows or [] if isinstance(row, dict))  # the House's own record of when they paid
                 for row in rows or []:
                     if not isinstance(row, dict):
                         continue
@@ -911,15 +1006,35 @@ class KalshiData:
                         "listed_close_ts": _listed_stop(row, close_ts),
                         "resolve_ts": max(resolve_time(row, close_ts), _listed_stop(row, close_ts)),
                         "candles_from": candles_from,
+                        "_row": row,  # `_resolve_at`: a deadline-type market is judged step by step
                         "strike": parse_strike(ticker, row),
                     })
         return events, len(seen)
 
+    def _resolve_at(self, market: "dict[str, Any]") -> "Callable[[float], float] | None":
+        """A settled market's `resolution` at replay time `t`, as the live book would have judged it
+        then: from its listed close (never its real, possibly early, close) and the settle lag of its
+        series known at `t` (`SettleLags.lag` reads only settlements before `t`'s UTC midnight). None
+        where nothing moves with `t`: no lags, or an expected expiration that is a schedule."""
+        row = market.get("_row")
+        if self.settle_lags is None or not isinstance(row, dict):
+            return None
+        if not is_deadline(expected_of(row), market["listed_close_ts"]):
+            return None
+        lags, listed = self.settle_lags, market["listed_close_ts"]
+        return lambda t: max(resolution(row, listed, lags=lags, at=t).due, listed)
+
     @staticmethod
     def _market_steps(
-        market: "dict[str, Any]", candles: "list[dict[str, Any]]", start_ts: float, end_ts: float, step: int
+        market: "dict[str, Any]", candles: "list[dict[str, Any]]", start_ts: float, end_ts: float, step: int,
+        resolve_at: "Callable[[float], float] | None" = None,
     ) -> "list[tuple[int, dict[str, Any]]]":
-        """Grid observations, then a quote-free closing row for outstanding orders' final range."""
+        """Grid observations, then a quote-free closing row for outstanding orders' final range.
+        `resolve_at(t)`: when the market is expected to pay as judged at `t` (`KalshiData._resolve_at`);
+        else its one `resolve_ts`."""
+        if resolve_at is None:
+            fixed = market.get("resolve_ts", market["listed_close_ts"])
+            resolve_at = lambda t: fixed  # noqa: E731
         usable = sorted(
             (c for c in candles if isinstance(c, dict) and isinstance(c.get("ts"), (int, float)) and not isinstance(c.get("ts"), bool)),
             key=lambda c: c["ts"],
@@ -957,7 +1072,7 @@ class KalshiData:
                 "yes_bid_high": max(highs),
                 "close_time": market["close_time"],
                 "hours_to_close": round((market["listed_close_ts"] - t) / 3600.0, 4),
-                "hours_to_resolve": round((market.get("resolve_ts", market["listed_close_ts"]) - t) / 3600.0, 4),
+                "hours_to_resolve": round((resolve_at(t) - t) / 3600.0, 4),
                 "volume_24h": round(max(0.0, day), 2),
                 "open_interest": _float(candle.get("open_interest")) or 0.0,
                 "strike": market["strike"],
@@ -981,7 +1096,7 @@ class KalshiData:
                 yes_ask_low=min(lows) if lows else None,
                 yes_bid_high=max(highs) if highs else None,
                 close_time=iso(stop), hours_to_close=0.0,
-                hours_to_resolve=round((market.get("resolve_ts", market["listed_close_ts"]) - stop) / 3600.0, 4),
+                hours_to_resolve=round((resolve_at(stop) - stop) / 3600.0, 4),
                 volume_24h=round(max(0.0, volume[index] - volume[bisect.bisect_right(ends, stop - DAY)]), 2),
                 open_interest=_float(usable[index - 1].get("open_interest")) or 0.0,
             )

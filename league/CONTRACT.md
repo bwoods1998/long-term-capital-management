@@ -16,7 +16,8 @@ NEEDS = {
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
-                                  # woken a few seconds after the regular open when its next wake would land later)
+                                  # woken a few seconds after the regular open when its next wake would land later,
+                                  # and is not woken at all while the regular session is shut)
 }
 PARAMS = {"lookback": 24, "z_entry": 2.0}          # defaults; a mutation changes these first
 
@@ -494,6 +495,25 @@ it is paid. **The horizon rule:** the House refuses a Kalshi entry expected to p
 hours out for an `hour` strategy or 48 for a `day` strategy, and closes any crypto position held
 longer than 48 hours. Equities are not bounded. Exits are never refused.
 
+"Expected to pay" is the market's SCHEDULED expiration where Kalshi gives one, and its close where
+it does not; never the deprecated latest date the market may expire (Sept 24, 2026). Kalshi gives
+one for every market seen, but for many series it is a DEADLINE, not a schedule: two days or more
+after the close (the diesel prints 169.5 hours, the AI-share weeklies 168), the latest the market
+may expire if its data comes late. Such a market is judged by its close plus its series' measured
+settle lag: the 95th percentile of (settlement - close) over the series' last 40 settled markets of
+that kind on the House's record (at least 20 of them; settlements before the day began), never
+before the close and never after the deadline. A series with fewer on record is judged by the
+deadline, as before. (Measured on the House's cache of Sept 5-17: the last 40 diesel dailies paid
+within 5.9 hours of the close, the weeklies within 7.8.) `hours_to_resolve` is measured to that
+same moment, live and on a replay tape (where a step reads only settlements known before its day),
+so a strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule. A
+refusal says which it judged by: "this market is expected to resolve in 60 hours, by its scheduled
+expiration (...)", "..., by its close plus its series' measured settle lag (...)", "..., by its
+expected expiration (...), a deadline days after its close: its series has fewer than 20 settled
+markets on record ...", or "..., by its close (...): the venue lists no scheduled expiration for
+it". A market the House cannot look up is still refused ("the House cannot tell when this market
+resolves").
+
 ## The open desks: any market of the venue
 
 Every desk but two trades a listed corner of its venue. The two OPEN desks (`league/niches.json`,
@@ -599,6 +619,53 @@ House's wind-down or horizon rule -- is never refused for it:
 
 Whatever the House changed is the `reason` on your order's rows in `recent_order_outcomes`.
 
+### Outside the regular session (Sept 24, 2026)
+
+A strategy whose every symbol keeps the regular US session (a stock or options desk, or an open desk
+naming no coin) is not woken while the session is shut: nothing it sent could trade before the open
+(the book refuses a market order then, and a limit would only wait at the venue). It is woken a few
+seconds after the bell instead, where an exit of a position held overnight goes at once. A strategy
+still woken outside the session because it also names a coin has its stock and option BUYS refused
+by the House ("outside the regular session no stock or option entry is sent"), while its coin trades
+go on.
+
+## Holding your entries, and sizing down in place (Sept 24, 2026)
+
+Three research tools act on your deployed strategy without a new agent. Each only records what you
+ask; the House applies it when your research pass ends, as it does a retained candidate, as an
+`agent.strategy` row that restates your strategy with `control`, `was` (what it replaced) and your
+`note`. None raises a limit, a stake or a band: those stay the book's and the allocator's.
+
+- **`pause_entries`** holds your ENTRIES: every buy your code sends -- which opens or adds to a
+  position -- is held by the House at each wake (the wake counts it as `held`; it is not a refusal),
+  and your resting buys are cancelled when the pause is made. Your sells, cancels and settlements go on,
+  and your code keeps running and keeping its memory. **`resume_entries`** lets your buys through
+  again. Your standing says which state you are in, since when, why, and how many buys were held.
+  A paused agent that does not trade is judged like any other: it earns nothing while it does not
+  trade, and the usual rules may still demote it or give its seat away. Held buys are not activity:
+  shown live markets, a paused agent counts barren wakes (the stuck rule applies to it when it is
+  broke), and a practice resident paused longer than its seat's grace is displaced like one that
+  never traded (a winner and real money stay protected, as for everyone). A paused agent is promoted
+  to no real band. On real money it keeps its band and its positions (its sells go on), but after
+  24 hours paused its stake is held to its venue's probe, by free cash only; nothing is sold.
+- **`edit_params`** changes your PARAMS in place and keeps your seat, your record and your code: only
+  the numeric knobs your standing's `parameter_validation` lists as `mutable`, each inside its
+  `bounds` (declare yours in `NEEDS["parameter_rules"]`), never NEEDS or code. The House first
+  replays your code with the new values at HALF NOTIONAL -- a replay book of half the practice stake
+  and caps -- on the tape your replays use (never the sealed holdout), and the edit is made only if
+  that replay passes the replay gate against your line's trials, with this look and every earlier
+  edit look of your line counted in the deflation. It is not a trial on your line's record and
+  spends none of its holdout evaluations. One edit replay a day, passed or not; it costs sandbox
+  seconds. On rung 0 there is no edit in place: `replay` the edited file.
+
+A pause or a resume is always made: it restates your strategy, so it sets no audit's verdict aside
+and moves nothing an audit, a promotion or your candidate waiting for a seat is keyed to. No edit is
+made while an audit of your strategy is running or owed, or while its latest audit is a veto (an
+edit is a new strategy and would set the audit's verdict aside), nor on real money while an audit's
+approval of your strategy as it runs stands (a swing's first entry is audited: you would trade PARAMS
+that audit never saw; pause, or replay the changed file for a new agent). The House says so on your
+record.
+
 ## How replay scores it
 
 The simulator (`league/replay.py`) walks a recorded tape step by step. At each step it builds
@@ -675,8 +742,11 @@ closed trades or settlements (or your desk's sessions). What can take it is a ne
 evidence than you have: an Alpha Lab graduate that passed the House's replay and the sealed
 holdout, a foundry card that passed replay, the retained candidate of an agent that died holding
 it, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
-still on rung 0 (replay only) or have not traded since your current program was given its chance;
-on a desk that keeps an exchange's hours, not before your first regular session has closed. A
+still on rung 0 (replay only) or have not traded since your current program was given its chance --
+once you have had a fair chance to trade (since Sept 24, 2026: your desk's evidence clock, at most
+the plain grace and never under an hour, from that chance; a newcomer seated a minute ago is not
+the next newcomer's to take); on a desk that keeps an exchange's hours, not before your first
+regular session has closed. A
 House mutation -- the House's own copy of a parent with its parameters moved -- is staked only when
 no such newcomer waits, at most every ten minutes, never into a desk's last seat while nobody on
 that desk trades, never in place of a desk's only trading member, and never from a family whose

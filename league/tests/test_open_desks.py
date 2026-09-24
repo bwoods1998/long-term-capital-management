@@ -12,6 +12,7 @@ import unittest
 from decimal import Decimal
 
 from league import feeds, history, niches
+from league.ledger import now_iso
 from league.tests.test_allocator import IDLE, HouseCaseReal
 from league.tests.test_house import HouseCase
 from league.tests.test_hypotheses import PASSER, FoundryCase, candidate
@@ -216,6 +217,9 @@ class InTheHouse(HouseCase):
         return agent
 
     def test_an_open_desk_entry_in_any_market_of_its_venue_is_accepted_and_another_venues_refused(self):
+        # In the regular session: outside it no stock entry is sent (the wake skip, Sept 24, 2026).
+        self.clock.now = 1789000000.0 + 13.6 * 3600  # 2026-09-10 14:02Z, 10:02 in New York
+        self.broker.clock_iso = now_iso(self.clock)
         agent = self.seat_open()
         book = self.house.books["alpaca-paper"]
         for symbol, bid, ask in (("COIN", "250", "250.10"), ("PEPE/USD", "0.00001", "0.0000101"), ("XLE", "90", "90.02")):
