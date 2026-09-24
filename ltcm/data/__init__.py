@@ -40,13 +40,15 @@ from ..broker import Instrument, Quote, money, text
 NEW_YORK = ZoneInfo("America/New_York")
 UTC = timezone.utc
 
-USER_AGENT = "LTCM/0.1 (blakewoods.us; blakewoods98@gmail.com)"
 #: The User-Agent the SEC and the National Weather Service ask every client to send, an application
 #: name and a contact address (https://www.sec.gov/os/webmaster-faq#developers,
 #: https://www.weather.gov/documentation/services-web-api). Sept 24, 2026: one constant, so the owner
 #: changes the contact in one place; the NWS, Open-Meteo, derivatives, macro and EDGAR readers and
 #: the House's feed recorders (league/feeds.py) all send it.
 CONTACT_USER_AGENT = "ltcm (agent@blakewoods.us)"
+#: The default every `HttpTransport` sends (the older EDGAR calls among them). Sept 24, 2026: it named
+#: the owner's personal address; it is the one contact constant now, so no reader sends another.
+USER_AGENT = CONTACT_USER_AGENT
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 #: The on-disk HTTP cache never grows past this; the oldest entries go first.
 CACHE_CAP_BYTES = 256 * 1024 * 1024

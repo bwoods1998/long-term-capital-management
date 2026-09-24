@@ -167,9 +167,12 @@ REPLAY_VIEW = {
     "kalshi": "markets: the rows the contract lists, with hours_to_close; watched symbols arrive as observed.bars only",
     # Sept 23, 2026: two point-in-time histories a replay can use at once (league/feeds.py).
     "feeds": "only when NEEDS['feeds'] declares them: ctx['feeds'][feed][key], the latest row whose t is at or before the step. "
-             "vol (Deribit DVOL for BTC and ETH, hourly candles stamped at their close) and funding (OKX settled funding per "
-             "coin, stamped at settlement) are backfilled over the replay window, so they are replayable now; sports and perps "
-             "are recorded live only. A key may be absent: use it only when present",
+             "Backfilled over the replay window, so replayable now: vol (Deribit DVOL for BTC and ETH, hourly candles stamped at "
+             "their close), funding (OKX settled funding per coin, stamped at settlement), oi (OKX hourly open interest, stamped "
+             "at the hour's end), forecast (Open-Meteo GFS and ECMWF daily high, low and rain at 1-3 days' lead per settlement "
+             "station, stamped 11:00 local standard time) and earnings (each 8-K Item 2.02's EDGAR acceptance time). Recorded "
+             "live only, from when recording began: sports, perps, weather (ensembles), nws, earnings_date, rates, treasury, "
+             "odds and tsa. A key may be absent: use it only when present",
     "absent_in_replay": ["quotes[...].t", "recent_order_outcomes", "event_risk"],
     "rule": "Code that REQUIRES a field replay does not supply never trades on replay and cannot pass. Use such fields only when present.",
 }
@@ -1296,7 +1299,14 @@ class Foundry:
         # The history ingestion's rows only: the options store's carry `asset: "option"`, and the live
         # feeds write one `asset: "feed"` row a feed every hour (league/feeds.py), which would otherwise
         # always be the newest and hide the store this summarises.
-        rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=500, newest=True) if "asset" not in row.payload]
+        # Sept 24, 2026 (the close-the-gaps run's recorders): eleven more feeds write about 264 rows a
+        # day, so the newest 500 rows stopped reaching back to the ingestion's row within a day and the
+        # packet lost its coverage section. Look further back, a widening window at a time.
+        rows = []
+        for limit in (500, 5000, 50000):
+            rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=limit, newest=True) if "asset" not in row.payload]
+            if rows:
+                break
         if not rows:
             return None
         latest = rows[-1].payload
