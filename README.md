@@ -106,7 +106,7 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   |---|---|---|---|
   | Replay | 0 | new code | none |
   | Paper | 1 | passed replay | the $200 purse |
-  | Probe | 2 | E ≥ 1.01 and 5 closed practice trades, or 3 settlements on Kalshi, when the agent's family is not proven | $10 at Kalshi, $25 at Alpaca |
+  | Probe | 2 | E ≥ 1.01 and 5 closed practice trades, or 3 settlements on Kalshi, when the agent's family is not proven -- and (since Sept 24, 2026, R5) its family is not losing (a forward record at or below zero after 6 active blocks) nor held by a probe's demotion until its record since then turns | $10 at Kalshi, $25 at Alpaca |
   | Bunt | 2 | the same line, when the agent's family's pooled record is proven | $30 at Kalshi, $25 at Alpaca, × W_real up to 1.25 |
   | Family swing | 2 | every member on real money of a PROVEN family whose REAL record passes its entry look -- judged at 15 independent settlements and every 5 more, on those first ones, at 90% -- once that entry is audited; it stays while the whole real record's bound at 80% holds (since Sept 24, 2026, Deploy B) | 2 × the bunt ($60 at Kalshi), doubling after each 10 further winning real settlements, up to Kelly on the bound and 60% of the venue for the whole family, held by measured capacity |
   | Swing | 3 | E ≥ 1.25, W_real ≥ 1 and 8 real closed trades, for a proven family's member only (since Sept 24, 2026); the first swing is audited | the bunt × min(E, 20)², up to 60% of the venue |
@@ -120,8 +120,20 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   (since Deploy B; for a favourites
   record, one of mostly small wins, the House's exact loss-rate bound as well:
   `family_proven.lopsided_gate`); a probe becomes a bunt the pass after that, and a bunt a probe when
-  the bound falls. On Kalshi, closed trades and settlements count once per event, so strikes stacked
-  on one game are one bet. The board labels each real agent probe, bunt or swing, with its family's
+  the bound falls. **No probe on a losing family** (R5, Sept 24, 2026, `allocator.family_probe`, the
+  run's third money-digest change): when a family's forward record -- every member's active blocks,
+  living or dead, and their summed log growth, the line on which the House stops breeding it -- is at
+  or below zero after 6 active blocks, no probe is seated from it, and a probe seated on it goes back to
+  practice at the next pass (on Kalshi its contracts are held to settlement; on Alpaca its bids are
+  cancelled and it goes back once it holds nothing the demotion would sell -- dust is booked, not sold:
+  no sale is forced, and it is lent nothing more meanwhile). Each probe that goes back to practice, for
+  any reason, holds its family until the family's record since that demotion turns positive over 6
+  active blocks; the options probe krasker-14 (options-pullback: 19 practice blocks, -0.3829) seated
+  as an $80 probe at 16:47:37Z is the kind of seat this refuses. Measured on the 15:06Z snapshot: 11
+  of the allocator's 21 promotions since Sept 23 went onto losing families and realized -$8.12 on
+  22 closes, no stay positive; the other 10 made +$28.96. On Kalshi, closed trades and settlements
+  count once per event, so strikes stacked on one game are one bet. The board labels each real
+  agent probe, bunt or swing, with its family's
   state, bound, count and capacity, and carries every followed family's record in its `families`
   block (`league/families.py`, the mechanism ledger; a `family.record` ledger row when it changes).
   **The family swing** (Deploy B): a PROVEN family's entry is judged when its REAL record reaches 15
@@ -149,7 +161,8 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
 - **Down.** Hysteresis: a bunt leaves below E 0.8585 once it has 3 independent real results in its
   stay (since Sept 24, 2026: one early loss does not cross it; the stay drawdown and drift still apply), and a swing drops to a bunt below
   1.0625 or W_real 0.9. A 35% real drawdown from the high-water mark of the current real stay sends
-  an agent back to paper at once, trial or not. An agent sent back waits an hour before it may bunt again (`reentry_cooldown_hours`), so a
+  an agent back to paper at once, trial or not, and so does a losing family for its probes (R5,
+  above; on Alpaca once the probe is flat). An agent sent back waits an hour before it may bunt again (`reentry_cooldown_hours`), so a
   record near a line cannot flap between books. W_paper under 0.80 after 10 closed trades is death.
   Paper death, statistical death and drift still apply.
 - **The envelope.** Per venue, it is the grant's capital plus realized profit there, so stars
@@ -639,8 +652,8 @@ What no model and no code path on Sail may change, and where each item is enforc
 | Jev allowance | $42 (Sept 23, 2026: metered $16.14 + $26 funded; $20 before) and 500,000 calls for the pilot's whole life. The pilot was to end on September 21 at 4:01 AM Pacific; since the owner resumed the game its unused allowance continues with no end date (`TYPESAFE_PERSISTENT`) | external Durable Object; backed by retained campaign earmarks, with no calendar reset or refill |
 | OpenAI budget | $408 for the month (`FRONTIER_MONTH_USD`: raised from $174 to $374 on Sept 21, 2026, when the owner added $200 of credit, and on Sept 23 to metered + the owner's funded ~$100). Since Sept 23 it also rises by 0.3 of the real accounts' equity above $1,017.75 (`COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`), held to `FRONTIER_MONTH_MAX_USD`, which is the funded $408, so profit buys nothing above funded money yet. The House's campaign allowance is a further line | in the gateway, which reads the equity itself: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
-| The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`915c978e…` since the close-the-gaps run's Deploy B, Sept 24, 2026; `8116302e…` from its Deploy A; `34adf385…` at that run's T0; `9fa83727…` from the allocator of Sept 23, 2026; `64a206c6…` under swing-and-bunt earlier that day), and the House writes the digest to the ledger every time it starts |
-| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the close-the-gaps run's Deploy A (Sept 24, 2026) it counts 101 agents: the allocation over the smallest real stake, the $10 Kalshi probe (40 over the $25 bunt line from Deploy A of Sept 23; 101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`c02ed852…` from the close-the-gaps run's Deploy B, Sept 24, 2026, once ratified; `521c4586…` from its Deploy A; `c2b0e09c…` at that run's T0; `44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
+| The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`38a57fe9…` since the close-the-gaps run's R5, Sept 24, 2026; `915c978e…` from its Deploy B; `8116302e…` from its Deploy A; `34adf385…` at that run's T0; `9fa83727…` from the allocator of Sept 23, 2026; `64a206c6…` under swing-and-bunt earlier that day), and the House writes the digest to the ledger every time it starts |
+| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the close-the-gaps run's Deploy A (Sept 24, 2026) it counts 101 agents: the allocation over the smallest real stake, the $10 Kalshi probe (40 over the $25 bunt line from Deploy A of Sept 23; 101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`535a7f15…` from the close-the-gaps run's R5, Sept 24, 2026, `allocator.family_probe`, once ratified; `c02ed852…` from its Deploy B; `521c4586…` from its Deploy A; `c2b0e09c…` at that run's T0; `44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, the campaign, live-trading and experiment-record files, the agent-box seal (`sandbox.py`), the history a strategy is judged on (`history.py`, `deep_replay.py`), the horizon rule's answer (`resolution.py`), `gateway/`, `.github/` (`ci.FORBIDDEN` has the full list) | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 

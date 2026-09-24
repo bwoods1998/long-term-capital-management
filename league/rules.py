@@ -155,6 +155,24 @@ or never swings at all.
         else:
             sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE: a conviction-sized practice record proves (or\n"
                       "  disproves) your family faster than a token one. Information, never an order: your size is your code's.\n")
+        # R5 (the close-the-gaps run, Sept 24, 2026; `allocator.family_probe`): no probe on a losing family, and a probe that
+        # went back to practice holds its family until the family's record since then turns.
+        probe_rule = alloc.get("family_probe") if isinstance(alloc.get("family_probe"), dict) else None
+        probe_gate_text = ""
+        if probe_rule:
+            blocks = int(probe_rule.get("losing_min_blocks", 6))
+            held = (f"  A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until\n"
+                    f"  the family's record SINCE then is positive over {blocks} active blocks (each such demotion, until\n"
+                    f"  its own turn).\n"
+                    if probe_rule.get("reseat") == "gain_since_demotion" else "")
+            probe_gate_text = (
+                f"  NO PROBE ON A LOSING FAMILY. When your family's forward record -- the active blocks of every member\n"
+                f"  ever born, living or dead, summed -- is at or below zero after {blocks} active blocks, no probe is\n"
+                "  seated from it, and a probe seated on it goes back to practice at the next pass (at Alpaca once it\n"
+                "  holds nothing that demotion would sell: its bids are cancelled, and nothing is sold for it).\n"
+                f"{held}"
+                "  A proven family's members are bunts and are never held. (Sept 24, 2026: 11 of 21 promotions went to\n"
+                "  such families and lost $8.12 on 22 closes, no stay positive; the other 10 made $28.96.)\n")
         swing_rule = alloc.get("family_swing") if isinstance(alloc.get("family_swing"), dict) else None
         family_swing_text = ""
         if swing_rule:
@@ -186,7 +204,7 @@ or never swings at all.
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
-  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
+{probe_gate_text}  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
   foundry card starts a family of its own and proves itself from zero; your research children stay in
   your family, whatever they change, and their trades add to its record (its maker and taker entries are
   pooled apart: a child that makes the market where you took it builds the maker record, and the taker

@@ -55,6 +55,11 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
   `max_share_of_venue` of it: FAMILY caps, shared by its members, because members of one family
   bid the same markets (mullins-2 and mullins-6 both held KXRAIN-26SEP22-SATX on real money): two
   members each at full Kelly on the family's bound are twice Kelly on one mechanism.
+- **The probe gate** (`probe_rule`, `losing`, `gaining`; R5, Sept 24, 2026): no probe on a family whose pooled forward
+  record (the House's `family_forward`: active blocks and summed log growth, every member ever born) is at or below zero
+  after `losing_min_blocks` active blocks, and none from a family one of whose probes went back to practice until its
+  record since then is positive over as many (`Allocator.probe_gate`). The board's clock to a family's swing is
+  `swing_clock`.
 
 A money judge: `league/ci.py` forbids Merton's pull requests to touch it.
 """
@@ -66,7 +71,7 @@ import hashlib
 import json
 import math
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
@@ -290,6 +295,19 @@ def swing_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] 
             # Full Kelly on the lower bound, as the constitution's scaled rung (`rungs.3.kelly_fraction`).
             "kelly_fraction": float((c.get("rungs") or {}).get("3", {}).get("kelly_fraction", 1.0)),
             "max_share_of_venue": float(allocator.get("max_share_of_venue", 0.6))}
+
+
+def probe_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """`allocator.family_probe` (R5 of the close-the-gaps run, Sept 24, 2026), or None where the constitution has none: a
+    probe is then seated on any family's record. `losing_min_blocks` is the losing line's count of active blocks (and the
+    count a family's record since a probe's demotion must be positive over); `hold` is whether a probe demoted from real
+    money holds its family (`reseat: "gain_since_demotion"`)."""
+    allocator = (constitution or CONSTITUTION).get("allocator") or {}
+    rule = allocator.get("family_probe")
+    if not isinstance(rule, Mapping):
+        return None
+    return {"losing_min_blocks": int(rule.get("losing_min_blocks", 6)), "reseat": str(rule.get("reseat") or ""),
+            "hold": str(rule.get("reseat") or "") == "gain_since_demotion"}
 
 
 def position_share(venue: str, constitution: Mapping[str, Any] | None = None) -> float:
@@ -916,6 +934,74 @@ def losing(blocks: int, growth: float, minimum: int) -> bool:
     `minimum` active blocks. A record that nets to zero is not a loss (six blocks of +0.01 and -0.01 sum to
     -3.5e-18 in floating point)."""
     return blocks >= minimum and growth <= -1e-9
+
+
+def gaining(blocks: int, growth: float, minimum: int) -> bool:
+    """The mirror of `losing`: a pooled forward record POSITIVE over at least `minimum` active blocks, the turn a family
+    held by a probe's demotion waits for (`allocator.family_probe`). A record that nets to zero has not turned."""
+    return blocks >= minimum and growth >= 1e-9
+
+
+def first_real_at(tape: TradeTape, members: Iterable[str], venue: str) -> float | None:
+    """When the family's first real dollar was lent (the earliest `book.stake` above zero on the venue's real book, any
+    member, living or dead), in epoch seconds, or None: where the family's real life starts."""
+    book = REAL_BOOK.get(venue)
+    first = None
+    for member in members:
+        for row in tape.rows.get(member) or ():
+            if row.kind != "book.stake" or row.payload.get("book") != book or not row.at:
+                continue
+            try:
+                lent = float(row.payload.get("usd") or 0)
+            except (TypeError, ValueError):
+                continue
+            if lent > 0 and (first is None or row.at < first):
+                first = row.at
+    return first
+
+
+def swing_clock(record: Mapping[str, Any], rule: Mapping[str, Any] | None, *, first_real: float | None,
+                now: float, released: bool | None = None) -> dict[str, Any] | None:
+    """The family's clock to its swing (R3 of the close-the-gaps run, Sept 24, 2026; the board's `families`, never a
+    `family.record` row: it moves with the clock alone). `real_per_day`: its independent REAL settlements a day over its
+    real life, from its first real dollar (`first_real_at`), once that life is an hour long (a rate over minutes is
+    noise); `needs`: what the family swing (`allocator.family_swing`) still asks -- the real settlements to the next entry
+    look (`min_real_settlements`, then every `entry_every`), the confidence that look's bound is read at, whether the
+    pooled proof is still missing, the audit that follows a passing look, and whether the live grant does not yet release
+    stakes above the bunt (`grant`, when `released` is known); `days_to_swing`: the days to that look at the family's own
+    real rate. None where no estimate stands: no rate yet, no member on real money (its real record does not grow), or
+    nothing left to count but the pooled proof. A swinging family needs nothing; one whose look passed waits only for its
+    audit. The owner's notes at the resume (Sept 24, 2026 14:30Z) read sports-central-run-under, the one proven family, at
+    real n 5 against 15: this is that clock, read from the rule itself."""
+    if rule is None:
+        return None
+    real = record.get("real") or {}
+    entry = real.get("entry") or {}
+    n = int(real.get("n") or 0)
+    swinging = record.get("state") == "swing"
+    proven = bool(record.get("proven"))
+    days = max(now - first_real, 0.0) / DAY if first_real is not None else None
+    rate = (n / days if n > 0 else 0.0) if days is not None and days >= 1 / 24 else None
+    if swinging:
+        needed, look = 0, None
+    elif entry.get("ready"):
+        needed, look = 0, entry.get("checkpoint")  # the look passed: the entry's audit is what is left
+    else:
+        look = int(entry.get("next_checkpoint") or rule["min_real_settlements"])
+        needed = max(look - n, 0)
+    if swinging or (needed == 0 and proven):
+        to_swing = 0.0
+    elif needed == 0 or not rate or int(record.get("members_real") or 0) <= 0:
+        to_swing = None
+    else:
+        to_swing = needed / rate
+    return {"real_n": n, "real_since": None if first_real is None else datetime.fromtimestamp(first_real, tz=timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%SZ"), "real_days": None if days is None else round(days, 3),
+            "real_per_day": None if rate is None else round(rate, 3),
+            "needs": {"real_settlements": needed, "look_at": look, "confidence": float(rule["entry_confidence"]),
+                      "proof": not proven, "audit": not swinging,
+                      "grant": None if released is None or swinging else not released},
+            "days_to_swing": None if to_swing is None else round(to_swing, 2)}
 
 
 def score(record: Mapping[str, Any], state: str) -> int:

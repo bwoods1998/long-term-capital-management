@@ -475,6 +475,36 @@ CONSTITUTION: dict[str, Any] = {
         # positive (`Allocator.family_taker`). Evidence: the taker mechanisms were the loss engine of
         # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
         "real_entry_liquidity": "maker_unless_family_taker_positive",
+        # `family_probe` (row "allocator.family_probe"; R5 of the close-the-gaps run, Sept 24, 2026: the run's third and
+        # last money-digest change, which the owner granted at the resume): NO PROBE ON A LOSING FAMILY. The line is the
+        # House's own for breeding (`House._losing_family`, `families.losing`): a family's pooled forward record -- its
+        # active `eval.block` count and summed log growth over every agent ever born into it, living or dead
+        # (`House.family_forward`; the allocator reads the same rows from its tape, `Allocator.family_forward`) -- is
+        # at or below zero after `losing_min_blocks` active blocks (a record that nets to zero is not a loss). Then:
+        #   1. the allocator seats no PROBE from the family: the promotion waits, its status naming the blocks and growth;
+        #   2. a probe already seated on it goes back to practice at the next pass by the demotion path (`_move_down` to
+        #      practice), which holds a Kalshi contract to settlement and so sells nothing there; on Alpaca, where that
+        #      path sells what the account holds (an option at the bid, a stock at the next open), only once the probe
+        #      holds nothing that path would sell -- its working bids cancelled first, as the path itself does -- and no
+        #      buy is still in question at the venue: no sale is ever forced, and it is lent nothing more meanwhile;
+        #   3. under `reseat: "gain_since_demotion"`, each probe that goes back to practice from real money, for any
+        #      reason, holds its family until the family's pooled forward record SINCE that demotion turns: positive over
+        #      `losing_min_blocks` or more active blocks ("until the family's record turns"; a turn is for good, and each
+        #      demotion is its own hold). The demotions are read from the ledger's `eval.verdict` rows (a restart forgets
+        #      nothing): their `band_from`, and for a row that does not name its band, the family's state in the
+        #      mechanism ledger just before it.
+        # A gate that cannot be read seats no probe and demotes nobody.
+        # A proven or swinging family's agents are bunts, not probes: none of this applies to them. Evidence
+        # (docs/research/queries/2026-09-24/R5-family-probe.py, on the 15:06Z snapshot): of the allocator's 21
+        # promotions to real money since Sept 23 00:00Z, 11 were onto families whose pooled forward record was negative
+        # over 6 or more active blocks; they realized -$8.12 on 22 closes (8 positive) and no stay ended positive. The
+        # other 10 made +$28.96 on 34 closes (26 positive). At 15:06Z 9 of the 14 seated probes, $139.75 of their $168.94
+        # of stake, sat on such families: crypto-alts-reversion (351 blocks, -0.0569; haghani-62, -63 and -r42c38c on
+        # Alpaca), crypto-15m-lab-335592 (22, -0.2777), crypto-15m-doge-flat-spot-no (35, -0.6226),
+        # crypto-15m-prior-window-reset (25, -0.7019), crypto-strikes-vol-shock-upside (26, -0.2168) and
+        # prices-favorites (23, -0.2225). 6 is the House's breeding line (`game.json` `economy.losing_family_min_blocks`).
+        # Absent, a probe is seated on any family's record, as before.
+        "family_probe": {"losing_min_blocks": 6, "reseat": "gain_since_demotion"},
     },
 }
 
@@ -517,4 +547,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '915c978e2fff394d69e503fe582112a33d9f95ba7da3bbf431fa4c649badc2d8'
+PINNED_DIGEST = '38a57fe98b837c60007a86459090de14bee177c74cd83e58d718002de8986158'

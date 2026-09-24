@@ -3727,6 +3727,7 @@ class House:
             authorization = self.campaigns.live_authorization() if self.campaigns else None
             if rung == 1 and allocator_module.enabled():
                 # A known defect's bunt, committed after its audit: the allocator's envelope decides.
+                if self.allocator.refuses_probe(agent, verdict): return  # R5 (Sept 24, 2026): the probe gate again after the audit
                 if self.allocator.headroom(agent.venue) < self.allocator.target_stake(agent, "bunt"):
                     self._promotion_status(agent, verdict, 'envelope', 'the envelope has no room for the bunt the audit approved')
                     return
