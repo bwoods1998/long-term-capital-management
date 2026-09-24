@@ -542,3 +542,38 @@ and B-seats are building. The floor ran under the T0 rules meanwhile: the 15-min
 losing (huang-h427345-2 demoted at 03:24Z), meriwether-h2d625d (the one family proven under Deploy A's
 rules) made +$19.47 real, and the first Alpaca real agent (haghani-56) was seated. Compute at 05:30Z:
 the OpenAI month $421.41 of $607; Sail about $168 (burn about $37 a day).
+
+### T+8 (09:34Z Sept 24)
+
+`scripts/gap_scoreboard.py --take snap/T8 --baseline 2026-09-24T05:37:31Z` from `~/Work/ltcm-deploy`
+at `3faf146` (ledger 475,400 rows to 09:34:23Z; window the last 24 h). The first reading made through
+the House's own family record (`HouseRecords`, Deploy B): the scoreboard and the allocator now agree
+that one family is proven.
+
+| # | Metric | T0 | T+4 | T+8 |
+|---|---|---|---|---|
+| 1 | Families with a positive real bound; capacity (proven by the House's pooled record) | 2 (n 2 and 5) | 4 on t bounds alone, none with ≥ 10 real events | **1**: sports-central-run-under, real n 5, bound +0.291 a dollar at risk, capacity $94.57/day; the House's proof agrees (pooled n 19, +0.204) |
+| 2 | Allocator promotions since Deploy A: settled, share positive | 11, +$0.28 on 25 | 12, +$7.26 on 46 | 0 promotions since 05:37:31Z (no unproven mechanism promoted) |
+| 3 | Real $ proven / unproven; Alpaca real agents | $96.56 / $168.98; 0 | $117.10 / $103.98; 1 | $20.54 / $122.35 (seven probes still shrinking to $10 by free cash); 1 (haghani-56) |
+| 4 | Median life all / day-horizon; deaths before 3 fills (seated) | 14.38 / 19.83 h; 66% | 12.06 / 13.32 h; 55% | 9.59 / 5.79 h over 124; 61% (seated: 118, 59%). Since Deploy B: 12 deaths, median 0.28 h — the churn below |
+| 5 | Lab batches last hour; LLM share of born graduates; waiters | 0; 2 of 18; 30 at 33.84 h | 16; 6 of 36; 10 at 37.64 h | **106**; 14 of 50 (28%); 23 (14 graduates, 9 cards) at 41.73 h |
+| 6 | Self-cross refusals of sells (6 h); stacked promotions | 26; 4 of 11 | 34; 4 of 12 | 8, **all before Deploy A** (0 since 05:37Z); 0 of 0 |
+| 7 | Recorders on allowed hosts; idle desks (48 h) | 0 of 12; 1 | 0 of 12; 1 | **9 of 12** (RCP refuses bots; api.open-meteo.com and efts.sec.gov unused: their sibling hosts serve the feeds); **0** |
+
+**State.** Deploy B went live at 08:30:59Z and was ratified 10 s later on money digest `c02ed852`, the
+run's second and last digest change; its watch passed at 08:41:13Z. The first owner deploy had been
+refused because the in-box updater was watching a release of its own. D2 is verified: 48 phantom
+OpenAI holds ($86.86) were released at 07:48:57Z, and the House line equals the gateway month. The
+site's mechanism ledger is deployed (`a4d25790`). Its publisher (#261) is merged and ships with the
+updater. Wave 2 is in review or building: C-tools final (#258), C-search (#262) in review, C-perf
+building, and the board's honest bound (`c-board/honest-bound`). Two live defects were found since
+the last note:
+- The House re-parses the same settled Kalshi listings about 24 times in 30 seconds while running at
+  74% CPU, with a 51-64 s tick. C-perf is fixing this and adding step timings.
+- Deploy B's seat market chains displacements. An evidenced newcomer may take a never-traded seat
+  with no grace, so graduates displace the previous newborn within 33 s to 14 minutes (6 of the 12
+  deaths since 08:31Z). The fix is in progress (`c-seats/fair-chance`).
+
+Compute at 09:37Z: the OpenAI month is at $442.50 of $607, with $164.50 left and $2.40 settled in the
+last hour. Sail has $165.44 on the House line and burned about $2.60 in four hours under the $2/h
+research cap (it was about $37 a day before).
