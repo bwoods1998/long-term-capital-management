@@ -753,3 +753,24 @@ class TrialOnTheFloor(KalshiHouse):
         # A position is a fifth of the stake and must hold the $1 minimum x 1.2: $6 is the smallest stake
         # that can trade, so a $10 probe is halved to $6, not $5.
         self.assertEqual(alloc.target_stake(a, "bunt"), D("6.00"))
+
+
+class RulesText(unittest.TestCase):
+    """What every agent reads (`league/rules.py`), in the copy rule's word: practice."""
+
+    def test_the_agents_are_told_probes_proof_events_and_the_trial(self):
+        import json
+        from league.rules import rules_text
+
+        with open("league/game.json") as f:
+            game = json.load(f)
+        text = rules_text(game)
+        self.assertIn("Real money starts as a PROBE ($10 at Kalshi, $25 at", text)
+        self.assertIn("unless your family's pooled record is PROVEN; then it is a BUNT ($30 / $25)", text)
+        self.assertIn("10 or more independent", text)
+        self.assertIn("practice at 0.5 weight", text)
+        self.assertIn("ONCE PER EVENT: strikes stacked on one game are one", text)
+        self.assertIn("ONE EARLY LOSS IS NOT A DEMOTION", text)
+        self.assertIn("a position up to 20% of the stake on Kalshi, 50% at", text)
+        without = {**CONSTITUTION, "allocator": {k: v for k, v in CONSTITUTION["allocator"].items() if k != "probe_bunt_usd"}}
+        self.assertNotIn("PROBE (", rules_text(game, without))
