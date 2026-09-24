@@ -690,7 +690,7 @@ is null in `league/config.json`).
 | `league/` | The rebuilt runtime: the House. Standard library only. [Its own guide](league/README.md). |
 | `ltcm/` | The first run's runtime. No longer run; the league imports its venue adapters, broker types, risk engine, fee model, Sail clients and data readers. [What is still used](ltcm/README.md). |
 | `gateway/` | The Cloudflare Worker holding venue, OpenAI, TypeSafe and GitHub credentials, external caps and kill switch. |
-| `scripts/` | The owner's tools: `floor_box.py` (the House's Sailbox), `gateway_admin.py` (kill switch and status), `floor_watch.py` (the read-only watch), `lab_box.py` (the Alpha Lab's box), and the first run's scripts. |
+| `scripts/` | The owner's tools: `floor_box.py` (the House's Sailbox), `gateway_admin.py` (kill switch and status), `floor_watch.py` (the read-only watch), `gap_scoreboard.py` (the close-the-gaps scoreboard, read from a snapshot), `lab_box.py` (the Alpha Lab's box), and the first run's scripts. |
 | `deploy/` | [How the House runs on its box](deploy/README.md): releases, the canary, the two watchdogs. |
 | `docs/` | [Index](docs/README.md): the operator's page, the run records, the design, the build log, the runbook, and the first run's record. |
 | `playbooks/` | The first run's desk playbooks, kept as history. The league's lessons are in `league/playbook/`. |
@@ -793,8 +793,10 @@ Also `logs`, `checkpoint`, `checkpoints`, `fork`, `sleep`, `resume`, `pause`, `t
 exits and reconciliation go on; [docs/operations.md](docs/operations.md) is the operator's page.
 `python3 scripts/gateway_admin.py status | kill | unkill` reads and sets the gateway's kill switch.
 `python3 scripts/floor_watch.py [--since ISO] [--json]` prints the watch, read-only: bands, real
-money, evidence, the lab, costs, health and the site. `python3 scripts/lab_box.py status | sleep`
-reads or sleeps the Alpha Lab's box.
+money, evidence, the lab, costs, health and the site. `python3 scripts/gap_scoreboard.py --take DIR`
+(or `--snapshot DIR`) prints the close-the-gaps scoreboard from a read-only snapshot of the House's
+stores: the seven gaps, each desk's evidence clock and every family's pooled record.
+`python3 scripts/lab_box.py status | sleep` reads or sleeps the Alpha Lab's box.
 
 **Switching the floor on** is in [docs/runbook-go-live.md](docs/runbook-go-live.md).
 
