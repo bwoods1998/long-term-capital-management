@@ -203,6 +203,24 @@ class TradingPending(EvidenceCase):
         self.assertTrue(self.house._trading_pending(agent, SimpleNamespace(name="alpaca-paper"), now - 60, now, self.rules),
                         "an Alpaca book has no settled route: five closed trades")
 
+    def test_the_seats_protection_and_the_bunt_line_read_one_record(self):
+        """The invariant: for every count of closed trades and settlements on either kind of book, the
+        seat's protection ends exactly when the allocator's bunt line (`allocator.bunt_ready`) has its
+        record -- never a line of its own."""
+        from league import allocator as allocator_module
+
+        agent = self.seated("any")
+        line = allocator_module._params()
+        now = self.clock()
+        for book, venue in (("kalshi-shadow", "kalshi"), ("alpaca-paper", "alpaca")):
+            for closed in range(7):
+                for settled in range(min(closed, 5) + 1):
+                    evidence = SimpleNamespace(paper_trades=closed, venue=venue, e=10.0,
+                                               paper_settled=settled if book in allocator_module.EVENT_BOOKS else 0)
+                    with patch.object(allocator_module, "closed_trades", return_value=(closed, settled)):
+                        pending = self.house._trading_pending(agent, SimpleNamespace(name=book), now - 60, now, self.rules)
+                    self.assertEqual(pending, not allocator_module.bunt_ready(evidence, line), (book, closed, settled))
+
 
 class SeatsHoldingNothing(EvidenceCase):
     def test_the_hourly_watch_names_the_seats_with_no_forward_score_no_fill_and_no_grace(self):
