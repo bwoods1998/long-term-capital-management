@@ -6,7 +6,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from league.house import Newcomer
-from league.tests.test_house import BUYER
+from league.tests.test_house import BUYER, HouseCase
 from league.tests.test_hypotheses import FoundryCase
 from league.tests.test_lab import KNOB, LabCase
 from league.tests.test_seat_capacity import NoFoundryCards
@@ -354,3 +354,67 @@ class AProvenFamilysNameFollowsItsProgram(ReviewCase):
             self.house.kill(anchor, "evidence", "a test death")
             self.assertEqual(self.house._proven_programs(), [], "no member runs the program that proved the family")
             self.assertIsNone(self.house._proven_births(self.rules))
+
+
+class StaleSeatsOnADeskThatKeepsHours(HouseCase):
+    """A pin, not a fix: S3 on a desk that keeps an exchange's hours, which the builder's tests (a 24/7 crypto desk)
+    never reached. S3 passes over the trading protection (`_trading_pending`: the bunt line's closed trades, or three
+    sessions) once the desk's evidence clock has run and a session has closed -- but never takes a trader holding a
+    position while its market is shut (scholes-23, 07:11Z Sept 23, mid-basket: the House would sell at the open what
+    the agent's own exit sells there)."""
+
+    def setUp(self):
+        super().setUp()
+        from league.venues import instrument_for
+
+        self.rules = self.house.game["economy"]
+        self.book = self.house.books["alpaca-paper"]
+        self.spy = instrument_for("alpaca-paper", {"symbol": "SPY"})
+
+    def at(self, stamp):
+        from league.tests.test_stock_desk_seats import ts
+
+        self.clock.now = ts(stamp)
+
+    def fill(self, agent, stamp, *, closed=False):
+        self.at(stamp)
+        payload = {"book": "alpaca-paper", "symbol": "SPY", "side": "sell" if closed else "buy",
+                   "quantity": "0.05", "price": "500", "source": "venue"}
+        if closed:
+            payload.update(realized="-0.02", flat=True)
+        self.house.ledger.append("book.fill", payload, agent=agent.id)
+
+    def stale_pick(self, desk):
+        """The pick for a waiter with a winning forward window (+0.0001) against residents with no window of their own,
+        the desk's evidence clock the index ETFs' at 15:06Z (19.2 h)."""
+        with patch.object(self.house, "_resident_forward", return_value=None), \
+                patch.object(self.house, "_forward_scorable", return_value=True), \
+                patch.object(self.house, "_desk_clocks", return_value={desk: 19.2 * 3600}):
+            found = self.house._weakest(self.rules, evidenced=True, newcomer=Newcomer(forward=0.0001))
+        return None if found is None else found.id
+
+    def test_s3_takes_a_stale_trader_past_its_trading_protection_but_never_one_holding_through_a_shut_market(self):
+        from decimal import Decimal
+
+        from league.book import Holding
+        from league.tests.test_stock_desk_seats import FIRST_WAKE, SPY_HOURLY
+
+        self.at("2026-09-22T22:00:00Z")
+        agent = self.seated("stocks", SPY_HOURLY)
+        desk = self.house.niche_of(agent)
+        self.assertTrue(desk.keeps_hours(agent.needs))
+        self.at(FIRST_WAKE)  # Wednesday Sept 23, the open
+        self.house.ledger.append("agent.woke", {"ok": True, "offered": 1}, agent=agent.id)
+        self.fill(agent, "2026-09-23T14:10:00Z")
+        self.fill(agent, "2026-09-23T14:11:00Z", closed=True)  # one closed trade: short of the bunt line's record
+        self.at("2026-09-24T07:00:00Z")  # 17.5 h: inside the desk's clock
+        self.assertIsNone(self.stale_pick(desk.id))
+        self.at("2026-09-24T09:00:00Z")  # 19.5 h and Wednesday's session closed: stale, and flat
+        self.assertEqual(self.stale_pick(desk.id), agent.id)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "without a forward score: the trading protection")
+        self.fill(agent, "2026-09-24T19:30:00Z")  # Thursday's basket, held overnight
+        self.book.account(agent.id).holdings[self.spy.key] = Holding(self.spy, Decimal("0.05"), Decimal("25"))
+        self.at("2026-09-25T07:11:00Z")
+        self.assertIsNone(self.stale_pick(desk.id), "holding through a shut market: never, stale or not")
+        self.at("2026-09-25T13:31:00Z")
+        self.assertEqual(self.stale_pick(desk.id), agent.id, "the market is open: the House can sell at market")
