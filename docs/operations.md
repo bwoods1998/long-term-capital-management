@@ -195,7 +195,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     (the `retained` candidates of dead authors too), the displaceable count, the seats holding no
     evidence (`seats_holding_none`: count and the first ids), the desks' evidence clocks, and why each
     class of waiter was last refused a seat; and each House-sent sale stopped after three identical
-    refusals (`wind down stopped`, from house.json `wind_down_refusals`);
+    refusals (`wind down stopped`, from house.json `wind_down_refusals`). Since R2 (Sept 24, 2026) the
+    `longest wait` line (class, id, desk, hours and the rule that holds its desk), an `over 2 h on`
+    line a desk where newcomers have waited over two hours (count, longest, rule), and one line with
+    the waiters that left the queue in the last day by rule and the population the league may grow to
+    now (`population <now> of <ceiling>` and why, from Sail's runway);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why) and, since Deploy A, `settled_usd`,
     `inflight_usd` and the `previous` month, refusals, alerts, and the site checkpoint's age and
@@ -340,6 +344,66 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
     admission pass on their author's line (a proven family's first, then the longest wait), dropped
     after 72 hours.
+    **R2 and R3 (Sept 24, 2026, the close-the-gaps run): the seat market's capacity.** Measured at
+    15:06Z: 82 newcomers waited (41 graduates, the longest 24.5 h since passing; 15 cards, 47.3 h; 11
+    retained candidates; 15 merged strategies) in a league of 112 of 112 whose every desk they waited
+    for was full; 50 had waited over two hours and the only warning said how many, not where or why.
+    - `waiters` has a first class, `proven` (R3): a proven family's program owed births on its desk.
+      Every class is what REMAINS once the search has closed a waiter's way: a waiter whose desk the
+      search closes (the foundry's closed desks, `Foundry._closed_desks`: game.json
+      `hypotheses.closed_desks` until a family there is positive over `closed_reopen_blocks` active
+      blocks on that desk; the lab's idle desks, `Lab._idle_desk`) or, for a lab graduate, whose own
+      forward window loses (`Lab.forward_score` at or below zero) leaves the queue once, with a
+      `route.decision` row `seat-expired:<class>:<id>` (route `expired`, the reason and the rule), a
+      house.json `seat_expired` entry kept a week, and one info alert a desk an hour ("N waiters for
+      <desk> left the seat queue"). It is never counted again: not in `waiters`, the refusals, the
+      reserved desks or the scoreboard's metric 5. An expired retained candidate's admission row is
+      `dropped` with the reason, an expired merged strategy is not enrolled, no card is admitted onto
+      a closed desk, and no seat is made there for a graduate (`_displaceable` gives an evidenced
+      newcomer no seat on a desk the search closes, and the House holds that desk's cap at its
+      members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
+      resident still runs is not expired: it takes that resident's seat. At 15:06Z 21 would have left
+      (the 20 of kalshi-crypto-15m: 3 graduates, 6 cards, 4 retained candidates, 7 corrected children
+      of dead parents; and a megacaps graduate whose window lost -0.000142 a block), and Deploy C's
+      lab holds 17 nudges itself: 44 remain. kalshi-crypto-strikes was NOT closed: the search had
+      reopened it on two lab families positive there (17 and 7 active blocks, one on real money).
+    - `expired`: the waiters that left the queue in the last day (`last_day`, `by_rule`, `by_desk`).
+    - `over_two_hours` (desk -> `count`, `longest_hours`, `longest`, `rule`) and `longest_wait`
+      (`class`, `id`, `desk`, `hours`, `since`, `reason`), the invariant: no newcomer waits over two
+      hours, or one warning a desk an hour ("N newcomers have waited over 2 hours for a seat on
+      <desk> (the longest ..): <rule>") names the desk, the count, the longest wait and the rule that
+      holds them -- a free seat the birth passes have not reached (the lab births at most 6 an hour,
+      the refill one a `newcomer_seconds`), or the rules that keep every resident of the desk from
+      the best waiter that asks, counted: real money, a winner, inside its grace or its desk's
+      evidence clock, a trader short of its record, its day screen pending, a proven family's
+      member, a forward record the newcomer does not beat, one displacement a desk a tick, the
+      search closes the desk, the desk held for the proven family's births. `longest_wait` is
+      recomputed every tick; its `reason` is the hourly watch's.
+    - `caps` (desk -> `cap`, `base` (niches.json), `members`, `waiting`) and `population`
+      (`max_population` now, `ceiling` (turbo.json), `held_at`, `runway_days`, the `sail` reading and
+      the `rule`): the league grows toward turbo.json `max_population` (128) only while Sail's runway
+      -- the latest balance less `sail_reserve_usd` over the trailing day's falls, from the Sail
+      meter's `ops.budget` "sail" rows -- is over `economy.population_runway_days` (1.5); otherwise,
+      or unread, it is held at `economy.max_population_short_runway` (112), killing nobody (an info
+      or warning alert when it moves). At 15:06Z: $162.30 against $34.88 a day, 4.51 days.
+    - S3 in `displaceable`: a waiter with a winning forward window takes the seat of a practice
+      resident whose desk evidence clock has run (its seat older than the clock -- the plain 12-hour
+      grace where none is measured -- and its fair chance; on a desk that keeps hours, a session
+      closed since) with no positive record of its own (no winning standing, no positive forward
+      window), past the S1 forward rule and the trading and screen protections; never inside its
+      clock or fair chance, a real-money seat, a winner, a proven family's member by an unproven
+      newcomer, or one holding a position while its market is shut; one a desk a tick. At 15:06Z 29
+      practice seats were stale by this test (10 index ETFs, 5 options, 4 crypto-15m, 3 megacaps, 2
+      crypto majors, 2 sports, 2 sports props, 1 attention); one waiter had a winning window
+      (a megacaps graduate, +0.000102 a block over 3 active blocks).
+    - R3: a proven family's program (its anchor: the living member on the highest rung with fills of
+      its own; its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
+      on its desk, a House mutation of the anchor's PARAMS inside their bounds at the newcomer cadence
+      (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
+      living members run it; while it is owed, its desk gives a newcomer of another family no seat
+      and is reserved from cards and merged strategies. Not at the family's measured capacity (E3),
+      not for a losing family. A member that inherited the family's name with other code is not its
+      program (meriwether-h2d625d-2).
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -734,6 +798,27 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
 - **"the desks' evidence clocks ..."** (info, at most daily): the House measured each desk's
   evidence clock and the seat grace follows it (`house.json` `evidence_clocks`); a measurement that
   fails is a warning and the last reading stands.
+- **"N waiters for <desk> left the seat queue (...): its desk <desk> is closed by the search: ..."**
+  (info, at most once an hour a desk; R2, Sept 24, 2026): waiters whose desk the search closes (the
+  foundry's closed desk, or the lab's idle desk) or, a graduate, whose own forward window loses, left
+  the queue with their reason (`route.decision` `seat-expired:<class>:<id>`). Nothing to do: they are
+  not seated and not counted. A desk that should be open again reopens when a family there is
+  positive over `hypotheses.closed_reopen_blocks` active blocks on it.
+- **"N newcomers have waited over 2 hours for a seat on <desk> (the longest ..): <rule>"** (warning,
+  once an hour a desk; R2, Sept 24, 2026): the two-hour invariant. The rule says what holds them: a
+  free seat the birth passes have not reached yet (the lab's six births an hour, the refill's one a
+  `newcomer_seconds`), or the residents' protections, counted (real money, winners, inside the grace
+  or the desk's evidence clock, traders short of their record, a proven family's members ...). Read it
+  with `health.json` `seats.over_two_hours`: a desk whose seats are all real money or winners needs a
+  cap (`league/niches.json`), a forward-scored waiter (S3) or patience, not a rule change.
+- **"the league's population is now N (was M): ..."** (info when it grows, warning when it is held;
+  R2, Sept 24, 2026): Sail's runway crossed `economy.population_runway_days` (1.5 days) or its meter
+  went unread; the league grows toward turbo.json `max_population` only while the runway holds, and is
+  held at `economy.max_population_short_runway` (112) otherwise. Nobody is killed: a held league
+  stops growing.
+- **"K proven family's births wait for a seat: <family> on <desk>: ..."** (warning, once an hour; R3):
+  the proven family's program is owed births and its desk (or the full league) has no resident a
+  proven family's newcomer may displace.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
@@ -832,6 +917,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
+| | `SEAT_WAIT_WARN_SECONDS`, `SEARCH_CLOSED_TTL_SECONDS`, `SEAT_EXPIRED_KEEP_SECONDS`, `SAIL_BURN_WINDOW_SECONDS`, `SAIL_BURN_MIN_SPAN_SECONDS` | 2 h, 10 min, 7 d, 1 d, 6 h | The seat market's capacity (R2, Sept 24, 2026): how long a newcomer waits before one warning a desk an hour names its desk, count and rule; how often the search's closed desks are read (the foundry's rule reads every block of every agent that lived on them); how long an expired waiter is remembered; and Sail's burn for the population rule (the falls of the Sail meter's readings over the trailing day, scaled to a day, none measured under six hours of readings). Constants in `league/house.py` |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
 | `league/tapes.py` | `SETTLED_MEMO_ROWS` (`KalshiData.settled_memo_rows`) | 400,000 rows | A Kalshi series' day whose every market has settled is read from `ltcm.history` once a process and kept in memory: only the fields the tape reads (`SETTLED_FIELDS`, times as epoch seconds), the least recently used day out first (Sept 24, 2026). Measured on the real listings: 240-245 bytes a row held for KXBTC, KXBTCD, KXETH and KXETHD (3,350-3,470 as History parses it), 347 for the other series, so at most about 140 MB; a 14-day tape of those four is 293,888 rows. A second such tape costs about a quarter of what it did (on the developer machine: about 58 s every time before, 10-12 s once held; interleaved on a varying clock, a median 80 against 19.5 CPU-seconds). 0: every read is History's, as before. A day still settling keeps `settled_listing_ttl` (600 s) |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |
@@ -861,6 +947,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `merton.schedule_hours.teacher` | 12 | The teacher's cadence (6 until Sept 24, 2026), bounded 6-24 h by `merton_bounds` (`economy.check_bounds`, so `league.ci`). The burst no longer accelerates it |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
+| | `economy.proven_family_members`, `population_runway_days`, `max_population_short_runway` | 4 (1-8), 1.5 d (1.5-7), 112 (64-128) | R2 and R3 (Sept 24, 2026): how many living members a proven family's program runs on before the House stops breeding it first on its desk (`House._proven_births`: House mutations of the anchor's PARAMS; at 15:06Z sports-central-run-under ran its program on one member); the Sail runway above which the league grows toward turbo.json `max_population`, and the population it is held at otherwise (`House._population_rule`) |
 | `league/constitution.py` | `allocator.corrected_child_supersedes` | on (Deploy B) | L1 (Sept 24, 2026): a research child that passed replay with a fix to its real-money parent's entry mechanism (liquidity, fee, side, borne out by the parent's own entry fills) supersedes the parent at once, demoted from real money through the evaluator and retired `superseded` (`House._supersede_by_research`). The account must be of the parent's CURRENT program and a liquidity or fee fix must rest its entries post-only (review of #245: the child meriwether-h2d625d-2 fixed its own moneyline file, not its parent's KXMLBTOTAL entries); a parent whose family's pooled taker record is proven positive (`Allocator.family_taker`, as X0 reads it) is not superseded for a liquidity or fee fix. Absent or false: only merged repairs supersede (`_retire_superseded`). A money rule: re-ratify after a change |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
@@ -902,12 +989,12 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/research_routes.json` | `cache.layout`, `cache.explicit_hints` | `messages`, on | The Luna cache layout; `packet` is the old layout |
 | | `routing.sail_by_evidence` | off | Let measured evidence move new Sail sessions to a cheaper tier |
 | `league/turbo.json` | `research_minutes`, `research_workers`, `replay_workers` | 15, 16, 12 | The funded burst's research interval and workers (5, 32 and 8 until Sept 23, 2026). In force while the burst is, which it is while the live grant is active |
-| | `max_population`, `newcomer_seconds`, `endowment_usd` | 112, 600 s, $8 | The burst's population ceiling (64 until Sept 23, 2026, when foundry cards that passed replay waited for seats; 96 until the seat market of Sept 23, when 20 lab graduates, 6 replay-passed cards and 6 merged strategies waited: 16 more boxes cost about $0.43 a day of Sail, 2.9 days of runway), the House mutation cadence (120 s until then; no mutation is staked while any waiter waits) and House endowment |
+| | `max_population`, `newcomer_seconds`, `endowment_usd` | 128, 600 s, $8 | The burst's population ceiling (64 until Sept 23, 2026, when foundry cards that passed replay waited for seats; 96 until the seat market of Sept 23, when 20 lab graduates, 6 replay-passed cards and 6 merged strategies waited: 16 more boxes cost about $0.43 a day of Sail, 2.9 days of runway; 112 until R2, Sept 24, when 82 newcomers waited, 44 once the search's closed desks were taken out: the league grows to 128 only while Sail's runway is over `economy.population_runway_days`, and is held at `economy.max_population_short_runway` otherwise; 4.51 days at 15:06Z), the House mutation cadence (120 s until then; no mutation is staked while any waiter waits) and House endowment |
 | | `fork_threshold_usd` | $10 | The credits an agent needs before it may fork a parameter copy of itself. Above the endowment, so only an agent that has earned payouts forks. Until Sept 23, 2026 the burst forced $2, every newborn forked at once (22 copies in 40 minutes), and the foundry's replay-passing cards waited for seats on full desks |
 | | `merton_schedule_hours` | operator 48, designer 96, toolsmith 48, architect 24, teacher 12 | Merton's burst cadence, set by each role's measured yield. Until Sept 24, 2026 `load_turbo` dropped this key, so it never reached the House and the burst's own defaults ran (operator 0.25 h, toolsmith and architect 0.5 h, teacher and designer 1 h, stretched by backoff): the ledger shows the teacher about hourly and the architect every 30-60 minutes on Sept 23. The teacher is bounded 6-24 h (`TURBO_MERTON_HOURS`) |
 | | `sail_research_usd_per_hour` | $2 | L2, Sept 24, 2026: no NEW research session starts on Sail while the settled cost of the Sail commitments created in the last hour (`campaigns.sqlite`; every Sail call is research) has reached it; a session under way resumes, a job still queued for a research worker waits like a new session, and Luna is not capped. A call in flight counts once it settles, so the hour can overshoot by what is in flight. One `ops.budget` "sail research cap" row when it closes or opens; `health.json` `research_economy.sail_cap` shows it. Bounds $1-4 (`TURBO_RANGES`). Sail settled $5-6.5 an hour on Sept 23 at 19-23Z and $1.27 in the hour before T0 |
 | | `luna_fraction` | 0.95 | The share of agents whose research runs on GPT-6 Luna; the rest stay on Sail as the comparison (a Luna session cost about $0.011 against about $0.06 on Sail, Sept 23, 2026) |
-| `league/niches.json` | `max_members` | Kalshi: crypto strikes 4, crypto 15-minute 10, weather 14, sports 16, props 4, prices 8, attention 4. Alpaca: crypto majors and alts 12, index ETFs 14, megacaps 12, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`) |
+| `league/niches.json` | `max_members` | Kalshi: crypto strikes 6, crypto 15-minute 8, weather 17, sports 19, props 6, prices 8, attention 4. Alpaca: crypto majors 12, alts 16, index ETFs 18, megacaps 16, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`). R2 (Sept 24, 2026): the seats follow the 44 waiters that remained at 15:06Z once the search's closed desks and the lab's holds were taken out (megacaps +4 for 4 graduates, index ETFs +4 for 9 waiters, weather +3 for the longest card and two retained candidates, crypto alts +4 for 4 cards and 4 corrected children behind 9 winners and 3 probes, props +2 for two retained candidates, crypto strikes +2 for the two lab families the search reopened it on, sports +3 for the proven family's births), and fewer where the search is closed (15-minute crypto 10 -> 8; while the search closes a desk the House holds its cap at its members, `House._follow_the_search`). The caps add up to 154, above the population's ceiling (128) |
 | | `open`, `asset_classes`, `exclude_patterns` | `kalshi-open` and `alpaca-open` (8 seats each); Alpaca `equity`, `crypto`; Kalshi `^KXMVE` | The open desks (Sept 23, 2026): a desk whose universe is every tradable market of its venue. `status: dormant` closes one. `niches.OPEN_DISCOVERY` (24) is the length of an open desk's discovery list, of which a strategy naming nothing it may trade is shown the first twelve (`MAX_UNIVERSE`); a Kalshi desk missing from the last survey is surveyed within the half hour, not at the next day's turn |
 | `gateway/wrangler.jsonc` | `FRONTIER_MONTH_USD` (and `FRONTIER_MONTH_MAX_USD`), `TYPESAFE_PILOT_USD` | $607, $42 | The OpenAI month and Jev's lifetime allowance, aligned to metered plus the owner's funded balances: the month on Sept 24, 2026 ($394.46 metered + $213 funded; $408 before), Jev on Sept 23. Never above funded money. Deployed with `wrangler deploy`, not through the canary |
 | | `COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`, `FRONTIER_MONTH_MAX_USD` | 0.3, $1,017.75, $408 | Compute follows profit (Sept 23, 2026, `gateway/lib/equity.mjs`): the month's cap is `FRONTIER_MONTH_USD` plus 0.3 of the real accounts' equity above the grant's capital, held to `FRONTIER_MONTH_MAX_USD`. That ceiling equals the funded month, so today profit is reported (`profit_index.earned_usd`) and buys nothing; raise it with each OpenAI top-up bought from profit. An unset share or baseline, or an unreadable or stale reading, gives exactly `FRONTIER_MONTH_USD`. The House's line mirrors the raise (`CampaignBudget.mirror_gateway_bonus`) |

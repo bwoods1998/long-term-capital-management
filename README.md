@@ -483,6 +483,19 @@ thing an agent can be, ahead of any amount of losing: an agent that trades and l
 by the evaluator and will be killed on its own evidence, while an agent that trades nothing is
 judged by nobody and costs a box and a seat for as long as it is left alone.
 
+**The seat queue** (Sept 24, 2026, the close-the-gaps run). Newcomers with evidence -- the Alpha Lab's
+graduates, replay-passed foundry cards, the retained candidates of residents that died holding them,
+merged strategies -- take every freed seat before any House mutation, and since R3 a proven family's
+program comes before all of them on its desk: the House breeds mutations of the program that proved
+the family until four living members run it, so more members build the practice records that take
+them to real money. A waiter the search has closed leaves the queue with its reason, never counted
+again: at 15:06Z, 82 newcomers waited in a league of 112 of 112, 20 of them for the 15-minute crypto
+desk the search had closed and one with a losing forward window. A waiter with a winning forward
+window may take the seat of a practice resident whose desk's evidence clock has run with no positive
+record of its own. Desk caps follow the waiters that remain, and the league grows toward 128 only
+while Sail's runway stays over a day and a half. No newcomer waits over two hours without one
+warning an hour naming its desk, how many wait there and the rule that holds them.
+
 **Forks.** An agent with $4.00 of credits or more may fork, and must endow the child with $1.50 of
 its own ($1.00 is what the House stakes when it cannot; during the funded burst the threshold is
 $2.00 and the House stakes $8). An agent above rung 0 never edits itself, because its record belongs to its code: an
