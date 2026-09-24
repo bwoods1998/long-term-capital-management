@@ -2073,8 +2073,15 @@ class House:
 
     def _deep_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None:
         """The development-window tape from the history store, or None when it is not all fetched
-        (then the live tape is used, exactly as before). Deep tapes are cached like live ones."""
+        (then the live tape is used, exactly as before). Deep tapes are cached like live ones.
+
+        A window the store HAS fetched and holds no bars of a symbol for (it did not trade yet) is
+        unsupported input, raised with that reason and never cached (Sept 24, 2026, D1's root: an
+        ADA/USD development tape over 2025-09-12..2025-11-14, where the store holds ADA/USD from
+        2026-02-01, was built with no steps, and the lab's step failed on it for hours). Replay,
+        research coverage and the lab read `tape_for`, so each says why and none counts a trial."""
         from . import deep_replay
+        from .history import series_without_bars
         from .tapes import TapeError
 
         store = self._history_store()
@@ -2091,8 +2098,14 @@ class House:
             with self._tape_lock:
                 hit = self._tapes.get(key)
                 if hit is None or self.clock() - hit[0] > 86400:
-                    self._tapes[key] = (self.clock(), deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
-                                                                          holdout=self.holdout_window)[1])
+                    empty = series_without_bars(store, deep_replay._symbols_of(needs), timeframe, start, end, feed=feed)
+                    if empty:
+                        raise ValueError("unsupported input: " + "; ".join(empty[:4]))
+                    tape = deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
+                                                holdout=self.holdout_window)[1]
+                    if not tape.get("steps"):
+                        raise ValueError(f"unsupported input: the development tape {key} has no steps: nothing was recorded in its window")
+                    self._tapes[key] = (self.clock(), tape)
                 return key, self._tapes[key][1]
         except TapeError:
             return None  # not fetched yet: a gap in the store is never a result against the strategy
@@ -2129,6 +2142,17 @@ class House:
             return all(self.evaluator.replay_gate(agent.family, r, lineage=lineage, counted=True)[0] for r in results.values())
 
         try:
+            # A sealed window the store holds no bars of a symbol for would be a failed run that spends
+            # one of the lineage's evaluations on nothing: refused before the seal is opened. Whether a
+            # symbol traded at all in the window is coverage, which `data.coverage` rows already
+            # publish; no price in the window is read (Sept 24, 2026).
+            from .history import series_without_bars
+
+            timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
+            empty = series_without_bars(store, deep_replay._symbols_of(needs), timeframe, self.holdout_window[0],
+                                        self.holdout_window[1], feed=feed)
+            if empty:
+                return {"evaluated": False, "refused": "unsupported input: " + "; ".join(empty[:4])}
             seal = deep_replay.HoldoutSeal(self.ledger, budget=self.settings.holdout_lineage_budget, window=self.holdout_window)
             return seal.evaluate(agent=agent.id, lineage=lineage[-1] if lineage else agent.id, code=code, params=params,
                                  run=run, passed=passed)
