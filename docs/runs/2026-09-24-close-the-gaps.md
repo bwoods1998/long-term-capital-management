@@ -244,6 +244,29 @@ recorded for the next open; live verification uses the markets that trade around
   branches. Left: `ltcm-sailfloor` (05:08Z), `ltcm-w2-int` (05:19Z), `ltcm-run` (05:52Z; unmerged: push
   only), `ltcm-hosts` (07:30Z), `ltcm-w2-options` (draft #210, kept).
 
+- 04:24-04:41Z — the reviewers' follow-ups landed: A-book rows 8 (a crossed seller is paid what its
+  venue would have paid it alone; the House row keeps the gap) and 9 (an exit the House re-priced never
+  walls off the agent's next exit; it is re-checked every pass); A-money the lopsided gate
+  (`family_proven.lopsided_gate`), a family record that fails never blocks a wake or the pass, and only a
+  proven family's agent swings.
+- 04:45-05:10Z — **B-feeds (#234) and B-loop (#236) opened.** B-feeds: twelve recorders (Open-Meteo
+  ensembles and forecast history, NWS, EDGAR 8-K acceptance times, Nasdaq dates, NY Fed SOFR, Treasury
+  par yields, ESPN odds, TSA, OKX open interest; RealClearPolling answers every automated client with a
+  captcha and is recorded as refused; EIA and The Odds API wait for the owner's keys). The main session
+  added three fixes it reported (the default User-Agent carried the owner's personal address; the
+  foundry's coverage read would lose the ingestion's row within a day; the replay view's feed text).
+  B-loop: L2-L4, the CI Kalshi tape's observed bars (unblocks #217 and #208), empty history tapes
+  refused where built; and it found `load_turbo` silently dropped `turbo.json`'s Merton cadence, so the
+  architect ran every 30-60 minutes instead of 24 h.
+- 05:08Z — **Deploy A's PR #240** from `a/integration` (A-lab, A-holds' review, A-book's review, A-money's
+  review, the rules text for the real book, one event key for the book and the allocator, main's
+  Merton merges). Money digest `c2b0e09c` → `521c4586`. First CI: two House-level fixtures entered a real
+  Kalshi position at market and were now refused by X0 (the keys and the book's rules first met on the
+  integration branch), fixed by patching the keys out around those entries; three more modules failed on
+  "Disk quota exceeded": the session's /tmp is a 3.8 GB tmpfs, filled by parallel suites, stale test
+  directories and the reviewers' tree copies (cleared to 1.8 GB free).
+- 05:10Z — B-families and B-seats launched from `a/integration` (`8b301a0`).
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
