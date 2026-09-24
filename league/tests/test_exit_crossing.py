@@ -483,6 +483,21 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.18"), False))
         self.assertIn("one step above the House's own resting bid", out.detail)
 
+    def test_a_kill_switch_engaged_while_the_way_is_cleared_stops_the_cross(self):
+        """Review of #226 (mutation testing): the kill-switch guard in `_crossable` could be removed with every test
+        passing, because `check` refuses everything while the switch is on. It still decides one case: the switch
+        engaged after `check` read it, while the House clears the way at the venue. A cross fills the bidder's
+        ENTRY, which an engaged switch forbids, so none is booked."""
+        held = self.hold("seller", self.inst, "1.62")
+        bid = self.rest_bid("buyer", self.inst, "3", "12.17")
+        reads = iter([False])  # `check` reads it off; the owner engages it a moment later
+        self.book.kill_switch = lambda: next(reads, True)
+        self.book.submit([self.intent("seller", self.inst, "sell", held)])
+        self.assertEqual(self.crossed_fills("seller"), [])
+        self.assertEqual(self.crossed_fills("buyer"), [])
+        self.assertEqual(self.broker.cancelled, [])
+        self.assertTrue(self.book.orders[bid].open)
+
     def test_bids_under_the_market_are_left_alone_and_the_exit_takes_the_markets_bid(self):
         """The snapshot's five bids under a market bidding 12.18: a sell at the venue fills there and
         never reaches them, so none is cancelled and the exit goes out floored one step above the
