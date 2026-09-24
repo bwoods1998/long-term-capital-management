@@ -258,8 +258,9 @@ status is exposed in health and agent research context; qualification is distinc
    `edit_params` only record a request (`agent.research`, tool `control`, status `requested`, id
    `control-request:<session>:<n>`); `edit_params` first has the House replay the edit
    (`_edit_replay`: numeric PARAMS `parameters.inspect` lists as mutable, inside their bounds, on a
-   book of half the practice stake and caps, judged by the replay gate with the look in the
-   deflation, no `eval.trial`, never the holdout, one a day passed or not; an `edit_replay` row).
+   book of half the practice stake and caps, judged by the replay gate with this look and every
+   earlier edit look of the line in the deflation, no `eval.trial`, never the holdout, one a day
+   passed or not, read in full by `_edit_looks`; an `edit_replay` row).
    After any candidate, the pass's entry controls are applied (`_apply_controls`): each an
    `agent.strategy` row restating the strategy in force with `control`
    (`pause_entries`, `resume_entries` or `edit_params`), `was`, the agent's `note` and the

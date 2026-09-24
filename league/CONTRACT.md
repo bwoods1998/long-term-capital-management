@@ -542,10 +542,10 @@ ask; the House applies it when your research pass ends, as it does a retained ca
   `bounds` (declare yours in `NEEDS["parameter_rules"]`), never NEEDS or code. The House first
   replays your code with the new values at HALF NOTIONAL -- a replay book of half the practice stake
   and caps -- on the tape your replays use (never the sealed holdout), and the edit is made only if
-  that replay passes the replay gate against your line's trials, with this look counted in the
-  deflation. It is not a trial on your line's record and spends none of its holdout evaluations.
-  One edit replay a day, passed or not; it costs sandbox seconds. On rung 0 there is no edit in
-  place: `replay` the edited file.
+  that replay passes the replay gate against your line's trials, with this look and every earlier
+  edit look of your line counted in the deflation. It is not a trial on your line's record and
+  spends none of its holdout evaluations. One edit replay a day, passed or not; it costs sandbox
+  seconds. On rung 0 there is no edit in place: `replay` the edited file.
 
 A pause or a resume is always made: it restates your strategy, so it sets no audit's verdict aside
 and moves nothing an audit, a promotion or your candidate waiting for a seat is keyed to. No edit is

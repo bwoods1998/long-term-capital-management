@@ -2563,12 +2563,13 @@ class House:
         lists as mutable change, each inside its bounds. The House replays the code with the edited
         PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`), on the
         tape its replays use -- the development window, never the sealed holdout -- and judges it by
-        the replay gate against the line's trials with this look counted in the deflation
-        (`evaluator.replay_gate`, counted=False). It records no `eval.trial` and spends none of the
-        line's holdout evaluations. One such replay an agent a day (`EDIT_REPLAY_EVERY_SECONDS`),
-        passed or not, recorded as an `agent.research` row (tool "edit_replay"), so the look that is
-        no trial cannot be repeated into a lucky one. A passing edit is applied when the pass ends
-        (`_apply_controls`); this changes nothing itself.
+        the replay gate against the line's trials with this look, and every earlier edit look of the
+        line, counted in the deflation (`evaluator.replay_gate`, counted=False, `looks`). It records no
+        `eval.trial` and spends none of the line's holdout evaluations. One such replay an agent a day
+        (`EDIT_REPLAY_EVERY_SECONDS`), passed or not, recorded as an `agent.research` row (tool
+        "edit_replay", read in full by `_edit_looks`), so the look that is no trial cannot be
+        repeated into a lucky one. A passing edit is applied when the pass ends (`_apply_controls`);
+        this changes nothing itself.
 
         Returns {"passed", "reasons", "params", "was", "code_sha256", "numbers"}, or {"error"} for an
         edit refused before any replay (or a replay that could not run, which is no look)."""
@@ -2584,8 +2585,9 @@ class House:
             if refusal:
                 return {"error": refusal}
             current = deepcopy(current)
-        last = next((e for e in reversed(self.ledger.read(kinds="agent.research", agent=current.id, limit=400, newest=True))
-                     if e.payload.get("tool") == "edit_replay"), None)
+        lineage = self.registry.lineage(current.id)
+        looks = self._edit_looks(lineage)
+        last = next((e for e in reversed(looks) if e.agent == current.id), None)
         if last is not None and self.clock() - _epoch(last.at) < EDIT_REPLAY_EVERY_SECONDS:
             return {"error": f"one in-place edit replay a day, passed or not: your last was at {last.at}; "
                              f"the next may run from {now_iso(lambda: _epoch(last.at) + EDIT_REPLAY_EVERY_SECONDS)}"}
@@ -2619,8 +2621,10 @@ class House:
         crash = self._crashed(result)
         if crash:
             return {"error": f"the edit's replay was not run (not a look; nothing changed): {crash[:160]}"}
+        # This look, and every earlier edit look of the line (no `eval.trial` records them), are tries in
+        # the deflation: one look a day, but not each one judged as if it were the first.
         passed, reasons, growth, sharpe, deflated, trials, oos = self.evaluator._replay_reasons(
-            current.family, result, self.registry.lineage(current.id), counted=False)
+            current.family, result, lineage, counted=False, looks=[e.payload.get("sharpe") for e in looks])
         numbers = {"trades": int(result.get("trades") or 0), "blocks": len(growth), "sharpe": sharpe, "trials": len(trials),
                    "deflated_sharpe": None if deflated is None else deflated["dsr"], "return_pct": result.get("return_pct"),
                    "max_drawdown": result.get("max_drawdown"), "oos_mean_log_growth": oos.get("mean_log_growth"),
@@ -2630,6 +2634,17 @@ class House:
                                               "params": edited, "was": dict(current.params), **numbers}, agent=current.id)
         return {"passed": passed, "reasons": reasons, "params": edited, "was": dict(current.params),
                 "code_sha256": current.code_sha256, "numbers": numbers}
+
+    def _edit_looks(self, agent_ids: Sequence[str]) -> list[Any]:
+        """Every in-place edit replay (`edit_replay` rows) of these agents, oldest first: the one-a-day
+        rule and the deflation read them. Read in full, never from a window of the newest rows: an
+        agent writes up to 1,700 `agent.research` rows a day, and on the T0 snapshot of the close-the-
+        gaps run 26 of 487 agents wrote 400 inside a day (meriwether-37 in 2.8 hours), so a window of
+        400 lost the day's look and let a second one run (review of #249). The busiest agent's whole
+        research record decodes in about 20 ms."""
+        looks = [entry for agent_id in dict.fromkeys(agent_ids) for entry in self.ledger.iter(kinds="agent.research", agent=agent_id)
+                 if entry.payload.get("tool") == "edit_replay"]
+        return sorted(looks, key=lambda entry: entry.seq)
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:
@@ -4989,8 +5004,7 @@ class House:
             held = sum(int(e.payload.get("held") or 0) for e in self.ledger.read(kinds="agent.woke", agent=agent.id, limit=2000, newest=True)
                        if e.at >= since)
             out.update(since=since, note=paused.get("note"), held_since_pause=held)
-        last = next((e for e in reversed(self.ledger.read(kinds="agent.research", agent=agent.id, limit=400, newest=True))
-                     if e.payload.get("tool") == "edit_replay"), None)
+        last = next(reversed(self._edit_looks([agent.id])), None)
         if last is not None:
             out["last_edit_replay"] = {"at": last.at, "passed": last.payload.get("passed"), "reasons": last.payload.get("reasons"),
                                        "next_allowed_at": now_iso(lambda: _epoch(last.at) + EDIT_REPLAY_EVERY_SECONDS)}

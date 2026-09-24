@@ -228,19 +228,22 @@ class Evaluator:
         ]
 
     def replay_gate(self, family: str, result: Mapping[str, Any], *, lineage: Sequence[str] | None = None,
-                    counted: bool = False) -> tuple[bool, list[str]]:
+                    counted: bool = False, looks: Sequence[Any] = ()) -> tuple[bool, list[str]]:
         """The replay gate `record_trial` applies, without recording anything: whether this result
         would pass against its selection path, and why not. `counted=True` when the result is
         already one of the path's trials (a sealed-holdout replay of a version whose development
-        trial was recorded is judged with that trial's deflation, not one more)."""
-        return self._replay_reasons(family, result, lineage, counted=counted)[:2]
+        trial was recorded is judged with that trial's deflation, not one more). `looks`: the Sharpe
+        ratio (or None) of each earlier look at the path that no `eval.trial` records -- an in-place
+        parameter edit's replay (`House._edit_replay`) -- each one more try in the deflation."""
+        return self._replay_reasons(family, result, lineage, counted=counted, looks=looks)[:2]
 
     def _replay_reasons(self, family: str, result: Mapping[str, Any], lineage: Sequence[str] | None, *,
-                        counted: bool = False) -> tuple[bool, list[str], list[float], Any, Any, list[Any], Mapping[str, Any]]:
+                        counted: bool = False, looks: Sequence[Any] = ()) -> tuple[bool, list[str], list[float], Any, Any, list[Any], Mapping[str, Any]]:
         rules = self.ladder["replay"]
         growth = [float(b["log_growth"]) for b in result.get("blocks") or []]
         sharpe = stats.sharpe(growth) if result.get("ok") else None
-        trials = self.family_trials(family, lineage) + ([] if counted else [sharpe])
+        earlier = [float(s) if isinstance(s, (int, float)) and not isinstance(s, bool) and math.isfinite(s) else None for s in looks]
+        trials = self.family_trials(family, lineage) + earlier + ([] if counted else [sharpe])
         defined = [t for t in trials if t is not None]
         deflated = stats.deflated_sharpe(growth, defined, n_trials=len(trials)) if sharpe is not None else None
         oos = result.get("out_of_sample") or {}

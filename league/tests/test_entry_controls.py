@@ -291,6 +291,28 @@ class InPlaceEdit(ControlCase):
         self.clock.advance(24 * 3600 + 1)
         self.assertIn("passed", self.edit({"notional_usd": 20}))
 
+    def test_one_edit_replay_a_day_however_busy_its_record(self):
+        """Review of #249: the day's look was sought in the agent's newest 400 research rows. On the T0
+        snapshot 26 of 487 agents wrote 400 inside a day (meriwether-37 in 2.8 hours: 515 admission
+        rows a day), and a second edit replay ran three hours after the first."""
+        self.edit({"notional_usd": 45})
+        for n in range(400):
+            self.house.ledger.append("agent.research", {"tool": "candidate_admission", "session": f"q{n}", "status": "deferred",
+                                                        "reason": f"waiting {n}"}, agent=self.agent.id)
+        self.clock.advance(3 * 3600)
+        self.assertIn("a day", self.edit({"notional_usd": 20}).get("error", ""))
+        self.assertEqual(len(self.replays), 1)
+        standing = self.house._research_standing(self.house.registry.get(self.agent.id))["entries"]
+        self.assertFalse(standing["last_edit_replay"]["passed"])
+
+    def test_every_edit_look_of_the_line_is_a_try_in_the_deflation(self):
+        """Review of #249: each look was deflated as the line's recorded trials plus one, however many
+        edit looks came before it."""
+        first = self.edit({"notional_usd": 20})
+        self.clock.advance(24 * 3600 + 1)
+        second = self.edit({"notional_usd": 25})
+        self.assertEqual(second["numbers"]["trials"], first["numbers"]["trials"] + 1)
+
     def test_an_edit_replayed_before_its_strategy_changed_is_not_applied(self):
         result = self.edit({"notional_usd": 20})
         self.apply(self.agent, "pause_entries", n=0)  # a pause does not change the strategy
