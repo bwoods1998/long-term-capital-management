@@ -35,6 +35,18 @@ IDLE = LADDER.replace("ladder-test", "idle-test").replace('''def decide(ctx):'''
 def _unused(ctx):''')
 
 
+def base_usd(venue, usd):
+    """Both tiers' base at `venue` (Sept 24, 2026: an unproven family's agent is a PROBE staked
+    `probe_bunt_usd`, a proven one's a bunt at `bunt_usd`; the bunt band's mechanics are the same on
+    either base, and the test agents' families are unproven)."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    for key in ("bunt_usd", "probe_bunt_usd"):
+        stack.enter_context(patch.dict(CONSTITUTION["allocator"][key], {venue: usd}))
+    return stack
+
+
 def ev(**kw):
     base = dict(agent="a", venue="alpaca", rung=1, w_paper=1.0, w_real=1.0, e=1.0, paper_trades=0, paper_settled=0,
                 real_trades=0, real_pnl=0.0, real_drawdown=0.0, haircut_log=0.0, real_seen=False)
@@ -248,7 +260,9 @@ class Mechanics(HouseCaseReal):
         promote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "promote"][-1]
         self.assertEqual((promote["band_from"], promote["band_to"], promote["via"]), ("paper", "bunt", "allocator"))
         self.assertEqual(promote["stake_usd"], "25")
-        self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "bunt")
+        # Its family ("alloc-test") has no proven record: a probe, the bunt band's first tier (Sept 24,
+        # 2026). On Alpaca a probe and a bunt are both $25.
+        self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "probe")
         # Its evidence falls below the bunt line with hysteresis: straight back to paper.
         table[a.id] = dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=2)
         with self.evidence_of(table):
@@ -360,7 +374,7 @@ class Mechanics(HouseCaseReal):
             self.assertEqual(alloc.target_stake(a, "bunt"), D("24.00"))
             swing = alloc.target_stake(a, "swing", ev(venue="alpaca", e=4.0))
             self.assertEqual(swing, D("24.00"))  # 30 (0.6 of $50) halved to 15, floored at 24
-            with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}):
+            with base_usd("alpaca", "60"):
                 self.assertEqual(alloc.target_stake(a, "bunt"), D("30.00"))  # a stake above the floor is halved
         with patch.object(type(alloc), "floor_pnl", return_value=D("-10")):  # -20%: still throttled
             self.assertTrue(alloc._throttle())
@@ -466,8 +480,10 @@ class GrantAndDigest(unittest.TestCase):
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual(grant["constitution_digest"], money_digest())
-        self.assertEqual(grant["stake_usd"], "25")  # the smallest bunt (Alpaca; Kalshi is $30 since Sept 23, 2026 ~17:00 UTC)
-        self.assertEqual(grant["max_agents"], 40)  # floor($1,017.75 / $25)
+        # The smallest real stake: the Kalshi probe since Sept 24, 2026 (the smallest bunt, Alpaca's $25,
+        # before: 40 seats).
+        self.assertEqual(grant["stake_usd"], "10")
+        self.assertEqual(grant["max_agents"], 101)  # floor($1,017.75 / $10)
         with patch.dict(CONSTITUTION["allocator"], {"enabled": False}):
             old = policy({"kalshi": "517.75", "alpaca": "500"})
             self.assertNotEqual(old["constitution_digest"], grant["constitution_digest"])
@@ -819,7 +835,7 @@ class BuntGrowth(HouseCaseReal):
         a bunt seated at $10 before the raise stayed at $10 (meriwether-h2d625d on the 21:31Z board,
         W_real 0.9978, stake $10, target $30). It is lent up to the base, net of what it was lent."""
         a, book = self.bunted()
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}):  # the base raised under it
+        with base_usd("alpaca", "40"):  # the base raised under it
             row = self.sized(a, book, 0.9978, "24.95")
             self.assertEqual((row["stake_usd"], row["moved_usd"]), ("40", "15.00"))  # 40 - 25 lent, not 40 - 24.95
             self.assertEqual(book.account(a.id).staked, D("40"))
@@ -829,7 +845,7 @@ class BuntGrowth(HouseCaseReal):
         """The #198 review, item 4: a bunt halved by the throttle stayed halved when it lifted."""
         a, book = self.bunted()
         alloc = self.house.allocator
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "60"}), \
+        with base_usd("alpaca", "60"), \
                 patch.object(type(alloc), "headroom", return_value=D("1000")):  # the test House's $50 envelope aside
             self.sized(a, book, 0.95, "24")  # lent up to the $60 base
             self.assertEqual(book.account(a.id).staked, D("60"))
@@ -846,7 +862,7 @@ class BuntGrowth(HouseCaseReal):
     def test_lending_up_to_the_base_stays_inside_the_envelope(self):
         a, book = self.bunted()
         alloc = self.house.allocator
-        with patch.dict(CONSTITUTION["allocator"]["bunt_usd"], {"alpaca": "40"}), \
+        with base_usd("alpaca", "40"), \
                 patch.object(type(alloc), "headroom", return_value=D("6.50")):
             row = self.sized(a, book, 0.99, "25")
             self.assertEqual(row["moved_usd"], "6.50")  # 15 owed to the base, 6.50 of room

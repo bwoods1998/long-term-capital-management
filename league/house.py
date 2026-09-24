@@ -4328,6 +4328,10 @@ class House:
                 'allocator': ({**{k: v for k, v in (CONSTITUTION.get('allocator') or {}).items()},
                                'your_band': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('band'),
                                'your_evidence': (self.allocator.board().get('agents') or {}).get(agent.id, {}).get('evidence'),
+                               # P1 (Sept 24, 2026): your family's pooled record decides whether real money
+                               # starts as a probe or a bunt (`allocator.family_proven`).
+                               'your_family': {k: (self.allocator.board().get('agents') or {}).get(agent.id, {}).get(k)
+                                               for k in ('family', 'family_state', 'family_bound', 'family_n')},
                                'note': 'While enabled, the paper screen and the micro bound above no longer promote: bands and '
                                        'stakes follow E = W_paper^paper_weight x W_real at every mark pass.'}
                               if allocator_module.enabled() else None),
@@ -4713,8 +4717,9 @@ class House:
                    note=("W_paper is after the practice haircut, and more trading pays more of it; the dollars are "
                          "the gain on your paper equity now that would put E on the line. Crossing it is judged by "
                          "the allocator at its next pass, as for everyone; nothing here changes the line."))
-        if row.get("band") in ("bunt", "swing", "star"):
-            # Already on real money: the line it now has to hold is the bunt line with hysteresis.
+        if row.get("band") in ("probe", "bunt", "swing", "star"):
+            # Already on real money: the line it now has to hold is the bunt line with hysteresis (once
+            # `hysteresis_after_settled` real settlements are in, since Sept 24, 2026).
             out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6))
         return out
 

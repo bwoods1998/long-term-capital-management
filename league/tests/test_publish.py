@@ -430,7 +430,10 @@ class BoardTest(BoardCase):
         self.clock.advance(5)
         body = self.publisher().checkpoint(self.house)
         self.assertEqual(body["board"]["enabled"], True, "the allocator's own board, once it has drawn one")
-        self.assertEqual(body["desks"][0]["band"], self.house.allocator.board()["agents"][agent.id]["band"])
+        # A probe (Sept 24, 2026: the bunt band's first tier, for an unproven family's agent) is shown as
+        # the bunt it is a tier of until the site learns the word; the site's totals count its stake.
+        band = self.house.allocator.board()["agents"][agent.id]["band"]
+        self.assertEqual(body["desks"][0]["band"], "bunt" if band == "probe" else band)
         self.assertEqual(sum(row["count"] for per in body["board"]["bands"].values() for row in per.values()), 1)
 
     def test_an_agent_the_allocator_does_not_list_keeps_its_rung_band(self):

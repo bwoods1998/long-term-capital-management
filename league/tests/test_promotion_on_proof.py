@@ -422,3 +422,242 @@ class FamilyRecord(FamilyCase):
             second = allocator.family_record(self.house, "weather-favorites", "kalshi", tape=tape)
         self.assertEqual(second["n"], 2)
         self.assertEqual([c.kwargs.get("after") for c in reads.call_args_list], [cursor])  # one read, from the cursor
+
+
+KALSHI_IDLE = '''
+NEEDS = {"venue": "kalshi", "horizon": "hour", "style": "favorites", "series": ["KXBTCD"]}
+PARAMS = {}
+def decide(ctx):
+    return {"intents": [], "thought": "waiting"}
+'''
+
+
+def canned(family, venue="kalshi", *, proven=False, n=4, bound=-0.01, taker_positive=False):
+    """A family record as `allocator.family_record` returns it, with the numbers a test sets."""
+    side = {"n": n, "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "positive": False, "members": 1}
+    return {"family": family, "venue": venue, "through": 0, "members": 2, "members_counted": 1, "n": n,
+            "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "proven": proven,
+            "state": "proven" if proven else "unproven", "real_n": 0,
+            "maker": dict(side), "taker": {**side, "positive": taker_positive, "bound": 0.004 if taker_positive else bound},
+            "rule": allocator._family_rule()}
+
+
+class KalshiHouse(unittest.TestCase):
+    """A House with a real (fake) Kalshi venue and its practice book: probes are $10 and bunts $30 here."""
+
+    def setUp(self):
+        import threading  # noqa: F401 - the House's own threads
+        from league.economy import load_game
+        from league.house import House, Settings
+        from league.tests.fakes import FakeBroker
+        from league.tests.test_ladder import FakeAuditor, InProcessSandbox
+
+        strategies = patch("league.strategies.all_strategies", return_value=[])
+        strategies.start()
+        self.addCleanup(strategies.stop)
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.real = FakeBroker("kalshi", cash="1000", family="kalshi")
+        self.paper = FakeBroker("kalshi-shadow", family="kalshi")
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        self.auditor = FakeAuditor()
+        self.house = House(Path(self.dir.name) / "house", brokers={"kalshi": self.real, "kalshi-shadow": self.paper},
+                           sandbox=InProcessSandbox(), clock=self.clock, game=game, auditor=self.auditor,
+                           settings=Settings(mark_every_seconds=0, research=False, real_money=True))
+        self.auditor.ledger = self.house.ledger
+        # Without a grant the envelope is the tuition line: room for a $30 bunt and a probe or two.
+        tuition = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "100"})
+        tuition.start()
+        self.addCleanup(tuition.stop)
+        self.families: dict = {}
+        self.records = patch.object(allocator, "family_record", side_effect=self._record)
+        self.records.start()
+        self.addCleanup(self.records.stop)
+
+    def tearDown(self):
+        self.house.close(wait=None)
+        self.dir.cleanup()
+
+    def _record(self, house, family, venue, **kw):
+        return self.families.get(family) or canned(family, venue)
+
+    def agent(self, name="kay", family="weather-favorites"):
+        agent = self.house.spawn(name, family, KALSHI_IDLE, reason="test", endowment="2.5")
+        self.house.evaluator.seat(agent.id, 1, "test: straight to practice")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        return agent
+
+    def evidence_of(self, table):
+        real = allocator.evidence
+
+        def fake(house, agent, rung=None):
+            rung = house.evaluator.rung(agent.id) if rung is None else rung
+            if agent.id not in table:
+                return real(house, agent, rung)
+            row = dict(table[agent.id])
+            row.setdefault("cooling", False)
+            return ev(agent=agent.id, venue=agent.venue, rung=rung, **row)
+        return patch.object(allocator, "evidence", side_effect=fake)
+
+    def tick(self, n=1, seconds=300):
+        for _ in range(n):
+            self.clock.advance(seconds)
+            self.house.tick()
+
+    def promote_row(self, agent):
+        return [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "promote"][-1]
+
+
+class ProbesAndBunts(KalshiHouse):
+    """P1: a paper agent at the bunt line is seated as a probe unless its family is proven."""
+
+    READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
+
+    def test_an_unproven_familys_agent_is_seated_as_a_probe(self):
+        a = self.agent()
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        house = self.house
+        self.assertEqual(house.evaluator.rung(a.id), 2)
+        self.assertEqual(house.books["kalshi"].account(a.id).staked, D("10"))
+        row = house.allocator.board()["agents"][a.id]
+        self.assertEqual((row["band"], row["family"], row["family_state"], row["family_n"]), ("probe", "weather-favorites", "unproven", 4))
+        self.assertEqual(row["family_bound"], -0.01)
+        promote = self.promote_row(a)
+        # The ledger keeps the site's band words (the site learns "probe" in its own wave): a probe is a
+        # bunt's tier, and the tier and the family record ride along.
+        self.assertEqual((promote["band_from"], promote["band_to"], promote["tier"], promote["stake_usd"]), ("paper", "bunt", "probe", "10"))
+        self.assertEqual(promote["family"]["state"], "unproven")
+        self.assertIn("probe", promote["reason"])
+        self.assertEqual(house.allocator.band_of(a.id), "bunt")  # the book's daily-loss rule: probes are bunts
+        board = house.allocator.board()
+        self.assertEqual(board["bands"]["kalshi"]["bunt"]["count"], 1)  # the site's words: a probe is a bunt's tier
+        self.assertNotIn("probe", board["bands"]["kalshi"])
+        self.assertEqual((board["tiers"]["kalshi"]["probe"]["count"], board["tiers"]["kalshi"]["probe"]["capital_usd"]), (1, D("10")))
+
+    def test_a_proven_familys_agent_is_seated_as_a_bunt(self):
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        a = self.agent()
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        self.assertEqual(self.house.books["kalshi"].account(a.id).staked, D("30"))
+        row = self.house.allocator.board()["agents"][a.id]
+        self.assertEqual((row["band"], row["family_state"], row["family_n"]), ("bunt", "proven", 16))
+        self.assertEqual(self.promote_row(a)["tier"], "bunt")
+
+    def test_a_probe_becomes_a_bunt_the_pass_after_its_family_is_proven_and_back(self):
+        a = self.agent()
+        book = self.house.books["kalshi"]
+        table = {a.id: dict(self.READY, w_real=1.0)}
+        with self.evidence_of(table):
+            self.tick()
+            self.assertEqual(book.account(a.id).staked, D("10"))
+            self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=10, bound=0.001)
+            self.tick()
+            self.assertEqual(book.account(a.id).staked, D("30"))
+            self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "bunt")
+            sizes = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "size"]
+            self.assertEqual((sizes[-1]["tier"], sizes[-1]["moved_usd"]), ("bunt", "20.00"))
+            # The bound falls to zero or below: back to a probe, by free cash only.
+            self.families["weather-favorites"] = canned("weather-favorites", proven=False, n=11, bound=-0.0001)
+            self.tick()
+            self.assertEqual(book.account(a.id).staked, D("10"))
+            self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
+
+    def test_a_bunt_turned_probe_never_sells_to_shrink(self):
+        from league.book import Intent
+        from league.ledger import now_iso
+        from league.tests.test_book import event
+
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        a = self.agent()
+        book = self.house.books["kalshi"]
+        table = {a.id: dict(self.READY, w_real=1.0)}
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(book.account(a.id).staked, D("30"))
+        instrument = event(venue="kalshi")
+        self.real.set_quote(instrument, ".79", ".80")
+        book.resolves_at = lambda instrument: self.clock() + 3600
+        intent = Intent.new(agent=a.id, instrument=instrument, side="buy", quantity=D(3), reason="test", created_at=now_iso(self.clock))
+        self.assertEqual(book.submit([intent])[0].status, "filled")
+        held = {k: h.quantity for k, h in book.account(a.id).holdings.items()}
+        self.assertTrue(held)
+        self.families["weather-favorites"] = canned("weather-favorites", proven=False, n=17, bound=-0.002)
+        submitted = len(self.real.submitted)
+        with self.evidence_of(table):
+            self.house.allocator.rebalance()
+        account = book.account(a.id)
+        self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
+        self.assertEqual({k: h.quantity for k, h in account.holdings.items()}, held)
+        self.assertLess(account.staked, D("30"))  # free cash came back ...
+        self.assertGreaterEqual(account.cash - book._reserved_cash(a.id), D(0))  # ... and only free cash
+        self.assertGreaterEqual(book.equity(a.id), D("9.99"))  # to the probe's $10, its position kept
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
+
+    def test_the_family_is_read_once_a_pass(self):
+        agents = [self.agent(f"kay{i}") for i in range(3)]
+        table = {a.id: dict(e=1.0, w_paper=1.0, paper_trades=1) for a in agents}
+        with self.evidence_of(table):
+            self.records.stop()
+            with patch.object(allocator, "family_record", side_effect=self._record) as reads:
+                self.house.allocator.rebalance()
+            self.records.start()
+        families = [c.args[1] for c in reads.call_args_list]
+        self.assertEqual(families.count("weather-favorites"), 1)
+
+    def test_the_book_reads_the_familys_taker_record(self):
+        a = self.agent()
+        alloc = self.house.allocator
+        self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 4,
+                                                   "mean_log": 0.01, "bound": -0.01})
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.002, taker_positive=True)
+        alloc.rebalance()
+        self.assertTrue(alloc.family_taker(a.id)["positive"])
+        self.assertIsNone(alloc.family_taker("nobody"))
+        with patch.object(allocator, "enabled", return_value=False):
+            self.assertIsNone(alloc.family_taker(a.id))
+
+    def test_the_audit_judges_a_probe_as_a_probe(self):
+        a = self.agent()
+        alloc = self.house.allocator
+        context = alloc.context(ev(agent=a.id, venue="kalshi", e=1.1, paper_trades=6), "bunt")
+        self.assertEqual((context["tier"], context["stake_usd"]), ("probe", "10"))
+        self.assertEqual(context["family"]["family"], "weather-favorites")
+        self.assertEqual((context["family"]["state"], context["family"]["n"], context["family"]["bound"]), ("unproven", 4, -0.01))
+        self.assertIn("taker", context["family"])
+        self.assertEqual(context["family"]["rule"]["min_independent_settlements"], 10)
+
+
+class OptionsProbe(unittest.TestCase):
+    def test_an_options_probe_is_still_one_affordable_contract(self):
+        """One contract cannot be cut smaller: an options probe is staked `option_bunt_usd` ($80)."""
+        from league.tests.test_allocator import HouseCaseReal
+
+        class Case(HouseCaseReal):
+            def runTest(self):
+                pass
+
+        case = Case()
+        case.setUp()
+        try:
+            from league import seeds
+
+            agent = case.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test",
+                                     specialty="alpaca-options")
+            with patch.object(allocator, "family_record", return_value=canned("options-breakout", "alpaca")):
+                self.assertEqual(case.house.allocator.tier(agent), "probe")
+                self.assertEqual(case.house.allocator.target_stake(agent, "bunt"), D("80"))
+        finally:
+            case.tearDown()
+
+
+class GrantSeats(unittest.TestCase):
+    def test_the_grants_seat_count_follows_the_smallest_real_stake_the_probe(self):
+        from league.live_trading import policy
+
+        grant = policy({"kalshi": "517.75", "alpaca": "500"})
+        self.assertEqual((grant["stake_usd"], grant["max_agents"]), ("10", 101))  # floor($1,017.75 / $10)
+        self.assertIn("probes of $25 at alpaca, $10 at kalshi for an unproven family", grant["scaling"])
