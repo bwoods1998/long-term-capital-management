@@ -313,6 +313,20 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual(out.status, "crossed", out.detail)
         self.assertEqual(D(self.crossed_fills("seller")[0]["price"]), D("12.17"))
 
+    def test_a_take_profit_above_the_ask_is_never_re_priced_under_its_limit(self):
+        """Review of #226: a market order of the House's still in flight stands in the way of EVERY sell
+        (its price is unknown), so a take-profit limit sell above the ask went down the doubt path and was
+        re-priced post-only to the ask, 12.19, under the 12.50 its holder asked for."""
+        held = self.hold("seller", self.inst, "1.62")
+        self.broker.asynchronous = True  # Alpaca accepts a market order first and fills it a moment later
+        self.seat("buyer")
+        self.assertEqual(self.book.submit([self.intent("buyer", self.inst, "buy", "1")])[0].status, "sent")
+        out = self.book.submit([self.intent("seller", self.inst, "sell", held, order_type="limit", limit_price="12.50")])[0]
+        self.assertEqual(out.status, "resting", out.detail)
+        sent = self.broker.submitted[-1]
+        self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.50"), True))
+        self.assertIn("post-only limit at your own limit 12.50", out.detail)
+
     def test_an_entry_that_would_cross_is_still_refused(self):
         self.hold("seller", self.inst, "3")
         self.seat("buyer")
@@ -416,6 +430,18 @@ class RealKalshiExitTest(CrossCase):
         self.assertEqual(self.crossed_fills("seller"), [])
         sent = self.broker.submitted[-1]
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("0.41"), True))
+
+    def test_a_no_take_profit_is_never_re_priced_under_its_limit(self):
+        """Review of #226: a market buy whose answer was lost stays `unknown` (open, unpriced) and stands in
+        the way of every sell of the market; a NO take-profit at 0.55 was re-priced to the NO ask, 0.42."""
+        held = self.hold("seller", self.no, "5")
+        self.seat("buyer")
+        self.broker.lose_next_submit = True
+        self.assertEqual(self.book.submit([self.intent("buyer", self.no, "buy", "2")])[0].status, "unknown")
+        out = self.book.submit([self.intent("seller", self.no, "sell", held, order_type="limit", limit_price="0.55")])[0]
+        self.assertEqual(out.status, "resting", out.detail)
+        sent = self.broker.submitted[-1]
+        self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("0.55"), True))
 
     def test_an_entry_on_the_other_side_is_still_refused(self):
         self.hold("seller", self.no, "5")

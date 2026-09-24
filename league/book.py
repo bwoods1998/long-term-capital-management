@@ -1724,7 +1724,10 @@ class Book:
         (D3, step 3), and the note that tells the agent why -- or None and the reason when no price
         exists. Never at or through the House's own best opposite order, read in YES space for a Kalshi
         leg: a consistent venue quote never asks at or under a bid still resting, so this binds only on
-        a stale quote, where the exit rests one price step past the House's bid instead."""
+        a stale quote, where the exit rests one price step past the House's bid instead. And never
+        under the agent's own limit: a take-profit limit ABOVE the ask that met one of the House's orders
+        in flight (a market order is in the way of every sell) rests at its own price, not at the ask
+        (review of #226, Sept 24, 2026: it was re-priced down to the ask, selling under what it asked)."""
         ask = quote.ask if quote is not None else None
         if ask is None or ask <= 0:
             return None, (f"no ask to rest this exit at, and a sell at the market here could meet the House's own resting order "
@@ -1740,7 +1743,11 @@ class Book:
                 price = self._beyond(rest, bound)
         if price is None:
             return None, f"no price can rest this exit past the House's own resting order ({doubt}); ask again at your next wake"
-        note = (f"the House re-priced this exit as a post-only limit at the ask {text(price)}: at the market it could meet the "
+        where = "the ask"
+        if rest.limit_price is not None and rest.limit_price > price:
+            # A sell in its own leg's dollars: a higher price is the less aggressive one, on either Kalshi leg.
+            price, where = rest.limit_price, "your own limit"
+        note = (f"the House re-priced this exit as a post-only limit at {where} {text(price)}: at the market it could meet the "
                 f"House's own resting order, which could not be crossed inside the House ({doubt})")
         return dataclasses.replace(rest, order_type="limit", limit_price=price, post_only=True), note
 
