@@ -150,7 +150,11 @@ class TradeTape:
         self.rows: dict[str, list[TapeRow]] = {}
         self.cutoffs: dict[str, dict[str, int]] = {}
         self.bids: dict[str, list[Bid]] = {}
-        self.blocks: dict[str, list[tuple[int, str, bool, float]]] = {}  # (seq, book, active, log growth)
+        #: (seq, book, active, log growth, began): `began` is the ledger position of the block's first mark
+        #: (`first_mark_seq`), where the block BEGAN; a block is written when it closes, so the block in progress at a
+        #: ledger position is written after it (`Evaluator.blocks(since_seq=...)` reads a record since by `began` too;
+        #: the R5 adversarial review, Sept 24, 2026). A row without it began where it was written.
+        self.blocks: dict[str, list[tuple[int, str, bool, float, int]]] = {}
         self.filled: dict[str, float] = {}  # order id -> when a buy fill named it
         self.last_seq: dict[str, int] = {}  # agent -> the newest row folded for it: a family's version
         self.programs: dict[str, int] = {}  # agent -> the ledger position of its last program change (`agent.strategy`)
@@ -200,7 +204,8 @@ class TradeTape:
             if entry.agent != HOUSE:
                 with contextlib.suppress(TypeError, ValueError):
                     self.blocks.setdefault(entry.agent, []).append(
-                        (entry.seq, str(p.get("book") or ""), bool(p.get("active")), float(p.get("log_growth") or 0.0)))
+                        (entry.seq, str(p.get("book") or ""), bool(p.get("active")), float(p.get("log_growth") or 0.0),
+                         int(p.get("first_mark_seq") or entry.seq)))
                     self._touch(entry.agent, entry.seq)
         elif entry.agent != HOUSE:
             keep = {k: p[k] for k in _TAPE_FIELDS if k in p}
@@ -678,7 +683,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                       for group in edges.values()) / weight_sum) if weight_sum > 0 else None
     blocks = {"practice": 0, "real": 0, "growth": 0.0}
     for member in members:
-        for _, book, active, growth in tape.blocks.get(member) or ():
+        for _, book, active, growth, _ in tape.blocks.get(member) or ():
             if active and book in books:
                 blocks["real" if book == REAL_BOOK[venue] else "practice"] += 1
                 blocks["growth"] += growth

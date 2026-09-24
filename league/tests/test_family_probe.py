@@ -43,10 +43,15 @@ class ForwardBlocks:
             ghosts[key] = agent
         return ghosts[key]
 
-    def blocks(self, family, *growths, book="kalshi-shadow", code=KALSHI_IDLE, active=True):
+    def blocks(self, family, *growths, book="kalshi-shadow", code=KALSHI_IDLE, active=True, began=None):
+        """`began`: the ledger position of each block's first mark (`first_mark_seq`), where the evaluator's blocks say
+        when they began; without it a block began where it was written, as these rows always did."""
         ghost = self.ghost(family, code)
         for growth in growths:
-            self.house.ledger.append("eval.block", {"book": book, "active": active, "log_growth": growth, "key": "k"}, agent=ghost.id)
+            row = {"book": book, "active": active, "log_growth": growth, "key": "k"}
+            if began is not None:
+                row["first_mark_seq"] = began
+            self.house.ledger.append("eval.block", row, agent=ghost.id)
 
     def status(self, agent):
         return self.house._state["promotion_status"].get(agent.id) or {}
@@ -382,6 +387,51 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
         self.blocks("weather-favorites", -0.50)  # the record since the demotion is -0.44 now; the whole record +0.16
         table[b.id] = READY
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 2)
+
+    def test_a_block_in_progress_at_the_demotion_is_not_its_record_since(self):
+        """The R5 adversarial review (Sept 24, 2026): a block is written when it CLOSES, so every member's block in
+        progress at a demotion is written after it, though it began before. The record since a demotion is the blocks
+        that BEGAN after it (`first_mark_seq`), as `Evaluator.blocks(since_seq=...)` reads a record since a ledger
+        position. Measured on the 15:06Z snapshot: haghani-56's drift demotion at 13:06:12Z (crypto-alts-reversion)
+        turned at 14:02:40Z on six blocks, +0.0385, that had all begun before it (nine such blocks carried +0.0504 of
+        the +0.0534 counted since); by when the blocks began, it turns at 15:03:44Z, on +0.0030."""
+        a = self.seated()
+        began = self.house.ledger.head()[0]  # a mark before the demotion: the hour's blocks began here
+        self.drawdown(a)
+        b = self.agent("hawk")
+        table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
+        self.blocks("weather-favorites", *[0.02] * 6, began=began)  # closed after the demotion, begun before it
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
+        self.assertIn("(it is +0.0000 over 0;", self.status(b)["reason"])
+        self.blocks("weather-favorites", *[0.01] * 6)  # the next hour's: begun after the demotion, +0.06 over 6
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 2)
+
+    def test_a_turn_is_read_on_the_record_as_a_pass_finds_it(self):
+        """The R5 adversarial review (Sept 24, 2026): the blocks of one hour close together and one pass reads them all,
+        so a prefix of them is a record the family never stood at. A turn is for good, so it is read on the record since
+        as the pass finds it, never block by block inside what one pass reads. Measured on the 15:06Z snapshot: the holds
+        of huang-hd8ff7c-4 and -3 (crypto-15m-spot-impulse-lag, demoted at 01:01:35Z and 01:44:20Z) would have ended at
+        04:02:35Z on the first six of that pass's blocks (+0.0340), while their family's record since was at or below
+        zero at every pass through the snapshot; 3 of the 12 demotions from rung 2 turned earlier block by block."""
+        self.blocks("weather-favorites", *[0.10] * 6)  # +0.60 before: the whole record never loses in this test
+        a = self.seated()
+        self.drawdown(a)
+        b = self.agent("hawk")
+        table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
+        self.blocks("weather-favorites", *[0.01] * 6, -0.10)  # one pass: seven blocks since, -0.04 (its first six +0.06)
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
+        self.assertIn("(it is -0.0400 over 7;", self.status(b)["reason"])
+        self.assertIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.blocks("weather-favorites", 0.05)  # +0.01 over eight: turned
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(b.id), 2)

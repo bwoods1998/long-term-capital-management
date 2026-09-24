@@ -1337,7 +1337,7 @@ class Allocator:
             if not family:
                 continue
             row = out.setdefault(family, [0, 0.0])
-            for _, _, active, growth in blocks:
+            for _, _, active, growth, _ in blocks:
                 if active:
                     row[0] += 1
                     row[1] += growth
@@ -1368,11 +1368,19 @@ class Allocator:
 
     def _turned(self, family: str, seq: int, minimum: int) -> tuple[bool, int, float]:
         """(whether the family's record since ledger position `seq` has TURNED, its active blocks since, their summed log
-        growth). The record since is every active block the ledger wrote after `seq`, for every agent ever born into the
-        family (the rows and members `family_forward` reads, from the pass's tape); it has turned once it was positive over
-        `minimum` or more active blocks at any block since, read block by block in ledger order (`families.gaining`): the
-        brief's "until the family's record turns" is a moment, and a hold ends there for good (the R5 review, Sept 24, 2026). Derived from
-        the ledger alone, so a restart finds the same turn. Once a pass a demotion."""
+        growth). The record since is every active block that BEGAN after `seq` (its first mark, `first_mark_seq`), for
+        every agent ever born into the family (the rows and members `family_forward` reads, from the pass's tape): a block
+        is written when it closes, so the block each member had in progress at a demotion is written after it though it
+        began before, and `Evaluator.blocks(since_seq=...)` reads a record since a ledger position the same way. It has
+        turned when that record, as the pass finds it, is positive over `minimum` or more active blocks
+        (`families.gaining`); the hold then ends for good (the R5 review, Sept 24, 2026: `_prune_holds` drops it at that
+        pass). Never block by block inside what one pass reads: the blocks of an hour close together, so a prefix of them
+        is a record the family never stood at. The R5 adversarial review (Sept 24, 2026) measured both on the 15:06Z
+        snapshot: haghani-56's hold (13:06:12Z) turned at 14:02:40Z on six blocks that had all begun before its demotion,
+        and of the 12 demotions from rung 2, 3 turned earlier block by block, 2 of them (huang-hd8ff7c-3 and -4) at
+        04:02:35Z on a prefix while their record since was at or below zero at every pass. A House that lost
+        `allocator.json` reads each hold again at its first pass on the record as it then stands: a hold that had ended
+        and whose record since has fallen back holds again, the safe side. Once a pass a demotion."""
         key = (family, int(seq))
         cached = self._since.get(key)
         if cached is not None:
@@ -1380,14 +1388,10 @@ class Allocator:
         registry = self.house.registry
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
             members = [a.id for a in list(registry.agents.values()) if a.family == family]
-        rows = sorted((written, value) for member in members for written, _, active, value in self._tape.blocks.get(member) or ()
-                      if active and written > seq)
-        blocks, growth, turned = 0, 0.0, False
-        for _, value in rows:
-            blocks += 1
-            growth += value
-            turned = turned or families.gaining(blocks, growth, minimum)
-        self._since[key] = (turned, blocks, growth)
+        values = [value for member in members for _, _, active, value, began in self._tape.blocks.get(member) or ()
+                  if active and began > seq]
+        blocks, growth = len(values), math.fsum(values)
+        self._since[key] = (families.gaining(blocks, growth, minimum), blocks, growth)
         return self._since[key]
 
     def _fold_demotions(self) -> None:
@@ -1416,7 +1420,7 @@ class Allocator:
     def _prune_holds(self) -> None:
         """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
         never comes back, and the state keeps only the holds still in force (a restart that folds the whole ledger again
-        prunes to the same)."""
+        prunes on the record as it then stands, the safe side: `_turned`)."""
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return
