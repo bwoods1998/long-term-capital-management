@@ -620,6 +620,23 @@ recorded for the next open; live verification uses the markets that trade around
   and the re-run 16:09:28-16:19:43Z). The lasting fix rides C′ (`0245d76`): the tests job gets 20 minutes, and
   `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` follows the workflow file (the running updater refuses
   main heads with the new workflow until C′ lands, and trusts them after it).
+- 16:42:49Z — **R1: Deploy C′ live.** PR #274 CI green at 16:30:45Z (3.14 in 10m03s under the new 20-minute
+  limit), merged 16:31Z (main `84e1d0f`); owner deploy at 16:31:19Z, release `20260924T163119Z-cb03f8aa33a8`,
+  canary 76 s, promoted 16:32:40Z, watch passed (verdict 16:42:49Z); no ratify (money digest `c02ed852`).
+  The watch's readings 1-2 read the old House's file (16:29:41Z, 208-238 s old, nothing frozen); the new
+  House wrote its own at 16:33:50Z and every later reading was its own. This watch was still the OLD
+  watchdog's; the next deploy is judged by the fixed one.
+- 16:45Z — **R1's first readings** (verifyC.py on the box, from 16:32:40Z): `tick_steps` in health (last tick
+  90.7 s: research 15.4 s, wakes 12.1, publish 10.2, poll:kalshi-shadow 8.0, mark:alpaca-paper 7.5,
+  hypotheses 6.3); tick 87.6 s, not yet under 60. Waiters 82 → 66: lab graduates 41 → 23 as E1 holds 16 of
+  them as parameter nudges (crypto-strikes 11, weather 3, sports-props 1) and one on a losing forward window
+  (megacaps). X1 verified: agents edited their own parameters in place (`control: edit_params`:
+  hilibrand-l98e85b's risk_fraction 0.05 → 0.12 at 16:36:32Z because 5% of a $10 probe is below one contract;
+  haghani-l22bffc's spread cap 0.4% → 0.8% at 16:37:56Z after 30 idle wakes). kalshi-open's member
+  diagnosed its own idleness ("none of their four NFL series is currently open in the six-hour window") and
+  rewrote itself at 16:36:40Z. One death: krasker-6 (options-pullback, 12 fills, forward −0.0726) displaced by
+  krasker-3's retained candidate (S3). The three cards at 16:35:19Z are the engineer's repair cards for three
+  real-money agents' refusals, not foundry search cards. `settle_lags.json` holds 2 series, no diesel yet.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
