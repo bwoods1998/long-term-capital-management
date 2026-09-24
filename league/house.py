@@ -5151,6 +5151,32 @@ class House:
                 self._state[key] = 0
             if out.get("absorbed"):
                 self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": kind, **out})
+            self._watch_absorb(kind, out)
+
+    #: A release that keeps being refused this long is said once (Sept 24, 2026: the first check of
+    #: the OpenAI release compared a moving House figure with a reading a tick old and refused every
+    #: try for as long as research ran; nothing on the ledger or in health said so).
+    ABSORB_STALL_SECONDS = 1800
+
+    def _watch_absorb(self, kind: str, out: Mapping[str, Any]) -> None:
+        """The invariant on the release of stale holds: while every try comes back with a reason and
+        nothing released, since when is kept in the House's state, and past `ABSORB_STALL_SECONDS` one
+        warning says why, with the check's numbers; a release, or a try with nothing to release,
+        clears it (and an info alert says so if the warning went out)."""
+        key = f"absorb_stalled:{kind}"
+        stalled = self._state.setdefault("absorb_stalled", {})
+        if out.get("absorbed") or not out.get("why"):
+            row = stalled.pop(kind, None)
+            if row and row.get("told"):
+                self.alert("info", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds are being released again")
+            return
+        row = stalled.setdefault(kind, {"since": self.clock(), "told": False})
+        row["why"] = str(out.get("why"))[:200]
+        if not row["told"] and self.clock() - float(row["since"]) >= self.ABSORB_STALL_SECONDS:
+            row["told"] = True
+            minutes = (self.clock() - float(row["since"])) / 60
+            self.alert("warning", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds have not been released for {minutes:.0f} minutes: "
+                                  f"{row['why']}", check=dict(out.get("check") or {}), key=key)
 
     def tick(self) -> dict[str, Any]:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
