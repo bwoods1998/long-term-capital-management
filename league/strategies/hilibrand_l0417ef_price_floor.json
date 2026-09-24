@@ -1,0 +1,9 @@
+{
+  "family": "crypto-strikes-lab-955dae",
+  "name": "hilibrand_l0417ef_price_floor",
+  "repair": {
+    "key": "strategy_defect:hilibrand-l0417ef:0417efb29890",
+    "parent": "hilibrand-l0417ef"
+  },
+  "why": "Corrected child of hilibrand-l0417ef: filter rounded maker bids before candidate ranking to respect the $0.15 replay/paper and $0.30 real-money entry floors. Preserves the parent's crypto-strike specialty and pricing/sizing logic; starts at rung 0 with no record and must qualify independently."
+}
