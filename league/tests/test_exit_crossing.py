@@ -16,7 +16,7 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
-from ltcm.broker import BrokerError, Instrument
+from ltcm.broker import BrokerError, Instrument, RejectedOrder
 
 from league.auditor import order_outcomes
 from league.book import q_cash
@@ -318,6 +318,61 @@ class PracticeAlpacaExitTest(CrossCase):
         self.book.poll()
         self.assertEqual(self.snapshot_state(), before)
         self.assertTrue(self.book.reconcile().ok)
+
+    def test_a_cross_takes_only_what_the_venue_left_unfilled_of_the_bid(self):
+        """Review of #226: the guard against a quantity filled twice -- a cross takes the bid's quantity LESS
+        every venue fill booked -- was never exercised (in every test the exit was smaller than what the venue
+        had left of the bid, so crossing the whole bid passed too). Here the venue fills 2 of a 3 bid while the
+        House cancels it and the exit needs almost 3: 1 is crossed and the rest goes to the venue."""
+        held = self.hold("seller", self.inst, "3")
+        bid = self.rest_bid("buyer", self.inst, "3", "12.17")
+
+        def filled_in_flight(order_id):
+            stale = copy.copy(self.broker.get_order(order_id))
+            self.broker.fill_resting(bid, "2")
+            self.broker.orders[bid].status = "cancelled"
+            stale.status = "cancelled"
+            return stale
+
+        with patch.object(self.broker, "cancel", side_effect=filled_in_flight):
+            out = self.book.submit([self.intent("seller", self.inst, "sell", held)])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        venue = [D(e.payload["quantity"]) for e in self.ledger.iter(kinds="book.fill", agent="buyer") if e.payload.get("source") == "venue"]
+        self.assertEqual(venue, [D("2")])
+        (crossed,) = self.crossed_fills("buyer")
+        self.assertEqual(D(crossed["quantity"]), D("1"))  # 3 bid, 2 filled at the venue: 1 left to cross, never 3
+        self.assertEqual(self.broker.submitted[-1].quantity, held - D("1"))  # the rest of the exit, at the venue
+        self.assertEqual(self.book.account("seller").holdings, {})
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_a_later_slice_of_an_exit_is_never_crossed(self):
+        """Review of #226: `_advance_plan` clears a later slice with `cross=False` and then sends the whole slice.
+        Nothing pinned it: crossed there, a slice meeting a peer's bid at the touch was crossed AND sent (7.98
+        LINK held, 11.97 sold)."""
+        self.seat("seller", usd="200", position="200", order="75")
+        for _ in range(2):
+            self.assertEqual(self.book.submit([self.intent("seller", self.inst, "buy", "4")])[0].status, "filled")
+        held = self.book.account("seller").holdings[self.inst.key].quantity
+        submit, calls = self.broker.submit, []
+
+        def second_slice_refused(order_intent):
+            calls.append(order_intent)
+            if len(calls) == 2:
+                raise RejectedOrder("the venue refused this slice")
+            return submit(order_intent)
+
+        with patch.object(self.broker, "submit", side_effect=second_slice_refused):
+            self.book.submit([self.intent("seller", self.inst, "sell", held)])  # over the cap: an exit plan
+        bid = self.rest_bid("peer", self.inst, "5", "12.17")  # a bid at the touch arrives before the next slice
+        self.clock.advance(60)
+        self.book.poll()
+        self.assertEqual(self.crossed_fills("seller"), [])
+        self.assertTrue(self.book.orders[bid].open)
+        sold = sum((D(e.payload["quantity"]) for e in self.ledger.iter(kinds="book.fill", agent="seller")
+                    if e.payload.get("source") == "venue" and e.payload["side"] == "sell"), D(0))
+        offered = sum((w.remaining for w in self.book.open_orders("seller") if w.side == "sell"), D(0))
+        self.assertLessEqual(sold + offered, held)
+        self.assertEqual(self.broker.submitted[-1].limit_price, D("12.18"))  # one step above the House's bid
 
     def test_a_bid_that_filled_before_the_exit_is_booked_and_not_crossed(self):
         held = self.hold("seller", self.inst, "1.62")
