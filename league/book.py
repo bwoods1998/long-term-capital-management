@@ -1510,7 +1510,7 @@ class Book:
             return f"the venue has not acknowledged the House's order {working.order_id} that could meet it"
         return None
 
-    def _crossable(self, working: Working, intent: Intent, *, cross: bool, touch: Decimal | None) -> bool:
+    def _crossable(self, working: Working, intent: Intent, *, cross: bool, touch: Decimal | None, now: str) -> bool:
         """Whether this resting order of another agent's may be cancelled and crossed with the exit
         inside the House: one agent's bid on the same leg, on a book in good standing, AT OR ABOVE the
         venue's bid for the leg -- where a sell at the venue would really have met it. A bid under the
@@ -1519,8 +1519,18 @@ class Book:
         the exiter would sell under the bid it could have had (Sept 24, 2026: the alpaca-crypto-alts
         bids rested 1.3-3% under their 32-bar means). Such an exit goes to the venue instead, one step
         above the House's bid (`_floored_exit`). A slice (`cross=False`) is never crossed, and neither
-        is a post-only exit, which asked never to take: it rests one step above the House's bid."""
+        is a post-only exit, which asked never to take: it rests one step above the House's bid.
+        Nor is anything crossed while the venue itself is shut (a stock or an option outside the
+        regular session, where only a LIMIT exit passes `check`): the venue could fill neither order
+        until the open, so a cross then would book both agents a fill no venue could have made, on a
+        quote from the close (review of #226, Sept 24, 2026). The exit goes to the venue one step
+        above the House's bid, to wait for the open like any order."""
         if not cross or intent.post_only or self.frozen or touch is None:
+            return False
+        try:
+            if self.market_open is not None and self.market_open(working.instrument, now) is False:
+                return False
+        except Exception:  # noqa: BLE001 - a session that cannot be read is shut, for this purpose
             return False
         try:
             if self.kill_switch and self.kill_switch():
@@ -1573,7 +1583,7 @@ class Book:
                 break
             working = peers[0]
             doubt = doubt or self._doubt_about(working)
-            if doubt or not self._crossable(working, intent, cross=cross, touch=touch):
+            if doubt or not self._crossable(working, intent, cross=cross, touch=touch, now=now):
                 break
             reference = working.broker_order_id or working.order_id
             try:

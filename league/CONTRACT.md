@@ -460,6 +460,8 @@ House's wind-down or horizon rule -- is never refused for it:
   at its next wake if it still wants to.
 - **The House's bids under the market's bid** are left alone: your sell goes to the venue as a limit
   one price step above the best of them, so it takes the market's better bids and never the House's.
+  So does a sell that meets a bid while the venue itself is shut (a stock or an option outside the
+  regular session): nothing is crossed until the venue could trade, and the order waits for the open.
   A `post_only` sell is never crossed either (it asked never to take): it rests, still post-only, one
   step above the House's best bid.
 - **When the House cannot tell where one of its orders stands** (a cancel the venue has not

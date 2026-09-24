@@ -327,6 +327,23 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.50"), True))
         self.assertIn("post-only limit at your own limit 12.50", out.detail)
 
+    def test_nothing_is_crossed_while_the_venue_is_shut(self):
+        """Review of #226: outside the regular session only a LIMIT exit of a stock passes `check`; it met a
+        peer's resting bid and the two were crossed at once, on the close's quote -- a fill the venue could not
+        have made until the open. It goes to the venue one cent above the House's bid instead, to wait."""
+        spy = Instrument("equity", "SPY", self.venue)
+        self.broker.set_quote(spy, "50.00", "50.02")
+        held = self.hold("seller", spy, "1")
+        bid = self.rest_bid("buyer", spy, "1", "50.00")
+        self.book.market_open = lambda instrument, now: False if instrument.asset_class in ("equity", "option") else None
+        out = self.book.submit([self.intent("seller", spy, "sell", held, order_type="limit", limit_price="49.90")])[0]
+        self.assertEqual(out.status, "resting", out.detail)
+        self.assertEqual(self.crossed_fills("seller"), [])
+        self.assertEqual(self.broker.cancelled, [])
+        self.assertTrue(self.book.orders[bid].open)
+        sent = self.broker.submitted[-1]
+        self.assertEqual((sent.side, sent.order_type, sent.limit_price), ("sell", "limit", D("50.01")))
+
     def test_an_entry_that_would_cross_is_still_refused(self):
         self.hold("seller", self.inst, "3")
         self.seat("buyer")
