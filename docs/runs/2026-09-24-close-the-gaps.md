@@ -282,6 +282,30 @@ recorded for the next open; live verification uses the markets that trade around
   batches by 05:46Z with no failed step. The OpenAI meter anchored at 05:38:57Z ($421.85 settled at the
   gateway; the House line $179.11 against the gateway month's $183.59 left).
 
+- 05:50-06:10Z — cleanup: the Wave 0 worktrees and branches removed (merged via #240; #224/#226/#227/#228
+  marked merged by GitHub, #232/#235 closed); the paused run's `ltcm-sailfloor`, `ltcm-w2-int` removed,
+  `ltcm-run` removed with its unmerged branch kept on origin (`4572849`). C-tools (X1, X2, the wake skip)
+  launched from `9191e81`.
+- 06:05Z — **a D2 defect found live:** no stale OpenAI hold released in the first half hour. The check
+  compared the House's settled sum since the anchor ($4.1177, growing the moment each call answers) with
+  the gateway's settled growth as last read ($4.1045, a tick old): while research ran the House was
+  always a minute of calls ahead, so every try was refused, and nothing said so. Fixed in PR #246 (compare
+  only calls older than a call's life before the reading; a genuinely lagging gateway still refuses) with
+  the invariant `House._watch_absorb` (a release refused for half an hour is said once, with the
+  check's numbers). Protected: rides Deploy B. Until then the $98.36 of holds stay counted (the tier
+  reads the gateway month, which is the nearer line, so nothing is starved).
+- 06:10Z — **B-families (#242) done:** `league/families.py` (the mechanism ledger), the family swing
+  (15 real settlements, 2 × the bunt, doubling every 10 positive, Kelly on the bound, 60% of the venue
+  and measured capacity, shared across a family's members), `swing_requires_proven_family` and
+  `corrected_child_supersedes` as keys, and **the family proof's unit changed to return on the capital
+  at risk** (`ln(1 + 0.01 r)/0.01` per event; practice rows had been growth on a $200 purse and real
+  rows on a $30 stake, so real rows weighed 3-7 times their declared weight). Money digest `521c4586` →
+  `1fa87d83`. Under it **no family is proven at T0**: sports-central-run-under's account-growth proof
+  came from buying two strikes on the games it won and one on those it lost (6 of 11 practice events at
+  about even money after a 7% fee); weather-favorites' loss-rate bound is −0.21. The first family swing
+  is about 19 days away at weather's real pace, if it never loses. Reviews launched: #242
+  (adversarial), #236 + #234 (watchdog, point-in-time honesty, compute).
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
