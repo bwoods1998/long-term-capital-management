@@ -2780,6 +2780,12 @@ class House:
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
+            if rung == 2 and allocator_module.enabled() and self.allocator.tier(agent) != "bunt":
+                # Only a proven family's agent swings (Sept 24, 2026): a swing audit that finishes after its
+                # family's record stopped being proven does not commit (`Allocator.family` never raises).
+                self._promotion_status(agent, verdict, 'family', "its family's pooled record is not proven: "
+                                                                  "only a proven family's agent swings")
+                return
             authorization = self.campaigns.live_authorization() if self.campaigns else None
             if rung == 1 and allocator_module.enabled():
                 # A known defect's bunt, committed after its audit: the allocator's envelope decides.

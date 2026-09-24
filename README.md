@@ -108,7 +108,7 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   | Paper | 1 | passed replay | the $200 purse |
   | Probe | 2 | E ≥ 1.01 and 5 closed practice trades, or 3 settlements on Kalshi, when the agent's family is not proven | $10 at Kalshi, $25 at Alpaca |
   | Bunt | 2 | the same line, when the agent's family's pooled record is proven | $30 at Kalshi, $25 at Alpaca, × W_real up to 1.25 |
-  | Swing | 3 | E ≥ 1.25, W_real ≥ 1 and 8 real closed trades; the first swing is audited | the bunt × min(E, 20)², up to 60% of the venue |
+  | Swing | 3 | E ≥ 1.25, W_real ≥ 1 and 8 real closed trades, for a proven family's member only (since Sept 24, 2026); the first swing is audited | the bunt × min(E, 20)², up to 60% of the venue |
   | Star | 3 | the top 3 swings by real P&L with W_real ≥ 1.25 | the swing stake |
 
   **Promotion on proof** (Sept 24, 2026, the close-the-gaps run). A probe is the bunt band's first

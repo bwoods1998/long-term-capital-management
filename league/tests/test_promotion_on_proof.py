@@ -932,17 +932,71 @@ class TrialOnTheFloor(KalshiHouse):
         demote = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
         self.assertEqual((demote["band_from"], demote["band_to"]), ("swing", "probe"))
 
-    def test_a_probe_that_swings_is_on_the_tape_as_a_probe(self):
-        """Review of #224 (Sept 24, 2026): the move up from a probe says "probe", as the board and the
-        move down say it; it had said "bunt -> swing" for an agent staked and shown as a probe."""
+    SWING_READY = dict(e=1.30, w_paper=1.21, w_real=1.1, real_trades=8, real_stay_closed=8)
+
+    def test_only_a_proven_familys_agent_swings(self):
+        """The main session's decision on the review of #224 (Sept 24, 2026): every real-money agent is a
+        probe or a proven family's member (the plan's Done list), so the agent-level swing is the second
+        route for a PROVEN family's agent only. An unproven family's probe at the swing line stays a
+        probe, and no swing audit is spent on it; once its family is proven the same evidence swings, and
+        the tape says "bunt -> swing"."""
         a = self.seated_probe()
-        ready = dict(self.READY, e=1.30, w_paper=1.21, w_real=1.1, real_trades=8, real_stay_closed=8)
+        ready = dict(self.READY, **self.SWING_READY)
+        with patch.object(allocator, "audit_standing", return_value="approved"), self.evidence_of({a.id: ready}):
+            summary = self.house.allocator.rebalance()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
+        self.assertEqual([m for m in summary["moves"] if m["agent"] == a.id], [])
+        self.assertEqual(self.auditor.seen, [])
+        band, why = allocator.target_band(self.house.allocator._evidence[a.id], P())
+        self.assertEqual(band, "bunt")
+        self.assertIn("only a proven family's agent swings", why)
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
         with patch.object(allocator, "audit_standing", return_value="approved"), self.evidence_of({a.id: ready}):
             summary = self.house.allocator.rebalance()
         self.assertEqual(self.house.evaluator.rung(a.id), 3)
         promote = self.promote_row(a)
-        self.assertEqual((promote["band_from"], promote["band_to"]), ("probe", "swing"))
-        self.assertEqual([(m["from"], m["to"]) for m in summary["moves"] if m["agent"] == a.id], [("probe", "swing")])
+        self.assertEqual((promote["band_from"], promote["band_to"]), ("bunt", "swing"))
+        self.assertEqual([(m["from"], m["to"]) for m in summary["moves"] if m["agent"] == a.id], [("bunt", "swing")])
+
+    def test_a_swing_whose_family_stops_being_proven_drops_to_a_probe(self):
+        """A swing's evidence may still be a swing's, but when its family's record stops being proven it
+        drops to rung 2 as a probe, by free cash only (the stake follows in `_size`)."""
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        a = self.seated_probe()
+        healthy = dict(self.READY, e=2.0, w_paper=1.21, w_real=1.2, real_trades=12, real_stay_closed=12)  # under the star line
+        with patch.object(allocator, "audit_standing", return_value="approved"), self.evidence_of({a.id: healthy}):
+            self.house.allocator.rebalance()
+            self.assertEqual(self.house.evaluator.rung(a.id), 3)
+            self.families["weather-favorites"] = canned("weather-favorites", proven=False, n=17, bound=-0.001)
+            summary = self.house.allocator.rebalance()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        demote = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
+        self.assertEqual((demote["band_from"], demote["band_to"]), ("swing", "probe"))
+        self.assertIn("no longer proven", demote["reason"])
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
+
+    def test_a_swing_audit_that_finishes_after_the_family_lost_its_proof_does_not_commit(self):
+        """The audit runs off the tick; if the family's record stops being proven while it runs, the
+        approval does not move the agent to the swing band (`House._commit_promotion`)."""
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        a = self.seated_probe()
+        approve = self.auditor.audit
+
+        def audit(agent, verdict, **kwargs):
+            self.families["weather-favorites"] = canned("weather-favorites", proven=False, n=17, bound=-0.001)
+            self.house.allocator._families.clear()  # the family is read afresh, as at the next pass
+            return approve(agent, verdict)
+
+        self.auditor.audit = audit
+        with self.evidence_of({a.id: dict(self.READY, **self.SWING_READY)}):
+            self.house.allocator.rebalance()
+            self.house.wait(5)
+        self.assertEqual(self.auditor.seen, [a.id])
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        status = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "progress"]
+        self.assertEqual((status[-1]["stage"], status[-1]["reason"]),
+                         ("family", "its family's pooled record is not proven: only a proven family's agent swings"))
 
     def test_a_probe_whose_stake_could_not_be_lent_is_named_a_probe(self):
         """Review of #224: a probe whose stake does not land goes straight back, and the tape and the

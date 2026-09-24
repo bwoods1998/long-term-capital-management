@@ -123,6 +123,10 @@ class Evidence:
     #: sold-flat events on Kalshi, closed trades on Alpaca, since `real_stay_start`. The hysteresis exit
     #: waits for `hysteresis_after_settled` of them.
     real_stay_closed: int = 0
+    #: Whether the agent's family's pooled record is proven (`Allocator.family`), set by the pass before
+    #: any band is read. Only a proven family's agent swings (Sept 24, 2026: every real-money agent is a
+    #: probe or a proven family's member). None where no pass set it: no family gate.
+    family_proven: bool | None = None
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
@@ -600,9 +604,17 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
                             "one early loss is not a demotion")
     if rung == 2:
         if swing_ready(ev, p) and not ev.cooling:
+            if ev.family_proven is False:
+                # The agent-level swing is the second route for a PROVEN family's agent only (the close-
+                # the-gaps run, Sept 24, 2026): an unproven family's agent stays a probe, whatever its
+                # own E on a few real settlements says (the plan's gap 2).
+                return "bunt", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, but its family's pooled record is not "
+                                "proven: only a proven family's agent swings")
             return "swing", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, W_real {ev.w_real:.4f}, "
                              f"{ev.real_trades} real closed trades")
         return "bunt", "holds the bunt band"
+    if ev.family_proven is False:
+        return "bunt", "its family's pooled record is no longer proven: an unproven family's agent is a probe, not a swing"
     if ev.e < p["swing_at"] * p["hysteresis"] or ev.w_real < p["swing_exit_w_real"]:
         return "bunt", (f"E {ev.e:.4f} or W_real {ev.w_real:.4f} fell below the swing band's floor "
                         f"({p['swing_at'] * p['hysteresis']:.4f} / {p['swing_exit_w_real']:g})")
@@ -979,6 +991,9 @@ class Allocator:
                     evid[agent.id] = evidence(house, agent, rungs[agent.id])
                 except Exception as exc:  # noqa: BLE001 - one agent's unreadable record must not stop the pass
                     house.alert("warning", f"allocator: {agent.id}'s evidence could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+                    continue
+                # Only a proven family's agent swings (Sept 24, 2026); `family` never raises.
+                evid[agent.id].family_proven = bool(self.family(agent.family, agent.venue)["proven"])
             self._evidence = evid
             live_ok = {v: self._live_open(v) for v in REAL_BOOK}
             # 1. Deaths on paper wealth.

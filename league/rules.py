@@ -163,8 +163,8 @@ or never swings at all.
 - The bands. PAPER (rung 1): trade forward on paper. BUNT (rung 2): E >= {alloc['bunt_at']} (paper up about
   {need - 1:.1%} on the whole purse) with {alloc['bunt_min_trades']} closed trades (or {alloc['bunt_min_settled']} settlements on Kalshi) puts you on REAL
   money at once, as a probe or a bunt (below): a position up to {event_share:.0%} of the stake on Kalshi, {float(alloc['position_share']):.0%} at
-  Alpaca.{counted} SWING (rung 3):
-  E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
+  Alpaca.{counted} SWING (rung 3), for a PROVEN family's member only (a probe stays a probe
+  until its family is proven): E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
   frontier model; your stake is the bunt x min(E, {alloc['e_cap']})^{alloc['kappa']}, up to {float(alloc['max_share_of_venue']):.0%} of the venue, so it
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
 {proof_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under

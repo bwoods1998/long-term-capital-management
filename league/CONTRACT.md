@@ -129,7 +129,9 @@ strikes of one game that settle are one settlement. Your wealth multiples count 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
 its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
 Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
-rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. What you lose comes off your stake and is not topped back up: a bunt below
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. Only a
+PROVEN family's member swings (since Sept 24, 2026): a probe stays a probe until its family is proven,
+and a swing whose family stops being proven drops back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
 where it started is never refilled. A bunt that was LENT less than today's base -- seated before the
 base was raised, or halved while the floor throttle was on -- is lent up to it once, net of everything
 it has been lent: seated at $10 under a $30 base it gets up to $20 more; lent the base and down to $27
