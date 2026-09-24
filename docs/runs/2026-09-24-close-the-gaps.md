@@ -626,7 +626,7 @@ recorded for the next open; live verification uses the markets that trade around
   The watch's readings 1-2 read the old House's file (16:29:41Z, 208-238 s old, nothing frozen); the new
   House wrote its own at 16:33:50Z and every later reading was its own. This watch was still the OLD
   watchdog's; the next deploy is judged by the fixed one.
-- 16:45Z — **R1's first readings** (verifyC.py on the box, from 16:32:40Z): `tick_steps` in health (last tick
+- 16:43Z — **R1's first readings** (verifyC.py on the box, from 16:32:40Z): `tick_steps` in health (last tick
   90.7 s: research 15.4 s, wakes 12.1, publish 10.2, poll:kalshi-shadow 8.0, mark:alpaca-paper 7.5,
   hypotheses 6.3); tick 87.6 s, not yet under 60. Waiters 82 → 66: lab graduates 41 → 23 as E1 holds 16 of
   them as parameter nudges (crypto-strikes 11, weather 3, sports-props 1) and one on a losing forward window
