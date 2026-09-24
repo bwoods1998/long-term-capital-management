@@ -418,3 +418,26 @@ class StaleSeatsOnADeskThatKeepsHours(HouseCase):
         self.assertIsNone(self.stale_pick(desk.id), "holding through a shut market: never, stale or not")
         self.at("2026-09-25T13:31:00Z")
         self.assertEqual(self.stale_pick(desk.id), agent.id, "the market is open: the House can sell at market")
+
+
+class TwoProvenFamiliesOnOneDesk(ReviewCase):
+    """`_displaceable`'s R3 hold read the owed births as desk -> family: with two proven families owed births on one desk
+    the later overwrote the earlier, and the earlier family's own births were refused there ("even by a proven family's
+    newcomer") until the later one had its members."""
+
+    def test_either_owed_familys_birth_may_take_the_seat_and_no_other_family_may(self):
+        self.rules.update(newcomer_seconds=600, proven_family_members=4)
+        first = self.resident("first", family="first-family")
+        second = self.resident("second", family="second-family")
+        for agent in (first, second):
+            self.house.evaluator.promote(agent.id, 2, "test: a bunt on real money")
+            self.buy(agent)
+        idle = self.resident("idle")
+        self.clock.advance(3601)
+        with self.proven("first-family", "second-family"):
+            self.assertEqual(sorted(w["family"] for w in self.house.seat_waiters(fresh=True)["proven"]), ["first-family", "second-family"])
+            for family in ("first-family", "second-family"):
+                pick = self.house._weakest(self.rules, specialty=DESK, evidenced=True, newcomer=Newcomer(family=family, venue="alpaca"))
+                self.assertEqual(pick.id if pick else None, idle.id, f"{family}'s birth may take the seat")
+            self.assertIsNone(self.house._weakest(self.rules, specialty=DESK, evidenced=True,
+                                                  newcomer=Newcomer(family="another", venue="alpaca")))

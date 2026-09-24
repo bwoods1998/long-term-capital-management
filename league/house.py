@@ -4764,9 +4764,11 @@ class House:
             if evidenced and specialty in self._search_closed_desks((specialty,)):
                 kept("the search closes the desk")
                 return []  # R2: no seat is made on a desk the search closes; its waiters have left the queue
-            owed = {str(w.get("niche")): str(w.get("family")) for w in self.seat_waiters().get("proven") or ()}
-            if specialty in owed and newcomer.family != owed[specialty]:
-                kept(f"held for the proven family {owed[specialty]}'s births")
+            owed: dict[str, set[str]] = {}
+            for w in self.seat_waiters().get("proven") or ():
+                owed.setdefault(str(w.get("niche")), set()).add(str(w.get("family")))  # every owed family: the review of #276
+            if specialty in owed and newcomer.family not in owed[specialty]:
+                kept(f"held for the proven famil{'y' if len(owed[specialty]) == 1 else 'ies'} {', '.join(sorted(owed[specialty]))}'s births")
                 return []  # R3: the desk's next seat is the proven family's program's
         newcomer_proven = self._family_proven(newcomer.family, newcomer.venue)
         # S3 (R2): a newcomer with a winning forward window may take a stale seat (`_stale_seat`).
