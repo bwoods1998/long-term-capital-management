@@ -1,0 +1,5 @@
+{
+  "name": "index-vwap-inventory",
+  "family": "equity-intraday",
+  "why": "The index-ETF specialty reports eleven losing traders among thirteen active traders. Test the founding VWAP liquidity-reversion hypothesis instead of duplicating momentum, overnight or calendar cards: one passive morning bid in SPY, QQQ or IWM below a completed-bar approximation of session VWAP, capped at $2 and further bounded by cash, equity and House limits. Manage working bids, size fractional shares at the ask, offer recovery with a gross cost cushion, and target liquidation by 12:45 New York with an observed price stop. Neither VWAP recovery nor passive execution establishes an edge; adverse selection, bar approximations and the paper execution haircut can defeat the hypothesis. This unexecuted candidate begins at rung 0, preserves applicable equity-intraday selection history, and requires adequate after-cost replay, applicable holdout, independent paper outcomes, audit and ordinary capital qualification. Reject sparse activity or negative economics rather than forcing turnover."
+}
