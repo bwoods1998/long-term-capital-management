@@ -135,7 +135,7 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
   digest needs the ratify. The close-the-gaps run's Deploy A (Sept 24, 2026) moves them to
-  constitution `15ae031e…`, money `223e2f0e…` (101 agents over the $10 Kalshi probe once ratified);
+  constitution `8116302e…`, money `521c4586…` (101 agents over the $10 Kalshi probe once ratified);
   at that run's T0 they were `34adf385…` / `c2b0e09c…` (40 agents, a $25 stake line). Deploy A of the
   learn-and-unblock run (17:34Z, Sept 23, 2026) had set `52c6c7e5…` / `1d63a56e…`, the grant
   re-ratified at 17:34:36Z. Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
