@@ -186,8 +186,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     one); and `remaining_usd`, the smaller of the two, which is what every reader of the House's
     line sees. OpenAI's entry also has `month`: the gateway month last read, its highest reading
     (`high_usd`), the finals carried from earlier months (`carried_usd`), `settled_total_usd`, the
-    month's own `cap_usd` and `spent_usd` at the last reading, `covers_from` and the check's
-    `anchor`.
+    month's own `cap_usd` and `spent_usd` at the last reading, `base_usd` (what the meter carried
+    when `covers_from` last moved), `covers_from` and the check's `anchor`.
   - `hypotheses`: cards, pending evaluations, the foundry's `refusal` reason and its window spend.
   - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
     (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
@@ -385,7 +385,9 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - **It never runs backwards.** The month falls whenever a call settles below its worst case and
     starts at zero on the 1st, so the meter keeps the month's highest reading plus the finals of
     earlier months (the gateway's `previous`). It counts from the start of the first month it read
-    (`covers_from`); a month the gateway could not close moves `covers_from` forward.
+    (`covers_from`); a month the gateway could not close moves `covers_from` forward, and what the
+    meter carried until then leaves its measure (`base_usd`), because the House's own settled costs
+    of those calls are counted apart (`before_meter_usd`).
   - **What is released.** Every ten minutes, a `frontier:` hold with no answer, older than six
     hours and made since `covers_from`, is absorbed: the gateway reserved that call's worst case
     on its month before it called OpenAI, and settled it at the metered cost or kept the worst

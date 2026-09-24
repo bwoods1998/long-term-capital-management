@@ -119,14 +119,15 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS meter_month(id TEXT PRIMARY KEY, month TEXT NOT NULL, high INTEGER NOT NULL,
                 carried INTEGER NOT NULL, settled_high INTEGER, settled_carried INTEGER NOT NULL,
                 covers_from REAL NOT NULL, anchor_at REAL, anchor_row INTEGER, anchor_settled INTEGER, at REAL NOT NULL,
-                cap INTEGER, spent INTEGER, reading_row INTEGER);
+                cap INTEGER, spent INTEGER, reading_row INTEGER, base INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS phase_amendments(id TEXT NOT NULL, at REAL NOT NULL, old_policy TEXT NOT NULL,
                 new_policy TEXT NOT NULL, why TEXT NOT NULL);
         """)
-        # The gateway's own line (Sept 24, 2026 review) joined `meter_month` after its first build: a
-        # store that build created gains it here, and reads it as unknown until the next reading.
+        # The gateway's own line and the meter's base (Sept 24, 2026 review) joined `meter_month` after
+        # its first build: a store that build created gains them here, and reads them as unknown.
         columns = lambda: {r[1] for r in self.db.execute("PRAGMA table_info(meter_month)")}  # noqa: E731
-        for name, decl in (("cap", "INTEGER"), ("spent", "INTEGER"), ("reading_row", "INTEGER")):
+        for name, decl in (("cap", "INTEGER"), ("spent", "INTEGER"), ("reading_row", "INTEGER"),
+                           ("base", "INTEGER NOT NULL DEFAULT 0")):
             if name not in columns():
                 try:
                     self.db.execute(f"ALTER TABLE meter_month ADD COLUMN {name} {decl}")
@@ -396,19 +397,27 @@ class CampaignBudget:
             (len(prefix), prefix, since, len(prefix), prefix, since, len(prefix), prefix, kind, after_row)).fetchone()
         return int(inside), int(before), int(other), int(pending)
 
-    def _measured(self, kind: str, burst: Mapping[str, Any]) -> int:
-        """What `kind`'s meter has counted since the burst's baseline. Sail's baseline is its reading
-        at the burst's activation. OpenAI had no meter then (Sept 21, 2026): its baseline is the
-        meter's own, the zero of the first gateway month it read (`observe_month`), which began
-        before every burst call that month covers. It counts that month's calls made before the
-        burst too, so it can only overcount; a meter with neither counts nothing."""
+    def _measured(self, kind: str, burst: Mapping[str, Any] | None) -> int:
+        """What `kind`'s meter has counted since the burst's baseline (since the meter began, with no
+        burst). Sail's baseline is its reading at the burst's activation. OpenAI had no meter then
+        (Sept 21, 2026): its baseline is the meter's own, the zero of the first gateway month it read
+        (`observe_month`), which began before every burst call that month covers. It counts that
+        month's calls made before the burst too, so it can only overcount; a meter with neither
+        counts nothing.
+
+        A monthly meter never counts from before `covers_from`: when a month the gateway could not
+        close moved it forward, what the meter carried until then (`meter_month.base`) is left out,
+        because the House's settled costs of those calls are added apart (`_sums` `before`). Counting
+        both read that month twice (the Sept 24, 2026 review: $10 of September became $20)."""
         row = self.db.execute('SELECT baseline, latest FROM meter WHERE id=?', (kind,)).fetchone()
         if row is None:
             return 0
-        baseline = burst['meters'].get(kind)
+        baseline = burst['meters'].get(kind) if burst else row['baseline']
+        month = self.db.execute('SELECT base FROM meter_month WHERE id=?', (kind,)).fetchone()
         if baseline is None:
-            monthly = self.db.execute('SELECT 1 FROM meter_month WHERE id=?', (kind,)).fetchone()
-            baseline = row['baseline'] if monthly else row['latest']
+            baseline = row['baseline'] if month else row['latest']
+        if month is not None:
+            baseline = max(int(baseline), int(month['base'] or 0))
         return max(0, int(row['latest']) - int(baseline))
 
     def _line(self, kind: str, burst: Mapping[str, Any]) -> dict[str, int]:
@@ -498,7 +507,7 @@ class CampaignBudget:
 
     def _used(self, kind: str) -> int:
         settled, before, other, pending = self._sums(kind)
-        measured = self.db.execute("SELECT MAX(latest-baseline) FROM meter WHERE id=?", (kind,)).fetchone()[0] or 0
+        measured = self._measured(kind, None)
         # Account meter already includes settled model costs. Do not add them twice. Including
         # unresolved holds again is intentionally conservative when vendor billing arrives first.
         # A settled cost the meter does not record (Jev's beside OpenAI's month, or a call made
@@ -749,7 +758,7 @@ class CampaignBudget:
                         raise ValueError(f"{kind} already has an account meter; a monthly one cannot replace it")
                     state = {"month": month, "high": high_now, "carried": 0, "settled_high": settled_now,
                              "settled_carried": 0, "covers_from": month_start(month),
-                             "anchor_at": None, "anchor_row": None, "anchor_settled": None}
+                             "anchor_at": None, "anchor_row": None, "anchor_settled": None, "base": 0}
                     self.db.execute("INSERT INTO meter VALUES(?,?,?)", (kind, 0, high_now))
                     burst = self.burst()
                     inside, before, other, pending = self._sums(kind, int(burst["first_row"]) if burst else 0)
@@ -780,7 +789,11 @@ class CampaignBudget:
                         state["carried"] += final[1]
                         state["settled_carried"] += final[2] or 0
                     if not closed:
+                        # The months before are no longer covered, and what the meter carried for them
+                        # is left out of what it measures from here (`_measured`): the House's own
+                        # settled costs of those calls are added apart (`_sums` `before`).
                         state["covers_from"] = month_start(month)
+                        state["base"] = state["carried"]
                     # The check starts again in every new month: a call in flight across midnight is
                     # refused its settle by the gateway (its month has ended) while the House may still
                     # settle it, which would set the two sides apart for good.
@@ -807,11 +820,11 @@ class CampaignBudget:
                         "house_pending_micro_usd": pending}))
                 state.update(id=kind, at=now)
                 columns = ("id", "month", "high", "carried", "settled_high", "settled_carried", "covers_from", "anchor_at",
-                           "anchor_row", "anchor_settled", "at", "cap", "spent", "reading_row")
+                           "anchor_row", "anchor_settled", "at", "cap", "spent", "reading_row", "base")
                 self.db.execute(
                     f"INSERT INTO meter_month({','.join(columns)}) VALUES({','.join('?' * len(columns))}) "
                     "ON CONFLICT(id) DO UPDATE SET " + ", ".join(f"{c}=excluded.{c}" for c in columns[1:]),
-                    tuple(state.get(c) for c in columns))
+                    tuple(state.get(c) if c != "base" else int(state.get("base") or 0) for c in columns))
                 self.db.execute("UPDATE meter SET latest=MAX(latest, ?) WHERE id=?", (int(state["carried"]) + int(state["high"]), kind))
                 self.db.execute("INSERT INTO meter_health VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET checked=excluded.checked",
                                 (kind, now))
@@ -838,6 +851,7 @@ class CampaignBudget:
                 # The month's own line at the last reading: its cap in force and its spend then.
                 "cap_usd": None if row["cap"] is None else usd(row["cap"]),
                 "spent_usd": None if row["spent"] is None else usd(row["spent"]),
+                "base_usd": usd(int(row["base"] or 0)),
                 "covers_from": row["covers_from"], "read_at": row["at"],
                 "anchor": None if row["anchor_at"] is None else
                 {"at": row["anchor_at"], "row": row["anchor_row"], "settled_usd": usd(row["anchor_settled"])}}

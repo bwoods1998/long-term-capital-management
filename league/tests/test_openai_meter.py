@@ -364,6 +364,38 @@ class HoldsBeforeTheMeterCovers(Floor):
         self.assertEqual(out["absorbed"], 0, "October's month cannot vouch for a September call")
         self.assertEqual(g.db.execute("SELECT cost FROM commitments WHERE id='frontier:september'").fetchone()[0], None)
 
+    def test_a_month_the_gateway_cannot_close_is_counted_once(self):
+        """Sept 24, 2026 review: the meter kept September's last high (`carried`) while `covers_from`
+        moved to October, and September's settled calls were added apart as well: $10 read as $20."""
+        g = self.metered()
+        self.read("0.00", "0.00")
+        self.call("frontier:september", "12.00", "10.00")  # the House and the gateway both settle $10
+        self.read("10.00", "10.00")
+        self.now[0] = stamp("2026-10-01T00:30:00")
+        self.guard.observe_balance("sail", "100.00")
+        self.read("0.00", "0.00", month="2026-10")  # the gateway cannot report September's final
+        self.call("frontier:october", "1.00", "0.50")
+        self.read("0.50", "0.50", month="2026-10")
+        line = g.report()["meters"]["openai"]["line"]
+        self.assertEqual((line["settled_usd"], line["measured_usd"], line["before_meter_usd"]), ("0.5", "0.5", "10"))
+        self.assertEqual(Decimal(g.report()["burst"]["committed_usd"]["openai"]), Decimal("10.5"))
+        self.assertEqual(Decimal(g.report()["accounts"]["openai"]["committed_usd"]), Decimal("10.5"), "the phase's line too")
+        self.assertEqual(g.month_meter("openai")["base_usd"], "10")
+
+    def test_a_month_the_gateway_closes_stays_inside_the_meter(self):
+        g = self.metered()
+        self.read("0.00", "0.00")
+        self.call("frontier:september", "12.00", "10.00")
+        self.read("10.00", "10.00")
+        self.now[0] = stamp("2026-10-01T00:30:00")
+        self.guard.observe_balance("sail", "100.00")
+        self.read("0.00", "0.00", month="2026-10", previous={"month": "2026-09", "spent_usd": "10.00", "settled_usd": "10.000000"})
+        self.call("frontier:october", "1.00", "0.50")
+        self.read("0.50", "0.50", month="2026-10")
+        line = g.report()["meters"]["openai"]["line"]
+        self.assertEqual((line["settled_usd"], line["measured_usd"], line["before_meter_usd"]), ("10.5", "10.5", "0"))
+        self.assertEqual(Decimal(g.report()["burst"]["committed_usd"]["openai"]), Decimal("10.5"))
+
     def test_calls_settled_before_the_meter_covers_are_counted_beside_it_never_inside(self):
         self.call("frontier:september", "2.00")                   # no answer, 20:00Z Sept 30
         self.call("frontier:september-settled", "12.00", "10.00")  # settled in September
