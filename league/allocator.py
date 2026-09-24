@@ -710,11 +710,51 @@ class Allocator:
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
             return [a for a in list(registry.agents.values()) if a.family == family and a.venue == venue]
 
-    def _members_real(self, family: str, venue: str) -> int:
+    def _members_real_ids(self, family: str, venue: str) -> list[str]:
         """The family's living members on real money at `venue`: the family swing's caps are shared by them."""
         rungs = getattr(self, "_rungs", None) or {}
-        return sum(1 for a in self._members(family, venue)
-                   if a.alive and (rungs[a.id] if a.id in rungs else self.house.evaluator.rung(a.id)) >= 2)
+        return sorted(a.id for a in self._members(family, venue)
+                      if a.alive and (rungs[a.id] if a.id in rungs else self.house.evaluator.rung(a.id)) >= 2)
+
+    def _members_real(self, family: str, venue: str) -> int:
+        return len(self._members_real_ids(family, venue))
+
+    def _reswing(self, record: Mapping[str, Any], members_real: int) -> dict[str, Any] | None:
+        """The family swing's stake a member, shared by `members_real` members on real money (the pass's record keeps
+        the ramp's entry and the fill rates it was read at: `swing_inputs`)."""
+        rule = families.swing_rule()
+        if rule is None:
+            return None
+        family, venue = record["family"], record["venue"]
+        inputs = record.get("swing_inputs") or {}
+        return families.swing_target(record, rule=rule, venue=venue, bunt_usd=self._family_base_stake(family, venue),
+                                     venue_capital=self.capital(venue), members_real=members_real,
+                                     entered_seq=inputs.get("entered_seq"), rates=inputs.get("rates"))
+
+    def _swing_for(self, agent: Any) -> dict[str, Any] | None:
+        """The family swing's stake for `agent` while its family swings, else None. The pass's record shares the family's
+        caps among the members it counted on real money; an agent it did not count -- a newcomer being seated -- shares
+        them with ONE MORE member from its first dollar (review of #242, Sept 24, 2026: two newcomers seated in one pass
+        were each lent the one-member share, and the family held three times its Kelly cap until the next pass)."""
+        record = self.family(agent.family, agent.venue)
+        swing = record.get("swing") if record.get("state") == "swing" else None
+        if not swing or agent.id in (record.get("members_real_ids") or ()):
+            return swing
+        return self._reswing(record, int(record.get("members_real") or 0) + 1) or swing
+
+    def _admit(self, agent: Any) -> None:
+        """A newcomer just seated on real money counts among its family's members for the rest of the pass: a swinging
+        family's share is recomputed with it, so the next newcomer and every member's stake (`_size`) follow the count."""
+        key = (agent.family, agent.venue)
+        record = self._families.get(key)
+        if not record or agent.id in (record.get("members_real_ids") or ()):
+            return
+        record = dict(record)
+        record["members_real_ids"] = sorted({*(record.get("members_real_ids") or ()), agent.id})
+        record["members_real"] = len(record["members_real_ids"])
+        if record.get("state") == "swing" and record.get("swing"):
+            record["swing"] = self._reswing(record, record["members_real"]) or record["swing"]
+        self._families[key] = record
 
     def _decorate(self, record: Mapping[str, Any], *, advance: bool) -> dict[str, Any]:
         """The record with the mechanism ledger's state: "swing" while the REAL record qualifies and the entry was
@@ -733,13 +773,15 @@ class Allocator:
         stamp = now_iso(self.house.clock)
         since = previous.get("since") if state == before and previous.get("since") else stamp
         entered = previous.get("entered_seq") if before == "swing" else self._through
-        members_real = self._members_real(family, venue)
-        swing = None
+        counted = self._members_real_ids(family, venue)
+        members_real = len(counted)
+        swing = inputs = None
         out = dict(record)
         members = [a.id for a in self._members(family, venue)]
         if state == "swing" and rule is not None:
             since_capacity = self.house.clock() - rule["capacity_days"] * families.DAY
             rates = families.fill_rates(self._tape, members, since=since_capacity, min_markets=rule["capacity_min_markets"])
+            inputs = {"entered_seq": entered, "rates": rates}
             swing = families.swing_target(record, rule=rule, venue=venue, bunt_usd=self._family_base_stake(family, venue),
                                           venue_capital=self.capital(venue), members_real=members_real,
                                           entered_seq=entered, rates=rates)
@@ -762,7 +804,7 @@ class Allocator:
                 self.state.setdefault("families", {})[key] = new
             if ready and state != "swing":
                 self._request_family_audit(key, out, members_real)
-        out.update(state=state, since=since, swing=swing, members_real=members_real)
+        out.update(state=state, since=since, swing=swing, members_real=members_real, members_real_ids=counted, swing_inputs=inputs)
         return out
 
     def family(self, family: str, venue: str) -> dict[str, Any]:
@@ -1113,7 +1155,8 @@ class Allocator:
         p = _params()
         base = p["bunt_usd"].get(agent.venue, _d("10"))
         family = self.family(agent.family, agent.venue)
-        swing = family.get("swing") if family.get("state") == "swing" and band in ("bunt", "swing", "star") else None
+        # A newcomer being seated shares the family's caps with the members already on real money (`_swing_for`).
+        swing = self._swing_for(agent) if family.get("state") == "swing" and band in ("bunt", "swing", "star") else None
         if band in ("bunt", "probe") and (band == "probe" or self.tier(agent) == "probe"):
             # P1 (Sept 24, 2026): a bunt of an unproven family is a probe, pocket change for an unproven
             # mechanism. `bunt_growth` then keeps what it makes on the probe's own base.
@@ -1424,6 +1467,7 @@ class Allocator:
             house.seat(agent)
             house.alert("warning", f"allocator: {agent.id}'s ${stake} {tier} could not be staked on {venue}; it stays on paper")
             return
+        self._admit(agent)  # it shares its family's caps from now on in this pass (review of #242)
         house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", f"the allocator seated it as a {tier}")
         summary["moves"].append({"agent": agent.id, "from": "paper", "to": tier, "why": why, "stake_usd": str(stake)})
 

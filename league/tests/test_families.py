@@ -512,6 +512,25 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.assertEqual(alloc.family_state(agents[0]), "swing")
         self.assertEqual(len(self.verdicts), 1)
 
+    def test_newcomers_share_a_swinging_familys_caps_from_their_first_dollar(self):
+        """Review of #242: the pass's record shared the family's caps among the members it counted on real money when the
+        pass began, so two practice members seated into the family in one pass were each lent the ONE-member share: the
+        family held $150 against its $50 Kelly cap until the next pass (and longer at those limits had they traded)."""
+        (a,), book = self.seated_bunts(1)
+        alloc = self.house.allocator
+        self.families["weather-favorites"] = real_record(n=15, bound=0.01, variance=0.5)  # Kelly binds, under the ramp's $60
+        self.rebalance(); self.house.wait(5); self.rebalance()
+        cap = D(alloc.family("weather-favorites", "kalshi")["swing"]["kelly_usd"])
+        self.assertEqual(book.account(a.id).staked, cap)
+        news = [self.agent(f"new{i}") for i in range(2)]
+        self.table.update({n.id: dict(self.READY) for n in news})
+        self.rebalance()
+        # Shared three ways the Kelly cap is under the bunt, which a proven family's member keeps: $30 each, and the member
+        # already seated is swept back to it by free cash in the same pass.
+        self.assertEqual([book.account(x.id).staked for x in (a, *news)], [D("30.00")] * 3)
+        record = alloc.family("weather-favorites", "kalshi")
+        self.assertEqual((record["members_real"], record["swing"]["members_real"]), (3, 3))
+
     def test_the_family_swings_audit_is_not_its_members_own(self):
         """Review of #242: the family's verdict is written against one member (the one with the most real trades), but it
         judged the FAMILY's stake. Read as that member's own, its approval let the member take the agent-level swing (rung
@@ -607,24 +626,21 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.seated_bunts(1)
         rows = lambda: [e.payload for e in self.house.ledger.iter(kinds="family.record")]  # noqa: E731
         first = [r for r in rows() if r["family"] == "weather-favorites"]
+        # The member the pass seated counts among its family's members for the rest of that pass (review of #242).
         self.assertEqual((first[-1]["state"], first[-1]["venue"], first[-1]["stake_usd"], first[-1]["members_real"]),
-                         ("proven", "kalshi", "30", 0))  # read at the pass's start, before it seated the member
+                         ("proven", "kalshi", "30", 1))
         written = len(rows())
+        self.families["weather-favorites"] = real_record(n=6, bound=-0.5)
         self.rebalance()
-        self.assertEqual(len(rows()), written)  # inside five minutes: nothing, though its member is now on real money
+        self.assertEqual(len(rows()), written)  # inside five minutes: nothing, though its record changed
         self.clock.advance(301)
         self.rebalance()
-        self.assertEqual([r["members_real"] for r in rows()[written:]], [1])  # that change, once
+        new = rows()[written:]
+        self.assertEqual([(r["family"], r["real"]["n"]) for r in new], [("weather-favorites", 6)])  # that change, once
         written = len(rows())
         self.clock.advance(301)
         self.rebalance()
         self.assertEqual(len(rows()), written)  # nothing changed: nothing
-        self.families["weather-favorites"] = real_record(n=6, bound=-0.5)
-        self.clock.advance(301)
-        self.rebalance()
-        new = rows()[written:]
-        self.assertEqual([r["family"] for r in new], ["weather-favorites"])
-        self.assertEqual(new[0]["real"]["n"], 6)
 
     def test_the_states_survive_a_restart_through_the_ledger(self):
         agents, _ = self.swinging()
