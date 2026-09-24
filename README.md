@@ -767,7 +767,7 @@ The `league/` modules:
 | `capital.py` | Rung 3 sizing and the standing capital recommendation for the owner. Its sizing (`resize`, `top_up_micro`) stands down while the allocator is enabled; the recommendation is still written each epoch. |
 | `allocator.py` | Capital is the ladder (Sept 23, 2026): evidence, bands, stakes, the envelope, the throttle, paper-wealth death and the performance fee, at every mark pass. A money judge. |
 | `lab.py`, `labbox.py` | The Alpha Lab (Sept 23, 2026): the MAP-Elites archive, breeding, graduation and royalties; and its batch evaluator on the lab's own sealed box. |
-| `publish.py` | The public tape, and since Sept 23, 2026 each agent's band, stake and evidence and the capital board. |
+| `publish.py` | The public tape, and since Sept 23, 2026 each agent's band, stake and evidence and the capital board; since Sept 24, 2026 each agent's family state, the proven families and the lab's hourly line. |
 | `service.py`, `config.json` | Builds the real House from the config and three secrets. |
 | `__main__.py` | The command line. |
 | `watchdog.py` | In-box releases: stage, canary, promote, watch, roll back. |
