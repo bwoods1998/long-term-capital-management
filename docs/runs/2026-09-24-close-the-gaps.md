@@ -747,6 +747,13 @@ recorded for the next open; live verification uses the markets that trade around
   agent's own pause.
 - 19:33Z — **Deploy E assembled:** `e/deploy` = main + `r5/drain-review` (86cdc91), PR #282; `house.py` and docs only,
   money digest unchanged (`535a7f15`), no ratify. 185 tests of the touched modules OK; CI running.
+- 19:56:01Z — **Deploy E live.** PR #282 CI green (19:44:00Z), merged (main `1befef1`); owner deploy
+  `20260924T194422Z-ea14b24d6ceb`, promoted 19:45:58Z, watch passed; no ratify (money digest `535a7f15`). **Verified:**
+  the House held krasker-14's entries at 19:48:35Z (an `agent.strategy` `pause_entries` row under `house:drain`; house.json
+  `drain_holds`), and its 19:53:50Z wake sent nothing. The perf pass (#283, 8 commits; `league/evaluator.py` protected,
+  so an owner deploy) is in adversarial review: on a disk copy of the T+16 snapshot it cut six ticks' main-thread CPU
+  64.1 → 22.0 s (growing league) and 73.6 → 27.2 s (full league); the biggest single item was `reconcile_stale`'s full
+  scan of the 1.73 GB provider.sqlite every tick (5.0-5.9 s wall on the box), now an index.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
