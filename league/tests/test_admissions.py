@@ -1,7 +1,11 @@
 """A qualified improvement must survive a full population without duplicate births."""
+import tempfile
+import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from league.admissions import Admissions
+from league.ledger import Ledger
 from league.tests.test_house import BUYER, HouseCase
 
 
@@ -136,3 +140,53 @@ class CandidateAdmissions(HouseCase):
         self.assertNotIn('_code', standing['peer_replay_passes'][0])
         self.assertIsNone(standing['qualification_policy']['hard_trial_limit'])
         self.assertEqual(standing['qualification_policy']['paper']['gate'], 'screen')
+
+
+class TheQueueIsFoldedOnce(unittest.TestCase):
+    """Sept 24, 2026 (R6-perf): the admission queue was folded from every `agent.research` row there is on
+    every question (79,585 rows, 46.7 MB of JSON at 17:27Z, about 1.3 s each time): on every tick's health,
+    at each newcomer turn and twice for each research candidate admitted. It is folded once a ledger and
+    then only from the new rows, and answers exactly as a fresh read of the whole record does."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite")
+        self.addCleanup(self.ledger.close)
+
+    def fresh(self, agent=None):
+        """The queue as the whole record says (or one author's rows), read the way `rows` read it before."""
+        found = {}
+        for entry in self.ledger.iter(kinds='agent.research', agent=agent):
+            p = entry.payload
+            if p.get('tool') not in ('candidate', 'candidate_admission') or not p.get('session'):
+                continue
+            if p.get('tool') == 'candidate' and p.get('status') not in ('deferred', 'forked', 'fork_error', 'commit_unconfirmed'):
+                continue
+            found.setdefault(p['session'], {'session': p['session'], 'agent': entry.agent, 'created_seq': entry.seq}).update(p)
+        return sorted(found.values(), key=lambda r: r['created_seq'])
+
+    def research(self, agent, **payload):
+        self.ledger.append('agent.research', payload, agent=agent)
+
+    def test_only_new_rows_are_read_and_the_answer_is_a_fresh_read_s(self):
+        queue = Admissions(self.ledger)
+        queue.enqueue('a1', (1, 'x', 1), {'code': 'x', 'params': {'n': 1}, 'passed': True}, 's1')
+        self.research('a1', tool='candidate', status='retained', session='kept-out')  # not an admission
+        self.research('a2', tool='candidate', status='deferred', session='s2', _candidate={'code': 'y'})
+        self.research('a2', tool='notes', text='not a candidate at all')
+        self.assertEqual(Admissions(self.ledger).rows(), self.fresh())
+        row = Admissions(self.ledger).rows()[0]
+        Admissions(self.ledger).record(row, 'deferred', 'niche is full; waiting for an eligible seat')
+        queue.enqueue('a3', (1, 'z', 1), {'code': 'z', 'params': {}, 'passed': True}, 's3')
+        self.research('a3', tool='candidate_admission', session='s2', status='cancelled', reason='parent retired')
+        with patch.object(self.ledger, 'read', wraps=self.ledger.read) as read:
+            again = Admissions(self.ledger).rows()
+        self.assertEqual(again, self.fresh())
+        self.assertEqual([r['status'] for r in again], ['deferred', 'cancelled', 'queued'])
+        self.assertTrue(read.call_args_list and all(call.kwargs['after'] > 0 for call in read.call_args_list),
+                        "the fold reads only the rows after the ones it has folded")
+        again[0]['status'] = 'changed by a caller'
+        again[0]['_candidate']['params']['n'] = 99
+        self.assertEqual(Admissions(self.ledger).rows(), self.fresh(), "a caller's row is its own copy")
+        self.assertEqual(Admissions(self.ledger).rows(agent='a2'), self.fresh(agent='a2'))  # one author's own rows, as before
