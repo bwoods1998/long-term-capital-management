@@ -689,6 +689,36 @@ recorded for the next open; live verification uses the markets that trade around
   by mechanism (the attribution defect #276's follow-up stops for new births).
 - 18:30Z — `d/deploy` = main + #276 + `r2/review` + 7b69e2c + #278 + #279 + #280 + `r5/review` (bf80ec8): 546 tests of the
   touched modules OK in 30 s on the tmpfs, `league.ci` passes; CI running.
+- 18:54:01Z — **Deploy D live; R5 is the run's third and last money-digest change.** PR #281 CI green (3.11 10m00s,
+  3.14 9m23s); the full league suite locally 3,159 OK; merged 18:41Z (main `57e1372`); owner deploy
+  `20260924T184214Z-3809789857ef`, canary about 90 s, promoted 18:43:49Z, **grant ratified 18:44:00Z on money digest
+  `535a7f15`** (constitution `38a57fe9`), watch passed (verdict at 18:53:49Z, the first judged by the fixed watchdog).
+  The old House's file was 296 s old at the reading before the promotion and 276 s at reading 3 against the 300 s
+  limit (slow ticks: health is dated at a tick's start); the new House wrote its own at 18:45:23Z.
+- 18:55Z — **R5 and R2 verified on the first passes:**
+  - **R5 drained the losing families at 18:47:37-39Z:** 8 probes back to practice by `allocator.family_probe`:
+    - hawkins-19 (prices-favorites, 23 blocks −0.2225) and hilibrand-h6ca596-3 (crypto-strikes-vol-shock-upside, 28
+      blocks −0.2154), both winners on their own and both on losing families;
+    - haghani-62, haghani-63 and haghani-r42c38c (crypto-alts-reversion, 360 blocks −0.0202; flat at the pass);
+    - huang-l5aa23e and huang-l0c6f38 (crypto-15m-lab-335592, 22 blocks −0.2777);
+    - huang-h427345-4 (crypto-15m-prior-window-reset, 25 blocks −0.7019).
+
+    krasker-14 ($80 options probe, options-pullback) holds a contract and waits to be flat (board `probe_gate`
+    "losing"); it bought a second contract ($15) at 18:52:30Z: a draining probe is lent nothing more but its entries
+    are not stopped (the builder's and the reviewer's recorded owner call), watched below. Real agents after the
+    drain: meriwether-h2d625d (the proven bunt, equity $42.46 against stake $20.06), mullins-2 and mullins-6
+    (weather-favorites, 35 blocks +0.146), hilibrand-lc04657 and hilibrand-l98e85b (two crypto-strikes lab families,
+    +0.253 and +0.027), meriwether-h7d7702 (2 blocks), krasker-14. The practice board: 50 agents gated "losing", 58
+    open.
+  - **R2/R3:** the population ceiling is 128 (Sail $160.13, $34.20 a day, 4.54 days); the proven family's first House
+    birth meriwether-h2d625d-3 at 18:46:31Z; 6 births in 8 minutes, 4 of them research forks on other markets born
+    into their own families (e.g. haghani-66 → `crypto-alts-ltc-settled-funding-r-7c866f`). The swing's clock on the
+    board: sports-central-run-under real n 5, 3.16 settlements a day, 10 to the look at 15, **3.17 days**.
+  - **The real Alpaca book:** krasker-14's first real option buy froze it at 18:35:38Z (−$0.0324: the OCC clearing
+    fee the real account also takes at the fill; the practice fix #278 left real books alone until measured, and this
+    is that measurement: taken at the fill, listed the same day at 18:52Z). The restart's first reconcile counted the
+    fills since the last good one (a cent each) and booked the cents to the House; the fee row was then booked when
+    listed; the book reconciles. Exits were never blocked (a frozen book refuses only entries).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
