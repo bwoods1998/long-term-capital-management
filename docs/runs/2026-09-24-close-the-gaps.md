@@ -44,7 +44,7 @@ recorded for the next open; live verification uses the markets that trade around
 | 0.7 | First-hour decision 3: the lab | done 01:48Z |
 | 0.8 | First-hour decision 4: Deploy A's money set | done 01:55Z |
 | 0.9 | First-hour decision 5: file owners per wave | done 01:55Z |
-| Z | The scoreboard (`scripts/gap_scoreboard.py`) | ⟨pending⟩ |
+| Z | The scoreboard (`scripts/gap_scoreboard.py`) | T0 reading done (PR #223, below) |
 | D1 | The lab's step | ⟨pending⟩ |
 | D2 | Phantom OpenAI holds | ⟨pending⟩ |
 | D3 | Exits walled off by the self-cross rule | ⟨pending⟩ |
@@ -165,6 +165,41 @@ recorded for the next open; live verification uses the markets that trade around
 - 01:57Z — OpenAI since the tier reopened: the gateway month $402.96 → $405.45 in 20 minutes (235
   calls in the hour: the research backlog and the six Merton roles that were overdue; $2.52 settled,
   $8.59 of in-flight holds). Watched hourly; L2 pauses the unproductive roles in Wave 1.
+
+## The scoreboard at T0
+
+`scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
+PR #223, the full reading in `docs/research/queries/2026-09-24/Z-T0.txt`). The plan's baseline at
+00:50Z in brackets.
+
+| # | Metric | T0 | Target |
+|---|---|---|---|
+| 1 | Families with a positive real lower bound; capacity | 2 on real n of 2 and 5 (sports-central-run-under $56.65/day est., weather-favorites $7.81/day est.); 0 with ≥ 10 real events [1, ~$1/day] | ≥ 2, capacity measured |
+| 2 | Allocator promotions to real money: settled result, share positive | 11 promotions, +$0.28 on 25 settlements, 3 positive (27%) [−$18.62 on 9, 0 positive] | every promotion since Deploy A a probe or a proven-family bunt |
+| 3 | Real dollars in proven / unproven families; Alpaca real agents | $96.56 / $168.98; 0 now (1 ever) [$66 / $256; 0] | proven ≥ unproven; ≥ 1 Alpaca real agent |
+| 4 | Median agent life (h), all / day-horizon; deaths before 3 fills | 14.38 / 19.83 h over 104 deaths; 69 (66%) [14.3 h; 68%] | ≥ 24 h day-horizon; < 30% |
+| 5 | Lab batches an hour; LLM share of born graduates; waiters, longest; supersessions | 0 (34.25 an hour over the day, the last at 23:37:17Z); 2 of 18; 30 waiting, the longest 33.84 h (a card); 0 of 3 real-money parents with a passing research child [0; 2 of 18; 30 at 11 h; 0] | ≥ 30; ≥ 50%; 0 over 2 h; every corrected parent |
+| 6 | Self-cross refusals of reducing orders (6 h); promotions on stacked positions | 26 (of 54 self-cross refusals); 4 of 11 [~85; 1] | 0; 0 |
+| 7 | Recorders live on the allowed hosts; desks offered markets with no intent (48 h) | 0 of 12; 1 (alpaca-open) [0 of 12; 3] | a recorder for every allowed host a desk needs; 0 |
+
+Also measured at T0:
+- **The family records** (practice 0.5 + real 1, one observation an event, Student's t one-sided 80%):
+  45 of 66 families have a closed trade; two are proven: **weather-favorites** (n 16, n_eff 14.2, mean
+  +0.0050, lcb +0.0033; practice n 13 mean +0.0000, real n 5 mean +0.0159; all maker) and
+  **sports-central-run-under** (meriwether-h2d625d's; n 11, n_eff 9.9, mean +0.0237, lcb +0.0058; all
+  taker, so its taker record is positive). sports-central-over-under (meriwether-h7d7702's) has a high
+  mean on 4 events and is not proven. Every crypto-15m family is negative (crypto-15m-favorites n 106,
+  lcb −0.0064; crypto-15m-prior-window-reset n 30, lcb −0.0493).
+- **The evidence clocks** (first fill to the third independent settlement, Kaplan-Meier median, last 7
+  days): kalshi-crypto-15m 1.9 h, alpaca-crypto-alts 3.8 h, kalshi-crypto-strikes 4.4 h,
+  alpaca-megacaps 4.4 h, alpaca-index-etfs 18.1 h, kalshi-sports 20.5 h, alpaca-options 23.9 h,
+  kalshi-weather 31.8 h, kalshi-prices 36.5 h; not reached on kalshi-attention, kalshi-sports-props and
+  alpaca-crypto-majors.
+- **Weather favourites' capacity:** 26.5 markets bid a day, a real fill rate of 0.6 at bids up to $12
+  (median $9.60), $0.49 a settlement: about $7.81 a day at today's size; its real seats earn about $1.41
+  a day now.
+- **Real-money parents with a replay-passing research child:** mullins-2 (children mullins-14, -18,
+  -20), meriwether-h2d625d (child -2), huang-h51fdd3-2 (child -3; the parent is off real money).
 
 ## Progress notes
 
