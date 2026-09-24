@@ -128,6 +128,26 @@ LEAGUE_HOSTS = (
     "www.deribit.com",
     "api.hyperliquid.xyz",
     "futures.kraken.com",
+    # The key-free data hosts the owner allowed on Sept 24, 2026 for the close-the-gaps run's
+    # recorders (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I). Weather: Open-Meteo's forecast,
+    # ensemble and historical-forecast APIs, and the NWS API (the settlement authority's own
+    # forecast; NWS and SEC ask for a User-Agent naming the requester and a contact address).
+    # Earnings times: EDGAR full-text search and Nasdaq's calendar. Rates: SOFR and par yields.
+    # Sports: ESPN's core API carries odds and win probabilities. Attention: TSA volumes and
+    # polling averages, HTML pages. The keyed hosts (api.eia.gov, api.the-odds-api.com) stay the
+    # owner's step.
+    "api.open-meteo.com",
+    "ensemble-api.open-meteo.com",
+    "historical-forecast-api.open-meteo.com",
+    "api.weather.gov",
+    "www.sec.gov",
+    "efts.sec.gov",
+    "api.nasdaq.com",
+    "markets.newyorkfed.org",
+    "home.treasury.gov",
+    "sports.core.api.espn.com",
+    "www.tsa.gov",
+    "www.realclearpolling.com",
 )
 
 
