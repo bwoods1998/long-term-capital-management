@@ -337,7 +337,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
 
 
     def test_each_demotion_holds_until_the_record_since_it_turns(self):
-        """Review of #276: two probes of one family demoted apart are two holds; the later one's turn does not release the
+        """The R5 review (Sept 24, 2026): two probes of one family demoted apart are two holds; the later one's turn does not release the
         earlier, whose record since includes the family's losses in between."""
         self.blocks("weather-favorites", *[0.05] * 6)  # +0.30 before: the whole record never loses in this test
         a, b = self.seated("kay"), self.seated("hawk")
@@ -369,7 +369,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
 
     def test_a_turn_is_for_good(self):
-        """"Until the family's record turns" (review of #276): once the record since a demotion has turned, the hold is over,
+        """"Until the family's record turns" (the R5 review, Sept 24, 2026): once the record since a demotion has turned, the hold is over,
         even if the record since then falls back; the whole record's losing line still stands guard."""
         self.blocks("weather-favorites", *[0.10] * 6)  # +0.60 before the demotion
         a = self.seated()
@@ -387,7 +387,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.assertEqual(self.house.evaluator.rung(b.id), 2)
 
     def test_a_family_whose_record_cannot_be_read_demotes_nobody(self):
-        """Review of #276: an unreadable record counts a family's agents as probes for money; the losing line must not then
+        """The R5 review (Sept 24, 2026): an unreadable record counts a family's agents as probes for money; the losing line must not then
         send a proven family's bunt back to practice for a read that failed. No probe is seated from it either."""
         a = self.seated()
         self.blocks("weather-favorites", *[-0.05] * 6)
@@ -424,7 +424,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (1, 2))
 
     def test_an_audit_that_approves_a_seat_meets_the_gate_again(self):
-        """Review of #276: a known defect is audited off the tick before its seat, and its family may turn losing meanwhile.
+        """The R5 review (Sept 24, 2026): a known defect is audited off the tick before its seat, and its family may turn losing meanwhile.
         `House._commit_promotion` asks the gate again (`Allocator.refuses_probe`)."""
         from league.evaluator import Verdict
 
@@ -465,7 +465,7 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         self.assertTrue(held)
         self.losing()
         # W_real 1.2: its target rises to $30 (a bunt keeps what it makes), but a probe on a losing family waiting to go
-        # back is lent nothing more (review of #276).
+        # back is lent nothing more (the R5 review, Sept 24, 2026).
         table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.2, paper_trades=6)}
         submitted = len(self.real.submitted)
         with self.evidence_of(table):
@@ -523,7 +523,7 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         return book, btc, outcome.order_id
 
     def test_a_probe_resting_only_a_bid_has_it_cancelled_and_goes_back_in_one_pass(self):
-        """The demotion path's own first step, cancelling working buys, sells nothing (review of #276: haghani-r42c38c
+        """The demotion path's own first step, cancelling working buys, sells nothing (the R5 review, Sept 24, 2026: haghani-r42c38c
         only rested bids, re-posted every wake, and would never have been flat between them)."""
         a = self.seated()
         book, _, order_id = self.resting_bid(a)
@@ -560,7 +560,7 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
 
     def test_a_buy_the_book_still_asks_the_venue_about_keeps_the_probe_seated(self):
         """A buy closed as never arrived may be revived with its fill for a quarter of an hour (`Book._reserved_cash`): its
-        fill after a demotion would be sold by the wind-down's retry (review of #276)."""
+        fill after a demotion would be sold by the wind-down's retry (the R5 review, Sept 24, 2026)."""
         a = self.seated()
         self.losing()
         book = self.house.books["alpaca"]
@@ -693,7 +693,7 @@ class TheBoard(ForwardBlocks, KalshiHouse):
         self.assertFalse([e for e in self.house.ledger.iter(kinds="family.record") if "swing_clock" in e.payload])
 
     def test_the_clock_where_no_estimate_stands(self):
-        """Review of #276: no real dollar yet, a real life under an hour (a rate over minutes is noise), no member on real
+        """The R5 review (Sept 24, 2026): no real dollar yet, a real life under an hour (a rate over minutes is noise), no member on real
         money (the real record does not grow), or only the pooled proof left: no days to swing. A passed look waits for the
         audit alone."""
         rule, day = families.swing_rule(), 86400.0

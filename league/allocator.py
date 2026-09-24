@@ -296,7 +296,7 @@ def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[s
     reason -- hysteresis, the stay drawdown, displacement, drift, an audit's veto, the losing line itself -- except a
     seat whose stake never landed (`unfunded`: no real dollar, nothing learned about the family). Each demotion holds
     its family until the family's record SINCE it turns (`Allocator.probe_hold`): two probes of one family demoted an
-    hour apart are two holds, and the later one turning does not release the earlier (review of #276). A demotion is a
+    hour apart are two holds, and the later one turning does not release the earlier (the R5 review, Sept 24, 2026). A demotion is a
     PROBE's when the row's `band_from` says "probe"; a row that names no band (the House's drift, audit-veto and tuition
     demotions write none) is a probe's when the mechanism ledger's last `family.record` row for the agent's family before
     it said "unproven" (`states`, folded here from the same rows), and not otherwise: the ledger holds no record of a
@@ -758,7 +758,7 @@ class Allocator:
             self._rungs = None  # after the families, rungs move with the pass: read afresh
         # The probe gate (R5, Sept 24, 2026): every family's forward record once a pass, from the tape just read, and the
         # probe demotions the ledger gained since the last pass (the House's drift and audit vetoes demote between passes).
-        # A gate that cannot be read seats no probe this pass and demotes nobody for it (review of #276): it fails closed.
+        # A gate that cannot be read seats no probe this pass and demotes nobody for it (the R5 review, Sept 24, 2026): it fails closed.
         self._since = {}
         self._gate_fault = None
         try:
@@ -1371,7 +1371,7 @@ class Allocator:
         growth). The record since is every active block the ledger wrote after `seq`, for every agent ever born into the
         family (the rows and members `family_forward` reads, from the pass's tape); it has turned once it was positive over
         `minimum` or more active blocks at any block since, read block by block in ledger order (`families.gaining`): the
-        brief's "until the family's record turns" is a moment, and a hold ends there for good (review of #276). Derived from
+        brief's "until the family's record turns" is a moment, and a hold ends there for good (the R5 review, Sept 24, 2026). Derived from
         the ledger alone, so a restart finds the same turn. Once a pass a demotion."""
         key = (family, int(seq))
         cached = self._since.get(key)
@@ -1437,7 +1437,7 @@ class Allocator:
         family record since has not yet turned (`_turned`), {"seq", "at", "agent", "why", "blocks", "growth", "pending"}:
         the hold in force since then, the family's record since it, and how many demotions still hold the family. Each
         demotion holds until the family's record since IT turns, so a later demotion's turn never releases an earlier
-        one (review of #276: two probes of one family demoted apart)."""
+        one (the R5 review, Sept 24, 2026: two probes of one family demoted apart)."""
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return None
@@ -1505,7 +1505,7 @@ class Allocator:
 
     def refuses_probe(self, agent: Any, verdict: Any) -> bool:
         """The probe gate again when an audit approves a known defect's seat (`House._commit_promotion`): the audit ran off
-        the tick, and the family may have turned losing, or a probe of it gone back to practice, meanwhile (review of #276).
+        the tick, and the family may have turned losing, or a probe of it gone back to practice, meanwhile (the R5 review, Sept 24, 2026).
         True, with the promotion status written, when the seat is refused."""
         if not enabled() or agent is None:
             return False
@@ -1531,8 +1531,8 @@ class Allocator:
         books a holding the venue will not trade as dust (`House._dust_reason`: under a cent, or under the venue's minimal
         quantity), and SELLS every other holding at the market (a stock or an option at the next open): "holding". It
         cancels working buys, whose fill racing the cancel it would sell: "working". And a buy the book closed as never
-        arrived may still be revived with its fill for a quarter of an hour (`Book._reserved_cash`): "reserved" (review of
-        #276). None of this on an event book, where every holding is held to settlement; a holding whose dust test cannot
+        arrived may still be revived with its fill for a quarter of an hour (`Book._reserved_cash`): "reserved" (the R5
+        review, Sept 24, 2026). None of this on an event book, where every holding is held to settlement; a holding whose dust test cannot
         be read counts as one it would sell."""
         book = self.house.books.get(REAL_BOOK.get(agent.venue, ""))
         if book is None or agent.id not in book.accounts:
@@ -1559,10 +1559,10 @@ class Allocator:
         """R5 (2): a PROBE seated on a losing family goes back to practice at this pass, by the path every demotion takes
         (`_move_down` to practice), when that path sells nothing (`_unflat`). A probe whose only obstacle is its working
         buys has them cancelled first -- the demotion path's own first step, which sells nothing -- and goes back if that
-        leaves it flat; a fill that raced the cancel is a position, and it waits (review of #276: an Alpaca probe that always
+        leaves it flat; a fill that raced the cancel is a position, and it waits (the R5 review, Sept 24, 2026: an Alpaca probe that always
         rests a bid was never flat). One that holds a position keeps its seat until it is flat -- its own exits, and the stay
         drawdown, hysteresis and drift, go on; it is lent nothing more (`_size`) -- and is told once. A family whose record
-        cannot be read demotes nobody (review of #276: a read fault counts a proven family's bunts as probes)."""
+        cannot be read demotes nobody (the R5 review, Sept 24, 2026: a read fault counts a proven family's bunts as probes)."""
         gate = self.probe_gate(agent)
         if gate is None or gate["gate"] != "losing" or self.family(agent.family, agent.venue).get("error"):
             self._waiting_flat.discard(agent.id)
@@ -1833,7 +1833,7 @@ class Allocator:
     def _refold(self) -> None:
         """Fold the demotions the ledger gained (`_fold_demotions`: the House's between passes, this pass's own) and read
         the holds afresh. A fold that fails leaves the gate unreadable for the rest of the pass: no probe is seated on
-        holds that may be missing a demotion (review of #276)."""
+        holds that may be missing a demotion (the R5 review, Sept 24, 2026)."""
         try:
             self._fold_demotions()
         except Exception as exc:  # noqa: BLE001 - the holds already folded stand, and the gate closes
@@ -2061,7 +2061,7 @@ class Allocator:
         if delta > 0:
             gate = self.probe_gate(agent) if band == "bunt" else None
             if gate is not None and gate["gate"] == "losing":
-                # R5 (Sept 24, 2026; review of #276): a probe on a losing family waiting to go back to practice (on Alpaca,
+                # R5 (Sept 24, 2026; the R5 review, Sept 24, 2026): a probe on a losing family waiting to go back to practice (on Alpaca,
                 # until it is flat) is lent nothing more; free cash still comes back.
                 return None
             if band == "bunt" and p["bunt_growth"] == "w_real" and ev.w_real < 1.0:
