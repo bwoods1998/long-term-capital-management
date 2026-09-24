@@ -70,9 +70,10 @@ from .ledger import HOUSE, now_iso
 
 ZERO = Decimal(0)
 CENT = Decimal("0.01")
-#: A PROBE (Sept 24, 2026) is the bunt band's first tier: rung 2, staked `probe_bunt_usd`, for an agent
-#: whose family has not proven its mechanism. The rung, the book's daily-loss rule (`band_of`) and the
-#: ledger's band words stay "bunt"; the board says which tier.
+#: A PROBE (Sept 24, 2026) is rung 2 staked `probe_bunt_usd`, for an agent whose family has not proven its
+#: mechanism; a member of a proven family is a bunt. A first-class band: the board's rows and summary and
+#: the verdicts' `band_from`/`band_to` say it, and the publisher (#222) and the site (personal-site #6)
+#: know it. Only the rung and the book's daily-loss rule (`band_of`) read "bunt" for both.
 BANDS = ("replay", "paper", "probe", "bunt", "swing", "star")
 RUNG_OF = {"replay": 0, "paper": 1, "probe": 2, "bunt": 2, "swing": 3, "star": 3}
 PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
@@ -869,7 +870,7 @@ class Allocator:
         tier = (self.tier(agent) if band in ("bunt", "probe") else None) if agent is not None else None
         return {
             "allocator": "capital is the ladder (league/allocator.py): stakes follow evidence inside the grant's per-venue envelope",
-            "band_to": band, "stake_usd": str(stake), "max_position_usd": str(position), "max_order_usd": str(order),
+            "band_to": tier or band, "stake_usd": str(stake), "max_position_usd": str(position), "max_order_usd": str(order),
             # P1 (Sept 24, 2026): a probe is judged as a probe -- pocket change for an unproven family's
             # mechanism -- and a bunt as a proven family's member, on the family's pooled record.
             "tier": tier, "family": self.family_summary(agent) if agent is not None else None,
@@ -972,14 +973,12 @@ class Allocator:
 
     def _numbers(self, ev: Evidence, band_from: str, band_to: str, stake: Decimal | None, why: str,
                  agent: Any = None) -> dict[str, Any]:
-        """A band move's verdict numbers. The band words are the site's (`league/publish.py`: replay,
-        paper, bunt, swing, star; a probe is a bunt's tier), and a move to a bunt carries its `tier`
-        and the family record behind it (P1, Sept 24, 2026)."""
-        out = {"via": "allocator", "band_from": "bunt" if band_from == "probe" else band_from,
-               "band_to": "bunt" if band_to == "probe" else band_to,
+        """A band move's verdict numbers; a move to a probe or a bunt carries the family record that
+        decided which (P1, Sept 24, 2026)."""
+        out = {"via": "allocator", "band_from": band_from, "band_to": band_to,
                "stake_usd": None if stake is None else str(stake), "evidence": ev.row(), "reason_detail": why}
-        if agent is not None and out["band_to"] == "bunt":
-            out.update(tier=self.tier(agent), family=self.family_summary(agent))
+        if agent is not None and band_to in ("probe", "bunt"):
+            out["family"] = self.family_summary(agent)
         return out
 
     def _move_down(self, agent: Any, ev: Evidence, band: str, why: str, summary: dict[str, Any]) -> None:
@@ -987,6 +986,8 @@ class Allocator:
         old = house.book_of(agent)
         band_from = self._band_now(agent, ev)
         target = RUNG_OF[band]
+        if band == "bunt":
+            band = self.tier(agent)  # a swing lands on rung 2 as a probe or a bunt, by its family (Sept 24, 2026)
         numbers = self._numbers(ev, band_from, band, None, why)
         while house.evaluator.rung(agent.id) > max(target, 1):
             house.evaluator.demote(agent.id, why, numbers)
@@ -997,8 +998,11 @@ class Allocator:
         summary["moves"].append({"agent": agent.id, "from": band_from, "to": band, "why": why})
 
     def _band_now(self, agent: Any, ev: Evidence) -> str:
-        band = self._board["agents"].get(agent.id, {}).get("band") or band_of_rung(ev.rung)
-        return "bunt" if band == "probe" else band  # the ledger's word for the band; the tier is the board's
+        if ev.rung == 2:
+            return self.tier(agent)  # "probe" or "bunt" (Sept 24, 2026), as the board says it
+        band = self._board["agents"].get(agent.id, {}).get("band")
+        # The last board's band while it is still the agent's rung's (a star is a swing); else the rung's.
+        return band if band is not None and RUNG_OF.get(band) == ev.rung else band_of_rung(ev.rung)
 
     def _bunt(self, agent: Any, ev: Evidence, why: str, p: Mapping[str, Any], summary: dict[str, Any], displaced_at: set[str]) -> None:
         house = self.house
@@ -1055,7 +1059,7 @@ class Allocator:
                                     f"the {venue} account's free cash cannot take another ${stake} stake now")
             return
         tier = self.tier(agent)
-        numbers = self._numbers(ev, "paper", "bunt", stake, why, agent)
+        numbers = self._numbers(ev, "paper", tier, stake, why, agent)
         house.evaluator.promote(agent.id, 2, f"{tier}: {why}; {self._family_note(agent)}", numbers)
         if source is not None:
             house._move_books(agent, source)  # winds the paper account down; seat() lends the bunt stake
@@ -1171,9 +1175,10 @@ class Allocator:
             house.alert("warning", f"allocator: {agent.id}'s stake could not move by {delta} ({exc})")
             return None
         house.seat(agent)  # the limits follow the stake
-        row = {"band": band, "stake_usd": str(target), "moved_usd": str(delta), "equity_usd": str(equity.quantize(CENT)),
-               "via": "allocator", "evidence": ev.row(), **({"tier": self.tier(agent)} if band == "bunt" else {}),
-               "reason": f"{band} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")}
+        named = self.tier(agent) if band == "bunt" else band  # a rung-2 stake is a probe's or a bunt's (Sept 24, 2026)
+        row = {"band": named, "stake_usd": str(target), "moved_usd": str(delta), "equity_usd": str(equity.quantize(CENT)),
+               "via": "allocator", "evidence": ev.row(),
+               "reason": f"{named} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")}
         house.ledger.append("eval.verdict", {"decision": "size", "rung": house.evaluator.rung(agent.id), "book": book.name, **row}, agent=agent.id)
         return {"agent": agent.id, **row}
 
@@ -1230,9 +1235,8 @@ class Allocator:
             record = self.family(agent.family, agent.venue)
             if rung == 2:
                 band = self.tier(agent)  # P1 (Sept 24, 2026): "probe" or "bunt", by the family's proof
-            # `league/publish.py` sends the site only the bands and fields it knows (a probe shows as its
-            # rung's band until the site learns the word); the family fields are for the watch and the
-            # scoreboard.
+            # `league/publish.py` sends the site only the fields it knows: the family fields are for the
+            # watch and the scoreboard until the site learns them (W).
             agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target, "evidence": ev.row() if ev else None,
                                 "venue": agent.venue, "last_move": None, "family": agent.family,
                                 "family_state": record["state"], "family_bound": record["bound"], "family_n": record["n"]}
@@ -1243,21 +1247,12 @@ class Allocator:
             if move["agent"] in agents:
                 agents[move["agent"]]["last_move"] = {k: move[k] for k in ("at", "from_band", "to_band", "reason")}
         bands: dict[str, dict[str, Any]] = {}
-        tiers: dict[str, dict[str, Any]] = {}
         for row in agents.values():
-            # The summary is in the site's words (Sept 24, 2026): `league/publish.py` passes the site only
-            # the bands it knows, and its capital totals must count a probe's stake, so a probe counts
-            # under "bunt", the band it is a tier of. `tiers` splits the bunt band for the watch.
-            word = "bunt" if row["band"] == "probe" else row["band"]
-            slot = bands.setdefault(row["venue"], {}).setdefault(word, {"count": 0, "capital_usd": ZERO})
+            slot = bands.setdefault(row["venue"], {}).setdefault(row["band"], {"count": 0, "capital_usd": ZERO})
             slot["count"] += 1
             slot["capital_usd"] += row["stake_usd"] or ZERO
-            if word == "bunt":
-                tier = tiers.setdefault(row["venue"], {}).setdefault(row["band"], {"count": 0, "capital_usd": ZERO})
-                tier["count"] += 1
-                tier["capital_usd"] += row["stake_usd"] or ZERO
         envelope = sum((self.grant_capital(v) for v in REAL_BOOK), ZERO)
-        board = {"enabled": True, "agents": agents, "moves": moves, "bands": bands, "tiers": tiers,
+        board = {"enabled": True, "agents": agents, "moves": moves, "bands": bands,
                  "throttle": {"active": bool(throttle), "floor_pnl_usd": self.floor_pnl(), "envelope_usd": envelope},
                  "at": now_iso(house.clock),
                  "envelope": {v: {"capital_usd": str(self.capital(v)), "committed_usd": str(self.committed(v))} for v in REAL_BOOK
@@ -1315,6 +1310,9 @@ def _verdict(agent_id: str, rung: int, why: str, ev: Evidence, allocator: "Alloc
 
     book = PAPER_BOOK[ev.venue] if rung <= 1 else REAL_BOOK[ev.venue]
     band = "bunt" if rung <= 1 else "swing"
+    if band == "bunt" and allocator is not None:
+        agent = allocator.house.registry.get(agent_id)
+        band = allocator.tier(agent) if agent is not None else band  # a probe or a bunt (Sept 24, 2026)
     numbers: dict[str, Any] = {"via": "allocator", "book": book, "evidence": ev.row(), "E": ev.e, "band_to": band}
     if allocator is not None:
         numbers["allocation_context"] = allocator.context(ev, band)

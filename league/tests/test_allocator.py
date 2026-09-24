@@ -261,10 +261,10 @@ class Mechanics(HouseCaseReal):
         self.assertEqual(real.limits[a.id].max_position_usd, D("12.50"))
         self.assertTrue(house.books["alpaca-paper"].account(a.id).swept)
         promote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "promote"][-1]
-        self.assertEqual((promote["band_from"], promote["band_to"], promote["via"]), ("paper", "bunt", "allocator"))
+        # Its family ("alloc-test") has no proven record: a PROBE, the first real stake of an unproven
+        # family (Sept 24, 2026). On Alpaca a probe and a bunt are both $25.
+        self.assertEqual((promote["band_from"], promote["band_to"], promote["via"]), ("paper", "probe", "allocator"))
         self.assertEqual(promote["stake_usd"], "25")
-        # Its family ("alloc-test") has no proven record: a probe, the bunt band's first tier (Sept 24,
-        # 2026). On Alpaca a probe and a bunt are both $25.
         self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "probe")
         # Its evidence falls below the bunt line with hysteresis after three real results in its stay
         # (the one-loss trial, Sept 24, 2026): straight back to paper.
@@ -273,11 +273,11 @@ class Mechanics(HouseCaseReal):
             self.tick()
         self.assertEqual(house.evaluator.rung(a.id), 1)
         demote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "demote"][-1]
-        self.assertEqual((demote["band_from"], demote["band_to"]), ("bunt", "paper"))
+        self.assertEqual((demote["band_from"], demote["band_to"]), ("probe", "paper"))
         paper = house.books["alpaca-paper"].account(a.id)
         self.assertTrue(paper.funded and not paper.swept and paper.cash > D("199"))  # staked afresh on paper
         moves = house.allocator.board()["moves"]
-        self.assertEqual([(m["from_band"], m["to_band"]) for m in moves if m["agent"] == a.id], [("paper", "bunt"), ("bunt", "paper")])
+        self.assertEqual([(m["from_band"], m["to_band"]) for m in moves if m["agent"] == a.id], [("paper", "probe"), ("probe", "paper")])
 
     def test_the_envelope_is_never_exceeded_and_the_best_evidence_is_seated_first(self):
         house = self.house
