@@ -51,7 +51,15 @@ import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Any, Callable, Iterable, NamedTuple
+from typing import Any, Callable, Iterable
+
+# The horizon rule's answer lives in `league/resolution.py`, a money judge (`ci.FORBIDDEN`): the book,
+# the House, the live view and a replay tape read it; the names stay importable from here.
+from .resolution import (  # noqa: F401 - re-exported
+    CLOSE, DEADLINE, DEADLINE_AFTER_CLOSE_SECONDS, SCHEDULED, SETTLE_LAG, SETTLE_LAG_KEEP, SETTLE_LAG_MARKETS,
+    SETTLE_LAG_MIN_MARKETS, SETTLE_LAG_QUANTILE, Resolution, SettleLags, expected_of, is_deadline, resolution, resolve_time,
+    series_of,
+)
 
 DATA_URL = "https://data.alpaca.markets"
 CRYPTO_BARS_PATH = "/v1beta3/crypto/us/bars"
@@ -515,187 +523,6 @@ def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
     return min(listed, resolve_time(row, listed))
 
 
-#: What a market's expected payment is judged by (`resolution`, the horizon rule's one answer):
-#: SCHEDULED, the venue's expected expiration; CLOSE, the close where the venue gives none;
-#: SETTLE_LAG, the close plus its series' measured settle lag, where the expected expiration is a
-#: deadline; DEADLINE, that deadline itself where the lag cannot be measured (the rule before).
-SCHEDULED, CLOSE, SETTLE_LAG, DEADLINE = "scheduled", "close", "settle_lag", "deadline"
-#: An "expected" expiration this long after the close is a deadline, not a schedule: the latest the
-#: market may expire when its data comes late. Measured on the local history cache (settled markets
-#: of Sept 5-17, 2026): 479 of 1,683 series list it six days or more after the close (the diesel
-#: prints 169.5 hours, the AI-share weeklies 168), while their markets paid within hours.
-DEADLINE_AFTER_CLOSE_SECONDS = 48 * 3600
-#: The settle lag (`SettleLags`): the 95th percentile of (settlement - close) over a series' last
-#: `SETTLE_LAG_MARKETS` deadline-type settled markets, at least `SETTLE_LAG_MIN_MARKETS` of them.
-SETTLE_LAG_MARKETS = 40
-SETTLE_LAG_MIN_MARKETS = 20
-SETTLE_LAG_QUANTILE = 0.95
-#: Settled markets kept per series (the newest), enough for any replay window's days.
-SETTLE_LAG_KEEP = 400
-
-
-class Resolution(NamedTuple):
-    """`resolution`'s answer: when the market is expected to pay (epoch seconds), what that is judged
-    by, and for SETTLE_LAG the lag (hours) and how many settled markets measured it. `deadline` is the
-    venue's expected expiration where it is a deadline (SETTLE_LAG, DEADLINE)."""
-    due: float
-    basis: str
-    lag_hours: "float | None" = None
-    markets: "int | None" = None
-    deadline: "float | None" = None
-
-
-def series_of(row: "dict[str, Any]") -> str:
-    """The Kalshi series of a market row: its ticker's first segment."""
-    return str(row.get("ticker") or row.get("market") or "").upper().split("-", 1)[0]
-
-
-def _expected(row: "dict[str, Any]") -> "float | None":
-    try:
-        value = parse_time(row.get("expected_expiration_time")) if row.get("expected_expiration_time") else None
-    except TapeError:
-        value = None
-    return value if value is not None and value > 0 else None
-
-
-class SettleLags:
-    """When a Kalshi series' markets paid after their close, measured on the House's own records.
-
-    Only deadline-type markets are kept (an expected expiration `DEADLINE_AFTER_CLOSE_SECONDS` or
-    more after the close), from the settled rows the House already reads: every Kalshi replay tape
-    passes its settled markets through `observe` (`KalshiData._settled_events`, which reads them from
-    `ltcm.history.History` and its disk cache as it always has), so measuring asks the venue nothing.
-    Persisted beside the House's state (`path`), so a restart keeps them.
-
-    `lag(series, at)` is the 95th percentile of (settlement - close) over the series' last
-    `SETTLE_LAG_MARKETS` such markets that settled before `at`'s UTC midnight, with at least
-    `SETTLE_LAG_MIN_MARKETS` of them, never below zero; else None. One value a series a day, kept
-    once measured: recomputed at most daily, and the same for the live book, the House and a replay
-    tape's steps of that day. A replay at `t` reads only settlements known before `t`."""
-
-    VERSION = 1
-
-    def __init__(self, path: Any = None):
-        from pathlib import Path
-
-        self.path = Path(path) if path else None
-        self._rows: dict[str, dict[str, tuple[float, float]]] = {}
-        self._memo: dict[tuple[str, int], tuple[float, int]] = {}
-        self._lock = threading.Lock()
-        self._dirty = False
-        if self.path is not None and self.path.exists():
-            try:
-                import json
-
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                for series, markets in (data.get("series") or {}).items():
-                    self._rows[str(series)] = {str(t): (float(v[0]), float(v[1])) for t, v in (markets or {}).items()}
-            except (OSError, ValueError, TypeError, IndexError, AttributeError):
-                self._rows = {}  # an unreadable file measures nothing: the deadline stands until tapes refill it
-
-    def observe(self, rows: "Iterable[dict[str, Any]]") -> int:
-        """Keep the deadline-type markets among these settled rows. Returns how many were new."""
-        added = 0
-        with self._lock:
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                try:
-                    close_ts = parse_time(row.get("close_time"))
-                    settled = parse_time(row.get("settlement_ts"))
-                except TapeError:
-                    continue
-                expected = _expected(row)
-                if expected is None or expected - close_ts < DEADLINE_AFTER_CLOSE_SECONDS:
-                    continue
-                ticker = str(row.get("ticker") or "").upper()
-                series = series_of(row)
-                if not ticker or not series:
-                    continue
-                markets = self._rows.setdefault(series, {})
-                if ticker not in markets:
-                    added += 1
-                markets[ticker] = (close_ts, settled)
-                if len(markets) > SETTLE_LAG_KEEP:
-                    for old, _ in sorted(markets.items(), key=lambda kv: kv[1][1])[: len(markets) - SETTLE_LAG_KEEP]:
-                        markets.pop(old, None)
-            self._dirty = self._dirty or added > 0
-        return added
-
-    def lag(self, series: str, at: float) -> "tuple[float, int] | None":
-        """(the lag in seconds, the markets that measured it) for `series` at `at`, or None."""
-        day = int(math.floor(float(at) / DAY) * DAY)
-        key = (str(series).upper(), day)
-        with self._lock:
-            if key in self._memo:
-                return self._memo[key]
-            known = sorted((settled, close_ts) for close_ts, settled in (self._rows.get(key[0]) or {}).values() if settled < day)
-            known = known[-SETTLE_LAG_MARKETS:]
-            if len(known) < SETTLE_LAG_MIN_MARKETS:
-                return None  # not kept: the day's value appears once enough settlements are on record
-            lags = sorted(max(0.0, settled - close_ts) for settled, close_ts in known)
-            found = (lags[math.ceil(SETTLE_LAG_QUANTILE * len(lags)) - 1], len(lags))
-            self._memo[key] = found
-            return found
-
-    def save(self) -> None:
-        """Write what is kept, if anything new came in (atomically)."""
-        if self.path is None:
-            return
-        import json
-        import os
-
-        with self._lock:
-            if not self._dirty:
-                return
-            data = {"version": self.VERSION, "series": {s: {t: list(v) for t, v in m.items()} for s, m in self._rows.items()}}
-            self._dirty = False
-        tmp = self.path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")  # two tapes may save at once
-        try:
-            tmp.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-            os.replace(tmp, self.path)
-        except OSError:
-            with self._lock:
-                self._dirty = True  # asked again after the next tape
-
-
-def resolution(row: "dict[str, Any]", close_ts: float, *, lags: "SettleLags | None" = None, at: "float | None" = None) -> Resolution:
-    """When a market is expected to pay, and what that is judged by -- the horizon rule's one answer:
-    the live view, a replay tape, the House's check and the book's all read it.
-
-    - SCHEDULED: the venue's expected expiration, which a listing shows from the day it opens and
-      never changes. (Measured Sept 19, 2026: a game's `close_time` is two days after kickoff and it
-      really closes when a winner is declared, near its expected expiration; a weather market stops
-      trading at `close_time` and is paid at its expiration, about 14 hours later.)
-    - SETTLE_LAG: where that "expected" expiration lies `DEADLINE_AFTER_CLOSE_SECONDS` or more after
-      the close it is a deadline, not a schedule, and the market is judged by its close plus its
-      series' measured settle lag (`SettleLags.lag` at `at`), never before the close and never after
-      the deadline. Review of #249: the diesel prints list theirs 169.5 hours after the close (the
-      horizon rule refused 71 KXDIESELD entries on Sept 20-22 as "expected to resolve in 171-185
-      hours") while the last 40 cached diesel dailies paid within 5.9 hours of the close (p95).
-    - DEADLINE: that deadline, where the lag cannot be measured (no `lags`, or fewer than
-      `SETTLE_LAG_MIN_MARKETS` settled markets of the series on record): the rule before.
-    - CLOSE: the close, where the venue lists no expected expiration (none seen).
-
-    Never the deprecated `expiration_time` the parser falls back to (the latest expiration)."""
-    expected = _expected(row)
-    if expected is None:
-        return Resolution(close_ts, CLOSE)
-    if expected - close_ts < DEADLINE_AFTER_CLOSE_SECONDS:
-        return Resolution(expected, SCHEDULED)
-    measured = lags.lag(series_of(row), at) if lags is not None and at is not None else None
-    if measured is None:
-        return Resolution(expected, DEADLINE, deadline=expected)
-    lag, markets = measured
-    due = min(max(close_ts, close_ts + lag), expected)
-    return Resolution(due, SETTLE_LAG, round(lag / 3600.0, 2), markets, expected)
-
-
-def resolve_time(row: "dict[str, Any]", close_ts: float, *, lags: "SettleLags | None" = None, at: "float | None" = None) -> float:
-    """When a market is expected to pay (epoch seconds): `resolution`'s time."""
-    return resolution(row, close_ts, lags=lags, at=at).due
-
-
 #: A market that may close early lists a close well after it will really stop trading. The live
 #: view asks this much further ahead, and keeps what is expected to RESOLVE inside the window.
 EARLY_CLOSE_SLACK_SECONDS = 72 * 3600
@@ -1106,8 +933,7 @@ class KalshiData:
         row = market.get("_row")
         if self.settle_lags is None or not isinstance(row, dict):
             return None
-        expected = _expected(row)
-        if expected is None or expected - market["listed_close_ts"] < DEADLINE_AFTER_CLOSE_SECONDS:
+        if not is_deadline(expected_of(row), market["listed_close_ts"]):
             return None
         lags, listed = self.settle_lags, market["listed_close_ts"]
         return lambda t: max(resolution(row, listed, lags=lags, at=t).due, listed)

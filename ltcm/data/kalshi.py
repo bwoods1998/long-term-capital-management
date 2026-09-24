@@ -395,7 +395,7 @@ class KalshiMarketData:
             "expiration_time": row.get("expected_expiration_time") or row.get("expiration_time"),
             # The venue's SCHEDULED expiration, kept apart (Sept 24, 2026): None where Kalshi gives none.
             # `expiration_time` above falls back to Kalshi's deprecated field, which is the LATEST the
-            # market may expire, not when it is expected to pay. `league.tapes.resolution` judges the
+            # market may expire, not when it is expected to pay. `league.resolution.resolution` judges the
             # horizon rule by this one (no market seen lacks it), or where it is itself a deadline days
             # after the close (the diesel print's is a week on) by the close plus the series' measured
             # settle lag.

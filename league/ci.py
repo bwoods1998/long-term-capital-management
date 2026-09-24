@@ -67,6 +67,10 @@ FORBIDDEN: tuple[str, ...] = (
     # The lab's batch evaluator: the numbers a lab candidate is judged by, and the door that keeps
     # the holdout out of the lab box.
     "league/labbox.py",
+    # The horizon rule's answer (review of #249, Sept 24, 2026): when a Kalshi market is expected to pay,
+    # which the book's `max_hours_to_resolve` judges every entry by, and how it reads the settle lags
+    # the House keeps as data (`settle_lags.json`).
+    "league/resolution.py",
 )
 #: The shared strategy list every architect proposal used to rewrite whole (`league/strategies`).
 RETIRED_REGISTRY = "league/strategies/registry.json"

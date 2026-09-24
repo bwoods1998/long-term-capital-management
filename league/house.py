@@ -83,7 +83,7 @@ QUIET_DESK_WAKES = 3
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
 #: Beside the House's state: when each deadline-type Kalshi series' markets paid after their close
-#: (`tapes.SettleLags`), which the horizon rule judges such a market by.
+#: (`resolution.SettleLags`, which reads it as untrusted data), which the horizon rule judges such a market by.
 SETTLE_LAGS_FILE = "settle_lags.json"
 #: X1 (Sept 24, 2026): an in-place parameter edit is replayed first on a book this share of the
 #: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
@@ -495,9 +495,9 @@ class House:
         self.kalshi_data = kalshi_data
         if kalshi_data is not None and hasattr(kalshi_data, "settle_lags") and getattr(kalshi_data, "settle_lags", None) is None:
             # When each deadline-type series' markets pay after their close, measured on the settled
-            # markets its replay tapes read, and kept beside the House's state (`tapes.SettleLags`):
+            # markets its replay tapes read, and kept beside the House's state (`resolution.SettleLags`):
             # what the horizon rule judges such a market by (review of #249, P1).
-            from .tapes import SettleLags
+            from .resolution import SettleLags  # the protected answer (`ci.FORBIDDEN`) reads its own file
 
             kalshi_data.settle_lags = SettleLags(self.root / SETTLE_LAGS_FILE)
         self.provider = provider
@@ -723,7 +723,8 @@ class House:
 
         X2 (Sept 24, 2026, the close-the-gaps run): the book refuses an entry expected to pay past the
         agent's horizon ("this market is expected to resolve in N hours"), and its refusal cannot say
-        what N was measured to (`tapes.resolution`): the market's scheduled expiration; its close plus
+        what N was measured to (`league/resolution.py`, a money judge in `ci.FORBIDDEN`): the market's
+        scheduled expiration; its close plus
         its series' measured settle lag, where the venue's "expected" expiration is a deadline days
         after the close; that deadline, where the lag cannot be measured yet; or its close, where the
         venue lists none. The House asks the book's own question of the book's own answer
@@ -744,7 +745,8 @@ class House:
             return ""
         if hours is None or hours <= float(horizon):
             return ""
-        from .tapes import CLOSE, DEADLINE, SCHEDULED, SETTLE_LAG_MIN_MARKETS, SETTLE_LAG, iso as tape_iso
+        from .resolution import CLOSE, DEADLINE, SCHEDULED, SETTLE_LAG, SETTLE_LAG_MIN_MARKETS
+        from .tapes import iso as tape_iso
 
         if found.basis == SCHEDULED:
             judged = f"by its scheduled expiration ({tape_iso(found.due)})"

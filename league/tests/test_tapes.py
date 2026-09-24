@@ -582,11 +582,18 @@ class ScheduledExpirationTest(unittest.TestCase):
         self.assertEqual(lags.lag("KXDIESELD", self.NOW + 86400), (144000.0, 26))  # tomorrow: 30 h and 40 h paid by then
 
     def test_never_before_the_close_and_never_after_the_deadline(self):
-        early = self.data(self.diesel(), lags=self.lags(diesel_settled(20, -3.0, last_close="2026-09-21T05:59:00Z")))
-        self.assertEqual(early.resolution_of("KXDIESELD-26SEP22-T6.510").due, self.CLOSE)
+        """A market paid at its close has a lag of 0; one "paid" before its close is no settlement and is not
+        counted (none of 9,826 cached deadline-type markets did); a lag past a market's own deadline counts
+        as its deadline."""
+        at_close = self.data(self.diesel(), lags=self.lags(diesel_settled(20, 0.0, last_close="2026-09-21T05:59:00Z")))
+        self.assertEqual(at_close.resolution_of("KXDIESELD-26SEP22-T6.510").due, self.CLOSE)
+        before = self.data(self.diesel(), lags=self.lags(diesel_settled(20, -3.0, last_close="2026-09-21T05:59:00Z")))
+        found = before.resolution_of("KXDIESELD-26SEP22-T6.510")
+        self.assertEqual((found.due, found.basis), (parse_time("2026-09-29T07:30:00Z"), "deadline"))
         late = self.data(self.diesel(), lags=self.lags(diesel_settled(20, 400.0, last_close="2026-09-01T05:59:00Z")))
         found = late.resolution_of("KXDIESELD-26SEP22-T6.510")
-        self.assertEqual((found.due, found.basis), (parse_time("2026-09-29T07:30:00Z"), "settle_lag"))
+        self.assertEqual((found.due, found.basis, found.lag_hours), (self.CLOSE + 169.5 * 3600, "settle_lag", 169.5))
+        self.assertLessEqual(found.due, parse_time("2026-09-29T07:30:00Z"))
 
     def test_the_lags_survive_a_restart(self):
         import tempfile

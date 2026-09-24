@@ -646,8 +646,12 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   or more after the close is a deadline (the diesel prints, the AI-share weeklies); such a market
   is judged by its close plus the p95 settle lag of its series' last 40 settled markets on record
   (at least 20), which `settle_lags.json` beside the House's state keeps (fed by every Kalshi
-  tape's settled markets; recomputed once a day; delete it to measure afresh). A series stuck on
-  "fewer than 20 settled markets" is one no tape has replayed enough of yet. The House asks before
+  tape's settled markets; recomputed once a day; delete it to measure afresh). The answer is
+  `league/resolution.py`, a money judge in `ci.FORBIDDEN` (an owner deploy changes it, never the
+  updater), and it reads that file as untrusted data: an entry that settled before its close, or is
+  not three finite times with a real deadline, is ignored; each lag is clamped to [0, its
+  deadline]; a series needs 20 good settlements. A series stuck on "fewer than 20 settled markets"
+  is one no tape has replayed enough of yet. The House asks before
   the book; the book still judges every entry after it, from the same answer. The book's own shorter
   text ("expected to resolve in N hours; entries must resolve within 48", no basis) would now mean
   the two looks disagreed, at the boundary a moment apart.

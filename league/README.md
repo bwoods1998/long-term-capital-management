@@ -199,18 +199,21 @@ status is exposed in health and agent research context; qualification is distinc
    grace like one that never traded. The allocator promotes a paused agent to no real band (its
    status says "paused"), and after `allocator.PAUSED_STAKE_AFTER_SECONDS` (24 h) holds a paused
    real agent's stake to the probe by free cash only (P2; the board row's `entries_paused_since`).
-   **The horizon's basis (X2, Sept 24, 2026).** `tapes.resolution(row, close)` is when a Kalshi
+   **The horizon's basis (X2, Sept 24, 2026).** `resolution.resolution(row, close)` is when a Kalshi
    market is expected to pay and what that is judged by: its scheduled (expected) expiration where
    the venue gives one, its close otherwise, never the deprecated latest date it may expire
    (`ltcm/data/kalshi.py` keeps `expected_expiration_time` apart). The venue gives one for every
    market seen (1.36 million cached rows, review of #249), but where it lies two days or more after
    the close it is a deadline (the diesel prints, the AI-share weeklies), and the market is judged
-   by its close plus its series' measured settle lag (`tapes.SettleLags`: the p95 of the last 40 of
-   its settled markets before the day, at least 20; fed by every Kalshi tape's settled markets and
-   kept in `settle_lags.json` beside the House's state; review of #249, P1), or by the deadline
-   while that cannot be measured. The live view's
-   `hours_to_resolve`, a replay tape's and the book's horizon rule (`KalshiData.resolves_at`,
-   `resolution_of`) read it alike. A Kalshi entry past the horizon is refused by the House before
+   by its close plus its series' measured settle lag (`resolution.SettleLags`: the p95 of the last
+   40 of its settled markets before the day, at least 20; fed by every Kalshi tape's settled
+   markets and kept in `settle_lags.json` beside the House's state; review of #249, P1), or by the
+   deadline while that cannot be measured. `league/resolution.py` is a money judge
+   (`ci.FORBIDDEN`: an updater release cannot change what the book admits), and it reads
+   `settle_lags.json` as untrusted data: an entry that settled before its close or is not three
+   finite times with a real deadline is ignored, each lag is clamped to [0, its deadline], and a
+   series needs 20 good settlements. The live view's `hours_to_resolve`, a replay tape's and the
+   book's horizon rule (`KalshiData.resolves_at`, `resolution_of`) read it alike. A Kalshi entry past the horizon is refused by the House before
    the book (`_horizon_refusal`), saying which it was judged by; what it cannot look up it leaves
    to the book.
 4. **Submit one batch per book**, so opposite market orders on one instrument net inside the House.

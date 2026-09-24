@@ -326,6 +326,110 @@ class HorizonBySchedule(unittest.TestCase):
         self.assertEqual((intent.side, dropped, self.refusals()), ("sell", [], []))
 
 
+class ProtectedAnswer(HorizonBySchedule):
+    """Review of #249 (the main session, 09:10Z): the horizon rule's answer is a money judge. It lives in
+    `league/resolution.py`, in `ci.FORBIDDEN`, so an updater release cannot change what the book admits;
+    the settle lags the House keeps (`settle_lags.json`) are data, read through it as untrusted: an entry
+    that is not three finite times with the settlement at or after the close and a real deadline is
+    ignored, each lag is clamped to [0, its deadline], and a series needs 20 good settlements. A
+    malformed or hostile file admits nothing the rule refuses without it."""
+
+    def test_the_answer_is_a_protected_money_judge(self):
+        import tempfile
+        from pathlib import Path
+
+        from league import resolution, tapes
+        from league.ci import FORBIDDEN
+        from league.updater import protected_changes
+
+        self.assertIn("league/resolution.py", FORBIDDEN)
+        for name in ("resolution", "resolve_time", "SettleLags", "Resolution", "is_deadline"):
+            self.assertIs(getattr(tapes, name), getattr(resolution, name), name)  # the tape, the live view and the House read it
+        self.assertIsInstance(self.data.settle_lags, resolution.SettleLags)
+        with tempfile.TemporaryDirectory() as folder:
+            running, incoming = Path(folder) / "running", Path(folder) / "incoming"
+            for tree, text in ((running, "LAG = 1\n"), (incoming, "LAG = 0\n")):
+                (tree / "league").mkdir(parents=True)
+                (tree / "league" / "resolution.py").write_text(text)
+            refused = protected_changes(incoming, running)  # the updater refuses such a release
+            self.assertTrue(any(line.startswith("league/resolution.py:") for line in refused), refused)
+
+    def hostile(self, markets):
+        """Load a `settle_lags.json` of this content through the protected reader, as the House does."""
+        import json
+
+        from league.resolution import SettleLags
+
+        path = self.house.root / "hostile_settle_lags.json"
+        path.write_text(markets if isinstance(markets, str) else json.dumps(markets))
+        self.data.settle_lags = SettleLags(path)
+
+    def entries(self, n, lag_hours, *, gap_hours=169.5, first=0):
+        """`n` kept diesel entries [close, settled, deadline], one a day before Sept 22."""
+        base = parse_time("2026-09-21T05:59:00Z")
+        return {f"KXDIESELD-{i:03d}-T6.500": [base - i * 86400, base - i * 86400 + lag_hours * 3600, base - i * 86400 + gap_hours * 3600]
+                for i in range(first, first + n)}
+
+    def book_says(self):
+        """The book's own verdict on a bid the House's check does not see (the book reads the same answer).
+        A second later than any House refusal of the same bid, so it is another intent."""
+        from unittest.mock import patch
+
+        self.clock.advance(1)
+        with patch.object(self.house, "_horizon_refusal", return_value=""):
+            (intent,), dropped = self.bid(self.diesel["ticker"])
+        return self.book.submit([intent])[0]
+
+    def assert_refused_as_without_a_file(self):
+        (reason,) = self.refusals()
+        self.assertIn("this market is expected to resolve in 172 hours", reason)
+        outcome = self.book_says()
+        self.assertEqual(outcome.status, "refused")
+        self.assertIn("this market is expected to resolve in 172 hours", outcome.detail)
+
+    def test_an_honest_file_admits_the_diesel_print(self):
+        """The control: 40 good settlements paid 5.86 hours after the close."""
+        self.hostile({"version": 1, "series": {"KXDIESELD": self.entries(40, 5.86)}})
+        self.assertEqual(self.bid(self.diesel["ticker"])[1], [])
+        self.assertEqual(self.refusals(), [])
+        self.assertNotEqual(self.book_says().status, "refused")
+
+    def test_settlements_before_the_close_are_no_settlements(self):
+        self.hostile({"version": 1, "series": {"KXDIESELD": self.entries(40, -100.0)}})
+        self.bid(self.diesel["ticker"])
+        self.assert_refused_as_without_a_file()
+        self.assertIn("fewer than 20 settled markets", self.refusals()[0])
+
+    def test_huge_lags_count_as_the_deadline(self):
+        self.hostile({"version": 1, "series": {"KXDIESELD": self.entries(40, 10_000.0)}})
+        self.bid(self.diesel["ticker"])
+        self.assert_refused_as_without_a_file()
+
+    def test_too_few_settlements_keep_the_deadline(self):
+        self.hostile({"version": 1, "series": {"KXDIESELD": self.entries(19, 0.0)}})
+        self.bid(self.diesel["ticker"])
+        self.assert_refused_as_without_a_file()
+
+    def test_malformed_entries_are_ignored(self):
+        junk = {f"J{i}": value for i, value in enumerate((
+            "garbage", None, 7, [1, 2], [1, 2, 3, 4], ["2026-09-01T05:59:00Z", 0, 0], [None, None, None],
+            [float("nan"), 1.0, 2.0], [1.0, float("inf"), 2.0], [-5.0, 1.0, 1e12], [0, 0, 0],
+            [1789000000.0, 1789000000.0, 1789000000.0 + 3600],  # an "expected" expiration an hour on is no deadline
+        ))}
+        self.hostile({"version": 1, "series": {"KXDIESELD": {**self.entries(19, 0.0), **junk}, "KXOTHER": "x", "": []}})
+        self.bid(self.diesel["ticker"])
+        self.assert_refused_as_without_a_file()
+
+    def test_a_file_that_is_no_table_is_ignored(self):
+        for text in ('{"version": 1, "series": {"KXDIESELD": {"KXDIESELD-0', "[1, 2, 3]", '"a string"', '{"series": [1, 2]}', "NaN"):
+            with self.subTest(text=text):
+                self.house.ledger.append("ops.alert", {"level": "info", "text": "reset"})  # a row between the subtests
+                self.hostile(text)
+                self.assertIsNone(self.data.settle_lags.lag("KXDIESELD", self.clock()))
+                found = self.data.resolution_of(self.diesel["ticker"])
+                self.assertEqual((found.basis, round((found.due - self.clock()) / 3600)), ("deadline", 172))
+
+
 class GameFile(unittest.TestCase):
     def test_the_shipped_horizon_is_inside_its_bounds(self):
         game = load_game()
