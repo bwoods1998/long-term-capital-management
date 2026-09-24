@@ -1557,8 +1557,8 @@ class Book:
             self._await_cancel(working, now, why=OWN_CROSS_WHY)
             if working.open:
                 doubt = doubt or f"the venue has not confirmed the cancel of your own order {working.order_id}"
-            else:
-                withdrawn.append(working.order_id)
+            elif working.status == "cancelled":
+                withdrawn.append(working.order_id)  # one that filled first is booked, and is no longer in the way
         left = intent.quantity
         parts: list[tuple[Working, Share, Decimal]] = []
         for _ in range(len(self.orders) + 1):
