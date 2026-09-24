@@ -387,6 +387,58 @@ class EditInTheSeatMarket(ControlCase):
         self.assertEqual(self.edit_in_place(agent, {"notional_usd": 20.0}), ["edit_params"])
         self.assertEqual(self.displaceable(evidenced=True), [])
 
+class ControlsAcrossAStop(ControlCase):
+    """Review of #249: a pass's controls were applied after its research job was marked done, and a
+    restart resumes only an unfinished job, so a stop between the two lost them for good."""
+
+    def test_a_stop_after_the_pass_ends_keeps_what_it_asked(self):
+        from league.researcher import Pass
+
+        agent = self.seated()
+        house = self.house
+
+        class Researcher:
+            def research(self, agent, standing, *, session):
+                house.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": "pause_entries",
+                                                       "session": session, "note": "the live rule keeps adding losing positions"},
+                                    agent=agent.id, id=f"control-request:{session}:0")
+                return Pass(agent.id, reason="finished", calls=["pause_entries"])
+
+        class Stopped(RuntimeError):
+            pass
+
+        house.researcher = Researcher()
+        finish = house.research_jobs.finish
+
+        def finish_then_stop(session, reason="", **kw):
+            finish(session, reason, **kw)
+            raise Stopped("the process stops here")
+
+        house.research_jobs.finish = finish_then_stop
+        with self.assertRaises(Stopped):
+            house.research(agent)
+        self.assertIsNotNone(house.registry.entries_paused(agent.id))
+
+    def test_a_restart_between_an_edit_and_a_pause_of_one_pass_makes_the_pause(self):
+        from dataclasses import asdict
+        from league.researcher import Pass, pass_state
+
+        agent = self.seated("sized", SIZED)
+        jobs = self.house.research_jobs
+        session = jobs.enqueue(agent.id, self.house._generation(agent.id))["session"]
+        jobs.start(session, {"agent": asdict(agent), "standing": {}})
+        jobs.ready(session, pass_state(Pass(agent.id, reason="finished")))
+        was = dict(agent.params)
+        params = {**was, "notional_usd": 20.0}
+        self.house.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": True, "reasons": [],
+                                                    "params": params, "was": was}, agent=agent.id)
+        self.request(agent, "edit_params", session=session, n=0, params=params, was=was, code_sha256=agent.code_sha256)
+        self.assertEqual(self.house._apply_controls(agent.id, session), ["edit_params"])  # the process stops here
+        self.request(agent, "pause_entries", session=session, n=1)  # asked in the same pass, not yet made
+        self.house.research(self.house.registry.get(agent.id))  # the restart resumes the job
+        self.assertIsNotNone(self.house.registry.entries_paused(agent.id))
+        self.assertEqual(jobs.get(session)["status"], "cancelled")
+
 if __name__ == "__main__":
     import unittest
 

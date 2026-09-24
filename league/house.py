@@ -4633,6 +4633,11 @@ class House:
             with self._lifecycle_lock:
                 current = self._generation(agent.id)
                 if current is None or list(current[:-1]) != job['generation'][:-1]:
+                    if job['status'] == 'ready':
+                        # Its pass had ended: what it asked of its entries is still its to have, or is
+                        # refused on the record (an edit of a strategy that changed, a dead agent). A stop
+                        # between an edit and a pause of one pass moved the generation (X1).
+                        self._apply_controls(agent.id, session)
                     self.research_jobs.finish(session, 'retired or changed before resume', cancelled=True)
                     return None
                 generation = tuple(job['generation'])
@@ -4664,9 +4669,12 @@ class House:
                 if candidate:
                     self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
+            # After any candidate (an edit is a new strategy, which moves the generation), and BEFORE the
+            # job is done: a restart resumes an unfinished job and applies them (ids make it a no-op the
+            # second time), but never a finished one (review of #249: a stop between the two lost the pause).
+            self._apply_controls(agent.id, session)
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
             self._note_research_result(agent.id, outcome)
-            self._apply_controls(agent.id, session)  # after any candidate: a control row moves the generation (X1)
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
