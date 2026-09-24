@@ -45,13 +45,13 @@ recorded for the next open; live verification uses the markets that trade around
 | 0.8 | First-hour decision 4: Deploy A's money set | done 01:55Z |
 | 0.9 | First-hour decision 5: file owners per wave | done 01:55Z |
 | Z | The scoreboard (`scripts/gap_scoreboard.py`) | T0 reading done (PR #223, below) |
-| D1 | The lab's step | ⟨pending⟩ |
-| D2 | Phantom OpenAI holds | ⟨pending⟩ |
-| D3 | Exits walled off by the self-cross rule | ⟨pending⟩ |
-| D4 | Independent settlements | ⟨pending⟩ |
-| P | Promotion on proof (probes, the one-loss trial, maker unless proven) | ⟨pending⟩ |
-| X0 | Book rules through constitution keys | ⟨pending⟩ |
-| Deploy A | Wave 0, ratified at promotion (digest change 1 of 2) | ⟨pending⟩ |
+| D1 | The lab's step | live 05:37Z (Deploy A); batches resumed (4 by 05:46Z); the hour's rate and the poison row's block to verify |
+| D2 | Phantom OpenAI holds | live 05:37Z; gateway `44edfee6` 05:26Z; the meter anchored 05:38:57Z; the release to verify |
+| D3 | Exits walled off by the self-cross rule | live 05:37Z; 0 self-cross refusals of sells to 05:46Z; to verify over hours |
+| D4 | Independent settlements | live 05:37Z (money digest `521c4586`) |
+| P | Promotion on proof (probes, the one-loss trial, maker unless proven) | live 05:37Z; 05:44Z board: 1 proven-family bunt, 7 probes; lopsided gate adopted (04:15Z) |
+| X0 | Book rules through constitution keys | live 05:37Z |
+| Deploy A | Wave 0, ratified at promotion (digest change 1 of 2) | done: promoted 05:37:31Z, ratified 05:37:41Z on `521c4586`, watch passed 05:47:34Z |
 | C1/C2 | The mechanism ledger and the family swing | ⟨pending⟩ |
 | S | The evidence clock and the seat market | ⟨pending⟩ |
 | L | The loop's joints | ⟨pending⟩ |
@@ -266,6 +266,21 @@ recorded for the next open; live verification uses the markets that trade around
   "Disk quota exceeded": the session's /tmp is a 3.8 GB tmpfs, filled by parallel suites, stale test
   directories and the reviewers' tree copies (cleared to 1.8 GB free).
 - 05:10Z — B-families and B-seats launched from `a/integration` (`8b301a0`).
+
+- 05:25:59Z — **the gateway for Deploy A** (`wrangler deploy --tag deb12e9`, 157 tests): version
+  `44edfee6`; `/v1/health` `frontier` reads `settled_usd` 421.405264, `inflight_usd` 0, `previous` null.
+- 05:26Z — PR #240 merged (main `9191e81`, with Merton's #241).
+- 05:30Z — the T+4 scoreboard reading (below, "Progress notes").
+- 05:36:14Z — **Deploy A** (`deploy_ratify.sh` from `~/Work/ltcm-deploy` at `9191e81`): release
+  `20260924T053614Z-ca151559d272`, **promoted 05:37:31.724Z**, **the grant ratified 05:37:41Z** (10 s)
+  on money digest `521c4586` (constitution `8116302e`): 101 agents at a $10 smallest stake, capital
+  unchanged; the watch passed, DEPLOY-EXIT 0 at 05:47:34Z.
+- 05:44Z — the first board under Deploy A: meriwether-h2d625d the one bunt (sports-central-run-under,
+  proven; target $37.50); probes: haghani-56 (Alpaca $25), hawkins-19, hilibrand-h6ca596-3,
+  hilibrand-lc04657, meriwether-h7d7702, mullins-2 (target $11.65, $29.08 now) and mullins-6 ($10.29,
+  $36.70 now), shrinking by free cash only (six "size" verdicts with band `probe`). The lab ran 4
+  batches by 05:46Z with no failed step. The OpenAI meter anchored at 05:38:57Z ($421.85 settled at the
+  gateway; the House line $179.11 against the gateway month's $183.59 left).
 
 ## The scoreboard at T0
 
