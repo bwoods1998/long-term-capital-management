@@ -1,0 +1,8 @@
+{
+  "family": "crypto-15m-doge-flat-spot-no",
+  "name": "huang_h51fdd3_6_price_floor",
+  "repair": {
+    "key": "order_refusal:kalshi:buying a longshot at #: the floor buys no event contract under # (longshot buyers lose on Kalshi; se"
+  },
+  "why": "Corrected child of huang-h51fdd3-6, whose buffered passive bids repeatedly requested prices below the Kalshi longshot floor, including 0.18 and 0.08 after the earlier repair deployed. Filter each leg's final rounded bid before ranking: at least 0.15 on rungs 0/1 and 0.30 on rungs 2/3. Cancel below-floor resting buys even if their market and leg remain eligible. Preserve the parent's specialty, parameters, model, sizing and post-only entries. Born on rung 0 with no inherited record; must qualify independently."
+}

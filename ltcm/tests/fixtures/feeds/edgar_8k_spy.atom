@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+  <feed xmlns="http://www.w3.org/2005/Atom">
+    <author>
+      <email>webmaster@sec.gov</email>
+      <name>Webmaster</name>
+    </author>
+    <company-info>
+      <addresses>
+        <address type="mailing">
+          <city>NEW YORK</city>
+          <state>NY</state>
+          <street1>11 WALL STREET</street1>
+          <street2>PDR SERVICES LLC C/O NYSE EURONEXT</street2>
+          <zip>10005</zip>
+        </address>
+        <address type="business">
+          <city>NEW YORK</city>
+          <phone>212-656-4440</phone>
+          <state>NY</state>
+          <street1>11 WALL STREET</street1>
+          <street2>PDR SERVICES LLC C/O NYSE EURONEXT</street2>
+          <zip>10005</zip>
+        </address>
+      </addresses>
+      <cik>0000884394</cik>
+      <cik-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0000884394&amp;owner=include&amp;count=40</cik-href>
+      <conformed-name>SPDR S&amp;P 500 ETF TRUST</conformed-name>
+      <fiscal-year-end>0930</fiscal-year-end>
+      <formerly-names count="1">
+        <names>
+          <date>2009-12-29</date>
+          <name>SPDR TRUST SERIES 1</name>
+        </names>
+      </formerly-names>
+      <state-location>NY</state-location>
+      <state-location-href>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;State=NY&amp;owner=include&amp;count=40</state-location-href>
+      <state-of-incorporation>NY</state-of-incorporation>
+    </company-info>
+    <id>https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=0000884394</id>
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=SPY&amp;type=8-K&amp;owner=include&amp;start=0&amp;count=40" rel="alternate" type="text/html" />
+    <link href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&amp;CIK=SPY&amp;type=8-K&amp;owner=include&amp;start=0&amp;count=40&amp;output=atom" rel="self" type="application/atom+xml" />
+    <title>SPDR S&amp;P 500 ETF TRUST  (0000884394)</title>
+    <updated>2026-09-23T23:44:40-04:00</updated>
+  </feed>

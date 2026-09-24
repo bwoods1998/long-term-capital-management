@@ -448,7 +448,8 @@ class ListedStopTest(unittest.TestCase):
     def test_a_settled_game_shows_its_scheduled_expiration(self):
         from league.tapes import _listed_stop, parse_time
 
-        row = {"can_close_early": True, "close_time": "2026-09-18T03:29:53Z", "expiration_time": "2026-09-18T03:15:00Z", "latest_expiration_time": "2026-09-20T00:15:00Z"}
+        row = {"can_close_early": True, "close_time": "2026-09-18T03:29:53Z", "expected_expiration_time": "2026-09-18T03:15:00Z",
+               "expiration_time": "2026-09-18T03:15:00Z", "latest_expiration_time": "2026-09-20T00:15:00Z"}
         self.assertEqual(iso(_listed_stop(row, parse_time(row["close_time"]))), "2026-09-18T03:15:00Z")
 
     def test_a_market_that_cannot_close_early_shows_its_close(self):
@@ -460,26 +461,234 @@ class ListedStopTest(unittest.TestCase):
     def test_a_weather_market_stops_at_its_close_and_is_paid_later(self):
         from league.tapes import _listed_stop, parse_time, resolve_time
 
-        row = {"can_close_early": True, "close_time": "2026-09-19T05:00:00Z", "expiration_time": "2026-09-19T19:00:00Z"}
+        row = {"can_close_early": True, "close_time": "2026-09-19T05:00:00Z", "expected_expiration_time": "2026-09-19T19:00:00Z",
+               "expiration_time": "2026-09-19T19:00:00Z"}
         close = parse_time(row["close_time"])
         self.assertEqual((iso(_listed_stop(row, close)), iso(resolve_time(row, close))), ("2026-09-19T05:00:00Z", "2026-09-19T19:00:00Z"))
+
+
+def diesel_settled(n, lag_hours, *, last_close, first=0, series="KXDIESELD", gap_hours=169.5):
+    """`n` settled deadline-type markets of a series, one a day, the last closing at `last_close`,
+    each paid `lag_hours` after its close (a number, or a function of the market's index)."""
+    from league.tapes import iso
+
+    rows = []
+    for i in range(first, first + n):
+        close = parse_time(last_close) - (first + n - 1 - i) * 86400
+        lag = lag_hours(i) if callable(lag_hours) else lag_hours
+        rows.append({"ticker": f"{series}-{i:03d}-T6.500", "status": "finalized", "result": "yes", "close_time": iso(close),
+                     "expected_expiration_time": iso(close + gap_hours * 3600), "settlement_ts": iso(close + lag * 3600)})
+    return rows
+
+
+class ScheduledExpirationTest(unittest.TestCase):
+    """X2 (Sept 24, 2026): a Kalshi market is expected to pay at its SCHEDULED (expected) expiration
+    when the venue gives one, and at its close otherwise -- never at the latest moment it may expire.
+
+    The venue gives one for every market seen (review of #249): all 993,336 settled rows of Sept 5-17
+    in the local history cache and all 368,425 open rows of the first run's Sept 15 cache carry
+    `expected_expiration_time`. For the daily diesel print it is a DEADLINE, not a schedule: 169.5
+    hours after the close (KXDIESELD-26SEP13-T6.210 closed 05:59Z Sept 13, expected and latest 07:30Z
+    Sept 20, paid 07:45Z Sept 13), and the T0 refusal of KXDIESELD-26SEP22-T6.510 at 03:18:43Z on
+    Sept 22 read it as "expected to resolve in 172 hours". Review of #249, P1: such a market is judged
+    by its close plus its series' measured settle lag (`SettleLags`: the p95 of the last 40 of its
+    settled markets known before the day, at least 20), and by the deadline while that cannot be
+    measured. The close stands in only for a market the venue gives no expected expiration."""
+
+    NOW = parse_time("2026-09-22T03:18:43Z")
+    CLOSE = parse_time("2026-09-22T05:59:00Z")
+
+    @staticmethod
+    def venue_row(ticker, close, **extra):
+        """What Kalshi's /markets answers, before the House's parser."""
+        row = {"ticker": ticker, "event_ticker": "-".join(ticker.split("-")[:2]), "status": "active", "title": "a test market",
+               "yes_bid_dollars": "0.9600", "yes_ask_dollars": "0.9800", "close_time": close, "volume_24h_fp": "12000.00",
+               "open_interest_fp": "3400.00", "can_close_early": False}
+        row.update(extra)
+        return row
+
+    def diesel(self):
+        """The daily diesel print as the venue lists it (the shape of KXDIESELD-26SEP13-T6.210)."""
+        return self.venue_row("KXDIESELD-26SEP22-T6.510", "2026-09-22T05:59:00Z", can_close_early=True,
+                              expected_expiration_time="2026-09-29T07:30:00Z", expiration_time="2026-09-29T07:30:00Z",
+                              latest_expiration_time="2026-09-29T07:30:00Z")
+
+    def unscheduled(self):
+        """A market the venue gave no expected expiration: none was seen; the rule's fallback."""
+        return self.venue_row("KXDIESELD-26SEP22-T6.505", "2026-09-22T06:00:00Z", expected_expiration_time=None,
+                              expiration_time="2026-09-29T07:30:00Z", latest_expiration_time="2026-09-29T07:30:00Z")
+
+    def game(self):
+        return self.venue_row("KXMLBGAME-26SEP22NYYBOS-NYY", "2026-09-24T02:00:00Z", can_close_early=True,
+                              expected_expiration_time="2026-09-22T06:30:00Z", expiration_time="2026-09-29T02:00:00Z",
+                              latest_expiration_time="2026-09-29T02:00:00Z")
+
+    def data(self, *venue_rows, lags=None):
+        from ltcm.data.kalshi import KalshiMarketData
+
+        parsed = {row["ticker"]: KalshiMarketData.parse_market(row) for row in venue_rows}
+
+        class Venue(FakeMarketData):
+            def market(self, ticker):
+                return parsed[ticker]
+
+        by_series: dict = {}
+        for row in parsed.values():
+            by_series.setdefault(row["ticker"].split("-")[0], []).append(row)
+        data = KalshiData(Venue({series: [rows] for series, rows in by_series.items()}), clock=lambda: self.NOW)
+        data.settle_lags = lags
+        return data
+
+    def lags(self, rows):
+        from league.tapes import SettleLags
+
+        lags = SettleLags()
+        lags.observe(rows)
+        return lags
+
+    def test_the_parser_keeps_the_scheduled_expiration_apart_from_the_latest(self):
+        from ltcm.data.kalshi import KalshiMarketData
+
+        self.assertEqual(KalshiMarketData.parse_market(self.diesel())["expected_expiration_time"], "2026-09-29T07:30:00Z")
+        self.assertEqual(KalshiMarketData.parse_market(self.game())["expected_expiration_time"], "2026-09-22T06:30:00Z")
+        self.assertIsNone(KalshiMarketData.parse_market(self.unscheduled())["expected_expiration_time"])
+
+    def test_a_deadline_is_judged_by_the_close_plus_the_series_measured_settle_lag(self):
+        """P1: the last 40 of 45 diesel dailies settled before the day paid 0.2 to 8 hours after their
+        close (0.2 h apart); the 95th percentile of those 40 is 7.6 hours, so the print is due 7.6
+        hours after its close, not a week on."""
+        lags = self.lags(diesel_settled(45, lambda i: 0.2 * (i - 4), last_close="2026-09-21T05:59:00Z"))
+        found = self.data(self.diesel(), lags=lags).resolution_of("KXDIESELD-26SEP22-T6.510")
+        self.assertEqual((found.basis, found.lag_hours, found.markets, found.deadline), ("settle_lag", 7.6, 40, parse_time("2026-09-29T07:30:00Z")))
+        self.assertAlmostEqual(found.due, self.CLOSE + 7.6 * 3600, places=3)
+        self.assertEqual(round((found.due - self.NOW) / 3600, 2), 10.27)  # 172 hours by the deadline
+
+    def test_the_deadline_stands_where_the_lag_cannot_be_measured(self):
+        """Fewer than 20 settled markets of the series known before the day: the rule before P1."""
+        deadline = parse_time("2026-09-29T07:30:00Z")
+        for lags in (None, self.lags(diesel_settled(19, 2.0, last_close="2026-09-21T05:59:00Z"))):
+            found = self.data(self.diesel(), lags=lags).resolution_of("KXDIESELD-26SEP22-T6.510")
+            self.assertEqual((found.due, found.basis, found.deadline), (deadline, "deadline", deadline))
+            self.assertEqual(round((found.due - self.NOW) / 3600), 172)
+
+    def test_the_lag_reads_only_settlements_before_the_day_and_is_computed_once_a_day(self):
+        """No look-ahead, recomputed at most daily: a market that settled today counts tomorrow."""
+        lags = self.lags(diesel_settled(20, 2.0, last_close="2026-09-21T05:59:00Z"))
+        self.assertEqual(lags.lag("KXDIESELD", self.NOW), (7200.0, 20))
+        late = diesel_settled(1, 30.0, first=100, last_close="2026-09-21T01:00:00Z")  # paid 07:00Z Sept 22: after midnight
+        early = diesel_settled(5, 40.0, first=200, last_close="2026-09-19T05:59:00Z")  # paid before midnight
+        self.assertEqual(lags.observe(late + early), 6)
+        self.assertEqual(lags.lag("KXDIESELD", self.NOW), (7200.0, 20))  # the day's value stands
+        self.assertEqual(lags.lag("KXDIESELD", self.NOW + 86400), (144000.0, 26))  # tomorrow: 30 h and 40 h paid by then
+
+    def test_never_before_the_close_and_never_after_the_deadline(self):
+        """A market paid at its close has a lag of 0; one "paid" before its close is no settlement and is not
+        counted (none of 9,826 cached deadline-type markets did); a lag past a market's own deadline counts
+        as its deadline."""
+        at_close = self.data(self.diesel(), lags=self.lags(diesel_settled(20, 0.0, last_close="2026-09-21T05:59:00Z")))
+        self.assertEqual(at_close.resolution_of("KXDIESELD-26SEP22-T6.510").due, self.CLOSE)
+        before = self.data(self.diesel(), lags=self.lags(diesel_settled(20, -3.0, last_close="2026-09-21T05:59:00Z")))
+        found = before.resolution_of("KXDIESELD-26SEP22-T6.510")
+        self.assertEqual((found.due, found.basis), (parse_time("2026-09-29T07:30:00Z"), "deadline"))
+        late = self.data(self.diesel(), lags=self.lags(diesel_settled(20, 400.0, last_close="2026-09-01T05:59:00Z")))
+        found = late.resolution_of("KXDIESELD-26SEP22-T6.510")
+        self.assertEqual((found.due, found.basis, found.lag_hours), (self.CLOSE + 169.5 * 3600, "settle_lag", 169.5))
+        self.assertLessEqual(found.due, parse_time("2026-09-29T07:30:00Z"))
+
+    def test_the_lags_survive_a_restart(self):
+        import tempfile
+        from pathlib import Path
+        from league.tapes import SettleLags
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "settle_lags.json"
+            lags = SettleLags(path)
+            lags.observe(diesel_settled(20, 3.0, last_close="2026-09-21T05:59:00Z"))
+            lags.save()
+            self.assertEqual(SettleLags(path).lag("KXDIESELD", self.NOW), (10800.0, 20))
+
+    def test_a_schedule_and_a_game_are_not_touched_by_a_lag(self):
+        """Only an expected expiration two days or more after the close is a deadline."""
+        lags = self.lags(diesel_settled(20, 2.0, last_close="2026-09-21T05:59:00Z", series="KXMLBGAME"))
+        found = self.data(self.game(), lags=lags).resolution_of("KXMLBGAME-26SEP22NYYBOS-NYY")
+        self.assertEqual((found.due, found.basis), (parse_time("2026-09-22T06:30:00Z"), "scheduled"))
+
+    def test_a_market_the_venue_gives_no_scheduled_expiration_is_judged_by_its_close(self):
+        data = self.data(self.unscheduled())
+        close = parse_time("2026-09-22T06:00:00Z")
+        self.assertEqual(data.resolution_of("KXDIESELD-26SEP22-T6.505")[:2], (close, "close"))
+        self.assertEqual(data.resolves_at("KXDIESELD-26SEP22-T6.505"), close)
+
+    def test_the_live_view_shows_the_hours_the_book_judges(self):
+        data = self.data(self.diesel(), self.game())
+        rows = {row["market"]: row for row in data.markets(["KXDIESELD", "KXMLBGAME"], max_hours_to_close=24)}
+        diesel, game = rows["KXDIESELD-26SEP22-T6.510"], rows["KXMLBGAME-26SEP22NYYBOS-NYY"]
+        self.assertEqual((diesel["hours_to_close"], diesel["hours_to_resolve"]), (2.6714, 172.1881))  # no lag measured: the deadline
+        self.assertEqual((game["hours_to_close"], game["hours_to_resolve"]), (3.1881, 3.1881))
+        data.settle_lags = self.lags(diesel_settled(20, 5.0, last_close="2026-09-21T05:59:00Z"))
+        data._listings.clear()
+        diesel = {row["market"]: row for row in data.markets(["KXDIESELD"], max_hours_to_close=24)}["KXDIESELD-26SEP22-T6.510"]
+        self.assertEqual(diesel["hours_to_resolve"], round((data.resolves_at("KXDIESELD-26SEP22-T6.510") - self.NOW) / 3600, 4))
+        self.assertEqual(diesel["hours_to_resolve"], 7.6714)
+
+    def test_a_settled_market_on_a_replay_tape_is_judged_the_same_way(self):
+        from ltcm.data.kalshi import KalshiMarketData
+        from league.tapes import resolve_time
+
+        for venue_row in (self.diesel(), self.unscheduled()):
+            live = self.data(venue_row).resolves_at(venue_row["ticker"])
+            row = KalshiMarketData.parse_market({**venue_row, "status": "finalized", "result": "yes"})
+            self.assertEqual(resolve_time(row, parse_time(row["close_time"])), live)
+
+
+class DeadlineOnATape(unittest.TestCase):
+    """P1 on a replay tape: a deadline-type market's `hours_to_resolve` at step `t` is judged with the
+    settle lag its series had at `t` -- from settlements before `t`'s UTC midnight, the tape's own
+    among them once they are paid -- as the live view would have shown it then. Never with a lag
+    learned from settlements after `t`."""
+
+    def test_each_step_reads_the_lag_known_that_day(self):
+        from league.tapes import SettleLags
+
+        lags = SettleLags()
+        lags.observe(diesel_settled(20, 2.0, last_close="2026-09-08T05:59:00Z"))  # paid 2 h after the close, long before
+        # The tape's own markets: the Sept 9 print's three strikes close 05:59Z and are paid 9 h later; the
+        # one under test closes 05:59Z Sept 11.
+        paid_late = [{"ticker": f"KXDIESELD-26SEP09-T6.{k}00", "event_ticker": "KXDIESELD-26SEP09", "status": "finalized", "result": "no",
+                      "open_time": "2026-09-08T12:00:00Z", "close_time": "2026-09-09T05:59:00Z", "expected_expiration_time": "2026-09-16T07:29:00Z",
+                      "settlement_ts": "2026-09-09T14:59:00Z", "title": "diesel"} for k in range(3)]
+        tested = {"ticker": "KXDIESELD-26SEP11-T6.500", "event_ticker": "KXDIESELD-26SEP11", "status": "finalized", "result": "no",
+                  "open_time": "2026-09-09T00:00:00Z", "close_time": "2026-09-11T05:59:00Z",
+                  "expected_expiration_time": "2026-09-18T07:29:00Z", "settlement_ts": "2026-09-11T08:00:00Z", "title": "diesel"}
+        candles = {tested["ticker"]: [candle(at, 0.40, 0.44) for at in ("2026-09-09T23:00:00Z", "2026-09-10T01:00:00Z")]}
+        history = FakeHistory(paid_late + [tested], candles)
+        data = KalshiData(None, history, clock=lambda: parse_time("2026-09-12T00:00:00Z"))
+        data.settle_lags = lags
+        tape = data.tape(["KXDIESELD"], start="2026-09-09T00:00:00Z", end="2026-09-11T06:00:00Z", horizon="day", step_seconds=3600)
+        shown = {step["t"]: row["hours_to_resolve"] for step in tape["steps"] for row in step["markets"]
+                 if row["market"] == tested["ticker"] and not row.get("execution_only")}
+        close = parse_time("2026-09-11T05:59:00Z")
+        # Sept 9: 20 known, all paid in 2 h; the Sept 9 print is paid at 14:59Z, after that day's midnight. Sept 10: its
+        # three strikes are known too, and 3 of 23 paid 9 h after the close is the 95th percentile.
+        self.assertEqual(shown["2026-09-09T23:00:00Z"], round((close + 2 * 3600 - parse_time("2026-09-09T23:00:00Z")) / 3600, 4))
+        self.assertEqual(shown["2026-09-10T01:00:00Z"], round((close + 9 * 3600 - parse_time("2026-09-10T01:00:00Z")) / 3600, 4))
 
 
 class KalshiMarketsTest(unittest.TestCase):
     def test_a_game_is_shown_by_when_it_is_expected_to_end_not_by_its_listed_close(self):
         """Measured Sept 19, 2026: a game's close is two days after kickoff; it really closes when a
         winner is declared, near its scheduled expiration."""
-        game = dict(can_close_early=True, expiration_time="2026-09-10T20:15:00Z")  # 6.3 hours from NOW
+        game = dict(can_close_early=True, expected_expiration_time="2026-09-10T20:15:00Z", expiration_time="2026-09-10T20:15:00Z")  # 6.3 hours from NOW
         data = FakeMarketData({"KXNFLGAME": [[
             live("KXNFLGAME-26SEP10AB-A", "0.60", "0.62", "2026-09-12T17:00:00Z", **game),
-            live("KXNFLGAME-26SEP14CD-C", "0.60", "0.62", "2026-09-13T01:00:00Z", can_close_early=True, expiration_time="2026-09-12T23:00:00Z"),  # next week's
+            live("KXNFLGAME-26SEP14CD-C", "0.60", "0.62", "2026-09-13T01:00:00Z", can_close_early=True, expected_expiration_time="2026-09-12T23:00:00Z"),  # next week's
         ]]})
         rows = KalshiData(data, clock=clock).markets(["KXNFLGAME"], max_hours_to_close=12)
         self.assertEqual([row["market"] for row in rows], ["KXNFLGAME-26SEP10AB-A"])
         self.assertEqual((rows[0]["close_time"], rows[0]["hours_to_close"], rows[0]["hours_to_resolve"]), ("2026-09-10T20:15:00Z", 6.2167, 6.2167))
 
     def test_a_market_paid_after_it_stops_trading_shows_both_times(self):
-        data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expiration_time="2026-09-11T10:00:00Z")]]})
+        data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expected_expiration_time="2026-09-11T10:00:00Z")]]})
         row = KalshiData(data, clock=clock).markets(["KXHIGHNY"], max_hours_to_close=24)[0]
         self.assertEqual((row["hours_to_close"], row["hours_to_resolve"]), (5.9667, 19.9667))
 
@@ -492,7 +701,7 @@ class KalshiMarketsTest(unittest.TestCase):
                 self.calls += 1
                 if ticker == "GONE":
                     raise RuntimeError("404")
-                return {"ticker": ticker, "close_time": "2026-09-12T17:00:00Z", "expiration_time": "2026-09-10T20:15:00Z" if ticker == "GAME" else None}
+                return {"ticker": ticker, "close_time": "2026-09-12T17:00:00Z", "expected_expiration_time": "2026-09-10T20:15:00Z" if ticker == "GAME" else None}
 
         source = One()
         data = KalshiData(source, clock=clock)
@@ -707,7 +916,8 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertEqual(step["markets"][1]["strike"], 81250.0)
 
     def test_history_is_asked_for_minute_candles_an_event_at_a_time(self):
-        self.assertEqual(self.history.settled_calls, [("KXBTCD", int(parse_time(START)), int(parse_time(END)))])
+        day = int(parse_time("2026-09-10T00:00:00Z"))  # the listing is read a whole UTC day at a time (L4)
+        self.assertEqual(self.history.settled_calls, [("KXBTCD", day, day + DAY - 1)])
         calls = {tuple(sorted(names)): (lo, hi, period) for names, lo, hi, period in self.history.candle_calls}
         self.assertEqual(calls, {
             (A, B): (parse_time("2026-09-10T12:00:00Z"), parse_time("2026-09-10T13:00:00Z"), 1),
@@ -766,12 +976,13 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertGreater(len(orders), 1)                             # and the seed is what orders it
 
     def test_listing_is_cut_on_utc_days(self):
+        """Whole UTC days, never the tape's own start or end: those move with the clock, and a URL
+        that never repeats is one the disk cache can never answer (L4, Sept 24, 2026)."""
         history = FakeHistory([], {})
         tape = KalshiData(None, history, clock=clock).tape(["KXBTCD", "KXETHD"], start="2026-09-08T22:00:00Z", end="2026-09-10T02:00:00Z")
         self.assertEqual((tape["steps"], tape["results"]), ([], {}))
-        day = parse_time("2026-09-09T00:00:00Z")
-        windows = [(int(parse_time("2026-09-08T22:00:00Z")), int(day) - 1), (int(day), int(day) + DAY - 1),
-                   (int(day) + DAY, int(parse_time("2026-09-10T02:00:00Z")))]
+        day = int(parse_time("2026-09-09T00:00:00Z"))
+        windows = [(day - DAY, day - 1), (day, day + DAY - 1), (day + DAY, day + 2 * DAY - 1)]
         self.assertEqual(history.settled_calls, [(name, lo, hi) for name in ("KXBTCD", "KXETHD") for lo, hi in windows])
 
     def test_an_early_close_shows_the_close_the_listing_showed(self):
@@ -819,6 +1030,271 @@ class KalshiTapeTest(unittest.TestCase):
             kalshi.tape(["KXBTCD"], start=END, end=START)
         with self.assertRaisesRegex(TapeError, "at least one series"):
             kalshi.tape([], start=START, end=END)
+
+
+class ListingTransport:
+    """The Kalshi endpoints `ltcm.history.History` reads, over a list of settled market rows: pages
+    of `page` rows with a cursor, and no candles. `listings` records each listing request's window."""
+
+    def __init__(self, rows, page=2):
+        self.rows, self.page, self.listings = rows, page, []
+
+    def get(self, url, headers=None, timeout=30):
+        import json as _json
+        import urllib.parse as _parse
+
+        parts = _parse.urlsplit(url)
+        query = dict(_parse.parse_qsl(parts.query))
+        if parts.path.endswith("/candlesticks"):
+            return 200, {}, _json.dumps({"markets": []}).encode()
+        lo, hi = int(query["min_close_ts"]), int(query["max_close_ts"])
+        self.listings.append((query.get("series_ticker"), lo, hi, query.get("cursor")))
+        rows = sorted((r for r in self.rows if r["ticker"].startswith(query.get("series_ticker", "") + "-")
+                       and lo <= parse_time(r["close_time"]) <= hi), key=lambda r: r["ticker"])
+        start = int(query.get("cursor") or 0)
+        cursor = str(start + self.page) if start + self.page < len(rows) else ""
+        return 200, {}, _json.dumps({"markets": rows[start:start + self.page], "cursor": cursor}).encode()
+
+
+class TheSettledListingIsReadOnce(unittest.TestCase):
+    """L4 (Sept 24, 2026, the close-the-gaps run): the House's log showed KXETHD's settled listing
+    read again, seven pages at a time, for every Kalshi tape it built (2,183 `[history] kalshi
+    settled` lines). A tape's first day window began at the tape's own start, which moves with the
+    clock, so its URL never repeated and `ltcm.history`'s disk cache never answered it; and the day
+    still settling was read whole every time. A settled day is now read on whole UTC days (the same
+    URL every time, so the disk cache answers it), and the day still settling is served from memory
+    for `settled_listing_ttl` seconds, then read again only from where it could still change."""
+
+    def setUp(self):
+        from ltcm.history import History
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.now = [parse_time("2026-09-10T14:02:00Z")]
+        rows = []
+        for day in ("07", "08", "09", "10"):
+            for hour in ("01", "05", "09", "13"):
+                for strike in ("T2599.99", "T2699.99"):
+                    close = f"2026-09-{day}T{hour}:00:00Z"
+                    if parse_time(close) < self.now[0]:
+                        rows.append({"ticker": f"KXETHD-26SEP{day}{hour}-{strike}", "event_ticker": f"KXETHD-26SEP{day}{hour}",
+                                     "status": "finalized", "result": "yes", "open_time": f"2026-09-{day}T00:00:00Z",
+                                     "close_time": close, "yes_bid": 0, "yes_ask": 100, "volume": 5})
+        self.transport = ListingTransport(rows)
+        self.history = lambda: History(self.transport, cache_dir=Path(self.dir.name) / "cache", clock=lambda: self.now[0],
+                                       sleep=lambda s: None, verbose=False, min_interval=0)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def build(self, kalshi, *, back_days=3):
+        end = self.now[0] - 120
+        return kalshi.tape(["KXETHD"], start=iso(end - back_days * DAY), end=iso(end))
+
+    def test_a_second_tape_reads_nothing_the_house_already_holds(self):
+        kalshi = KalshiData(None, self.history(), clock=lambda: self.now[0])
+        first = self.build(kalshi)
+        self.assertEqual(len(first["results"]), 0)  # no candles, so no steps: the listing is what is measured
+        read = len(self.transport.listings)
+        self.assertGreater(read, 0)
+        self.now[0] += 60  # the next agent's tape a minute later, over a window a minute later
+        self.build(kalshi)
+        self.assertEqual(self.transport.listings[read:], [], "nothing the House holds is read again")
+
+    def test_a_restart_reads_only_the_day_still_settling(self):
+        self.build(KalshiData(None, self.history(), clock=lambda: self.now[0]))
+        read = len(self.transport.listings)
+        self.now[0] += 60
+        self.build(KalshiData(None, self.history(), clock=lambda: self.now[0]))  # a new process, the same disk cache
+        today = int(parse_time("2026-09-10T00:00:00Z"))
+        again = self.transport.listings[read:]
+        self.assertTrue(again)
+        self.assertEqual({lo for _, lo, _, _ in again}, {today}, "settled days come from the disk cache")
+
+    def test_after_its_ttl_the_settling_day_is_read_only_from_where_it_can_still_change(self):
+        kalshi = KalshiData(None, self.history(), clock=lambda: self.now[0])
+        self.build(kalshi)
+        read = len(self.transport.listings)
+        before = self.now[0]
+        self.now[0] += kalshi.settled_listing_ttl + 60
+        tape = self.build(kalshi)
+        again = self.transport.listings[read:]
+        self.assertEqual({lo for _, lo, _, _ in again}, {int(before - 12 * 3600)})
+        self.assertEqual(tape["meta"]["listed"], 3 * 8, "every settled market of the window is still listed")
+
+
+def settled_days(now):
+    """Settled rows as `History.kalshi_settled` parses them, over Sept 6-10, 2026, with every shape
+    the tape reads from a settled row: strikes in the ticker, a voided market, a settlement stamped
+    before its close, no open time, an unreadable open time, an open time after the close, no event
+    ticker, an event that is not the ticker's first two segments (an inning of a game, as Kalshi
+    lists KXMLBINNINGWIN), a game that closed early with its strike only in `floor_strike`, a
+    weather-like market paid after its close; and fields the tape never reads (volume, prices, price
+    ranges). Candles make every market a step."""
+    rows, candles = [], {}
+    for day in (6, 7, 8, 9, 10):
+        for hour in (1, 13):
+            close = f"2026-09-{day:02d}T{hour:02d}:00:00Z"
+            if parse_time(close) >= now:
+                continue
+            opened = iso(parse_time(close) - 12 * 3600)
+            event = f"KXETHD-26SEP{day:02d}{hour:02d}"
+            for strike, result in (("T2599.99", "yes"), ("T2699.99", "no"), ("T2799.99", "")):
+                ticker = f"{event}-{strike}"
+                rows.append(settled(ticker, result, opened, close, can_close_early=False, settlement_ts=iso(parse_time(close) + 377.25),
+                                    expiration_time=iso(parse_time(close) + 3600), volume=D("12"), yes_bid=D("0.41"),
+                                    price_ranges=[{"start": "0", "end": "1", "step": "0.01"}], status="finalized"))
+                candles[ticker] = [candle(iso(parse_time(opened) + 600), 0.40, 0.45, volume=3.0, interest=2.0),
+                                   candle(iso(parse_time(close) - 1200), 0.55, 0.58, ask_low=0.52, bid_high=0.56, volume=1.0, interest=3.0)]
+        ticker = f"KXETHD-26SEP{day:02d}05-T2899.99"
+        close = f"2026-09-{day:02d}T05:00:00Z"
+        rows.append(settled(ticker, "no", None, close, settlement_ts=iso(parse_time(close) - 60)))  # no open, paid "before" its close
+        candles[ticker] = [candle(iso(parse_time(close) - 1800), 0.10, 0.12)]
+        ticker = f"KXETHD-26SEP{day:02d}07-T2999.99"
+        close = f"2026-09-{day:02d}T07:00:00Z"
+        rows.append(dict(settled(ticker, "yes", "not a time", close), event_ticker=None))
+        candles[ticker] = [candle(iso(parse_time(close) - 1500), 0.80, 0.84)]
+        ticker = f"KXETHD-26SEP{day:02d}09-T3099.99"
+        close = f"2026-09-{day:02d}T09:00:00Z"
+        rows.append(settled(ticker, "no", iso(parse_time(close) + 60), close))  # opened after it closed: never listed
+        candles[ticker] = [candle(iso(parse_time(close) - 1500), 0.20, 0.24)]
+        for inning in (1, 2):
+            event = f"KXMLBINNINGWIN-26SEP{day:02d}2110CINLAD-{inning}"
+            close = f"2026-09-{day:02d}T{2 + inning:02d}:15:00Z"
+            for side, result in (("CIN", "yes"), ("LAD", "no")):
+                ticker = f"{event}-{side}"
+                rows.append(settled(ticker, result, f"2026-09-{day:02d}T01:00:00Z", close, event_ticker=event))
+                candles[ticker] = [candle(iso(parse_time(close) - 2400), 0.45, 0.50)]
+        game = f"KXMLBGAME-26SEP{day:02d}NYYBOS-NYY"
+        close = f"2026-09-{day:02d}T20:47:13Z"
+        rows.append(settled(game, "yes", f"2026-09-{day:02d}T17:00:00Z", close, latest_expiration_time=f"2026-09-{day + 2:02d}T00:00:00Z",
+                            expiration_time=f"2026-09-{day:02d}T21:00:00Z", floor_strike=D("0.5"), settlement_ts=iso(parse_time(close) + 900)))
+        candles[game] = [candle(iso(parse_time(close) - 3000), 0.61, 0.63), candle(iso(parse_time(close) - 400), 0.90, 0.93)]
+    return rows, candles
+
+
+class TheSettledDayIsHeldInMemory(unittest.TestCase):
+    """C-perf (Sept 24, 2026, the close-the-gaps run, Wave 2). After L4 the House's log still carried
+    about 3,200 `[history] kalshi settled <series>: N markets in P page(s)` lines every 30 minutes, all
+    day on Sept 23-24: in one 30 s window six reads each of KXBTC, KXBTCD, KXETH and KXETHD, each up to
+    seven pages of 1,000 markets. A fully settled day went back to History on every tape build; its
+    disk cache answered, and every row of every page was parsed again (`KalshiMarketData.
+    parse_market`), CPU under the GIL beside the tick. Measured on the real rows of those four series
+    (the owner's History cache): 0.26 s a KXETHD day, and about 58 s for a 14-day tape of the four,
+    the second build as slow as the first. A fully settled day is now held in memory after its first
+    read, only the fields the tape reads, in a least-recently-used memo bounded in rows."""
+
+    NOW = parse_time("2026-09-10T14:02:00Z")
+    SERIES = ["KXETHD", "KXMLBGAME", "KXMLBINNINGWIN"]
+
+    def setUp(self):
+        self.rows, self.candles = settled_days(self.NOW)
+        self.now = [self.NOW]
+
+    def kalshi(self, history=None, **kw):
+        history = history or FakeHistory(self.rows, self.candles)
+        return KalshiData(None, history, clock=lambda: self.now[0], **kw), history
+
+    def build(self, kalshi):
+        end = self.now[0] - 120
+        return kalshi.tape(self.SERIES, start=iso(end - 4 * DAY), end=iso(end))
+
+    @staticmethod
+    def day(date):
+        return int(parse_time(date + "T00:00:00Z"))
+
+    def test_a_second_tape_asks_history_for_no_settled_day(self):
+        kalshi, history = self.kalshi()
+        first = self.build(kalshi)
+        self.assertTrue(first["results"])
+        read = len(history.settled_calls)
+        self.assertEqual(read, 3 * 5, "four settled days and today's, for each series")
+        self.now[0] += 60  # the next agent's tape, a minute later, over a window a minute later
+        self.assertEqual(self.build(kalshi)["results"], first["results"])
+        self.assertEqual(history.settled_calls[read:], [], "a settled day is read once a process; today's is served for its ttl")
+
+    def test_a_tape_from_the_memo_is_the_tape_history_gives(self):
+        plain, every_time = self.kalshi()
+        plain.settled_memo_rows = 0  # no memo: every read is History's, as before
+        held, once = self.kalshi()
+        for _ in range(3):
+            self.assertEqual(held.tape(self.SERIES, start="2026-09-06T00:30:00Z", end="2026-09-10T13:00:00Z"),
+                             plain.tape(self.SERIES, start="2026-09-06T00:30:00Z", end="2026-09-10T13:00:00Z"))
+            self.assertEqual(self.build(held), self.build(plain))
+            self.now[0] += 60
+        self.assertEqual(once.candle_calls, every_time.candle_calls, "the same events, asked for over the same windows")
+        self.assertLess(len(once.settled_calls), len(every_time.settled_calls))
+        settled_day = {(name, lo) for name, lo, hi in every_time.settled_calls if hi == lo + DAY - 1 and hi <= self.NOW - 12 * 3600}
+        self.assertEqual(len([c for c in once.settled_calls if (c[0], c[1]) in settled_day]), len(settled_day), "each settled day once")
+
+    def test_the_memo_keeps_only_what_the_tape_reads_and_times_as_history_would_parse_them(self):
+        from league.tapes import SETTLED_FIELDS
+
+        kalshi, history = self.kalshi()
+        day = self.day("2026-09-07")
+        first = kalshi._settled_day("KXETHD", day)
+        again = kalshi._settled_day("KXETHD", day)
+        self.assertEqual(len(history.settled_calls), 1)
+        self.assertEqual(first, again)
+        self.assertIsNot(first[0], again[0], "each read gets rows of its own")
+        self.assertEqual({tuple(sorted(row)) for row in again}, {tuple(sorted(SETTLED_FIELDS))})
+        source = {row["ticker"]: row for row in history.kalshi_settled("KXETHD", start_ts=day, end_ts=day + DAY - 1)}
+        for row in again:
+            raw = source[row["ticker"]]
+            for field in ("close_time", "open_time", "settlement_ts", "expiration_time"):
+                try:
+                    expected = parse_time(raw.get(field))
+                except TapeError:
+                    expected = raw.get(field)  # a time the tape cannot read stays as it was, to fail the same way
+                self.assertEqual(row[field], expected, (row["ticker"], field))
+            for field in ("title", "result", "event_ticker", "floor_strike", "cap_strike", "can_close_early"):
+                self.assertEqual(row[field], raw.get(field))
+
+    def test_the_least_recently_used_day_leaves_first(self):
+        kalshi, history = self.kalshi()
+        days = [self.day(f"2026-09-0{d}") for d in (6, 7, 8)]
+        per_day = len(kalshi._settled_day("KXETHD", days[0]))
+        kalshi.settled_memo_rows = 2 * per_day
+        kalshi._settled_day("KXETHD", days[1])
+        kalshi._settled_day("KXETHD", days[2])  # the 6th leaves
+        read = len(history.settled_calls)
+        kalshi._settled_day("KXETHD", days[2])
+        kalshi._settled_day("KXETHD", days[1])
+        self.assertEqual(len(history.settled_calls), read)
+        kalshi._settled_day("KXETHD", days[0])  # read again, and the 8th, now the least recently used, leaves
+        kalshi._settled_day("KXETHD", days[1])
+        kalshi._settled_day("KXETHD", days[2])
+        self.assertEqual(history.settled_calls[read:], [("KXETHD", d, d + DAY - 1) for d in (days[0], days[2])])
+
+    def test_a_day_over_the_bound_is_not_held_and_no_memo_is_history_every_time(self):
+        kalshi, history = self.kalshi()
+        day = self.day("2026-09-08")
+        kalshi.settled_memo_rows = len(kalshi._settled_day("KXETHD", day)) - 1
+        kalshi._settled_day("KXETHD", self.day("2026-09-07"))
+        kalshi._settled_day("KXETHD", day)
+        self.assertEqual(len(history.settled_calls), 3)
+        kalshi.settled_memo_rows = 0
+        rows = kalshi._settled_day("KXETHD", self.day("2026-09-07"))
+        self.assertEqual(len(history.settled_calls), 4)
+        self.assertIn("volume", rows[0], "without the memo the rows are History's own")
+
+    def test_a_day_still_settling_keeps_its_ttl_and_is_held_once_it_has_settled(self):
+        kalshi, history = self.kalshi()
+        today = self.day("2026-09-10")
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls, [("KXETHD", today, today + DAY - 1)])
+        self.assertNotIn(("KXETHD", today), kalshi._settled_memo)
+        self.now[0] += 60
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(len(history.settled_calls), 1, "within settled_listing_ttl the settling day is served from memory")
+        self.now[0] += kalshi.settled_listing_ttl
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls[1][1], int(self.NOW - 12 * 3600), "then read from where it can still change")
+        self.now[0] = today + DAY - 1 + 12 * 3600  # the day has settled
+        kalshi._settled_day("KXETHD", today)
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls[2:], [("KXETHD", today, today + DAY - 1)])
+        self.assertNotIn(("KXETHD", today), kalshi._settling)
+        self.assertIn(("KXETHD", today), kalshi._settled_memo)
 
 
 if __name__ == "__main__":

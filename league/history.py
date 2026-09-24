@@ -531,6 +531,35 @@ class HistoryStore:
         return out
 
 
+def series_without_bars(store: HistoryStore, symbols: Sequence[str], timeframe: str, start: "str | date", end: "str | date",
+                        *, feed: str = "sip") -> list[str]:
+    """Why a tape of these symbols over [start, end) could not be replayed: one line for each
+    symbol whose stored bars a tape's steps are cut from (the execution series: 5-minute bars under
+    a daily signal, else the signal timeframe; crypto raw on `us`, an equity adjusted at 1Day and
+    1Hour and raw below) hold no bar in the window although the window was fetched. Empty when every
+    symbol has one. A range never fetched is a gap in THIS store and is left to `coverage_gaps`
+    (league/deep_replay.py), which falls back to the live tape; this is the other case, where the
+    venue answered and had nothing: the symbol did not trade yet.
+
+    Sept 24, 2026 (D1's root): the store held ADA/USD 15-minute bars only from 2026-02-01, and a
+    development tape of ADA/USD over 2025-09-12..2025-11-14 was built with no steps; the lab's step
+    then failed on it every minute for over two hours."""
+    execution = "5Min" if timeframe == "1Day" else timeframe
+    out = []
+    for symbol in symbols:
+        crypto = asset_class(symbol) == "crypto"
+        series_feed = "us" if crypto else feed
+        adjustment = "raw" if crypto or execution not in DUAL_ADJUSTED else "all"
+        cover = store.coverage(symbol, execution, start, end, feed=series_feed, adjustment=adjustment)
+        if cover["status"] == "unfetched" or cover["rows"]:
+            continue
+        first = store.first_bar(symbol, execution, feed=series_feed, adjustment=adjustment)
+        since = f"its first is {iso(first)[:10]}" if first is not None else "it holds none at all"
+        out.append(f"the history store holds no {symbol} {execution} bars in {cover['start']}..{cover['end']} ({since}): "
+                   "nothing was recorded in this window, so nothing can be replayed on it")
+    return out
+
+
 def _find_chunk(recorded: Mapping[tuple[str, str], Any], a: date, b: date) -> Any:
     """The record covering [a, b): the exact chunk, or the chunk grid's one that contains it."""
     row = recorded.get((str(a), str(b)))

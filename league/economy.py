@@ -60,6 +60,33 @@ def check_bounds(game: Mapping[str, Any]) -> None:
             raise ValueError(f"game.json: horizon.{key} = {value:g} is outside [{low}, {high}]")
     if int(economy["min_population"]) > int(economy["max_population"]):
         raise ValueError("game.json: min_population is above max_population")
+    # The Alpha Lab's dials the close-the-gaps plan bounds (Sept 24, 2026): `lab_bounds`, each checked
+    # where the lab section sets it (league/lab.py holds `reserved_share` to its bounds as it reads it).
+    lab = game.get("lab") or {}
+    for key, bound in (game.get("lab_bounds") or {}).items():
+        if str(key).startswith("_") or key not in lab:
+            continue
+        low, high = bound
+        value = float(lab[key])
+        if not float(low) <= value <= float(high):
+            raise ValueError(f"game.json: lab.{key} = {value:g} is outside [{low}, {high}]")
+    # Merton's dials (Sept 24, 2026): the scheduled hours `merton_bounds` bounds, and
+    # `paused_until_profit` any subset of the roles it lists.
+    merton, limits = game.get("merton") or {}, game.get("merton_bounds") or {}
+    for role, (low, high) in (limits.get("schedule_hours") or {}).items():
+        value = float((merton.get("schedule_hours") or {}).get(role, low))
+        if not float(low) <= value <= float(high):
+            raise ValueError(f"game.json: merton.schedule_hours.{role} = {value:g} is outside [{low}, {high}]")
+    allowed = set(limits.get("paused_until_profit") or ())
+    paused = merton.get("paused_until_profit") or []
+    if not isinstance(paused, list) or any(role not in allowed for role in paused):
+        raise ValueError(f"game.json: merton.paused_until_profit must be a subset of {sorted(allowed)}")
+    lock = ((game.get("research") or {}).get("gate") or {}).get("abstain_lock_profile")
+    if lock is not None:
+        from ltcm.provider import PROFILES
+
+        if lock not in PROFILES:
+            raise ValueError(f"game.json: research.gate.abstain_lock_profile {lock!r} is not a Sail profile ltcm/provider.py prices")
 
 
 def usd(value: Any) -> Decimal:

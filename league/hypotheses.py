@@ -74,7 +74,7 @@ from .constitution import CONSTITUTION
 from .ledger import now_iso
 from .seeds import SEEDS
 
-PROMPT_VERSION = "foundry-2026-09-23.4"
+PROMPT_VERSION = "foundry-2026-09-24.1"
 ROLE = "foundry"
 TASK_CALL = "hypothesis.foundry"
 TASK_EVALUATE = "hypothesis.evaluate"
@@ -133,6 +133,37 @@ DEFAULTS: dict[str, Any] = {
     # over `fast_lane_reopen_blocks` active blocks; the open fast desks are ranked by that yield.
     "fast_lane_min_blocks": 6,
     "fast_lane_reopen_blocks": 3,
+    # Sept 24, 2026 (E2 of the close-the-gaps run): desks that get no card, on any route, until a family there
+    # has a positive pooled forward record over `closed_reopen_blocks` active blocks (`_closed_desks`).
+    "closed_desks": [],
+    "closed_reopen_blocks": 3,
+    # The first transfer to try (E2): a family scaled on a fair value on its own desk, before any port to a
+    # desk where it never lived (`first_transfer`); {} is none. Its keys: family, desk, mechanism, feeds.
+    "first_transfer": {},
+}
+
+#: The recorders of Sept 24, 2026 (league/feeds.py) a card on each desk may name (E2 of the close-the-gaps
+#: run): weather ensembles, NWS forecasts and the forecast history for kalshi-weather; EDGAR 8-K acceptance
+#: times and the Nasdaq calendar for the megacaps and options (and the index ETFs, whose heaviest members
+#: report); SOFR and par yields for the rates series of the open Kalshi desk; ESPN odds and scoreboards for
+#: sports; DVOL, settled funding, open interest and the perps snapshot for crypto; TSA volumes for the
+#: attention desk; the owner's keyed feeds (EIA) where they apply. The packet shows only those the House
+#: records (`Foundry._recorded_feeds`).
+DESK_FEEDS: dict[str, tuple[str, ...]] = {
+    "kalshi-weather": ("weather", "nws", "forecast"),
+    "alpaca-megacaps": ("earnings", "earnings_date"),
+    "alpaca-options": ("earnings", "earnings_date"),
+    "alpaca-index-etfs": ("earnings", "earnings_date", "rates", "treasury"),
+    "alpaca-crypto-majors": ("vol", "funding", "oi", "perps"),
+    "alpaca-crypto-alts": ("funding", "oi", "perps"),
+    "kalshi-crypto-strikes": ("vol", "funding", "oi", "perps"),
+    "kalshi-crypto-15m": ("vol", "funding", "oi", "perps"),
+    "kalshi-sports": ("odds", "sports"),
+    "kalshi-sports-props": ("odds", "sports"),
+    "kalshi-open": ("rates", "treasury", "weather", "forecast", "tsa", "eia"),
+    "alpaca-open": ("earnings", "earnings_date", "vol", "funding", "oi", "perps", "rates", "treasury"),
+    "kalshi-prices": ("eia",),
+    "kalshi-attention": ("tsa",),
 }
 
 #: The bounded routes of `allocate`, in the order they are offered a call; `evidence` takes the rest.
@@ -167,9 +198,12 @@ REPLAY_VIEW = {
     "kalshi": "markets: the rows the contract lists, with hours_to_close; watched symbols arrive as observed.bars only",
     # Sept 23, 2026: two point-in-time histories a replay can use at once (league/feeds.py).
     "feeds": "only when NEEDS['feeds'] declares them: ctx['feeds'][feed][key], the latest row whose t is at or before the step. "
-             "vol (Deribit DVOL for BTC and ETH, hourly candles stamped at their close) and funding (OKX settled funding per "
-             "coin, stamped at settlement) are backfilled over the replay window, so they are replayable now; sports and perps "
-             "are recorded live only. A key may be absent: use it only when present",
+             "Backfilled over the replay window, so replayable now: vol (Deribit DVOL for BTC and ETH, hourly candles stamped at "
+             "their close), funding (OKX settled funding per coin, stamped at settlement), oi (OKX hourly open interest, stamped "
+             "at the hour's end), forecast (Open-Meteo GFS and ECMWF daily high, low and rain at 1-3 days' lead per settlement "
+             "station, stamped 11:00 local standard time) and earnings (each 8-K Item 2.02's EDGAR acceptance time). Recorded "
+             "live only, from when recording began: sports, perps, weather (ensembles), nws, earnings_date, rates, treasury, "
+             "odds and tsa. A key may be absent: use it only when present",
     "absent_in_replay": ["quotes[...].t", "recent_order_outcomes", "event_risk"],
     "rule": "Code that REQUIRES a field replay does not supply never trades on replay and cannot pass. Use such fields only when present.",
 }
@@ -193,6 +227,18 @@ Rules.
   outside the desk is refused before it runs.
 - Use only data that exists (`data`). Never assume an input listed in `data.not_supplied`. Watched
   inputs (NEEDS.observe) only where `data` says replay supplies them.
+- MODEL VERSUS MARKET. Every card is a model of fair value against the market's price: compute what the
+  contract or the stock is worth from data the House records -- `data.recorded_feeds` lists the feeds this
+  desk may read (weather ensembles and NWS forecasts, 8-K earnings times, SOFR and par yields, ESPN odds,
+  DVOL and funding ...), with how to declare each in NEEDS["feeds"] and whether a replay can judge it now
+  -- and trade only where the model and the price disagree by more than the fee and the spread. Name every
+  feed it reads in `data`, as `data.recorded_feeds` names it.
+- State the FEE each trade pays (`fee`, from `fees`: taker or maker, per side and per round trip) and the
+  EDGE IT NEEDS to clear it (`edge_needed`: how far the model must be from the price, per trade, to pay that
+  fee and the spread). A card that does not state both is refused before its replay.
+- `forward_on_this_desk` carries each family's measured CAPACITY (markets it bids a day, its fill rate at its
+  size, dollars a day at its edge): a family `at_capacity` already fills the markets it bids at the size it
+  trades, so a card that only repeats it there adds nothing. Write for markets it does not fill.
 - Read `failed_on_this_desk` and `retired_on_this_desk`. Do not resubmit a failed or retired mechanism
   unless `mechanism` names the specific reason it failed and why yours is different in kind.
 - Model the fees in `fees` explicitly, and state `edge_after_costs` with the arithmetic. On Alpaca
@@ -226,6 +272,9 @@ Rules.
   horizons. They share its reason for the edge, so make each a distinct expression of it (other
   markets, timing, entry or exit), and each is still a falsifiable card with its own `rejection` test;
   say in `mechanism` what carries over and what might not. You see its mechanism in words, never code.
+  A `transfer` marked `scale` keeps the family on its own desk and widens it: follow `transfer.ask` (a fair
+  value from the named feeds, priced on every market of the desk it can reach, bid where the model clears
+  the ask and the fee).
 - It must TRADE on the replay tape: `replay_gate` needs at least min_trades closed trades and
   min_blocks blocks within `replay_window`, out-of-sample growth above min_oos_growth a block (zero
   when it is not stated), and a deflated Sharpe at least min_deflated_sharpe. A program that never
@@ -251,6 +300,8 @@ Answer with ONE JSON object and nothing else:
                  "mechanism": "why the edge exists and who pays it",
                  "data": ["each input it requires, as NEEDS names it"],
                  "edge_after_costs": "expected edge per trade after fees and spread, with the arithmetic",
+                 "fee": "the fee each trade pays, from `fees`",
+                 "edge_needed": "how far the model must be from the price, per trade, to clear that fee and the spread",
                  "horizon": "how long a position is held, and the block it is judged on",
                  "rejection": "what evidence would reject it",
                  "code": "the WHOLE strategy file"}]}"""
@@ -885,7 +936,7 @@ class Foundry:
         return any(card.get("niche") in scores and self._seat_available(scores[card["niche"]], weakest) for card in waiting)
 
     def _allocate(self) -> tuple[DeskScore, str, str] | None:
-        blocked = self._blocked_desks()
+        blocked = self._blocked_desks() | set(self._closed_desks())
         # A desk that already has a replay-passing card waiting gets no more cards until it is seated,
         # nor (when cards may queue for replay) one whose last cards are still awaiting replay.
         waiting = {card.get("niche") for card in self.inventory()}
@@ -906,9 +957,14 @@ class Foundry:
 
         best = desks[0]
         if due("transfer"):
-            picked = self._transfer_pick(desks)
+            picked = self._first_transfer_pick(desks) or self._transfer_pick(desks)
             if picked is not None:
                 source, pick = picked
+                if source.get("scale"):
+                    return pick, "transfer", (
+                        f"transfer share: {taken['transfer']} of the last {len(window)} calls ported a proven mechanism; "
+                        f"the first transfer to try scales {source['family']} on {pick.niche} on a fair value "
+                        f"({', '.join(source.get('feeds') or []) or 'the recorded feeds'}): {str(source.get('ask') or '')[:200]}")
                 return pick, "transfer", (
                     f"transfer share: {taken['transfer']} of the last {len(window)} calls ported a proven mechanism; "
                     f"{source['family']} earns forward on {source['desk']} ({source['earning']} of {source['members']} "
@@ -1002,9 +1058,97 @@ class Foundry:
         niche = self.house.niches.get(niche_id)
         if niche is None:
             return None
+        first = self._first_transfer()
+        if first is not None and first["desk"] == niche_id:
+            return first
         tried = self._tried()
         return next((source for source in self.forward_families()
                      if source["venue"] == niche.venue and niche_id not in tried.get(source["family"], set())), None)
+
+    def _first_transfer_pick(self, desks: Sequence[DeskScore]) -> tuple[dict[str, Any], DeskScore] | None:
+        """(source, desk) for `first_transfer` while it is due and its desk can take a newcomer."""
+        first = self._first_transfer()
+        if first is None:
+            return None
+        pick = next((d for d in desks if d.niche == first["desk"]), None)
+        return (first, pick) if pick is not None else None
+
+    def _first_transfer(self) -> dict[str, Any] | None:
+        """`first_transfer` as a transfer source (E2 of the close-the-gaps run, Sept 24, 2026), until a call
+        for it has returned: the family, on its own desk, `scale`d onto a fair value from the named feeds.
+
+        The plan's first transfer: the weather favourites (resting bids on 0.90-0.97 daily weather
+        favourites, the one family with real profit at T0: about $1.41 a day on its real seats, about $7.81
+        a day at its measured capacity of 26.5 markets bid a day) bid a band of a few series; priced on the
+        ensemble's fair value it can bid every Kalshi weather series (highs, lows, rain) wherever the model
+        clears the ask and the fee. Its forward record comes from `forward_families` when it earns now, else
+        from its members as the registry holds them (the family ledger, not an agent's luck, proves it)."""
+        config = self.settings.get("first_transfer") or {}
+        family, desk = str(config.get("family") or ""), str(config.get("desk") or "")
+        niche = self.house.niches.get(desk)
+        if not family or niche is None:
+            return None
+        for call in self.calls():
+            ported = (call.get("allocation") or {}).get("transfer") or {}
+            if ported.get("scale") and ported.get("family") == family and ported.get("desk") == desk and not call.get("error"):
+                return None
+        row = next((dict(r) for r in self.forward_families() if r["family"] == family and r["desk"] == desk), None)
+        if row is None:
+            members = sorted((a for a in list(self.house.registry.agents.values()) if a.family == family and a.specialty == desk),
+                             key=lambda a: (not a.alive, a.id))
+            if not members:
+                return None
+            words, origin = self._mechanism(members[0])
+            rungs = sorted((self.house.evaluator.rung(a.id) for a in members if a.alive), reverse=True)
+            row = {"family": family, "desk": desk, "venue": niche.venue, "horizon": members[0].horizon, "members": len(members),
+                   "rungs": rungs, "with_a_record": 0, "earning": 0, "agents": [a.id for a in members][:4],
+                   "best_rung": rungs[0] if rungs else 0, "real_money": any(r >= 2 for r in rungs), "record_on": "no earned record now",
+                   "observations": 0, "growth_per_block": 0.0, "mechanism": words, "mechanism_from": origin}
+        return {**row, "scale": True, "ask": str(config.get("mechanism") or ""), "feeds": [str(f) for f in config.get("feeds") or []]}
+
+    def _closed_desks(self) -> dict[str, str]:
+        """Desks that get no card on any route (E2 of the close-the-gaps run, Sept 24, 2026), with why: each of
+        `closed_desks` until a family there -- of any agent that lived on the desk -- shows a positive pooled
+        forward record over `closed_reopen_blocks` active blocks ON THAT DESK (`_closed_desk_forward`). Measured
+        at T0: every kalshi-crypto-15m family negative on its pooled record (crypto-15m-favorites n 106, bound
+        -0.0064), and kalshi-crypto-strikes -10.3% an active block, 2 replay passes in 40 births."""
+        closed = [str(d) for d in (self.settings.get("closed_desks") or [])]
+        if not closed:
+            return {}
+        need = max(1, int(self.settings.get("closed_reopen_blocks") or 3))
+        try:
+            forward = self._closed_desk_forward(closed)
+        except Exception:  # noqa: BLE001 - an unreadable record reopens nothing
+            forward = {}
+        out = {}
+        for desk in closed:
+            if not any(blocks >= need and growth > 0 for blocks, growth in (forward.get(desk) or {}).values()):
+                out[desk] = f"no family on {desk} has a positive forward record over {need} active blocks there"
+        return out
+
+    def _closed_desk_forward(self, desks: Sequence[str]) -> dict[str, dict[str, tuple[int, float]]]:
+        """Desk -> family -> (its distinct active forward blocks on that desk, their summed log growth), from the
+        `eval.block` rows of the family's members that lived on the desk, living or dead: one block a block key,
+        however many members were active in it.
+
+        The review of #262 (Sept 24, 2026): read from `House.family_forward`, which pools a family over every desk
+        it lives on and counts each member's block, a closed desk reopened on a family's record elsewhere
+        (kalshi-favorites lives on kalshi-crypto-strikes and kalshi-weather) or on one hour of siblings (three
+        members of one family, active in the same hour, were three blocks: huang-hd8ff7c-3, -4 and -5 at
+        2026-09-24T04 on the T4 snapshot)."""
+        ledger = self.house.ledger
+        rows: dict[str, dict[str, list[Any]]] = {}
+        for agent in list(self.house.registry.agents.values()):
+            if agent.specialty not in desks or not agent.family:
+                continue
+            row = rows.setdefault(agent.specialty, {}).setdefault(agent.family, [set(), 0.0])
+            for entry in ledger.iter(kinds="eval.block", agent=agent.id):
+                p = entry.payload
+                if not p.get("active"):
+                    continue
+                row[0].add(str(p.get("key") or entry.id))  # a row with no block key is a block of its own
+                row[1] += float(p.get("log_growth") or 0.0)
+        return {desk: {family: (len(keys), growth) for family, (keys, growth) in families.items()} for desk, families in rows.items()}
 
     def _blocked_desks(self) -> set[str]:
         """Desks with an open foundry repair report: no more cards until it is verified."""
@@ -1222,6 +1366,15 @@ class Foundry:
             "ask": ("Write at least half of the batch as adaptations of this mechanism to this desk's markets, data, fees and "
                     "horizons, each a distinct expression of it and a falsifiable card with its own rejection test."),
         }}
+        if transfer is not None and transfer.get("scale"):
+            # The first transfer to try (E2, Sept 24, 2026): the family widened on its own desk by a fair value.
+            ported["transfer"].pop("never_tried_here")
+            ported["transfer"].update(
+                scale=True, feeds=list(transfer.get("feeds") or []),
+                on_this_desk=f"{transfer['family']} trades here now, on the few markets its own band reaches",
+                ask=(f"{transfer.get('ask') or 'Price every market of this desk it can reach from a fair value.'} Write at least half "
+                     "of the batch as such cards, each a distinct model (other series, other data, other thresholds), each a "
+                     "falsifiable card with its own rejection test, its fee and the edge it needs to clear it."))
         return {
             **ported,
             "batch": {"candidates": max(3, min(int(self.settings["candidates"]), 4)), "prompt_version": PROMPT_VERSION},
@@ -1231,7 +1384,8 @@ class Foundry:
             "data": {"replay": (capabilities.get("replay") if isinstance(capabilities, dict) else None),
                      "observations": (capabilities.get("observations") if isinstance(capabilities, dict) else None),
                      "not_supplied": ((capabilities.get("observations") or {}).get("not_supplied") if isinstance(capabilities, dict) else None),
-                     "recorded_coverage": coverage},
+                     "recorded_coverage": coverage,
+                     "recorded_feeds": self._recorded_feeds(niche)},
             "fees": {"kalshi_taker": "0.07 x contracts x price x (1 - price) per order: 1.75 cents a contract at 50c, 0.63 cents at 90c",
                      "kalshi_maker": ("nothing, except on the series in desk.maker_fee_series, which pay a quarter of the taker "
                                       "rate: 0.0175 x contracts x price x (1 - price)"),
@@ -1288,7 +1442,79 @@ class Foundry:
                 row["earning"] += s.score_growth > 0
                 best = row["best_growth_per_block"]
                 row["best_growth_per_block"] = round(s.score_growth, 6) if best is None else max(best, round(s.score_growth, 6))
+        niche = house.niches.get(niche_id)
+        for row in rows.values():
+            capacity = self._capacity(row["family"], niche.venue) if niche is not None else None
+            if capacity is not None:
+                row["capacity"] = capacity
         return sorted(rows.values(), key=lambda r: (-r["earning"], -r["with_a_record"], r["family"]))[:12]
+
+    def _family_record(self, family: str, venue: str) -> Mapping[str, Any] | None:
+        """The family ledger's record of a family (`Allocator.family`, league/families.py), or None."""
+        reader = getattr(getattr(self.house, "allocator", None), "family", None)
+        if reader is None or not family:
+            return None
+        try:
+            record = reader(family, venue)
+        except Exception:  # noqa: BLE001 - `Allocator.family` never raises; a record that cannot be read says nothing
+            return None
+        return record if isinstance(record, Mapping) else None
+
+    def _capacity(self, family: str, venue: str) -> dict[str, Any] | None:
+        """A family's measured capacity as the family ledger holds it (E3 of the close-the-gaps run, Sept 24,
+        2026; `families.capacity`, never measured again here) and whether it is at it (`lab.family_at_capacity`),
+        for the packet: a card on a family at its capacity adds nothing on the markets it already fills."""
+        from .families import swing_rule
+        from .lab import family_at_capacity
+
+        record = self._family_record(family, venue)
+        if record is None:
+            return None
+        cap = record.get("capacity") if isinstance(record.get("capacity"), Mapping) else {}
+
+        def number(value: Any, digits: int) -> float | None:
+            try:
+                return None if value is None else round(float(value), digits)
+            except (TypeError, ValueError):
+                return None
+
+        return {"state": record.get("state"), "usd_per_day": number(cap.get("usd_per_day"), 4),
+                "markets_per_day": number(cap.get("markets_per_day"), 3), "fill_rate_at_size": number(cap.get("fill_rate_at_size"), 4),
+                "size_usd": number(cap.get("size_usd"), 2), "at_capacity": family_at_capacity(record, swing_rule())}
+
+    def _at_capacity(self, agent: Agent) -> bool:
+        """Whether the agent's family is at its measured capacity (`_capacity`)."""
+        return bool((self._capacity(agent.family, agent.venue) or {}).get("at_capacity"))
+
+    def _recorded_feeds(self, niche: Any) -> list[dict[str, Any]]:
+        """The recorded feeds a card on this desk may read (`DESK_FEEDS`, the recorders of Deploy B: E2 of the
+        close-the-gaps run, Sept 24, 2026), each with what it is, how to declare and read it, whether a replay
+        can judge it now (point-in-time history) or only once its window has been recorded (a live feed), and,
+        where the House records, since when and for which keys. A keyed feed whose key the owner has not placed
+        says it is waiting."""
+        from . import feeds as feeds_module
+
+        recorder = getattr(self.house, "feeds", None)
+        try:
+            described = recorder.describe() if recorder is not None else {}
+        except Exception:  # noqa: BLE001 - the list still says what may be declared
+            described = {}
+        examples = {"sports": "nfl", "perps": "BTC", "vol": "BTC", "funding": "BTC"}
+        out = []
+        for name in DESK_FEEDS.get(niche.id, ()):
+            if name not in feeds_module.FEEDS:
+                continue
+            source = feeds_module.RECORDERS.get(name)
+            example = (source.example if source is not None else "") or examples.get(name, "KEY")
+            row = described.get(name) or {}
+            history = name in feeds_module.HISTORY_FEEDS
+            out.append({"feed": name, "what": str(getattr(source, "what", "") or feeds_module.WHAT.get(name) or "")[:240],
+                        "declare": f"NEEDS['feeds'] = {{'{name}': ['{example}']}}", "read": f"ctx['feeds']['{name}'][key]",
+                        "replay": ("point-in-time history, backfilled: a replay can judge a strategy that reads it now" if history
+                                   else "recorded live from when recording began: a replay accepts it once its window is recorded"),
+                        **{k: row[k] for k in ("recording_since", "backfilled_since", "replayable_now", "waiting") if row.get(k) is not None},
+                        **({"recording": list(row.get("recording") or [])[:12]} if row else {})})
+        return out
 
     def _coverage(self, niche: Any) -> dict[str, Any] | None:
         """What the newest `data.coverage` row (the history ingestion) says it holds for this desk's
@@ -1296,7 +1522,14 @@ class Foundry:
         # The history ingestion's rows only: the options store's carry `asset: "option"`, and the live
         # feeds write one `asset: "feed"` row a feed every hour (league/feeds.py), which would otherwise
         # always be the newest and hide the store this summarises.
-        rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=500, newest=True) if "asset" not in row.payload]
+        # Sept 24, 2026 (the close-the-gaps run's recorders): eleven more feeds write about 264 rows a
+        # day, so the newest 500 rows stopped reaching back to the ingestion's row within a day and the
+        # packet lost its coverage section. Look further back, a widening window at a time.
+        rows = []
+        for limit in (500, 5000, 50000):
+            rows = [row for row in self.house.ledger.read(kinds="data.coverage", limit=limit, newest=True) if "asset" not in row.payload]
+            if rows:
+                break
         if not rows:
             return None
         latest = rows[-1].payload
@@ -1322,7 +1555,8 @@ class Foundry:
         inputs = hashlib.sha256((system + "\n" + user).encode("utf-8")).hexdigest()
         call = f"foundry:{inputs[:12]}:{int(self._now())}"
         allocation: dict[str, Any] = {"desk": niche_id, "route": route, "reason": reason[:500]}
-        ported = {"family": source["family"], "desk": source["desk"]} if source is not None else None
+        ported = ({"family": source["family"], "desk": source["desk"], **({"scale": True} if source.get("scale") else {})}
+                  if source is not None else None)
         if route == "transfer":
             allocation["transfer"] = ported  # what `_tried` reads: this family has now been tried on this desk
         answer = None
@@ -1376,6 +1610,9 @@ class Foundry:
         code = str(raw.get("code") or "")
         if not mechanism or not code.strip():
             return None, "a candidate without a mechanism or code"
+        # E2 (Sept 24, 2026): every card states the fee it pays and the edge it needs to clear it.
+        if not str(raw.get("fee") or "").strip() or not str(raw.get("edge_needed") or "").strip():
+            return None, "a candidate that does not state the fee it pays and the edge it needs to clear it"
         ident = card_id(mechanism, niche_id)
         if ident in known:
             return None, f"{ident}: this exact mechanism already has a card on this desk"
@@ -1393,6 +1630,7 @@ class Foundry:
             "id": ident, "mechanism": mechanism[:2000], "data": [str(x)[:120] for x in (raw.get("data") or [])][:12]
             if isinstance(raw.get("data"), list) else [str(raw.get("data") or "")[:400]],
             "edge_after_costs": str(raw.get("edge_after_costs") or "")[:800], "horizon": str(raw.get("horizon") or "")[:300],
+            "fee": str(raw.get("fee") or "")[:300], "edge_needed": str(raw.get("edge_needed") or "")[:300],
             "rejection": str(raw.get("rejection") or "")[:800], "niche": niche_id, "venue": niche.venue,
             "author": "merton", "lineage": [line], "parent_card": None, "created_for": call,
             "name": name, "line_id": line, "family": family, "created_epoch": self._now(),
@@ -1663,6 +1901,8 @@ class Foundry:
                 continue  # an exhausted mechanism is not bred, however well one of its members trades
             if house._losing_family(agent.family):
                 continue  # one earning member does not outvote the family's pooled forward record
+            if self._at_capacity(agent):
+                continue  # E3 (Sept 24, 2026): a family at its measured capacity gets no more search there
             niche = house.niche_of(agent)
             if niche is None or niche.dormant or room.get(niche.id, 0) <= 0:
                 continue

@@ -16,7 +16,8 @@ NEEDS = {
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
-                                  # woken a few seconds after the regular open when its next wake would land later)
+                                  # woken a few seconds after the regular open when its next wake would land later,
+                                  # and is not woken at all while the regular session is shut)
 }
 PARAMS = {"lookback": 24, "z_entry": 2.0}          # defaults; a mutation changes these first
 
@@ -115,23 +116,73 @@ close-the-gaps run). A family is proven (`allocator.family_proven`) when its poo
 every member ever born into it, living or dead; one observation per independent event any member
 closed on practice or real money (per closed trade at Alpaca, a practice trade there less the practice
 haircut your E pays), practice at weight 0.5 and real at 1, members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
-lower bound (Student's t) on its mean log growth above zero; a lopsided record (80% or more of its
+lower bound (Student's t) on its mean above zero; a lopsided record (80% or more of its
 observations winning, as favourites win) must also clear the House's exact loss-rate test at 80%
-(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. An agent of a proven family is seated
+(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. Since Deploy B (Sept 24,
+2026, `family_proven.unit: "at_risk"`) an event is measured by what it made per dollar its positions
+put at risk (ln(1 + 1% x r) / 1%, r never below -1: a contract that expires worthless counts -1.005,
+never an account's ruin), and weighs what it put at risk against its member's usual size on that book, so
+a practice event and a real one of the same bet count alike, scaling every bet up or down proves nothing
+faster, and a large losing bet counts for its dollars (the record is what the events made over what they
+put at risk); `"account"` restores the member's account growth. An agent of a proven family is seated
 as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
 ($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
 and a bunt a probe after the bound falls to zero or below; the stake moves toward the new target by
 free cash only, never by a forced sale. `research_context.qualification_policy.allocator.your_family`
-shows your family's state, bound and count. On Kalshi, closed trades and settlements count ONCE PER
+shows your family's state ("unproven", "proven" or "swing"), bound, count, capacity and what set a
+swing's stake. A family is the mechanism: every lab graduate (a lab nudge of a member's parameters
+included) and every foundry card is born into a family of its own; research children stay in their
+parent's family whatever they change, and its maker and taker entries are pooled apart. On Kalshi, closed trades and settlements count ONCE PER
 EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
 strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
+
+NO PROBE ON A LOSING FAMILY (since Sept 24, 2026, `allocator.family_probe`). Your family's forward
+record is the active blocks of every member ever born, living or dead, and their summed log growth (the
+line on which the House stops breeding a family). When it is at or below zero after 6 active blocks, the
+family is LOSING: no probe is seated from it (your promotion waits with the stage `family_losing` and the
+family's numbers), and a probe seated on it goes back to practice at the next pass. On Kalshi that
+demotion sells nothing (a contract is held to settlement); on Alpaca, where the demotion would sell what
+the account holds (an option at the bid, a stock at the next open), your working bids are cancelled first
+and a probe keeps its seat until it holds nothing the demotion would sell (dust is booked, not sold) --
+your own exits go on, nothing is sold for you, and you are lent nothing more. A probe that goes back to
+practice from real money for ANY reason (hysteresis, the stay drawdown, displacement, drift, an audit's
+veto, this rule) HOLDS its family until the family's forward record SINCE that demotion turns: positive
+over 6 active blocks (stage `family_held`, with when the hold began). A turn is for good, and each such
+demotion is its own hold. A newcomer never displaces a probe of its
+own family (that would hold the family, and it, at once). A proven or swinging family's members are
+bunts and are never held. Measured on Sept 24, 2026: 11 of the allocator's 21 promotions since Sept 23
+went onto losing families and lost $8.12 on 22 closes, no stay ending positive; the other 10 made $28.96.
+
+THE FAMILY SWING (since Deploy B, Sept 24, 2026, `allocator.family_swing`). Only a PROVEN family
+swings (its pooled record: a real record alone neither proves nor swings a family). Its entry is judged
+when its REAL record reaches 15 independent settlements and at every 5 more (15, 20, 25, ...), on those
+first settlements, with the honest lower bound at 90% above zero (the t bound, and the loss-rate bound
+for a favourites record); a look that fails waits for the next one. When a look passes and the frontier
+auditor approves the entry on that record (the family packet: every member's real closes, event by
+event, the look, with the stake it would take), every member on real money is staked at the family's
+ramp: twice `bunt_usd` ($60 on Kalshi) when the family enters, doubled after every 10 further WINNING
+independent real settlements while the whole real record's honest bound at 80% stays above zero (read
+at every pass), up to full Kelly on that bound against the venue's capital (capital
+at risk on one event: the stake is that over the 25% of it one Kalshi event may hold) and 60% of the
+venue (both the FAMILY's, shared by its members on real money, a member seated in the same pass
+included from its first dollar), held where the family's fill
+rate at the bigger size is under half its fill rate at the smaller one ("capacity" on the board), and
+never under the bunt. The envelope's headroom bounds every raise. A bound at zero or below returns the
+members to bunts (to probes if the pooled proof has gone too), by free cash only, and so does a live
+grant that stops releasing stakes above the bunt (its rung 3). Leaving the swing lapses the family's
+approval, and so does a new program taken by any member, or a member born into the family (a research
+child), after the audit looked: the next entry is audited again, while a swing already running is untouched. The family's audit is the family's: it is never read as the verdict on
+the member it was written against, whose own promotions are audited as before. A swinging member's positions are the same
+share of its stake, and the book holds it to its daily-loss rule as it holds every swing.
 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
 its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
 Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
-rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. Only a
-PROVEN family's member swings (since Sept 24, 2026): a probe stays a probe until its family is proven,
-and a swing whose family stops being proven drops back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue (never
+less than the family swing's stake when your family swings). Only a PROVEN (or swinging) family's member
+takes this agent-level swing (since Sept 24, 2026; `allocator.swing_requires_proven_family` since Deploy
+B): a probe stays a probe until its family is proven, and a swing whose family stops being proven drops
+back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
 where it started is never refilled. A bunt that was LENT less than today's base -- seated before the
 base was raised, or halved while the floor throttle was on -- is lent up to it once, net of everything
 it has been lent: seated at $10 under a $30 base it gets up to $20 more; lent the base and down to $27
@@ -146,7 +197,7 @@ since Sept 24, 2026: settled events on Kalshi, closed trades at Alpaca). Before 
 no demotion by the exit line, though the stay drawdown and drift (the evaluator's watch on an edge that
 falls far below the record that earned the seat) still apply; the bunt line in your standing says
 `exit_line_applies_after_real_settlements` and `real_settlements_this_stay`. A swing keeps the
-book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
+book's 10% rule -- a swinging family's member on rung 2 too -- and so does every practice book. The real book's daily halt (`allocator.real_halt`)
 is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
 risk-reducing orders go through on that venue until the next day. Both lines read the day from your
 opening equity at the first check of the UTC day, and since Sept 23, 2026 that opening survives a
@@ -274,7 +325,7 @@ a zero: a replay of a strategy that asks for features of a symbol the House has 
 refused as unsupported input (not a trial), and the House's daily options job backfills the
 symbols living strategies ask for.
 
-### Feeds: sports scoreboards, perpetual funding, implied vol and settled funding (`NEEDS["feeds"]`)
+### Feeds: scoreboards, perps, implied vol, funding, weather, earnings, rates, odds and more (`NEEDS["feeds"]`)
 
 ```python
 NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"],   # recorded live
@@ -369,6 +420,71 @@ whether a replay may use it yet, and for a backfilled key the endpoint it came f
 strategy that declares feeds is replayed on the recent live tape, never on the development window
 of the history store.
 
+#### The feeds added on Sept 24, 2026
+
+Declared and read exactly like the four above (known keys only, at most six a feed; a key the House
+does not record is absent, never zero). A **live** feed's `t` is when the House received the row and
+it is never backfilled; a **history** feed's `t` is when the value became final by the source's own
+record, and it is backfilled over the replay window, so a strategy that declares only history feeds
+is replayed at once. Weather keys are the settlement station a Kalshi series names: `KXHIGHNY`,
+`KXLOWTNYC`, `nyc` and `KNYC` all mean `KNYC` (twenty stations: `ltcm/data/weather.py`).
+
+```python
+NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGHNY"],   # weather
+                  "earnings": ["AAPL"], "earnings_date": ["AAPL"],                        # earnings
+                  "rates": ["SOFR"], "treasury": ["10Y"], "odds": ["nfl"], "tsa": ["checkpoint"],
+                  "oi": ["BTC"]}
+```
+
+- **weather** (live; Open-Meteo's GFS and ECMWF ensembles): `dates[day]` for the next three whole
+  NWS climate days -- midnight to midnight local STANDARD time, the day the CLI report and every
+  Kalshi high, low and rain market settle on (in summer an hour off the local clock) -- each with
+  `high`, `low` (F) and `precip_in` as `{members, mean, sd, p10, p50, p90, min, max, n}`: one value
+  per ensemble member (82 when both models answer). `runs[model]` = `{model, init, available,
+  modified}`: when the forecast run began and when Open-Meteo had it (the forecast's issue time).
+  Members are hourly samples at the nearest model cell and run a little cool of a station's
+  maximum: calibrate before you price. A new row only when a newer model run exists.
+- **nws** (live; api.weather.gov): the National Weather Service's own forecast for the station as
+  issued: `issued` (its update time, never after `t`), `periods` (the 12-hour periods: `name`,
+  `start`, `end`, `daytime`, `temperature` F -- a daytime period's is the NWS high, a night's the
+  low -- `pop` %, `short`) and `days` (`date`, `hourly_max`, `hourly_min`, `hours`, `pop_max` of the
+  hourly forecast over each climate day; `hours` < 24 where it does not cover the day whole).
+- **forecast** (history; Open-Meteo's archive of GFS and ECMWF IFS): one row a station a day,
+  `t` 11:00 local standard time, with `dates[day]` = `{lead_days, models: {gfs_seamless: {high,
+  low, precip_in}, ecmwf_ifs025: {...}}}` for today at one day's lead, tomorrow at two and the day
+  after at three. Every value in a row was predicted by 23:00 the evening before (`issued_by`);
+  `t` adds a 12-hour allowance for the run to be published. Nothing a model published after the
+  hour it forecast (its day-0 output) is ever in it. Replayable at once.
+- **earnings** (history; EDGAR): the stock's newest earnings announcement -- the 8-K reporting Item
+  2.02 -- with `t` its acceptance time (the moment it was public; the company's press release can
+  come minutes earlier), `form`, `accession`, `filed`, `accepted`, `items`, `url`, and `previous`:
+  the acceptance times of the four before it. Keys: the megacap and options desks' stocks (funds
+  have none; VALE files 6-Ks, which are not recorded). Replayable at once.
+- **earnings_date** (live; Nasdaq): the next announcement Nasdaq shows: `date`, `estimated` (True
+  when it is Zacks' estimate from past dates, not the company's), `time` (`after_close`,
+  `before_open` or None), `eps_forecast`, `analysts`, `last_year_eps`. A moved date is a new row.
+- **rates** (live; New York Fed): `SOFR`, `EFFR`, `OBFR`, `TGCR`, `BGCR` -- `effective_date` (the
+  business day the rate applies to, published the next), `rate` %, `p1`, `p25`, `p75`, `p99`,
+  `volume_bn`, `revised`. **treasury** (live; the Treasury's par curve): `1M`, `6W`, `2M`, `3M`,
+  `4M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `7Y`, `10Y`, `20Y`, `30Y` -- `date`, `yield` %.
+- **odds** (live; ESPN's core API; league keys as for `sports`): each game on the league's
+  recorded board that has not started and starts within 36 hours: `id`, `name`, `start`, `home`,
+  `away`, `lines` (every provider: `details`, `spread` signed from the home side, `over_under`,
+  `home_ml`, `away_ml`, `implied_home` with the book's margin taken out, `open` prices) and
+  `win_probability` (ESPN's predictor, football and basketball only, else None).
+- **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
+  newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
+  House (a bot check) since Sept 24, 2026, so it has no row.
+- **oi** (history; OKX): the coin's open interest in its USDT perpetual for the newest COMPLETED
+  hour, `t` the hour's end (the running hour moves, so it is never shown): `oi_usd`, `oi_coin`,
+  `oi_contracts`, `hours`, `change_24h_pct`. Replayable at once.
+- **eia** (WTI, BRENT, GASOLINE, DIESEL) and **consensus** (sportsbooks' consensus win
+  probability per league) wait for the owner's keys: until `runtime_status` shows them recording,
+  they have no rows.
+
+`runtime_status` (`observations.feeds`) says for each feed its host, what is recorded and since
+when, and for a waiting one what it waits for; `replay_coverage` says whether a replay may use it.
+
 ## What you may watch but not trade
 
 `NEEDS["observe"] = {"symbols": ["BTC/USD"], "series": ["KXBTCD"]}` (up to six of each) asks the
@@ -395,6 +511,25 @@ scheduled end, whatever later close it lists); a weather market stops trading th
 it is paid. **The horizon rule:** the House refuses a Kalshi entry expected to pay more than 12
 hours out for an `hour` strategy or 48 for a `day` strategy, and closes any crypto position held
 longer than 48 hours. Equities are not bounded. Exits are never refused.
+
+"Expected to pay" is the market's SCHEDULED expiration where Kalshi gives one, and its close where
+it does not; never the deprecated latest date the market may expire (Sept 24, 2026). Kalshi gives
+one for every market seen, but for many series it is a DEADLINE, not a schedule: two days or more
+after the close (the diesel prints 169.5 hours, the AI-share weeklies 168), the latest the market
+may expire if its data comes late. Such a market is judged by its close plus its series' measured
+settle lag: the 95th percentile of (settlement - close) over the series' last 40 settled markets of
+that kind on the House's record (at least 20 of them; settlements before the day began), never
+before the close and never after the deadline. A series with fewer on record is judged by the
+deadline, as before. (Measured on the House's cache of Sept 5-17: the last 40 diesel dailies paid
+within 5.9 hours of the close, the weeklies within 7.8.) `hours_to_resolve` is measured to that
+same moment, live and on a replay tape (where a step reads only settlements known before its day),
+so a strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule. A
+refusal says which it judged by: "this market is expected to resolve in 60 hours, by its scheduled
+expiration (...)", "..., by its close plus its series' measured settle lag (...)", "..., by its
+expected expiration (...), a deadline days after its close: its series has fewer than 20 settled
+markets on record ...", or "..., by its close (...): the venue lists no scheduled expiration for
+it". A market the House cannot look up is still refused ("the House cannot tell when this market
+resolves").
 
 ## The open desks: any market of the venue
 
@@ -501,6 +636,53 @@ House's wind-down or horizon rule -- is never refused for it:
 
 Whatever the House changed is the `reason` on your order's rows in `recent_order_outcomes`.
 
+### Outside the regular session (Sept 24, 2026)
+
+A strategy whose every symbol keeps the regular US session (a stock or options desk, or an open desk
+naming no coin) is not woken while the session is shut: nothing it sent could trade before the open
+(the book refuses a market order then, and a limit would only wait at the venue). It is woken a few
+seconds after the bell instead, where an exit of a position held overnight goes at once. A strategy
+still woken outside the session because it also names a coin has its stock and option BUYS refused
+by the House ("outside the regular session no stock or option entry is sent"), while its coin trades
+go on.
+
+## Holding your entries, and sizing down in place (Sept 24, 2026)
+
+Three research tools act on your deployed strategy without a new agent. Each only records what you
+ask; the House applies it when your research pass ends, as it does a retained candidate, as an
+`agent.strategy` row that restates your strategy with `control`, `was` (what it replaced) and your
+`note`. None raises a limit, a stake or a band: those stay the book's and the allocator's.
+
+- **`pause_entries`** holds your ENTRIES: every buy your code sends -- which opens or adds to a
+  position -- is held by the House at each wake (the wake counts it as `held`; it is not a refusal),
+  and your resting buys are cancelled when the pause is made. Your sells, cancels and settlements go on,
+  and your code keeps running and keeping its memory. **`resume_entries`** lets your buys through
+  again. Your standing says which state you are in, since when, why, and how many buys were held.
+  A paused agent that does not trade is judged like any other: it earns nothing while it does not
+  trade, and the usual rules may still demote it or give its seat away. Held buys are not activity:
+  shown live markets, a paused agent counts barren wakes (the stuck rule applies to it when it is
+  broke), and a practice resident paused longer than its seat's grace is displaced like one that
+  never traded (a winner and real money stay protected, as for everyone). A paused agent is promoted
+  to no real band. On real money it keeps its band and its positions (its sells go on), but after
+  24 hours paused its stake is held to its venue's probe, by free cash only; nothing is sold.
+- **`edit_params`** changes your PARAMS in place and keeps your seat, your record and your code: only
+  the numeric knobs your standing's `parameter_validation` lists as `mutable`, each inside its
+  `bounds` (declare yours in `NEEDS["parameter_rules"]`), never NEEDS or code. The House first
+  replays your code with the new values at HALF NOTIONAL -- a replay book of half the practice stake
+  and caps -- on the tape your replays use (never the sealed holdout), and the edit is made only if
+  that replay passes the replay gate against your line's trials, with this look and every earlier
+  edit look of your line counted in the deflation. It is not a trial on your line's record and
+  spends none of its holdout evaluations. One edit replay a day, passed or not; it costs sandbox
+  seconds. On rung 0 there is no edit in place: `replay` the edited file.
+
+A pause or a resume is always made: it restates your strategy, so it sets no audit's verdict aside
+and moves nothing an audit, a promotion or your candidate waiting for a seat is keyed to. No edit is
+made while an audit of your strategy is running or owed, or while its latest audit is a veto (an
+edit is a new strategy and would set the audit's verdict aside), nor on real money while an audit's
+approval of your strategy as it runs stands (a swing's first entry is audited: you would trade PARAMS
+that audit never saw; pause, or replay the changed file for a new agent). The House says so on your
+record.
+
 ## How replay scores it
 
 The simulator (`league/replay.py`) walks a recorded tape step by step. At each step it builds
@@ -569,26 +751,80 @@ the line it grew from). Only then is it born, on paper, with `founder` `lab:<lin
 grew from as its parent, at most six an hour. Its author is recorded. When a lab graduate earns a performance fee on realized real
 profit, a tenth of that fee is its royalty to the lab's compute line.
 
+**What graduates** (since Sept 24, 2026). Half of each batch is kept for the programs someone wrote --
+your `lab_submit`, the cheap model's and the frontier model's -- wherever they wait, and half of the
+lab's turns build the tape where most of them wait; the rest of its turns and of each batch go to the
+queue's oldest programs and to the largest groups of parameter mutants. A program graduates only:
+- with a change to its code beyond `PARAMS` relative to every living program of its desk (its style,
+  its parameter bounds, its wake cadence and its market window in `NEEDS` count as parameters), or
+  with a forward score above the desk's living median (above zero while no resident of the desk has
+  one): a nudge of a program the desk already runs has to beat the desk on data it has not seen;
+- never while its own forward window loses, whatever its search fitness: the search tape admits,
+  data that came after the code was frozen ranks; and, with no window of its own, never while the
+  windows of its mechanism on the desk (its code beyond `PARAMS`) lose on average;
+- never onto a desk whose members were offered markets for 48 hours and wrote no order, unless a
+  feed the desk asked for (a tool request answered -- the toolsmith's "cannot be a pure tool" is a
+  refusal, not an answer --, a recorded feed its programs declare) arrived in that time.
+A program held back is not refused: it graduates when the reason goes. The lab breeds from a
+program by its own forward window as well as its lineage's, and more from lineages whose family's
+pooled record is proven; a family at its measured capacity (the family ledger's estimate: its markets
+are full at the size it trades) is not searched further.
+
 ## Your seat
 
 The league has a fixed number of seats, and a desk has its own. A seat is yours while you are on
 real money, while your practice record is up, and while you are trading toward the bunt line's
-closed trades (or your desk's sessions). What can take it is a newcomer with more evidence than
-you have: an Alpha Lab graduate that passed the House's replay and the sealed holdout, a foundry
-card that passed replay, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need
-not wait out your twelve-hour grace if you are still on rung 0 (replay only) or have not traded
-since your current program was given its chance; on a desk that keeps an exchange's hours, not
-before your first regular session has closed. A House mutation -- the House's own copy of a
-parent with its parameters moved -- is staked only when no such newcomer waits, at most every ten
-minutes, never into a desk's last seat while nobody on that desk trades, never in place of a desk's
-only trading member, and never from a family whose pooled forward record is negative after six
-active blocks. Nothing you cannot see decides this: your fills, your blocks and your rung.
+closed trades or settlements (or your desk's sessions). What can take it is a newcomer with more
+evidence than you have: an Alpha Lab graduate that passed the House's replay and the sealed
+holdout, a foundry card that passed replay, the retained candidate of an agent that died holding
+it, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
+still on rung 0 (replay only) or have not traded since your current program was given its chance --
+once you have had a fair chance to trade (since Sept 24, 2026: your desk's evidence clock, at most
+the plain grace and never under an hour, from that chance; a newcomer seated a minute ago is not
+the next newcomer's to take); on a desk that keeps an exchange's hours, not before your first
+regular session has closed. A
+House mutation -- the House's own copy of a parent with its parameters moved -- is staked only when
+no such newcomer waits, at most every ten minutes, never into a desk's last seat while nobody on
+that desk trades, never in place of a desk's only trading member, and never from a family whose
+pooled forward record is negative after six active blocks. Nothing you cannot see decides this:
+your fills, your blocks, your forward record, your family's record and your rung.
 
-**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs and its
-graduates waiting for seats on the part of the tape that arrived AFTER their code was frozen: data
-no search, no House replay and no holdout has seen. The result ranks. A program whose forward
-window wins comes first in its desk's archive and first for a seat; one whose window loses comes
-last, and its lineage is searched less. A forward window is never practice evidence: it promotes
+**Evidence is measured before a seat is lost** (since Sept 24, 2026):
+- **Your grace follows your desk's evidence clock.** It is the longer of twelve hours and how long
+  your desk's members have taken, over the last week, from their first fill to their third
+  independent settlement (the median; the House measures it every day and says it in an info
+  alert). On Sept 24 that was 31.8 hours on the weather desk and 36.5 on prices, and the twelve
+  hours stood on the 15-minute crypto desk.
+- **Once you have three fills of your own on your current program**, you are displaced only by a
+  newcomer whose forward score beats your own forward record: the lab replays your program too,
+  every hour, on the data that came after it was frozen. Until you have such a record, no newcomer
+  can take a trading seat from you by that route -- unless the lab can never score your program (a
+  desk it does not search, such as options, or a program it blocked): then the plain grace and
+  your record are what keep your seat.
+- **If your family is proven** (its pooled record over independent settlements, on the allocator's
+  board), no newcomer of an unproven family takes your seat -- unless you never traded and your
+  grace has run.
+- Seats that never traded go first; then the members of a family whose pooled forward record is
+  negative after six active blocks.
+- **Your research outlives you.** If you die holding a research candidate that passed replay, your
+  latest such candidate is not thrown away: it waits for a seat with your lineage, ranked with the
+  lab's graduates, and is born as your child when one frees.
+- **A corrected child supersedes its parent** (when the constitution's
+  `allocator.corrected_child_supersedes` is on): a research child whose program passed replay, and
+  whose own account of it names its parent's entry as the defect -- the liquidity it takes, the fee
+  it pays, the side it buys -- borne out by the parent's own entry fills, retires the parent at once
+  (from real money, through a demotion first). The account must be of the program your parent runs
+  now: your fix of your own earlier program is not your parent's defect. A liquidity or fee fix is a
+  program that rests its entries post-only, and it is no fix at all where your family's pooled taker
+  record is proven positive (then taking is what your family has proven). The child enters real money
+  on its own evidence.
+
+**Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs, its
+graduates waiting for seats and (since Sept 24, 2026) every living agent's current program on the
+part of the tape that arrived AFTER that code was frozen: data no search, no House replay and no
+holdout has seen. The result ranks. A program whose forward window wins comes first in its desk's
+archive and first for a seat; one whose window loses comes last, and its lineage is searched less;
+yours is what a newcomer must beat. A forward window is never practice evidence: it promotes
 nobody, moves no band, spends no holdout evaluation and changes no gate result. What the House
 asks of you before real money is unchanged.
 
@@ -609,8 +845,19 @@ verdict about you, a change of your code or rung, a lesson or a note written for
 of yours that was answered, or a blocker that lifted. A positive earned record still buys research on
 the clock (at a tenth of the interval), and an agent whose rules are not meeting the market is woken
 at the idle cadence; nobody waits more than 24 hours. After three passes in a row that changed nothing,
-only your own fill, settlement or refusal wakes you until a pass produces a candidate. Every pass's
+only your own fill, settlement or refusal wakes you until a pass produces a candidate, and while
+that lock holds your pass runs on the cheapest model the House buys (Sept 24, 2026). Every pass's
 trigger is recorded, so what each kind of evidence bought is measured.
+
+A pass the model's provider breaks (a server error: HTTP 500, 502, 503, 504 or 529) is not yours
+to pay for and does not count (Sept 24, 2026): what its turns were charged is refunded to your
+credits at once, it is not counted as a pass anywhere, and you may research again fifteen minutes
+later. A pass your own model ended -- it ran out of room, or it hit your daily cap -- is not
+refunded and starts your research clock again like any pass; like every failure of the model
+call, it moves no streak and is not one of the passes you are given before your seat can go to
+another.
+Research on Sail waits, too, while the House's research on Sail has spent its hourly cap; a pass
+already under way finishes, and the next begins once the hour's spend is under the cap again.
 
 A consultation (`ask_merton`) that fails -- Merton could not be reached, or his answer could not be
 read -- costs you nothing; only an answer is charged to your credits, and a failed consultation that

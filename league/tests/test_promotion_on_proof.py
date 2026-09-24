@@ -220,8 +220,9 @@ class MoneySet(unittest.TestCase):
 
     def test_a_family_is_proven_by_its_pooled_record(self):
         rule = self.r["family_proven"]
+        # C1 (Deploy B, Sept 24, 2026) measures an event per dollar at risk (`league/families.py`).
         self.assertEqual(rule, {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
-                                "confidence": "0.8", "lopsided_gate": True})
+                                "confidence": "0.8", "lopsided_gate": True, "unit": "at_risk", "reference_share": "0.01"})
         self.assertTrue(10 <= rule["min_independent_settlements"] <= 20)
         # The lopsided gate is the one-sided 80% lower bound of a lopsided record computed honestly, at the
         # ladder's own lopsided line (review of #224, adopted by the main session, Sept 24, 2026).
@@ -269,8 +270,15 @@ def hand_pool(observations):
 
 
 class FamilyCase(LedgerCase):
+    """Deploy A's family record in its own unit, the member's ACCOUNT growth (`family_proven.unit: "account"`,
+    the rollback form since C1 made the at-risk unit the rule, Sept 24, 2026): its arithmetic stays pinned
+    here; `league/tests/test_families.py` pins the at-risk unit's."""
+
     def setUp(self):
         super().setUp()
+        unit = patch.dict(CONSTITUTION["allocator"]["family_proven"], {"unit": "account"})
+        unit.start()
+        self.addCleanup(unit.stop)
         self.agents = {}
         self.house = SimpleNamespace(ledger=self.ledger, registry=SimpleNamespace(agents=self.agents))
 
@@ -593,6 +601,17 @@ class ProbesAndBunts(KalshiHouse):
     """P1: a paper agent at the bunt line is seated as a probe unless its family is proven."""
 
     READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
+
+    def test_the_board_shows_the_honest_bound_that_decides_the_proof(self):
+        """A lopsided record's t bound flatters it; the loss-rate gate decides (weather favourites at T0: t bound
+        +0.0033, honest bound -0.2112). The board, the watch and the agents read the honest one."""
+        a = self.agent()
+        self.families["weather-favorites"] = {**canned("weather-favorites"), "bound": 0.0033, "honest_bound": -0.2112,
+                                              "lopsided": True, "loss_gate": -0.2112}
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        row = self.house.allocator.board()["agents"][a.id]
+        self.assertEqual((row["family_state"], row["family_bound"]), ("unproven", -0.2112))
 
     def test_an_unproven_familys_agent_is_seated_as_a_probe(self):
         a = self.agent()

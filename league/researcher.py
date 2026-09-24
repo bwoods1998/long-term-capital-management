@@ -21,7 +21,7 @@ from typing import Any, Callable, Mapping
 
 from .agents import Agent
 from .commons import SEARCH_CHARGE_USD, Commons
-from .ledger import Ledger, canonical, now_iso
+from .ledger import Ledger, LedgerConflict, canonical, now_iso
 from .semantic_lab import MODEL as JEV_MODEL
 from .safety import CodeRefused, check_code
 from .sandbox import SandboxError
@@ -62,9 +62,21 @@ TOOLS: list[dict[str, Any]] = [
                                                      "source": {"type": "string", "enum": ["my_trades", "markets_now", "items"]},
                                                      "items": {"type": "array", "items": {"type": "string"}, "description": "only for source 'items'"}},
                     "required": ["question", "source"]}},
+    {"name": "pause_entries", "description": "Hold your deployed strategy's ENTRIES -- every buy, which opens or adds to a position -- from the end of this pass until you resume them. Your exits (sells), cancels and settlements go on; your resting buys are cancelled when it takes effect, and each buy your code sends is held by the House and counted on the wake. It raises nothing, and it shields nothing: held buys are not activity, a paused agent is promoted to no real band, after 24 hours paused a real stake is held to the probe (free cash only; your positions stay), and a practice seat paused past its grace can be given away like an idle one. Recorded on the ledger with what it replaced. Free, not a trial. Say why.",
+     "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
+    {"name": "resume_entries", "description": "Let your deployed strategy's entries through again from the end of this pass, after `pause_entries`. Recorded on the ledger like the pause. Free, not a trial. Say why.",
+     "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
+    {"name": "edit_params", "description": "Change your deployed strategy's PARAMS in place, keeping your seat and your record: only the numeric knobs your standing's parameter_validation lists as mutable, each inside its bounds; never NEEDS or code, and never a limit or a stake (the book and the allocator still cap every order). Give only the knobs you change, e.g. {\"notional_usd\": 8}. The House first replays your code with the new values at HALF NOTIONAL (a replay book of half the practice stake and caps) on your desk's development tape, never the sealed holdout: it is not a trial against your line and spends none of your line's holdout looks. The edit takes effect when this pass ends only if that replay passes the replay gate against your line's trials (this look and your line's earlier edit looks counted in the deflation). One edit replay a day, passed or not; it costs sandbox seconds. Say why.",
+     "parameters": {"type": "object", "properties": {"params": {"type": "object", "description": "the knobs you change and their new values"},
+                                                     "reason": {"type": "string"}}, "required": ["params", "reason"]}},
     {"name": "finish", "description": "End this research pass with one or two sentences on what you concluded.",
      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
 ]
+
+#: X1 (Sept 24, 2026): what an agent may ask of its deployed strategy without a new agent. The tools
+#: only record the request (`agent.research` tool "control", status "requested"); the House applies
+#: it when the pass ends (`House._apply_controls`), as it does a retained candidate.
+CONTROL_TOOLS = ("pause_entries", "resume_entries", "edit_params")
 
 #: The Alpha Lab's tools (league/lab.py), offered only on a floor where the lab runs.
 LAB_TOOLS: list[dict[str, Any]] = [
@@ -172,6 +184,10 @@ class Researcher:
         #: (agent) -> whether it has evidence (rung >= 1 and a closed trade): such an agent's session may
         #: run to `evidence_max_turns` (Sept 23, 2026: 10 -> 20). None changes nothing.
         self.evidence = None
+        #: (agent, changes, *, session) -> the House's replay of an in-place parameter edit
+        #: (`House._edit_replay`): {"passed", "reasons", "params", "was", "code_sha256", "numbers"} or
+        #: {"error"}. None: `edit_params` is not available (X1, Sept 24, 2026).
+        self.edit_replay = None
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -523,12 +539,14 @@ class Researcher:
         if 'finished_at' not in state:
             state['finished_at'] = self.clock()
             save()
+        refunded = self.refund_provider_fault(agent, session, out.reason, turns=int(state.get('turn') or 0) + 1)
         self.ledger.append('agent.research', {
             'tool': 'summary', 'session': session, 'turns': out.turns,
             'profile': state['profile'], 'started': state['started'], 'finished': state['finished_at'],
             'elapsed_seconds': round(max(0, state['finished_at'] - state['started']), 3),
             'cost_usd': format(out.cost_usd, 'f'), 'trials': out.trials,
             'summary': out.summary[:1200], 'reason': out.reason, 'candidate': bool(out.candidate),
+            **({'refunded_usd': refunded} if refunded else {}),
         }, agent=agent.id, id=summary_id)
         if self.traces is not None:
             from .traces import research_outcome
@@ -715,6 +733,57 @@ class Researcher:
                                               **({"split": result["split"]} if "split" in result else {})}, agent=agent.id)
         return result
 
+    def _request_control(self, agent: Agent, session: str, control: str, payload: Mapping[str, Any], out: "Pass") -> None:
+        """Record what the House is to apply when this pass ends (`House._apply_controls`): one
+        `agent.research` row, tool "control", status "requested", id `control-request:<session>:<n>`
+        (`n` the call's place in the pass, so a resumed pass cannot record it twice)."""
+        try:
+            self.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": control, "session": session,
+                                                  **payload}, agent=agent.id, id=f"control-request:{session}:{len(out.calls)}")
+        except LedgerConflict:
+            pass  # this very call was recorded before a restart
+
+    @staticmethod
+    def _reason(args: Mapping[str, Any]) -> str:
+        return str(args.get("reason") or "").strip()[:600]
+
+    def _entries(self, agent: Agent, name: str, args: Mapping[str, Any], out: "Pass", session: str) -> dict[str, Any]:
+        """`pause_entries` / `resume_entries` (X1, Sept 24, 2026): recorded now, applied when the pass ends."""
+        reason = self._reason(args)
+        if len(reason) < 10:
+            return {"error": "say why in a sentence: the reason is kept on the ledger with the change"}
+        self._request_control(agent, session, name, {"note": reason}, out)
+        paused = name == "pause_entries"
+        return {"recorded": True, "takes_effect": "when this pass ends",
+                "note": ("from then on every buy your code sends is held, and your resting buys are cancelled then; "
+                         "your sells, cancels and settlements go on. `resume_entries` in a later pass lets them through again."
+                         if paused else "from then on your code's buys reach the book again, under the same limits as before.")}
+
+    def _edit(self, agent: Agent, args: Mapping[str, Any], out: "Pass", session: str) -> dict[str, Any]:
+        """`edit_params` (X1, Sept 24, 2026): the House replays the edit first (`House._edit_replay`);
+        a passing edit is recorded, and applied when the pass ends."""
+        if self.edit_replay is None:
+            return {"error": "in-place parameter edits are not available on this floor"}
+        reason = self._reason(args)
+        if len(reason) < 10:
+            return {"error": "say why in a sentence: the reason is kept on the ledger with the change"}
+        changes = args.get("params")
+        if not isinstance(changes, Mapping) or not changes:
+            return {"error": "params is an object of the knobs you change and their new values, e.g. {\"notional_usd\": 8}"}
+        try:
+            result = dict(self.edit_replay(agent, dict(changes), session=session) or {})
+        except Exception as exc:  # noqa: BLE001 - an edit that cannot be replayed is not made
+            return {"error": f"the edit could not be replayed and is not made: {type(exc).__name__}: {str(exc)[:200]}"}
+        if result.get("error"):
+            return {"error": str(result["error"])[:600], "applied": False}
+        answer = {"passed": bool(result.get("passed")), "reasons": result.get("reasons") or [], "replay": result.get("numbers"),
+                  "params": result.get("params"), "was": result.get("was")}
+        if not answer["passed"]:
+            return {**answer, "note": "not made: the replay of the edit did not pass. Your strategy runs as it was."}
+        self._request_control(agent, session, "edit_params", {"note": reason, "params": result.get("params"), "was": result.get("was"),
+                                                               "code_sha256": result.get("code_sha256"), "replay": result.get("numbers")}, out)
+        return {**answer, "takes_effect": "when this pass ends"}
+
     def refund_failed_consults(self, agent: Agent) -> list[str]:
         """Reverse what a failed consultation charged before Sept 23, 2026, once per session.
 
@@ -744,6 +813,34 @@ class Researcher:
                                id=f"merton-refund:{session}")
             refunded.append(session)
         return refunded
+
+    def refund_provider_fault(self, agent: Agent, session: str, reason: str, *, turns: int) -> str | None:
+        """Give back what a session's model turns were charged when the provider failed it.
+
+        Sept 24, 2026 (the close-the-gaps run, L2): a session that ends in a provider 502 or 504
+        (`research_gate.provider_fault`: the HTTP 5xx family) was charged for the turns before the
+        failure and counted like any other. Its research-token charges (`tokens:<session>:<turn>`)
+        are returned in one `credit.grant` (id `research-refund:<session>`, so a resumed session
+        cannot refund twice). Other charges of the pass -- a web search, a consultation, a Jev
+        question -- were answered and stand. The same predicate makes the session no completed pass
+        anywhere. Returns the amount refunded, or None."""
+        from .research_gate import provider_fault
+
+        if not provider_fault(reason):
+            return None
+        ident = f"research-refund:{session}"
+        done = self.ledger.get(ident)
+        if done is not None:
+            return str(done.payload.get("usd"))
+        total = ZERO
+        for turn in range(max(0, int(turns))):
+            row = self.ledger.get(f"tokens:{session}:{turn}")
+            if row is not None and row.kind == "credit.charge" and row.agent == agent.id:
+                total += Decimal(str(row.payload.get("usd") or 0))
+        if total <= 0:
+            return None
+        self.economy.grant(agent.id, total, f"refund of research session {session}: the provider failed it ({reason})", id=ident)
+        return format(total, "f")
 
     def _last_consult(self, agent: Agent) -> float | None:
         """When this agent last hired him. Its own record, so a question it could not afford or
@@ -810,6 +907,10 @@ class Researcher:
             return self.commons.request_tool(agent.id, str(args.get("name") or ""), str(args.get("description") or ""))
         if name == "classify":
             return self._classify(agent, args, out, session)
+        if name in ("pause_entries", "resume_entries"):
+            return self._entries(agent, name, args, out, session)
+        if name == "edit_params":
+            return self._edit(agent, args, out, session)
         if name in ("lab_query", "lab_submit"):
             if self.lab is None:
                 return {"error": "the Alpha Lab is not running on this floor"}

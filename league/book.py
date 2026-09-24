@@ -89,6 +89,20 @@ CASH_PLACES = Decimal("0.00000001")
 #: failed to be polled again and settle itself, short enough that no desk loses an afternoon.
 ADOPT_AFTER = 3
 DUST_USD = Decimal("0.01")
+#: A PRACTICE book's cash difference under this, with every position agreeing and no order of
+#: unknown outcome, is booked to the House row as dust at once: never a freeze (`_reconcile`).
+#: Sept 24, 2026, 14:39:07Z: `alpaca-paper` read "cash differs by -0.0322" -- $0.03 the venue took
+#: at the fill of krasker-14's one-contract AAL option buy (the OCC clearing fee, which Alpaca lists
+#: as a FEE activity only the next morning, so `_book_venue_fees` cannot see it yet) and $0.0022 of
+#: cent rounding on a $28 BTC buy -- and refused every Alpaca practice entry until 14:51:06Z, when
+#: four more fills had raised the per-fill tolerance past it. The same cents froze the book every
+#: day (adopted after three readings at -0.1436 Sept 21, -0.0200 Sept 22, -0.0326 Sept 23, +0.8616
+#: Sept 24 11:40Z), and at 15:37:27Z Sept 24 (-0.0269: krasker-6's AAL buy, $0.03, less a stock
+#: sale's rounding) the freeze was the reading that rolled Deploy C back inside its watch. A cent
+#: per fill (`DUST_USD`) is the venue's rounding; a practice book's option fees and maker refunds are
+#: cents more, and a dollar is far above them all and far below what an unbooked fill moves (the
+#: smallest Alpaca order is $10). Real-money books keep the freeze: there it is the point.
+PRACTICE_DUST_USD = Decimal("1.00")
 #: How long an event position the venue no longer shows may wait for its settlement row.
 SETTLEMENT_GRACE_SECONDS = 300
 
@@ -2934,7 +2948,11 @@ class Book:
     def _book_venue_fees(self, shortfall: Decimal) -> Decimal:
         """Book venue fee activities not yet on the ledger, oldest first, while they fit inside the
         shortfall (a fee from before the baseline is already in the baseline and explains nothing).
-        They are the House's cost: a day's fees are one rounded-up cent or two across every agent."""
+        They are the House's cost: a day's fees are one rounded-up cent or two across every agent.
+        An "OCC Clearing Fee" row is not booked where the option fill paid it (`Fees.option_clearing`,
+        a practice book): Alpaca's paper account takes it at the fill and lists it the next morning,
+        and booked again then it only ever explained some other shortfall (Sept 21-24, 2026: every
+        one of the 46 was booked a day late, against an unrelated shortfall)."""
         read = getattr(self.broker, "fee_activities", None)
         if read is None:
             return ZERO
@@ -2945,6 +2963,8 @@ class Book:
             return ZERO
         booked = ZERO
         for row in rows:
+            if self.fees.option_clearing and str(row.get("description") or "").lower().startswith("occ clearing fee"):
+                continue  # the option fill paid it, in the cash the venue took then
             fee = money(row["usd"])
             entry_id = f"venue-fee:{self.name}:{row['id']}"
             if fee <= 0 or self.ledger.get(entry_id) is not None or booked + fee > shortfall + DUST_USD:
@@ -3050,7 +3070,9 @@ class Book:
     def reconcile(self) -> Reconciliation:
         """Compare the book to the venue: venue cash must equal the baseline plus the book's own
         cash, and every venue position the baseline's plus the agents'. A difference under a cent
-        is booked to the House row as dust; anything larger freezes new entries until it clears."""
+        (a cent a venue fill since the last reconciliation) is booked to the House row as dust, and
+        on a PRACTICE book so is any cash difference under `PRACTICE_DUST_USD` while every position
+        agrees and no order is in doubt; anything larger freezes new entries until it clears."""
         with self._lock:
             self.open_baseline()
             result = self._reconcile()
@@ -3143,15 +3165,6 @@ class Book:
                         self._baseline_row(self.baseline_cash + paid, remaining, f"baseline position {key} settled")
             expected = self.baseline_cash + cash
             cash_diff = venue_cash - expected
-            if cash_diff <= -DUST_USD:
-                # The venue holds less than the book says. Alpaca passes on the regulators' fees
-                # (on equity sales and on every option contract) as one FEE activity at the end of
-                # the day, which no fill ever showed: book the ones that explain the shortfall.
-                booked = self._book_venue_fees(-cash_diff)
-                if booked:
-                    cash, positions, instruments = self._ledger_totals()
-                    expected = self.baseline_cash + cash
-                    cash_diff = venue_cash - expected
             diffs: dict[str, str] = {}
             for key in sorted(set(venue_positions) | set(positions) | set(self.baseline_positions)):
                 diff = venue_positions.get(key, ZERO) - positions.get(key, ZERO) - self.baseline_positions.get(key, ZERO)
@@ -3193,6 +3206,21 @@ class Book:
                 if key not in awaiting and key not in diffs:
                     del self._awaiting_settlement[key]
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
+            if cash_diff <= -DUST_USD and not diffs and not awaiting and not pending:
+                # The venue holds less than the book says. Alpaca passes on the regulators' fees
+                # (on equity sales and on every option contract) as one FEE activity at the end of
+                # the day, which no fill ever showed: book the ones that explain the shortfall.
+                # Never beside a position difference or an order in doubt: that shortfall is the
+                # price of units the ledger has not booked yet. Sept 24, 2026, 11:29:48Z: an
+                # in-flight BTC buy read "cash differs by -24.1299" with its coins at the venue, and
+                # $0.87 of the day before's fee rows -- their cash long gone, at their fills -- were
+                # booked against it; the fill landed seven seconds later and the book froze on
+                # +0.8700 for ten minutes, until it adopted the venue.
+                booked = self._book_venue_fees(-cash_diff)
+                if booked:
+                    cash, _, _ = self._ledger_totals()
+                    expected = self.baseline_cash + cash
+                    cash_diff = venue_cash - expected
             # A venue shows cash to the cent and rounds each fill's fee its own way: allow a cent
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
@@ -3207,6 +3235,12 @@ class Book:
                             if o.instrument.asset_class == "option" and o.side == "buy" and o.limit_price is not None), ZERO)
                 if held > 0 and abs(cash_diff + held) < tolerance:
                     within, cash_diff = True, ZERO
+            # A practice book is never frozen by cents (`PRACTICE_DUST_USD`): with every position
+            # agreeing and no order in doubt, a difference under a dollar either way is the venue's
+            # fees and rounding, and is booked as dust now, not after three frozen readings.
+            practice_dust = (not within and not self.real_money and not diffs and not pending and not awaiting
+                             and abs(cash_diff) < PRACTICE_DUST_USD)
+            within = within or practice_dust
             ok = within and not diffs and not pending
             problems = []
             if not within:
@@ -3233,6 +3267,10 @@ class Book:
                         "cash_delta": text(dust),
                         "position_delta": "0",
                         "real_money": self.real_money,
+                        **({"detail": f"practice book: a cash difference under ${PRACTICE_DUST_USD} with every position agreeing and "
+                                      f"no order in doubt, booked at once instead of freezing entries ({self._fills_since_reconcile} "
+                                      f"fill(s) since the last reconciliation allowed {tolerance:.2f})"}
+                           if practice_dust else {}),
                     },
                     agent=HOUSE,
                 )

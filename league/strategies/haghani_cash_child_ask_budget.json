@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_cash_child_ask_budget",
+  "repair": {
+    "key": "order_refusal:alpaca:position would be #% of desk equity, cap #%"
+  },
+  "why": "Corrected child of haghani-r42c38c for its reported position-to-equity refusals. Preserve the parent's Alpaca hourly alternative-coin specialty, parameters, deep-dip prices, exits and fee-aware cash reservations. Replace dollar-only entry sizing with explicit nine-decimal quantities valued at the ask, bounded by supplied limits and half current equity with 2% headroom. Cancel oversized working bids and skip entries below the venue minimum. Born on rung 0 with no inherited record; must qualify on its own evidence."
+}

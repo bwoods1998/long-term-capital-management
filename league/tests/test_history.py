@@ -106,6 +106,25 @@ def _ingestor(store, client, **kw):
                     sleep=lambda s: None, **kw)
 
 
+class NoBarsInAWindow(unittest.TestCase):
+    """`series_without_bars`: the symbols a tape over a window could have no bar of, with what the
+    store does hold; a range never fetched is a gap in the store, not "no bars" (Sept 24, 2026)."""
+
+    def test_a_symbol_listed_after_the_window_is_named_with_where_its_history_begins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore.at_root(tmp)
+            ing = _ingestor(store, FakeAlpaca(listed={"ADA/USD": "2026-02-01T00:00:00Z"}))
+            ing.run(ing.plan(["SPY", "ADA/USD"], ["1Day", "1Hour"], "2025-04-01", "2025-07-01"))
+            ing.run(ing.plan(["ADA/USD"], ["1Hour"], "2026-02-01", "2026-03-01"))
+            try:
+                empty = history.series_without_bars(store, ["ADA/USD", "SPY", "QQQ"], "1Hour", "2025-05-19", "2025-06-02", feed="sip")
+            finally:
+                store.close()
+        self.assertEqual(len(empty), 1, empty)  # SPY has bars; QQQ was never fetched, which is not "no bars"
+        self.assertIn("no ADA/USD 1Hour bars in 2025-05-19..2025-06-02", empty[0])
+        self.assertIn("its first is 2026-02-01", empty[0])
+
+
 class ChunkGridTest(unittest.TestCase):
     def test_years_for_daily_and_months_otherwise(self):
         self.assertEqual(chunk_ranges("1Day", date(2016, 3, 1), date(2018, 1, 5)),

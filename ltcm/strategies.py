@@ -1312,6 +1312,16 @@ class Strategies:
         thread = getattr(self, "_dispatcher", None)
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
+        # The runs the dispatcher handed to the pool finish too (bounded), so a stopped dispatcher leaves
+        # nothing writing the store behind it; their results stay in flight for the next tick to collect
+        # (`_collect`). Sept 24, 2026: a run still writing after stop raced the test's temporary
+        # directory ("Directory not empty") in CI three times in one day.
+        deadline = time.time() + 5.0
+        for future in list(self._inflight.values()):
+            try:
+                future.result(timeout=max(0.0, deadline - time.time()))
+            except Exception:
+                pass
 
     def _run_guarded(self, manifest: DeskManifest, name: str, row: Mapping[str, Any], at: str) -> dict[str, Any] | None:
         if not self.family_enabled(manifest):

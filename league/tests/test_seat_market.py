@@ -128,6 +128,10 @@ class EvidencedNewcomers(SeatCase):
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, young.id)
         self.house.kill(young, "displaced", "test")
         self.clock.advance(float(self.house.settings.tick_seconds) + 1)  # one displacement a desk a tick
+        # Sept 24, 2026: a never-traded paper seat first has its fair chance (an hour on a desk with no clock) --
+        # after Deploy B evidenced waiters took each other's seats 33 s to 14 min after birth.
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "inside its fair chance")
+        self.clock.advance(3600)  # past it, still inside the plain grace
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, idle.id)
 
     def test_real_money_winners_traders_short_of_their_record_and_unopened_stock_desks_are_never_taken(self):
@@ -174,7 +178,7 @@ class MergedStrategies(SeatCase):
     def test_a_merged_strategy_takes_a_never_traded_seat_inside_the_grace(self):
         resident = self.seated("resident")
         self.rules["max_population"] = 1
-        self.clock.advance(600)
+        self.clock.advance(3601)  # past the seat's fair chance (an hour with no desk clock), inside the plain grace
         self.strategies([{"name": "btc-gap-fade", "family": "gap-fade", "why": "a test strategy", "code": BUYER}])
         born = self.house.enroll()
         self.assertEqual([a.founder for a in born], ["btc-gap-fade"])
@@ -290,12 +294,17 @@ class SeatCaps(unittest.TestCase):
     def test_desk_caps_and_the_population_follow_the_evidence(self):
         root = Path(__file__).resolve().parents[1]
         niches = {row["id"]: row for row in json.loads((root / "niches.json").read_text())["niches"]}
-        for desk, cap in {"kalshi-weather": 14, "kalshi-sports": 16, "alpaca-index-etfs": 14, "kalshi-crypto-15m": 10,
-                          "kalshi-crypto-strikes": 4, "kalshi-sports-props": 4, "kalshi-attention": 4}.items():
+        # R2 (Sept 24, 2026): the seats follow the waiters that remain once the search's closed desks are taken out
+        # (niches.json `_about` has the 15:06Z count behind each), and fewer where the search is closed.
+        for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 19, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
+                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 8, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
+                          "kalshi-attention": 4}.items():
             self.assertEqual(niches[desk]["max_members"], cap, desk)
         turbo = json.loads((root / "turbo.json").read_text())
-        self.assertEqual((turbo["max_population"], turbo["newcomer_seconds"]), (112, 600))
+        self.assertEqual((turbo["max_population"], turbo["newcomer_seconds"]), (128, 600))
         self.assertGreaterEqual(sum(int(row.get("max_members") or 5) for row in niches.values()), turbo["max_population"])
+        game = json.loads((root / "game.json").read_text())
+        self.assertEqual((game["economy"]["max_population_short_runway"], game["economy"]["population_runway_days"]), (112, 1.5))
 
 
 if __name__ == "__main__":

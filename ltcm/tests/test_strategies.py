@@ -1278,6 +1278,29 @@ class DispatcherTests(StrategyCase):
         self.strategies.stop_dispatcher()
         self.assertFalse(self.strategies._dispatcher.is_alive())
 
+    def test_stopping_the_dispatcher_waits_for_the_runs_it_started(self):
+        """A stopped dispatcher leaves no run of its own still writing (the CI race of Sept 24, 2026)."""
+        import threading as _threading
+
+        started, release = _threading.Event(), _threading.Event()
+
+        def slow(d, c):
+            started.set()
+            release.wait(2.0)
+            time.sleep(0.2)
+            return Run("STRATEGY-RESULT " + json.dumps({"intents": [], "notes": "slow"}))
+
+        self.strategies.config.update({"parallel_runs": 4, "dispatch_seconds": 0.05})
+        self.strategies.deploy(self.manifest, "edge", 600, {})
+        self.strategies.store.update(self.manifest.id, "edge", last_run_at="2026-09-16T03:00:00.000Z")
+        self.manager.script = slow
+        self.assertTrue(self.strategies.start_dispatcher(lambda: self.service.manifests, lambda: NOW))
+        self.addCleanup(self.strategies.stop_dispatcher)
+        self.assertTrue(started.wait(5.0), "the dispatcher started a run")
+        release.set()
+        self.strategies.stop_dispatcher()
+        self.assertTrue(all(f.done() for f in self.strategies._inflight.values()), "no run still in flight after stop")
+
     def test_no_dispatcher_without_the_setting(self):
         self.strategies.config.update({"parallel_runs": 4, "dispatch_seconds": 0})
         self.assertFalse(self.strategies.start_dispatcher(lambda: self.service.manifests, lambda: NOW))

@@ -381,8 +381,76 @@ CONSTITUTION: dict[str, Any] = {
         # 16 give an 80% upper bound of 25% on the loss rate, against a breakeven near 7% at 93c. False
         # restores the t bound alone. `min_independent_settlements` stays 10: raising it does not change
         # a symmetric record's false-positive rate at a look, and the gate is what fixes the lopsided one.
+        #
+        # `unit` and `reference_share` (the same row, Deploy B, Sept 24, 2026: C1 decided the unit of an
+        # observation on the T0 snapshot, docs/goals/LTCM_CLOSE_THE_GAPS.md): "at_risk" measures an event
+        # by what it made per dollar its positions put at risk, as the log growth of a small reference bet,
+        # ln(1 + `reference_share` x r) / `reference_share` with r never below -1, so a contract that expires
+        # worthless is a finite -1.005 at 1%, not an account's ruin. Measured on the T0 snapshot: a practice
+        # row was growth on a $200 purse and a real row on a $30-60 stake, so a real row weighed three to
+        # seven times its declared 1 against 0.5 (weather-favorites: a median 9.25% of the purse at risk an
+        # event on practice, 31.7% of the stake on real money), and the account unit moves with the stake
+        # itself, so a family swing that doubled a member's stake would halve its growth an event and pull
+        # the family's own bound down. The at-risk unit is scale-free across purses, stakes and books, the
+        # weights mean what they say, and bound / variance in it is Kelly's fraction of capital at risk.
+        # Each event weighs what it put at risk against its member's mean on that book (the review of #242:
+        # weighed alike, small wins and large losses -- a resting bid filled in full as the price falls
+        # through it -- read as an edge while the dollars lost; weather-favorites' practice losers carried
+        # 2.4 times its winners' dollars at T0, and a family that lost $44 of real money over 100 events was
+        # proven and ready to swing). Effect at T0 (docs/runs/2026-09-24-close-the-gaps.md), the same states
+        # as Deploy A's: weather-favorites unproven (2 losses in 16; loss-rate bound -0.2112 a dollar at risk);
+        # sports-central-run-under proven (bound +0.1423: 6 of 11 practice events won at about even money after
+        # a 7% taker fee, its winners carrying twice its losers' dollars; weighed alike it was -0.1234); every
+        # other family unproven. "account" restores Deploy A's unit exactly.
         "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
-                          "confidence": "0.8", "lopsided_gate": True},
+                          "confidence": "0.8", "lopsided_gate": True, "unit": "at_risk", "reference_share": "0.01"},
+        # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a
+        # PROVEN family (`family_proven`, the pooled record: the table's one proof) whose REAL record has
+        # `min_real_settlements` or more independent settlements and whose honest lower bound on it is above
+        # zero (the one-sided t bound, and the loss-rate bound for a lopsided record: favourites must earn it
+        # with losses on the record) SWINGS once the frontier auditor approves its entry on that real record.
+        # The ENTRY is judged only at `min_real_settlements` real settlements and every `entry_every` more (15,
+        # 20, 25, ...), on the first that many real events, with both bounds at `entry_confidence`; the family
+        # STAYS, and its ramp doubles, while the whole real record's honest bound at `family_proven.confidence`
+        # (80%) holds at every pass. Why (the review of #242 and the main session's decision, Sept 24, 2026): a
+        # one-sided 80% bound re-read at every settlement is crossed by an EDGELESS family far more often than one
+        # time in five. The main session's simulation (scratchpad/rev-bfam/sim_rules2.py, 500 runs a case, the
+        # review's arithmetic) of the entry alone: at every settlement at 80% an edgeless even-money family enters
+        # by 30 / 50 / 200 real settlements 37% / 44% / 61% of the time (a +14%/$ edge's median entry at 20); at
+        # every 5th settlement at 90% it is 19% / 22% / 37% -- near the table's 20% over the 30-50 settlements that
+        # matter -- while a +14%/$ edge still enters at a median 30, +8%/$ at 40, and a +1.8%/$ favourites edge at
+        # 80 (an edgeless favourites family 9% by 50, 24% by 200). Leaving the swing, a member's new program or a
+        # member born into the family after the audit lapses the approval: the next entry is audited again (a
+        # swing already running is untouched). Every member on
+        # real money is staked at the ramp -- `start_multiple` x `bunt_usd` ($60 at Kalshi) when the family
+        # enters, doubling after every `doubling_every` further POSITIVE independent real settlements while
+        # the bound stays above zero -- up to the FAMILY's caps shared by its members on real money: full
+        # Kelly on that bound against the venue's capital (`rungs.3.kelly_fraction`, the owner's
+        # swing-and-bunt sizing) and `max_share_of_venue` of it ($310.65 of $517.75), and held where the
+        # measured fill rate at the next size (over `capacity_days`, on `capacity_min_markets` markets at
+        # each size) is under `capacity_fill_ratio` of the rate at the size before. The envelope's headroom
+        # bounds every increase; a bound at or below zero returns the members to bunts, by free cash only.
+        # Values inside the table (15-40 settlements, 2-4x the bunt, doubling every 10; the entry's 90% is the
+        # table's 80% bound computed honestly under repeated looks, as the loss-rate gate computed it honestly for
+        # favourites at 04:15Z). Measured at T0: no family's real record qualifies (weather-favorites 5 real
+        # events, all won: at 93c its loss-rate bound needs 23 clean real events at 80% and 32 at 90%, a look at 35).
+        "family_swing": {"min_real_settlements": 15, "start_multiple": 2, "doubling_every": 10,
+                         "capacity_fill_ratio": "0.5", "capacity_min_markets": 5, "capacity_days": 7,
+                         "entry_every": 5, "entry_confidence": "0.9"},
+        # `swing_requires_proven_family` (the main session's decision on the review of #224, Sept 24, 2026,
+        # carried here so the ratified digest records it): only a proven (or swinging) family's agent takes
+        # the agent-level swing (`swing_at`), an unproven family's agent at the swing line stays a probe, and
+        # a swing whose family loses its proof drops back to rung 2 (free cash only). Every real-money agent
+        # is then a probe or a proven family's member, the plan's Done list. False restores the agent-level
+        # swing of Sept 23 for every family.
+        "swing_requires_proven_family": True,
+        # `corrected_child_supersedes` (row "allocator.corrected_child_supersedes", Deploy B): a research
+        # child of a REAL-money parent that passes replay with a fix to the parent's entry mechanism (fee,
+        # side, liquidity) demotes the parent to practice at once and takes its seat (`league/house.py`, L1).
+        # Evidence: meriwether-h2d625d kept trading taker moneylines at a 7% fee while its child
+        # meriwether-h2d625d-2 (maker) passed replay 39 of 40. Absent or false, only the engineer's merged
+        # repairs supersede.
+        "corrected_child_supersedes": True,
         # `hysteresis_after_settled` (row "allocator.hysteresis_after_settled", 0-5): the hysteresis
         # exit (E under `bunt_at` x `hysteresis`) sends an agent from real money back to practice only
         # once it has this many independent real closed results in its current stay (settled events on
@@ -407,6 +475,36 @@ CONSTITUTION: dict[str, Any] = {
         # positive (`Allocator.family_taker`). Evidence: the taker mechanisms were the loss engine of
         # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
         "real_entry_liquidity": "maker_unless_family_taker_positive",
+        # `family_probe` (row "allocator.family_probe"; R5 of the close-the-gaps run, Sept 24, 2026: the run's third and
+        # last money-digest change, which the owner granted at the resume): NO PROBE ON A LOSING FAMILY. The line is the
+        # House's own for breeding (`House._losing_family`, `families.losing`): a family's pooled forward record -- its
+        # active `eval.block` count and summed log growth over every agent ever born into it, living or dead
+        # (`House.family_forward`; the allocator reads the same rows from its tape, `Allocator.family_forward`) -- is
+        # at or below zero after `losing_min_blocks` active blocks (a record that nets to zero is not a loss). Then:
+        #   1. the allocator seats no PROBE from the family: the promotion waits, its status naming the blocks and growth;
+        #   2. a probe already seated on it goes back to practice at the next pass by the demotion path (`_move_down` to
+        #      practice), which holds a Kalshi contract to settlement and so sells nothing there; on Alpaca, where that
+        #      path sells what the account holds (an option at the bid, a stock at the next open), only once the probe
+        #      holds nothing that path would sell -- its working bids cancelled first, as the path itself does -- and no
+        #      buy is still in question at the venue: no sale is ever forced, and it is lent nothing more meanwhile;
+        #   3. under `reseat: "gain_since_demotion"`, each probe that goes back to practice from real money, for any
+        #      reason, holds its family until the family's pooled forward record SINCE that demotion turns: positive over
+        #      `losing_min_blocks` or more active blocks ("until the family's record turns"; a turn is for good, and each
+        #      demotion is its own hold). The demotions are read from the ledger's `eval.verdict` rows (a restart forgets
+        #      nothing): their `band_from`, and for a row that does not name its band, the family's state in the
+        #      mechanism ledger just before it.
+        # A gate that cannot be read seats no probe and demotes nobody.
+        # A proven or swinging family's agents are bunts, not probes: none of this applies to them. Evidence
+        # (docs/research/queries/2026-09-24/R5-family-probe.py, on the 15:06Z snapshot): of the allocator's 21
+        # promotions to real money since Sept 23 00:00Z, 11 were onto families whose pooled forward record was negative
+        # over 6 or more active blocks; they realized -$8.12 on 22 closes (8 positive) and no stay ended positive. The
+        # other 10 made +$28.96 on 34 closes (26 positive). At 15:06Z 9 of the 14 seated probes, $139.75 of their $168.94
+        # of stake, sat on such families: crypto-alts-reversion (351 blocks, -0.0569; haghani-62, -63 and -r42c38c on
+        # Alpaca), crypto-15m-lab-335592 (22, -0.2777), crypto-15m-doge-flat-spot-no (35, -0.6226),
+        # crypto-15m-prior-window-reset (25, -0.7019), crypto-strikes-vol-shock-upside (26, -0.2168) and
+        # prices-favorites (23, -0.2225). 6 is the House's breeding line (`game.json` `economy.losing_family_min_blocks`).
+        # Absent, a probe is seated on any family's record, as before.
+        "family_probe": {"losing_min_blocks": 6, "reseat": "gain_since_demotion"},
     },
 }
 
@@ -449,4 +547,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '8116302ee038c5ae7929b24c00486d6f675a99d3c1268329ce5497cd4157b034'
+PINNED_DIGEST = '38a57fe98b837c60007a86459090de14bee177c74cd83e58d718002de8986158'

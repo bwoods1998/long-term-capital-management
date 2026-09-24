@@ -6,6 +6,11 @@ It runs a read-only snippet on the House box (sqlite opened `mode=ro`; nothing i
 and reads the public site checkpoint from here. Sections: bands, real money, evidence, the lab,
 costs, health. Built from the Sept 23, 2026 session's scratch watch scripts (post.py, swing.py,
 holds.py, gwh.py), for the capital-ladder build (docs/goals/LTCM_NORTH_STAR_BUILD.md, "The watch").
+
+`--since` is any ISO time (a space or a `T` between date and time, a zone or none: UTC), and is
+turned into the ledger's own form before it is compared (`normalize_since`). Sept 24, 2026: the
+ledger's `at` is compared as text, and sqlite's `datetime('now', '-1 hour')` writes a space where
+the ledger writes `T`; a space sorts before `T`, so that form admitted the whole day.
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 BOX_SNIPPET = r'''
 import sqlite3, pathlib, json, sys, collections, math, time, calendar
-root = pathlib.Path('/workspace/state')
+root = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else '/workspace/state')  # a second argument: the tests' state
 since = sys.argv[1]
 out = {}
 def ro(name):
@@ -36,6 +41,14 @@ out['health'] = {'at': h.get('at'), 'release': h.get('release'), 'tick_s': h.get
                  'grant_active': lt.get('active'), 'money_digest': ((lt.get('policy') or {}).get('constitution_digest') or '')[:8],
                  'background_jobs': len(h.get('background_jobs') or []),
                  'long_jobs': [j['key'] for j in (h.get('background_jobs') or []) if j.get('running_seconds', 0) > 600]}
+# The tick's own clock (C-perf, Sept 24, 2026): the last tick's slowest steps, each step's slowest in the
+# last hour, and each background lane's last run (health.json `tick_steps`).
+ts = h.get('tick_steps') or {}
+tl = ts.get('last') or {}
+out['tick_steps'] = {'total_s': tl.get('total_seconds'), 'ticks_in_hour': ts.get('ticks_in_hour'),
+                     'last': sorted(([k, v] for k, v in (tl.get('steps') or {}).items()), key=lambda kv: (-kv[1], kv[0]))[:6],
+                     'slowest_hour': [[r.get('step'), r.get('seconds'), r.get('at')] for r in (ts.get('slowest_hour') or [])[:6]],
+                     'background': {lane: [r.get('key'), r.get('seconds'), r.get('state')] for lane, r in sorted((ts.get('background') or {}).items())}}
 acc = camp.get('accounts') or {}
 out['costs'] = {'openai_left': (acc.get('openai') or {}).get('remaining_usd'), 'sail_left': (acc.get('sail') or {}).get('remaining_usd'),
                 'pending_calls': camp.get('pending_calls'), 'jev': (h.get('jev') or {}).get('budget') if isinstance(h.get('jev'), dict) else None}
@@ -147,18 +160,52 @@ try:
 except Exception:
     hs = {}
 sh, seats, labh = h.get('shards') or {}, h.get('seats') or {}, h.get('lab') or {}
+seat_block = {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour', 'waiters_by_desk')} if seats else None
+if seats:
+    # S1-S4 (the close-the-gaps run, Sept 24, 2026): the seats holding no evidence (no forward score, no fill, no grace
+    # left: count and the first ids), the desks' evidence clocks the grace follows, and why each class of waiter
+    # (the retained research candidates of dead authors too) was last refused a seat.
+    none = seats.get('seats_holding_none') or {}
+    seat_block['seats_holding_none'] = {'count': none.get('count'), 'ids': (none.get('ids') or [])[:12]} if none else None
+    seat_block['evidence_clocks'] = (seats.get('evidence_clocks') or {}).get('hours')
+    seat_block['refused'] = {c: str((r or {}).get('why') or '')[:100] for c, r in (seats.get('last_refused_birth') or {}).items()} or None
+    # R2 (Sept 24, 2026): the longest wait and the rule that holds it, the desks where newcomers wait over two hours,
+    # the waiters that left the queue in the last day (the search closed their desk, or their forward window lost),
+    # and the population the league may grow to on Sail's runway.
+    seat_block['longest_wait'] = seats.get('longest_wait')
+    seat_block['over_two_hours'] = {d: {k: r.get(k) for k in ('count', 'longest_hours', 'rule')}
+                                    for d, r in (seats.get('over_two_hours') or {}).items()} or None
+    seat_block['expired'] = seats.get('expired')
+    pop = seats.get('population') or {}
+    seat_block['population'] = {k: pop.get(k) for k in ('max_population', 'ceiling', 'runway_days', 'rule')} if pop else None
+# The House-sent sales the venue or the book refused three times in a row (`WIND_DOWN_REFUSALS`): not sent again
+# until the holding changes or a day has passed (house.json `wind_down_refusals`).
+stopped = []
+for a, books in (hs.get('wind_down_refusals') or {}).items():
+    for b, rows in (books or {}).items():
+        for key, r in (rows or {}).items():
+            if int((r or {}).get('count') or 0) >= 3:
+                stopped.append(f"{a} {b} {key} refused {r.get('count')}x: {str(r.get('detail') or '')[:90]}")
 out['blocks'] = {
     'tier': hs.get('frontier_tier'),
     'shards': {k: sh.get(k) for k in ('balances', 'moved_24h_usd', 'unattributed_usd', 'blocked', 'pending', 'last_error')} if sh else None,
-    'seats': {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour')} if seats else None,
+    'seats': seat_block,
+    'wind_down_stopped': stopped[:10] or None,
     'lab': {'closed_since': labh.get('closed_since'), 'llm_paused': (labh.get('llm') or {}).get('paused'),
             'waiting_seat': (labh.get('waiting_seat') or {}).get('count'), 'queued': labh.get('queued')} if labh else None}
 # D1 (Sept 24, 2026): whether the lab's step is failing, and since when (five in a row sets it).
 out['lab_step'] = {k: labh.get(k) for k in ('failing_since', 'failures_in_a_row', 'error')} if labh else None
-row = db.execute("select at, payload from ledger where kind='ops.budget' and payload like '%\"what\": \"yield\"%' order by seq desc limit 1").fetchone()
+# L3 (Sept 24, 2026): warnings that repeat (10 in 30 minutes: one error alert, listed until they stop
+# for 30 minutes), the health failures the in-box watchdog reads, and the research economy's dials.
+out['repeating_warnings'] = h.get('repeating_warnings') or []
+out['failures'] = h.get('failures') or []
+out['research_economy'] = h.get('research_economy')
+# The ledger's payloads are canonical JSON, with no space after a colon: `"what":"yield"`. Until
+# Sept 24, 2026 this asked for `"what": "yield"`, which no row carries, and printed no yield at all.
+row = db.execute("select at, payload from ledger where kind='ops.budget' and payload like '%\"what\":\"yield\"%' order by seq desc limit 1").fetchone()
 if row:
     yp = json.loads(row[1])
-    out['yield'] = {'at': row[0], **{k: yp.get(k) for k in ('spend', 'evidence', 'usd_per', 'window') if k in yp}}
+    out['yield'] = {'at': row[0], **{k: yp.get(k) for k in ('spend_usd', 'evidence', 'usd_per', 'by_profile', 'since', 'until') if k in yp}}
 print(json.dumps(out, default=str))
 '''
 
@@ -192,16 +239,22 @@ def site_read() -> dict:
             "board": bool(checkpoint.get("board"))}
 
 
+#: The gateway's `/v1/health`, read from the box (which holds the token). Since Deploy A (Sept 24,
+#: 2026) the frontier block also says what is settled, what is still in flight (reservations whose
+#: calls have not answered) and the previous month's line (`previous`): the watch prints them all.
+GATEWAY_SNIPPET = (
+    "import sys,json,urllib.request,os;sys.path.insert(0,'/workspace/current');os.environ.setdefault('LEAGUE_ENV','/workspace/.env');"
+    "os.chdir('/workspace/current');from league.service import load_config,load_env,secret;load_env();cfg=load_config();"
+    "req=urllib.request.Request(cfg['gateway_url'].rstrip('/')+'/v1/health',headers={'Authorization':'Bearer '+secret('GATEWAY_TOKEN'),'User-Agent':'ltcm-floor/1.0'});"
+    "h=json.load(urllib.request.urlopen(req,timeout=20));f=h.get('frontier') or {};t=h.get('typesafe') or {};s=h.get('sail') or {};"
+    "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','settled_usd','inflight_usd','cap_usd','base_cap_usd','profit_index','previous')},"
+    "'jev':{k:t.get(k) for k in ('spent_usd','cap_usd')},'sail':{k:s.get(k) for k in ('balance_usd','burn_usd_per_day','runway_days')}}))")
+
+
 def gateway_read() -> dict:
     from scripts.floor_box import client, read_state, require_box
 
-    code = ("import sys,json,urllib.request,os;sys.path.insert(0,'/workspace/current');os.environ.setdefault('LEAGUE_ENV','/workspace/.env');"
-            "os.chdir('/workspace/current');from league.service import load_config,load_env,secret;load_env();cfg=load_config();"
-            "req=urllib.request.Request(cfg['gateway_url'].rstrip('/')+'/v1/health',headers={'Authorization':'Bearer '+secret('GATEWAY_TOKEN'),'User-Agent':'ltcm-floor/1.0'});"
-            "h=json.load(urllib.request.urlopen(req,timeout=20));f=h.get('frontier') or {};t=h.get('typesafe') or {};s=h.get('sail') or {};"
-            "print(json.dumps({'frontier':{k:f.get(k) for k in ('month','spent_usd','cap_usd','base_cap_usd','profit_index')},"
-            "'jev':{k:t.get(k) for k in ('spent_usd','cap_usd')},'sail':{k:s.get(k) for k in ('balance_usd','burn_usd_per_day','runway_days')}}))")
-    run = client().exec(require_box(read_state()), ["/workspace/.venv/bin/python", "-c", code], timeout=120, on_output=None)
+    run = client().exec(require_box(read_state()), ["/workspace/.venv/bin/python", "-c", GATEWAY_SNIPPET], timeout=120, on_output=None)
     lines = (run.stdout or "").strip().splitlines()
     return json.loads(lines[-1]) if lines else {"error": run.stderr[-400:]}
 
@@ -210,10 +263,18 @@ def render(box: dict, site: dict, gateway: dict) -> str:
     h = box["health"]
     lines = [f"# floor watch {h['at']}  release {h['release']}  tick {h['tick_s']}s  living {h['living']}  dead {h['dead']}",
              f"grant active {h['grant_active']} digest {h['money_digest']}  stopped: {h['stopped'] or '-'}  frozen books: {h['frozen_books'] or '-'}"
-             f"  long jobs: {h['long_jobs'] or '-'}",
-             f"## bands {box['bands']}",
-             f"moves {box['moves']}  births {box['births']}  deaths {box['deaths']}",
-             f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
+             f"  long jobs: {h['long_jobs'] or '-'}"]
+    ticks = box.get("tick_steps") or {}
+    if ticks.get("last") or ticks.get("slowest_hour"):
+        # C-perf (Sept 24, 2026): which steps the tick's seconds went to (health.json `tick_steps`).
+        lines.append(f"## tick steps: last {ticks.get('total_s')}s: " + (", ".join(f"{k} {v}s" for k, v in ticks.get("last") or []) or "-")
+                     + f"  |  slowest in the hour ({ticks.get('ticks_in_hour')} ticks): "
+                     + (", ".join(f"{k} {v}s at {str(at)[11:19]}" for k, v, at in ticks.get("slowest_hour") or []) or "-"))
+    if ticks.get("background"):
+        lines.append("   background " + ", ".join(f"{lane} {row[1]}s ({row[0]}, {row[2]})" for lane, row in ticks["background"].items()))
+    lines += [f"## bands {box['bands']}",
+              f"moves {box['moves']}  births {box['births']}  deaths {box['deaths']}",
+              f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
     lines += ["  " + row for row in box["move_rows"]]
     lines.append(f"## real money {json.dumps(box['fills'])}  performance fees ${box['performance_fees']}")
     lines.append(f"## practice {json.dumps(box.get('practice_fills') or {})}")
@@ -225,21 +286,74 @@ def render(box: dict, site: dict, gateway: dict) -> str:
                  f"  error {step.get('error') or '-'}  batches since --since {box.get('lab_batches')}"
                  f"  tables {box.get('lab')} {box.get('lab_ledger', '')}")
     lines.append(f"## costs {json.dumps(box['costs'])}  gateway {json.dumps(gateway)}")
+    seats = (box.get("blocks") or {}).get("seats") or {}
+    if seats:
+        none = seats.get("seats_holding_none") or {}
+        lines.append(f"## seats waiters {seats.get('waiters')}  displaceable {seats.get('displaceable')}  holding none "
+                     f"{none.get('count', '-')} {none.get('ids') or ''}  clocks {seats.get('evidence_clocks')}"
+                     f"  refused {seats.get('refused') or '-'}")
+        # R2 (Sept 24, 2026): no newcomer waits over two hours, or the watch says where and why.
+        longest = seats.get("longest_wait") or {}
+        if longest:
+            lines.append(f"   longest wait {longest.get('hours')} h: {longest.get('class')} {longest.get('id')} for {longest.get('desk') or '?'}"
+                         f" -- {longest.get('reason') or 'under two hours or not yet read by the hourly watch'}")
+        for desk, row in (seats.get("over_two_hours") or {}).items():
+            lines.append(f"   over 2 h on {desk}: {row.get('count')} (longest {row.get('longest_hours')} h): {row.get('rule')}")
+        expired, pop = seats.get("expired") or {}, seats.get("population") or {}
+        if expired or pop:
+            lines.append(f"   left the queue in a day {expired.get('last_day', 0)} {expired.get('by_rule') or ''}"
+                         f"  population {pop.get('max_population', '-')} of {pop.get('ceiling', '-')}: {pop.get('rule') or '-'}")
+    for row in (box.get("blocks") or {}).get("wind_down_stopped") or []:
+        lines.append("  wind-down stopped " + row)
     if box.get("blocks"):
         lines.append(f"## blocks {json.dumps(box['blocks'], default=str)}")
     if box.get("yield"):
-        lines.append(f"## yield {json.dumps(box['yield'], default=str)[:600]}")
+        lines.append(f"## yield {json.dumps(box['yield'], default=str)[:900]}")
+    if box.get("research_economy"):
+        lines.append(f"## research economy {json.dumps(box['research_economy'], default=str)[:600]}")
+    # L3 (Sept 24, 2026): a warning that repeats is a defect until it stops; a health failure is what
+    # the in-box watchdog reads (league/watchdog.py).
+    repeating = box.get("repeating_warnings") or []
+    lines.append(f"## repeating warnings {len(repeating) or '-'}")
+    lines += [f"  {r.get('count')}x since {r.get('first_seen')} (last {r.get('last_seen')}): {str(r.get('text'))[:160]}" for r in repeating]
+    failures = box.get("failures") or []
+    lines.append(f"## health failures {len(failures) or '-'}")
+    lines += [f"  {r.get('check')} since {r.get('since')}: {str(r.get('text'))[:200]}" for r in failures]
     lines.append(f"## health refusals {json.dumps(box['refusals'])}")
     lines += ["  alert " + a for a in box["alerts"]]
     lines.append(f"## site {json.dumps(site)}")
     return "\n".join(lines)
 
 
+def normalize_since(value: str) -> str:
+    """`--since` in the ledger's own form, `YYYY-MM-DDTHH:MM:SS` in UTC, or an argparse error.
+
+    The snippet compares it as text with the ledger's `at` (`2026-09-24T00:42:00.123Z`). A space
+    instead of the `T` (what sqlite's `datetime('now', ...)` writes) sorts before every stamp of
+    that day, so it admitted the whole day (Sept 24, 2026); a zone other than UTC would shift the
+    window; a fraction or a `Z` at the end is harmless but is dropped too."""
+    from datetime import datetime, timezone
+
+    text = str(value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00").replace("z", "+00:00"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--since must be an ISO time such as 2026-09-24T00:42:00, not {value!r}") from None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def parser() -> argparse.ArgumentParser:
+    out = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    out.add_argument("--since", type=normalize_since, default=time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 3600)),
+                     help="the window's start, an ISO time (UTC unless it names a zone); default an hour ago")
+    out.add_argument("--json", action="store_true")
+    return out
+
+
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--since", default=time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 3600)))
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
+    args = parser().parse_args(argv)
     box = box_read(args.since)
     site = site_read()
     try:

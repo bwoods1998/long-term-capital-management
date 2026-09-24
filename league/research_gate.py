@@ -52,7 +52,15 @@ frequent than the clock already allows.
 7. **Abstention has a memory.** After `abstain_lock_after` (3) abstaining sessions in a row the
    agent researches only on a settlement, a fill or a refusal of its own order until a session
    produces a candidate (or runs a replay, which resets the streak as before); notes, lessons,
-   credits and verdicts wait. The idle path is untouched: an idle agent keeps its cadence.
+   credits and verdicts wait. The idle path is untouched: an idle agent keeps its cadence. Since
+   Sept 24, 2026 a locked agent's NEW session runs on `abstain_lock_profile` (`lock_profile`), the
+   cheapest profile: flash_asap cost $0.0027 a call against Luna's $0.0080 and pro_asap's $0.0299
+   on the same frozen packets (league/routing_evidence.json, Sept 22).
+8. **A session the provider broke is not a pass** (Sept 24, 2026). One that ended in a provider
+   server error (`provider_fault`: HTTP 500, 502, 503, 504 or 529) is refunded by the researcher,
+   and like every provider failure (`completed_pass`) it moves no streak, counts as no completed
+   pass for displacement, and the House gives the agent its turn back. The refund and this rule
+   read the same predicate, so no refunded session is ever counted as a pass.
 
 Each decision writes one private `research.gate` row, with `trigger` (the class of evidence that
 woke it, or the skip's reason) and `record` (winner, loser, unproven or idle) so the yield of each
@@ -80,6 +88,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .allocator import RESTATING_CONTROLS
 from .jev import sha
 from .ledger import now_iso
 
@@ -124,7 +133,13 @@ DEFAULTS: dict[str, Any] = {
     # of Sept 22.
     "clock_runs": "winners_and_idle",
     "abstain_lock_after": 3,
+    # Sept 24, 2026 (rule 7): the profile a locked agent's new session runs on; "" leaves it alone.
+    "abstain_lock_profile": "flash_asap",
 }
+#: Provider server errors (Sept 24, 2026): the vendor failed the session, so the researcher refunds
+#: what its turns were charged. The brief's 502 and 504, and the rest of the family the researcher
+#: already treats alike (it polls a response it holds on any of them).
+PROVIDER_FAULTS = frozenset(("provider_http_500", "provider_http_502", "provider_http_503", "provider_http_504", "provider_http_529"))
 RELEVANCE = ("Does this note report evidence, a lesson, a new tool or data, or a failure that bears directly on the "
              "strategy described in state (its market, mechanism or hypothesis), so that its owner should test or change "
              "something now? Generic advice, another market's result or a restatement of known limits does not count.")
@@ -133,6 +148,21 @@ RELEVANCE = ("Does this note report evidence, a lesson, a new tool or data, or a
 def _epoch(iso: str) -> float:
     from datetime import datetime
     return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+
+
+def provider_fault(reason: Any) -> bool:
+    """Whether a research session ended because the provider failed it (`PROVIDER_FAULTS`): the
+    session the researcher refunds. Every such session is also not a completed pass."""
+    text = str(reason or "")
+    return text.startswith("provider: ") and text[len("provider: "):].strip() in PROVIDER_FAULTS
+
+
+def completed_pass(payload: Mapping[str, Any]) -> bool:
+    """Whether a research summary row is a completed pass: not a provider failure of any kind and
+    not a tool outcome a restart left unconfirmed. The gate's abstention streak, the House's
+    empty-pass count and displacement's count of completed passes all read it this way, and a
+    refunded session (`provider_fault`) is always one of the exceptions."""
+    return session_outcome(payload) != "provider_failure"
 
 
 def session_outcome(payload: Mapping[str, Any]) -> str:
@@ -373,6 +403,11 @@ class ResearchGate:
             if entry.kind == "audit.verdict":
                 counts[f"audit.verdict:{'approve' if entry.payload.get('approve') else 'refuse'}"] += 1
                 continue
+            if entry.kind == "agent.strategy" and entry.payload.get("control") in RESTATING_CONTROLS:
+                # Its own pause or resume of its entries (X1) restates its strategy: no code change,
+                # no news, and it must not buy the next paid session (review of #249). An in-place
+                # edit is a new strategy, as an in-place rewrite is.
+                continue
             counts[entry.kind] += 1
         found = [f"{kind}:{n}" for kind, n in sorted(counts.items())]
         found += self._about_it(agent, after)
@@ -424,6 +459,22 @@ class ResearchGate:
         if lessons:
             found.append(f"lesson:{lessons}")
         return found
+
+    def lock_profile(self, agent: Any) -> str | None:
+        """The profile a NEW session of this agent runs on while it is under the abstention lock
+        (rule 7): `abstain_lock_profile`, the cheapest. None when it is not locked, the gate or the
+        lock is off, or the agent is idle (an idle agent is never locked). Read from the streak the
+        gate's last decision left (`allow` absorbs each summary before it decides)."""
+        settings = self.settings
+        profile = str(settings.get("abstain_lock_profile") or "")
+        lock_after = int(settings.get("abstain_lock_after") or 0)
+        if not settings.get("enabled", True) or not profile or lock_after <= 0:
+            return None
+        with self.state.lock:
+            streak = int(self.state.agent(agent.id).get("streak") or 0)
+        if streak < lock_after or self.record_of(agent) == "idle":
+            return None
+        return profile
 
     def record_of(self, agent: Any) -> str:
         """idle (its rules are not meeting the market: the House pulls its research forward), winner
@@ -642,7 +693,7 @@ def report(ledger: Any, *, sensor: Any = None, after: int = 0) -> dict[str, Any]
             continue
         finished += 1
         outcome = session_outcome(after_rows[0].payload)
-        adopted = any(e.seq > sample.seq and e.seq <= after_rows[0].seq
+        adopted = any(e.seq > sample.seq and e.seq <= after_rows[0].seq and e.payload.get("control") not in RESTATING_CONTROLS
                       for e in ledger.read(kinds="agent.strategy", agent=sample.agent, after=sample.seq, limit=5))
         if outcome == "candidate" or adopted:
             misses += 1

@@ -273,15 +273,15 @@ class HouseTest(HouseCase):
         self.house.tick()  # heard twice a minute apart, the lost exit is closed and the mark pass retries it
         self.assertEqual(book.account(agent.id).holdings, {})
 
-    def test_a_few_cents_short_on_paper_is_a_warning_and_real_money_stays_an_error(self):
+    def test_a_few_cents_short_on_paper_is_dust_and_a_real_shortfall_stays_an_error(self):
         agent = self.seated()
         self.house.tick()  # it buys; the paper book reconciles
-        self.broker.cash -= Decimal("0.06")  # the venue's fee activity has not posted yet
+        self.broker.cash -= Decimal("0.06")  # two option fills' fees: taken at the fill, listed the next morning
         self.clock.advance(301)
         self.house.tick()
-        alerts = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "does not reconcile" in e.payload["text"]]
-        self.assertTrue(alerts)
-        self.assertEqual({a["level"] for a in alerts}, {"warning"})
+        # Sept 24, 2026: booked as dust at once (`book.PRACTICE_DUST_USD`), never a freeze -- nor an alert.
+        self.assertFalse([e for e in self.house.ledger.iter(kinds="ops.alert") if "does not reconcile" in e.payload["text"]])
+        self.assertTrue(all(book.frozen is None for book in self.house.books.values() if not book.real_money))
         self.broker.cash -= Decimal("5.00")  # more than cents: an error
         self.clock.advance(301)
         self.house.tick()
@@ -839,6 +839,61 @@ class FloorInvariants(HouseCase):
         self.house.ledger.append("agent.intent", {"book": "alpaca-paper", "symbol": "BTC/USD", "side": "buy"}, agent=agent.id)
         self.house._floor_invariants()
         self.assertEqual(self.warnings("offered markets"), [])
+
+    def test_a_desk_of_day_programs_is_quiet_after_a_day_without_an_intent_not_an_hour(self):
+        """Sept 24, 2026: kalshi-sports (16 members, every one a day program) wrote 2-7 intents an hour
+        from 00Z to 07Z and none from 11Z to 14Z -- its favourites programs wait for game time -- and
+        the hourly rule called it quiet six times that day, while two of its agents made the floor's
+        profit."""
+        agent = self.seated()
+        self.house.registry.get(agent.id).horizon = "day"
+
+        def an_hour_of_offers():
+            for ago in (3000, 1800, 600):
+                self.wake(agent, offered=32, ago=ago)
+            self.house._floor_invariants()
+
+        an_hour_of_offers()
+        self.assertEqual(self.warnings("offered markets"), [])  # an hour is nothing to a day program
+        for _ in range(17):
+            self.clock.advance(3600)
+            an_hour_of_offers()
+        self.assertEqual(self.warnings("offered markets"), [])  # 17 h 50 m: under three quarters of a day
+        self.clock.advance(3600)
+        an_hour_of_offers()
+        (told,) = self.warnings("offered markets")
+        self.assertIn("no agent of the desk wrote an intent for 18 hours (a desk of day programs)", told["text"])
+        self.clock.advance(3600)
+        an_hour_of_offers()
+        self.assertEqual(len(self.warnings("offered markets")), 1)  # once a day
+        self.house.ledger.append("agent.intent", {"book": "alpaca-paper", "symbol": "BTC/USD", "side": "buy"}, agent=agent.id)
+        for _ in range(24):  # an intent starts its day again
+            self.clock.advance(3600)
+            an_hour_of_offers()
+        self.assertEqual(len(self.warnings("offered markets")), 2)  # told again a day after the first telling
+        # ...counted from its first offer after that intent (22 h 50 m), not from the first of all (42 h).
+        self.assertIn("for 22 hours", self.warnings("offered markets")[-1]["text"])
+
+    def test_a_kalshi_wake_offers_only_its_own_series_inside_its_horizon(self):
+        """Sept 24, 2026: greenwich-h4cb387 (NFL props within six hours, horizon "hour") was shown its
+        desk's busiest live series (UEFA and DJI) while its own had nothing in its window, and each
+        wake was counted barren -- the quiet-desk warning at 14:58Z, the research gate and the stuck
+        cull all read that count."""
+        from dataclasses import replace
+
+        from league.agents import Agent
+
+        agent = Agent(id="greenwich-t", name="greenwich-t", family="open-football-prop-no", venue="kalshi", horizon="hour",
+                      style="football-prop-favourite", generation=0, parent=None, code="", params={}, wake_minutes=15,
+                      born_at=now_iso(self.clock), specialty="kalshi-open",
+                      needs={"series": ["KXNFLWINMARGIN", "KXNFLPASSINT"], "max_hours_to_close": 6})
+        fallback = [{"market": f"KXUCLGAME-{i}", "series": "KXUCLGAME", "hours_to_close": 2.0, "hours_to_resolve": 4.0}
+                    for i in range(76)]
+        self.assertEqual(self.house._offered(agent, {"markets": fallback, "note": "the busiest live series"}), 0)
+        own = [{"market": "KXNFLPASSINT-A", "series": "KXNFLPASSINT", "hours_to_close": 5.0, "hours_to_resolve": 8.0},
+               {"market": "KXNFLPASSINT-B", "series": "KXNFLPASSINT", "hours_to_close": 5.5, "hours_to_resolve": 30.0}]
+        self.assertEqual(self.house._offered(agent, {"markets": own + fallback}), 1)  # the second resolves past 12 hours
+        self.assertEqual(self.house._offered(replace(agent, needs={"max_hours_to_close": 6}), {"markets": fallback}), 76)  # names none: all
 
     def test_a_real_money_bunt_frozen_by_a_daily_loss_rule_is_told_once_a_day(self):
         agent = self.seated()

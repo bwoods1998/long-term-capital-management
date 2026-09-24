@@ -79,10 +79,11 @@ class TheFailingRow(StepCase):
     def test_the_failing_row_is_blocked_and_the_batches_behind_it_run(self):
         """The regression, from the failing state: the row's own NEEDS, the history store as it stood."""
         self.history(["ADA/USD"], "15Min", "2025-08-01", "2025-11-14", listed={"ADA/USD": "2026-02-01T00:00:00Z"})
-        tape_id, tape = self.house.tape_for(ADA_NEEDS)
-        self.assertEqual(tape["source"]["window"], ["2025-09-12", "2025-11-14"])
-        self.assertEqual(tape["steps"], [])  # fetched and empty: not a gap in the store, so no TapeError either
-        self.house._tapes.clear()
+        # Fetched and empty: not a gap in the store, so no TapeError, and since Sept 24, 2026 (B-loop) the
+        # House refuses the tape where it builds it instead of handing out one with no steps.
+        with self.assertRaisesRegex(ValueError, r"unsupported input: the history store holds no ADA/USD 15Min bars in 2025-09-12\.\.2025-11-14"):
+            self.house.tape_for(ADA_NEEDS)
+        self.assertFalse(any(key.startswith("deep:") for key in self.house._tapes))
         self.insert(ADA_ROW, ADA_NEEDS)
         behind = self.queue(KNOB)
         out = self.lab.step()
@@ -91,10 +92,10 @@ class TheFailingRow(StepCase):
         row = self.candidate(ADA_ROW)
         self.assertEqual(row["status"], "blocked")
         self.assertIn("unsupported input", row["error"])
-        self.assertIn("no steps", row["error"])
+        self.assertIn("no ADA/USD 15Min bars", row["error"])
         self.assertEqual(self.candidate(behind)["status"], "evaluated")
         self.assertGreaterEqual(out["batches"], 1)
-        self.assertNotIn(tape_id, self.house._tapes)  # the House still keeps no tape only the lab asked for
+        self.assertFalse(any(key.startswith("deep:") for key in self.house._tapes))  # no empty tape is kept
 
     def test_a_tape_with_no_steps_is_unsupported_input_and_one_step_is_searched(self):
         needs = static_literal(KNOB, "NEEDS")
@@ -324,11 +325,11 @@ class ARestart(StepCase):
         self.assertTrue(tape["steps"] and tape["source"]["window"])  # a development tape from the store
         live = {**self.needs, "symbols": ["ETH/USD"]}  # not in the store: the House's live tape
         self.house._tapes.clear()
-        deep_rows, live_rows = self.rows(self.needs, 10, "d"), self.rows(live, 6, "l", age=1800.0)
-        while self.lab.evaluate_batch():  # builds both tapes, evaluates a batch on each
+        deep_rows, live_rows = self.rows(self.needs, 12, "d"), self.rows(live, 8, "l", age=1800.0)
+        # Builds both tapes, a batch on each (since E1, Sept 24, 2026, one tape is built a turn: the queue's,
+        # then the largest group's, which is the deep tape again until the live one is larger).
+        while len(self.lab._tape_index) < 2 and self.lab.evaluate_batch():
             self.lab._tapes_built = 0
-            if self.lab.queued() <= 12:
-                break
         waiting_deep = sum(self.candidate(r)["status"] == "queued" for r in deep_rows)
         waiting_live = sum(self.candidate(r)["status"] == "queued" for r in live_rows)
         self.assertGreaterEqual(waiting_deep, 4)

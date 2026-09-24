@@ -19,6 +19,8 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["ladder"]["alpha"], 0.05)  # death's budget
         self.assertEqual(CONSTITUTION["ladder"]["promotion_alpha"], 0.20)  # promotion's budget, swing and bunt
         self.assertEqual(CONSTITUTION["ladder"]["replay"]["min_oos_growth"], -0.0005)  # swing and bunt
+        # No probe on a losing family (R5, the close-the-gaps run, Sept 24, 2026: the run's third money-digest change).
+        self.assertEqual(CONSTITUTION["allocator"]["family_probe"], {"losing_min_blocks": 6, "reseat": "gain_since_demotion"})
 
     def test_sizing_stays_on_the_lower_bound_and_death_keeps_its_budget(self):
         """Whatever the owner's appetite, two properties hold: the scaled rung is never sized above
