@@ -17,6 +17,9 @@ from unittest.mock import patch
 from league.ledger import now_iso
 from league.tests.test_house import HouseCase
 
+#: The step these tests make slow, well clear of what load makes of a real one (it was 1.0 s).
+SLOW_STEP_SECONDS = 3.0
+
 
 class TheTickSteps(HouseCase):
     def health(self):
@@ -42,19 +45,33 @@ class TheTickSteps(HouseCase):
         self.assertEqual(steps["ticks_in_hour"], 1)
         self.assertEqual({row["step"] for row in steps["slowest_hour"]} <= set(last["steps"]), True)
 
-    def test_a_slow_step_is_the_slowest_for_an_hour(self):
+    def warm(self):
+        """Sept 24, 2026: `test_a_slow_step_is_the_slowest_for_an_hour` failed "'payout' !=
+        'floor_invariants'" under a seven-way parallel run. A House's first tick pays its first epoch,
+        and that loads every playbook lesson onto the ledger (`House.learn`): 51 lessons by then, 3.1 s
+        with the temp directory on disk (0.13 s when the test was written), more under load, against a
+        1.0 s slow step. So the first tick is ticked first and left more than an hour behind: the next
+        epoch is six hours off, and the slow tick pays none."""
+        self.house.tick()
+        self.clock.advance(3601)
+
+    def slow_tick(self):
         invariants = self.house._floor_invariants
 
-        def slow():  # a House's first tick also pays its first epoch (0.13 s here): the slow step is well clear of it
-            time.sleep(1.0)
+        def slow():  # a House's first tick also pays its first epoch (0.13 s idle): the slow step is well clear of it
+            time.sleep(SLOW_STEP_SECONDS)
             return invariants()
 
         with patch.object(self.house, "_floor_invariants", slow):
             self.house.tick()
+
+    def test_a_slow_step_is_the_slowest_for_an_hour(self):
+        self.warm()
+        self.slow_tick()
         steps = self.health()
         last = steps["last"]["steps"]
         self.assertEqual(max(last, key=last.get), "floor_invariants")
-        self.assertGreaterEqual(last["floor_invariants"], 1.0)
+        self.assertGreaterEqual(last["floor_invariants"], SLOW_STEP_SECONDS)
         self.assertEqual(steps["slowest_hour"][0]["step"], "floor_invariants")
         slow_at = steps["slowest_hour"][0]["at"]
         self.clock.advance(1800)
@@ -69,6 +86,25 @@ class TheTickSteps(HouseCase):
         hour = {row["step"]: row["seconds"] for row in steps["slowest_hour"]}
         self.assertLess(hour.get("floor_invariants", 0), 1.0)
         self.assertEqual(steps["ticks_in_hour"], 2)
+
+    def test_the_first_epochs_cost_never_lands_in_the_slow_tick(self):
+        """The flake itself: the first epoch's lessons, slowed further as a loaded box slows them, are
+        paid in the warm tick and are not in the hour the slow step is judged in."""
+        learn = self.house.learn
+
+        def loaded(*args, **kwargs):
+            time.sleep(1.5)
+            return learn(*args, **kwargs)
+
+        with patch.object(self.house, "learn", loaded):
+            self.warm()
+            first = self.health()["last"]["steps"]["payout"]
+            self.slow_tick()
+        steps = self.health()
+        self.assertGreaterEqual(first, 1.5)  # the first epoch really was slow
+        last = steps["last"]["steps"]
+        self.assertEqual(max(last, key=last.get), "floor_invariants")
+        self.assertEqual(steps["slowest_hour"][0]["step"], "floor_invariants")
 
     def test_each_background_lane_s_last_run_is_in_health_and_not_in_the_tick(self):
         self.assertTrue(self.house._background("feeds:test", time.sleep, 0.2))
