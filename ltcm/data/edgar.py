@@ -15,16 +15,31 @@ Endpoints, verified against the SEC's own developer pages:
 
 Captured filing text is capped at 400 KB and always returned with the SHA-256 of the bytes that
 were actually fetched, so a memo can cite a document the floor can prove it read.
+
+Sept 24, 2026 (the House's earnings recorder, league/feeds.py): full-text search answers a filing's
+DATE only (`file_date`, probed that day), and `data.sec.gov` is not on the House box's allowlist.
+The company browse feed on www.sec.gov carries what an honest backfill needs, each filing's
+ACCEPTANCE time (`<updated>`, with its offset: "2026-07-30T16:30:28-04:00" is the filing index's
+"Accepted 2026-07-30 16:30:28") and its items ("items 2.02, 8.01and9.01"):
+
+    GET https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=<ticker or CIK>&type=8-K
+        &dateb=&owner=include&start=<offset>&count=<n>&output=atom
+      <company-info><cik>, <conformed-name>; <entry>: <accession-number>, <filing-type> (8-K, 8-K/A),
+      <filing-date>, <items-desc>, <filing-href>, <updated> -- newest first; `type=8-K` matches the
+      amendments too. An unknown ticker answers an HTML page, never an empty feed.
 """
 
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 import urllib.parse
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from . import (
+    CONTACT_USER_AGENT,
     DataError,
     HttpTransport,
     read_json,
@@ -41,6 +56,7 @@ SUBMISSIONS_URL = DATA_HOST + "/submissions/CIK{cik}.json"
 COMPANYFACTS_URL = DATA_HOST + "/api/xbrl/companyfacts/CIK{cik}.json"
 COMPANYCONCEPT_URL = DATA_HOST + "/api/xbrl/companyconcept/CIK{cik}/{taxonomy}/{tag}.json"
 FULL_TEXT_SEARCH_URL = SEARCH_HOST + "/LATEST/search-index"
+BROWSE_URL = SEC_HOST + "/cgi-bin/browse-edgar"
 
 ARCHIVE_PREFIXES = (SEC_HOST + "/Archives/", SEC_HOST + "/cgi-bin/", DATA_HOST + "/")
 
@@ -335,6 +351,70 @@ class Edgar:
         return results
 
 
+    # ------------------------------------------------------------ the browse feed
+    def filings(self, company: str, *, form: str = "8-K", start: int = 0, count: int = 40) -> dict[str, Any]:
+        """One page of a company's filings of `form` (and its amendments) from the browse feed,
+        newest first (`parse_filings_atom`): `company` is a ticker or a CIK, `start` the offset of the
+        page. Sent with the contact User-Agent the SEC asks for."""
+        name = str(company or "").strip().upper()
+        if not (TICKER.match(name) or name.isdigit()):
+            raise DataError(f"not a ticker or CIK: {company!r}")
+        if not FORM.match(str(form)):
+            raise DataError(f"not an EDGAR form type: {form!r}")
+        params = {"action": "getcompany", "CIK": name, "type": str(form), "dateb": "", "owner": "include",
+                  "start": max(0, int(start)), "count": max(1, min(int(count), 100)), "output": "atom"}
+        url = BROWSE_URL + "?" + urllib.parse.urlencode(params)
+        status, _, body = self.transport.get(url, {"Accept": "application/atom+xml", "User-Agent": CONTACT_USER_AGENT}, self.timeout)
+        if status != 200:
+            raise DataError(f"sec filings {name}: HTTP {status} from {url}")
+        return parse_filings_atom(body)
+
+
+_ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
+_ITEM = re.compile(r"\d{1,2}\.\d{2}")
+
+
+def _tag(block: str, name: str) -> str | None:
+    found = re.search(rf"<{name}(?:\s[^>]*)?>(.*?)</{name}>", block, re.S)
+    return html.unescape(found.group(1).strip()) if found else None
+
+
+def accepted_utc(value: Any) -> str:
+    """An Atom `<updated>` (EDGAR's acceptance time, with its offset) as a UTC stamp to the second."""
+    moment = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        raise DataError(f"sec: an acceptance time without its offset: {value!r}")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_filings_atom(body: "bytes | str") -> dict[str, Any]:
+    """A company browse feed (`output=atom`) as `{cik, company, entries}`, newest first, each entry
+    `{accession, form, filed, accepted, items, url}` with `accepted` the acceptance time in UTC and
+    `items` the 8-K items it reports (["2.02", "9.01"]). Raises DataError when the answer is not a
+    company's feed -- EDGAR answers an unknown ticker with an HTML page -- or an entry has no
+    acceptance time."""
+    text = body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body)
+    if "<feed" not in text[:2000] or "<company-info>" not in text:
+        raise DataError("sec: no company feed (EDGAR knows no such filer)")
+    info = text.split("<entry>", 1)[0]
+    cik = _tag(info, "cik")
+    require(cik is not None and cik.strip().isdigit(), "sec: a company feed without its CIK")
+    entries = []
+    for block in _ENTRY.findall(text):
+        accession, updated = _tag(block, "accession-number"), _tag(block, "updated")
+        form = _tag(block, "filing-type") or (re.search(r'term="([^"]+)"', block) or [None, None])[1]
+        require(accession is not None and updated is not None, "sec: a filing without its accession number or acceptance time")
+        entries.append({
+            "accession": accession,
+            "form": form,
+            "filed": _tag(block, "filing-date"),
+            "accepted": accepted_utc(updated),
+            "items": _ITEM.findall(_tag(block, "items-desc") or ""),
+            "url": _tag(block, "filing-href"),
+        })
+    return {"cik": pad_cik(cik), "company": _tag(info, "conformed-name"), "entries": entries}
+
+
 def _at(column: Any, index: int) -> Any:
     if isinstance(column, list) and 0 <= index < len(column):
         return column[index]
@@ -359,9 +439,12 @@ def archive_url(cik: Any, accession: Any, document: Any) -> str:
 
 
 __all__ = [
+    "BROWSE_URL",
     "Edgar",
+    "accepted_utc",
     "archive_url",
     "pad_cik",
+    "parse_filings_atom",
     "TICKERS_URL",
     "SUBMISSIONS_URL",
     "COMPANYFACTS_URL",

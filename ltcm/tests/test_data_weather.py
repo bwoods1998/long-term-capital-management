@@ -186,3 +186,81 @@ class TableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------- the House's recorders, Sept 24, 2026
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from ltcm.data.weather import (  # noqa: E402
+    CITIES,
+    city_for_series,
+    city_of_station,
+    standard_offset_hours,
+    station_for,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures" / "feeds"
+
+
+def recorded(name):
+    """A payload recorded from api.weather.gov on Sept 24, 2026 at 03:16Z (trimmed to the fields relied on)."""
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+class SeriesAndStations(unittest.TestCase):
+    def test_every_temperature_series_of_the_weather_desk_names_its_settlement_station(self):
+        from league import niches
+
+        desk = niches.load()["kalshi-weather"]
+        temperature = [s for s in desk.universe if s.startswith(("KXHIGH", "KXLOWT"))]
+        self.assertGreaterEqual(len(temperature), 30)
+        self.assertEqual([s for s in temperature if station_for(s) is None], [])
+        self.assertEqual({s: station_for(s) for s in ("KXHIGHNY", "KXLOWTNYC", "KXHIGHTPHX", "KXLOWTPHIL", "KXHIGHCHI", "KXRAINNYC")},
+                         {"KXHIGHNY": "KNYC", "KXLOWTNYC": "KNYC", "KXHIGHTPHX": "KPHX", "KXLOWTPHIL": "KPHL",
+                          "KXHIGHCHI": "KMDW", "KXRAINNYC": "KNYC"})
+        # Nothing is guessed: a series that names no known city, and anything that is not a series.
+        self.assertEqual([station_for(s) for s in ("KXRAIN", "KXRAINWKND", "KXHIGHTUL", "KXBTCD", "", None)], [None] * 6)
+        self.assertEqual((station_for("KNYC"), station_for("nyc"), station_for("Los Angeles"), station_for("kmdw")),
+                         ("KNYC", "KNYC", "KLAX", "KMDW"))
+        self.assertIsNone(city_for_series("KXHIGHT"))
+
+    def test_the_climate_day_offset_is_standard_time(self):
+        self.assertEqual({CITIES[k].station: standard_offset_hours(CITIES[k]) for k in ("new york", "chicago", "denver", "phoenix", "los angeles")},
+                         {"KNYC": -5.0, "KMDW": -6.0, "KDEN": -7.0, "KPHX": -7.0, "KLAX": -8.0})
+        self.assertEqual(city_of_station("KNYC").name, "New York")
+
+
+class Issued(unittest.TestCase):
+    def transport(self, **over):
+        routes = {POINTS: recorded("nws_points_knyc.json"),
+                  "https://api.weather.gov/gridpoints/OKX/34,45/forecast": recorded("nws_forecast_knyc.json"),
+                  "https://api.weather.gov/gridpoints/OKX/34,45/forecast/hourly": recorded("nws_hourly_knyc.json")}
+        routes.update(over)
+        return FakeTransport(routes)
+
+    def test_the_recorded_forecast_as_issued(self):
+        transport = self.transport()
+        answer = Weather(transport, clock=Clock("2026-09-24T03:16:37Z")).issued(CITIES["new york"])
+        self.assertEqual((answer["station"], answer["issued"], answer["unit"]), ("KNYC", "2026-09-23T21:46:15Z", "F"))
+        first = answer["periods"][0]
+        self.assertEqual((first["name"], first["daytime"], first["temperature"], first["pop"], first["short"]),
+                         ("Tonight", False, 52.0, 0.0, "Partly Cloudy"))
+        self.assertEqual(answer["periods"][1]["temperature"], 68.0)  # Thursday's high
+        # The hourly path starts 23:00 EDT Sept 23 (22:00 EST): the rest of the climate day of Sept 23, then whole days.
+        days = {row["date"]: row for row in answer["days"]}
+        self.assertEqual(days["2026-09-23"]["hours"], 2)
+        self.assertEqual(days["2026-09-24"]["hours"], 24)
+        hourly = recorded("nws_hourly_knyc.json")["properties"]["periods"]
+        on_24 = [p["temperature"] for p in hourly if "2026-09-24T01:00:00-04:00" <= p["startTime"] < "2026-09-25T01:00:00-04:00"]
+        self.assertEqual(len(on_24), 24)
+        self.assertEqual((days["2026-09-24"]["hourly_max"], days["2026-09-24"]["hourly_min"]), (float(max(on_24)), float(min(on_24))))
+        for call in transport.calls:
+            self.assertEqual(call["headers"]["User-Agent"], USER_AGENT)
+        json.dumps(answer, allow_nan=False)
+
+    def test_a_forecast_without_an_issue_time_is_an_error_not_a_row(self):
+        broken = recorded("nws_forecast_knyc.json")
+        del broken["properties"]["updateTime"]
+        with self.assertRaises(DataError):
+            Weather(self.transport(**{"https://api.weather.gov/gridpoints/OKX/34,45/forecast": broken})).issued(CITIES["new york"])
