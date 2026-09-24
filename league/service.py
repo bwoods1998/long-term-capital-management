@@ -309,10 +309,14 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                         daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
                         purpose_calls=jev.get("purpose_calls") or None)
         house.jev_floor = JevFloor(house, sensor, jev)
+        if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
+            # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
+            house.researcher.routes.lock = house.jev_floor.gate.lock_profile
     if not canary:
         from .frontier import FrontierMonth
 
-        house.frontier_month = FrontierMonth(gateway_url, token)
+        # The gateway's month is also OpenAI's meter: each reading feeds the campaign (Sept 24, 2026).
+        house.frontier_month = FrontierMonth(gateway_url, token, meter=campaigns)
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
@@ -325,7 +329,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         pace = house.game.get("merton") or {}
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
-                            pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
+                            pace=house.frontier_pace, backoff_max=pace.get("backoff_max"),
+                            # Sept 24, 2026 (L2): these roles wait while the floor's 24-hour real P&L is not positive.
+                            paused_until_profit=pace.get("paused_until_profit"))
     if house.merton is not None:
         # Always built with Merton: switched off in league/engineer.json it still reports (free),
         # and buys nothing.

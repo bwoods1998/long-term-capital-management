@@ -58,7 +58,14 @@ class StockDeskSeats(HouseCase):
             self.fill(agent, f"2026-09-23T14:{11 + 2 * n:02d}:00Z", closed=True)
 
     def weakest(self):
-        found = self.house._weakest(self.rules)
+        """The tournament's pick for a newcomer whose forward score (0.0) beats every resident's own record
+        here (-0.01): since S1 (Sept 24, 2026) a trader with three fills is displaced only by such a one."""
+        from unittest.mock import patch
+
+        from league.house import Newcomer
+
+        with patch.object(self.house, "_resident_forward", return_value=-0.01):
+            found = self.house._weakest(self.rules, newcomer=Newcomer(forward=0.0))
         return None if found is None else found.id
 
     def test_the_grace_is_regular_session_hours_not_the_night(self):

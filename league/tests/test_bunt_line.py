@@ -101,13 +101,23 @@ class BuntLine(HouseCase):
 
 class OneLossTrialText(HouseCase):
     """The rules tell a bunt what the study measured on Sept 23, 2026: one lost position over about
-    15% of a fresh stake (1 - hysteresis) sends it back to paper."""
+    15% of a fresh stake (1 - hysteresis) sends it back to paper. Since Sept 24, 2026 that exit waits
+    for `hysteresis_after_settled` real settlements, and the rules say so."""
 
     def test_the_rules_name_the_one_loss_trial_and_its_share(self):
         import json
+        from unittest.mock import patch
         from league.constitution import CONSTITUTION
         from league.rules import rules_text
-        text = rules_text(json.load(open("league/game.json")))
+        with open("league/game.json") as f:
+            game = json.load(f)
+        text = rules_text(game)
         share = 1 - float(CONSTITUTION["allocator"]["hysteresis"])
+        after = CONSTITUTION["allocator"]["hysteresis_after_settled"]
+        self.assertIn("ONE EARLY LOSS IS NOT A DEMOTION", text)
+        self.assertIn(f"once you have {after} independent real", text)
+        self.assertIn(f"about {share:.0%} of your stake", text)
+        with patch.dict(CONSTITUTION["allocator"], {"hysteresis_after_settled": 0}):  # the old rule reads as before
+            text = rules_text(game)
         self.assertIn("ONE-LOSS TRIAL", text)
         self.assertIn(f"about {share:.0%} of your stake", text)

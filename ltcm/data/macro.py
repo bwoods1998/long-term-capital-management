@@ -41,13 +41,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from . import DataError, HttpTransport, TransportError, iso, strip_html
+from . import CONTACT_USER_AGENT, DataError, HttpTransport, TransportError, iso, strip_html
 
 BLS_HOST = "https://api.bls.gov"
 FED_HOST = "https://www.federalreserve.gov"
 BLS_SERIES_URL = BLS_HOST + "/publicAPI/v2/timeseries/data/"
 FED_CALENDAR_URL = FED_HOST + "/json/calendar.json"
-USER_AGENT = "ltcm (agent@blakewoods.us)"
+USER_AGENT = CONTACT_USER_AGENT  # one constant for the whole package (ltcm/data/__init__.py)
 SOURCE = "macro"
 
 #: 25 keyless BLS queries a day: one a second is a courtesy, the daily budget is the limit.

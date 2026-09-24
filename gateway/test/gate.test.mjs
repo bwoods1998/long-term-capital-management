@@ -168,3 +168,58 @@ test('an exit skips the dollar caps but still counts as an order', () => {
   assert.equal(full.reserve({ micro: usd(1) }).ok, true);
   assert.equal(full.reserve({ micro: usd(1), exit: true }).ok, false, 'the order count cap binds exits too');
 });
+
+test('the frontier month keeps the calls still unanswered apart from what is settled', () => {
+  const gate = build({ ...ENV, FRONTIER_MONTH_USD: '100' });
+  const read = () => { const m = gate.status().frontier; return [m.spent_usd, m.settled_usd, m.inflight_usd]; };
+  const a = gate.frontierReserve({ micro: usd(5) });
+  assert.equal(a.ok, true);
+  assert.equal(a.tracked, true);
+  assert.deepEqual(read(), ['5.00', '0.000000', '5.000000']);
+  // It settles at $1.25 of its $5 worst case: the month falls, what is settled rises.
+  assert.equal(gate.frontierSettle({ month: a.month, reserved: a.micro, actual: '1250000', tracked: a.tracked }).ok, true);
+  assert.deepEqual(read(), ['1.25', '1.250000', '0.000000']);
+  // A call whose cost is unknown keeps its whole worst case, and that is settled too.
+  const b = gate.frontierReserve({ micro: usd(2) });
+  gate.frontierSettle({ month: b.month, reserved: b.micro, actual: null, tracked: b.tracked });
+  assert.deepEqual(read(), ['3.25', '3.250000', '0.000000']);
+  // A call cut off before it could settle stays in flight: in the month, not in what is settled.
+  gate.frontierReserve({ micro: usd(4) });
+  assert.deepEqual(read(), ['7.25', '3.250000', '4.000000']);
+});
+
+test('a hold reserved before in-flight tracking settles without touching the in-flight figure', () => {
+  // The month as the code before Sept 24, 2026 stored it: its $5 includes a $2 hold still in flight.
+  const store = memoryStore({ frontier: JSON.stringify({ month: '2026-09', spent: '5000000', calls: 3, agents: {} }) });
+  const gate = createGate({ store, env: { ...ENV, FRONTIER_MONTH_USD: '100' }, now: () => NOON });
+  const read = () => { const m = gate.status().frontier; return [m.spent_usd, m.settled_usd, m.inflight_usd]; };
+  assert.deepEqual(read(), ['5.00', '5.000000', '0.000000']);
+  const fresh = gate.frontierReserve({ micro: usd(1) });
+  // The old hold settles at $0.50 from an invocation of the old code, which passes no `tracked`.
+  gate.frontierSettle({ month: '2026-09', reserved: usd(2), actual: '500000' });
+  assert.deepEqual(read(), ['4.50', '3.500000', '1.000000']);
+  gate.frontierSettle({ month: fresh.month, reserved: fresh.micro, actual: '100000', tracked: fresh.tracked });
+  assert.deepEqual(read(), ['3.60', '3.600000', '0.000000']);
+});
+
+test('the month that ended is reported with its final, for the House s meter', () => {
+  let at = Date.parse('2026-09-30T23:50:00Z');
+  const gate = createGate({ store: memoryStore(), env: { ...ENV, FRONTIER_MONTH_USD: '100' }, now: () => at });
+  assert.equal(gate.status().frontier.previous, null);
+  const a = gate.frontierReserve({ micro: usd(3) });
+  gate.frontierSettle({ month: a.month, reserved: a.micro, actual: '1250000', tracked: a.tracked });
+  const late = gate.frontierReserve({ micro: usd(2) });  // in flight across midnight
+  at = Date.parse('2026-10-01T00:01:00Z');
+  let month = gate.status().frontier;
+  assert.deepEqual([month.month, month.spent_usd, month.settled_usd], ['2026-10', '0.00', '0.000000']);
+  assert.deepEqual(month.previous, { month: '2026-09', spent_usd: '3.25', settled_usd: '1.250000' });
+  // Its month has ended: the late call's settle is refused and September keeps its worst case.
+  assert.equal(gate.frontierSettle({ month: late.month, reserved: late.micro, actual: '100000', tracked: late.tracked }).ok, false);
+  // The first October call replaces the stored month; September's final is kept beside it.
+  gate.frontierReserve({ micro: usd(1) });
+  month = gate.status().frontier;
+  assert.equal(month.spent_usd, '1.00');
+  assert.deepEqual(month.previous, { month: '2026-09', spent_usd: '3.25', settled_usd: '1.250000' });
+  at = Date.parse('2026-11-02T00:00:00Z');
+  assert.deepEqual(gate.status().frontier.previous, { month: '2026-10', spent_usd: '1.00', settled_usd: '0.000000' });
+});

@@ -364,9 +364,15 @@ class LivePath(unittest.TestCase):
                 book.submit([Intent.new(agent=agent.id, instrument=inst, side='sell', quantity=held,
                     reason='test close', created_at=now_iso(f.clock), nonce=f'{agent.id}-sell-{n}')])
                 f.clock.advance(30); book.mark()
-        self.assertEqual(h._weakest(rules).id, loser.id)
-        h.research_jobs.enqueue(loser.id, list(h._generation(loser.id)))
-        self.assertIsNone(h._weakest(rules))
+        # Since S1 (Sept 24, 2026) a trader with three fills is displaced only by a newcomer whose forward
+        # score beats its own record: this newcomer's does.
+        from unittest.mock import patch
+        from league.house import Newcomer
+        with patch.object(h, '_resident_forward', return_value=-0.01):
+            self.assertEqual(h._weakest(rules, newcomer=Newcomer(forward=0.0)).id, loser.id)
+            self.assertIsNone(h._weakest(rules), 'no forward score: the trader keeps its seat')
+            h.research_jobs.enqueue(loser.id, list(h._generation(loser.id)))
+            self.assertIsNone(h._weakest(rules, newcomer=Newcomer(forward=0.0)))
 
     def test_corrected_audit_policy_gets_one_reconsideration_not_repeated_shopping(self):
         f = self.fixture(); h = f.house

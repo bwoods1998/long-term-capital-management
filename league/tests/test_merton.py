@@ -519,3 +519,107 @@ class NoBriefMayCarryANumberTheCheckerOwns(unittest.TestCase):
         for name, text in list(BRIEFS.items()) + [("consult", CONSULT)]:
             for value in owned:
                 self.assertNotIn(f"${value} ", text, f"{name} restates a constitutional amount the code owns")
+
+
+class PausedUntilProfit(unittest.TestCase):
+    """L2 (Sept 24, 2026, the close-the-gaps run): Merton's pull-request roles' lifetime spend was
+    architect $57, teacher $21, toolsmith $19, operator $15, designer $8 for about one positive
+    forward record. The roles in `merton.paused_until_profit` do not sit down while the floor's
+    24-hour REAL P&L -- the realized result of the real books' settlements and closing fills over
+    the last 24 hours -- is not positive; each pause and each resumption is one `ops.budget` row."""
+
+    ROLES = ("architect", "toolsmith", "operator", "designer")
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+        self.ledger.append("ops.started", {"release": "test"})
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def merton(self, paused=ROLES):
+        return Merton(FakeFrontier({"files": []}), FakeForge(), self.ledger, evidence=lambda role: {}, clock=self.clock,
+                      schedule_hours={role: 1 for role in ("operator", "teacher", "toolsmith", "designer", "architect")},
+                      first_after_hours={role: 0 for role in ("operator", "teacher", "toolsmith", "designer", "architect")},
+                      paused_until_profit=paused)
+
+    def settle(self, pnl, *, book="kalshi", real=True):
+        self.ledger.append("book.settle", {"book": book, "pnl": pnl, "real_money": real, "result": "no"}, agent="mullins-2")
+
+    def rows(self):
+        return [e.payload for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "merton pause"]
+
+    def test_the_code_roles_wait_while_the_real_books_lose_and_the_teacher_does_not(self):
+        self.settle("-2.50")
+        self.settle("9.00", book="kalshi-shadow", real=False)  # practice money is not the floor's P&L
+        merton = self.merton()
+        self.assertEqual(merton.due(), ["teacher"])
+        rows = self.rows()
+        self.assertEqual(sorted(r["role"] for r in rows), sorted(self.ROLES))
+        self.assertTrue(all(r["paused"] and r["real_pnl_24h_usd"] == "-2.50" and r["settlements"] == 1 for r in rows), rows)
+        self.clock.advance(60)
+        self.assertEqual(merton.due(), ["teacher"])
+        self.assertEqual(len(self.rows()), 4, "a pause is one row, not one a tick")
+
+    def test_they_resume_when_the_last_24_hours_are_positive(self):
+        self.settle("-2.50")
+        merton = self.merton()
+        merton.due()
+        self.clock.advance(600)
+        self.ledger.append("book.fill", {"book": "alpaca", "real_money": True, "realized": "4.00", "source": "venue"}, agent="x")
+        self.assertEqual(set(merton.due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
+        resumed = [r for r in self.rows() if not r["paused"]]
+        self.assertEqual(sorted(r["role"] for r in resumed), sorted(self.ROLES))
+        self.assertEqual(resumed[0]["real_pnl_24h_usd"], "1.50")
+
+    def test_a_result_older_than_a_day_no_longer_counts(self):
+        self.settle("5.00")
+        merton = self.merton()
+        self.assertIn("architect", merton.due())
+        self.assertEqual(self.rows(), [], "never paused, so nothing to say")
+        self.clock.advance(25 * 3600)
+        self.assertEqual(merton.due(), ["teacher"], "nothing realized in 24 hours is not a profit")
+        self.assertEqual(self.rows()[-1]["real_pnl_24h_usd"], "0")
+
+    def test_a_restart_does_not_say_it_again_and_an_empty_list_pauses_nobody(self):
+        self.settle("-1.00")
+        self.merton().due()
+        self.clock.advance(400)
+        self.assertEqual(self.merton().due(), ["teacher"])
+        self.assertEqual(len(self.rows()), 4)
+        self.assertEqual(set(self.merton(paused=()).due()), {"architect", "toolsmith", "operator", "designer", "teacher"})
+
+    def test_health_says_who_waits_and_on_what(self):
+        self.settle("-1.00")
+        merton = self.merton()
+        merton.due()
+        state = merton.pause_state()
+        self.assertEqual(sorted(state["paused"]), sorted(self.ROLES))
+        self.assertEqual((state["real_pnl_24h_usd"], state["settlements"]), ("-1.00", 1))
+        self.assertIn("realized", state["measure"])
+
+
+class TheOperatorPacketKeepsPrivateKeysOut(unittest.TestCase):
+    """Since Deploy A a failed lab step's alert carries `_traceback` (up to 2,000 characters); the
+    operator's packet copied every alert's whole payload, sixty of them (Sept 24, 2026)."""
+
+    def test_private_keys_are_not_in_the_operators_alerts_or_budget(self):
+        from league.merton import evidence_from
+
+        alert = SimpleNamespace(at="2026-09-24T00:00:00Z", payload={"level": "warning", "text": "the lab's step failed (IndexError)",
+                                                                   "phase": "breed", "_traceback": "Traceback ... " * 200})
+        budget = SimpleNamespace(at="2026-09-24T00:00:00Z", payload={"what": "yield", "_private": "x", "total_usd": "1"})
+        house = SimpleNamespace(
+            registry=SimpleNamespace(living=lambda: []),
+            commons=SimpleNamespace(blocked_requests=lambda **kw: []),
+            ledger=SimpleNamespace(read=lambda **kw: [alert] if kw.get("kinds") == "ops.alert" else [budget] if kw.get("kinds") == "ops.budget" else []),
+            evaluator=SimpleNamespace(blocks=lambda _: [], rung=lambda _: 1),
+            economy=SimpleNamespace(balance=lambda _: 0),
+            books={}, budget=None, pacer=SimpleNamespace(report=lambda: {}, running=lambda: False),
+            settings=SimpleNamespace(real_money=False), registry_path=None)
+        shown = evidence_from(house)("operator")
+        self.assertEqual(shown["alerts"], [{"at": "2026-09-24T00:00:00Z", "level": "warning", "text": "the lab's step failed (IndexError)", "phase": "breed"}])
+        self.assertNotIn("_private", shown["budget"][0])

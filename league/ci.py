@@ -59,6 +59,8 @@ FORBIDDEN: tuple[str, ...] = (
     "league/history.py", "league/deep_replay.py",
     # The allocator decides who holds real money and how much (Sept 23, 2026): a money judge.
     "league/allocator.py",
+    # The mechanism ledger (Sept 24, 2026): the family records that decide probe, bunt and family swing.
+    "league/families.py",
     # The Kalshi shard funder moves the owner's collateral between exchange shards (Sept 23, 2026):
     # the one funds move the gateway allows, so a money mover.
     "league/shards.py",
@@ -112,8 +114,21 @@ def changed_paths(base: str, head: str = "HEAD", *, cwd: Path = REPO) -> list[st
 
 
 # ------------------------------------------------------------------------ canned tapes
-def regression_tape(venue: str, *, steps: int = 600, seed: int = 7) -> dict[str, Any]:
-    """A deterministic synthetic tape: enough structure for a strategy to trade on, no meaning."""
+#: Where a synthetic observed series starts: the spot a strike ladder is written around (the Kalshi
+#: tape's strikes are 80,000 and up), and the other majors near their Sept 2026 prices.
+OBSERVED_START = {"BTC/USD": 80000.0, "ETH/USD": 2600.0, "SOL/USD": 150.0}
+
+
+def regression_tape(venue: str, *, steps: int = 600, seed: int = 7, observe: Any = None, bars: Any = None) -> dict[str, Any]:
+    """A deterministic synthetic tape: enough structure for a strategy to trade on, no meaning.
+
+    `observe` and `bars` are the strategy's NEEDS["observe"] and NEEDS["bars"]. A Kalshi strategy
+    that watches another venue's bars (a strike ladder's spot price) is handed deterministic
+    `observed_bars` for each watched symbol at its declared timeframe, warm-up included, in the
+    shape `House.tape_for` records and `league/replay.py` reads. Sept 24, 2026: without them every
+    such strategy failed this check with "required observed bars are missing" whatever it changed
+    (Merton's repairs of Huang's BTC 15-minute strategy, PRs #217 and #208). A tape for a strategy
+    that watches nothing is exactly what it always was."""
     rng = random.Random(seed)
     if venue == "alpaca":
         prices = {"BTC/USD": 80000.0, "ETH/USD": 2600.0, "SOL/USD": 150.0, "SPY": 650.0, "QQQ": 560.0, "IWM": 230.0, "TLT": 90.0, "GLD": 300.0}
@@ -153,7 +168,51 @@ def regression_tape(venue: str, *, steps: int = 600, seed: int = 7) -> dict[str,
                                "close_time": close, "volume_24h": 20000.0, "open_interest": 5000.0, "strike": float(name.rsplit("T", 1)[1])})
             rows.append({"t": stamp, "markets": listed})
         rows.append({"t": close, "markets": []})
-    return {"venue": "kalshi", "horizon": "hour", "step_seconds": 300, "steps": rows, "results": results}
+    tape = {"venue": "kalshi", "horizon": "hour", "step_seconds": 300, "steps": rows, "results": results}
+    watched = [str(s) for s in ((observe or {}).get("symbols") or []) if isinstance(s, str)][:6] if isinstance(observe, dict) else []
+    if watched:
+        _observed_bars(tape, watched, bars if isinstance(bars, dict) else {}, seed)
+    return tape
+
+
+def _observed_bars(tape: dict[str, Any], symbols: list[str], bars: dict[str, Any], seed: int) -> None:
+    """Close-stamped bars of each watched symbol on the declared grid, from `limit` bars before the
+    tape's first step to its last one: a slow random walk from its own seed, so adding a symbol
+    changes no other symbol's series and nothing about the markets. A timeframe the House cannot
+    record gets no bars, and the replay refuses it as it would refuse the real tape."""
+    from datetime import datetime, timezone
+
+    from .tapes import TIMEFRAME_SECONDS
+
+    timeframe = str(bars.get("timeframe") or "1Hour")
+    tape["observed_timeframe"] = timeframe
+    seconds = TIMEFRAME_SECONDS.get(timeframe)
+    if not seconds:
+        tape["observed_bars"] = {}
+        return
+    try:
+        limit = max(1, min(200, int(bars.get("limit") or 60)))
+    except (TypeError, ValueError):
+        limit = 60
+
+    def epoch(stamp: str) -> int:
+        return int(datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp())
+
+    first, last = epoch(tape["steps"][0]["t"]), epoch(tape["steps"][-1]["t"])
+    start = (first // seconds - limit) * seconds
+    out: dict[str, list[dict[str, Any]]] = {}
+    for symbol in symbols:
+        walk = random.Random(f"{seed}:{symbol}")
+        price = OBSERVED_START.get(symbol, 100.0)
+        rows = []
+        for close in range(start + seconds, last + 1, seconds):
+            opened = price
+            price = max(opened * (1 + walk.gauss(0, 0.001)), 0.01)
+            high, low = max(opened, price) * (1 + abs(walk.gauss(0, 0.0003))), min(opened, price) * (1 - abs(walk.gauss(0, 0.0003)))
+            rows.append({"t": datetime.fromtimestamp(close, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                         "o": round(opened, 4), "h": round(high, 4), "l": round(low, 4), "c": round(price, 4), "v": 10.0})
+        out[symbol] = rows
+    tape["observed_bars"] = out
 
 
 # ------------------------------------------------------------------------- content checks
@@ -179,7 +238,8 @@ def check_strategy(path: Path, *, catalogue: dict | None = None) -> list[str]:
 
     if niches.match(described["needs"], catalogue if catalogue is not None else niches.load()) is None:
         return [f"{path.name}: its NEEDS sit in no open specialty of league/niches.json (the House would refuse to let it be born)"]
-    result = run_replay(code, {}, regression_tape(venue, steps=240))
+    needs = described["needs"]
+    result = run_replay(code, {}, regression_tape(venue, steps=240, observe=needs.get("observe"), bars=needs.get("bars")))
     if not result.get("ok"):
         return [f"{path.name}: the replay did not run: {result.get('error')}"]
     if int(result.get("errors") or 0) > 0:

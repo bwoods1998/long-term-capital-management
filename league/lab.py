@@ -59,10 +59,29 @@ The lab watches itself (`_watch`, on every tick, Sept 23, 2026): closed for long
 the since-when lives in `meta`, so a restart does not reset it), and a graduate that has waited for a
 seat longer than `seat_wait_alert_hours` is named once. `health()` is the lab's line in health.json.
 
+**The step says why it failed, and no candidate stops it (D1, Sept 24, 2026).** From 23:21:59Z Sept
+23 the step failed every one to three minutes with "IndexError: list index out of range" and nothing
+escalated: one queued Luna child asked for ADA/USD alone, whose hourly development window the history
+store had fetched and found empty (ADA/USD trades on Alpaca from Feb 2026), and `_search_tape` read
+the first step of a tape that had none. Now a tape with no steps is unsupported input, and its row is
+blocked like any other; anything else a queued row's NEEDS, tape or result raises blocks that row
+(`_block_row`, at most `row_errors_per_step` a step) and the step goes on. Each phase of the step is
+guarded on its own (`_guarded`): its warning names the `phase` and carries the traceback
+(`_traceback`, private), and the phases after it still run. `failures_alert_after` failed steps in a
+row raise one error alert and set `failing_since` in health.json (kept in `meta`, so a restart does
+not reset it); a step that works again clears it with an info. The lab's tape index (tape key ->
+when it was built, the lab's tape id, the House's tape id, its source) is kept in `meta` too, so
+after a restart `ready_queued` counts the rows whose tape the House holds or rebuilds from its own
+disk, and the step evaluates before it breeds.
+
 **Forward windows (S2, Sept 23, 2026).** Every `forward_every_minutes` the lab replays its archived
 elites and its graduates waiting for seats (`forward_windows`) on tape data that arrived AFTER their
 code was frozen: the tape is cut at the hour after the candidate's evaluation (or its graduation),
-so no search, no House replay and no holdout has seen a step of it. Replay fills, on the lab box's
+so no search, no House replay and no holdout has seen a step of it. Since Sept 24, 2026 (S2 of the
+close-the-gaps run) every living resident's current program is scored too, its window cut after the
+program was frozen (its birth or its latest rewrite), so the House's seat market can compare a
+newcomer's forward score with the resident's own record (`resident_forward`) before a trader's seat
+is taken. Replay fills, on the lab box's
 lane, bounded per run. The record (`forward` table, one row per candidate and run, never the
 archive's fitness) RANKS: seats (`forward_score`, which the House's seat market reads), the archive's
 cell ordering (`elites`: a program whose forward window wins comes before every untested one, one
@@ -103,6 +122,7 @@ import re
 import sqlite3
 import threading
 import time
+import traceback
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -149,6 +169,11 @@ DEFAULTS: dict[str, Any] = {
     # when a graduate has waited this long for a seat.
     "closed_alert_minutes": 30,
     "seat_wait_alert_hours": 6,
+    # D1 (Sept 24, 2026): this many failed steps in a row raise one error alert (`_note_step`); a
+    # queued row the lab cannot handle is blocked, at most this many a step before the step fails
+    # instead (`_block_row`: a defect that breaks every row is the lab's, not the rows').
+    "failures_alert_after": 5,
+    "row_errors_per_step": 8,
     # Forward windows (S2, Sept 23, 2026): every `forward_every_minutes`, at most
     # `forward_candidates_per_run` archived elites and waiting graduates (least recently scored
     # first) are replayed on tape data that arrived after their code was frozen, on the lab box, for
@@ -158,13 +183,23 @@ DEFAULTS: dict[str, Any] = {
     # `forward_min_active_blocks` active blocks; the floor's practice record counts from
     # `forward_min_trades` closed trades. Cost, from the box's measured rates that day (11 candidates
     # a second on Kalshi tapes, 1.7 on crypto) and windows a tenth of a search tape: 48 candidates
-    # are some 5-30 box-seconds an hour, under a cent of Sail at $0.20 an hour.
+    # are some 5-30 box-seconds an hour, under a cent of Sail at $0.20 an hour. But the budget is the
+    # run's own time, and the tapes it builds fill it: measured Sept 23 (22:11Z, 23:14Z), a run scored
+    # 4 and 5 of its 48 due and skipped the rest when its 90 s were spent.
     "forward_every_minutes": 60,
     "forward_candidates_per_run": 48,
     "forward_box_seconds": 90,
     "forward_days": 7,
     "forward_min_active_blocks": 3,
     "forward_min_trades": 3,
+    # S2 (the close-the-gaps run, Sept 24, 2026): every living resident's current program is scored too, in
+    # the run's own budget, its window cut after its program was frozen on a grid of this many hours, so
+    # the residents of one tape frozen within a few hours share one batch (a window a few hours shorter,
+    # of the days a resident has lived).
+    "forward_resident_cut_hours": 6,
+    # A tape the House fails to build the same way this many hourly tries in a row is unsupported input and
+    # its rows are blocked (Sept 24, 2026: three submissions failed every hour and sat at the queue's front).
+    "tape_failures_before_block": 12,
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -193,6 +228,17 @@ RESERVED_ORIGINS = ("agent", "luna", "sol")
 #: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
 #: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
 TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
+#: How long a search tape is used before it is built again (the House rebuilds its own tapes daily),
+#: and how long the tape index (`Lab._tape_index`) keeps a tape the lab built.
+SEARCH_TAPE_SECONDS = 6 * 3600
+#: Tapes the persisted index keeps at most (its newest); the search copies in memory are six.
+TAPE_INDEX_MAX = 64
+#: The tail of a traceback an alert carries (`_traceback`, a private key: `ledger.public_view`
+#: strips it from everything published).
+TRACEBACK_CHARS = 2000
+#: What the House's tape reader says when NEEDS ask for more history than it will ever fetch
+#: (`league/tapes.py`: at most `MAX_PAGES` pages a read): unsupported input, never re-queued.
+TOO_LONG = "ask for a shorter window"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -610,6 +656,16 @@ class Lab:
         self._forward_error = ""
         self._priors: tuple[float, list[dict[str, Any]]] | None = None
         self._prior_skips: dict[str, int] = {}
+        #: A resident's program's lab id, by (agent, code, parameters) (`resident_candidate`, S2).
+        self._resident_ids: dict[tuple[str, str, str], str | None] = {}
+        #: D1 (Sept 24, 2026): what the step's phases raised (`_guarded`) and the queued rows it
+        #: blocked for an error of the lab's own (`_block_row`), told at the end of each step.
+        self._failures: list[dict[str, str]] = []
+        self._row_errors: list[dict[str, str]] = []
+        #: The tape index: every search tape built in the last `SEARCH_TAPE_SECONDS`, tape key ->
+        #: {at, ident, house, source}, persisted in `meta` `tape_index` so a restart keeps it
+        #: (`_ready_keys`). The search copies themselves stay in memory (`_tapes`).
+        self._tape_index: dict[str, dict[str, Any]] = self._load_tape_index()
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
@@ -809,8 +865,11 @@ class Lab:
 
     def health(self) -> dict[str, Any]:
         """The lab's line in health.json (`House._health`, every tick): whether it may work now and
-        why not, since when it has been closed, the paid phases skipped and why, the graduates waiting
-        for seats. Cheap (a few small queries), and never raises."""
+        why not, since when it has been closed, whether its step is failing (`failing_since`, set
+        after `failures_alert_after` failures in a row; `failures_in_a_row`; the last `error`), the
+        paid phases skipped and why, the graduates waiting for seats, and its tapes (search copies in
+        memory, tapes in the persisted index). Cheap (a few small queries, no lock the House's tape
+        builds hold), and never raises."""
         try:
             since = self._meta("closed_since")
             waiting = self.waiting()
@@ -818,6 +877,8 @@ class Lab:
                 "refusal": self.refusal or None,
                 "closed_since": _iso(float(since)) if since is not None else None,
                 "closed_minutes": round((self._now() - float(since)) / 60, 1) if since is not None else 0,
+                **self._failing(),
+                "tapes": {"search_copies": len(self._tapes), "indexed": len(self._tape_index)},
                 "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
                 "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0,
                                  "graduates": [{k: r[k] for k in ("candidate", "line", "niche", "since", "hours", "forward")} for r in waiting[:8]]},
@@ -829,51 +890,161 @@ class Lab:
             return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     def step(self) -> dict[str, Any]:
-        """One bounded pass: seed, breed, evaluate in batches until `step_seconds`, graduate,
-        collect royalties, publish. Never raises into its lane."""
+        """One bounded pass: collect royalties, seed, breed, evaluate in batches until
+        `step_seconds`, graduate, run the forward windows, publish. Never raises into its lane.
+
+        Each phase is guarded on its own (D1, Sept 24, 2026; `_guarded`): a phase that raises is
+        told as a warning carrying its `phase` and its traceback, and the phases after it still run,
+        so a fee that cannot be read does not stop the batches and a birth that breaks does not stop
+        the forward windows. A step with any failure counts toward `failures_alert_after`
+        (`_note_step`). Before, one try held the whole pass and its alert carried only the
+        exception's text: 115 identical warnings in 2 h 18 min said nothing of where."""
         started = time.monotonic()
-        settings = self.settings
         out: dict[str, Any] = {"batches": 0, "evaluated": 0, "archived": 0, "calls": 0, "graduations": []}
         self._tapes_built = 0
-        try:
-            self.royalties()
-            self.seed()
-            while time.monotonic() - started < float(settings["step_seconds"]):
-                if self.open():
-                    break
-                # Breed when fewer than a batch wait on tapes already built: seeds each need their own
-                # tape (a few a step), so counting every queued row starved breeding behind them
-                # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
-                if self.ready_queued() < int(settings["batch_size"]):
-                    out["calls"] += self.breed()
-                done = self.evaluate_batch()
-                if not done:
-                    break
-                if done.get("refused"):
-                    continue
-                out["batches"] += 1
-                out["evaluated"] += done["candidates"]
-                out["archived"] += done["archived"]
+        self._failures, self._row_errors = [], []
+
+        def graduate() -> None:
             if not self.open():
                 out["graduations"] = self.graduate()
+
+        def forward() -> None:
             if not self.open():
                 out["forward"] = self.forward_windows()
-        except Exception as exc:  # noqa: BLE001 - the lab must never take a lane or the tick down
-            self.house.alert("warning", f"the lab's step failed ({type(exc).__name__}: {str(exc)[:200]})")
-            out["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+
+        self._guarded("royalties", self.royalties)
+        self._guarded("seed", self.seed)
+        self._guarded("batches", lambda: self._batches(started, out))
+        self._guarded("graduate", graduate)
+        self._guarded("forward", forward)
+        failures, self._failures = self._failures, []
+        if failures:
+            out["error"] = failures[0]["error"]
+        try:
+            self._tell_row_errors()
+            for failure in failures:
+                self.house.alert("warning", f"the lab's step failed ({failure['error']})", phase=failure["phase"],
+                                 _traceback=failure["traceback"])
+        except Exception:  # noqa: BLE001 - a ledger that cannot take an alert fails the House's own writes too
+            pass
+        self._note_step(failures)
         try:
             self.publish()
         except Exception as exc:  # noqa: BLE001
             self.house.alert("warning", f"the lab could not publish its stats ({type(exc).__name__}: {str(exc)[:160]})")
         return out
 
+    def _batches(self, started: float, out: dict[str, Any]) -> None:
+        """The step's batches, until `step_seconds`, the lab closes or nothing is ready. Breeding is
+        guarded on its own: a parent that cannot be bred never stops the batches."""
+        settings = self.settings
+        while time.monotonic() - started < float(settings["step_seconds"]):
+            if self.open():
+                break
+            # Breed when fewer than a batch wait on tapes already built: seeds each need their own
+            # tape (a few a step), so counting every queued row starved breeding behind them
+            # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
+            if self.ready_queued() < int(settings["batch_size"]):
+                out["calls"] += self._guarded("breed", self.breed) or 0
+            done = self.evaluate_batch()
+            if not done:
+                break
+            if done.get("refused"):
+                continue
+            out["batches"] += 1
+            out["evaluated"] += done["candidates"]
+            out["archived"] += done["archived"]
+
+    def _guarded(self, phase: str, work: Callable[[], Any]) -> Any:
+        """One phase of the step. What it raises is kept for the step's report (`_failures`, once
+        per phase and error, with the last `TRACEBACK_CHARS` of its traceback), never raised."""
+        try:
+            return work()
+        except Exception as exc:  # noqa: BLE001 - the lab must never take a lane or the tick down
+            error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            if not any(f["phase"] == phase and f["error"] == error for f in self._failures):
+                self._failures.append({"phase": phase, "error": error, "traceback": traceback.format_exc()[-TRACEBACK_CHARS:]})
+            return None
+
+    def _note_step(self, failures: Sequence[Mapping[str, str]]) -> None:
+        """The step's record of itself (D1, Sept 24, 2026), in `meta` so a restart does not reset it
+        (the failures of Sept 23 ran across two restarts): `failures_in_a_row`, `failures_first_at`
+        (the run's first failure) and `last_failure` (its phase and error). At
+        `failures_alert_after` failures in a row, ONE error alert carrying the traceback, and
+        `failing_since` (the run's first failure), which health.json shows. A step with no failure
+        clears them all, with an info alert if the run had been escalated. Never raises."""
+        try:
+            now = self._now()
+            count = int(self._meta("failures_in_a_row") or 0)
+            if not failures:
+                if count:
+                    escalated = self._meta("failing_since")
+                    self._x("DELETE FROM meta WHERE key IN ('failures_in_a_row', 'failures_first_at', 'last_failure', 'failing_since')")
+                    if escalated is not None:
+                        self.house.alert("info", f"the Alpha Lab's step works again after {count} failures in a row since {_iso(float(escalated))}")
+                return
+            first = failures[0]
+            count += 1
+            since = float(self._meta("failures_first_at") or now)
+            self._set_meta("failures_in_a_row", str(count))
+            self._set_meta("failures_first_at", str(since))
+            self._set_meta("last_failure", json.dumps({"phase": first["phase"], "error": first["error"], "at": now}))
+            if count >= int(self.settings["failures_alert_after"]) and self._meta("failing_since") is None:
+                self._set_meta("failing_since", str(since))
+                self.house.alert("error", f"the Alpha Lab's step has failed {count} times in a row since {_iso(since)} ({first['error']})",
+                                 phase=first["phase"], failures_in_a_row=count, _traceback=first["traceback"])
+        except Exception as exc:  # noqa: BLE001 - keeping the record of a failure must not be one
+            text = f"the lab could not record its step ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                try:
+                    self.house.alert("warning", text)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _failing(self) -> dict[str, Any]:
+        """The step's failure record as health.json and `lab.stats` show it: `failing_since` (None
+        until `failures_alert_after` steps in a row have failed), `failures_in_a_row`, and the last
+        failure's `error` (None once a step succeeds)."""
+        count = int(self._meta("failures_in_a_row") or 0)
+        since = self._meta("failing_since")
+        try:
+            last = json.loads(self._meta("last_failure") or "null") if count else None
+        except ValueError:
+            last = None
+        return {"failing_since": _iso(float(since)) if since is not None else None, "failures_in_a_row": count,
+                "error": last.get("error") if isinstance(last, dict) else None}
+
+    def _block_row(self, row: Mapping[str, Any], exc: BaseException, what: str) -> bool:
+        """Block one queued row the lab's own code could not handle (D1, Sept 24, 2026): its NEEDS,
+        its tape or its result raised something no refusal names. `status='blocked'` with the error,
+        as `_next_batch` blocks a row whose data is unsupported, and the step goes on; the rows are
+        told once at the end of the step (`_tell_row_errors`). Call it while handling `exc`. False,
+        and nothing written, past `row_errors_per_step` rows in one step: a defect that breaks every
+        row is the lab's, and the caller re-raises it rather than block the queue."""
+        if len(self._row_errors) >= int(self.settings["row_errors_per_step"]):
+            return False
+        error = f"{type(exc).__name__}: {str(exc)[:240]}"
+        self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?", (f"{what}: {error}"[:300], self._now(), row["id"]))
+        self._row_errors.append({"candidate": str(row["id"]), "error": error, "traceback": traceback.format_exc()[-TRACEBACK_CHARS:]})
+        return True
+
+    def _tell_row_errors(self) -> None:
+        """One warning for the rows `_block_row` blocked this step, naming them, with the first
+        one's traceback."""
+        errors, self._row_errors = self._row_errors, []
+        if errors:
+            self.house.alert("warning", f"the lab could not evaluate {len(errors)} queued candidate(s) and blocked them ({errors[0]['error']})",
+                             candidates=[e["candidate"] for e in errors], _traceback=errors[0]["traceback"])
+
     # ----------------------------------------------------------------- queue
     def queued(self) -> int:
         return int(self._q("SELECT COUNT(*) AS n FROM candidates WHERE status='queued'")[0]["n"])
 
     def ready_queued(self) -> int:
-        """Queued candidates whose search tape is built and fresh: what the next batches can run now."""
-        fresh = {key for key, hit in self._tapes.items() if self._now() - hit[0] < 6 * 3600}
+        """Queued candidates whose search tape the next batches can have without fetching anything
+        (`_ready_keys`): what they can run now."""
+        fresh = self._ready_keys()
         if not fresh:
             return 0
         count = 0
@@ -883,6 +1054,24 @@ class Lab:
             except (TypeError, ValueError):
                 continue
         return count
+
+    def _ready_keys(self) -> set[str]:
+        """The tape keys a batch can have now without a fetch: a fresh search copy in memory; or, from
+        the tape index (which a restart keeps), a tape the lab built in the last `SEARCH_TAPE_SECONDS`
+        that the House holds in its cache (an agent's replay built it again) or rebuilds from its own
+        disk (the history store's development window: `source` "history-dev"). D1, Sept 24, 2026:
+        after the 23:40Z restart the in-memory copies were gone, `ready_queued()` was 0 and every
+        step went to `breed()` first. Takes the House's tape lock: the step's lane only, never the
+        tick (`health` does not call it)."""
+        now = self._now()
+        ready = {key for key, hit in self._tapes.items() if now - hit[0] < SEARCH_TAPE_SECONDS}
+        fresh = {key: entry for key, entry in self._tape_index.items() if key not in ready and now - entry["at"] < SEARCH_TAPE_SECONDS}
+        if fresh:
+            house = self.house
+            with house._tape_lock:
+                held = set(house._tapes)
+            ready |= {key for key, entry in fresh.items() if entry["source"] == "history-dev" or entry["house"] in held}
+        return ready
 
     def admit(self, code: str, *, niche: Any, origin: str, author: str, lineage: str, parents: Sequence[str] = (),
               idea: str = "", priority: int | None = None) -> str:
@@ -994,10 +1183,18 @@ class Lab:
         """(lab tape id, search tape) for these NEEDS: the House's own tape for them, with the same
         input checks its replay makes, never one that reaches the sealed holdout, cut to its first
         `search_fraction`. Keyed by `tape_key` (Sept 23, 2026): a Luna child that differs from its
-        parent only in `style` or `parameter_rules` is the parent's tape, not a build of its own."""
+        parent only in `style` or `parameter_rules` is the parent's tape, not a build of its own.
+
+        A tape with no steps is unsupported input (D1, Sept 24, 2026), kept for the hour like any
+        tape that failed: nothing was recorded in its window, so there is nothing to search. The
+        history store holds ADA/USD only from 2026-02-01, so an hourly development window
+        (2025-09-12..2025-11-14) of ADA/USD alone is fetched and empty; this function read the
+        cut's first step outside its guard, and one queued Luna child asking for ADA/USD alone
+        failed every step for over two hours with an IndexError. Every tape built is entered in the
+        tape index (`_index_tape`), which a restart keeps."""
         key = tape_key(needs)
         hit = self._tapes.get(key)
-        if hit is not None and self._now() - hit[0] < 6 * 3600:  # the House rebuilds its own tapes daily
+        if hit is not None and self._now() - hit[0] < SEARCH_TAPE_SECONDS:  # the House rebuilds its own tapes daily
             return hit[1], hit[2]
         failed = self._tape_errors.get(key)
         if failed is not None and self._now() - failed[0] < 3600:
@@ -1026,12 +1223,25 @@ class Lab:
             if needs.get("venue") == "alpaca" and observed.get("series"):
                 raise LabError("unsupported input: cross-venue event observations are not recorded on equity tapes")
             check_dev_only(tape, house.holdout_window)
-        except (LabError, TimeoutError):
+        except TimeoutError:
+            raise
+        except LabError:
+            self._forget_tape(key)
             raise
         except Exception as exc:  # noqa: BLE001 - no tape is a blocked candidate, not a crash
-            message = f"{type(exc).__name__}: {str(exc)[:200]}"
+            message = self._tape_failure(key, f"{type(exc).__name__}: {str(exc)[:200]}")
             self._tape_errors[key] = (self._now(), message)
+            self._forget_tape(key)
             raise LabError(message) from None
+        if not tape.get("steps"):
+            message = (f"unsupported input: the House's tape for these NEEDS has no steps ({str(tape_id)[:120]}): "
+                       "nothing was recorded in its window")
+            self._tape_errors[key] = (self._now(), message)
+            self._forget_tape(key)
+            if tape_id not in cached:
+                with house._tape_lock:
+                    house._tapes.pop(tape_id, None)
+            raise LabError(message)
         cut = search_tape(tape, float(self.settings["search_fraction"]))
         if tape_id not in cached:
             # A tape only the lab asked for is not kept in the House's own cache (which keeps one
@@ -1044,7 +1254,104 @@ class Lab:
         if len(self._tapes) >= 6:
             self._tapes.pop(next(iter(self._tapes)))
         self._tapes[key] = (self._now(), ident, cut)
+        source = tape.get("source") if isinstance(tape.get("source"), Mapping) else {}
+        self._index_tape(key, ident, str(tape_id), "history-dev" if source.get("window") else "live")
+        self._tape_built(key)
         return ident, cut
+
+    def _tape_failures(self) -> dict[str, dict[str, Any]]:
+        """Tape key -> its failed builds in a row (`meta` `tape_failures`): the folded error, how many
+        hourly tries in a row it came back, since when."""
+        try:
+            raw = json.loads(self._meta("tape_failures") or "{}")
+        except ValueError:
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _tape_failure(self, key: str, message: str) -> str:
+        """What a failed build of the House's tape for these NEEDS means for the rows that need it.
+
+        Unsupported input -- the row is blocked, not re-queued -- when the House's tape reader refuses the
+        size of what the NEEDS ask for (`TOO_LONG`: it follows at most `tapes.MAX_PAGES` pages a read, so the
+        same NEEDS get the same answer on every try). mcentee-hddb4ae's three alpaca-megacaps submissions
+        (12 names of daily bars with a 260-bar warm-up) failed that way every hour on Sept 23-24, 2026 and
+        were re-queued at priority 0 for ever, at the front of the queue.
+
+        And the invariant for the answers nobody wrote down: the same failure (numbers folded) that has come
+        back `tape_failures_before_block` hourly tries in a row is unsupported input too, with ONE warning;
+        the count is kept in `meta` (`tape_failures`), so a restart does not start it again, and a build that
+        works clears it (`_tape_built`). Anything else: the message as it is, tried again after the hour."""
+        if TOO_LONG in message:
+            return f"unsupported input: {message}"
+        failures = self._tape_failures()
+        folded = re.sub(r"\d+", "#", message)
+        row = failures.pop(key, None) or {}
+        same = row.get("error") == folded
+        tries = int(row.get("tries") or 0) + 1 if same else 1
+        since = float(row.get("since") or self._now()) if same else self._now()
+        failures[key] = {"error": folded, "tries": tries, "since": since}
+        self._set_meta("tape_failures", json.dumps(dict(list(failures.items())[-TAPE_INDEX_MAX:])))
+        limit = int(self.settings["tape_failures_before_block"])
+        if tries < limit:
+            return message
+        if tries == limit:
+            self.house.alert("warning", f"the lab blocks the queued rows whose tape failed the same way {tries} times in a row since "
+                                        f"{_iso(since)}: {message}")
+        return f"unsupported input: the House's tape for these NEEDS failed the same way {tries} times in a row ({message})"
+
+    def _tape_built(self, key: str) -> None:
+        """A tape that built clears its failures in a row."""
+        failures = self._tape_failures()
+        if failures.pop(key, None) is not None:
+            self._set_meta("tape_failures", json.dumps(failures))
+
+    def _load_tape_index(self) -> dict[str, dict[str, Any]]:
+        """The tape index as `meta` `tape_index` holds it, its fresh entries only, oldest first."""
+        try:
+            raw = json.loads(self._meta("tape_index") or "{}")
+        except ValueError:
+            return {}
+        now, rows = self._now(), []
+        for key, entry in (raw.items() if isinstance(raw, dict) else ()):
+            try:
+                row = {"at": float(entry["at"]), "ident": str(entry["ident"]), "house": str(entry["house"]), "source": str(entry["source"])}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if now - row["at"] < SEARCH_TAPE_SECONDS:
+                rows.append((str(key), row))
+        return dict(sorted(rows, key=lambda item: item[1]["at"]))
+
+    def _index_tape(self, key: str, ident: str, house_id: str, source: str) -> None:
+        """Enter a search tape just built in the tape index and persist it. What is kept, and why:
+        the tape key (the NEEDS it serves), when it was built (fresh for `SEARCH_TAPE_SECONDS`), its
+        lab id (what `batches.tape_id` and `candidates.tape_id` name it), the House's own tape id
+        (whether the House holds it now) and its source ("history-dev" when the House rebuilds it
+        from the history store on its own disk, "live" when it must fetch). Not the tape: a search
+        copy is some MB and is cut again from the House's tape. Never raises: an index that cannot
+        be written costs a breeding step after a restart, never a candidate."""
+        self._tape_index.pop(key, None)
+        self._tape_index[key] = {"at": self._now(), "ident": ident, "house": house_id, "source": source}
+        self._save_tape_index()
+
+    def _forget_tape(self, key: str) -> None:
+        """A tape that failed or was refused is not one a batch can have."""
+        if self._tape_index.pop(key, None) is not None:
+            self._save_tape_index()
+
+    def _save_tape_index(self) -> None:
+        now = self._now()
+        kept = [(k, e) for k, e in self._tape_index.items() if now - e["at"] < SEARCH_TAPE_SECONDS][-TAPE_INDEX_MAX:]
+        self._tape_index = dict(kept)
+        try:
+            self._set_meta("tape_index", json.dumps(self._tape_index))
+        except Exception as exc:  # noqa: BLE001 - see `_index_tape`
+            text = f"the lab could not keep its tape index ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                try:
+                    self.house.alert("warning", text)
+                except Exception:  # noqa: BLE001
+                    pass
 
     # --------------------------------------------------------------- evaluate
     def _next_batch(self) -> tuple[str, dict[str, Any], list[sqlite3.Row]] | None:
@@ -1068,13 +1375,21 @@ class Lab:
         if not rows:
             return None
         self._batch_turn = getattr(self, "_batch_turn", 0) + 1
-        largest_turn = int(rows[0]["priority"]) != 0 and self._batch_turn % 2 == 0
+
+        def needs_key(row: sqlite3.Row) -> str:
+            try:
+                return tape_key(json.loads(row["needs"]))
+            except (TypeError, ValueError):
+                return str(row["needs"])
+
+        # An agent's submission is served first -- one that CAN be served: a row whose tape failed this hour
+        # is not the queue's front (Sept 24, 2026: three submissions whose tape never built sat at priority 0,
+        # and the largest-group turn never ran while they did).
+        now = self._now()
+        failed = {key for key, (at, _) in self._tape_errors.items() if now - at < 3600}
+        front = next((r for r in rows if needs_key(r) not in failed), rows[0])
+        largest_turn = int(front["priority"]) != 0 and self._batch_turn % 2 == 0
         if largest_turn:
-            def needs_key(row: sqlite3.Row) -> str:
-                try:
-                    return tape_key(json.loads(row["needs"]))
-                except (TypeError, ValueError):
-                    return str(row["needs"])
             sizes: dict[str, int] = {}
             for row in rows:
                 sizes[needs_key(row)] = sizes.get(needs_key(row), 0) + 1
@@ -1091,6 +1406,12 @@ class Lab:
                     self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?", (str(exc)[:300], self._now(), row["id"]))
                 else:  # a venue or store that failed now: to the back of the queue, tried again after the hour's cache
                     self._x("UPDATE candidates SET created=?, error=? WHERE id=?", (self._now(), str(exc)[:300], row["id"]))
+                continue
+            except Exception as exc:  # noqa: BLE001 - D1 (Sept 24, 2026): one row never stops the lab
+                # Anything else this row's NEEDS or tape raise escaped the walk before: nothing moved the
+                # row, so it failed every step from the front of the queue.
+                if not self._block_row(row, exc, "the lab could not read its NEEDS or its tape"):
+                    raise
                 continue
             groups.setdefault(tape_id, []).append(row)
             tapes[tape_id] = tape
@@ -1138,6 +1459,7 @@ class Lab:
                 for key, hit in list(self._tapes.items()):
                     if hit[1] == tape_id:
                         self._tapes.pop(key)
+                        self._forget_tape(key)
                         self._tape_errors[key] = (self._now(), f"unsupported input: {str(exc)[:200]}")
                 for r in chosen:
                     self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?",
@@ -1171,20 +1493,26 @@ class Lab:
                 # stays queued, and neither is a result against it.
                 infrastructure += bool(result is not None and result.get("infrastructure"))
                 continue
+            try:
+                scored = score(result, tape)
+                corr = self._correlation(result, live)
+                cell = cell_key(row["niche"], row["horizon"], tpd_bucket(scored["trades_per_day"]), corr_bucket(corr))
+                status = "evaluated" if scored["ok"] else "failed"
+                self._x("UPDATE candidates SET status=?, evaluated=?, tape_id=?, error=?, eligible=?, gate=?, fitness=?, trades=?,"
+                        " trades_per_day=?, corr=?, cell=?, summary=? WHERE id=?",
+                        (status, self._now(), tape_id, None if scored["ok"] else str(result.get("error") or "")[:300],
+                         int(scored["eligible"]), int(scored["gate"]), scored["fitness"], scored["trades"],
+                         scored["trades_per_day"], corr, cell if scored["eligible"] else None,
+                         json.dumps({**_summary(result, scored), "tape_source": tape_source}, default=str), row["id"]))
+            except Exception as exc:  # noqa: BLE001 - D1 (Sept 24, 2026): a result the lab cannot score blocks its own row
+                # Left queued, the whole batch would run on the box again every step and fail again.
+                if not self._block_row(row, exc, "the lab could not score its result"):
+                    raise
+                continue
             counts["candidates"] += 1
-            scored = score(result, tape)
-            corr = self._correlation(result, live)
-            cell = cell_key(row["niche"], row["horizon"], tpd_bucket(scored["trades_per_day"]), corr_bucket(corr))
-            status = "evaluated" if scored["ok"] else "failed"
             counts["ok"] += scored["ok"]
             counts["eligible"] += scored["eligible"]
             counts["gate"] += scored["gate"]
-            self._x("UPDATE candidates SET status=?, evaluated=?, tape_id=?, error=?, eligible=?, gate=?, fitness=?, trades=?,"
-                    " trades_per_day=?, corr=?, cell=?, summary=? WHERE id=?",
-                    (status, self._now(), tape_id, None if scored["ok"] else str(result.get("error") or "")[:300],
-                     int(scored["eligible"]), int(scored["gate"]), scored["fitness"], scored["trades"],
-                     scored["trades_per_day"], corr, cell if scored["eligible"] else None,
-                     json.dumps({**_summary(result, scored), "tape_source": tape_source}, default=str), row["id"]))
             if scored["eligible"] and self._place(cell, row["niche"], row["id"], float(scored["fitness"])):
                 counts["archived"] += 1
         box_usd = Decimal(str(self.settings["box_usd_per_hour"])) * Decimal(str(round(seconds, 3))) / Decimal(3600)
@@ -1916,19 +2244,29 @@ class Lab:
         living = house.registry.living()
         if niche is None or niche.dormant:
             return None, self._record(row, "refused", "its desk is closed", line=line, family=family)
+        newcomer = self._newcomer(row, family)
         if sum(1 for a in living if a.specialty == niche.id) >= niche.max_members:
-            displaced = house._weakest(rules, specialty=niche.id, evidenced=True)
+            displaced = house._weakest(rules, specialty=niche.id, evidenced=True, newcomer=newcomer)
             if displaced is None:
                 return None, self._record(row, "waiting_seat", "its desk is full of agents that have earned their seats",
                                           line=line, family=family, table_state="passed")
             return displaced, None
         if len(living) >= int(rules["max_population"]):
-            displaced = house._weakest(rules, evidenced=True)
+            displaced = house._weakest(rules, evidenced=True, newcomer=newcomer)
             if displaced is None:
                 return None, self._record(row, "waiting_seat", "the league is full of agents that have earned their seats",
                                           line=line, family=family, table_state="passed")
             return displaced, None
         return None, None
+
+    def _newcomer(self, row: Mapping[str, Any], family: str) -> Any:
+        """The graduate as the House's seat market reads a newcomer (S1, Sept 24, 2026): its family (a lab
+        family, proven only by its own members' record) and its forward score, which must beat a trading
+        resident's own forward record before that resident's seat is its."""
+        from .house import Newcomer
+
+        return Newcomer(family=family, venue=str(row["venue"]), forward=self.forward_score(str(row["id"])),
+                        what=f"the Alpha Lab graduate {row['id']}")
 
     def _born_already(self, lineage: str, code_sha256: str) -> Any:
         """The agent an earlier `_birth` of this candidate spawned, if any (living or not). The
@@ -1964,10 +2302,11 @@ class Lab:
             if house.ledger.get(f"endow:{child.id}") is None:
                 house.economy.grant(child.id, rules["endowment_usd"], "endowment", id=f"endow:{child.id}")
             living = house.registry.living()
+            newcomer = self._newcomer(row, str(child.family))
             if niche is not None and sum(1 for a in living if a.specialty == niche.id) > niche.max_members:
-                displaced = house._weakest(rules, specialty=niche.id, exclude=[child.id], evidenced=True)
+                displaced = house._weakest(rules, specialty=niche.id, exclude=[child.id], evidenced=True, newcomer=newcomer)
             elif len(living) > int(rules["max_population"]):
-                displaced = house._weakest(rules, exclude=[child.id], evidenced=True)
+                displaced = house._weakest(rules, exclude=[child.id], evidenced=True, newcomer=newcomer)
         if seated and child.alive:
             if house.evaluator.rung(child.id) < 1:
                 house.evaluator.seat(child.id, 1, f"an Alpha Lab graduate: candidate {ident} passed the House's replay before birth, on its own line")
@@ -2017,13 +2356,88 @@ class Lab:
         return paid
 
     # --------------------------------------------------------------- forward
-    def forward_due(self, limit: int) -> list[sqlite3.Row]:
-        """The archived elites and the graduates waiting for seats whose forward window is next:
-        never scored first, then least recently scored (the table decides, so a restart resumes)."""
-        rows = self._q("SELECT c.*, MAX(f.at) AS scored FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
-                       " WHERE c.status='evaluated' AND c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
-                       " WHERE state='passed') GROUP BY c.id ORDER BY (scored IS NULL) DESC, scored, c.evaluated LIMIT ?", (int(limit),))
+    def forward_due(self, limit: int, residents: Mapping[str, Any] | None = None) -> list[sqlite3.Row]:
+        """The archived elites, the graduates waiting for seats and every living resident's current program
+        (S2, Sept 24, 2026: `_residents`, whatever its search status but blocked) whose forward window is
+        next: never scored first -- the graduates waiting for seats, then the residents, then the elites --
+        then least recently scored (the table decides, so a restart resumes). D1, Sept 24, 2026: the runs
+        of Sept 23 at 22:11Z and 23:14Z scored 4 and 5 of their 48 due candidates (the rest skipped
+        when the run's time was spent), in evaluation order, so the graduates whose forward score the
+        seat market reads waited behind the archive's never-scored elites."""
+        ids = list(residents if residents is not None else self._residents())[:400]
+        marks = ",".join("?" for _ in ids)
+        rows = self._q("SELECT c.*, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations WHERE state='passed') AS waiting,"
+                       f" c.id IN ({marks}) AS resident FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
+                       " WHERE (c.status='evaluated' AND c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
+                       f" WHERE state='passed')) OR (c.status IN ('queued', 'evaluated', 'failed') AND c.id IN ({marks}))"
+                       " GROUP BY c.id ORDER BY (scored IS NULL) DESC, (scored IS NULL AND waiting) DESC, (scored IS NULL AND resident) DESC,"
+                       " scored, c.evaluated LIMIT ?", (*ids, *ids, int(limit)))
         return [r for r in rows if self._desk(r["niche"]) is not None]
+
+    def resident_candidate(self, agent: Any) -> str | None:
+        """The lab's id of a living agent's current program: its file with its parameters written in,
+        exactly as `seed` admits it, so its seed row (once seeded) is this id. None for a file with no
+        single literal PARAMS."""
+        key = (str(agent.id), str(agent.code_sha256), json.dumps(agent.params or {}, sort_keys=True))
+        cache = self._resident_ids
+        if key not in cache:
+            literal = static_literal(agent.code, "PARAMS") or {}
+            params = {**literal, **dict(agent.params or {})}
+            code = with_params(agent.code, params) if params != literal else agent.code
+            if len(cache) >= 4096:
+                cache.clear()
+            cache[key] = candidate_id(code) if code else None
+        return cache[key]
+
+    def _residents(self) -> dict[str, Any]:
+        """Candidate id -> the living agent whose current program it is, on every desk the lab searches."""
+        out: dict[str, Any] = {}
+        for agent in self.house.registry.living():
+            if self._desk(agent.specialty or "") is None:
+                continue
+            ident = self.resident_candidate(agent)
+            if ident and (ident not in out or self._program_frozen(agent) > self._program_frozen(out[ident])):
+                out[ident] = agent  # twins: the later freeze, so the window is after both
+        return out
+
+    def _program_frozen(self, agent: Any) -> float:
+        """When a resident's current program was frozen: its birth, or its latest `agent.strategy` row
+        (a rewrite; a parameter repair). Its selection -- the replay that seated it -- saw nothing after."""
+        from .house import _epoch
+
+        last = self.house.ledger.last("agent.strategy", agent=agent.id)
+        return max(_epoch(agent.born_at), _epoch(last.at) if last is not None else 0.0)
+
+    def resident_forward(self, agent: Any, *, ranked: bool = False) -> float | None:
+        """A resident's own forward record (S2), which the House's seat market compares a newcomer's
+        forward score with (`House._displaceable`): the mean log growth per block of its current program's
+        latest forward window, whatever its active blocks (a resident that barely traded in its window has
+        that record, and a newcomer must beat it); `ranked`, its `forward_score` (only with
+        `forward_min_active_blocks`). None before its first window, or when the window failed."""
+        ident = self.resident_candidate(agent)
+        if not ident:
+            return None
+        if ranked:
+            return self.forward_score(ident)
+        row = self.forward_record(ident)
+        if row is None or not row["ok"] or row["mean_log_growth"] is None:
+            return None
+        return float(row["mean_log_growth"])
+
+    def can_score(self, agent: Any) -> bool:
+        """Whether a forward window can ever give this living agent's current program a record (the House's
+        seat market keeps a trader's seat while it waits for one): its desk is one the lab searches (`_desk`:
+        never a dormant, unreplayed or options desk), its file has a single literal PARAMS
+        (`resident_candidate`), and the lab has not blocked that program. The review of #245 (Sept 24, 2026):
+        alpaca-options is never searched, so krasker-6, -10, -11 and -14 (3-8 fills at T0) could never have a
+        record, and the forward rule kept their seats against every newcomer for good."""
+        if self._desk(getattr(agent, "specialty", None) or "") is None:
+            return False
+        ident = self.resident_candidate(agent)
+        if not ident:
+            return False
+        rows = self._q("SELECT status FROM candidates WHERE id=?", (ident,))
+        return not rows or rows[0]["status"] != "blocked"
 
     def _frozen_at(self, row: Mapping[str, Any]) -> float:
         """When this candidate's code was frozen: its evaluation, or its graduation's pass (the
@@ -2083,10 +2497,11 @@ class Lab:
 
     def forward_windows(self, *, force: bool = False) -> dict[str, Any] | None:
         """One forward-window run (S2, Sept 23, 2026), every `forward_every_minutes`: the due
-        elites and waiting graduates (`forward_due`) are replayed on the lab box on the steps of
-        their tape that came after their code was frozen (`forward_cut`, at the hour after the
-        freeze, so one batch serves every candidate frozen in that hour), and each gets one row of
-        the `forward` table. Bounded: `forward_candidates_per_run` candidates, `forward_box_seconds`
+        elites, waiting graduates and living residents' programs (`forward_due`) are replayed on the
+        lab box on the steps of their tape that came after their code was frozen (`forward_cut`, at
+        the hour after the freeze, so one batch serves every candidate frozen in that hour; a
+        resident's on the `forward_resident_cut_hours` grid after its program's freeze), and each
+        gets one row of the `forward` table. Bounded: `forward_candidates_per_run` candidates, `forward_box_seconds`
         of box time. What it never does: write to the ledger, touch a candidate's fitness, gate or
         cell, the archive, the holdout or anyone's rung. The stamp `forward_at` is set after the
         run, so a run a crash interrupts is run again next step, least recently scored first."""
@@ -2099,13 +2514,21 @@ class Lab:
         row1 = CONSTITUTION["rungs"]["1"]
         limits = {"max_position_usd": float(row1["max_position_usd"]), "max_order_usd": float(row1["max_order_usd"])}
         groups: dict[tuple[str, float], list[sqlite3.Row]] = {}
-        for row in self.forward_due(int(settings["forward_candidates_per_run"])):
+        residents = self._residents()
+        grid = max(1.0, float(settings["forward_resident_cut_hours"])) * 3600.0
+        for row in self.forward_due(int(settings["forward_candidates_per_run"]), residents):
             try:
                 key = tape_key(json.loads(row["needs"]))
             except (TypeError, ValueError):
                 continue
             out["candidates"] += 1
-            cut = math.ceil(self._frozen_at(row) / 3600.0) * 3600.0
+            resident = residents.get(row["id"])
+            if resident is not None:
+                # A resident's program: its window starts after its program was frozen (S2), on a coarser grid.
+                cut = math.ceil(self._program_frozen(resident) / grid) * grid
+                out["residents"] = out.get("residents", 0) + 1
+            else:
+                cut = math.ceil(self._frozen_at(row) / 3600.0) * 3600.0
             groups.setdefault((key, cut), []).append(row)
 
         def skip(why: str, n: int) -> None:
@@ -2378,6 +2801,8 @@ class Lab:
             # and the graduates waiting for seats (the two invariants), as `health()` shows them.
             "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
             "closed_since": _iso(float(closed)) if closed is not None else None,
+            # D1 (Sept 24, 2026): whether the step is failing, as `health()` shows it.
+            **self._failing(),
             "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0},
             # S2 (Sept 23, 2026): the forward windows' last run and records, and the priors in force.
             "forward": self.forward_stats(),

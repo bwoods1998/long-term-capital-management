@@ -104,7 +104,9 @@
         "from_band": "paper",
         "to_band": "bunt",
         "reason": "E 1.030 after 9 settled trades"
-      }
+      },
+      "family_state": "proven",
+      "family_n": 12
     },
     {
       "id": "crypto-reversion",
@@ -177,7 +179,9 @@
         "from_band": "paper",
         "to_band": "bunt",
         "reason": "E 1.031 after 7 closed trades"
-      }
+      },
+      "family_state": "unproven",
+      "family_n": 9
     },
     {
       "id": "crypto-reversion-2",
@@ -240,7 +244,9 @@
         "trades": 3,
         "real_trades": 0
       },
-      "last_move": null
+      "last_move": null,
+      "family_state": "unproven",
+      "family_n": 9
     }
   ],
   "committee": {
@@ -354,6 +360,27 @@
       "active": false,
       "floor_pnl_usd": "0.32",
       "envelope_usd": "1017.75"
+    },
+    "families": {
+      "unproven": 1,
+      "rows": [
+        {
+          "family": "kalshi-hour-favorites",
+          "venue": "kalshi",
+          "state": "proven",
+          "n": 12,
+          "real_n": 3,
+          "bound": "0.021500",
+          "stake_usd": "10.00",
+          "members_real": 1,
+          "capacity_usd_per_day": "4.10"
+        }
+      ]
+    },
+    "lab": {
+      "at": "2026-09-19T06:25:00.000Z",
+      "tested_last_hour": 84,
+      "graduates_waiting": 2
     }
   }
 }

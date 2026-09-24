@@ -24,6 +24,8 @@ export const SAIL_KEY = 'sail';
 export const ALERTS_KEY = 'alerts';
 const NOTICES_KEY = 'notices';
 export const FRONTIER_KEY = 'frontier';
+//: The frontier month that ended, as it stood when the next month's first call replaced it.
+export const FRONTIER_PREVIOUS_KEY = 'frontier-previous';
 export const PULLS_KEY = 'pulls';
 export const TYPESAFE_KEY = 'typesafe-pilot-v1';
 
@@ -136,13 +138,38 @@ export function createGate({ store, env = {}, now = Date.now }) {
      * The frontier model's month. `frontierReserve` holds a call's worst-case cost against the
      * month's budget or refuses; `frontierSettle` replaces the hold with what the call cost.
      * A month is a UTC calendar month and starts at zero.
+     *
+     * `spent` is every call's cost or hold. `inflight` (Sept 24, 2026) is the part of it that is
+     * still a hold: calls reserved and not yet settled, and calls cut off before they could settle
+     * (a deploy or a crash mid-call), whose worst case stays in `spent` for good. `spent` falls
+     * whenever a call settles below its worst case; `spent - inflight`, what is settled, rises,
+     * except once: a hold the code before Sept 24, 2026 reserved was never counted in flight, so
+     * when it settles below its worst case the settled figure falls by the difference. The House
+     * meters OpenAI with both and keeps the highest settled figure (league/campaigns.py
+     * `observe_month`).
      */
     frontierMonth(at = now()) {
       const month = new Date(at).toISOString().slice(0, 7);
       const row = read(store, FRONTIER_KEY, null);
       return row && row.month === month
-        ? { month, spent: BigInt(row.spent || 0), calls: Number(row.calls) || 0, agents: row.agents && typeof row.agents === 'object' ? row.agents : {} }
-        : { month, spent: 0n, calls: 0, agents: {} };
+        ? { month, spent: BigInt(row.spent || 0), inflight: BigInt(row.inflight || 0), calls: Number(row.calls) || 0,
+          agents: row.agents && typeof row.agents === 'object' ? row.agents : {} }
+        : { month, spent: 0n, inflight: 0n, calls: 0, agents: {} };
+    },
+
+    /**
+     * The month before this one, as it stood when it ended: its `spent` and what of it was
+     * settled, or null. The House carries it into its OpenAI meter, so the calls of a month's last
+     * minutes are not lost when the month starts again at zero. Until the new month's first call
+     * the stored row is still the old month; that call keeps it under `FRONTIER_PREVIOUS_KEY`.
+     */
+    frontierPrevious(at = now()) {
+      const month = new Date(at).toISOString().slice(0, 7);
+      const row = read(store, FRONTIER_KEY, null);
+      const last = row && typeof row.month === 'string' && row.month < month ? row : read(store, FRONTIER_PREVIOUS_KEY, null);
+      if (!last || typeof last.month !== 'string' || last.month >= month) return null;
+      const spent = BigInt(last.spent || 0), inflight = BigInt(last.inflight || 0);
+      return { month: last.month, spent, settled: spent > inflight ? spent - inflight : 0n };
     },
 
     /** The last reading of the real accounts (`equity.readEquity`), or null. */
@@ -177,21 +204,29 @@ export function createGate({ store, env = {}, now = Date.now }) {
           error: `This call could cost $${formatUsd(amount)}; the month has $${formatUsd(cap > row.spent ? cap - row.spent : 0n)} left of $${formatUsd(cap)}.`,
         };
       }
-      write(store, FRONTIER_KEY, { month: row.month, spent: String(row.spent + amount), calls: row.calls, agents: row.agents });
-      return { ok: true, month: row.month, micro: String(amount) };
+      const stored = read(store, FRONTIER_KEY, null);
+      if (stored && typeof stored.month === 'string' && stored.month !== row.month) write(store, FRONTIER_PREVIOUS_KEY, stored);
+      write(store, FRONTIER_KEY, { month: row.month, spent: String(row.spent + amount), inflight: String(row.inflight + amount),
+        calls: row.calls, agents: row.agents });
+      // `tracked`: this hold is counted in flight, and its settle must release it from there.
+      return { ok: true, month: row.month, micro: String(amount), tracked: true };
     },
 
-    frontierSettle({ month, reserved, actual, agent = null, at = now() }) {
+    frontierSettle({ month, reserved, actual, agent = null, tracked = false, at = now() }) {
       const row = this.frontierMonth(at);
       if (row.month !== month) return { ok: false };
       const held = BigInt(reserved);
       // A call whose cost cannot be read keeps its whole reservation: unknown is not free.
       const cost = actual === null || actual === undefined ? held : BigInt(actual);
       const spent = row.spent - held + cost;
+      // Only a hold reserved as tracked leaves the in-flight figure: a call the code before Sept 24,
+      // 2026 reserved was never counted there, and an invocation of that code passes no `tracked`.
+      const inflight = tracked === true ? (row.inflight > held ? row.inflight - held : 0n) : row.inflight;
       const agents = { ...row.agents };
       const name = typeof agent === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(agent) ? agent : 'unattributed';
       agents[name] = String(BigInt(agents[name] || 0) + cost);
-      write(store, FRONTIER_KEY, { month: row.month, spent: String(spent > 0n ? spent : 0n), calls: row.calls + 1, agents });
+      write(store, FRONTIER_KEY, { month: row.month, spent: String(spent > 0n ? spent : 0n), inflight: String(inflight),
+        calls: row.calls + 1, agents });
       return { ok: true, cost_usd: formatUsdMicro(cost) };
     },
 
@@ -346,9 +381,15 @@ export function createGate({ store, env = {}, now = Date.now }) {
         frontier: (() => {
           const month = this.frontierMonth(at);
           const { capMicro, parts } = this.frontierCap(at);
+          const previous = this.frontierPrevious(at);
           return {
             // `cap_usd` is the cap in force (the House mirrors it); `profit_index` says how it was reached.
             month: month.month, spent_usd: formatUsd(month.spent), cap_usd: formatUsd(capMicro), calls: month.calls,
+            // What of `spent_usd` is settled and what is still a hold (`frontierMonth`), to the
+            // microdollar: the House's OpenAI meter checks the one against its own settled costs.
+            settled_usd: formatUsdMicro(month.spent > month.inflight ? month.spent - month.inflight : 0n),
+            inflight_usd: formatUsdMicro(month.inflight),
+            previous: previous ? { month: previous.month, spent_usd: formatUsd(previous.spent), settled_usd: formatUsdMicro(previous.settled) } : null,
             base_cap_usd: formatUsd(monthCapMicro(env)), profit_index: parts,
             by_agent: Object.fromEntries(Object.entries(month.agents).map(([name, value]) => [name, formatUsd(BigInt(value))])),
           };

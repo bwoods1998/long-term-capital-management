@@ -29,7 +29,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, the cap in force and its profit-indexed parts from the stored equity reading, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. It never reads a venue itself (Sept 23, 2026). |
+| `GET` | `/v1/health` | Kill switch, caps, today's order counters, the frontier month (spent, what of it is settled and what is still in flight, the month that ended, the cap in force and its profit-indexed parts from the stored equity reading, calls, cost by agent), today's pull requests, the watchdog's record, Sail balance, runway and box state, and when each alert last went out. It never reads a venue itself (Sept 23, 2026). |
 | `POST` | `/v1/kill` | Engages the kill switch. The runtime token may: stopping is never gated. |
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
@@ -244,7 +244,50 @@ over 512 KiB (`413`), no `OPENAI_SECRET_KEY` (`503`). A provider `4xx` is settle
 provider error, a timeout (570 seconds since Sept 21, 2026; it was 280) or a reply with no readable
 usage keeps its whole reservation, because unknown is not free. Since Sept 23, 2026 the House settles
 its own campaign commitment for a verified call at this meter's `X-LTCM-Cost-USD`, and releases the
-hold of a refused (4xx) call; a call with no answer keeps its worst case on both lines.
+hold of a refused (4xx) call; a call with no answer keeps its worst case on both lines, until the
+House absorbs its own hold into this month six hours later (below).
+
+### What the month counts (Sept 24, 2026)
+
+`/v1/health` `frontier` splits the month three ways, and the House's OpenAI meter reads all of it
+(`league/campaigns.py` `observe_month`):
+
+- `spent_usd`: every call's cost, or its hold while it has none. It falls whenever a call settles
+  below its worst case, and starts at zero on the 1st (UTC).
+- `inflight_usd`: the holds of calls reserved and not yet settled, to the microdollar. A call cut
+  off before it could settle (a deploy or a crash mid-call) stays here, and in `spent_usd`, for the
+  rest of the month. A hold reserved before Sept 24, 2026 was never counted here.
+- `settled_usd`: `spent_usd` less `inflight_usd`, to the microdollar. It rises, except once at
+  this deploy: a call the code before it reserved was never counted in flight, so when that call
+  settles below its worst case, `settled_usd` falls by the difference. The House keeps the
+  highest reading, so a fall only delays its check.
+- `previous`: the month that ended, with its `spent_usd` and `settled_usd` as they stood when it
+  ended, or null. The next month's first call keeps it (`FRONTIER_PREVIOUS_KEY`). A call still in
+  flight at midnight is refused its settle (its month has ended), so the old month keeps its whole
+  worst case.
+
+How a call settles:
+
+| The answer | Settled at |
+| --- | --- |
+| `2xx` with a usage block | its metered cost |
+| `2xx` whose usage cannot be read | its whole worst case |
+| a provider `4xx` | zero: refused before any generation |
+| `503` whose body is OpenAI's error object of type `service_unavailable_error` | zero (since Sept 24, 2026): OpenAI says the model lacked the capacity to process the request ([error codes](https://developers.openai.com/api/docs/guides/error-codes)). Two such answers on Sept 22, 2026 kept their worst case, $2.02 for one |
+| any other `5xx`: a `500` `server_error`, a `502`, a `504`, a `503` from an edge | its whole worst case: a server error can come after the model has worked, and an edge answers for a call the provider may still have billed |
+| no answer (a timeout, a network error), or an answer cut off mid-body | its whole worst case. Until Sept 24, 2026 a body cut off mid-read threw past the settle ("error code: 1101") and left the hold in flight |
+
+**The House's meter.** The House reads this month on every tick and feeds its OpenAI meter a
+figure that never falls: the month's highest `spent_usd` plus the finals of earlier months
+(`previous`). An OpenAI hold of its own with no answer, made since the meter began counting and
+older than six hours, is absorbed into that figure: the gateway reserved the call's worst case
+here before calling OpenAI, so this month already counts it once. It releases nothing unless this
+month's `settled_usd` has grown by at least what the House settled since its anchor (see
+`docs/operations.md`, The OpenAI meter). While a reading is fresh, the House's own OpenAI line
+never reads above this month's `cap_usd` less `spent_usd` (less what the House committed since
+the reading), so aligning `FRONTIER_MONTH_USD` to the funded balance bounds the House too. Deploy
+the gateway before the House release that reads these fields; a House that finds no `settled_usd`
+releases nothing.
 
 ## Pull requests
 

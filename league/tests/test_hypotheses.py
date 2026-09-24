@@ -216,6 +216,19 @@ class Cards(FoundryCase):
         shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
         self.assertEqual(([row["symbol"] for row in shown["series"]], shown["source"]), (["BTC/USD"], "alpaca-history"))
 
+    def test_the_packet_finds_the_ingestions_coverage_behind_a_day_of_feed_rows(self):
+        """Sept 24, 2026 (the recorders of workstream I): eleven more feeds write about 264 hourly
+        coverage rows a day, and the packet read only the newest 500, so the history ingestion's row
+        fell out of reach within a day and the foundry lost its coverage section (B-feeds' report)."""
+        self.house.ledger.append("data.coverage", {"source": "alpaca-history", "status": "finished", "series": [
+            {"kind": "bars", "symbol": "BTC/USD", "timeframe": "1Hour", "rows": 900, "first_day": "2024-01-01", "last_day": "2026-09-21"}],
+            "limitations": []})
+        self.house.ledger.append_many([{"kind": "data.coverage", "payload": {"asset": "feed", "feed": f"f{n % 11}", "status": "current", "keys": {}}}
+                                       for n in range(700)])
+        shown = self.foundry.packet(self.DESK)["data"]["recorded_coverage"]
+        self.assertIsNotNone(shown)
+        self.assertEqual(([row["symbol"] for row in shown["series"]], shown["source"]), (["BTC/USD"], "alpaca-history"))
+
     def test_replays_that_fail_to_fetch_data_are_infrastructure_not_invalid_code(self):
         from league.hypotheses import classify_error
         self.assertEqual(classify_error("TapeError: alpaca stock bars: TransportError: GET https://gateway/v1/alpaca-paper/v2/stocks/bars"), "blocked_infra")

@@ -180,3 +180,43 @@ class MatchTests(SportsCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------- ESPN's core API, Sept 24, 2026
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from ltcm.data.sports import CORE_HOST, implied_home, parse_core_odds, parse_predictor  # noqa: E402
+
+FIXTURES = Path(__file__).parent / "fixtures" / "feeds"
+CORE_ODDS = CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/odds"
+CORE_PREDICTOR = CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/predictor"
+
+
+def core(name):
+    """ESPN core API answers for Falcons at Packers, recorded Sept 24, 2026 at 03:22Z (odds without their bet links)."""
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+class CoreApi(unittest.TestCase):
+    def test_the_recorded_lines_and_predictor(self):
+        lines = parse_core_odds(core("espn_core_odds_401872948.json"))
+        self.assertEqual(lines, [{"provider": "Draft Kings", "priority": 1, "details": "GB -5.5", "spread": -5.5, "over_under": 42.5,
+                                  "home_ml": -245, "away_ml": 200, "implied_home": 0.6806,
+                                  "open": {"spread": -7.5, "home_ml": -360, "away_ml": 285}}])
+        self.assertEqual(parse_predictor(core("espn_core_predictor_401872948.json")),
+                         {"home": 0.74465, "away": 0.25332, "tie": 0.00203, "modified": "2026-09-23T23:27Z"})
+        self.assertIsNone(parse_predictor({"homeTeam": {"statistics": []}}))
+        self.assertEqual((implied_home(-110, -110), implied_home(None, 120)), (0.5, None))
+
+    def test_the_core_api_is_asked_per_competition_and_a_game_without_a_line_has_none(self):
+        transport = FakeTransport({CORE_ODDS: core("espn_core_odds_401872948.json"), CORE_PREDICTOR: core("espn_core_predictor_401872948.json"),
+                                   CORE_HOST + "/v2/sports/soccer/*": (404, {}, b'{"error": "not found"}')})
+        client = Sports(transport)
+        self.assertEqual(client.core_odds("nfl", "401872948")[0]["provider"], "Draft Kings")
+        self.assertEqual(client.core_predictor("nfl", "401872948")["home"], 0.74465)
+        self.assertEqual(client.core_odds("soccer/eng.1", "704512"), [])
+        self.assertIsNone(client.core_predictor("soccer/eng.1", "704512"))
+        self.assertEqual(transport.calls[0]["headers"]["User-Agent"], USER_AGENT)
+        with self.assertRaises(DataError):
+            client.core_odds("nfl", "../401872948")

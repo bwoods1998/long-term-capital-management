@@ -13,9 +13,10 @@ class Admissions:
     def __init__(self, ledger: Ledger):
         self.ledger = ledger
 
-    def rows(self):
+    def rows(self, agent=None):
+        """Every admission, folded by session; `agent` reads one author's rows only (its own index)."""
         found = {}
-        for entry in self.ledger.iter(kinds='agent.research'):
+        for entry in self.ledger.iter(kinds='agent.research', agent=agent):
             p = entry.payload
             if p.get('tool') not in ('candidate', 'candidate_admission') or not p.get('session'):
                 continue

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ltcm.broker import Instrument, Quote
 from ltcm.data import (
+    CONTACT_USER_AGENT,
     CompositeMarketData,
     DataError,
     HttpTransport,
@@ -173,7 +174,9 @@ class HttpTransportTests(unittest.TestCase):
         transport = HttpTransport(opener=opener)
         transport.get("https://example.test/x")
         self.assertEqual(seen["headers"].get("User-agent"), USER_AGENT)
-        self.assertIn("blakewoods98@gmail.com", USER_AGENT)
+        # Sept 24, 2026: the default is the one contact constant, never the owner's personal address.
+        self.assertEqual(USER_AGENT, CONTACT_USER_AGENT)
+        self.assertNotIn("gmail", USER_AGENT)
         with self.assertRaises(DataError):
             transport.get("http://example.test/x")
 
