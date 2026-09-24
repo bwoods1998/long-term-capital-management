@@ -552,12 +552,17 @@ recorded for the next open; live verification uses the markets that trade around
   47.25 h; (6) 0 self-cross refusals of reducing orders; (7) 9 of 12 recorders, kalshi-open idle (255 markets
   offered over 4 wakes, no intent). Tick 85-200 s. The watch loop (events every 5 min, `floor_watch.py` every
   15 min, the stock desks every 30 min in the session) started 15:08Z.
-- 15:10Z — **The proven bunt's stake was never short.** The board's `stake_usd` is the net loan after profit
+- 15:20Z — **R6's freeze measured:** `alpaca-paper` read −$0.0322 at 14:39:07Z and stayed frozen until
+  14:51:06Z, when more fills raised the tolerance (one cent a fill) and −$0.0352 was booked as dust. The same
+  shape adopted the venue after three failed readings on Sept 21 (−$0.1436), Sept 22 (−$0.0200) and Sept 23
+  (−$0.0326), each near 19:30-20:10Z. Builders launched at 15:26Z from `c/deploy`: R2 seats (`r2/seats`), R5 and
+  R3's board (`r5/family-probe`), R6 bugs (`r6/bugs`).
+- 15:22Z — **The proven bunt's stake was never short.** The board's `stake_usd` is the net loan after profit
   sweeps (`account.staked`), not equity: meriwether-h2d625d was lent $10 (Sept 23 12:50Z) and $20 (22:30Z),
   then swept $0.47, $8.99 and $0.48 as its equity ran over the $37.50 target ($43.54 at 04:37Z, $46.49 at
   04:49Z, $41.67 at 12:40Z): net $20.06. The resume's "stake $20.06 against a $37.50 target" read the loan as
   the stake; the lend-up works. The board gains `equity_usd` beside it (R3).
-- 15:12Z — **R5's evidence** (on the 15:06Z snapshot; `r5_evidence.py`: each allocator promotion to rung 2
+- 15:22Z — **R5's evidence** (on the 15:06Z snapshot; `r5_evidence.py`: each allocator promotion to rung 2
   since Sept 23 00:00Z, its family's pooled forward record at that moment by `House.family_forward`'s
   definition, and the stay's realized real P&L): 11 promotions onto families negative over 6 or more active
   blocks made **−$8.12 on 22 closes, none positive** (haghani-56 on crypto-alts-reversion at 241 blocks
@@ -568,22 +573,17 @@ recorded for the next open; live verification uses the markets that trade around
   blocks −0.4835), huang-h427345-4 (crypto-15m-prior-window-reset, 24 blocks −0.7121), and haghani-62,
   haghani-r42c38c and haghani-63 (crypto-alts-reversion, 336-345 blocks −0.06 to −0.11). The evidence
   supports the owner's third digest change: R5 is built (`r5/family-probe`).
-- 15:08Z — **R4 at the first reading** (14:38-15:08Z): the four stock and option desks woke 68 times, wrote 11
+- 15:27Z — **R4 at the first reading** (the loop's 14:38-15:08Z window and the 15:06Z board): the four stock and option desks woke 68 times, wrote 11
   intents and got 3 practice fills; 4 equity entries were refused by the practice-book freeze (R6). On the
   15:06Z board, 39 stock and option agents live; 2 have 5 or more closed trades (scholes-21 8 trades, E
   0.9981; mcentee-hddb4ae 7, E 1.0004); options and alpaca-open have none; the best E is 1.0341 on 0 closed
   trades. All 20 equity orders since the open were market orders: no agent has sent an equity limit order,
   so A7's fractional `day` limit path has no live instance to verify.
-- 15:13Z — **R6's freeze measured:** `alpaca-paper` read −$0.0322 at 14:39:07Z and stayed frozen until
-  14:51:06Z, when more fills raised the tolerance (one cent a fill) and −$0.0352 was booked as dust. The same
-  shape adopted the venue after three failed readings on Sept 21 (−$0.1436), Sept 22 (−$0.0200) and Sept 23
-  (−$0.0326), each near 19:30-20:10Z. Builders launched 15:26Z from `c/deploy`: R2 seats (`r2/seats`), R5 and
-  R3's board (`r5/family-probe`), R6 bugs (`r6/bugs`).
 - 15:28Z — **R1: Deploy C merged and deploying.** `c/deploy` = main + `c/integration` + `c-search/review`, both
-  merges clean (9f20640); the money digest is `c02ed852` on both sides (constitution `915c978e`), so no
+  merges clean (9f20640, 15:08:30Z); the money digest is `c02ed852` on both sides (constitution `915c978e`), so no
   ratify. Local parallel run: one timing flake under 7-way load (`test_tick_steps`, a 1 s slow step beaten by
-  a loaded first payout; R6 hardens it). CI green on both Pythons (run 36019308936); PR #272 merged
-  15:28Z (main `9807eec`); owner deploy from `~/Work/ltcm-deploy` at 15:28:31Z, release
+  a loaded first payout; R6 hardens it). PR #272 opened 15:19:14Z; CI green on both Pythons at 15:28:09Z (run 36019308936); merged
+  15:28:17Z (main `9807eec`); owner deploy from `~/Work/ltcm-deploy` at 15:28:31Z, release
   `20260924T152831Z-4c7a6f088c6d`.
 
 ## The scoreboard at T0
