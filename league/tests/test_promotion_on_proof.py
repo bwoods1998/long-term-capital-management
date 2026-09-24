@@ -961,3 +961,16 @@ class RulesText(unittest.TestCase):
         self.assertIn("a position up to 20% of the stake on Kalshi, 50% at", text)
         without = {**CONSTITUTION, "allocator": {k: v for k, v in CONSTITUTION["allocator"].items() if k != "probe_bunt_usd"}}
         self.assertNotIn("PROBE (", rules_text(game, without))
+
+    def test_the_trial_does_not_promise_that_only_the_drawdown_can_send_a_probe_back(self):
+        """Review of #224 (Sept 24, 2026): the trial holds the hysteresis exit only; drift (`ladder.drift`,
+        a money rule the plan leaves as it is) still demotes a real agent whose edge falls far below the
+        record that earned its seat -- haghani-37 went back to practice at 15:02:48Z Sept 23 after ONE
+        real close, -$0.51 on its ~$25 stake. The text had said only the 35% drawdown sends one back."""
+        import json
+        from league.rules import rules_text
+
+        with open("league/game.json") as f:
+            text = " ".join(rules_text(json.load(f)).split())
+        self.assertIn("until then only losing 35% of your real record from its high, or DRIFT", text)
+        self.assertNotIn("until then only losing 35% of your real record from its high sends you back", text)

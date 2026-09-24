@@ -130,7 +130,7 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   twice. Before this a position could only be as large as one order could close, so positions
   were held to $60.
 - **Down.** Hysteresis: a bunt leaves below E 0.8585 once it has 3 independent real results in its
-  stay (since Sept 24, 2026: one early loss is not a demotion), and a swing drops to a bunt below
+  stay (since Sept 24, 2026: one early loss does not cross it; the stay drawdown and drift still apply), and a swing drops to a bunt below
   1.0625 or W_real 0.9. A 35% real drawdown from the high-water mark of the current real stay sends
   an agent back to paper at once, trial or not. An agent sent back waits an hour before it may bunt again (`reentry_cooldown_hours`), so a
   record near a line cannot flap between books. W_paper under 0.80 after 10 closed trades is death.

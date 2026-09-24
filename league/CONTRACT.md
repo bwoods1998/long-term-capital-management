@@ -139,8 +139,9 @@ the desk on the day; `allocator.bunt_daily_loss`): what governs it is the alloca
 (35% of the real record from its high-water mark sends it back to practice at once) and hysteresis,
 which applies once the stay has 3 independent real results (`allocator.hysteresis_after_settled`,
 since Sept 24, 2026: settled events on Kalshi, closed trades at Alpaca). Before that one early loss is
-not a demotion; the bunt line in your standing says `exit_line_applies_after_real_settlements` and
-`real_settlements_this_stay`. A swing keeps the
+no demotion by the exit line, though the stay drawdown and drift (the evaluator's watch on an edge that
+falls far below the record that earned the seat) still apply; the bunt line in your standing says
+`exit_line_applies_after_real_settlements` and `real_settlements_this_stay`. A swing keeps the
 book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
 is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
 risk-reducing orders go through on that venue until the next day. Both lines read the day from your

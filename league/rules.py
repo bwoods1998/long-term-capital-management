@@ -136,7 +136,8 @@ or never swings at all.
 """ if alloc.get("probe_bunt_usd") else "")
         trial_text = (f"""  ONE EARLY LOSS IS NOT A DEMOTION: that exit line applies once you have {after} independent real
   settlements in your stay on real money (closed trades at Alpaca); until then only losing
-  {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to practice. (Sept 23, 2026: four of
+  {float(alloc['real_drawdown_demote']):.0%} of your real record from its high, or DRIFT (your real edge falling far below the practice
+  record that earned the seat: haghani-37 went back after one 2% loss on Sept 23), sends you back to practice. (Sept 23, 2026: four of
   the allocator's nine new bunts were sent back by their first loss.) After them, one lost position
   larger than about {1 - float(alloc['hysteresis']):.0%} of your stake can drop E under the line, and a binary contract loses
   its whole position: keep positions small until your wins have built a buffer.
