@@ -541,5 +541,43 @@ class TheHouseAbsorbs(HouseCase):
         self.assertEqual(len(again), 1, "once every ten minutes, and nothing is left to release")
 
 
+class AnUnreadMonth(HouseCase):
+    """Sept 24, 2026 review: with the gateway's health route down, every OpenAI reservation was refused
+    (audits included) while the tier still read "all", so research kept going to Luna to be refused, and
+    no alert said anything."""
+
+    def test_an_unread_month_is_said_once_and_sends_no_new_work_to_openai(self):
+        self.house.game["frontier_reserve"] = RESERVE
+        guard = CampaignBudget(self.house.root / "campaigns-test.sqlite", rules("sail", "openai"), clock=self.clock)
+        self.addCleanup(guard.close)
+        guard.observe_balance("sail", "100.00")
+        guard.observe_month("openai", "2026-09", "1.00", settled="1.000000", cap="100.00")
+        guard.activate_burst("night", night("30"))
+        healthy = {"month": "2026-09", "spent_usd": "1.00", "settled_usd": "1.000000", "cap_usd": "100.00"}
+        gateway = Gateway(healthy)
+        self.house.campaigns = guard
+        self.house.provider = SimpleNamespace(transport=SimpleNamespace(refresh=lambda: True))  # Sail's meter is read
+        self.house.frontier_month = FrontierMonth("https://gw.test", lambda: "t" * 20, opener=gateway,
+                                                  clock=self.clock, meter=guard)
+        self.house.tick()
+        self.assertEqual(self.house.frontier_tier(), "all")
+        gateway.frontier = OSError("the health route is down")
+        for _ in range(5):
+            self.clock.advance(61)
+            self.house.tick()
+        self.assertFalse(guard.ready("openai"))
+        texts = [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertEqual(len([t for t in texts if t.startswith("OpenAI's meter is not ready")]), 1,
+                         "the tick says so itself, once, not every tick")
+        self.assertEqual(self.house.frontier_tier(), "audits", "no role or Luna session is sent into a refusal")
+        gateway.frontier = healthy
+        self.clock.advance(61)
+        self.house.tick()
+        self.assertTrue(guard.ready("openai"))
+        texts = [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertEqual(len([t for t in texts if t.startswith("OpenAI's meter is read again")]), 1)
+        self.assertEqual(self.house.frontier_tier(), "all")
+
+
 if __name__ == "__main__":
     unittest.main()

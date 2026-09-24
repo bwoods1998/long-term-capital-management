@@ -4058,21 +4058,50 @@ class House:
     def frontier_tier(self) -> str:
         """What frontier work the OpenAI budget still pays for (`frontier.frontier_tier`), on the
         tighter of its two lines (`frontier_remaining`). A change of tier is written to the ledger
-        once, so the owner reads why Merton went quiet."""
+        once, so the owner reads why Merton went quiet.
+
+        While OpenAI's meter is not ready (`_openai_meter_unread`: the gateway's month unread for
+        three minutes), every OpenAI reservation is refused whatever either line says, so the tier
+        is "audits": no role is scheduled into a refusal, and a Luna-cohort agent's new research
+        session runs on Sail (`fast_research.ResearchRouter`) instead of being refused and left
+        unconfirmed. The owner is told when it starts and when the meter is read again. Found in the
+        Sept 24, 2026 review: with the gateway's health route down, the tier still read "all" and
+        nothing said that paid OpenAI work, audits included, had stopped."""
         from .frontier import frontier_tier
 
         remaining = self.frontier_remaining()
-        tier = frontier_tier(remaining, self.game.get("frontier_reserve"))
+        unread = self._openai_meter_unread()
+        tier = "audits" if unread else frontier_tier(remaining, self.game.get("frontier_reserve"))
         with self._state_lock:
             changed = tier != self._state.get("frontier_tier", "all")
+            was_unread = bool(self._state.get("frontier_meter_unread"))
             self._state["frontier_tier"] = tier
-        if changed:
+            self._state["frontier_meter_unread"] = unread
+        if unread and not was_unread:
+            self.alert("warning", "OpenAI's meter is not ready (the gateway's frontier month has not been read for three "
+                                  "minutes, or a charge exceeded its reservation): every OpenAI call is refused until it is. "
+                                  "New research runs on Sail; Merton, audits and the lab's Luna and Sol calls wait.")
+        elif not unread and (changed or was_unread):
             shown = f"${remaining:.2f}" if remaining is not None else "unknown"
-            self.alert("warning" if tier != "all" else "info", {
+            text = {
                 "all": f"frontier budget {shown} left: every role runs again",
                 "earned": f"frontier budget {shown} left: cheap research moves to Sail and the unearned roles pause",
-                "audits": f"frontier budget {shown} left: only audits and winners' consultations remain"}[tier])
+                "audits": f"frontier budget {shown} left: only audits and winners' consultations remain"}[tier]
+            self.alert("warning" if tier != "all" else "info", ("OpenAI's meter is read again; " + text) if was_unread else text)
         return tier
+
+    def _openai_meter_unread(self) -> bool:
+        """True while the campaign meters OpenAI by the gateway's month (`campaigns.json`
+        `meter_required`, with the month's reader in place, as in production) and would refuse every
+        OpenAI reservation for want of a fresh reading (`CampaignBudget.ready`)."""
+        campaigns = self.campaigns if self.frontier_month is not None else None
+        ready = getattr(campaigns, "ready", None)
+        if ready is None or "openai" not in ((getattr(campaigns, "policy", None) or {}).get("meter_required") or []):
+            return False
+        try:
+            return not ready("openai")
+        except Exception:  # noqa: BLE001 - an unreadable store is not a reading; the reservation says so itself
+            return False
 
     def research_order(self) -> list[Agent]:
         """Who gets asked first when the day's frontier allowance is nearly all the floor has.
@@ -5176,8 +5205,9 @@ class House:
             # OpenAI's meter is the gateway's frontier month (`FrontierMonth`, fed to the campaign):
             # read here on every tick, at most once a minute, so it is fresh for every OpenAI
             # reservation, and an unreadable gateway stops only paid OpenAI work (Sept 24, 2026).
+            # The tier reads it (`frontier_remaining`) and says so when it goes unread.
             try:
-                self.frontier_remaining()
+                self.frontier_tier()
             except Exception as exc:  # noqa: BLE001 - an unread month is an unread meter, never a failed tick
                 self.alert("warning", f"the gateway's frontier month could not be read ({type(exc).__name__}: {str(exc)[:160]})")
             self._absorb_stale_holds(sail=metered)

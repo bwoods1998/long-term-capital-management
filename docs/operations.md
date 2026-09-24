@@ -410,8 +410,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     is lowered and no settled row changes (`house_line_usd` keeps the House's own arithmetic).
   - **An unread gateway.** Three minutes without a reading and OpenAI reservations are refused:
     Merton, audits and the lab's Luna and Sol calls wait. Sail work, trading and exits go on. A
-    reservation that finds the reading a minute old reads the gateway again first. The House's
-    line then stands alone (`provider_left_usd` null).
+    reservation that finds the reading a minute old reads the gateway again first. While it lasts
+    the tier reads "audits", so no role is scheduled into a refusal and new research runs on
+    Sail, and one `ops.alert` warning ("OpenAI's meter is not ready ...") says so; another says
+    when the meter is read again. The House's line then stands alone (`provider_left_usd` null).
   - **The first deploy** records the policy change in `phase_amendments` beside the phase's pinned
     policy, which is never rewritten, so a rollback to the release before still opens the phase.
     Only a new meter may be added this way; any other change to `campaigns.json` still refuses to
