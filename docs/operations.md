@@ -414,6 +414,9 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   quarter-second apart, an order it has not acknowledged) the exit resting post-only at the ask.
   Each re-priced order's `book.order` rows carry the reason. A self-cross refusal on a SELL is a
   defect: `book.refused` rows whose `reasons` mention "House's own resting order" should all be buys.
+  Two sells may still be refused where no price exists at all, and neither is a self-cross refusal:
+  "no price is left above the House's own best bid to rest this exit at" (a House bid at the top of an
+  event's range, or a stale quote, while a cross is not allowed) and "no ask to rest this exit at".
   A crossed book reconciles to the cent: the venue saw only the cancel.
 - **"does not reconcile" on a paper book, by cents.** This is a warning, not an error (#108): it is
   the venue's end-of-day fee activity. An error means real money, or positions that disagree; read

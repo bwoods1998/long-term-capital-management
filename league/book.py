@@ -1746,8 +1746,11 @@ class Book:
         (review of #226, Sept 24, 2026: it was re-priced down to the ask, selling under what it asked)."""
         ask = quote.ask if quote is not None else None
         if ask is None or ask <= 0:
-            return None, (f"no ask to rest this exit at, and a sell at the market here could meet the House's own resting order "
-                          f"({doubt}); ask again at your next wake")
+            # Neither refusal says "the House's own resting order": that phrase is the old self-cross refusal of a
+            # sell, which docs/operations.md names a D3 defect (review of #226). These are the edges where no price
+            # exists at all.
+            return None, (f"no ask to rest this exit at while the House cannot say where one of its own orders in the way "
+                          f"stands ({doubt}); ask again at your next wake")
         price: Decimal | None = ask
         side, at = yes_space(rest.instrument, "sell", ask)
         opposite = [yes_space(w.instrument, w.side, w.limit_price)[1] for w in self.orders.values()
@@ -1758,7 +1761,7 @@ class Book:
             if (side == "sell" and at <= bound) or (side == "buy" and at >= bound):
                 price = self._beyond(rest, bound)
         if price is None:
-            return None, f"no price can rest this exit past the House's own resting order ({doubt}); ask again at your next wake"
+            return None, f"no price is left above the House's own best bid to rest this exit at ({doubt}); ask again at your next wake"
         where = "the ask"
         if rest.limit_price is not None and rest.limit_price > price:
             # A sell in its own leg's dollars: a higher price is the less aggressive one, on either Kalshi leg.

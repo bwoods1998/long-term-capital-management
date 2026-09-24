@@ -460,6 +460,24 @@ class RealKalshiExitTest(CrossCase):
         sent = self.broker.submitted[-1]
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("0.55"), True))
 
+    def test_a_sell_with_no_price_left_is_not_refused_as_a_self_cross(self):
+        """Review of #226: docs/operations.md calls a sell refused for "the House's own resting order" a D3
+        defect. Where no price exists at all -- a House bid at 0.99 on a stale quote while a cross is not
+        allowed (a frozen book) -- the sell is refused, but in words that are not the old self-cross refusal."""
+        yes = event("yes", venue=self.venue)
+        self.broker.set_quote(yes, "0.97", "0.98")
+        held = self.hold("seller", yes, "3")
+        self.broker.set_quote(yes, "0.98", "1.00")
+        self.rest_bid("buyer", yes, "5", "0.99", post_only=True)
+        self.broker.set_quote(yes, "0.98", "0.99")  # a stale ask at the House's own bid
+        self.book.frozen = "cash differs by 1.0000"  # a frozen book never crosses: it would fill the bidder's entry
+        out = self.book.submit([self.intent("seller", yes, "sell", held)])[0]
+        self.assertEqual(out.status, "refused")
+        self.assertIn("no price is left above the House's own best bid", out.detail)
+        refused = [r for e in self.ledger.iter(kinds="book.refused", agent="seller") for r in e.payload["reasons"]]
+        self.assertTrue(refused)
+        self.assertFalse(any("House's own resting order" in reason for reason in refused), refused)
+
     def test_an_entry_on_the_other_side_is_still_refused(self):
         self.hold("seller", self.no, "5")
         self.book.submit([self.intent("seller", self.no, "sell", "5", order_type="limit", limit_price="0.45")])
