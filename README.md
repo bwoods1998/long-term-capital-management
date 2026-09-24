@@ -969,7 +969,63 @@ dynamism revisions followed that evening:
   settlement, refusal, block, verdict or lesson) rather than the clock, the foundry follows
   forward yield, failed consults are refunded, and repair children are replayed before a seat.
 
+**The Sept 24 close-the-gaps run** ([plan](docs/goals/LTCM_CLOSE_THE_GAPS.md),
+[execution record](docs/runs/2026-09-24-close-the-gaps.md); T0 01:34:02Z, resumed at T0' 15:04:54Z; no deadline):
+- **Deploy A (#240), 05:37Z,** money digest `521c4586…`:
+  - the lab's step fixed, with failures that escalate;
+  - phantom OpenAI holds released into the gateway's month;
+  - exits never walled off by the self-cross rule;
+  - settlements counted once per event;
+  - a probe ($10 Kalshi, $25 Alpaca) for an unproven family, and a bunt only for a proven one;
+  - one early loss no longer a demotion;
+  - real entries post-only unless the family's taker record is proven.
+- **Deploy B (#260), 08:31Z,** money digest `c02ed852…`:
+  - the mechanism ledger (`league/families.py`) and the family swing;
+  - the evidence clock and the seat market;
+  - the loop's joints: corrected children supersede their parents, repeated warnings escalate, and Sail research is
+    capped at $2 an hour;
+  - the feed recorders.
+- **Deploy C (#272 and #274), 16:32Z:**
+  - the lab as a search: half of each batch goes to mechanism children, and nothing graduates without a mechanism
+    change or a winning forward window;
+  - the foundry brief `foundry-2026-09-24.1`;
+  - the agents' pause and in-place edit tools;
+  - the horizon judge (`league/resolution.py`);
+  - `tick_steps` in health;
+  - the wake skip;
+  - the seat market's fair chance.
+
+  Its first attempt (15:37Z) was rolled back by a practice-book freeze the old House recorded. C′ added the fix (a
+  practice book's cash difference under $1 is dust, not a freeze), a watchdog that judges the new House's own health,
+  and a 20-minute limit for CI's tests job.
+- **Deploy D (#281), 18:43Z,** money digest `535a7f15…` (the owner's third digest change), ratified 11 s after
+  promotion:
+  - no probe on a losing family; the first pass drained 8 probes;
+  - the seat market's capacity: population 128 while Sail's runway allows, waiters on closed desks leave the queue,
+    stale seats go to forward-scored waiters, the proven family is bred first, and a new program is born into its own
+    family;
+  - practice option fills pay the OCC clearing fee.
+- **Deploy E (#282), 19:45Z:** a probe waiting to go back to practice only exits.
+- **Deploy F (#286), 20:42Z:** the tick's perf pass (folds and indexes in place of whole-ledger scans).
+
 Known limits:
+
+- **Proof reads the family label** (Sept 24, 2026). A family is every agent born with its name. Until Deploy D a
+  research child with a different program was born into its parent's family: 98 such children by 15:06Z Sept 24, 39
+  of them living. R5's gate reads the label, so 26 of the 48 practice agents behind losing families at 15:06Z run code
+  unlike their parent's. New forks with other markets or another style now get a family of their own; the lasting fix
+  is a family keyed by mechanism, a money-judge change.
+- **The family swing's clock is days.** The one proven family (sports-central-run-under) had 5 real independent
+  settlements at the end of the Sept 24 run, 10 short of the swing's entry look. Its members trade the same games, so
+  more members add weight to events it already counts, not settlements. At its measured 3.2 a day that is about 3
+  days, and the MLB regular season ends Sept 27-28.
+- **Stock agents are far from the bunt line.** At the Sept 24 close no equity agent with 5 closed trades had E above
+  1.0019 (the line is 1.01), and a stock trade moves E by about 0.0004. The one agent over the line in E (an options
+  agent, 1.0751 on 4 trades) sits on a losing family.
+- **A real option fill's clearing fee.** Alpaca takes the OCC fee at the fill and lists it later (the same day on Sept
+  24). Until it is booked the real book refuses entries (exits go on).
+- **Waiters at the ceiling.** With the population at 128 of 128, about 40 evidenced newcomers queue; each desk's
+  overdue waiters are named hourly with the rule that holds them, not seated within two hours.
 
 - **Daily-bar replay now has separate execution bars.** Signal bars become available after
   their market day ends; five-minute execution observations provide trading opportunities.
