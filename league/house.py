@@ -156,23 +156,57 @@ _DEFECT_WORDS = re.compile(r"\b(defects?|fix(?:es|ed)?|wrong|replac(?:e|es|ed|in
 _TAKER_WORDS = re.compile(r"\b(takers?|marketable|cross(?:es|ing)? the (?:touch|spread)|at the ask|lift(?:s|ing)? the (?:ask|offer)|market orders?)\b", re.I)
 _MAKER_WORDS = re.compile(r"\b(makers?|post[- ]only|resting (?:bids?|orders?|limits?)|rest(?:s|ing)? (?:a |its )?(?:bids?|limits?)|join(?:s|ing)? the bid)\b", re.I)
 _FEE_WORDS = re.compile(r"\bfees?\b", re.I)
-_SIDE_WORDS = re.compile(r"\b(?:wrong|opposite) side\b|\bside (?:is|was) wrong\b|\bflip(?:s|ped|ping)? (?:the |its )?side\b", re.I)
+#: A claim that the side is wrong, never a description of what is bought: "the opposite side of the favourite" names
+#: no defect (the review of #245, Sept 24, 2026: with it, any child that bought NO retired a parent that entered at all).
+_SIDE_WORDS = re.compile(r"\bwrong side\b|\bside (?:is|was) wrong\b|\bflip(?:s|ped|ping)? (?:the |its )?side\b", re.I)
 
 
 def entry_defect(text: str) -> str | None:
     """Which part of an entry mechanism a research child's account of its program names as the defect:
     "liquidity" (a taker entry, fixed by resting maker orders), "fee" (the fee a taker entry pays, fixed
-    the same way), "side" (the side it buys), or None when it names none of them as a defect."""
+    the same way), "side" (the side it buys), or None when it names none of them as a defect.
+
+    Every kind needs a defect claimed in so many words (the review of #245, Sept 24, 2026). An account that
+    speaks of makers and takers is about liquidity whatever else it says, so the parent's taker entries and
+    the child's post-only program are checked (`House._corrected_entry`): meriwether-44's birth reason calls
+    its parent's TAKER "the wrong side" of a maker edge, and as a "side" defect it retired a MAKER parent."""
     text = str(text or "")
-    if _SIDE_WORDS.search(text):
-        return "side"
-    if not (_DEFECT_WORDS.search(text) and _MAKER_WORDS.search(text)):
+    if not _DEFECT_WORDS.search(text):
         return None
-    if _TAKER_WORDS.search(text):
+    maker, taker = _MAKER_WORDS.search(text), _TAKER_WORDS.search(text)
+    if maker and taker:
         return "liquidity"
-    if _FEE_WORDS.search(text):
+    if maker and _FEE_WORDS.search(text):
         return "fee"
+    if not (maker or taker) and _SIDE_WORDS.search(text):
+        return "side"
     return None
+
+
+def posts_maker_entries(code: str) -> bool:
+    """Whether a strategy file rests its entries post-only: some intent literal in it is a buy with
+    `post_only` True (a dict literal or `dict(...)` call, read with `ast`, never run). A maker fix of a taker
+    entry is a program that does this; a child that moves to market orders "for a guaranteed taker fill"
+    (meriwether's rewrite of Sept 21, 2026) names makers and takers too, and fixes nothing of the kind.
+    Measured on the T0 snapshot (Sept 24, 2026): all 145 of 503 programs that set `post_only` True do it on
+    a buy literal; meriwether-h2d625d's KXMLBTOTAL file does not, nor its child's first (moneyline) file."""
+    import ast
+
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            pairs = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict":
+            pairs = {k.arg: k.value for k in node.keywords if k.arg}
+        else:
+            continue
+        side, post = pairs.get("side"), pairs.get("post_only")
+        if isinstance(side, ast.Constant) and side.value == "buy" and isinstance(post, ast.Constant) and post.value is True:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -1002,16 +1036,17 @@ class House:
             if why is None:
                 self._supersede_seen[key] = now
                 continue
-            self._supersede(parent, child, why)
-            done += 1
+            done += self._supersede(parent, child, why)
         return done
 
     def _corrected_entry(self, parent: Agent, child: Agent) -> str | None:
         """Why `child` supersedes `parent` under L1, or None: the child is seated on paper or above, research
         wrote its current program (its parent's research candidate, or its own rewrite), that program passed
-        replay, its account of itself names an entry defect, and the parent's entries bear it out -- a
-        liquidity or fee defect needs a parent whose entries were takers, a side defect one that entered at
-        all. A maker parent is never superseded for "post-only" in its child's words (mullins-2 and mullins-14)."""
+        replay, its account of itself names an entry defect of the PARENT's current program, and the programs
+        bear it out -- a liquidity or fee defect needs a parent whose entries were takers and a child whose
+        program rests its entries post-only (`posts_maker_entries`), a side defect a parent that entered at
+        all. A maker parent is never superseded for "post-only" in its child's words (mullins-2 and mullins-14),
+        nor a taker parent for a child that takes too."""
         if self.evaluator.rung(child.id) < 1:
             return None
         account = self._program_account(parent, child)
@@ -1025,7 +1060,7 @@ class House:
         if kind is None:
             return None
         taker, maker = self._entry_fills(parent)
-        if kind in ("liquidity", "fee") and not (taker and taker >= maker):
+        if kind in ("liquidity", "fee") and not (taker and taker >= maker and posts_maker_entries(child.code)):
             return None
         if kind == "side" and not (taker or maker):
             return None
@@ -1033,23 +1068,48 @@ class House:
                 f"{taker + maker} entry fills were takers")
 
     def _program_account(self, parent: Agent, child: Agent) -> str | None:
-        """The research account of the child's CURRENT program: the purpose of the `agent.strategy` row that
-        adopted it (its own research rewrite), else the reason it was born with when it was born from its
-        parent's research candidate (a fork with new code). None when research did not write it (a House
-        mutation, a lab graduate)."""
-        adopted = None
-        for entry in self.ledger.iter(kinds="agent.strategy", agent=child.id):
-            p = entry.payload
-            if p.get("code_sha256") == child.code_sha256 and p.get("reason") and not str(p["reason"]).startswith("it rewrote itself"):
-                adopted = str(p["reason"])
-        if adopted is not None:
-            return adopted
-        born = self.ledger.get(f"born:{child.id}")
-        if born is None or born.payload.get("code_sha256") != child.code_sha256:
+        """The research account of the child's CURRENT program, when it is an account of its PARENT's current
+        program -- the one whose entries the parent trades:
+        - the purpose of the child's own rewrite (the `agent.strategy` row that adopted its current code),
+          when the program that rewrite replaced was the parent's current code (a mutation or copy of the
+          parent, fixed in place);
+        - else the reason it was born with, when it was born with new code from its parent's research
+          candidate while the parent ran the program it runs now, and it runs that code still.
+        None otherwise: a House mutation, a lab graduate, and a child whose rewrite fixed its OWN earlier
+        program. The review of #245 (Sept 24, 2026): meriwether-h2d625d trades KXMLBTOTAL unders; its child
+        meriwether-h2d625d-2 was born with a moneyline-favourites file its parent never ran and then fixed that
+        file's taker entry ("the current file buys at the ask"). Read as the parent's defect, L1's first pass
+        would have retired the floor's best real record (5 of 5 real settlements won) for it."""
+        changes: list[tuple[int, str | None, str, str, str]] = []  # (seq, code it replaced, its code, reason, kind)
+        current = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=child.id):
+            code = entry.payload.get("code_sha256")
+            if not code or code == current:
+                continue  # the House's own row after a rewrite ("it rewrote itself", `was`) repeats the code
+            changes.append((entry.seq, current, str(code), str(entry.payload.get("reason") or ""), entry.kind))
+            current = code
+        adopted = next((row for row in reversed(changes) if row[2] == child.code_sha256), None)
+        if adopted is None:
             return None
-        if not any(e.payload.get("child") == child.id and e.payload.get("new_code") for e in self.ledger.iter(kinds="agent.forked", agent=parent.id)):
+        _, replaced, _, reason, kind = adopted
+        if kind == "agent.strategy":
+            if replaced != parent.code_sha256 or not reason or reason.startswith("it rewrote itself"):
+                return None
+            return reason
+        fork = next((e for e in self.ledger.iter(kinds="agent.forked", agent=parent.id)
+                     if e.payload.get("child") == child.id and e.payload.get("new_code")), None)
+        if fork is None or self._code_at(parent, fork.seq) != parent.code_sha256:
             return None
-        return str(born.payload.get("reason") or "")
+        return reason
+
+    def _code_at(self, agent: Agent, seq: int) -> str | None:
+        """The code an agent ran at a ledger position: its birth's, or its latest `agent.strategy` row's before it."""
+        code = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=agent.id):
+            if entry.seq > seq:
+                break
+            code = entry.payload.get("code_sha256") or code
+        return code
 
     def _entry_fills(self, agent: Agent) -> tuple[int, int]:
         """(taker, maker) counts of the agent's own entry fills (buys, venue or cross) on every book."""
@@ -1062,11 +1122,16 @@ class House:
             maker += p.get("liquidity") == "maker"
         return taker, maker
 
-    def _supersede(self, parent: Agent, child: Agent, why: str) -> None:
+    def _supersede(self, parent: Agent, child: Agent, why: str) -> bool:
         """Supersede one parent (L1): on real money, demoted to practice through the evaluator first, as the
         allocator demotes (`Allocator._move_down`: a `demote` verdict a rung, with its band numbers); then
         retired as `superseded`, which winds its books down (a Kalshi contract is held to settlement)."""
         with self._lifecycle_lock:
+            # Read outside the lock: the allocator's pass or a death may have moved either since (review of #245).
+            now_parent, now_child = self.registry.get(parent.id), self.registry.get(child.id)
+            if now_parent is None or not now_parent.alive or now_parent.code_sha256 != parent.code_sha256 \
+                    or now_child is None or not now_child.alive or now_child.code_sha256 != child.code_sha256:
+                return False
             rung = self.evaluator.rung(parent.id)
             if rung >= 2:
                 band_from = "swing" if rung >= 3 else (self.allocator.tier(parent) if allocator_module.enabled() else "bunt")
@@ -1080,6 +1145,7 @@ class House:
                                             + "the child is judged on its own evidence and enters real money by its family's state")
         self.alert("info", f"{parent.id} was superseded by its research child {child.id}"
                            + (" and left real money" if rung >= 2 else "") + f": {why}")
+        return True
 
     def learn(self) -> int:
         """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook: once

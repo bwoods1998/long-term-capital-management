@@ -343,8 +343,12 @@ status is exposed in health and agent research context; qualification is distinc
    the constitution's `allocator.corrected_child_supersedes`): `_supersede_by_research`, beside
    `_retire_superseded` in `enroll`, retires a living parent whose research child passed replay and
    whose own account of its program names the parent's entry as the defect (`entry_defect`:
-   liquidity, fee or side), borne out by the parent's own entry fills (`_entry_fills`: a taker parent
-   for a liquidity or fee defect) -- demoted from real money through the evaluator first; the child
+   liquidity, fee or side, each a claimed defect; "the opposite side" is none), when that account is
+   of the parent's CURRENT program (`_program_account`: the child's rewrite of a copy of the parent's
+   code, or the parent's research candidate made while it ran that code -- never the child's fix of
+   its own earlier file, which is how meriwether-h2d625d-2's maker rewrite read at T0), borne out by the
+   programs (`_entry_fills`: a taker parent, and `posts_maker_entries`: a child whose entries rest
+   post-only, for a liquidity or fee defect) -- demoted from real money through the evaluator first; the child
    enters real money on its own evidence. A pair it found nothing in is looked at again hourly.
    **Dust and refused wind-downs** (Sept 24, 2026): a holding the venue will not trade (worth under a
    cent at its mark, or under the venue's minimal order quantity where its asset record states one)

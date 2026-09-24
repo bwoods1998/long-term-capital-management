@@ -607,7 +607,9 @@ your fills, your blocks, your forward record, your family's record and your rung
   `allocator.corrected_child_supersedes` is on): a research child whose program passed replay, and
   whose own account of it names its parent's entry as the defect -- the liquidity it takes, the fee
   it pays, the side it buys -- borne out by the parent's own entry fills, retires the parent at once
-  (from real money, through a demotion first). The child enters real money on its own evidence.
+  (from real money, through a demotion first). The account must be of the program your parent runs
+  now: your fix of your own earlier program is not your parent's defect. A liquidity or fee fix is a
+  program that rests its entries post-only. The child enters real money on its own evidence.
 
 **Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs, its
 graduates waiting for seats and (since Sept 24, 2026) every living agent's current program on the

@@ -20,7 +20,8 @@ from unittest.mock import patch
 
 from league.admissions import Admissions
 from league.constitution import CONSTITUTION
-from league.house import House, Newcomer, Settings, kaplan_meier_median
+from league.agents import code_sha
+from league.house import House, Newcomer, Settings, entry_defect, kaplan_meier_median, posts_maker_entries
 from league.lab import static_literal
 from league.sandbox import LocalSandbox
 from league.tests.fakes import FakeBroker
@@ -43,6 +44,28 @@ MAKER_SAFETY = ("Test a narrowly falsifiable safety hypothesis after the failed 
                 "favourite-maker NO strategy to rain markets, which produced the strongest observed live and replay subgroup, "
                 "while enforcing hours_to_resolve<=48, per-market event-risk capacity, free-cash reservation, and a strictly "
                 "below-current-ask post-only price. Acceptance is the normal replay gate; otherwise retain the deployed strategy.")
+#: The review of #245 (Sept 24, 2026), the floor's own words (T0 snapshot). meriwether-h2d625d-2's BIRTH reason: its
+#: parent's research replaced the KXMLBTOTAL program with another mechanism (moneyline favourites, a taker file). Its
+#: later rewrite (`TAKER_FIX`) fixed THAT file's taker entry, which its parent never ran.
+H2D_BIRTH = ("Replace the unsupported KXMLBTOTAL coin-flip under entries with the specialty's previously measured, "
+             "series-routed pregame heavy-favourite moneyline hypothesis: CFB favourite YES or soccer underdog NO, with "
+             "liquidity, spread, timing, resolution, fee and position limits.")
+#: meriwether-44's birth reason (22:07Z Sept 23): a liquidity claim in the words "the wrong side".
+WRONG_SIDE = ("Genuinely new hypothesis for this line (not a duplicate of the 102 WNBA/football/soccer taker trials): a "
+              "post-only MAKER bid on 90-98c YES favourites in maker-free soft cricket moneylines (KXT20MATCH, KXWT20MATCH), "
+              "pre-game. My deployed 90-98c TAKER on maker-fee major-sport moneylines is idle midweek and is the wrong side; "
+              "the favourite-longshot bias lives in maker-free soft moneyline books and is only captured passively as a maker.")
+#: meriwether's rewrite of Sept 21, 2026: from resting orders TO market orders -- makers and takers named, no maker fix.
+TO_TAKER = ("Two independent, peer-proven fixes to reverse my 8-trade/0-fill collapse: (1) switch entry from limit-at-ask (which "
+            "replay treats as a resting maker order, and which cancelled 12/12 forward paper orders with 0 fills) to "
+            'type="market" for a guaranteed taker fill; (2) replace the totals series with a passing 12-series set.')
+#: "The opposite side" says what is bought, not that anything was wrong.
+OPPOSITE_SIDE = ("Replace the idle rule with a falsifiable variant: rest a NO bid, the opposite side of the 90c favourite, "
+                 "pre-game, held to settlement.")
+#: A program that rests its entries post-only (a maker), and another program that takes, as the parents here do.
+MAKER = BUYER.replace("test-buyer", "test-maker").replace(
+    '"type": "market", "reason": "test buy"', '"type": "limit", "limit_price": 59000, "post_only": True, "reason": "test maker bid"')
+MONEYLINE = BUYER.replace("test-buyer", "test-moneyline")
 
 
 class EvidenceCase(SeatCase):
@@ -374,7 +397,7 @@ class CorrectedChildren(EvidenceCase):
     """L1: meriwether-h2d625d (taker entries on real money) and its child meriwether-h2d625d-2 (the maker fix,
     passed replay 00:18:31Z Sept 24) while the parent kept trading."""
 
-    CHILD = BUYER.replace("test-buyer", "test-maker")
+    CHILD = MAKER  # the maker fix: its entries rest post-only (`posts_maker_entries`)
 
     def parent(self, *, liquidity="taker", rung=2):
         parent = self.seated("meriwether")
@@ -384,14 +407,28 @@ class CorrectedChildren(EvidenceCase):
             self.house.evaluator.promote(parent.id, 2, "test: real money")
         return parent
 
-    def child(self, parent, reason, *, passed=True):
-        child = self.house.spawn(parent.line or parent.name, parent.family, self.CHILD, parent=parent.id, reason=reason)
+    def child(self, parent, reason, *, passed=True, code=None):
+        """A child born from its parent's research candidate (a fork with new code, House-staked)."""
+        child = self.house.spawn(parent.line or parent.name, parent.family, code or self.CHILD, parent=parent.id, reason=reason)
         self.house.evaluator.seat(child.id, 1, "its code passed replay as its parent's candidate")
         self.house.ledger.append("agent.forked", {"child": child.id, "new_code": True, "staked_by": "house", "reason": reason,
                                                   "endowment_usd": "8", "box_forked": False}, agent=parent.id)
         self.house.ledger.append("eval.trial", {"passed": passed, "code_sha256": child.code_sha256, "family": parent.family,
                                                 "trades": 40, "reasons": []}, agent=parent.id)
         return child
+
+    def rewrite(self, child, code, reason):
+        """A paper child with no record rewrites itself as `House._commit_research` writes it: the research row
+        (`Registry.adopt`), then the House's row with `was`, and the replay the new file passed."""
+        was = self.house.registry.get(child.id).code_sha256
+        needs, params = dict(static_literal(code, "NEEDS")), dict(static_literal(code, "PARAMS"))
+        self.house.registry.adopt(child.id, code=code, needs=needs, params=params, reason=reason)
+        self.house.ledger.append("agent.strategy", {"code_sha256": code_sha(code), "was": was, "reason": "it rewrote itself: it had no "
+                                                    "record to protect", "passed_replay": True, "_code": code, "params": params,
+                                                    "needs": needs}, agent=child.id)
+        self.house.ledger.append("eval.trial", {"passed": True, "code_sha256": code_sha(code), "family": child.family, "trades": 40,
+                                                "reasons": []}, agent=child.id)
+        return self.house.registry.get(child.id)
 
     def supersedes(self):
         return patch.dict(CONSTITUTION["allocator"], {"corrected_child_supersedes": True})
@@ -443,6 +480,70 @@ class CorrectedChildren(EvidenceCase):
             self.assertEqual(self.house._supersede_by_research(), 0)
         self.assertTrue(self.house.registry.get(parent.id).alive)
 
+
+    # The review of #245 (Sept 24, 2026). Each failed on the branch as built.
+    def test_a_childs_rewrite_of_its_own_earlier_program_is_not_its_parents_defect(self):
+        """The live case: meriwether-h2d625d trades KXMLBTOTAL unders (6 real taker fills, 5 of 5 real settlements
+        won); its child was born with ANOTHER program (moneyline favourites, taker) and at 00:22Z Sept 24 fixed the
+        taker entry of THAT file. L1's first pass retired the parent for it."""
+        parent = self.parent()
+        child = self.child(parent, H2D_BIRTH, code=MONEYLINE)
+        self.rewrite(child, MAKER, TAKER_FIX)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        self.assertTrue(self.house.registry.get(parent.id).alive, "the parent never ran the program its child fixed")
+        self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+
+    def test_a_childs_rewrite_of_its_parents_own_program_supersedes_the_parent(self):
+        """The rewrite route where the account IS the parent's: a copy of the parent's program (a House mutation)
+        fixed in place, with the parent still running that program."""
+        parent = self.parent()
+        child = self.house.spawn(parent.line or parent.name, parent.family, parent.code, parent=parent.id,
+                                 params={"notional": 15.0}, reason="a parameter mutation of its parent")
+        self.house.evaluator.seat(child.id, 1, "test")
+        self.rewrite(child, MAKER, TAKER_FIX)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 1)
+        self.assertEqual(self.house.registry.get(parent.id).cause, "superseded")
+
+    def test_a_birth_account_of_a_program_the_parent_has_since_replaced_is_not_its_defect(self):
+        parent = self.parent(rung=1)
+        self.child(parent, TAKER_FIX)
+        self.house.registry.adopt(parent.id, code=MONEYLINE, needs=dict(static_literal(MONEYLINE, "NEEDS")),
+                                  params=dict(static_literal(MONEYLINE, "PARAMS")), reason="the parent's own rewrite since")
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        self.assertTrue(self.house.registry.get(parent.id).alive)
+
+    def test_the_wrong_side_of_a_maker_edge_is_a_liquidity_claim_and_spares_a_maker_parent(self):
+        """meriwether-44's words: as a "side" defect (any entry at all) it retired a MAKER parent."""
+        self.assertEqual(entry_defect(WRONG_SIDE), "liquidity")
+        parent = self.parent(liquidity="maker")
+        self.child(parent, WRONG_SIDE)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+
+    def test_the_opposite_side_names_no_defect(self):
+        self.assertIsNone(entry_defect(OPPOSITE_SIDE))
+        self.assertEqual(entry_defect("Fix the wrong side: buy YES, not NO, on the favourite."), "side")
+        parent = self.parent(liquidity="maker")
+        self.child(parent, OPPOSITE_SIDE)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        self.assertTrue(self.house.registry.get(parent.id).alive)
+
+    def test_a_child_that_moves_to_market_orders_is_no_maker_fix(self):
+        """meriwether's rewrite of Sept 21 names makers, takers and a fix: a taker parent is not retired for a child
+        that takes too. The maker fix is a program that rests its entries post-only."""
+        self.assertEqual(entry_defect(TO_TAKER), "liquidity")
+        self.assertFalse(posts_maker_entries(MONEYLINE))
+        self.assertTrue(posts_maker_entries(MAKER))
+        parent = self.parent()
+        self.child(parent, TO_TAKER, code=MONEYLINE)
+        with self.supersedes():
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        self.assertEqual(self.house.evaluator.rung(parent.id), 2)
 
 if __name__ == "__main__":
     import unittest
