@@ -83,6 +83,85 @@ ledger, the lab store and the board. The run is judged on the movement.
   before building: if a defect below no longer reproduces, keep its regression test and its
   invariant and skip the fix.
 
+## Where the run stands at the resume (Sept 24, 2026, 14:30Z, in the US session)
+
+The run started at 01:34Z and was cut off in the night after Deploy B; this section re-baselines it.
+The record is `docs/runs/2026-09-24-close-the-gaps.md` (branch `run/close-the-gaps-2026-09-24`, last
+note T+8 at 09:34Z). Everything below was measured on the box at 14:24-14:35Z.
+
+**What shipped and holds.**
+- **Deploy A** (05:37Z, money digest `521c4586`): the lab's step, phantom OpenAI holds released,
+  exits never walled off, independent settlements per event, probes and the family record as the
+  promotion statistic, maker-unless-proven real entries.
+- **Deploy B** (08:31Z, money digest `c02ed852`, the plan's second and last digest change): the
+  mechanism ledger and the family swing, the evidence clock and the seat market, the loop's joints,
+  the feed recorders (9 of 12 allowed hosts recording). The site shows the mechanism ledger.
+- The floor runs release `main-786bc2285e1a` (main `56bf66c`: Deploy B plus six Merton strategy
+  merges shipped by the updater); the grant is active on `c02ed852`; no book frozen; 112 living.
+
+**What did not ship: Wave 2 (Deploy C).** It was built, reviewed and integrated but never deployed.
+The integration branch `c/integration` (36 commits, pushed at 14:33Z: C-tools #249 with its review
+#258 and the horizon judge in `league/resolution.py`, the board's honest bound `c-board/honest-bound`,
+C-perf #263, the seat market's fair chance #265, the dispatcher stop `c-fix/dispatcher-stop`) and
+C-search #262 with its review's eight fixes (`c-search/review`, pushed 14:33Z) are all CI-green and
+merge cleanly onto each other (`git merge-tree` exit 0). They change protected files (`allocator.py`,
+`ci.py`, `evaluator.py`, `resolution.py`, `updater.py`, `lab.py`) but no money rule: an owner
+deploy with no ratify. **Deploy C is the resume's first act.**
+
+**The scoreboard at the resume** (`scripts/gap_scoreboard.py --take`, 14:28Z, window 24 h,
+promotions since Deploy A):
+
+| # | Metric | T0 (01:34Z) | T+8 (09:34Z) | Resume (14:28Z) | Target | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | Proven families; capacity | 2 (n 2, 5) | 1 | **1**: sports-central-run-under, real n 5 (pooled 19), bound +0.204, capacity $83/day | ≥ 2 | short: proof is settlement-bound |
+| 2 | Promotions since Deploy A: settled, share positive | — | 0 | 9, all probes; −$6.07 on 8 settlements, 0 positive | every one a probe or proven | met by design; the probes lose |
+| 3 | Real $ proven / unproven; Alpaca real agents | $96 / $169; 0 | $21 / $122; 1 | **$20 / $169; 3** (crypto-alts probes since 13:29Z) | proven ≥ unproven; ≥ 1 Alpaca | Alpaca met; proven < unproven |
+| 4 | Median life (all / day); deaths before 3 fills | 14.4 / 19.8 h; 66% | 9.6 / 5.8 h; 61% | **5.8 / 5.1 h; 66%** (140 deaths in 24 h; 26 of 32 in the last 6 h displaced without a fill) | ≥ 24 h; < 30% | worse: the displacement chain #265 fixes is unshipped |
+| 5 | Lab batches/h; LLM share of graduates; waiters, longest wait | 0; 2/18; 30 at 11 h | 106; 14/50; 23 at 42 h | **101; 14/54; 53 at 46.6 h** (39 graduates, 14 cards, 11 retained, 14 strategies: 78 newcomers over an hour) | ≥ 30; ≥ 50%; 0 over 2 h | batches met; waiters far worse |
+| 6 | Self-cross exit refusals (6 h); stacked promotions | 85; 1 | 8 (all pre-A); 0 | **0; 1 of 9** (0 with per-event counting) | 0; 0 | met |
+| 7 | Recorders live; idle desks (48 h) | 0/12; 3 | 9/12; 0 | **9/12; 1** (kalshi-open: no wake for 146 min with one member) | all needed; 0 | keys and one idle desk |
+
+**Real money at the resume.** Kalshi: one proven-family bunt (meriwether-h2d625d, E 2.18, W_real
+1.83, stake $20.06 against a $37.50 target) and 11 probes at $10; Alpaca: 3 crypto-alts probes at
+$25 with resting limit buys (SOL, XRP) and no fill yet. The floor's real P&L is +$10.66 marked
+(equity $1,028.44 against the $1,017.75 grant); today's realized: Kalshi +$22.02 on 61 settlements
+(the sports families +$35.77 on 6; the five 15-minute crypto probes −$27.29 on 23), Alpaca −$0.44.
+The first positive floor since the grant, and all of it from two sports agents.
+
+**The live problems, ranked by what they cost the north star.**
+1. **The seat market is jammed** (gap 4 and 5): 78 tested newcomers wait over an hour (53 in the
+   lab's queue, the longest 46.6 h) while 7 residents are displaceable, and each freed seat goes to
+   the next retained candidate or graduate, which is displaced in turn before it trades (26 of the
+   last 32 deaths). The fair-chance fix (#265) and the search's desk rules (#262: no graduate onto
+   crypto-strikes or crypto-15m until a family there is positive, no graduation without a mechanism
+   change or a winning forward window) are in Deploy C. Two things Deploy C does not do: expire
+   waiters whose desks the search has closed (28 of the 53 wait for `kalshi-crypto-strikes`, a
+   4-seat desk), and let a waiter with a forward score take the seat of a resident whose desk
+   evidence clock has run with no positive record (the plan's S3). Both are risk-free rules.
+2. **Capital does not yet follow the one proof** (gap 3): the proven family has one real member at
+   $20 (its target $37.50: the allocator's lend-up runs at the mark pass) against a measured
+   capacity of $83 a day, and the family swing needs 15 real independent settlements (it has 5,
+   at about 2.9 a day). The lever inside the rules: more real members of the proven family
+   (its practice members and children), so the pooled real record reaches 15 in a day, not three.
+3. **The 15-minute crypto probes are a slow drain** (gap 2): eleven $10 probes on families whose
+   pooled forward record is negative lost $27 today; each is demoted after one loss and the next
+   graduate replaces it. The money rule that would stop it (no probe on a family negative over 6
+   forward blocks) is a money-digest change, so it needs the owner's grant of a third digest
+   change; the search rule in Deploy C stops new graduates there.
+4. **Stocks and options trade too rarely to ever reach the line** (gap 3, market hours): 39
+   stock and option agents on practice, 2 with 5 or more closed trades, the best E 1.022 on 0
+   trades; today's session to 14:30Z: 73 ETF wakes → 11 intents, 75 megacap wakes → 5, 18 options
+   wakes → 5; 18 equity and 6 option practice fills; no equity limit order (A7 still without a live
+   instance). Deploy C's foundry brief (E2) sends model-versus-market cards to these desks; the
+   session is the window to measure them.
+5. **The tick is slow again**: 95-175 s at 14:24-14:28Z (C-perf's settled-day memo is in Deploy C).
+6. **Small defects seen:** 3 of 24 earnings polls fail (`www.sec.gov` transport errors); the
+   `kalshi-open` desk's one member has not woken for 146 minutes; `kalshi-sports` offered markets
+   on 32 wakes in the last hour with no intent while its two real agents earned the day's profit.
+
+**Compute at the resume:** OpenAI $463 of $607 spent ($143.83 left in the House line, $3.71 settled in
+the last hour; tier "all"); Sail $162.33 (research capped at $2 an hour); Jev unchanged.
+
 ## What "closer to the north star" means when the run ends
 
 1. **A proven mechanism compounds.** A family whose pooled real record clears a lower bound is
@@ -271,6 +350,53 @@ context reset does not end it. The order below is a dependency order, not a sche
   canary and watch about 15 more. These are estimates for pacing builders, not limits.
 - **Progress notes.** Every four hours the run appends a scoreboard reading and a one-paragraph
   state to the run record, so the owner can read where it stands without the session.
+
+## Wave 3: the resume's order of work (Sept 24, 14:30Z onward)
+
+The dependency order for the resumed run. Nothing here changes a money rule unless the owner's
+/goal message grants a third digest change (R5).
+
+1. **R0. Re-baseline.** T0' in the run record; `python3 scripts/gap_scoreboard.py --take` as the
+   resume reading (above); the watch loop and the events feed; the ratify check is not needed
+   (no digest change is planned) unless R5 is granted.
+2. **R1. Deploy C at once.** Integrate `c/integration` and `c-search/review` (both pushed, CI-green,
+   clean merge), run both suites in parallel, open the PR, merge on green, owner-deploy from
+   `~/Work/ltcm-deploy` (no ratify: the digest stays `c02ed852`). If the in-box updater holds the
+   lock, retry each minute; never chain. Verify in the first hour: deaths before 3 fills fall
+   (no newborn displaced inside its fair chance), waiters fall, the lab's graduates go to the deep
+   desks, `tick_steps` in health and the tick under 60 s, the horizon judge admitting diesel once
+   its lags fill, agents' pause and size-down controls recorded.
+3. **R2. The seat market's capacity** (`house.py`, `niches.json`, `turbo.json`; risk-free):
+   - a waiter whose desk the search has closed (E1's rule) or whose forward window is losing
+     leaves the queue with a recorded reason, never counted as waiting;
+   - a waiter with a forward score takes the seat of a resident whose desk evidence clock has run
+     with no positive record (S3), one a desk a tick, never a trader short of its record or a
+     real-money seat;
+   - desk caps follow the waiters that remain (index ETFs, megacaps, weather, crypto-15m) and
+     shrink where the search is closed; population toward 128 only while Sail's runway stays over
+     1.5 days at the measured burn;
+   - the invariant: no newcomer waits over two hours, or a warning names why.
+4. **R3. Capital follows the one proof** (allocator/families, within the rules already ratified):
+   the proven family's practice members and its corrected children are seated on real money as
+   probes first (the seat market's priority), so its pooled real record reaches the swing's 15
+   independent settlements within a day; the board shows the family's settlements a day and the
+   days to its swing; the lend-up of its bunt to the target is verified at the next mark pass.
+5. **R4. The stock and options session** (market hours, 13:30-20:00Z): measure the desks' wakes,
+   intents, fills and refusals every 30 minutes; verify the wake skip and the open wake; A7's
+   fractional limit path with an agent's own order or the record of why none sends one; the
+   foundry brief's first cards on megacaps, ETFs and options (E2) and their replays; a
+   desk-level count of agents with 5 or more closed trades, the number that decides whether any
+   stock agent can reach the bunt line this week. Nothing forced.
+6. **R5. The probe drain** (only if the owner grants a third digest change): `allocator.family_probe`
+   (new): no probe on a family whose pooled forward record is negative over 6 or more active
+   blocks; a probe demoted once is not re-seated from the same family until the family's record
+   turns. Evidence: today's −$27.29 on 23 settlements across five 15-minute crypto probes.
+7. **R6. Bugs seen at the resume:** the earnings poll failures, the `kalshi-open` member that does
+   not wake, `kalshi-sports` offered with no intent for an hour, each with a test and an
+   invariant where none noticed.
+8. **R7. The watch, the docs, the cleanup, the report:** at least three hours after the last
+   deploy; the final scoreboard; README, operations, the run record and memory; the Wave 2 and
+   Wave 3 worktrees and branches removed once merged (keep `w2-options/design`, draft #210).
 
 ## Workstreams, in priority order
 
