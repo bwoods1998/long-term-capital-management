@@ -174,18 +174,14 @@ def market_key(instrument: Instrument) -> str:
 
 
 def _event_of(ticker: str) -> str:
-    """The Kalshi event a market belongs to: the ticker's first two `-` segments, SERIES-EVENT, as
-    Kalshi's own `event_ticker` reads (`KXMLBTOTAL-26SEP231840MILPHI-6` -> `KXMLBTOTAL-26SEP231840MILPHI`;
-    a player prop `KXMLBHIT-26AUG311940MILCHC-CHCPCROWARMSTRONG4-1` -> `KXMLBHIT-26AUG311940MILCHC`, the
-    game, as recorded), and a ticker of fewer than three segments is its own event (`KXMLBRFI-26SEP151940ATLCHC`
-    is a market and its event both). The book's instruments carry no event field. The same rule as
-    `league/tapes.py`, `ltcm/backtest.py` and the evaluator's `event_key` (the money owner's), to be pointed
-    at one function. Review of #226 (Sept 24, 2026): dropping only the LAST segment made each player of one
-    game its own event (four props of one game passed a 25% cap at 32% of the stake) and a two-segment
-    market's event its whole series (a second game's run-in-the-first refused as the first game's)."""
-    ticker = str(ticker or "").strip().upper()
-    parts = ticker.split("-")
-    return "-".join(parts[:2]) if len(parts) >= 3 else ticker
+    """The Kalshi event a market belongs to: the evaluator's `event_key` (the ticker's first two `-`
+    segments, SERIES-EVENT, as Kalshi's own `event_ticker` reads; a ticker of fewer than three segments
+    is its own event), so the book's `max_event_share` and the allocator's event counts can never
+    disagree on what one bet is (Deploy A's integration, Sept 24, 2026; the review of #226 had found
+    the book dropping only the LAST segment, which made each player of one game its own event)."""
+    from .evaluator import event_key
+
+    return event_key({"market_id": str(ticker or "")}) or str(ticker or "").strip().upper()
 
 
 def _allocator_rule(key: str) -> Decimal | None:
