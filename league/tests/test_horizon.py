@@ -169,6 +169,120 @@ class HouseHorizon(HouseCase):
         self.assertIn(self.btc.key, self.house.books["alpaca-paper"].account(agent.id).holdings)
 
 
+#: A daily prices-desk strategy that bids every favourite it is shown, and remembers the hours it saw.
+DIESEL_BIDDER = '''
+NEEDS = {"venue": "kalshi", "horizon": "day", "style": "test-diesel", "series": ["KXDIESELD"], "max_hours_to_close": 30,
+         "wake_minutes": 60}
+PARAMS = {}
+
+def decide(ctx):
+    return {"intents": [{"market": m["market"], "leg": "yes", "side": "buy", "quantity": 1, "type": "limit", "limit_price": 0.96,
+                         "post_only": True, "reason": "a resting bid on a favourite"} for m in ctx["markets"]],
+            "thought": "bidding", "memory": {"hours": {m["market"]: m["hours_to_resolve"] for m in ctx["markets"]}}}
+'''
+
+
+class HorizonBySchedule(unittest.TestCase):
+    """X2 (Sept 24, 2026): the horizon rule judges a Kalshi market by its scheduled (expected)
+    expiration when the venue gives one, by its close otherwise, and its refusal says which.
+
+    Measured on the T0 snapshot (ledger to 01:41Z Sept 24): 138 horizon refusals, 71 of them on the
+    daily diesel print (KXDIESELD-26SEP21 34, -26SEP22 36, -26SEP23 1; hawkins-3 27, hawkins-9 16,
+    hawkins-8 14, hawkins-2 14), each "expected to resolve in 171-185 hours" while the market stopped
+    trading a few hours later: the House read the latest date the market may expire, a week on."""
+
+    def setUp(self):
+        from league.tapes import KalshiData
+        from league.tests.test_ladder import InProcessSandbox
+        from league.tests.test_tapes import FakeMarketData, ScheduledExpirationTest
+        from ltcm.data.kalshi import KalshiMarketData
+        from league.house import House, Settings
+        from league.tests.fakes import Clock, FakeBroker
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch
+
+        strategies = patch('league.strategies.all_strategies', return_value=[])
+        strategies.start()
+        self.addCleanup(strategies.stop)
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.clock = Clock(ScheduledExpirationTest.NOW)  # 03:18:43Z Sept 22: hawkins-8's refusal
+        rows = ScheduledExpirationTest()
+        self.diesel = rows.diesel()                                                   # stops at 06:00Z, no schedule
+        self.scheduled = rows.venue_row("KXDIESELD-26SEP24-T6.500", "2026-09-24T06:00:00Z",
+                                        expected_expiration_time="2026-09-24T15:18:43Z")  # 60 hours out by its schedule
+        self.unscheduled = rows.venue_row("KXDIESELD-26SEP24-T6.505", "2026-09-24T15:18:43Z",
+                                          expected_expiration_time=None, expiration_time="2026-10-01T07:30:00Z")  # closes 60 hours out
+        parsed = {row["ticker"]: KalshiMarketData.parse_market(row) for row in (self.diesel, self.scheduled, self.unscheduled)}
+
+        class Venue(FakeMarketData):
+            def market(self, ticker):
+                return parsed[ticker]  # a ticker the venue does not know raises
+
+        self.data = KalshiData(Venue({"KXDIESELD": [[parsed[self.diesel["ticker"]]]]}), clock=self.clock)
+        self.broker = FakeBroker("kalshi-shadow", family="kalshi")
+        self.broker.clock_iso = now_iso(self.clock)  # the venue's quotes are as fresh as the House's clock
+        for ticker in parsed:
+            self.broker.set_quote(self.contract(ticker), "0.96", "0.98")
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        self.house = House(Path(self.dir.name) / "house", brokers={"kalshi-shadow": self.broker}, sandbox=InProcessSandbox(),
+                           kalshi_data=self.data, clock=self.clock, game=game, settings=Settings(mark_every_seconds=0, research=False))
+        self.addCleanup(self.house.close, wait=None)
+        self.agent = self.house.spawn("hawkins", "prices-favorites", DIESEL_BIDDER, reason="a test agent")
+        self.assertEqual(self.agent.specialty, "kalshi-prices")
+        self.house.evaluator.seat(self.agent.id, 1, "test")
+        self.house._state["tried"][self.agent.id] = self.agent.code_sha256
+        self.book = self.house.books["kalshi-shadow"]
+
+    @staticmethod
+    def contract(ticker):
+        return instrument_for("kalshi-shadow", {"market": ticker, "leg": "yes"})
+
+    def refusals(self):
+        return ["; ".join(e.payload.get("reasons") or []) for e in self.house.ledger.iter(kinds="book.refused", agent=self.agent.id)]
+
+    def bid(self, ticker):
+        self.house.seat(self.agent)
+        return self.house._intents(self.agent, self.book, [{"market": ticker, "leg": "yes", "side": "buy", "quantity": 1, "type": "limit",
+                                                            "limit_price": 0.96, "post_only": True, "reason": "test"}])
+
+    def test_a_daily_diesel_print_is_judged_by_its_close_and_entered(self):
+        self.house.tick()
+        self.assertEqual(self.refusals(), [])
+        orders = [e.payload for e in self.house.ledger.iter(kinds="book.order") if e.payload.get("instrument", {}).get("market_id") == self.diesel["ticker"]]
+        self.assertTrue(orders, "the bid reached the book")
+        self.assertEqual(self.house._state["memory"][self.agent.id]["hours"], {self.diesel["ticker"]: 2.6881})  # what the strategy was shown
+
+    def test_a_market_scheduled_past_the_horizon_is_refused_and_the_refusal_says_by_its_schedule(self):
+        intents, dropped = self.bid(self.scheduled["ticker"])
+        self.assertEqual((intents, dropped), ([], []))
+        (reason,) = self.refusals()
+        self.assertEqual(reason, "this market is expected to resolve in 60 hours, by its scheduled expiration (2026-09-24T15:18:43Z); "
+                                 "entries must resolve within 48")
+
+    def test_a_market_the_venue_gives_no_schedule_is_refused_by_its_close_and_says_so(self):
+        intents, dropped = self.bid(self.unscheduled["ticker"])
+        self.assertEqual((intents, dropped), ([], []))
+        (reason,) = self.refusals()
+        self.assertEqual(reason, "this market is expected to resolve in 60 hours, by its close (2026-09-24T15:18:43Z): the venue lists "
+                                 "no scheduled expiration for it; entries must resolve within 48")
+
+    def test_a_market_that_cannot_be_looked_up_is_left_to_the_book(self):
+        (intent,), dropped = self.bid("KXDIESELD-26SEP22-T9.999")
+        self.assertEqual((dropped, self.refusals()), ([], []))
+        self.broker.set_quote(intent.instrument, "0.96", "0.98")
+        outcome = self.book.submit([intent])[0]
+        self.assertIn("cannot tell when this market resolves", outcome.detail)  # the book is still the judge
+
+    def test_an_exit_is_never_judged(self):
+        (intent,), dropped = self.house._intents(self.agent, self.book, [{"market": self.unscheduled["ticker"], "leg": "yes", "side": "sell",
+                                                                          "quantity": 1, "type": "limit", "limit_price": 0.98, "reason": "test"}])
+        self.assertEqual((intent.side, dropped, self.refusals()), ("sell", [], []))
+
+
 class GameFile(unittest.TestCase):
     def test_the_shipped_horizon_is_inside_its_bounds(self):
         game = load_game()

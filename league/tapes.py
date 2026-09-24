@@ -512,20 +512,37 @@ def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
     return min(listed, resolve_time(row, listed))
 
 
+#: What a market's expected payment is judged by (`resolution`): the venue's scheduled expiration,
+#: or the close where the venue gives none.
+SCHEDULED, CLOSE = "scheduled", "close"
+
+
+def resolution(row: "dict[str, Any]", close_ts: float) -> "tuple[float, str]":
+    """When a market is expected to pay, and what that is judged by: its SCHEDULED (expected)
+    expiration where the venue gives one (`SCHEDULED`), which a listing shows from the day it opens
+    and never changes; its close otherwise (`CLOSE`). (Measured Sept 19, 2026: a game's `close_time`
+    is two days after kickoff and it really closes when a winner is declared, near its scheduled
+    expiration; a weather market stops trading at `close_time` and is paid at its expiration.)
+
+    Never the LATEST moment the market may expire. Sept 24, 2026 (X2, the close-the-gaps run): the
+    parser's `expiration_time` falls back to Kalshi's deprecated field when the venue lists no
+    scheduled expiration, and that field is the latest expiration -- a week after a daily diesel
+    print. The horizon rule refused 71 entries on KXDIESELD dailies between Sept 20 and 22 as
+    "expected to resolve in 171-185 hours" while each stopped trading within a day (hawkins-3,
+    -8, -9, -2; the T0 snapshot's ledger). The live view, a replay tape and the book's horizon rule
+    all read this one function, so what a strategy is shown is what the House judges."""
+    try:
+        value = parse_time(row.get("expected_expiration_time")) if row.get("expected_expiration_time") else None
+    except TapeError:
+        value = None
+    if value is not None and value > 0:
+        return value, SCHEDULED
+    return close_ts, CLOSE
+
+
 def resolve_time(row: "dict[str, Any]", close_ts: float) -> float:
-    """When a market is expected to pay: its scheduled `expiration_time`, which a listing shows
-    from the day it opens and never changes. (Measured Sept 19, 2026: a game's `close_time` is two
-    days after kickoff and it really closes when a winner is declared, near its expiration; a
-    weather market stops trading at `close_time` and is paid at its expiration, 14 hours later.)
-    The close stands in when there is no usable expiration."""
-    for key in ("expected_expiration_time", "expiration_time"):
-        try:
-            value = parse_time(row.get(key)) if row.get(key) else None
-        except TapeError:
-            value = None
-        if value is not None and value > 0:
-            return value
-    return close_ts
+    """When a market is expected to pay (epoch seconds): `resolution`'s time."""
+    return resolution(row, close_ts)[0]
 
 
 #: A market that may close early lists a close well after it will really stop trading. The live
@@ -635,10 +652,17 @@ class KalshiData:
 
     # ----------------------------------------------------------------- horizon
     def resolves_at(self, ticker: str) -> "float | None":
-        """When this market is expected to pay (epoch seconds), or None when it cannot be told.
-        A market's schedule does not change, so an answer is kept for the life of the process."""
+        """When this market is expected to pay (epoch seconds), or None when it cannot be told:
+        `resolution_of`'s time, what the book's horizon rule judges."""
+        found = self.resolution_of(ticker)
+        return None if found is None else found[0]
+
+    def resolution_of(self, ticker: str) -> "tuple[float, str] | None":
+        """(when this market is expected to pay, what that is judged by: `SCHEDULED` or `CLOSE`), or
+        None when it cannot be told (`resolution`). A market's schedule does not change, so an answer
+        is kept for the life of the process; a failed read is asked again."""
         ticker = str(ticker or "").upper()
-        cache = self.__dict__.setdefault("_resolves", {})
+        cache = self.__dict__.setdefault("_resolutions", {})
         if ticker in cache:
             return cache[ticker]
         try:
@@ -647,7 +671,7 @@ class KalshiData:
             close_ts = parse_time(row.get("close_time"))
         except Exception:  # noqa: BLE001 - not knowing is an answer: the book refuses the entry
             return None
-        cache[ticker] = resolve_time(row, close_ts)
+        cache[ticker] = resolution(row, close_ts)
         return cache[ticker]
 
     # ---------------------------------------------------------------- snapshot

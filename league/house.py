@@ -457,6 +457,37 @@ class House:
             return None
         return self.kalshi_data.resolves_at(instrument.market_id or instrument.symbol)
 
+    def _horizon_refusal(self, agent: Agent, book: Book, instrument: Instrument) -> str:
+        """The horizon rule's refusal of a Kalshi entry, saying what the House judged it by, or "".
+
+        X2 (Sept 24, 2026, the close-the-gaps run): the book refuses an entry expected to pay past the
+        agent's horizon ("this market is expected to resolve in N hours"), and its refusal cannot say
+        what N was measured to: the market's scheduled expiration, or its close where the venue lists
+        none (`tapes.resolution`). The House asks the book's own question of the book's own answer
+        (`_resolves_at` reads the same `KalshiData.resolution_of`, the same seat limit) before the
+        book does, and says which. Whatever it cannot tell it leaves to the book, which refuses it
+        ("cannot tell when this market resolves"): this never admits an entry the book would refuse."""
+        if instrument.asset_class != "event" or self.kalshi_data is None:
+            return ""
+        limits = book.limits.get(agent.id)
+        horizon = getattr(limits, "max_hours_to_resolve", None)
+        lookup = getattr(self.kalshi_data, "resolution_of", None)
+        if horizon is None or not callable(lookup):
+            return ""
+        try:
+            found = lookup(instrument.market_id or instrument.symbol)
+            due, basis = found if found else (None, None)
+            hours = None if due is None else (float(due) - self.clock()) / 3600.0
+        except Exception:  # noqa: BLE001 - not knowing is the book's to refuse
+            return ""
+        if hours is None or hours <= float(horizon):
+            return ""
+        from .tapes import SCHEDULED, iso as tape_iso
+
+        judged = (f"by its scheduled expiration ({tape_iso(due)})" if basis == SCHEDULED
+                  else f"by its close ({tape_iso(due)}): the venue lists no scheduled expiration for it")
+        return f"this market is expected to resolve in {hours:.0f} hours, {judged}; entries must resolve within {float(horizon):g}"
+
     # ------------------------------------------------------------------ state
     def _load_state(self) -> dict[str, Any]:
         try:
@@ -1553,7 +1584,8 @@ class House:
                 if quantity <= 0:
                     raise ValueError("the size rounds down to nothing")
                 minimum = min_order_usd(instrument) if side == "buy" else None
-                refusal = ""
+                # A Kalshi entry past the horizon is refused here, saying what it was judged by (X2).
+                refusal = self._horizon_refusal(agent, book, instrument) if side == "buy" else ""
                 if minimum is not None:
                     if price is None:
                         try:  # a market buy sized in units: the ask it will pay

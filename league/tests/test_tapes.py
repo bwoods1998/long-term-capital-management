@@ -448,7 +448,8 @@ class ListedStopTest(unittest.TestCase):
     def test_a_settled_game_shows_its_scheduled_expiration(self):
         from league.tapes import _listed_stop, parse_time
 
-        row = {"can_close_early": True, "close_time": "2026-09-18T03:29:53Z", "expiration_time": "2026-09-18T03:15:00Z", "latest_expiration_time": "2026-09-20T00:15:00Z"}
+        row = {"can_close_early": True, "close_time": "2026-09-18T03:29:53Z", "expected_expiration_time": "2026-09-18T03:15:00Z",
+               "expiration_time": "2026-09-18T03:15:00Z", "latest_expiration_time": "2026-09-20T00:15:00Z"}
         self.assertEqual(iso(_listed_stop(row, parse_time(row["close_time"]))), "2026-09-18T03:15:00Z")
 
     def test_a_market_that_cannot_close_early_shows_its_close(self):
@@ -460,26 +461,103 @@ class ListedStopTest(unittest.TestCase):
     def test_a_weather_market_stops_at_its_close_and_is_paid_later(self):
         from league.tapes import _listed_stop, parse_time, resolve_time
 
-        row = {"can_close_early": True, "close_time": "2026-09-19T05:00:00Z", "expiration_time": "2026-09-19T19:00:00Z"}
+        row = {"can_close_early": True, "close_time": "2026-09-19T05:00:00Z", "expected_expiration_time": "2026-09-19T19:00:00Z",
+               "expiration_time": "2026-09-19T19:00:00Z"}
         close = parse_time(row["close_time"])
         self.assertEqual((iso(_listed_stop(row, close)), iso(resolve_time(row, close))), ("2026-09-19T05:00:00Z", "2026-09-19T19:00:00Z"))
+
+
+class ScheduledExpirationTest(unittest.TestCase):
+    """X2 (Sept 24, 2026): a Kalshi market is expected to pay at its SCHEDULED (expected) expiration
+    when the venue gives one, and at its close otherwise -- never at the latest moment it may expire.
+
+    The shape is the T0 snapshot's: KXDIESELD-26SEP22-T6.510 was refused at 03:18:43Z on Sept 22 as
+    "expected to resolve in 172 hours" (71 refusals on the diesel dailies in all, 138 on the horizon
+    rule) while it stopped trading at about 06:00Z that morning. Kalshi lists no scheduled expiration
+    for the daily diesel print, and the parser took the deprecated `expiration_time` in its place:
+    the LATEST the market may expire, a week on."""
+
+    NOW = parse_time("2026-09-22T03:18:43Z")
+
+    @staticmethod
+    def venue_row(ticker, close, **extra):
+        """What Kalshi's /markets answers, before the House's parser."""
+        row = {"ticker": ticker, "event_ticker": "-".join(ticker.split("-")[:2]), "status": "active", "title": "a test market",
+               "yes_bid_dollars": "0.9600", "yes_ask_dollars": "0.9800", "close_time": close, "volume_24h_fp": "12000.00",
+               "open_interest_fp": "3400.00", "can_close_early": False}
+        row.update(extra)
+        return row
+
+    def diesel(self):
+        return self.venue_row("KXDIESELD-26SEP22-T6.510", "2026-09-22T06:00:00Z", expected_expiration_time=None,
+                              expiration_time="2026-09-29T07:30:00Z", latest_expiration_time="2026-09-29T07:30:00Z")
+
+    def game(self):
+        return self.venue_row("KXMLBGAME-26SEP22NYYBOS-NYY", "2026-09-24T02:00:00Z", can_close_early=True,
+                              expected_expiration_time="2026-09-22T06:30:00Z", expiration_time="2026-09-29T02:00:00Z",
+                              latest_expiration_time="2026-09-29T02:00:00Z")
+
+    def data(self, *venue_rows):
+        from ltcm.data.kalshi import KalshiMarketData
+
+        parsed = {row["ticker"]: KalshiMarketData.parse_market(row) for row in venue_rows}
+
+        class Venue(FakeMarketData):
+            def market(self, ticker):
+                return parsed[ticker]
+
+        by_series: dict = {}
+        for row in parsed.values():
+            by_series.setdefault(row["ticker"].split("-")[0], []).append(row)
+        return KalshiData(Venue({series: [rows] for series, rows in by_series.items()}), clock=lambda: self.NOW)
+
+    def test_the_parser_keeps_the_scheduled_expiration_apart_from_the_latest(self):
+        from ltcm.data.kalshi import KalshiMarketData
+
+        self.assertIsNone(KalshiMarketData.parse_market(self.diesel())["expected_expiration_time"])
+        self.assertEqual(KalshiMarketData.parse_market(self.game())["expected_expiration_time"], "2026-09-22T06:30:00Z")
+
+    def test_a_market_the_venue_gives_no_scheduled_expiration_is_judged_by_its_close(self):
+        data = self.data(self.diesel())
+        close = parse_time("2026-09-22T06:00:00Z")
+        self.assertEqual(data.resolution_of("KXDIESELD-26SEP22-T6.510"), (close, "close"))
+        self.assertEqual(data.resolves_at("KXDIESELD-26SEP22-T6.510"), close)  # 2.7 hours out, not 172
+
+    def test_a_scheduled_expiration_is_what_a_market_is_judged_by(self):
+        data = self.data(self.game())
+        self.assertEqual(data.resolution_of("KXMLBGAME-26SEP22NYYBOS-NYY"), (parse_time("2026-09-22T06:30:00Z"), "scheduled"))
+
+    def test_the_live_view_shows_the_hours_the_book_judges(self):
+        data = self.data(self.diesel(), self.game())
+        rows = {row["market"]: row for row in data.markets(["KXDIESELD", "KXMLBGAME"], max_hours_to_close=24)}
+        diesel, game = rows["KXDIESELD-26SEP22-T6.510"], rows["KXMLBGAME-26SEP22NYYBOS-NYY"]
+        self.assertEqual((diesel["hours_to_close"], diesel["hours_to_resolve"]), (2.6881, 2.6881))
+        self.assertEqual((game["hours_to_close"], game["hours_to_resolve"]), (3.1881, 3.1881))
+
+    def test_a_settled_market_on_a_replay_tape_is_judged_the_same_way(self):
+        from ltcm.data.kalshi import KalshiMarketData
+        from league.tapes import resolve_time
+
+        row = KalshiMarketData.parse_market({**self.diesel(), "status": "finalized", "result": "yes"})
+        close = parse_time(row["close_time"])
+        self.assertEqual(resolve_time(row, close), close)
 
 
 class KalshiMarketsTest(unittest.TestCase):
     def test_a_game_is_shown_by_when_it_is_expected_to_end_not_by_its_listed_close(self):
         """Measured Sept 19, 2026: a game's close is two days after kickoff; it really closes when a
         winner is declared, near its scheduled expiration."""
-        game = dict(can_close_early=True, expiration_time="2026-09-10T20:15:00Z")  # 6.3 hours from NOW
+        game = dict(can_close_early=True, expected_expiration_time="2026-09-10T20:15:00Z", expiration_time="2026-09-10T20:15:00Z")  # 6.3 hours from NOW
         data = FakeMarketData({"KXNFLGAME": [[
             live("KXNFLGAME-26SEP10AB-A", "0.60", "0.62", "2026-09-12T17:00:00Z", **game),
-            live("KXNFLGAME-26SEP14CD-C", "0.60", "0.62", "2026-09-13T01:00:00Z", can_close_early=True, expiration_time="2026-09-12T23:00:00Z"),  # next week's
+            live("KXNFLGAME-26SEP14CD-C", "0.60", "0.62", "2026-09-13T01:00:00Z", can_close_early=True, expected_expiration_time="2026-09-12T23:00:00Z"),  # next week's
         ]]})
         rows = KalshiData(data, clock=clock).markets(["KXNFLGAME"], max_hours_to_close=12)
         self.assertEqual([row["market"] for row in rows], ["KXNFLGAME-26SEP10AB-A"])
         self.assertEqual((rows[0]["close_time"], rows[0]["hours_to_close"], rows[0]["hours_to_resolve"]), ("2026-09-10T20:15:00Z", 6.2167, 6.2167))
 
     def test_a_market_paid_after_it_stops_trading_shows_both_times(self):
-        data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expiration_time="2026-09-11T10:00:00Z")]]})
+        data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expected_expiration_time="2026-09-11T10:00:00Z")]]})
         row = KalshiData(data, clock=clock).markets(["KXHIGHNY"], max_hours_to_close=24)[0]
         self.assertEqual((row["hours_to_close"], row["hours_to_resolve"]), (5.9667, 19.9667))
 
@@ -492,7 +570,7 @@ class KalshiMarketsTest(unittest.TestCase):
                 self.calls += 1
                 if ticker == "GONE":
                     raise RuntimeError("404")
-                return {"ticker": ticker, "close_time": "2026-09-12T17:00:00Z", "expiration_time": "2026-09-10T20:15:00Z" if ticker == "GAME" else None}
+                return {"ticker": ticker, "close_time": "2026-09-12T17:00:00Z", "expected_expiration_time": "2026-09-10T20:15:00Z" if ticker == "GAME" else None}
 
         source = One()
         data = KalshiData(source, clock=clock)
