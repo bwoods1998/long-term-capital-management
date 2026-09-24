@@ -210,6 +210,13 @@ SEAT_EXPIRED_KEEP_SECONDS = 7 * 86400.0
 #: $34.88 a day (the owner's $100 top-up is a rise, never a fall), against a $162.30 balance: 4.5 days over the $5 reserve.
 SAIL_BURN_WINDOW_SECONDS = 86400.0
 SAIL_BURN_MIN_SPAN_SECONDS = 6 * 3600.0
+#: A proven family's program that has no distinct valid PARAMS mutation left (`_mutated_params`: no declared or standard
+#: knob, the anchor's PARAMS outside its own rules, or 64 proposals that all repeat a living twin) is held this long
+#: before it is asked again (`_proven_births`, the review of #276, Sept 24, 2026): while held nothing is owed and its desk
+#: is not kept from other families' newcomers. Before, it stayed owed for good -- its desk gave every other family's
+#: newcomer no seat -- and the pass asked for the desk's weakest resident and a mutation on every tick. An hour, because
+#: what reopens a mutation (a living twin's death, a new anchor) happens on the scale of the newcomer cadence, not ticks.
+PROVEN_UNBRED_RETRY_SECONDS = 3600.0
 #: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
 HOUSE_CLOSING = "the House is closing"
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
@@ -5500,12 +5507,17 @@ class House:
             except Exception:  # noqa: BLE001 - `Allocator.family` never raises; an unread record breeds nothing
                 record = {}
             held = ""
+            unbred = (self._state.get("proven_unbred") or {}).get(family) or {}
             if family_at_capacity(record, swing_rule()):
                 held = "the family is at its measured capacity (E3): more members find no more room in its markets"
             elif self._losing_family(family):
                 held = "its pooled forward record is negative"
             elif self._holdout_spent(anchor):
                 held = "its line has spent its sealed-holdout ration"
+            elif unbred.get("program") == [anchor.id, anchor.code_sha256, json.dumps(anchor.params or {}, sort_keys=True)] \
+                    and self.clock() - float(unbred.get("epoch") or 0) < PROVEN_UNBRED_RETRY_SECONDS:
+                held = (f"no distinct valid mutation of {anchor.id}'s PARAMS was left at {unbred.get('at')} (`_mutated_params`); "
+                        f"asked again {PROVEN_UNBRED_RETRY_SECONDS / 3600:g} h on")
             out.append({"family": family, "venue": venue, "niche": anchor.specialty, "anchor": anchor, "running": running,
                         "wanted": max(0, target - len(running)), "held": held, "record": record})
         return out
@@ -5561,6 +5573,20 @@ class House:
             niche = self.niches.get(anchor.specialty or "")
             if niche is None or niche.dormant:
                 continue
+            # The mutation first: with none left there is nothing to seat, and the family is held (not owed) for
+            # PROVEN_UNBRED_RETRY_SECONDS, so its desk is not kept from other families meanwhile (review of #276).
+            params = self._mutated_params(anchor, seed=f"proven:{family}:{len(self.registry.agents)}")
+            with self._state_lock:
+                unbred = self._state.setdefault("proven_unbred", {})
+                if params is None:
+                    self._state.setdefault("proven_births", {})[family] = now
+                    unbred[family] = {"at": now_iso(self.clock), "epoch": now,
+                                      "program": [anchor.id, anchor.code_sha256, json.dumps(anchor.params or {}, sort_keys=True)]}
+                else:
+                    unbred.pop(family, None)
+            if params is None:
+                self._data_cache.pop("seat_waiters", None)
+                continue  # no valid mutation left inside its bounds (recorded by `_mutated_params`)
             keep = [a.id for a in row["running"]]
             newcomer = Newcomer(family=family, venue=anchor.venue, what=f"a birth of the proven family {family}'s program")
             loser = None
@@ -5574,9 +5600,6 @@ class House:
                 self._refuse_birth("proven", row["wanted"], f"{family} on {niche.id}: its desk (or the league) is full of residents that "
                                                             "may not be displaced, even by a proven family's newcomer")
                 continue
-            params = self._mutated_params(anchor, seed=f"proven:{family}:{len(self.registry.agents)}")
-            if params is None:
-                continue  # no valid mutation left inside its bounds (recorded by `_mutated_params`)
             with self._state_lock:
                 self._state.setdefault("proven_births", {})[family] = now
             record = row["record"] or {}
