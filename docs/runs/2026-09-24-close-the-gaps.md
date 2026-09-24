@@ -82,12 +82,12 @@ recorded for the next open; live verification uses the markets that trade around
 | R4 | The stock and options session, every 30 minutes | done 13:30-20:00Z (table at 20:01Z); the wake skip verified after the close; the open wake and E2's stock cards: the next session |
 | R5 | The probe drain (the owner's third digest change, on evidence) | live 18:43:49Z, ratified 18:44:00Z on `535a7f15`; 8 probes drained at the first pass; the drain hold (Deploy E) verified 19:48:35Z |
 | R6 | Bugs seen at the resume (practice-book 3-cent freeze, earnings polls, kalshi-open, kalshi-sports) | done: #273, #278 (the freeze and its cause), #279 (polls, idle desks, the test flake), #274 (the watchdog, CI's limit) |
-| Watch | At least three hours after the last deploy | ⟨pending⟩ |
-| B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
-| H | Cleanup: worktrees, branches, PRs, dead docs | ⟨pending⟩ |
-| Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md | ⟨pending⟩ |
-| Memory | project memory + MEMORY.md line | ⟨pending⟩ |
-| Report | when the Done list holds | ⟨pending⟩ |
+| Watch | At least three hours after the last deploy | done: 20:42:18-23:42:18Z after Deploy F (readings at 20:56, 21:10, 21:40, 22:11, 22:42, 23:12Z; the final scoreboard at 23:46Z) |
+| B | Bugs: regression test, fix, invariant | done: the report's section 6 |
+| H | Cleanup: worktrees, branches, PRs, dead docs | done: the report's section 7 (the run branch goes with #289) |
+| Docs | README, operations, runbook, league README, CONTRACT, gateway README, DESIGN.md | done: README, operations, runbook, league README and CONTRACT (the builders'), in #281-#289 |
+| Memory | project memory + MEMORY.md line | done (`ltcm-close-the-gaps-2026-09-24`) |
+| Report | when the Done list holds | done: the last section |
 
 ## Baseline (T0)
 
@@ -628,7 +628,7 @@ recorded for the next open; live verification uses the markets that trade around
   watchdog's; the next deploy is judged by the fixed one.
 - 16:43Z — **R1's first readings** (verifyC.py on the box, from 16:32:40Z): `tick_steps` in health (last tick
   90.7 s: research 15.4 s, wakes 12.1, publish 10.2, poll:kalshi-shadow 8.0, mark:alpaca-paper 7.5,
-  hypotheses 6.3); tick 87.6 s, not yet under 60. Waiters 82 → 66: lab graduates 41 → 23 as E1 holds 16 of
+  hypotheses 6.3); tick 87.6 s, not yet under 60. Waiters 82 → 66: lab graduates 41 → 23 as E1 holds 15 of
   them as parameter nudges (crypto-strikes 11, weather 3, sports-props 1) and one on a losing forward window
   (megacaps). X1 verified: agents edited their own parameters in place (`control: edit_params`:
   hilibrand-l98e85b's risk_fraction 0.05 → 0.12 at 16:36:32Z because 5% of a $10 probe is below one contract;
@@ -975,3 +975,182 @@ tick-steps flake). Real money: Kalshi +$22 realized today (the sports and crypto
 crypto probes −$28.49); since T0' one more probe was seated on a losing family (krasker-14, $80 on options-pullback,
 19 blocks −0.383) and one seated before it lost again and was demoted (huang-h51fdd3-6, −$1.20). Compute at 16:37Z: OpenAI $471.76 of $607; Sail
 $160.76 (runway 4.5 days).
+
+## The report (Sept 24, 2026; the watch closed at 23:42:18Z)
+
+### 1. The scoreboard
+
+`scripts/gap_scoreboard.py --take snap-final --baseline 2026-09-24T05:37:31Z` at 23:43-23:49Z (ledger 606,867 rows to
+23:46:04Z; window the last 24 h; release `main-8d48771e009d`, Deploy F plus Merton's #287), and the same snapshot windowed
+from Deploy C′ (`--since 2026-09-24T16:32:40`) for the rows the morning's churn dominates.
+
+| # | Metric | T0 01:34Z | T+8 09:34Z | T0' 15:06Z | T+16 17:27Z | **Final 23:46Z** | Target | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Families proven (House record); families with a positive real bound; capacity | 2 on real n 2, 5 | 1 | 1; 1 ($82/day) | 2; 1 | **2 proven** (sports-central-run-under: pooled n 20, real n 6, bound +0.256, $49.72-76.55/day; megacaps-chip-demand-relay: n 13 practice, bound +0.0010, $0.14-0.34/day) and **3 real-bound** (+ sports-central-over-under real n 3, crypto-strikes-lab-1b9d16 real n 4); none with ≥ 10 real events | ≥ 2, capacity measured | **met** on the House's proof, capacity measured for each; the second proven family has no real member and pennies of capacity |
+| 2 | Allocator promotions since Deploy A: settled, share positive | — | 0 | 9, −$6.07 on 8 | 10, −$6.65 on 12 | **17, all probes**, −$6.51 on 16 settlements, 3 positive | every one a probe or a proven-family bunt | **met by design**; since R5 (18:47Z) no probe is seated on a losing family |
+| 3 | Real $ proven / unproven; Alpaca real agents | $96.56 / $168.98; 0 | $20.54 / $122.35; 1 | $20.06 / $168.94; 3 | $20.06 / $238.94; 4 | **$12.81 / $254.18** on `stake_usd` (the net loan); by equity the proven bunt holds **$34.30** against $266.99 for 13 probes ($188.61 Alpaca, $78.38 Kalshi); **6** Alpaca real agents | proven ≥ unproven; ≥ 1 Alpaca | Alpaca **met**; proven < unproven: the one proven family has one real member (see 3 below) |
+| 4 | Median life all / day-horizon; deaths before 3 fills | 14.38 / 19.83 h; 66% | 9.59 / 5.79 h; 61% | 5.84 / 5.09 h; 66% | 5.21 / 5.09 h; 66% | 24 h window 4.47 / 5.09 h, 71% of 129; **since Deploy C′: 14.74 / 22.38 h, 13 of 19 (68%)**; 19 deaths in 7.2 h against 140 in the 24 h before | ≥ 24 h day desks; < 30% | day-horizon life **short by 1.6 h**; the early-death share **not met**: the deaths since Deploy C′ are idle seats given to evidenced newcomers after their fair chance, 12 of 19 displaced |
+| 5 | Lab batches/h; LLM share of graduates; waiters, longest; supersessions | 0; 2/18; 30 at 33.8 h | 106; 14/50; 23 at 41.7 h | 71; 14/54; 56 at 47.3 h | 70; 14/56; 40 at 49.6 h | **61; 19 of 68** (28%); **41 waiting** (22 graduates, the longest 8.9 h; 19 cards, the longest 55.9 h); 5 superseded (0 on real money) | ≥ 30; ≥ 50%; 0 over 2 h | batches **met**; LLM share **short** (28%); waiters **not met**: the population is at its 128 ceiling and each desk's overdue waiters are named hourly with their rule |
+| 6 | Self-cross refusals of sells (6 h); stacked promotions | 26; 4/11 | 8; 0 | 0; 1/9 | 0; 1/10 | **0; 0** counted per event (2 of 17 by closes) | 0; 0 | **met** |
+| 7 | Recorders; idle desks (48 h) | 0/12; 1 | 9/12; 0 | 9/12; 1 | 9/12; 0 | **9 of 12; 0** | all needed; 0 | idle desks **met**; recorders: EIA and the Odds API wait for the owner's keys, RealClearPolling refuses bots |
+
+### 2. What is live
+- **Release** `main-8d48771e009d` (main `927afc2`: Deploy F `73bcf07` plus Merton's #287). The House was promoted at
+  21:16:32Z by the in-box updater. Its later releases of Merton's #288, #290 and #291 were rolled back (22:27Z, 23:08Z,
+  23:46Z) by the backup defect below; the final PR (#289) carries the fix.
+- **This run's deploys:**
+  - A (05:37Z, `521c4586`);
+  - B (08:31Z, `c02ed852`);
+  - C (15:37Z, rolled back) and C′ (16:32Z);
+  - D (18:43Z, `535a7f15`, the owner's third digest change, ratified 18:44:00Z);
+  - E (19:45Z);
+  - F (20:42Z).
+- **The grant** `earned-live-20260921` is active on money digest `535a7f15` (constitution `38a57fe9`): 101 seats, $1,017.75 envelope
+  (Kalshi $517.75 grows with its realized profit to $545.09).
+
+### 3. Real money
+- **Realized:** since T0 (01:34Z) Kalshi +$27.99 and Alpaca +$0.12; since T0′ Kalshi +$17.54 and Alpaca +$0.56; since
+  Deploy D Kalshi +$18.55 and Alpaca −$0.03.
+  - The earners were meriwether-h2d625d, the proven run-under bunt (+$22.03 on 5), meriwether-h7d7702 (sports
+    over-under, +$14.44 on 2) and hilibrand-lc04657 (crypto-strikes lab, +$5.91 on 20).
+  - The losers were the 15-minute crypto and crypto-strike probes: hilibrand-h6ca596-3 −$4.96, huang-l55a341-2 −$4.67,
+    huang-hd8ff7c-3 −$4.29, huang-h427345-2 −$4.13 and huang-h51fdd3-6 −$2.60.
+  - Real equity $1,027.29 against the $1,017.75 grant (+$9.54, marked, at 23:32Z); the throttle is off.
+- **Real agents at the end: 14, every one a probe or a proven family's bunt.**
+  - Kalshi:
+    - the proven family's bunt, meriwether-h2d625d (equity $34.30, E 2.21, 6 real settlements);
+    - 7 probes: hilibrand-lc04657 and hilibrand-l98e85b (two crypto-strikes lab families), meriwether-h7d7702,
+      meriwether-hadd32b-3, and mullins-2, mullins-6 and mullins-12 (weather-favorites, 35 blocks +0.146).
+  - Alpaca: 6 probes:
+    - five crypto-alts-reversion members, re-seated 21:01-23:11Z after the family's record turned above zero;
+    - krasker-14, $80 of options on a losing family, draining under the House's hold (equity $63.00).
+- **R5 at work:** 8 probes on losing families were drained at the first pass (18:47:37-39Z); no probe has been seated on
+  a losing family since; the drain hold has stopped krasker-14's buys since 19:48:35Z.
+- **The family swing:** not reached. The proven family has 6 real independent settlements of the 15 its entry look needs,
+  at 3.4-3.6 a day (the board's clock: 2.68 days). Its three House births (-3, -4, -5) trade the same games, so they
+  add weight, not settlements.
+- **Alpaca:** 6 real agents (met); stock desks far from the line (R4).
+
+### 4. The loop
+- **The lab:** 61 batches in the last hour and 60-106 an hour through the day; graduates born today by origin: param 33,
+  agent 8, luna 7, sol 2. E1 held 15 parameter nudges and one losing window in Deploy C′'s first hour and kept holding them; 20
+  crypto-15m waiters left the queue at 18:56:18Z.
+- **L1:** london-l440e61 was superseded by its fee-fixed child (17:11:05Z), 5 supersessions in the window, none on real
+  money. The four real-money parents with replay-passing children are not corrections of the parent's entry (maker
+  parents, or a child on another program).
+- **Research yield** (the hourly row at 23:07Z):
+  - openai_luna: 21 candidates for $1.67 (12.6 a dollar);
+  - flash_asap: 1 for $0.24;
+  - pro_asap: 1 for $0.29.
+- **Merton's roles:** not paused, because the floor's 24-hour real P&L is positive. Merton merged #284, #285, #287, #288,
+  #290 and #291 itself: #284 and #285 rode Deploy F, the updater shipped #287, and its releases of #288, #290 and #291
+  were rolled back by the backup defect.
+- **L3:** no live instance: no warning repeated 10 times in 30 minutes since Deploy B.
+
+### 5. Compute
+- **OpenAI:** the month read $394.46 of $408 at T0 and was raised to $607 for the owner's $200 top-up; at 23:32Z it
+  reads $499.81 ($494.91 settled). The House line has $107.19 left, and $2.03 settled in the last hour. D2's
+  phantom holds were released at 07:48:57Z ($86.86).
+- **Sail:** $169.87 at T0 and $156.23 at 23:32Z. The 24-hour burn is $20.23 a day (it was $40.45 at T0 before the $2 an
+  hour research cap), a runway of 7.2 days.
+- **Jev:** $16.20 of $42 (unchanged).
+
+### 6. Bugs found in Wave 3 (each with its regression test; who noticed first)
+
+| Bug | Noticed first by | Fix | Invariant or signal now |
+|---|---|---|---|
+| The practice book froze on cents. Alpaca takes an option buy's OCC clearing fee (~$0.03) at the fill and lists it later; maker-fee refunds and rounding added more. 11 practice entries were refused on Sept 24, 20 since Sept 21, and Deploy C was rolled back by it. | the reconcile warning (14:39:12Z); the rollback | #273 (a practice difference under $1 is dust); #278 (practice option fills pay the fee; fees never explain a fill in flight) | the dust row's `detail` |
+| The watchdog judged a new release on the OLD House's last `health.json` | the rollback of Deploy C (15:39:27Z), diagnosed in the session | `r1/watchdog-inherit` in #274 | `frozen_by_previous_process` in deploy readings |
+| CI's 3.14 job hit its 10-minute limit twice in a row | CI (#274) | #274: 20 minutes, with `TRUSTED_WORKFLOWS_SHA256` re-pinned | a test pins the workflows' digest |
+| The board's `stake_usd` (the net loan) was read as the stake | the session (the resume's note) | #280: `equity_usd` beside it | — |
+| EDGAR earnings polls timed out (31 of 995 at 30 s) | the feeds warning | #279: 45 s; warn after 3 in a row | the warning names the reason |
+| `kalshi-open` was shown fallback series and counted them as offers (feeding barren and stuck counts) | the idle-desk warning | #279: only a program's own series inside its horizon count | — |
+| Idle-desk false alarms: `kalshi-sports`' day programs, and a 146-minute "no wake" measured from the House's start | the warnings themselves | #279 | — |
+| The tick-steps test failed on any machine (the first tick loads 51 lessons) | the local parallel run | #279 | — |
+| A research child with another program was born into its parent's family: 98 such children, 39 living; meriwether-h2d625d-2 carried the proven family's name | the session (the L1 analysis), measured by the R2 builder | #276 follow-up plus its review (new births); existing labels remain | known limit |
+| R5's drain let a draining probe buy (krasker-14's second contract, 18:52:30Z) | the session's watch | #282 (the House holds its buys) plus its review's 8 fixes | `drain_holds`; `house:drain` rows |
+| The slow tick: a 1.73 GB scan of provider.sqlite every tick, publish up to 88 s | `tick_steps` (Deploy C) | #283/#286 | `tick_steps` |
+| The real Alpaca book froze on the first real option fill's OCC fee | the reconcile error alert (18:35:42Z) | none needed: booked when listed the same day; real books keep the freeze | known limit |
+| The daily backup retried at every tick while Sail's checkpoint service answered 503 (from 21:31:55Z, an error alert every 3-4 minutes); those errors rolled back the updater's releases of Merton's #288 (22:27:14Z) and #290 (by 23:08:38Z) | the watch | the final PR (e04a36c): a 30-minute backoff doubling to 6 h; the alert carries `began_at`, so the watchdog inherits an outage that began before a promotion | the alert's `began_at` and `failures` |
+| An alert said "8 merged strategys" | the session | the final PR (`SEAT_WAITER_PLURALS`) | — |
+| The site refused one checkpoint (HTTP 500, Error 1101) | the publish warning | one blip 108 s after a restart; no change | — |
+| Reviews found, in builders' code: 13 issues in R2, 6 in R5 (3 medium), 8 in the drain hold (1 medium-high); 0 in the perf pass | the adversarial reviews | fixed on `*/review` branches before deploy | — |
+
+### 7. Repo and docs
+- **Removed (merged and pushed):** 13 Wave 2 worktrees and branches (after Deploy C′ went live), 8 Wave 3 worktrees and branches (18:56Z), and 6 more after Deploys E and F. #273, #276 and #278-#283 were merged through Deploys C′-F.
+- **Kept:**
+  - `ltcm-deploy`;
+  - `ltcm-w2-options` (draft #210, per the plan);
+  - the run worktree, until the final PR merges.
+- **Not deleted, and why:**
+  - 39 remote branches from Sept 19-23, all unmerged: deleting unmerged work is not authorized.
+  - Four old session scratch directories in `~/Work` (`ltcm-observation-2026-09-20` 80 MB, `ltcm-watch-2026-09-20-evening` 205 MB, `ltcm-watch-2026-09-21-eight-hour`, `ltcm-watch-2026-09-21-live-hour` 24 MB): evidence cited by earlier records; the owner's call.
+  - The main checkout `~/Work/long-term-capital-management` (at `3faf146`, behind main): never touched by a run.
+- **Docs:**
+  - README: the grant, the Sept 24 Status entry and its known limits;
+  - the runbook: the grant, digest history and compute;
+  - operations: the CI limit, the watchdog, the practice dust, the probe gate, the drain hold and the seat market;
+  - league/README and CONTRACT (the builders' own);
+  - this record.
+
+### 8. Rollback, and the owner's next decisions
+- **Rollback:**
+  - The box keeps the recent releases (Deploy F's `20260924T204043Z-2b76cd7a7763` among them), and `league.watchdog rollback` returns to the previous one it recorded. Deploys E and F and the updater's #287 changed no money rule, so going back to any of them needs no ratify.
+  - A rollback past Deploy D (to C′'s release) needs `python3 scripts/live_trading.py --ratify earned-live-20260921` on the restored release: the grant must pin the running money rules (`c02ed852`).
+  - Emergency stop: `scripts/gateway_admin.py kill`.
+- **Decisions, each with a recommendation:**
+  1. **R5's losing line is a sign test.** A zero-edge family flips across it: crypto-alts-reversion was re-seated at 21:01Z on +0.0113 over 375 blocks. Recommend a bound: a family is losing when its pooled forward upper bound is below zero, so near-zero families stay out until they show an edge. It is a money-digest change.
+  2. **Family = mechanism.** Proof reads the family label (98 mismatched children). Recommend keying the family by the program's mechanism (markets, style, code beyond PARAMS) in the next run: a money-judge change with a ratify.
+  3. **The real book's option fee.** The first real option fill showed Alpaca takes the OCC fee at the fill and lists it the same day. Recommend charging real option fills the fee as #278 does on practice, after one more real fill confirms the timing.
+  4. **Keyed hosts.** `api.eia.gov` (free key): yes, it unblocks kalshi-prices' fixings. `api.the-odds-api.com` (paid): only once the proven sports family binds at its measured capacity ($50-82 a day).
+  5. **The level-3 options account (O): not yet.** The options desk's family is losing (19 blocks, −0.383), and no options family has proof.
+  6. **Sail:** about $155 at about $34 a day. Recommend auto-recharge or a top-up before Sept 28; below 1.5 days of runway the population holds at 112.
+  7. **October's OpenAI cap:** the month resets Oct 1. Set `FRONTIER_MONTH_USD` to October's funded balance.
+  8. **Old scratch directories and the 39 unmerged remote branches:** archive or delete them at your discretion.
+- **Named windows after the run:**
+  - the stock desks' open wake at 13:30Z Sept 25, and E2's first stock and options cards in that session;
+  - diesel's horizon judge, once its series has 20 settled markets on the box;
+  - the family swing, at the proven family's 15th real independent settlement (about 2.5 days at 3.6 a day, if the MLB slate lasts);
+  - krasker-14's drain, when it is flat.
+
+### 9. Every workstream's state
+
+| Workstream | State |
+|---|---|
+| D1 the lab's step | verified 06:40Z; 60-106 batches an hour since |
+| D2 phantom holds | verified 07:48:57Z ($86.86 released) |
+| D3 exits | 0 self-cross refusals of a reducing order since Deploy A (26 in the 6 h before T0); no exit has met a House bid yet (0 crosses) |
+| D4, P1-P3, X0 | live since 05:37Z; every real agent a probe or a proven family's bunt |
+| C1 the mechanism ledger, C4 the board | verified (`family.record` rows, the board's families, `equity_usd`, `swing_clock`) |
+| C2 the family swing | named window: the proven family's 15th real independent settlement (6 now; about 2.7 days) |
+| C3 Alpaca real money | met: 6 Alpaca real agents (5 crypto-alts probes, 1 options probe draining) |
+| S1-S4, R2 the seat market | live; population 128; closed-desk waiters expire; 41 waiters at the ceiling, named hourly (not met: numbers above) |
+| L1 supersede | verified 17:11:05Z (london-l440e61) |
+| L2 research economy | verified (Sail research ≤ $2 an hour; the 24-hour burn fell from $40.45 to $20.23 a day) |
+| L3 warnings escalate | live, no live instance |
+| X1 pause and size-down | verified (16 `edit_params` rows by 17:23Z; the House uses the same pause for the drain) |
+| X2 the horizon judge | named window: diesel's series recording 20 settled markets on the box |
+| E1 the lab as a search | verified (15 nudges and a losing window held; 20 closed-desk waiters expired) |
+| E2 the foundry brief | cards on kalshi-open and kalshi-prices verified; stock and options cards: the next session (13:30Z Sept 25) |
+| E3 capacity | measured on the board for each family |
+| I recorders | 9 of 12; blocked: EIA and the Odds API wait for the owner's keys; RealClearPolling refuses bots |
+| W the site | verified 10:14Z; 136 desks published at 20:56Z |
+| O level-3 options | not this run (the plan) |
+| R0-R6 | done (the checklist); R4 recorded for the session, with the wake skip verified |
+| R7 the watch, docs, cleanup, report | the watch 20:42:18-23:42:18Z; docs and this report in #289 |
+
+### 10. The Done list
+- **The final scoreboard is above**, and each row has met its target or carries the numbers that say why not:
+  - row 3's proven share: one proven family with one real member;
+  - row 4's early deaths: idle seats making way;
+  - row 5's LLM share and waiters: 28%, and 41 waiting at the population ceiling.
+- **Every workstream is verified, scheduled for a named window, or blocked with numbers** (section 9).
+- **Tests:** the league suite passes on the final branch (3,182), CI passed on #289 (3.11 and 3.14), and every deploy's
+  CI was green before it merged.
+- **Every real-money agent is a probe or a proven family's bunt**, and the proven family's bunt is held to its target
+  ($30 × clamp(W_real, 1, 1.25) = $37.50; equity $34.30 with positions open).
+- **The lab evaluates and no exit is walled off.** The waiters are not under two hours: 41 wait with the population at
+  128 of 128, and each is named with its rule.
+- **Docs, memory and this record are current;** the final PR merges them.
+- **The repo and `~/Work` are clean** except what is not ours to delete (section 7).
+- **This report is delivered.**
