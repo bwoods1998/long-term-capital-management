@@ -770,8 +770,9 @@ recorded for the next open; live verification uses the markets that trade around
   seats no probe from it. The readings: 14:38-15:08Z 68 wakes / 11 intents / 3 fills (4 entries refused by the freeze);
   15:08-15:38Z 73 / 8 / 8; 15:38-16:08Z (the rollback) 102 / 14 / 12; 16:40-17:10Z 85 / 9 / 8; 17:10-17:40Z 85 / 8 / 7;
   17:40-18:10Z 104 / 10 / 9; 18:11-18:41Z 114 / 17 / 15 (krasker-14's first real option fill). A7 (fractional `day`
-  limits) had no instance: no equity program writes a limit order. The foundry wrote cards for the open desks
-  (kalshi-open at 17:15Z) but none for megacaps, ETFs or options in the session.
+  limits) had no instance: no equity program writes a limit order. E2's cards in the session went to kalshi-open (8 on
+  the new brief `foundry-2026-09-24.1`, 4 on the old) and kalshi-prices (4), besides the engineer's four repair cards;
+  none to megacaps, ETFs or options, so E2's stock and options cards remain a check for the next session.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
