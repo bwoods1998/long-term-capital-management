@@ -26,7 +26,7 @@ from league.history import HistoryStore
 from league.lab import Lab, LabError, _iso, static_literal
 from league.tests.test_history import FakeAlpaca, _ingestor
 from league.tests.test_house import IDLE
-from league.tests.test_lab import DESK, KNOB, LabCase
+from league.tests.test_lab import DESK, KNOB, SPARSE, LabCase
 
 #: The failing row, exactly as `lab.sqlite` held it at 01:42Z Sept 24 (candidate
 #: 4dac144a4a1bcace0863b8f3, a Luna child of card:9b8d01dcb85a0d26, queued since 16:09:34Z).
@@ -264,6 +264,28 @@ class TheStepSaysWhy(StepCase):
         self.assertEqual(self.lab.health()["failures_in_a_row"], 0)
         self.assertEqual(self.alerts("info", "works again"), [])  # never escalated, so nothing to take back
         self.assertEqual(self.alerts("error"), [])
+
+
+class WaitingGraduatesFirst(StepCase):
+    """The forward run scored 4 and 5 of its 48 due candidates on Sept 23 (22:11Z and 23:14Z; the rest
+    skipped when the run's time was spent), in evaluation order: the 25 graduates waiting for seats,
+    whose forward score the seat market reads, queued behind the archive's never-scored elites."""
+
+    def test_a_waiting_graduates_first_window_comes_before_an_elites_evaluated_earlier(self):
+        first = self.queue(KNOB)
+        self.lab.evaluate_batch()
+        self.clock.advance(60)
+        second = self.queue(SPARSE, lineage="founder:other")
+        self.lab.evaluate_batch()
+        self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, at, detail) VALUES(?,?,?,?,?,?,?,?)",
+                    (second, DESK, "founder:other", "rosenfeld-lsecond", "f", "passed", self.clock(),
+                     "its desk is full of agents that have earned their seats"))
+        self.house.game["lab"]["forward_candidates_per_run"] = 1
+        self.assertEqual([r["id"] for r in self.lab.forward_due(1)], [second])
+        self.assertEqual(self.lab.forward_windows(force=True)["scored"], 1)
+        self.assertEqual({r["candidate"] for r in self.lab._q("SELECT candidate FROM forward")}, {second})
+        # Then never-scored first again, then least recently scored: the elites are not starved.
+        self.assertEqual([r["id"] for r in self.lab.forward_due(2)], [first, second])
 
 
 class ARestart(StepCase):

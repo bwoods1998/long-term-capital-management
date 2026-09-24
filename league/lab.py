@@ -179,7 +179,9 @@ DEFAULTS: dict[str, Any] = {
     # `forward_min_active_blocks` active blocks; the floor's practice record counts from
     # `forward_min_trades` closed trades. Cost, from the box's measured rates that day (11 candidates
     # a second on Kalshi tapes, 1.7 on crypto) and windows a tenth of a search tape: 48 candidates
-    # are some 5-30 box-seconds an hour, under a cent of Sail at $0.20 an hour.
+    # are some 5-30 box-seconds an hour, under a cent of Sail at $0.20 an hour. But the budget is the
+    # run's own time, and the tapes it builds fill it: measured Sept 23 (22:11Z, 23:14Z), a run scored
+    # 4 and 5 of its 48 due and skipped the rest when its 90 s were spent.
     "forward_every_minutes": 60,
     "forward_candidates_per_run": 48,
     "forward_box_seconds": 90,
@@ -2273,10 +2275,16 @@ class Lab:
     # --------------------------------------------------------------- forward
     def forward_due(self, limit: int) -> list[sqlite3.Row]:
         """The archived elites and the graduates waiting for seats whose forward window is next:
-        never scored first, then least recently scored (the table decides, so a restart resumes)."""
-        rows = self._q("SELECT c.*, MAX(f.at) AS scored FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
+        never scored first, the graduates waiting for seats before the elites among those, then
+        least recently scored (the table decides, so a restart resumes). D1, Sept 24, 2026: the runs
+        of Sept 23 at 22:11Z and 23:14Z scored 4 and 5 of their 48 due candidates (the rest skipped
+        when the run's time was spent), in evaluation order, so the graduates whose forward score the
+        seat market reads waited behind the archive's never-scored elites."""
+        rows = self._q("SELECT c.*, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations WHERE state='passed') AS waiting"
+                       " FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
                        " WHERE c.status='evaluated' AND c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
-                       " WHERE state='passed') GROUP BY c.id ORDER BY (scored IS NULL) DESC, scored, c.evaluated LIMIT ?", (int(limit),))
+                       " WHERE state='passed') GROUP BY c.id ORDER BY (scored IS NULL) DESC, (scored IS NULL AND waiting) DESC, scored,"
+                       " c.evaluated LIMIT ?", (int(limit),))
         return [r for r in rows if self._desk(r["niche"]) is not None]
 
     def _frozen_at(self, row: Mapping[str, Any]) -> float:
