@@ -1122,5 +1122,180 @@ class TheSettledListingIsReadOnce(unittest.TestCase):
         self.assertEqual(tape["meta"]["listed"], 3 * 8, "every settled market of the window is still listed")
 
 
+def settled_days(now):
+    """Settled rows as `History.kalshi_settled` parses them, over Sept 6-10, 2026, with every shape
+    the tape reads from a settled row: strikes in the ticker, a voided market, a settlement stamped
+    before its close, no open time, an unreadable open time, an open time after the close, no event
+    ticker, an event that is not the ticker's first two segments (an inning of a game, as Kalshi
+    lists KXMLBINNINGWIN), a game that closed early with its strike only in `floor_strike`, a
+    weather-like market paid after its close; and fields the tape never reads (volume, prices, price
+    ranges). Candles make every market a step."""
+    rows, candles = [], {}
+    for day in (6, 7, 8, 9, 10):
+        for hour in (1, 13):
+            close = f"2026-09-{day:02d}T{hour:02d}:00:00Z"
+            if parse_time(close) >= now:
+                continue
+            opened = iso(parse_time(close) - 12 * 3600)
+            event = f"KXETHD-26SEP{day:02d}{hour:02d}"
+            for strike, result in (("T2599.99", "yes"), ("T2699.99", "no"), ("T2799.99", "")):
+                ticker = f"{event}-{strike}"
+                rows.append(settled(ticker, result, opened, close, can_close_early=False, settlement_ts=iso(parse_time(close) + 377.25),
+                                    expiration_time=iso(parse_time(close) + 3600), volume=D("12"), yes_bid=D("0.41"),
+                                    price_ranges=[{"start": "0", "end": "1", "step": "0.01"}], status="finalized"))
+                candles[ticker] = [candle(iso(parse_time(opened) + 600), 0.40, 0.45, volume=3.0, interest=2.0),
+                                   candle(iso(parse_time(close) - 1200), 0.55, 0.58, ask_low=0.52, bid_high=0.56, volume=1.0, interest=3.0)]
+        ticker = f"KXETHD-26SEP{day:02d}05-T2899.99"
+        close = f"2026-09-{day:02d}T05:00:00Z"
+        rows.append(settled(ticker, "no", None, close, settlement_ts=iso(parse_time(close) - 60)))  # no open, paid "before" its close
+        candles[ticker] = [candle(iso(parse_time(close) - 1800), 0.10, 0.12)]
+        ticker = f"KXETHD-26SEP{day:02d}07-T2999.99"
+        close = f"2026-09-{day:02d}T07:00:00Z"
+        rows.append(dict(settled(ticker, "yes", "not a time", close), event_ticker=None))
+        candles[ticker] = [candle(iso(parse_time(close) - 1500), 0.80, 0.84)]
+        ticker = f"KXETHD-26SEP{day:02d}09-T3099.99"
+        close = f"2026-09-{day:02d}T09:00:00Z"
+        rows.append(settled(ticker, "no", iso(parse_time(close) + 60), close))  # opened after it closed: never listed
+        candles[ticker] = [candle(iso(parse_time(close) - 1500), 0.20, 0.24)]
+        for inning in (1, 2):
+            event = f"KXMLBINNINGWIN-26SEP{day:02d}2110CINLAD-{inning}"
+            close = f"2026-09-{day:02d}T{2 + inning:02d}:15:00Z"
+            for side, result in (("CIN", "yes"), ("LAD", "no")):
+                ticker = f"{event}-{side}"
+                rows.append(settled(ticker, result, f"2026-09-{day:02d}T01:00:00Z", close, event_ticker=event))
+                candles[ticker] = [candle(iso(parse_time(close) - 2400), 0.45, 0.50)]
+        game = f"KXMLBGAME-26SEP{day:02d}NYYBOS-NYY"
+        close = f"2026-09-{day:02d}T20:47:13Z"
+        rows.append(settled(game, "yes", f"2026-09-{day:02d}T17:00:00Z", close, latest_expiration_time=f"2026-09-{day + 2:02d}T00:00:00Z",
+                            expiration_time=f"2026-09-{day:02d}T21:00:00Z", floor_strike=D("0.5"), settlement_ts=iso(parse_time(close) + 900)))
+        candles[game] = [candle(iso(parse_time(close) - 3000), 0.61, 0.63), candle(iso(parse_time(close) - 400), 0.90, 0.93)]
+    return rows, candles
+
+
+class TheSettledDayIsHeldInMemory(unittest.TestCase):
+    """C-perf (Sept 24, 2026, the close-the-gaps run, Wave 2). After L4 the House's log still carried
+    about 3,200 `[history] kalshi settled <series>: N markets in P page(s)` lines every 30 minutes, all
+    day on Sept 23-24: in one 30 s window six reads each of KXBTC, KXBTCD, KXETH and KXETHD, each up to
+    seven pages of 1,000 markets. A fully settled day went back to History on every tape build; its
+    disk cache answered, and every row of every page was parsed again (`KalshiMarketData.
+    parse_market`), CPU under the GIL beside the tick. Measured on the real rows of those four series
+    (the owner's History cache): 0.26 s a KXETHD day, and about 58 s for a 14-day tape of the four,
+    the second build as slow as the first. A fully settled day is now held in memory after its first
+    read, only the fields the tape reads, in a least-recently-used memo bounded in rows."""
+
+    NOW = parse_time("2026-09-10T14:02:00Z")
+    SERIES = ["KXETHD", "KXMLBGAME", "KXMLBINNINGWIN"]
+
+    def setUp(self):
+        self.rows, self.candles = settled_days(self.NOW)
+        self.now = [self.NOW]
+
+    def kalshi(self, history=None, **kw):
+        history = history or FakeHistory(self.rows, self.candles)
+        return KalshiData(None, history, clock=lambda: self.now[0], **kw), history
+
+    def build(self, kalshi):
+        end = self.now[0] - 120
+        return kalshi.tape(self.SERIES, start=iso(end - 4 * DAY), end=iso(end))
+
+    @staticmethod
+    def day(date):
+        return int(parse_time(date + "T00:00:00Z"))
+
+    def test_a_second_tape_asks_history_for_no_settled_day(self):
+        kalshi, history = self.kalshi()
+        first = self.build(kalshi)
+        self.assertTrue(first["results"])
+        read = len(history.settled_calls)
+        self.assertEqual(read, 3 * 5, "four settled days and today's, for each series")
+        self.now[0] += 60  # the next agent's tape, a minute later, over a window a minute later
+        self.assertEqual(self.build(kalshi)["results"], first["results"])
+        self.assertEqual(history.settled_calls[read:], [], "a settled day is read once a process; today's is served for its ttl")
+
+    def test_a_tape_from_the_memo_is_the_tape_history_gives(self):
+        plain, every_time = self.kalshi()
+        plain.settled_memo_rows = 0  # no memo: every read is History's, as before
+        held, once = self.kalshi()
+        for _ in range(3):
+            self.assertEqual(held.tape(self.SERIES, start="2026-09-06T00:30:00Z", end="2026-09-10T13:00:00Z"),
+                             plain.tape(self.SERIES, start="2026-09-06T00:30:00Z", end="2026-09-10T13:00:00Z"))
+            self.assertEqual(self.build(held), self.build(plain))
+            self.now[0] += 60
+        self.assertEqual(once.candle_calls, every_time.candle_calls, "the same events, asked for over the same windows")
+        self.assertLess(len(once.settled_calls), len(every_time.settled_calls))
+        settled_day = {(name, lo) for name, lo, hi in every_time.settled_calls if hi == lo + DAY - 1 and hi <= self.NOW - 12 * 3600}
+        self.assertEqual(len([c for c in once.settled_calls if (c[0], c[1]) in settled_day]), len(settled_day), "each settled day once")
+
+    def test_the_memo_keeps_only_what_the_tape_reads_and_times_as_history_would_parse_them(self):
+        from league.tapes import SETTLED_FIELDS
+
+        kalshi, history = self.kalshi()
+        day = self.day("2026-09-07")
+        first = kalshi._settled_day("KXETHD", day)
+        again = kalshi._settled_day("KXETHD", day)
+        self.assertEqual(len(history.settled_calls), 1)
+        self.assertEqual(first, again)
+        self.assertIsNot(first[0], again[0], "each read gets rows of its own")
+        self.assertEqual({tuple(sorted(row)) for row in again}, {tuple(sorted(SETTLED_FIELDS))})
+        source = {row["ticker"]: row for row in history.kalshi_settled("KXETHD", start_ts=day, end_ts=day + DAY - 1)}
+        for row in again:
+            raw = source[row["ticker"]]
+            for field in ("close_time", "open_time", "settlement_ts", "expiration_time"):
+                try:
+                    expected = parse_time(raw.get(field))
+                except TapeError:
+                    expected = raw.get(field)  # a time the tape cannot read stays as it was, to fail the same way
+                self.assertEqual(row[field], expected, (row["ticker"], field))
+            for field in ("title", "result", "event_ticker", "floor_strike", "cap_strike", "can_close_early"):
+                self.assertEqual(row[field], raw.get(field))
+
+    def test_the_least_recently_used_day_leaves_first(self):
+        kalshi, history = self.kalshi()
+        days = [self.day(f"2026-09-0{d}") for d in (6, 7, 8)]
+        per_day = len(kalshi._settled_day("KXETHD", days[0]))
+        kalshi.settled_memo_rows = 2 * per_day
+        kalshi._settled_day("KXETHD", days[1])
+        kalshi._settled_day("KXETHD", days[2])  # the 6th leaves
+        read = len(history.settled_calls)
+        kalshi._settled_day("KXETHD", days[2])
+        kalshi._settled_day("KXETHD", days[1])
+        self.assertEqual(len(history.settled_calls), read)
+        kalshi._settled_day("KXETHD", days[0])  # read again, and the 8th, now the least recently used, leaves
+        kalshi._settled_day("KXETHD", days[1])
+        kalshi._settled_day("KXETHD", days[2])
+        self.assertEqual(history.settled_calls[read:], [("KXETHD", d, d + DAY - 1) for d in (days[0], days[2])])
+
+    def test_a_day_over_the_bound_is_not_held_and_no_memo_is_history_every_time(self):
+        kalshi, history = self.kalshi()
+        day = self.day("2026-09-08")
+        kalshi.settled_memo_rows = len(kalshi._settled_day("KXETHD", day)) - 1
+        kalshi._settled_day("KXETHD", self.day("2026-09-07"))
+        kalshi._settled_day("KXETHD", day)
+        self.assertEqual(len(history.settled_calls), 3)
+        kalshi.settled_memo_rows = 0
+        rows = kalshi._settled_day("KXETHD", self.day("2026-09-07"))
+        self.assertEqual(len(history.settled_calls), 4)
+        self.assertIn("volume", rows[0], "without the memo the rows are History's own")
+
+    def test_a_day_still_settling_keeps_its_ttl_and_is_held_once_it_has_settled(self):
+        kalshi, history = self.kalshi()
+        today = self.day("2026-09-10")
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls, [("KXETHD", today, today + DAY - 1)])
+        self.assertNotIn(("KXETHD", today), kalshi._settled_memo)
+        self.now[0] += 60
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(len(history.settled_calls), 1, "within settled_listing_ttl the settling day is served from memory")
+        self.now[0] += kalshi.settled_listing_ttl
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls[1][1], int(self.NOW - 12 * 3600), "then read from where it can still change")
+        self.now[0] = today + DAY - 1 + 12 * 3600  # the day has settled
+        kalshi._settled_day("KXETHD", today)
+        kalshi._settled_day("KXETHD", today)
+        self.assertEqual(history.settled_calls[2:], [("KXETHD", today, today + DAY - 1)])
+        self.assertNotIn(("KXETHD", today), kalshi._settling)
+        self.assertIn(("KXETHD", today), kalshi._settled_memo)
+
+
 if __name__ == "__main__":
     unittest.main()
