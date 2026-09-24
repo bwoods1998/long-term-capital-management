@@ -661,3 +661,95 @@ class GrantSeats(unittest.TestCase):
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual((grant["stake_usd"], grant["max_agents"]), ("10", 101))  # floor($1,017.75 / $10)
         self.assertIn("probes of $25 at alpaca, $10 at kalshi for an unproven family", grant["scaling"])
+
+
+class OneLossTrial(unittest.TestCase):
+    """P2: the hysteresis exit applies once an agent has `hysteresis_after_settled` independent real
+    results in its current stay; before that only the stay drawdown and death send it back."""
+
+    def test_an_early_loss_is_not_a_demotion_and_the_third_settlement_restores_the_exit(self):
+        p = P()
+        line = p["bunt_at"] * p["hysteresis"]
+        self.assertEqual(p["hysteresis_after_settled"], 3)
+        self.assertEqual(allocator.target_band(ev(rung=2, e=line - 0.05, real_stay_closed=0), p)[0], "bunt")
+        band, why = allocator.target_band(ev(rung=2, e=line - 0.05, real_stay_closed=2), p)
+        self.assertEqual(band, "bunt")
+        self.assertIn("not a demotion", why)
+        self.assertEqual(allocator.target_band(ev(rung=2, e=line - 0.05, real_stay_closed=3), p)[0], "paper")
+        # The stay drawdown always applies, trial or not.
+        self.assertEqual(allocator.target_band(ev(rung=2, e=line - 0.05, real_stay_closed=0, real_drawdown=0.35), p)[0], "paper")
+        self.assertEqual(allocator.target_band(ev(rung=2, e=1.0, real_stay_closed=0, real_drawdown=0.36), p)[0], "paper")
+        # A swing in its trial below the bunt line is cut to a bunt at once (the swing floor), not sent off real money.
+        self.assertEqual(allocator.target_band(ev(rung=3, e=line - 0.05, w_real=0.8, real_stay_closed=0), p)[0], "bunt")
+        self.assertEqual(allocator.target_band(ev(rung=3, e=line - 0.05, w_real=0.8, real_stay_closed=3), p)[0], "paper")
+        with patch.dict(CONSTITUTION["allocator"], {"hysteresis_after_settled": 0}):  # the old rule, by the key
+            self.assertEqual(allocator.target_band(ev(rung=2, e=line - 0.05, real_stay_closed=0), P())[0], "paper")
+
+    def test_huang_l23cdb7s_loss_on_a_probe(self):
+        """-$8.51 in 90 minutes on a $30 stake (Sept 23, 2026): W_real 0.716, E under the line on one
+        settlement. On a probe it keeps its seat; the stay drawdown (28%) is under 35%."""
+        p = P()
+        w_real = (30 - 8.51) / 30
+        band, _ = allocator.target_band(ev(rung=2, e=1.02 * w_real, w_real=w_real, real_drawdown=1 - w_real,
+                                           real_stay_closed=1, real_trades=1), p)
+        self.assertEqual(band, "bunt")
+
+
+class EventPositions(unittest.TestCase):
+    """P2: on the event books a real position is at most `position_share_event` of the stake."""
+
+    def test_the_limits(self):
+        self.assertEqual(allocator.limits_for(D("30"), "kalshi"), (D("6.00"), D("6.00")))   # a $30 bunt
+        self.assertEqual(allocator.limits_for(D("10"), "kalshi"), (D("2.00"), D("2.00")))   # a $10 probe
+        self.assertEqual(allocator.limits_for(D("5"), "kalshi"), (D("1.20"), D("1.20")))    # never under the $1 minimum x 1.2
+        self.assertEqual(allocator.limits_for(D("400"), "kalshi"), (D("80.00"), D("75")))   # every order within the $75 cap
+        self.assertEqual(allocator.limits_for(D("25"), "alpaca"), (D("12.50"), D("12.50")))  # Alpaca keeps its half
+        with patch.dict(CONSTITUTION["allocator"], {"position_share_event": "0.5"}):
+            self.assertEqual(allocator.limits_for(D("30"), "kalshi"), (D("15.00"), D("15.00")))
+
+
+class TrialOnTheFloor(KalshiHouse):
+    READY = ProbesAndBunts.READY
+
+    def seated_probe(self):
+        a = self.agent()
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        return a
+
+    def test_a_probe_that_loses_its_first_settlement_stays_and_the_exit_returns_after_three(self):
+        a = self.seated_probe()
+        line = P()["bunt_at"] * P()["hysteresis"]
+        lost = dict(e=line - 0.1, w_paper=1.21, w_real=0.75, paper_trades=6, paper_settled=6, real_trades=1,
+                    real_drawdown=0.25, real_stay_closed=1)
+        with self.evidence_of({a.id: lost}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertEqual(self.house.books["kalshi"].limits[a.id].max_position_usd, D("2.00"))  # a fifth of $10
+        with self.evidence_of({a.id: dict(lost, real_trades=3, real_stay_closed=3)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+
+    def test_the_stay_drawdown_still_demotes_at_once(self):
+        a = self.seated_probe()
+        with self.evidence_of({a.id: dict(self.READY, e=0.9, w_real=0.64, real_drawdown=0.36, real_stay_closed=0)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+
+    def test_the_stays_real_results_are_counted_once_an_event(self):
+        a = self.seated_probe()
+        for ticker in ("KXMLBTOTAL-26SEP231840MILPHI-7", "KXMLBTOTAL-26SEP231840MILPHI-8", "KXHIGHNY-26SEP24-B72.5"):
+            self.house.ledger.append("book.settle", {"book": "kalshi", "pnl": "0.10", "cost": "1", "payout": "1", "quantity": "1",
+                                                     "instrument": LedgerCase.inst(ticker, venue="kalshi")}, agent=a.id)
+        row = allocator.evidence(self.house, self.house.registry.get(a.id))
+        self.assertEqual((row.real_stay_closed, row.real_trades), (2, 2))
+        self.assertEqual(row.row()["stay_closed"], 2)
+
+    def test_the_throttle_never_halves_a_probe_under_a_tradable_stake(self):
+        a = self.agent()
+        alloc = self.house.allocator
+        alloc.state["throttle"] = True
+        # A position is a fifth of the stake and must hold the $1 minimum x 1.2: $6 is the smallest stake
+        # that can trade, so a $10 probe is halved to $6, not $5.
+        self.assertEqual(alloc.target_stake(a, "bunt"), D("6.00"))

@@ -118,12 +118,16 @@ class Evidence:
     haircut_log: float  # the log wealth taken off the paper record by the execution haircut
     real_seen: bool  # the agent has ever had a real account
     cooling: bool = False  # demoted within `reentry_cooldown_hours`: no move up until it passes
+    #: Independent real results in the current stay on real money (P2, Sept 24, 2026): settled or
+    #: sold-flat events on Kalshi, closed trades on Alpaca, since `real_stay_start`. The hysteresis exit
+    #: waits for `hysteresis_after_settled` of them.
+    real_stay_closed: int = 0
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
                 "trades": int(self.paper_trades), "settled": int(self.paper_settled),
                 "real_trades": int(self.real_trades), "real_pnl": round(self.real_pnl, 4),
-                "real_drawdown": round(self.real_drawdown, 4)}
+                "real_drawdown": round(self.real_drawdown, 4), "stay_closed": int(self.real_stay_closed)}
 
 
 def _haircut_rate(bps: Any, asset_class: Any) -> float:
@@ -441,6 +445,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     e = (w_paper ** float(weights.get("paper_weight", 0.5))) * w_real
     paper_closed, settled = closed_trades(house, agent.id, paper_name)
     real_closed, _ = closed_trades(house, agent.id, real_name)
+    stay_closed = closed_trades(house, agent.id, real_name, since_seq=stay)[0] if stay is not None else 0
     left = left_real_at(house, agent.id)
     hours = float(r.get("reentry_cooldown_hours", 1.0))
     cooling = rung in (1, 2) and left is not None and house.clock() - left < hours * 3600
@@ -453,7 +458,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     return Evidence(agent=agent.id, venue=agent.venue, rung=rung, w_paper=w_paper, w_real=w_real, e=e,
                     paper_trades=paper_closed, paper_settled=settled if paper_name in EVENT_BOOKS else 0, real_trades=real_closed,
                     real_pnl=real_pnl, real_drawdown=real["drawdown"] if stay is not None else 0.0, haircut_log=haircut,
-                    real_seen=seen, cooling=cooling)
+                    real_seen=seen, cooling=cooling, real_stay_closed=stay_closed)
 
 
 # --------------------------------------------------------------------- bands
@@ -516,8 +521,19 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
         return "paper", "E below the bunt line or too few trades"
     if ev.real_drawdown >= p["real_drawdown_demote"]:
         return "paper", f"down {ev.real_drawdown:.0%} of its real record from its high-water mark: back to paper at once"
-    if ev.e < p["bunt_at"] * p["hysteresis"]:
-        return "paper", f"E {ev.e:.4f} fell below {p['bunt_at'] * p['hysteresis']:.4f} (the bunt line with hysteresis)"
+    line = p["bunt_at"] * p["hysteresis"]
+    if ev.e < line:
+        if ev.real_stay_closed >= p["hysteresis_after_settled"]:
+            return "paper", f"E {ev.e:.4f} fell below {line:.4f} (the bunt line with hysteresis)"
+        # The one-loss trial (P2, Sept 24, 2026): the exit waits for `hysteresis_after_settled` independent
+        # real results in this stay. A $30 bunt could hold a $15 position and one lost position over ~15%
+        # of the stake took E under the line: 4 of the allocator's nine promotions were demoted after one
+        # loss. Until then only the stay drawdown (above) and death apply; a swing still drops to a bunt
+        # at its own floor (below).
+        if rung == 2:
+            return "bunt", (f"E {ev.e:.4f} is under the exit line {line:.4f}, which applies after "
+                            f"{p['hysteresis_after_settled']} real settlements in this stay ({ev.real_stay_closed} so far): "
+                            "one early loss is not a demotion")
     if rung == 2:
         if swing_ready(ev, p) and not ev.cooling:
             return "swing", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, W_real {ev.w_real:.4f}, "
@@ -551,11 +567,19 @@ def swing_stake(ev: Evidence, venue_capital: Decimal, p: Mapping[str, Any]) -> D
     return max(base, min(stake, ceiling))
 
 
+def _position_share(venue: str, p: Mapping[str, Any]) -> float:
+    """The share of a real stake one position may hold: `position_share_event` on an event book (P2,
+    Sept 24, 2026: a fifth, so one binary miss stays inside the stay drawdown), `position_share` else."""
+    return float(p["position_share_event"] if REAL_BOOK.get(venue) in EVENT_BOOKS else p["position_share"])
+
+
 def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) -> tuple[Decimal, Decimal]:
-    """(max position, max order) for a real account staked `stake`: `position_share` of the stake,
-    never under the venue's minimum order (Alpaca crypto takes nothing under $10), and every order
+    """(max position, max order) for a real account staked `stake`: `position_share` of the stake
+    (`position_share_event` on Kalshi since Sept 24, 2026: $6 of a $30 bunt, $2 of a $10 probe), never
+    under the venue's minimum order x 1.2 (Alpaca crypto takes nothing under $10), and every order
     within the gateway's per-order cap."""
     p = _params()
+    share = _position_share(venue, p)
     cap = order_cap if order_cap is not None else _d(CONSTITUTION["order_caps"]["max_order_usd"])
     if order_cap is None and venue == "alpaca":
         # The gateway counts an Alpaca market order at the touch plus ten per cent
@@ -566,7 +590,7 @@ def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) 
     # A fifth above the venue's minimum: a minimum-sized order must still fit after its fee and a
     # price-grid step (Alpaca takes no crypto order under $10; a $15 bunt must be able to place one).
     minimum = (_d((rules().get("venue_minimum_usd") or {}).get(venue, "1")) * _d("1.2")).quantize(CENT)
-    position = max((stake * _d(p["position_share"])).quantize(CENT, rounding=ROUND_DOWN), minimum)
+    position = max((stake * _d(share)).quantize(CENT, rounding=ROUND_DOWN), minimum)
     if not EXITS_SLICED:
         position = min(position, (cap * _d("0.8")).quantize(CENT))
     order = max(min(position, cap), minimum)
@@ -788,9 +812,11 @@ class Allocator:
             stake = bunt_stake(ev, base, p)
         if self.state.get("throttle"):
             # Halved, but never under the smallest stake that can still trade: a position is at most
-            # `position_share` of the stake and must hold the venue's minimum order (x1.2), or the
-            # seat would hold capital and never open anything (Sept 23, 2026 review).
-            tradable = (_d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")) * _d("1.2") / _d(p["position_share"])).quantize(CENT)
+            # `position_share` of the stake (`position_share_event` on Kalshi) and must hold the venue's
+            # minimum order (x1.2), or the seat would hold capital and never open anything (Sept 23,
+            # 2026 review).
+            tradable = (_d((rules().get("venue_minimum_usd") or {}).get(agent.venue, "1")) * _d("1.2")
+                        / _d(_position_share(agent.venue, p))).quantize(CENT)
             stake = max((stake / 2).quantize(CENT, rounding=ROUND_DOWN), min(tradable, stake))
         return stake
 

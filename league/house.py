@@ -898,8 +898,9 @@ class House:
         position, order = Decimal(row["max_position_usd"]), Decimal(row["max_order_usd"])
         allocated = rung >= 2 and agent is not None and allocator_module.enabled()
         if allocated:
-            # Bands of capital: a real position is `position_share` of the allocator's stake, never
-            # under the venue's minimum order, every order within the gateway's cap.
+            # Bands of capital: a real position is `position_share` of the allocator's stake
+            # (`position_share_event` on Kalshi since Sept 24, 2026), never under the venue's minimum
+            # order, every order within the gateway's cap.
             position, order = self.allocator.limits(agent, staked if staked is not None else Decimal(0))
         elif rung >= 3 and staked is not None:
             position, order = capital.scaled_limits(staked)  # rung 3's limits follow its stake
@@ -4718,9 +4719,12 @@ class House:
                          "the gain on your paper equity now that would put E on the line. Crossing it is judged by "
                          "the allocator at its next pass, as for everyone; nothing here changes the line."))
         if row.get("band") in ("probe", "bunt", "swing", "star"):
-            # Already on real money: the line it now has to hold is the bunt line with hysteresis (once
-            # `hysteresis_after_settled` real settlements are in, since Sept 24, 2026).
-            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6))
+            # Already on real money: the line it now has to hold is the bunt line with hysteresis, once
+            # `hysteresis_after_settled` independent real settlements are in this stay (P2, Sept 24, 2026:
+            # before that only the stay drawdown sends it back).
+            out.update(on_real_money=True, holds_real_money_down_to_E=round(at * float(r.get("hysteresis", 1.0)), 6),
+                       exit_line_applies_after_real_settlements=int(r.get("hysteresis_after_settled") or 0),
+                       real_settlements_this_stay=int(ev.get("stay_closed") or 0))
         return out
 
     def standings(self) -> list[Standing]:

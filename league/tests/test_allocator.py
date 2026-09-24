@@ -91,7 +91,9 @@ class Rules(unittest.TestCase):
         p = P()
         line = p["bunt_at"] * p["hysteresis"]
         self.assertEqual(target_band(ev(rung=2, e=line + 0.001), p)[0], "bunt")  # below entry, above exit: stays
-        self.assertEqual(target_band(ev(rung=2, e=line - 0.001), p)[0], "paper")
+        # The exit applies once the stay has `hysteresis_after_settled` real results (P2, Sept 24, 2026).
+        self.assertEqual(target_band(ev(rung=2, e=line - 0.001, real_stay_closed=3), p)[0], "paper")
+        self.assertEqual(target_band(ev(rung=2, e=line - 0.001, real_stay_closed=2), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=1.1, real_trades=8), p)[0], "swing")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=0.99, real_trades=8), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=2, e=1.6, w_real=1.1, real_trades=7), p)[0], "bunt")
@@ -99,7 +101,7 @@ class Rules(unittest.TestCase):
         self.assertEqual(target_band(ev(rung=3, e=swing_exit + 0.01, w_real=0.95), p)[0], "swing")
         self.assertEqual(target_band(ev(rung=3, e=swing_exit - 0.01, w_real=1.0), p)[0], "bunt")
         self.assertEqual(target_band(ev(rung=3, e=2.0, w_real=0.89), p)[0], "bunt")
-        self.assertEqual(target_band(ev(rung=3, e=0.5, w_real=0.5), p)[0], "paper")
+        self.assertEqual(target_band(ev(rung=3, e=0.5, w_real=0.5, real_stay_closed=3), p)[0], "paper")
 
     def test_a_real_drawdown_sends_a_bunt_or_a_swing_back_to_paper_at_once(self):
         p = P()
@@ -132,11 +134,12 @@ class Rules(unittest.TestCase):
         # Exits are sliced (PR #164): the position follows the stake; every Alpaca order stays within
         # the gateway's $75 on its own pricing (a market order at the ask x 1.10).
         self.assertEqual(limits_for(D("400"), "alpaca"), (D("200.00"), D("68.18")))
-        self.assertEqual(limits_for(D("400"), "kalshi"), (D("200.00"), D("75")))
+        self.assertEqual(limits_for(D("400"), "kalshi"), (D("80.00"), D("75")))  # a fifth on an event book (Sept 24, 2026)
         with patch.object(allocator, "EXITS_SLICED", False):
             self.assertEqual(limits_for(D("400"), "alpaca"), (D("54.54"), D("54.54")))  # one order closes it
-        self.assertEqual(limits_for(D("10"), "kalshi"), (D("5.00"), D("5.00")))
-        self.assertEqual(limits_for(D("30"), "kalshi"), (D("15.00"), D("15.00")))  # the Kalshi bunt since Sept 23, 2026 ~17:00 UTC
+        # P2 (Sept 24, 2026): a Kalshi position is `position_share_event`, a fifth of the stake.
+        self.assertEqual(limits_for(D("10"), "kalshi"), (D("2.00"), D("2.00")))  # the Kalshi probe
+        self.assertEqual(limits_for(D("30"), "kalshi"), (D("6.00"), D("6.00")))  # the Kalshi bunt since Sept 23, 2026 ~17:00 UTC
 
 
 class EvidenceOnTheBooks(HouseCase):
@@ -263,8 +266,9 @@ class Mechanics(HouseCaseReal):
         # Its family ("alloc-test") has no proven record: a probe, the bunt band's first tier (Sept 24,
         # 2026). On Alpaca a probe and a bunt are both $25.
         self.assertEqual(house.allocator.board()["agents"][a.id]["band"], "probe")
-        # Its evidence falls below the bunt line with hysteresis: straight back to paper.
-        table[a.id] = dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=2)
+        # Its evidence falls below the bunt line with hysteresis after three real results in its stay
+        # (the one-loss trial, Sept 24, 2026): straight back to paper.
+        table[a.id] = dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=3, real_stay_closed=3)
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(house.evaluator.rung(a.id), 1)
@@ -610,9 +614,11 @@ class NoFlapping(HouseCaseReal):
             rung = h.evaluator.rung(ag.id) if rung is None else rung
             left = allocator.left_real_at(h, ag.id)
             cooling = rung == 1 and left is not None and h.clock() - left < 3600
-            # A record that would flap: good enough for a bunt on paper, a loser on real money.
+            # A record that would flap: good enough for a bunt on paper, a loser on real money (past its
+            # one-loss trial: three real results in the stay, Sept 24, 2026).
             return ev(agent=ag.id, venue=ag.venue, rung=rung, e=1.10 if rung == 1 else 0.70, w_paper=1.21,
-                      w_real=1.0 if rung == 1 else 0.64, paper_trades=6, cooling=cooling)
+                      w_real=1.0 if rung == 1 else 0.64, paper_trades=6, cooling=cooling,
+                      real_stay_closed=0 if rung == 1 else 3)
 
         rungs = []
         with patch.object(allocator, "evidence", side_effect=fake):
@@ -638,7 +644,11 @@ class NoFlapping(HouseCaseReal):
                 break
         self.assertTrue(real.account(a.id).holdings)
         self.price *= 0.6
-        self.tick()  # marked down: its real evidence falls, it is sent back to paper
+        # Marked down: its real evidence falls, and it is sent back to paper. What is under test is that
+        # the loss persists there, not the one-loss trial (Sept 24, 2026), which would hold the seat
+        # until three real results are in: the exit applies at once here.
+        with patch.dict(CONSTITUTION["allocator"], {"hysteresis_after_settled": 0}):
+            self.tick()
         row = allocator.evidence(house, house.registry.get(a.id))
         self.assertEqual(house.evaluator.rung(a.id), 1)
         self.assertLess(row.w_real, 0.9)  # the loss is still in its evidence on paper
