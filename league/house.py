@@ -3137,8 +3137,10 @@ class House:
             if row.kind == "agent.intent":
                 wakes.setdefault(agent.specialty, []).append([at, row.agent, 0, 1])
             elif row.payload.get("ok"):
+                # A buy its own pause held (X1, `held`) is its rules firing, not a desk gone quiet.
                 wakes.setdefault(agent.specialty, []).append(
-                    [at, row.agent, int(row.payload.get("offered") or 0), int(row.payload.get("intents") or 0)])
+                    [at, row.agent, int(row.payload.get("offered") or 0),
+                     int(row.payload.get("intents") or 0) + int(row.payload.get("held") or 0)])
         for niche_id, rows in list(wakes.items()):
             rows = [r for r in rows if now - float(r[0]) <= QUIET_DESK_SECONDS][-400:]  # eight seats waking every five minutes is 96 an hour
             if not rows:

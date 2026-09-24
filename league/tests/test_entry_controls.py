@@ -87,6 +87,19 @@ class PauseAndResume(ControlCase):
         self.assertEqual((woke["intents"], woke["held"]), (0, 1))
         self.assertEqual(self.house.idle_run(agent)["barren"], 0)  # its rules fired: it is not idle
 
+    def test_a_paused_desk_is_not_called_quiet(self):
+        """Review of #249: held buys read as "no agent of the desk wrote an intent ... its rules are not
+        firing" to the floor's quiet-desk invariant, a false warning for a desk whose agents paused."""
+        agent = self.seated()
+        self.apply(agent, "pause_entries")
+        for _ in range(13):
+            self.house.tick()
+            self.clock.advance(301)
+        self.house._state.setdefault("invariants", {})["at"] = 0
+        self.house._floor_invariants()
+        self.assertEqual([e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert")
+                          if "no agent of the desk wrote an intent" in str(e.payload.get("text"))], [])
+
     def test_its_exits_go_on(self):
         agent = self.seated()
         self.house.tick()  # it buys
