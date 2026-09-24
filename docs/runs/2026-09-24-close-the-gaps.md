@@ -208,6 +208,42 @@ recorded for the next open; live verification uses the markets that trade around
   Sept 23, and Alpaca refused all 107 ("order qty must be >= minimal qty"). Assigned to Wave 1 with an
   invariant (B-seats).
 
+- 04:0xZ — **the three money reviews.**
+  - A-holds (#227 → `a-holds/review`, draft #232): safe with follow-ups; four defects fixed, the
+    required one among them: the House's OpenAI line read $70-79 above the gateway month (above funded
+    money) and the agents' credit pool paid $32.87 an hour instead of $28.49; now every reader sees at
+    most the gateway month's remaining while its reading is fresh. Also: an unreadable gateway month
+    now reads the tier as "audits" (research to Sail, no role scheduled into a refusal); a month the
+    gateway cannot close is counted once. The rollback claim holds (the previous release opens the
+    amended store). Deploy the House at least 10 minutes after the gateway.
+  - A-money (#224 → `a-money/review`): seven fixes (a probe's limits ran ahead of an unlent raise; an
+    unproven family's probe could displace a proven family's idle bunt; the family record read Alpaca
+    practice fills without the haircut E charges; probe naming; three untested rules pinned; the rules
+    text on drift; stale digests in the docs). Two evidence findings: (1) on lopsided records
+    (favourites: many small wins, rare whole losses) the t bound alone "proves" an edgeless family at
+    its 10th observation 49% of the time at 93c and 74% at 97c, against the nominal 20%, and
+    crypto-15m-favorites was proven on Sept 20 on ten small wins before its 11th lost; (2) the proof
+    is re-read every pass with no charge for repeated looks, so families flip in and out.
+  - **Decision (04:15Z):** the family proof adopts the House's own loss-rate gate for lopsided
+    records (`stats.lopsided_growth_lcb`, the rule the evaluator's judges already apply beside their t
+    bounds), carried by a constitution key so the ratified digest records it: the table's "one-sided
+    80% lower bound", computed honestly for favourites. `min_independent_settlements` stays 10 (20
+    would not change the per-look rate of a symmetric record). **Consequence at T0:** weather-favorites
+    is NOT proven (t bound +0.0033, loss-rate gate −0.0125: 2 losses in 16 against a breakeven loss
+    rate near 7% at ~93c), so mullins-2 and mullins-6 become probes and shrink to $10 by free cash;
+    sports-central-run-under (meriwether-h2d625d, symmetric taker bets) stays proven. The plan's
+    premise that weather favourites was the one proven edge does not survive per-event counting and
+    the loss-rate gate; the report says so with these numbers. Also: an unproven family's agent may not
+    take the agent-level swing (every real-money agent is a probe or a proven family's member), and a
+    family record that fails to compute is treated as unproven and never blocks a wake or an exit.
+    Repeated looks go to C1.
+- 04:1xZ — a DNS outage (EAI_AGAIN) stopped three agents (the A-book reviewer, B-feeds, B-loop);
+  all three resumed from their transcripts.
+- 04:12Z — the cleanup's second pass: `ltcm-w1-int`, `-w1-bugs-rev`, `-w1-bugs-fu`, `-w2-money`,
+  `-secondlook`, `-w2-money-rev` removed (merged, clean, past six hours) with their local and remote
+  branches. Left: `ltcm-sailfloor` (05:08Z), `ltcm-w2-int` (05:19Z), `ltcm-run` (05:52Z; unmerged: push
+  only), `ltcm-hosts` (07:30Z), `ltcm-w2-options` (draft #210, kept).
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
