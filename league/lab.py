@@ -59,6 +59,18 @@ The lab watches itself (`_watch`, on every tick, Sept 23, 2026): closed for long
 the since-when lives in `meta`, so a restart does not reset it), and a graduate that has waited for a
 seat longer than `seat_wait_alert_hours` is named once. `health()` is the lab's line in health.json.
 
+**The step says why it failed, and no candidate stops it (D1, Sept 24, 2026).** From 23:21:59Z Sept
+23 the step failed every one to three minutes with "IndexError: list index out of range" and nothing
+escalated: one queued Luna child asked for ADA/USD alone, whose hourly development window the history
+store had fetched and found empty (ADA/USD trades on Alpaca from Feb 2026), and `_search_tape` read
+the first step of a tape that had none. Now a tape with no steps is unsupported input, and its row is
+blocked like any other; anything else a queued row's NEEDS, tape or result raises blocks that row
+(`_block_row`, at most `row_errors_per_step` a step) and the step goes on. Each phase of the step is
+guarded on its own (`_guarded`): its warning names the `phase` and carries the traceback
+(`_traceback`, private), and the phases after it still run. `failures_alert_after` failed steps in a
+row raise one error alert and set `failing_since` in health.json (kept in `meta`, so a restart does
+not reset it); a step that works again clears it with an info.
+
 **Forward windows (S2, Sept 23, 2026).** Every `forward_every_minutes` the lab replays its archived
 elites and its graduates waiting for seats (`forward_windows`) on tape data that arrived AFTER their
 code was frozen: the tape is cut at the hour after the candidate's evaluation (or its graduation),
@@ -103,6 +115,7 @@ import re
 import sqlite3
 import threading
 import time
+import traceback
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -149,6 +162,11 @@ DEFAULTS: dict[str, Any] = {
     # when a graduate has waited this long for a seat.
     "closed_alert_minutes": 30,
     "seat_wait_alert_hours": 6,
+    # D1 (Sept 24, 2026): this many failed steps in a row raise one error alert (`_note_step`); a
+    # queued row the lab cannot handle is blocked, at most this many a step before the step fails
+    # instead (`_block_row`: a defect that breaks every row is the lab's, not the rows').
+    "failures_alert_after": 5,
+    "row_errors_per_step": 8,
     # Forward windows (S2, Sept 23, 2026): every `forward_every_minutes`, at most
     # `forward_candidates_per_run` archived elites and waiting graduates (least recently scored
     # first) are replayed on tape data that arrived after their code was frozen, on the lab box, for
@@ -193,6 +211,9 @@ RESERVED_ORIGINS = ("agent", "luna", "sol")
 #: NEEDS keys the House's tape never depends on (`House.tape_for` reads none of them): two programs
 #: that differ only here replay on one tape, and are cached and batched as one (`tape_key`).
 TAPE_KEY_IGNORED = ("style", "parameter_rules", "wake_minutes", "max_hours_to_close")
+#: The tail of a traceback an alert carries (`_traceback`, a private key: `ledger.public_view`
+#: strips it from everything published).
+TRACEBACK_CHARS = 2000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -610,6 +631,10 @@ class Lab:
         self._forward_error = ""
         self._priors: tuple[float, list[dict[str, Any]]] | None = None
         self._prior_skips: dict[str, int] = {}
+        #: D1 (Sept 24, 2026): what the step's phases raised (`_guarded`) and the queued rows it
+        #: blocked for an error of the lab's own (`_block_row`), told at the end of each step.
+        self._failures: list[dict[str, str]] = []
+        self._row_errors: list[dict[str, str]] = []
         if self._meta("fee_cursor") is None:
             # A graduate cannot exist before the lab, so no older fee can owe it a royalty.
             self._set_meta("fee_cursor", str(house.ledger.head()[0]))
@@ -809,8 +834,10 @@ class Lab:
 
     def health(self) -> dict[str, Any]:
         """The lab's line in health.json (`House._health`, every tick): whether it may work now and
-        why not, since when it has been closed, the paid phases skipped and why, the graduates waiting
-        for seats. Cheap (a few small queries), and never raises."""
+        why not, since when it has been closed, whether its step is failing (`failing_since`, set
+        after `failures_alert_after` failures in a row; `failures_in_a_row`; the last `error`), the
+        paid phases skipped and why, the graduates waiting for seats. Cheap (a few small queries),
+        and never raises."""
         try:
             since = self._meta("closed_since")
             waiting = self.waiting()
@@ -818,6 +845,7 @@ class Lab:
                 "refusal": self.refusal or None,
                 "closed_since": _iso(float(since)) if since is not None else None,
                 "closed_minutes": round((self._now() - float(since)) / 60, 1) if since is not None else 0,
+                **self._failing(),
                 "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
                 "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0,
                                  "graduates": [{k: r[k] for k in ("candidate", "line", "niche", "since", "hours", "forward")} for r in waiting[:8]]},
@@ -829,43 +857,152 @@ class Lab:
             return {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
     def step(self) -> dict[str, Any]:
-        """One bounded pass: seed, breed, evaluate in batches until `step_seconds`, graduate,
-        collect royalties, publish. Never raises into its lane."""
+        """One bounded pass: collect royalties, seed, breed, evaluate in batches until
+        `step_seconds`, graduate, run the forward windows, publish. Never raises into its lane.
+
+        Each phase is guarded on its own (D1, Sept 24, 2026; `_guarded`): a phase that raises is
+        told as a warning carrying its `phase` and its traceback, and the phases after it still run,
+        so a fee that cannot be read does not stop the batches and a birth that breaks does not stop
+        the forward windows. A step with any failure counts toward `failures_alert_after`
+        (`_note_step`). Before, one try held the whole pass and its alert carried only the
+        exception's text: 115 identical warnings in 2 h 18 min said nothing of where."""
         started = time.monotonic()
-        settings = self.settings
         out: dict[str, Any] = {"batches": 0, "evaluated": 0, "archived": 0, "calls": 0, "graduations": []}
         self._tapes_built = 0
-        try:
-            self.royalties()
-            self.seed()
-            while time.monotonic() - started < float(settings["step_seconds"]):
-                if self.open():
-                    break
-                # Breed when fewer than a batch wait on tapes already built: seeds each need their own
-                # tape (a few a step), so counting every queued row starved breeding behind them
-                # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
-                if self.ready_queued() < int(settings["batch_size"]):
-                    out["calls"] += self.breed()
-                done = self.evaluate_batch()
-                if not done:
-                    break
-                if done.get("refused"):
-                    continue
-                out["batches"] += 1
-                out["evaluated"] += done["candidates"]
-                out["archived"] += done["archived"]
+        self._failures, self._row_errors = [], []
+
+        def graduate() -> None:
             if not self.open():
                 out["graduations"] = self.graduate()
+
+        def forward() -> None:
             if not self.open():
                 out["forward"] = self.forward_windows()
-        except Exception as exc:  # noqa: BLE001 - the lab must never take a lane or the tick down
-            self.house.alert("warning", f"the lab's step failed ({type(exc).__name__}: {str(exc)[:200]})")
-            out["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+
+        self._guarded("royalties", self.royalties)
+        self._guarded("seed", self.seed)
+        self._guarded("batches", lambda: self._batches(started, out))
+        self._guarded("graduate", graduate)
+        self._guarded("forward", forward)
+        failures, self._failures = self._failures, []
+        if failures:
+            out["error"] = failures[0]["error"]
+        try:
+            self._tell_row_errors()
+            for failure in failures:
+                self.house.alert("warning", f"the lab's step failed ({failure['error']})", phase=failure["phase"],
+                                 _traceback=failure["traceback"])
+        except Exception:  # noqa: BLE001 - a ledger that cannot take an alert fails the House's own writes too
+            pass
+        self._note_step(failures)
         try:
             self.publish()
         except Exception as exc:  # noqa: BLE001
             self.house.alert("warning", f"the lab could not publish its stats ({type(exc).__name__}: {str(exc)[:160]})")
         return out
+
+    def _batches(self, started: float, out: dict[str, Any]) -> None:
+        """The step's batches, until `step_seconds`, the lab closes or nothing is ready. Breeding is
+        guarded on its own: a parent that cannot be bred never stops the batches."""
+        settings = self.settings
+        while time.monotonic() - started < float(settings["step_seconds"]):
+            if self.open():
+                break
+            # Breed when fewer than a batch wait on tapes already built: seeds each need their own
+            # tape (a few a step), so counting every queued row starved breeding behind them
+            # (Sept 23, 2026: 191 seeds queued, 4 elites with cached tapes, 2-6 candidates a batch).
+            if self.ready_queued() < int(settings["batch_size"]):
+                out["calls"] += self._guarded("breed", self.breed) or 0
+            done = self.evaluate_batch()
+            if not done:
+                break
+            if done.get("refused"):
+                continue
+            out["batches"] += 1
+            out["evaluated"] += done["candidates"]
+            out["archived"] += done["archived"]
+
+    def _guarded(self, phase: str, work: Callable[[], Any]) -> Any:
+        """One phase of the step. What it raises is kept for the step's report (`_failures`, once
+        per phase and error, with the last `TRACEBACK_CHARS` of its traceback), never raised."""
+        try:
+            return work()
+        except Exception as exc:  # noqa: BLE001 - the lab must never take a lane or the tick down
+            error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            if not any(f["phase"] == phase and f["error"] == error for f in self._failures):
+                self._failures.append({"phase": phase, "error": error, "traceback": traceback.format_exc()[-TRACEBACK_CHARS:]})
+            return None
+
+    def _note_step(self, failures: Sequence[Mapping[str, str]]) -> None:
+        """The step's record of itself (D1, Sept 24, 2026), in `meta` so a restart does not reset it
+        (the failures of Sept 23 ran across two restarts): `failures_in_a_row`, `failures_first_at`
+        (the run's first failure) and `last_failure` (its phase and error). At
+        `failures_alert_after` failures in a row, ONE error alert carrying the traceback, and
+        `failing_since` (the run's first failure), which health.json shows. A step with no failure
+        clears them all, with an info alert if the run had been escalated. Never raises."""
+        try:
+            now = self._now()
+            count = int(self._meta("failures_in_a_row") or 0)
+            if not failures:
+                if count:
+                    escalated = self._meta("failing_since")
+                    self._x("DELETE FROM meta WHERE key IN ('failures_in_a_row', 'failures_first_at', 'last_failure', 'failing_since')")
+                    if escalated is not None:
+                        self.house.alert("info", f"the Alpha Lab's step works again after {count} failures in a row since {_iso(float(escalated))}")
+                return
+            first = failures[0]
+            count += 1
+            since = float(self._meta("failures_first_at") or now)
+            self._set_meta("failures_in_a_row", str(count))
+            self._set_meta("failures_first_at", str(since))
+            self._set_meta("last_failure", json.dumps({"phase": first["phase"], "error": first["error"], "at": now}))
+            if count >= int(self.settings["failures_alert_after"]) and self._meta("failing_since") is None:
+                self._set_meta("failing_since", str(since))
+                self.house.alert("error", f"the Alpha Lab's step has failed {count} times in a row since {_iso(since)} ({first['error']})",
+                                 phase=first["phase"], failures_in_a_row=count, _traceback=first["traceback"])
+        except Exception as exc:  # noqa: BLE001 - keeping the record of a failure must not be one
+            text = f"the lab could not record its step ({type(exc).__name__}: {str(exc)[:160]})"
+            if text != self._watch_error:
+                self._watch_error = text
+                try:
+                    self.house.alert("warning", text)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _failing(self) -> dict[str, Any]:
+        """The step's failure record as health.json and `lab.stats` show it: `failing_since` (None
+        until `failures_alert_after` steps in a row have failed), `failures_in_a_row`, and the last
+        failure's `error` (None once a step succeeds)."""
+        count = int(self._meta("failures_in_a_row") or 0)
+        since = self._meta("failing_since")
+        try:
+            last = json.loads(self._meta("last_failure") or "null") if count else None
+        except ValueError:
+            last = None
+        return {"failing_since": _iso(float(since)) if since is not None else None, "failures_in_a_row": count,
+                "error": last.get("error") if isinstance(last, dict) else None}
+
+    def _block_row(self, row: Mapping[str, Any], exc: BaseException, what: str) -> bool:
+        """Block one queued row the lab's own code could not handle (D1, Sept 24, 2026): its NEEDS,
+        its tape or its result raised something no refusal names. `status='blocked'` with the error,
+        as `_next_batch` blocks a row whose data is unsupported, and the step goes on; the rows are
+        told once at the end of the step (`_tell_row_errors`). Call it while handling `exc`. False,
+        and nothing written, past `row_errors_per_step` rows in one step: a defect that breaks every
+        row is the lab's, and the caller re-raises it rather than block the queue."""
+        if len(self._row_errors) >= int(self.settings["row_errors_per_step"]):
+            return False
+        error = f"{type(exc).__name__}: {str(exc)[:240]}"
+        self._x("UPDATE candidates SET status='blocked', error=?, evaluated=? WHERE id=?", (f"{what}: {error}"[:300], self._now(), row["id"]))
+        self._row_errors.append({"candidate": str(row["id"]), "error": error, "traceback": traceback.format_exc()[-TRACEBACK_CHARS:]})
+        return True
+
+    def _tell_row_errors(self) -> None:
+        """One warning for the rows `_block_row` blocked this step, naming them, with the first
+        one's traceback."""
+        errors, self._row_errors = self._row_errors, []
+        if errors:
+            self.house.alert("warning", f"the lab could not evaluate {len(errors)} queued candidate(s) and blocked them ({errors[0]['error']})",
+                             candidates=[e["candidate"] for e in errors], _traceback=errors[0]["traceback"])
 
     # ----------------------------------------------------------------- queue
     def queued(self) -> int:
@@ -1107,6 +1244,12 @@ class Lab:
                 else:  # a venue or store that failed now: to the back of the queue, tried again after the hour's cache
                     self._x("UPDATE candidates SET created=?, error=? WHERE id=?", (self._now(), str(exc)[:300], row["id"]))
                 continue
+            except Exception as exc:  # noqa: BLE001 - D1 (Sept 24, 2026): one row never stops the lab
+                # Anything else this row's NEEDS or tape raise escaped the walk before: nothing moved the
+                # row, so it failed every step from the front of the queue.
+                if not self._block_row(row, exc, "the lab could not read its NEEDS or its tape"):
+                    raise
+                continue
             groups.setdefault(tape_id, []).append(row)
             tapes[tape_id] = tape
         if not groups:
@@ -1186,20 +1329,26 @@ class Lab:
                 # stays queued, and neither is a result against it.
                 infrastructure += bool(result is not None and result.get("infrastructure"))
                 continue
+            try:
+                scored = score(result, tape)
+                corr = self._correlation(result, live)
+                cell = cell_key(row["niche"], row["horizon"], tpd_bucket(scored["trades_per_day"]), corr_bucket(corr))
+                status = "evaluated" if scored["ok"] else "failed"
+                self._x("UPDATE candidates SET status=?, evaluated=?, tape_id=?, error=?, eligible=?, gate=?, fitness=?, trades=?,"
+                        " trades_per_day=?, corr=?, cell=?, summary=? WHERE id=?",
+                        (status, self._now(), tape_id, None if scored["ok"] else str(result.get("error") or "")[:300],
+                         int(scored["eligible"]), int(scored["gate"]), scored["fitness"], scored["trades"],
+                         scored["trades_per_day"], corr, cell if scored["eligible"] else None,
+                         json.dumps({**_summary(result, scored), "tape_source": tape_source}, default=str), row["id"]))
+            except Exception as exc:  # noqa: BLE001 - D1 (Sept 24, 2026): a result the lab cannot score blocks its own row
+                # Left queued, the whole batch would run on the box again every step and fail again.
+                if not self._block_row(row, exc, "the lab could not score its result"):
+                    raise
+                continue
             counts["candidates"] += 1
-            scored = score(result, tape)
-            corr = self._correlation(result, live)
-            cell = cell_key(row["niche"], row["horizon"], tpd_bucket(scored["trades_per_day"]), corr_bucket(corr))
-            status = "evaluated" if scored["ok"] else "failed"
             counts["ok"] += scored["ok"]
             counts["eligible"] += scored["eligible"]
             counts["gate"] += scored["gate"]
-            self._x("UPDATE candidates SET status=?, evaluated=?, tape_id=?, error=?, eligible=?, gate=?, fitness=?, trades=?,"
-                    " trades_per_day=?, corr=?, cell=?, summary=? WHERE id=?",
-                    (status, self._now(), tape_id, None if scored["ok"] else str(result.get("error") or "")[:300],
-                     int(scored["eligible"]), int(scored["gate"]), scored["fitness"], scored["trades"],
-                     scored["trades_per_day"], corr, cell if scored["eligible"] else None,
-                     json.dumps({**_summary(result, scored), "tape_source": tape_source}, default=str), row["id"]))
             if scored["eligible"] and self._place(cell, row["niche"], row["id"], float(scored["fitness"])):
                 counts["archived"] += 1
         box_usd = Decimal(str(self.settings["box_usd_per_hour"])) * Decimal(str(round(seconds, 3))) / Decimal(3600)
@@ -2393,6 +2542,8 @@ class Lab:
             # and the graduates waiting for seats (the two invariants), as `health()` shows them.
             "llm": {"paused": self._llm_paused or None, "skipped": dict(self._skipped)},
             "closed_since": _iso(float(closed)) if closed is not None else None,
+            # D1 (Sept 24, 2026): whether the step is failing, as `health()` shows it.
+            **self._failing(),
             "waiting_seat": {"count": len(waiting), "longest_hours": waiting[0]["hours"] if waiting else 0},
             # S2 (Sept 23, 2026): the forward windows' last run and records, and the priors in force.
             "forward": self.forward_stats(),

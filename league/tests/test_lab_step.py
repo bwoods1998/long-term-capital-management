@@ -11,7 +11,8 @@ first_day 2026-02-01, 61 empty chunks, 7 done), so the development window of an 
 IndexError out of `_next_batch` on every step, before any batch, for as long as the row stayed at
 the front of the queue (a poison pill: nothing ever moved it).
 
-These tests hold the fix at that site.
+These tests hold the fix at that site, the rule that one candidate never stops the lab, and the
+step's traceback and escalation.
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ import hashlib
 import json
 from unittest.mock import patch
 
+from league import lab as lab_module
 from league.history import HistoryStore
-from league.lab import LabError, static_literal
+from league.lab import Lab, LabError, _iso, static_literal
 from league.tests.test_history import FakeAlpaca, _ingestor
 from league.tests.test_house import IDLE
 from league.tests.test_lab import DESK, KNOB, LabCase
@@ -64,6 +66,14 @@ class StepCase(LabCase):
         return [e for e in self.house.ledger.iter(kinds="ops.alert")
                 if (level is None or e.payload.get("level") == level) and words in str(e.payload.get("text"))]
 
+    def restart(self):
+        """What a deploy does to the lab: its process, and with it every in-memory cache, is gone."""
+        self.lab.close()
+        self.lab = Lab(self.house, box=self.box, mutator=self.luna, leaper=self.sol)
+        self.house.lab = self.lab
+        self.addCleanup(self.lab.close)
+        return self.lab
+
 
 class TheFailingRow(StepCase):
     def test_the_failing_row_is_blocked_and_the_batches_behind_it_run(self):
@@ -100,6 +110,160 @@ class TheFailingRow(StepCase):
             ident, cut = self.lab._search_tape({**needs, "symbols": ["ETH/USD"]})
         self.assertTrue(ident.startswith("lab:"))
         self.assertEqual(len(cut["steps"]), 1)
+
+
+class OneRowNeverStopsTheLab(StepCase):
+    def test_a_row_whose_needs_or_tape_breaks_the_lab_is_blocked_and_the_step_goes_on(self):
+        corrupt = self.insert("corrupt-needs", "{not json", age=7200)
+        odd_needs = {**static_literal(KNOB, "NEEDS"), "symbols": ["ETH/USD"]}
+        odd = self.insert("odd-tape", odd_needs, niche=DESK, age=7000)
+        behind = self.queue(KNOB)
+        real_tape, real_cut = self.house.tape_for, lab_module.search_tape
+
+        def tape_for(needs):
+            if needs.get("symbols") == ["ETH/USD"]:
+                return "alpaca:odd", {"venue": "alpaca", "horizon": "hour", "odd": True,
+                                      "steps": [{"t": f"2026-09-10T00:0{n}:00Z", "bars": {}} for n in range(3)]}
+            return real_tape(needs)
+
+        def cut(tape, fraction):  # the lab's own handling of one tape breaks, past `_search_tape`'s guard
+            if tape.get("odd"):
+                raise AttributeError("'str' object has no attribute 'get'")
+            return real_cut(tape, fraction)
+
+        with patch.object(self.house, "tape_for", side_effect=tape_for), patch("league.lab.search_tape", side_effect=cut):
+            out = self.lab.step()
+        self.assertNotIn("error", out)
+        self.assertEqual(self.candidate(corrupt)["status"], "blocked")
+        self.assertIn("JSONDecodeError", self.candidate(corrupt)["error"])
+        self.assertEqual(self.candidate(odd)["status"], "blocked")
+        self.assertIn("AttributeError", self.candidate(odd)["error"])
+        self.assertEqual(self.candidate(behind)["status"], "evaluated")
+        told = self.alerts("warning", "could not evaluate")
+        self.assertEqual(len(told), 1)  # one warning for the step, naming the rows, with the first traceback
+        self.assertEqual(set(told[0].payload["candidates"]), {corrupt, "odd-tape"})
+        self.assertIn("Traceback", told[0].payload["_traceback"])
+        self.assertNotIn("_traceback", told[0].to_public()["payload"])
+
+    def test_more_broken_rows_than_the_cap_fail_the_step_rather_than_block_the_queue(self):
+        """A defect that breaks every row is the lab's, not the rows': past `row_errors_per_step` the
+        step fails loudly and the rest of the queue stays as it was."""
+        self.house.game["lab"]["row_errors_per_step"] = 3
+        rows = [self.insert(f"corrupt-{n}", "{not json", age=7200 - n) for n in range(5)]
+        out = self.lab.step()
+        self.assertIn("JSONDecodeError", out["error"])
+        states = [self.candidate(r)["status"] for r in rows]
+        self.assertEqual(states.count("blocked"), 3)
+        self.assertEqual(states.count("queued"), 2)
+
+    def test_a_result_the_lab_cannot_score_blocks_its_row_and_the_batch_is_kept(self):
+        good, bad = self.queue(KNOB), self.queue(KNOB.replace("50.0", "40.0"))
+        real = lab_module.score
+
+        def score(result, tape, rules=None):
+            if result.get("id") == bad:
+                raise KeyError("blocks")
+            return real(result, tape, rules)
+
+        with patch("league.lab.score", side_effect=score):
+            done = self.lab.evaluate_batch()
+        self.assertEqual(done["candidates"], 1)
+        self.assertEqual(self.candidate(good)["status"], "evaluated")
+        self.assertEqual(self.candidate(bad)["status"], "blocked")
+        self.assertIn("KeyError", self.candidate(bad)["error"])
+        self.assertEqual(len(self.lab._q("SELECT * FROM batches")), 1)
+
+    def test_a_failing_phase_does_not_stop_the_others(self):
+        queued = self.queue(KNOB)
+        with patch.object(self.lab, "royalties", side_effect=RuntimeError("the fee cursor is gone")), \
+                patch.object(self.lab, "breed", side_effect=RuntimeError("a bad elite")), \
+                patch.object(self.lab, "graduate", side_effect=RuntimeError("a birth broke")), \
+                patch.object(self.lab, "forward_windows", return_value={"scored": 0}) as forward:
+            out = self.lab.step()
+        self.assertEqual(self.candidate(queued)["status"], "evaluated")  # royalties and breeding failed; the batch ran
+        forward.assert_called_once()  # graduation failed; the forward windows ran
+        self.assertEqual(out["error"], "RuntimeError: the fee cursor is gone")
+        phases = [e.payload["phase"] for e in self.alerts("warning", "step failed")]
+        self.assertEqual(phases, ["royalties", "breed", "graduate"])
+
+
+class TheStepSaysWhy(StepCase):
+    def test_the_alert_carries_the_traceback_privately_and_stats_carry_the_error(self):
+        def deep(n):  # two functions in turn: format_exc() folds only a frame repeated in a row
+            if n == 0:
+                raise IndexError("list index out of range")
+            return deeper(n - 1)
+
+        def deeper(n):
+            return deep(n)
+
+        with patch.object(self.lab, "royalties", side_effect=lambda: deep(40)):
+            out = self.lab.step()
+        self.assertEqual(out["error"], "IndexError: list index out of range")
+        alert = self.alerts("warning", "step failed")[-1]
+        self.assertEqual(alert.payload["text"], "the lab's step failed (IndexError: list index out of range)")
+        self.assertEqual(alert.payload["phase"], "royalties")
+        trace = alert.payload["_traceback"]
+        self.assertEqual(len(trace), 2000)  # the last 2,000 characters of traceback.format_exc()
+        self.assertTrue(trace.rstrip().endswith("IndexError: list index out of range"))
+        self.assertIn("in deep", trace)
+        self.assertNotIn("_traceback", alert.to_public()["payload"])  # private: never published
+        stats = self.lab.stats()
+        self.assertEqual((stats["error"], stats["failures_in_a_row"], stats["failing_since"]),
+                         ("IndexError: list index out of range", 1, None))
+        self.assertEqual(self.lab.health()["error"], "IndexError: list index out of range")
+
+    def test_five_failures_in_a_row_raise_one_error_and_a_success_clears_it(self):
+        def boom():  # a new exception each step, as the floor raises them
+            raise IndexError("list index out of range")
+
+        def failing(lab):
+            return patch.object(lab, "royalties", side_effect=boom)
+
+        first = self.clock()
+        with failing(self.lab):
+            for _ in range(4):
+                self.lab.step()
+                self.clock.advance(60)
+            self.assertEqual(self.alerts("error"), [])
+            health = self.lab.health()
+            self.assertEqual((health["failures_in_a_row"], health["failing_since"]), (4, None))
+            self.lab.step()  # the fifth
+            self.clock.advance(60)
+        errors = self.alerts("error")
+        self.assertEqual(len(errors), 1)
+        self.assertIn("failed 5 times in a row since " + _iso(first), errors[0].payload["text"])
+        self.assertIn("IndexError: list index out of range", errors[0].payload["text"])
+        self.assertIn("Traceback", errors[0].payload["_traceback"])
+        self.assertEqual(self.lab.health()["failing_since"], _iso(first))
+        # A restart does not reset the count or the since-when: they are in the lab's own store.
+        self.restart()
+        self.assertEqual((self.lab.health()["failures_in_a_row"], self.lab.health()["failing_since"]), (5, _iso(first)))
+        with failing(self.lab):
+            self.lab.step()
+            self.clock.advance(60)
+            self.lab.step()
+            self.clock.advance(60)
+        self.assertEqual(len(self.alerts("error")), 1)  # one error for the run of failures, not one every five
+        self.assertEqual(self.lab.stats()["failures_in_a_row"], 7)
+        out = self.lab.step()
+        self.assertNotIn("error", out)
+        again = self.alerts("info", "works again")
+        self.assertEqual(len(again), 1)
+        self.assertIn("7 failures in a row since " + _iso(first), again[0].payload["text"])
+        health = self.lab.health()
+        self.assertEqual((health["failures_in_a_row"], health["failing_since"], health["error"]), (0, None, None))
+        self.assertEqual(self.lab.stats()["error"], None)
+
+    def test_a_few_failures_then_a_success_reset_quietly(self):
+        with patch.object(self.lab, "royalties", side_effect=RuntimeError("once")):
+            self.lab.step()
+            self.lab.step()
+        self.assertEqual(self.lab.health()["failures_in_a_row"], 2)
+        self.lab.step()
+        self.assertEqual(self.lab.health()["failures_in_a_row"], 0)
+        self.assertEqual(self.alerts("info", "works again"), [])  # never escalated, so nothing to take back
+        self.assertEqual(self.alerts("error"), [])
 
 
 if __name__ == "__main__":

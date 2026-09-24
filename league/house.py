@@ -585,8 +585,11 @@ class House:
              "sandbox": type(self.sandbox).__name__, "release": Path(__file__).resolve().parents[1].name},
         )
 
-    def alert(self, level: str, text: str) -> None:
-        self.ledger.append("ops.alert", {"level": level, "text": str(text)[:1000]})
+    def alert(self, level: str, text: str, **payload: Any) -> None:
+        """An `ops.alert` row. `payload` rides in the same row beside the level and the text (D1,
+        Sept 24, 2026: the Alpha Lab's step sends its traceback as `_traceback`; a key that starts
+        with an underscore is private, and `ledger.public_view` strips it from everything published)."""
+        self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
 
     # ------------------------------------------------------- a tick that never blocks
     def _box_patience(self) -> Any:
