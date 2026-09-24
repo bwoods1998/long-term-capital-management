@@ -19,7 +19,15 @@ windows are measured back from it, and instants are compared as instants, never 
 (sqlite's `datetime('now', ...)` puts a space where the ledger puts `T`, which once let a whole day
 into a six-hour window).
 
-THE FAMILY RECORD (the definition A-money implements in `league/allocator.py`; Sept 24, 2026)
+THE FAMILY RECORD. By default every family record here is the House's own: `HouseRecords` runs
+`league.families.family_record` (Deploy B; `league.allocator.family_record` in Deploy A's code) on the
+snapshot through a read-only ledger and a registry of every agent ever born, so the scoreboard reads
+the Alpaca haircut, the loss-rate gate for lopsided records and the unit exactly as the allocator
+does (Sept 24, 2026: the review of #224 found this script proving families the allocator did not).
+With a checkout that has no such function, or `scoreboard(..., house_records=False)`, the
+scoreboard's own account-unit formula below stands in; the practice-only record is always that one.
+
+The scoreboard's own formula (the definition A-money implemented in `league/allocator.py`; Sept 24, 2026)
 
 - Members: every agent ever born with the family (`agent.born` payload `family`) on its venue,
   living or dead.
@@ -73,7 +81,8 @@ THE SEVEN METRICS (numbers in brackets: the plan's baseline at 00:50Z Sept 24)
 4. `deaths_in_window`: `agent.died` in the window: median life (born to died, hours), overall and for
    day-horizon agents (`agent.born` `horizon`, else the desk's only horizon), and the share that died
    with fewer than 3 of their own fills (venue or cross fills on any book; the House's closing sales
-   are the House's, not the agent's) [14.3 h; 68%].
+   are the House's, not the agent's) [14.3 h; 68%]; and the same for the agents that held a practice
+   seat before they died (a replay-only agent has no book and can never fill).
 5. `lab_loop`: `lab.sqlite` `batches` in the last hour and an hour over the window; the LLM share of
    born graduates (candidate origin `luna`/`sol`/`agent` against `param`/`seed`) [2 of 18]; waiters
    (graduations `passed`, waiting since their `lab.graduate:<id>:passed` ledger row as `Lab.waiting`
@@ -533,10 +542,94 @@ def record(trades: Sequence[Trade]) -> dict[str, Any]:
     return out
 
 
+class SnapshotLedger:
+    """The House ledger's read interface (`iter`) over the snapshot's read-only ledger, for the House's
+    own family record."""
+
+    class Entry:
+        __slots__ = ("seq", "kind", "agent", "at", "payload")
+
+        def __init__(self, seq: int, kind: str, agent: str, at: str, payload: dict):
+            self.seq, self.kind, self.agent, self.at, self.payload = seq, kind, agent, at, payload
+
+    def __init__(self, snap: Snapshot):
+        self.snap = snap
+
+    def iter(self, *, kinds: Iterable[str] | str | None = None, agent: str | None = None, after: int = 0):
+        kinds = [kinds] if isinstance(kinds, str) else list(kinds or ())
+        sql, args = "SELECT seq, kind, agent, at, payload FROM ledger WHERE seq > ?", [int(after)]
+        if kinds:
+            sql += f" AND kind IN ({','.join('?' * len(kinds))})"
+            args += kinds
+        if agent is not None:
+            sql += " AND agent = ?"
+            args.append(agent)
+        for seq, kind, who, at, payload in self.snap.ledger.execute(sql + " ORDER BY seq", args):
+            yield self.Entry(int(seq), str(kind), str(who), str(at), _payload(payload))
+
+
+class HouseRecords:
+    """Each family's pooled forward record exactly as the House computes it: `league.families.family_record`
+    (Deploy B; `league.allocator.family_record` before it) run on the snapshot through a read-only ledger
+    and a registry of every agent ever born, so the scoreboard and the allocator can never disagree about
+    which family is proven (the review of #224 found the scoreboard without the House's Alpaca haircut and
+    loss-rate gate; Deploy B's at-risk unit moved the record again). `open` returns None on a checkout
+    without the function; the scoreboard's own account-unit record (`record`) stands in then."""
+
+    class _Agent:
+        __slots__ = ("id", "family", "venue", "alive")
+
+        def __init__(self, agent: Agent):
+            self.id, self.family, self.venue, self.alive = agent.id, agent.family, agent.venue, agent.alive
+
+    def __init__(self, snap: Snapshot, agents: Mapping[str, Agent], compute: Any, tape: Any):
+        self.snap, self.compute, self.tape = snap, compute, tape
+        self.ledger = SnapshotLedger(snap)
+        self.registry = type("Registry", (), {})()
+        self.registry.agents = {a.id: self._Agent(a) for a in agents.values()}
+        self.through = self.tape.refresh(self.ledger)
+
+    @classmethod
+    def open(cls, snap: Snapshot, agents: Mapping[str, Agent]) -> "HouseRecords | None":
+        try:
+            from league import families as house_families
+            compute, tape = house_families.family_record, house_families.TradeTape()
+        except ImportError:
+            try:
+                from league import allocator as house_allocator
+                compute, tape = house_allocator.family_record, house_allocator.TradeTape()
+            except (ImportError, AttributeError):
+                return None
+        return cls(snap, agents, compute, tape)
+
+    def record(self, venue: str, family: str, *, through: int | None = None) -> dict[str, Any]:
+        """The House's record, in the scoreboard's keys (`n`, `n_eff`, `mean`, `sd`, `lcb`, `proven`), with the
+        House's own record under `house` and its real, maker and taker sides normalised the same way."""
+        rec = self.compute(self, family, venue, tape=self.tape, through=through)
+        out = house_side(rec)
+        out["proven"] = bool(rec.get("proven"))
+        out["unit"] = rec.get("unit", "account")
+        for side in ("real", "maker", "taker"):
+            if isinstance(rec.get(side), Mapping):
+                out[side] = house_side(rec[side])
+        out["house"] = {k: v for k, v in rec.items() if k not in ("real", "maker", "taker", "rule")}
+        return out
+
+
+def house_side(rec: Mapping[str, Any]) -> dict[str, Any]:
+    """One side of a House record in the scoreboard's keys; `lcb` is the House's honest bound (the t bound,
+    and the loss-rate gate for a lopsided record) where it gives one."""
+    honest = rec.get("honest_bound", rec.get("bound"))
+    return {"n": int(rec.get("n") or 0), "n_eff": rec.get("n_eff"), "mean": rec.get("mean_log"), "sd": rec.get("sd"),
+            "lcb": honest, "t_bound": rec.get("bound"), "loss_gate": rec.get("loss_gate"),
+            "proven": bool(rec.get("proven", rec.get("positive", False)))}
+
+
 class Families:
     """Members and closed trades by family (keyed by (venue, family))."""
 
-    def __init__(self, agents: Mapping[str, Agent], trades: Sequence[Trade]):
+    def __init__(self, agents: Mapping[str, Agent], trades: Sequence[Trade], house: HouseRecords | None = None):
+        self.house = house
         self.members: dict[tuple[str, str], list[Agent]] = defaultdict(list)
         for agent in agents.values():
             self.members[(agent.venue, agent.family)].append(agent)
@@ -548,14 +641,20 @@ class Families:
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
 
     def state(self, venue: str, family: str) -> dict[str, Any]:
-        """The pooled practice-and-real record (memoised)."""
+        """The pooled practice-and-real record (memoised): the House's own (`HouseRecords`) when this
+        checkout has it, else the scoreboard's account-unit record."""
         key = (venue, family)
         if key not in self._records:
-            self._records[key] = record(self.trades.get(key) or [])
+            if self.house is not None and venue in PRACTICE_BOOK:
+                self._records[key] = self.house.record(venue, family)
+            else:
+                self._records[key] = record(self.trades.get(key) or [])
         return self._records[key]
 
     def state_before(self, venue: str, family: str, seq: int) -> dict[str, Any]:
         """The pooled record from the rows closed before a ledger position."""
+        if self.house is not None and venue in PRACTICE_BOOK:
+            return self.house.record(venue, family, through=seq - 1)
         return record([t for t in self.trades.get((venue, family)) or [] if t.close_seq < seq])
 
 
@@ -572,11 +671,11 @@ def family_records(snap: Snapshot, agents: Mapping[str, Agent], families: Famili
             "family": family, "venue": venue,
             "members": len(members), "living": sum(1 for a in members if a.alive),
             "real_stake_usd": round(stake, 2),
-            "pooled": families.state(venue, family),
+            "pooled": (pooled := families.state(venue, family)),
             "practice": record([t for t in trades if not t.real]),
-            "real": record([t for t in trades if t.real]),
-            "maker": record([t for t in trades if t.liquidity == "maker"]),
-            "taker": record([t for t in trades if t.liquidity == "taker"]),
+            "real": pooled.get("real") or record([t for t in trades if t.real]),
+            "maker": pooled.get("maker") or record([t for t in trades if t.liquidity == "maker"]),
+            "taker": pooled.get("taker") or record([t for t in trades if t.liquidity == "taker"]),
         })
     rows.sort(key=lambda r: (-(r["pooled"]["n"]), r["venue"], r["family"]))
     return {"fn": "family_records", "families": rows,
@@ -703,15 +802,22 @@ def family_capacity(snap: Snapshot, venue: str, family: str, members: Sequence[A
 
 # ---------------------------------------------------------------------------------- metric 1
 def real_bounds(snap: Snapshot, families: Families, intents: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    """Families whose real-only pooled record has a lower bound above zero, and each one's capacity."""
-    rows = []
+    """Families whose real-only pooled record has a lower bound above zero, and each one's capacity; and the
+    families the House's own proof calls proven (the pooled practice-and-real record, `HouseRecords`),
+    with theirs. With the House's record the real side is the House's (its unit, its honest bound)."""
+    rows, proven = [], []
     for (venue, family), trades in sorted(families.trades.items()):
-        real = [t for t in trades if t.real]
-        rec = record(real)
-        if rec["lcb"] is not None and rec["lcb"] > 0:
+        pooled = families.state(venue, family)
+        # The House's real side where its record has one (Deploy B's), else the scoreboard's own.
+        real = pooled.get("real") or record([t for t in trades if t.real])
+        if pooled.get("proven"):
+            proven.append({"family": family, "venue": venue, "pooled": pooled, "real": real,
+                           "capacity": family_capacity(snap, venue, family, families.members[(venue, family)], trades, intents)})
+        if real and real.get("lcb") is not None and real["lcb"] > 0:
             capacity = family_capacity(snap, venue, family, families.members[(venue, family)], trades, intents)
-            rows.append({"family": family, "venue": venue, "real": rec, "capacity": capacity})
-    return {"fn": "real_bounds", "count": len(rows), "families": rows,
+            rows.append({"family": family, "venue": venue, "real": real, "capacity": capacity})
+    return {"fn": "real_bounds", "count": len(rows), "families": rows, "proven": proven,
+            "record": "house" if families.house is not None else "scoreboard",
             "with_enough_real_events": sum(1 for r in rows if r["real"]["n"] >= PROVEN_MIN_OBSERVATIONS),
             "real_families": sum(1 for trades in families.trades.values() if any(t.real for t in trades))}
 
@@ -822,8 +928,15 @@ def real_dollars(snap: Snapshot, agents: Mapping[str, Agent], families: Families
 
 
 # ---------------------------------------------------------------------------------- metric 4
-def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[Row]], since: float, now: float) -> dict[str, Any]:
-    """Deaths in the window: median life, overall and on day-horizon agents; deaths before 3 fills."""
+def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[Row]], since: float, now: float,
+                     rungs: Rungs | None = None) -> dict[str, Any]:
+    """Deaths in the window: median life, overall and on day-horizon agents; deaths before 3 fills.
+
+    With `rungs`, the same for the agents that held a practice seat (rung 1 or more at any point
+    before their death): a replay-only agent (rung 0) has no book and can never fill, so while the
+    House makes way with them the overall share before 3 fills measures who was chosen to die, not
+    whether traders are killed before their evidence (B-seats' measure on the T0 snapshot, Sept 24,
+    2026: 41 of the 72 deaths that remain under the evidence clock are rung-0 replay-only code)."""
     horizons = desk_horizons()
     dead = sorted((a for a in agents.values() if a.died is not None and since <= a.died <= now), key=lambda a: a.died)
 
@@ -843,7 +956,20 @@ def deaths_in_window(agents: Mapping[str, Agent], fills: Mapping[str, Sequence[R
             "day_desk_deaths": len(day_desk_dead), "median_life_day_desk_h": lived(day_desk_dead),
             "before_3_fills": len(few), "share_before_3_fills": _r(len(few) / len(dead)) if dead else None,
             "causes": dict(Counter(str(a.cause) for a in dead)),
-            "day_horizon_before_3_fills": sum(1 for a in few if day(a))}
+            "day_horizon_before_3_fills": sum(1 for a in few if day(a)),
+            **(seated_deaths(dead, few, rungs, lived) if rungs is not None else {})}
+
+
+def seated_deaths(dead: Sequence[Agent], few: Sequence[Agent], rungs: Rungs, lived: Any) -> dict[str, Any]:
+    """The deaths of agents that held a practice seat before they died (`Rungs`: a change to rung 1
+    or more before the death row), their median life and the share of them that died before 3 fills."""
+    def seated(agent: Agent) -> bool:
+        return any(int(r.p.get("to_rung") or 0) >= 1 for r in rungs.changes.get(agent.id) or () if r.seq < (agent.died_seq or 0))
+
+    held = [a for a in dead if seated(a)]
+    held_few = [a for a in few if seated(a)]
+    return {"seated_deaths": len(held), "median_life_seated_h": lived(held), "seated_before_3_fills": len(held_few),
+            "share_seated_before_3_fills": _r(len(held_few) / len(held)) if held else None}
 
 
 # ---------------------------------------------------------------------------------- metric 5
@@ -1114,8 +1240,8 @@ def kaplan_meier_median(times: Sequence[tuple[float, bool]]) -> float | None:
 def evidence_clocks(snap: Snapshot, agents: Mapping[str, Agent], trades: Sequence[Trade], fills: Mapping[str, Sequence[Row]],
                     days: float = EVIDENCE_CLOCK_DAYS) -> dict[str, Any]:
     """Per desk: hours from a member's first own fill to its third independent settlement (distinct
-    events on Kalshi, closed trades on Alpaca, any book), for members whose first fill is in the
-    last `days`."""
+    events on Kalshi, closed trades on Alpaca, any book; the House's closing sales left out), for
+    members whose first fill is in the last `days`."""
     start = snap.now - days * DAY
     by_agent: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
@@ -1129,7 +1255,9 @@ def evidence_clocks(snap: Snapshot, agents: Mapping[str, Agent], trades: Sequenc
         seen: set[str] = set()
         third = None
         for trade in sorted(by_agent.get(agent.id, []), key=lambda t: t.close_seq):
-            if trade.close_t < first:
+            # The House's sale of a dead member's holdings is the House's close, not the member's
+            # (the House's own clock, `House._evidence_clocks`, leaves it out since the B-seats review).
+            if trade.close_t < first or trade.closing:
                 continue
             seen.add(trade.event)
             if len(seen) == 3:
@@ -1159,14 +1287,15 @@ def weather_capacity(snap: Snapshot, families: Families, intents: Mapping[str, M
 
 # ----------------------------------------------------------------------------------- the board
 def scoreboard(snap: Snapshot, *, since: float | None = None, baseline: float | None = None,
-               hosts: Sequence[str] | None = None) -> dict[str, Any]:
-    """Every metric and extra of one snapshot."""
+               hosts: Sequence[str] | None = None, house_records: bool = True) -> dict[str, Any]:
+    """Every metric and extra of one snapshot. `house_records` False reads every family record with the
+    scoreboard's own account-unit formula instead of the House's function (the tests of that formula)."""
     since = snap.now - DAY if since is None else since
     agents = agents_of(snap)
     rungs = Rungs(snap)
     trades, still_open, skipped = closed_trades(snap)
     fills = own_fills(snap)
-    families = Families(agents, trades)
+    families = Families(agents, trades, HouseRecords.open(snap, agents) if house_records else None)
     intents = intent_outcomes(snap)
     health = snap.json.get("health.json") or {}
     return {
@@ -1178,7 +1307,7 @@ def scoreboard(snap: Snapshot, *, since: float | None = None, baseline: float | 
             "1": real_bounds(snap, families, intents),
             "2": allocator_promotions(snap, agents, rungs, trades, still_open, families, baseline),
             "3": real_dollars(snap, agents, families),
-            "4": deaths_in_window(agents, fills, since, snap.now),
+            "4": deaths_in_window(agents, fills, since, snap.now, rungs),
             "5": lab_loop(snap, agents, rungs, since),
             "6": {"self_cross": self_cross_exits(snap), "stacked": stacked_promotions(snap, agents, trades, baseline)},
             "7": {"recorders": recorders_live(snap, hosts), "idle_desks": idle_desks(snap, agents)},
@@ -1221,11 +1350,14 @@ def summary_rows(board: Mapping[str, Any]) -> list[tuple[str, str, str, str]]:
     six, seven = m["6"], m["7"]
     caps = "; ".join(f"{r['family']} real n {r['real']['n']}, {_usd(r['capacity'].get('capacity_usd_per_day'))}/day"
                      for r in one["families"]) or "none"
+    proven_caps = "; ".join(f"{r['family']} n {r['pooled']['n']}, real n {(r.get('real') or {}).get('n', 0)}, "
+                            f"{_usd(r['capacity'].get('capacity_usd_per_day'))}/day" for r in one.get("proven") or ()) or "none"
     labels = ", ".join(f"{k} {v}" for k, v in sorted(two["labels"].items()))
     stacked = six["stacked"]
     return [
-        ("1", "families with a positive real lower bound; capacity",
-         f"{one['count']} ({caps}); {one['with_enough_real_events']} on >= {PROVEN_MIN_OBSERVATIONS} real events",
+        ("1", "families with a positive real lower bound; capacity (and proven by the House's pooled record)",
+         f"{one['count']} ({caps}); {one['with_enough_real_events']} on >= {PROVEN_MIN_OBSERVATIONS} real events; "
+         f"proven ({one.get('record', 'scoreboard')} record): {len(one.get('proven') or ())} ({proven_caps})",
          "real_bounds, family_capacity"),
         ("2", "allocator promotions to real money: settled result, share positive" + (" (since the baseline)" if two["baseline"] else ""),
          f"{two['promotions']} promotions, {_usd(two['settled_pnl_usd'])} on {two['settlements']} settlements, "
@@ -1233,9 +1365,11 @@ def summary_rows(board: Mapping[str, Any]) -> list[tuple[str, str, str, str]]:
          "allocator_promotions"),
         ("3", "real dollars in proven / unproven families; Alpaca real agents",
          f"{_usd(three['proven_usd'])} / {_usd(three['unproven_usd'])}; {three['alpaca_real_agents']}", "real_dollars"),
-        ("4", "median life (h), all / day-horizon; deaths before 3 fills",
+        ("4", "median life (h), all / day-horizon; deaths before 3 fills (of them, agents that held a practice seat)",
          f"{four['median_life_h']} / {four['median_life_day_h']} h over {four['deaths']} deaths; "
-         f"{four['before_3_fills']} ({_pct(four['share_before_3_fills'])})", "deaths_in_window"),
+         f"{four['before_3_fills']} ({_pct(four['share_before_3_fills'])}); seated: {four.get('seated_deaths')} deaths, "
+         f"median {four.get('median_life_seated_h')} h, {four.get('seated_before_3_fills')} "
+         f"({_pct(four.get('share_seated_before_3_fills'))}) before 3 fills", "deaths_in_window"),
         ("5", "lab batches an hour; LLM share of born graduates; waiters, longest wait; supersessions",
          f"{five.get('batches_last_hour')} in the last hour; {five.get('born_graduates_llm')} of {five.get('born_graduates')}; "
          f"{five['waiters']} at {five['longest_wait_h']} h; {five['superseded_in_window']} superseded in the window "
@@ -1287,8 +1421,14 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
         out.append(("## " if markdown else "== ") + title)
 
     section("1. families with a positive real lower bound [real_bounds, family_capacity]")
+    out.append(f"{pre}the family record read: {m['1'].get('record', 'scoreboard')} "
+               f"({'the House own function, league.families / league.allocator family_record' if m['1'].get('record') == 'house' else 'the scoreboard account-unit formula'})")
     for r in m["1"]["families"]:
-        out.append(f"{pre}{r['venue']}/{r['family']}: real {_rec(r['real'])}; {r['real']['rows']} rows, P&L {_usd(r['real']['pnl_usd'])}")
+        rows = f"; {r['real']['rows']} rows, P&L {_usd(r['real']['pnl_usd'])}" if "rows" in r["real"] else ""
+        out.append(f"{pre}{r['venue']}/{r['family']}: real {_rec(r['real'])}{rows}")
+        out.append(f"{pre}  {_capacity_line(r['capacity'])}")
+    for r in m["1"].get("proven") or ():
+        out.append(f"{pre}PROVEN {r['venue']}/{r['family']}: pooled {_rec(r['pooled'])}; real {_rec(r.get('real') or {})}")
         out.append(f"{pre}  {_capacity_line(r['capacity'])}")
     out.append(f"{pre}families with any real closed trade: {m['1']['real_families']}")
     section("2. allocator promotions to real money [allocator_promotions]")
@@ -1309,6 +1449,10 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
     out.append(f"{pre}day-horizon agents: {d['day_horizon_deaths']} deaths, median {d['median_life_day_h']} h, "
                f"{d['day_horizon_before_3_fills']} before 3 fills; on day-only desks: {d['day_desk_deaths']} deaths, "
                f"median {d['median_life_day_desk_h']} h")
+    if "seated_deaths" in d:
+        out.append(f"{pre}agents that held a practice seat: {d['seated_deaths']} deaths, median {d['median_life_seated_h']} h, "
+                   f"{d['seated_before_3_fills']} ({_pct(d['share_seated_before_3_fills'])}) before 3 fills; the rest never "
+                   f"left replay (rung 0) and could not fill")
     section("5. the lab and the loop [lab_loop]")
     f = m["5"]
     out.append(f"{pre}batches: {f.get('batches_last_hour')} in the last hour, {f.get('batches_an_hour_in_window')} an hour over the "
@@ -1352,7 +1496,7 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
             continue
         out.append(f"{pre}{r['venue']}/{r['family']}: {_rec(r['pooled'])}; members {r['members']} ({r['living']} living), "
                    f"real stake {_usd(r['real_stake_usd'])}")
-        out.append(f"{pre}  practice {_rec(r['practice'])} | real {_rec(r['real'])} | maker {_rec(r['maker'])} | taker {_rec(r['taker'])}")
+        out.append(f"{pre}  practice (account unit) {_rec(r['practice'])} | real {_rec(r['real'])} | maker {_rec(r['maker'])} | taker {_rec(r['taker'])}")
     section("the weather favourites' capacity [weather_capacity]")
     w = x["weather_capacity"]
     out.append(f"{pre}{_capacity_line(w)}")

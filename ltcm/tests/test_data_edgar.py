@@ -290,3 +290,52 @@ class _Response:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------- the browse feed, Sept 24, 2026
+from pathlib import Path  # noqa: E402
+
+from ltcm.data import CONTACT_USER_AGENT  # noqa: E402
+from ltcm.data.edgar import BROWSE_URL, accepted_utc, parse_filings_atom  # noqa: E402
+
+FIXTURES = Path(__file__).parent / "fixtures" / "feeds"
+
+
+class BrowseFeed(unittest.TestCase):
+    """EDGAR's company browse feed, recorded Sept 24, 2026: each 8-K's items and ACCEPTANCE time,
+    which full-text search does not answer (it has the filing date only)."""
+
+    def test_the_recorded_feed_gives_each_filing_its_acceptance_time_in_utc(self):
+        feed = parse_filings_atom((FIXTURES / "edgar_8k_aapl.atom").read_bytes())
+        self.assertEqual((feed["cik"], feed["company"], len(feed["entries"])), ("0000320193", "Apple Inc.", 10))
+        july = next(e for e in feed["entries"] if e["accession"] == "0000320193-26-000018")
+        # The filing index says "Accepted 2026-07-30 16:30:28" (Eastern daylight time).
+        self.assertEqual((july["form"], july["filed"], july["accepted"], july["items"]),
+                         ("8-K", "2026-07-30", "2026-07-30T20:30:28Z", ["2.02", "9.01"]))
+        self.assertEqual(feed["entries"][0]["form"], "8-K/A")  # amendments come with type=8-K
+        self.assertEqual([e["accepted"] for e in feed["entries"]], sorted((e["accepted"] for e in feed["entries"]), reverse=True))
+        self.assertEqual(accepted_utc("2026-01-29T16:30:33-05:00"), "2026-01-29T21:30:33Z")  # standard time in winter
+        with self.assertRaises(DataError):
+            accepted_utc("2026-01-29T16:30:33")  # no offset: never guessed
+
+    def test_a_fund_has_an_empty_feed_and_an_unknown_ticker_no_feed(self):
+        self.assertEqual(parse_filings_atom((FIXTURES / "edgar_8k_spy.atom").read_bytes())["entries"], [])
+        with self.assertRaises(DataError) as caught:
+            parse_filings_atom((FIXTURES / "edgar_unknown_ticker.html").read_bytes())
+        self.assertIn("no company feed", str(caught.exception))
+        self.assertEqual(parse_filings_atom("<feed><company-info><cik>1</cik></company-info>"
+                                            "<entry><accession-number>a</accession-number><updated>2026-01-02T10:00:00-05:00</updated>"
+                                            "<items-desc>items 2.02, 8.01and9.01</items-desc></entry></feed>")["entries"][0]["items"],
+                         ["2.02", "8.01", "9.01"])
+
+    def test_filings_asks_the_browse_feed_with_the_contact_user_agent(self):
+        transport = FakeTransport({BROWSE_URL + "?*": (200, {"content-type": "application/atom+xml"},
+                                                       (FIXTURES / "edgar_8k_aapl.atom").read_bytes())})
+        feed = Edgar(transport).filings("aapl", start=40, count=40)
+        call = transport.calls[-1]
+        self.assertEqual((call["query"]["CIK"], call["query"]["type"], call["query"]["start"], call["query"]["count"], call["query"]["output"]),
+                         ("AAPL", "8-K", "40", "40", "atom"))
+        self.assertEqual(call["headers"]["User-Agent"], CONTACT_USER_AGENT)
+        self.assertEqual(len(feed["entries"]), 10)
+        with self.assertRaises(DataError):
+            Edgar(transport).filings("not a ticker!")

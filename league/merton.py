@@ -26,13 +26,15 @@ import json
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from . import ci
 from .frontier import Frontier, FrontierError
@@ -330,15 +332,79 @@ Answer with ONE JSON object and nothing else:
  "confidence": "high | medium | low: how sure you are that this beats what it runs now"}"""
 
 
+#: The real-money books (`House.REAL_BOOKS`): the only money the floor's P&L is measured in.
+REAL_BOOKS = ("kalshi", "alpaca")
+
+
+class RealPnl:
+    """The floor's 24-hour REAL P&L, as `merton.paused_until_profit` reads it: the realized result of
+    the real books over the last `hours` -- each settlement's `pnl` and each closing fill's
+    `realized` on `kalshi` and `alpaca`, fees included, practice books never.
+
+    Why the books' realized rows and not the allocator's `floor_pnl` (Sept 24, 2026): `floor_pnl`
+    is a level, equity less stake over every account the real books have held since they began (a
+    sweep moves cash and stake together, so it keeps an account's result). It has no 24-hour
+    window: its change over a day needs a reading from a day before, which the House does not keep
+    across a restart, and it moves with the marks of positions still open. The ledger's settlements
+    and closing fills are the venue's own verdicts, windowed exactly, and they survive a restart.
+    What they leave out is the mark of positions still open, which a day-horizon book settles within
+    a day or three. At T0 of the close-the-gaps run this read +$5.10 over 24 hours (34 settlements)
+    and -$2.73 over the last six; `floor_pnl` read +$0.75.
+
+    Read incrementally (only rows after the last one seen) at most every `every_seconds`."""
+
+    def __init__(self, ledger: Any, clock: Callable[[], float] = time.time, *, hours: float = 24.0, every_seconds: float = 300.0):
+        self.ledger, self.clock = ledger, clock
+        self.window, self.every = float(hours) * 3600, float(every_seconds)
+        self._rows: deque = deque()
+        self._seq = 0
+        self._at = float("-inf")
+        self._value: tuple[Decimal, int] = (Decimal(0), 0)
+        self._lock = threading.Lock()
+
+    def __call__(self) -> tuple[Decimal, int]:
+        """(realized USD over the window, the settlements and closing fills it comes from)."""
+        with self._lock:
+            now = self.clock()
+            if now - self._at < self.every:
+                return self._value
+            for entry in self.ledger.iter(kinds=("book.settle", "book.fill"), after=self._seq):
+                self._seq = entry.seq
+                p = entry.payload
+                if p.get("book") not in REAL_BOOKS or p.get("real_money") is False or p.get("source") == "dust":
+                    continue
+                amount = p.get("pnl") if entry.kind == "book.settle" else p.get("realized")
+                if amount is None:
+                    continue  # an opening fill realizes nothing
+                try:
+                    self._rows.append((_epoch(entry.at), Decimal(str(amount))))
+                except (InvalidOperation, ValueError):
+                    continue
+            while self._rows and self._rows[0][0] < now - self.window:
+                self._rows.popleft()
+            self._value = (sum((amount for _, amount in self._rows), Decimal(0)), len(self._rows))
+            self._at = now
+            return self._value
+
+
 class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
                  schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None, pace: Any = None,
-                 effort: Mapping[str, str] | None = None, backoff_max: Mapping[str, int] | None = None):
+                 effort: Mapping[str, str] | None = None, backoff_max: Mapping[str, int] | None = None,
+                 paused_until_profit: Iterable[str] | None = None, real_pnl: Callable[[], tuple[Decimal, int]] | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
         self.evidence = evidence
         self.clock = clock
+        #: Roles that do not sit down while the floor's 24-hour real P&L is not positive (game.json
+        #: `merton.paused_until_profit`; Sept 24, 2026). `real_pnl` measures it (`RealPnl`).
+        self.paused_until_profit = frozenset(r for r in (paused_until_profit or ()) if r in ROLES)
+        self.real_pnl = real_pnl or RealPnl(ledger, clock)
+        #: role -> paused, as last recorded (seeded from the ledger's newest rows, so a restart does
+        #: not record a pause again), and the reading it was decided on.
+        self._paused: dict[str, bool] | None = None
+        self._pnl_seen: tuple[Decimal, int] | None = None
         #: How often each role sits down. One architect pass is about $1.25 of the $100 month.
         self.schedule_hours = dict(schedule_hours or {"operator": 24, "teacher": 72, "toolsmith": 24, "designer": 168, "architect": 168})
         #: () -> the share of its usual wait a role serves, so the House can bring the roles round
@@ -405,8 +471,11 @@ class Merton:
         now = self.clock()
         started = self.ledger.read(kinds="ops.started", limit=1)
         running_hours = (now - _epoch(started[0].at)) / 3600 if started else 0.0
+        held = self._held()
         out = []
         for role in ROLES:
+            if role in held:
+                continue  # paused until the floor's 24-hour real P&L is positive
             last = self.last_pass(role)
             if last is None:
                 if running_hours >= self.first_after_hours.get(role, 0):
@@ -414,6 +483,46 @@ class Merton:
             elif now - last >= self.schedule_hours[role] * self._pace() * self.backoff(role) * 3600:
                 out.append(role)
         return out
+
+    def _held(self) -> frozenset[str]:
+        """The roles of `paused_until_profit` while the floor's 24-hour real P&L is not positive,
+        with one `ops.budget` row ("merton pause") each time a role pauses or resumes.
+
+        Sept 24, 2026 (the close-the-gaps run, L2): the architect ($57), teacher ($21), toolsmith
+        ($19), operator ($15) and designer ($8) had spent about $120 of the frontier month for about
+        one positive forward record. The auditor, the consultant and the engineer are not roles of
+        this class and keep their cadence; the teacher is paced by its schedule instead."""
+        if not self.paused_until_profit:
+            return frozenset()
+        try:
+            pnl, count = self.real_pnl()
+        except Exception:  # noqa: BLE001 - a P&L that cannot be read pauses nobody
+            return frozenset()
+        self._pnl_seen = (pnl, count)
+        paused = pnl <= 0
+        if self._paused is None:
+            self._paused = {}
+            for entry in self.ledger.read(kinds="ops.budget", limit=2000, newest=True):
+                if entry.payload.get("what") == "merton pause" and entry.payload.get("role") in ROLES:
+                    self._paused[entry.payload["role"]] = bool(entry.payload.get("paused"))
+        for role in sorted(self.paused_until_profit):
+            if self._paused.get(role, False) == paused:
+                continue
+            self._paused[role] = paused
+            self.ledger.append("ops.budget", {
+                "what": "merton pause", "role": role, "paused": paused, "real_pnl_24h_usd": format(pnl, "f"), "settlements": count,
+                "reason": ("the floor's real P&L over the last 24 hours is not positive: the role does not sit down until it is"
+                           if paused else "the floor's real P&L over the last 24 hours is positive: the role sits down again")})
+        return self.paused_until_profit if paused else frozenset()
+
+    def pause_state(self) -> dict[str, Any] | None:
+        """What `health.json` says of the pause: the roles waiting and the reading they wait on."""
+        if not self.paused_until_profit:
+            return None
+        pnl, count = self._pnl_seen if self._pnl_seen is not None else (None, None)
+        return {"roles": sorted(self.paused_until_profit), "paused": sorted(r for r, v in (self._paused or {}).items() if v and r in self.paused_until_profit),
+                "real_pnl_24h_usd": format(pnl, "f") if pnl is not None else None, "settlements": count,
+                "measure": "realized: the real books' settlements and closing fills over the last 24 hours"}
 
     def backoff(self, role: str) -> int:
         """How many times its usual wait a role serves after passes that changed nothing: one empty
@@ -641,8 +750,12 @@ def evidence_from(house: Any) -> Callable[[str], dict[str, Any]]:
         elif role == "toolsmith":
             base = {"open_requests": house.commons.open_requests(limit=10), "existing_tools": sorted(p.name for p in (Path(__file__).resolve().parent / "tools").glob("*.py"))}
         elif role == "operator":
-            alerts = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.alert", limit=60, newest=True)]
-            budget = [{"at": e.at, **e.payload} for e in ledger.read(kinds="ops.budget", limit=20, newest=True)]
+            # Private (`_`-prefixed) keys stay out of the packet: since Deploy A (Sept 24, 2026) a failed
+            # lab step's alert carries its `_traceback`, up to 2,000 characters, and sixty were copied.
+            alerts = [{"at": e.at, **{k: v for k, v in e.payload.items() if not str(k).startswith("_")}}
+                      for e in ledger.read(kinds="ops.alert", limit=60, newest=True)]
+            budget = [{"at": e.at, **{k: v for k, v in e.payload.items() if not str(k).startswith("_")}}
+                      for e in ledger.read(kinds="ops.budget", limit=20, newest=True)]
             from .ci import CONFIG_DIALS
 
             base = {"alerts": alerts, "budget": budget, "books": {n: {"frozen": b.frozen, "open_orders": len(b.open_orders())} for n, b in house.books.items()},

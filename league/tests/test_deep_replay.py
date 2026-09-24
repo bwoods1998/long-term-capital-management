@@ -261,6 +261,56 @@ class HouseDeepReplayTest(HouseCase):
 
 
 
+class AWindowTheStoreHoldsNoBarsFor(HouseCase):
+    """D1's root (found by the A-lab builder, Sept 24, 2026): the lab's step failed for hours because
+    `House._deep_tape` built `deep:alpaca:ADA/USD:15Min:100:hour:2025-09-12:2025-11-14:sip` with 0
+    steps. The history store held ADA/USD only from 2026-02-01 (61 empty chunks, 7 done), and
+    `coverage_gaps` refuses only unfetched ranges, not unavailable ones. A window the store holds no
+    bars for is now unsupported input with that reason where the tape is built: for replay, deep
+    replay, the lab (which reads `tape_for`) and the sealed holdout alike, and never a trial."""
+
+    ADA = SPY_BUYER.replace('"SPY"', '"ADA/USD"')
+
+    def setUp(self):
+        super().setUp()
+        self.house.holdout_window = ("2025-06-02", "2025-06-16")
+        self.house.settings.deep_replay_days = 14
+        store = HistoryStore.at_root(self.house.root)
+        ing = _ingestor(store, FakeAlpaca(listed={"ADA/USD": "2026-02-01T00:00:00Z"}), workers=2)
+        ing.run(ing.plan(["SPY", "ADA/USD"], ["1Day", "1Hour"], "2025-04-01", "2025-07-01"))
+        ing.run(ing.plan(["ADA/USD"], ["1Day", "1Hour"], "2026-02-01", "2026-03-01"))
+        store.close()
+        self.needs = {"venue": "alpaca", "horizon": "hour", "symbols": ["ADA/USD"], "bars": {"timeframe": "1Hour", "limit": 5}}
+
+    def test_the_tape_is_refused_with_the_reason_and_is_not_kept(self):
+        with self.assertRaises(ValueError) as caught:
+            self.house.tape_for(self.needs)
+        message = str(caught.exception)
+        self.assertTrue(message.startswith("unsupported input"), message)
+        self.assertIn("ADA/USD", message)
+        self.assertIn("no ADA/USD 1Hour bars in 2025-05-19..2025-06-02", message)
+        self.assertIn("2026-02-01", message)  # where the store's history of it begins
+        self.assertFalse(any(key.startswith("deep:") for key in self.house._tapes), "an empty tape is not cached")
+        with self.assertRaises(ValueError) as mixed:
+            self.house.tape_for({**self.needs, "symbols": ["ADA/USD", "SPY"]})
+        self.assertIn("ADA/USD", str(mixed.exception))
+        self.assertNotIn("SPY 1Hour", str(mixed.exception))
+
+    def test_a_candidate_on_it_is_not_a_trial(self):
+        agent = self.house.spawn("alts", "test-alts", self.ADA, reason="a test agent")
+        self.assertEqual(agent.specialty, "alpaca-crypto-alts")
+        out = self.house._candidate_replay(agent, self.ADA.replace('"notional": 20.0', '"notional": 25.0'))
+        self.assertFalse(out["counted_as_trial"], out)
+        self.assertIn("unsupported input", out["error"])
+        self.assertEqual(self.house.ledger.count(kinds="eval.trial"), 0)
+
+    def test_the_holdout_is_not_opened_for_a_window_it_holds_nothing_of(self):
+        agent = self.house.spawn("alts", "test-alts", self.ADA, reason="a test agent")
+        out = self.house._holdout(agent, self.ADA, self.needs, {"notional": 20.0})
+        self.assertFalse(out["evaluated"])
+        self.assertIn("unsupported input", out["refused"])
+        self.assertEqual(self.house.ledger.count(kinds="holdout.access"), 0, "no access of the lineage's ration is spent")
+
 
 class DevDaysTest(unittest.TestCase):
     def test_a_development_tape_is_never_larger_than_the_largest_live_one(self):

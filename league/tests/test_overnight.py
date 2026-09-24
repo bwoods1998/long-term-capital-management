@@ -1,4 +1,5 @@
 """A faster game must preserve evidence and its funded window across concurrency/restarts."""
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from decimal import Decimal
@@ -127,7 +128,9 @@ class BurstGame(HouseCase):
             tuned = game_for(load_game(), {'policy': load_policy()})
         hours = tuned['merton']['schedule_hours']
         self.assertEqual((hours['operator'], hours['designer']), (4.0, 12.0))  # the turbo's allocation
-        self.assertEqual((hours['architect'], hours['teacher']), (.5, 1))  # burst defaults stand; zero is ignored
+        self.assertEqual(hours['architect'], .5)  # the burst's default stands
+        self.assertEqual(hours['teacher'], load_game()['merton']['schedule_hours']['teacher'])  # zero is ignored; the burst
+        # no longer accelerates the teacher, whose cadence is a bounded dial (Sept 24, 2026)
         self.assertNotIn('nobody', hours)
 
     def test_turbo_speeds_the_loop_without_touching_the_stored_policy(self):
@@ -205,3 +208,54 @@ class BurstGame(HouseCase):
         for n in range(3):
             self.house.ledger.append('agent.research',{'tool':'summary','reason':'finished'},agent=agent.id)
         self.assertIsNone(self.house._weakest(rules))
+
+
+class TheResearchEconomyDials(unittest.TestCase):
+    """L2 (Sept 24, 2026, the close-the-gaps run): the risk-free dials this wave adds, and the one
+    turbo dial that never reached the House.
+
+    `load_turbo` copied only the keys of `TURBO_RANGES` and `sail_profile`, so the turbo layer's
+    `merton_schedule_hours` -- the re-allocation of Merton's cadence by measured yield recorded in
+    turbo.json on Sept 22 and 23 (operator 48 h, designer 96 h, toolsmith 48 h, architect 24 h) --
+    was dropped, and the burst's own defaults ran instead: the snapshot's ledger shows the teacher
+    sitting down about hourly and the architect every 30 to 60 minutes on Sept 23."""
+
+    def test_the_repository_turbo_carries_merton_and_the_sail_research_cap(self):
+        from league import overnight
+
+        turbo = overnight.load_turbo()
+        self.assertEqual(turbo["merton_schedule_hours"]["teacher"], 12)
+        self.assertEqual(turbo["sail_research_usd_per_hour"], 2)
+        hours = game_for(load_game(), {"policy": load_policy()})["merton"]["schedule_hours"]
+        self.assertEqual(hours["teacher"], 12.0)
+        self.assertEqual(hours, {role: float(v) for role, v in turbo["merton_schedule_hours"].items()})
+
+    def test_out_of_bounds_turbo_dials_are_refused(self):
+        from unittest.mock import patch
+        from league import overnight
+
+        for bad in ({"sail_research_usd_per_hour": 0.5}, {"sail_research_usd_per_hour": 5}, {"sail_research_usd_per_hour": "2"},
+                    {"merton_schedule_hours": {"teacher": 4}}, {"merton_schedule_hours": {"teacher": 25}},
+                    {"merton_schedule_hours": {"operator": 0}}, {"merton_schedule_hours": {"nobody": 3}}):
+            with patch.object(overnight.Path, "read_text", return_value=json.dumps(bad)):
+                with self.assertRaises(ValueError, msg=bad):
+                    overnight.load_turbo()
+
+    def test_the_game_file_pauses_the_code_roles_and_bounds_the_teacher(self):
+        from league.economy import check_bounds
+
+        game = load_game()
+        self.assertEqual(sorted(game["merton"]["paused_until_profit"]), ["architect", "designer", "operator", "toolsmith"])
+        self.assertEqual(game["merton"]["schedule_hours"]["teacher"], 12)
+        self.assertEqual(game["research"]["gate"]["abstain_lock_profile"], "flash_asap")
+        for mutate in (lambda g: g["merton"]["schedule_hours"].update(teacher=5), lambda g: g["merton"]["schedule_hours"].update(teacher=25),
+                       lambda g: g["merton"].update(paused_until_profit=["architect", "auditor"]),
+                       lambda g: g["research"]["gate"].update(abstain_lock_profile="pro_asap_turbo")):
+            changed = deepcopy(game)
+            mutate(changed)
+            with self.assertRaises(ValueError):
+                check_bounds(changed)
+        for subset in ([], ["teacher"], ["architect", "toolsmith", "operator", "designer", "teacher"]):
+            changed = deepcopy(game)
+            changed["merton"]["paused_until_profit"] = subset
+            check_bounds(changed)  # any subset of Merton's roles

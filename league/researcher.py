@@ -523,12 +523,14 @@ class Researcher:
         if 'finished_at' not in state:
             state['finished_at'] = self.clock()
             save()
+        refunded = self.refund_provider_fault(agent, session, out.reason, turns=int(state.get('turn') or 0) + 1)
         self.ledger.append('agent.research', {
             'tool': 'summary', 'session': session, 'turns': out.turns,
             'profile': state['profile'], 'started': state['started'], 'finished': state['finished_at'],
             'elapsed_seconds': round(max(0, state['finished_at'] - state['started']), 3),
             'cost_usd': format(out.cost_usd, 'f'), 'trials': out.trials,
             'summary': out.summary[:1200], 'reason': out.reason, 'candidate': bool(out.candidate),
+            **({'refunded_usd': refunded} if refunded else {}),
         }, agent=agent.id, id=summary_id)
         if self.traces is not None:
             from .traces import research_outcome
@@ -744,6 +746,34 @@ class Researcher:
                                id=f"merton-refund:{session}")
             refunded.append(session)
         return refunded
+
+    def refund_provider_fault(self, agent: Agent, session: str, reason: str, *, turns: int) -> str | None:
+        """Give back what a session's model turns were charged when the provider failed it.
+
+        Sept 24, 2026 (the close-the-gaps run, L2): a session that ends in a provider 502 or 504
+        (`research_gate.provider_fault`: the HTTP 5xx family) was charged for the turns before the
+        failure and counted like any other. Its research-token charges (`tokens:<session>:<turn>`)
+        are returned in one `credit.grant` (id `research-refund:<session>`, so a resumed session
+        cannot refund twice). Other charges of the pass -- a web search, a consultation, a Jev
+        question -- were answered and stand. The same predicate makes the session no completed pass
+        anywhere. Returns the amount refunded, or None."""
+        from .research_gate import provider_fault
+
+        if not provider_fault(reason):
+            return None
+        ident = f"research-refund:{session}"
+        done = self.ledger.get(ident)
+        if done is not None:
+            return str(done.payload.get("usd"))
+        total = ZERO
+        for turn in range(max(0, int(turns))):
+            row = self.ledger.get(f"tokens:{session}:{turn}")
+            if row is not None and row.kind == "credit.charge" and row.agent == agent.id:
+                total += Decimal(str(row.payload.get("usd") or 0))
+        if total <= 0:
+            return None
+        self.economy.grant(agent.id, total, f"refund of research session {session}: the provider failed it ({reason})", id=ident)
+        return format(total, "f")
 
     def _last_consult(self, agent: Agent) -> float | None:
         """When this agent last hired him. Its own record, so a question it could not afford or

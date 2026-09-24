@@ -252,7 +252,7 @@ class RealBoundsTest(ScoreboardCase):
         f.settle("l-1", 10, "kalshi", "KXL-26SEP24-1", -3)
         f.settle("l-1", 11, "kalshi", "KXM-26SEP24-1", -1)
         f.row("ops.job", "house", 25, {})  # the snapshot's clock: 25 h
-        board = gs.scoreboard(f.snapshot(), hosts=())
+        board = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)
         one = board["metrics"]["1"]
         self.assertEqual(one["count"], 1)
         row = one["families"][0]
@@ -294,7 +294,7 @@ class PromotionsTest(ScoreboardCase):
         return f.snapshot()
 
     def test_each_stays_settled_result_and_the_share_positive(self):
-        two = gs.scoreboard(self.build(), hosts=())["metrics"]["2"]
+        two = gs.scoreboard(self.build(), hosts=(), house_records=False)["metrics"]["2"]
         self.assertEqual(two["promotions"], 2)
         self.assertEqual(two["settlements"], 2)
         self.assertAlmostEqual(two["settled_pnl_usd"], 1.0)
@@ -305,7 +305,7 @@ class PromotionsTest(ScoreboardCase):
         self.assertEqual(p2["open_positions"], 1)
 
     def test_a_baseline_keeps_later_promotions_and_labels_them(self):
-        two = gs.scoreboard(self.build(), baseline=ts(2), hosts=())["metrics"]["2"]
+        two = gs.scoreboard(self.build(), baseline=ts(2), hosts=(), house_records=False)["metrics"]["2"]
         self.assertEqual([r["agent"] for r in two["rows"]], ["p-2"])
         self.assertEqual((two["rows"][0]["label"], two["rows"][0]["label_source"]), ("probe", "promotion band_to"))
         self.assertAlmostEqual(two["settled_pnl_usd"], -2.0)
@@ -328,9 +328,49 @@ class RealDollarsTest(ScoreboardCase):
             "u-1": {"band": "bunt", "stake_usd": "10", "venue": "kalshi"},
             "u-2": {"band": "bunt", "stake_usd": "25", "venue": "alpaca"},
             "x-1": {"band": "paper", "stake_usd": None, "venue": "kalshi"}}})
-        three = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["3"]
+        three = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["3"]
         self.assertEqual((three["proven_usd"], three["unproven_usd"]), (30.0, 35.0))
         self.assertEqual(three["alpaca_real_agents"], 1)
+
+
+class HouseRecordTest(ScoreboardCase):
+    """By default the scoreboard reads each family's record through the House's own function
+    (`gs.HouseRecords`), so the scoreboard and the allocator cannot disagree on which family is proven."""
+
+    def favourites(self):
+        f = self.floor
+        f.born("w-1", 0, family="favs")
+        f.stake("w-1", 0.1, "kalshi-shadow", 100)
+        for i in range(12):
+            market = f"KXW{i}-26SEP24-B1"
+            f.buy("w-1", 1 + i, "kalshi-shadow", market, quantity=10, price=0.95)
+            f.settle("w-1", 1.5 + i, "kalshi-shadow", market, 0.5 + 0.01 * i)
+        return f.snapshot()
+
+    def test_the_houses_record_refuses_a_lopsided_record_the_t_bound_alone_proves(self):
+        snap = self.favourites()
+        own = gs.scoreboard(snap, hosts=(), house_records=False)
+        house = gs.scoreboard(snap, hosts=())
+        self.assertIn("favs", own["extras"]["family_records"]["proven"], "twelve wins with a spread pass the t bound alone")
+        self.assertNotIn("favs", house["extras"]["family_records"]["proven"],
+                         "twelve wins and no loss do not clear the House's loss-rate gate")
+        self.assertEqual(house["metrics"]["1"]["record"], "house")
+        self.assertEqual(own["metrics"]["1"]["record"], "scoreboard")
+
+    def test_the_record_is_the_houses_function_on_the_snapshot(self):
+        snap = self.favourites()
+        agents = gs.agents_of(snap)
+        records = gs.HouseRecords.open(snap, agents)
+        self.assertIsNotNone(records, "this checkout has the House's family record")
+        direct = records.compute(records, "favs", "kalshi", tape=records.tape)
+        rec = records.record("kalshi", "favs")
+        self.assertEqual(rec["n"], direct["n"])
+        self.assertEqual(rec["n"], 12)
+        self.assertEqual(rec["proven"], bool(direct["proven"]))
+        self.assertAlmostEqual(rec["mean"], direct["mean_log"])
+        self.assertEqual(rec["lcb"], direct.get("honest_bound", direct.get("bound")))
+        before = records.record("kalshi", "favs", through=snap.head_seq - 4)
+        self.assertLess(before["n"], rec["n"], "a record through an earlier ledger position has fewer events")
 
 
 # --------------------------------------------------------------------------------- metric 4
@@ -349,14 +389,45 @@ class DeathsTest(ScoreboardCase):
         f.died("d-2", 20)
         f.died("d-3", 30)
         f.row("ops.job", "house", 31, {})
-        four = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["4"]  # window: 7 h to 31 h
+        four = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["4"]  # window: 7 h to 31 h
         self.assertEqual(four["deaths"], 3)
         self.assertEqual(four["median_life_h"], 20.0)
         self.assertEqual(four["median_life_day_h"], 25.0)
         self.assertEqual(four["before_3_fills"], 2)
         self.assertEqual(four["share_before_3_fills"], round(2 / 3, 4))
-        four = gs.scoreboard(f.snapshot(), since=ts(15), hosts=())["metrics"]["4"]
+        four = gs.scoreboard(f.snapshot(), since=ts(15), hosts=(), house_records=False)["metrics"]["4"]
         self.assertEqual(four["deaths"], 2)
+
+    def test_deaths_among_agents_that_held_a_practice_seat(self):
+        """A replay-only agent (rung 0) cannot fill: the seated measure leaves it out, and a seat taken
+        after the death, or a seat never taken, does not count."""
+        f = self.floor
+        f.born("r-0", 0, desk="kalshi-crypto-15m")  # replay only: never seated
+        f.born("s-1", 0)
+        f.verdict("s-1", 1, "seat", 0, 1)
+        f.buy("s-1", 2, "kalshi-shadow", "KXS1-26SEP24-1")
+        f.born("s-2", 0)
+        f.verdict("s-2", 1, "seat", 0, 1)
+        for i in range(3):
+            f.buy("s-2", 2 + i, "kalshi-shadow", f"KXS2-26SEP24-{i}")
+        f.verdict("s-2", 6, "demote", 1, 0)  # back to replay before it died: it held a seat
+        f.born("late", 0)
+        f.died("r-0", 10)
+        f.died("s-1", 12)
+        f.died("s-2", 20)
+        f.died("late", 21)
+        f.verdict("late", 22, "seat", 0, 1)  # after the death: not a seat it held
+        f.row("ops.job", "house", 23, {})
+        four = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["4"]
+        self.assertEqual(four["deaths"], 4)
+        self.assertEqual(four["before_3_fills"], 3)
+        self.assertEqual(four["seated_deaths"], 2)
+        self.assertEqual(four["median_life_seated_h"], 16.0)
+        self.assertEqual(four["seated_before_3_fills"], 1)
+        self.assertEqual(four["share_seated_before_3_fills"], 0.5)
+        text = gs.render_text(gs.scoreboard(f.snapshot(), hosts=(), house_records=False), markdown=True)
+        self.assertIn("seated: 2 deaths", text)
+        self.assertIn("agents that held a practice seat: 2 deaths", text)
 
 
 # --------------------------------------------------------------------------------- metric 5
@@ -394,7 +465,7 @@ class LabTest(ScoreboardCase):
         f.born("r-2", 2, parent="r-1")
         f.row("eval.trial", "r-2", 3, {"passed": True, "family": "fam"})
         f.row("ops.job", "house", now, {})
-        five = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["5"]
+        five = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["5"]
         self.assertEqual(five["batches_last_hour"], 2)
         self.assertEqual((five["born_graduates_llm"], five["born_graduates"]), (2, 4))
         self.assertEqual(five["llm_share"], 0.5)
@@ -419,7 +490,7 @@ class ExitsAndStackingTest(ScoreboardCase):
         f.row("book.refused", "x-1", 9, {"intent_id": "i-buy", "reasons": reason})
         f.row("book.refused", "x-1", 9, {"intent_id": "i-sell", "reasons": ["below the venue minimum"]})
         f.row("ops.job", "house", 10, {})
-        six = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["6"]["self_cross"]
+        six = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["6"]["self_cross"]
         self.assertEqual((six["self_cross_refusals"], six["reducing"]), (2, 1))
 
     def test_a_promotion_on_stacked_strikes_of_one_game(self):
@@ -433,7 +504,7 @@ class ExitsAndStackingTest(ScoreboardCase):
             f.settle("k-2", 1 + i, "kalshi-shadow", f"KXMLBTOTAL-26SEP24GAME{i}-{strike}", 1)
         f.verdict("k-1", 4, "promote", 1, 2, via="allocator")
         f.verdict("k-2", 4, "promote", 1, 2, via="allocator")
-        stacked = gs.scoreboard(f.snapshot(), hosts=())["metrics"]["6"]["stacked"]
+        stacked = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["6"]["stacked"]
         rows = {r["agent"]: r for r in stacked["rows"]}
         self.assertEqual((rows["k-1"]["closes"], rows["k-1"]["events"], rows["k-1"]["stacked"]), (3, 1, True))
         self.assertFalse(rows["k-1"]["passes_settled_per_event"])
@@ -525,6 +596,23 @@ class EvidenceClockTest(ScoreboardCase):
                                                    "km_median_h": 9.0, "censored_longest_h": 4.0})
         self.assertEqual(clocks["alpaca-crypto-alts"]["median_reached_h"], 3.0)
 
+    def test_the_houses_closing_sale_is_not_the_members_settlement(self):
+        """A member with two closes that died holding a third position did not reach its third
+        settlement when the House sold that position (the House's own clock since the B-seats review)."""
+        f = self.floor
+        f.born("h-1", 0, venue="alpaca", desk="alpaca-crypto-alts", horizon="hour")
+        f.buy("h-1", 1, "alpaca-paper", "SOL/USD", right=None)
+        f.sell("h-1", 2, "alpaca-paper", "SOL/USD", 0.1)
+        f.sell("h-1", 3, "alpaca-paper", "SOL/USD", 0.1)
+        f.died("h-1", 4)
+        f.sell("h-1", 4.5, "alpaca-paper", "SOL/USD", -0.2, reason="the House is closing this account")
+        f.row("ops.job", "house", 6, {})
+        snap = f.snapshot()
+        agents, trades, *_ = self.parts(snap)
+        clocks = gs.evidence_clocks(snap, agents, trades, gs.own_fills(snap))["desks"]
+        self.assertEqual(clocks["alpaca-crypto-alts"]["reached"], 0)
+        self.assertEqual(clocks["alpaca-crypto-alts"]["censored_longest_h"], 3.0)
+
     def test_the_kaplan_meier_median(self):
         self.assertEqual(gs.kaplan_meier_median([(4, False), (9, True)]), 9)
         # Four at risk: an event at 1 h (0.75), one censored at 2 h, an event at 3 h (0.75 x 2/3 = 0.5).
@@ -538,7 +626,7 @@ class RenderingTest(ScoreboardCase):
         f = self.floor
         f.born("a-1", 0)
         f.row("ops.job", "house", 1, {})
-        board = gs.scoreboard(f.snapshot(), hosts=())
+        board = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)
         text = gs.render_text(board)
         for number, _, _, functions in gs.summary_rows(board):
             self.assertIn(f"[{functions}]", text)

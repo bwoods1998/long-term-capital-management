@@ -129,6 +129,236 @@ PROBE_BOX = "house-probe"
 ORDER_INVARIANTS_EVERY_SECONDS = 60.0
 ORDER_INVARIANTS_FIRST_ROWS = 2000
 QUIET_ROUND_THE_CLOCK_SECONDS = 1800.0
+#: Warnings that repeat are defects (L3, Sept 24, 2026): the same warning text (`alert_key`) this many
+#: times inside the window is ONE error alert, and it is listed in health.json `repeating_warnings`
+#: until it has been quiet for the window. "the lab's step failed (IndexError: list index out of
+#: range)" was a warning 115 times in 2 h 18 min on Sept 23-24, 43 of them in two hours, and nothing
+#: escalated; at this rule it would have been an error, with its traceback, at 23:44:48Z.
+REPEAT_WARNINGS = 10
+REPEAT_WINDOW_SECONDS = 1800.0
+#: A session the provider broke gives the agent its turn back this soon (`House.research`).
+PROVIDER_RETRY_SECONDS = 900.0
+#: The lab evaluated nothing for this long while its queue was not empty: a health failure (L3).
+LAB_IDLE_SECONDS = 3600.0
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_NUMBERED = re.compile(r"[\w.:/@+\-]*\d[\w.:/@+\-]*")
+
+
+def alert_key(text: Any) -> str:
+    """What makes two warnings the same text: ids and numbers folded, so "failed 3 times" and "failed
+    4 times" are one, and two agents' identical failures with two order ids are one. A UUID becomes
+    `<id>` and every token that carries a digit (a count, an amount, a time, an agent or order id, a
+    URL with a version in it) becomes `#`; words stay, so two books or two desks stay apart."""
+    folded = _NUMBERED.sub("#", _UUID.sub("<id>", str(text or "")))
+    return re.sub(r"\s+", " ", folded).strip()[:300]
+
+
+def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str) -> dict[str, Any]:
+    """Count one warning of `text`, written at `now` (`stamp` in ISO), into its run of repeats: runs
+    quiet for the window are dropped first, and a run keeps the times inside the window."""
+    for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+        runs.pop(quiet)
+    run = runs.setdefault(alert_key(text), {"first_seen": stamp, "count": 0, "times": [], "escalated": None})
+    run["count"] = int(run.get("count") or 0) + 1
+    run["times"] = [t for t in run.get("times") or [] if now - float(t) < REPEAT_WINDOW_SECONDS][-4 * REPEAT_WARNINGS:] + [now]
+    run.update(text=text[:300], last_seen=stamp, last_epoch=now)
+    return run
+
+
+#: The evidence clock (S1, the close-the-gaps run, Sept 24, 2026): per desk, the Kaplan-Meier median hours
+#: from a member's first own fill to its third independent settlement (distinct events on the event
+#: books, closed trades on Alpaca, any book), over the members whose first fill is in the last
+#: `EVIDENCE_CLOCK_DAYS`, measured again once a day. The scoreboard (`scripts/gap_scoreboard.py`
+#: `evidence_clocks`) measured it at T0: kalshi-crypto-15m 1.9 h, alpaca-crypto-alts 3.8, kalshi-crypto-
+#: strikes 4.4, alpaca-megacaps 4.4, alpaca-index-etfs 18.1, kalshi-sports 20.5, alpaca-options 23.9,
+#: kalshi-weather 31.8, kalshi-prices 36.5, while the seat clock was twelve hours for every desk.
+EVIDENCE_CLOCK_DAYS = 7.0
+EVIDENCE_CLOCK_REFRESH_SECONDS = 86400.0
+EVIDENCE_CLOCK_SETTLEMENTS = 3
+#: A resident with this many fills of its own since its program's opportunity is displaced only by a
+#: newcomer whose forward score beats its own forward record (S1).
+FORWARD_RULE_FILLS = 3
+#: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
+HOUSE_CLOSING = "the House is closing"
+#: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
+#: (Sept 24, 2026: 107 identical refusals of a 0.000000001 LINK/USD sale in 12 hours).
+WIND_DOWN_REFUSALS = 3
+#: ...and it is tried again this long after the last refusal (the review of #245, Sept 24, 2026): a refusal that is
+#: transient but identical three times in a row (an outage, a rate limit, a halt) must not strand a holding for good.
+WIND_DOWN_RETRY_SECONDS = 86400.0
+
+#: L1 (Sept 24, 2026): the words with which a research child's own account of its program names its
+#: parent's ENTRY mechanism as the defect -- the liquidity it takes, the fee that costs, the side it
+#: buys -- and the fix. Read together with the parent's own entry fills (`House._entry_fills`), never alone:
+#: mullins-14's birth reason says "post-only" about a maker parent's code and names no defect of it.
+_DEFECT_WORDS = re.compile(r"\b(defects?|fix(?:es|ed)?|wrong|replac(?:e|es|ed|ing)|switch(?:es|ed)?|instead of|loses|losing|bleeds?)\b", re.I)
+_TAKER_WORDS = re.compile(r"\b(takers?|marketable|cross(?:es|ing)? the (?:touch|spread)|at the ask|lift(?:s|ing)? the (?:ask|offer)|market orders?)\b", re.I)
+_MAKER_WORDS = re.compile(r"\b(makers?|post[- ]only|resting (?:bids?|orders?|limits?)|rest(?:s|ing)? (?:a |its )?(?:bids?|limits?)|join(?:s|ing)? the bid)\b", re.I)
+_FEE_WORDS = re.compile(r"\bfees?\b", re.I)
+#: A claim that the side is wrong, never a description of what is bought: "the opposite side of the favourite" names
+#: no defect (the review of #245, Sept 24, 2026: with it, any child that bought NO retired a parent that entered at all).
+_SIDE_WORDS = re.compile(r"\bwrong side\b|\bside (?:is|was) wrong\b|\bflip(?:s|ped|ping)? (?:the |its )?side\b", re.I)
+
+
+def entry_defect(text: str) -> str | None:
+    """Which part of an entry mechanism a research child's account of its program names as the defect:
+    "liquidity" (a taker entry, fixed by resting maker orders), "fee" (the fee a taker entry pays, fixed
+    the same way), "side" (the side it buys), or None when it names none of them as a defect.
+
+    Every kind needs a defect claimed in so many words (the review of #245, Sept 24, 2026). An account that
+    speaks of makers and takers is about liquidity whatever else it says, so the parent's taker entries and
+    the child's post-only program are checked (`House._corrected_entry`): meriwether-44's birth reason calls
+    its parent's TAKER "the wrong side" of a maker edge, and as a "side" defect it retired a MAKER parent."""
+    text = str(text or "")
+    if not _DEFECT_WORDS.search(text):
+        return None
+    maker, taker = _MAKER_WORDS.search(text), _TAKER_WORDS.search(text)
+    if maker and taker:
+        return "liquidity"
+    if maker and _FEE_WORDS.search(text):
+        return "fee"
+    if not (maker or taker) and _SIDE_WORDS.search(text):
+        return "side"
+    return None
+
+
+def posts_maker_entries(code: str) -> bool:
+    """Whether a strategy file rests its entries post-only: some intent literal in it is a buy with
+    `post_only` True (a dict literal or `dict(...)` call, read with `ast`, never run). A maker fix of a taker
+    entry is a program that does this; a child that moves to market orders "for a guaranteed taker fill"
+    (meriwether's rewrite of Sept 21, 2026) names makers and takers too, and fixes nothing of the kind.
+    Measured on the T0 snapshot (Sept 24, 2026): all 145 of 503 programs that set `post_only` True do it on
+    a buy literal; meriwether-h2d625d's KXMLBTOTAL file does not, nor its child's first (moneyline) file."""
+    import ast
+
+    try:
+        tree = ast.parse(str(code or ""))
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            pairs = {k.value: v for k, v in zip(node.keys, node.values) if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dict":
+            pairs = {k.arg: k.value for k in node.keywords if k.arg}
+        else:
+            continue
+        side, post = pairs.get("side"), pairs.get("post_only")
+        if isinstance(side, ast.Constant) and side.value == "buy" and isinstance(post, ast.Constant) and post.value is True:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class Newcomer:
+    """Who asks for a seat (S1, the close-the-gaps run, Sept 24, 2026): its family and venue, whose pooled
+    record the allocator keeps (`Allocator.family`: proven or not), and its forward score (`Lab.forward_score`,
+    None without one). A caller that does not know yet which newcomer it seats -- the House's own mutation
+    refill, the foundry's card pass -- passes none: an unproven newcomer with no forward score."""
+
+    family: str | None = None
+    venue: str | None = None
+    forward: float | None = None
+    what: str = ""
+
+
+def kaplan_meier_median(times: Sequence[tuple[float, bool]]) -> float | None:
+    """The median of (time, reached) with the unreached censored at their time (as the scoreboard's
+    `kaplan_meier_median`); None when the survival curve never falls to one half."""
+    rows = sorted(times)
+    at_risk, survival = len(rows), 1.0
+    i = 0
+    while i < len(rows):
+        t = rows[i][0]
+        events = censored = 0
+        while i < len(rows) and rows[i][0] == t:
+            events += 1 if rows[i][1] else 0
+            censored += 0 if rows[i][1] else 1
+            i += 1
+        if events:
+            survival *= 1.0 - events / at_risk
+            if survival <= 0.5:
+                return t
+        at_risk -= events + censored
+    return None
+
+
+def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, days: float = EVIDENCE_CLOCK_DAYS,
+                            settlements: int = EVIDENCE_CLOCK_SETTLEMENTS) -> dict[str, dict[str, Any]]:
+    """Per desk: the hours from a member's first own fill to its `settlements`-th independent settlement,
+    for the members whose first own fill is in the last `days` -- the scoreboard's definition, read from the
+    House's own ledger (Sept 24, 2026). An own fill is a venue or cross fill, never the House's closing sale;
+    a settlement is a `book.settle` or a sale that left the position flat, on any book, counted once per
+    EVENT on the event books (`evaluator.event_key`, the allocator's count) and once per trade on Alpaca,
+    after each book's evidence cutoff -- never the House's closing sale either: a forced exit at a death
+    says nothing of how long the desk's markets take (the review of #245). A settlement after a death is
+    the market's own verdict and counts. A member that has not reached it is censored at its death or now.
+
+    Each desk: `members`, `reached`, `hours` (the Kaplan-Meier median, None when it is not reached: most
+    members never traded enough to measure how long the desk's markets take, which says nothing of the
+    markets' clock, so the plain grace stands there), `median_reached_hours` and `longest_waiting_hours`."""
+    from .evaluator import EVENT_BOOKS, event_key
+
+    start = now - days * 86400.0
+    rows = list(ledger.iter(kinds=("book.fill", "book.settle", "book.fill_correction", "book.baseline")))
+    cutoffs: dict[tuple[str, str], int] = {}
+    for entry in rows:
+        p = entry.payload
+        if entry.kind == "book.fill_correction":
+            key = (entry.agent, str(p.get("book")))
+            cutoffs[key] = max(cutoffs.get(key, 0), entry.seq)
+        elif entry.kind == "book.baseline":
+            for repair in p.get("repairs") or []:
+                if isinstance(repair, Mapping):
+                    key = (str(repair.get("agent")), str(p.get("book")))
+                    cutoffs[key] = max(cutoffs.get(key, 0), entry.seq)
+    first: dict[str, float] = {}
+    closes: dict[str, list[tuple[float, str]]] = {}
+    for entry in rows:
+        if entry.kind not in ("book.fill", "book.settle") or entry.agent == HOUSE:
+            continue
+        p = entry.payload
+        book = str(p.get("book"))
+        if entry.seq <= cutoffs.get((entry.agent, book), 0):
+            continue
+        at = _epoch(entry.at)
+        if entry.kind == "book.fill" and p.get("source") in ("venue", "cross") \
+                and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
+            first.setdefault(entry.agent, at)
+        closing = str(p.get("reason") or "").startswith(HOUSE_CLOSING)  # the House's sale at a death, never the member's
+        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)
+                                           and not closing):
+            key = (event_key(p.get("instrument")) if book in EVENT_BOOKS else None) or f"#{entry.seq}"
+            closes.setdefault(entry.agent, []).append((at, key))
+    desks: dict[str, list[tuple[float, bool]]] = {}
+    for agent in agents:
+        began = first.get(agent.id)
+        if began is None or began < start or not agent.specialty:
+            continue
+        seen: set[str] = set()
+        third = None
+        for at, key in closes.get(agent.id, ()):
+            if at < began:
+                continue
+            seen.add(key)
+            if len(seen) >= settlements:
+                third = at
+                break
+        if third is not None:
+            desks.setdefault(agent.specialty, []).append(((third - began) / 3600.0, True))
+        else:
+            ended = _epoch(agent.died_at) if not agent.alive and agent.died_at else now
+            desks.setdefault(agent.specialty, []).append((max(0.0, ended - began) / 3600.0, False))
+    out: dict[str, dict[str, Any]] = {}
+    for desk, times in sorted(desks.items()):
+        reached = sorted(t for t, ok in times if ok)
+        waiting = [t for t, ok in times if not ok]
+        median = kaplan_meier_median(times)
+        middle = (reached[(len(reached) - 1) // 2] + reached[len(reached) // 2]) / 2 if reached else None
+        out[desk] = {"members": len(times), "reached": len(reached),
+                     "hours": None if median is None else round(median, 1),
+                     "median_reached_hours": None if middle is None else round(middle, 1),
+                     "longest_waiting_hours": round(max(waiting), 1) if waiting else None}
+    return out
 
 
 @dataclass
@@ -221,6 +451,13 @@ class House:
         self._base_game = deepcopy(dict(game or load_game()))
         self._burst = active(campaigns, clock)
         self.game = game_for(self._base_game, self._burst)
+        # L2 (Sept 24, 2026): turbo.json `sail_research_usd_per_hour`, the Sail research cap
+        # (`_sail_cap_state`). It only ever holds research back, so it applies with or without a burst.
+        from .overnight import load_turbo
+
+        cap = load_turbo().get("sail_research_usd_per_hour")
+        self._sail_research_cap: Decimal | None = Decimal(str(cap)) if cap is not None else None
+        self._sail_cap_cache: tuple[float, dict[str, Any]] | None = None
         if self._burst:
             from .overnight import policy_with_turbo
             accelerated = policy_with_turbo(self._burst)
@@ -256,7 +493,7 @@ class House:
         self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.options_history: Any = None  # set by the service: listed-option history (`league/options_history.py`)
-        self.feeds: Any = None  # set by the service: scoreboards, perp funding, DVOL and settled funding (`league/feeds.py`)
+        self.feeds: Any = None  # set by the service: the recorded feeds (`league/feeds.py`: scoreboards, perps, DVOL, funding, weather, earnings, rates ...)
         self._feeds_waiting: dict[str, float] = {}  # agent -> when it was last said its replay waits for recorded feeds
         self._feed_requests_at = 0.0  # when the tool requests the feeds answer were last looked at
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
@@ -339,6 +576,11 @@ class House:
         self._deferred_told: dict[str, float] = {}
         #: When each desk last lost a resident to displacement (`kill`): one a desk a tick (`_displaceable`).
         self._desk_displaced: dict[str, float] = {}
+        #: The desks' evidence clocks are measured by one thread at a time (`evidence_clocks`, S1).
+        self._clock_lock = threading.Lock()
+        #: (parent, its code, child, its code) -> when L1 last found no corrected entry there
+        #: (`_supersede_by_research`): the look is taken again at most hourly a pair.
+        self._supersede_seen: dict[tuple[str, str, str, str], float] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -389,6 +631,9 @@ class House:
         # configured; its tools for researchers, and longer sessions for agents with evidence.
         from .lab import attach as attach_lab
         attach_lab(self)
+        # The desks' evidence clocks (S1, Sept 24, 2026), measured at startup when the stored reading is a
+        # day old or missing: a few thousand fill rows, well under a second, before any seat is judged.
+        self.evidence_clocks()
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -592,8 +837,91 @@ class House:
     def alert(self, level: str, text: str, **payload: Any) -> None:
         """An `ops.alert` row. `payload` rides in the same row beside the level and the text (D1,
         Sept 24, 2026: the Alpha Lab's step sends its traceback as `_traceback`; a key that starts
-        with an underscore is private, and `ledger.public_view` strips it from everything published)."""
-        self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
+        with an underscore is private, and `ledger.public_view` strips it from everything published).
+
+        A warning that repeats escalates (L3, Sept 24, 2026; `_repeating`): the same text
+        (`alert_key`) `REPEAT_WARNINGS` times inside `REPEAT_WINDOW_SECONDS` becomes ONE error alert
+        carrying the last warning's payload -- its traceback when the caller supplied one -- with
+        `repeated` (the folded text, the count, first and last seen) and `began_at` (when the run of
+        repeats began: `league/watchdog.py` counts an error whose condition began before a promotion
+        as inherited, never as the new release's doing)."""
+        row = self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
+        if str(level).lower() == "warning":
+            self._repeating(str(text), payload, seq=getattr(row, "seq", None))
+
+    def _repeating(self, text: str, payload: Mapping[str, Any], *, seq: int | None = None) -> None:
+        """Count one warning toward its run of repeats; escalate once when the run reaches the line.
+        The runs live in the House's state (house.json), so a restart neither forgets a run nor
+        escalates it again; a House whose state holds none rebuilds them from the ledger
+        (`_repeating_runs`, before `seq`: this warning's own row, which is counted here)."""
+        lock, state = getattr(self, "_state_lock", None), getattr(self, "_state", None)
+        if lock is None or state is None:
+            return  # an alert raised while the House is still being built
+        now = self.clock()
+        key = alert_key(text)
+        escalate = None
+        with lock:
+            run = _count_repeat(self._repeating_runs(before=seq), text, now, now_iso(self.clock))
+            if len(run["times"]) >= REPEAT_WARNINGS and not run.get("escalated"):
+                run["escalated"] = now_iso(self.clock)
+                escalate = {k: run[k] for k in ("first_seen", "last_seen", "count")} | {"in_window": len(run["times"])}
+        if escalate is not None:
+            minutes = int(REPEAT_WINDOW_SECONDS // 60)
+            self.ledger.append("ops.alert", {
+                **payload, "level": "error",
+                "text": f"a warning repeated {escalate['in_window']} times in {minutes} minutes: {text}"[:1000],
+                "repeated": {"text": key, "count": escalate["count"], "first_seen": escalate["first_seen"], "last_seen": escalate["last_seen"]},
+                "began_at": escalate["first_seen"]})
+
+    def _repeating_runs(self, *, before: int | None = None) -> dict[str, Any]:
+        """The runs of repeats in the House's state (call under `_state_lock`). A state that holds
+        none -- the first start of this code over an older House's house.json, or a lost house.json
+        -- rebuilds them from the ledger's own recent warnings and escalations, so a condition that
+        was already repeating keeps the moment it began and an escalated run is not said again.
+
+        Review of #236 (Sept 24, 2026): Deploy A's House counted no runs, so Deploy B's House would
+        have begun every run at its own restart, and a warning that repeated all through Deploy A (a
+        site refusing every checkpoint: 11 in the 12 minutes after three restarts on Sept 23) would
+        have escalated inside Deploy B's watch with `began_at` after the promotion -- and the
+        watchdog would have rolled the healthy release back for a condition it inherited."""
+        runs = self._state.get("repeating_warnings")
+        if isinstance(runs, dict):
+            return runs
+        runs = {}
+        try:
+            rows = self.ledger.read(kinds="ops.alert", limit=2000, newest=True)
+        except Exception:  # noqa: BLE001 - a ledger that cannot be read leaves the runs to begin now
+            rows = []
+        for entry in rows:
+            if before is not None and entry.seq >= before:
+                continue  # the warning being counted now
+            level, repeated = str(entry.payload.get("level") or "").lower(), entry.payload.get("repeated")
+            try:
+                at = _epoch(entry.at)
+            except (TypeError, ValueError):
+                continue
+            if level == "error" and isinstance(repeated, Mapping):
+                escalated = runs.get(str(repeated.get("text") or ""))
+                if escalated is not None:
+                    escalated["escalated"] = entry.at
+            elif level == "warning":
+                _count_repeat(runs, str(entry.payload.get("text") or ""), at, entry.at)
+        now = self.clock()
+        for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+            runs.pop(quiet)
+        self._state["repeating_warnings"] = runs
+        return runs
+
+    def _repeating_health(self) -> list[dict[str, Any]]:
+        """health.json `repeating_warnings`: each escalated run until it has been quiet for the window."""
+        now = self.clock()
+        with self._state_lock:
+            runs = self._repeating_runs()
+            for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+                runs.pop(quiet)
+            return [{"text": run.get("text"), "key": key, "count": run.get("count"), "first_seen": run.get("first_seen"),
+                     "last_seen": run.get("last_seen"), "escalated_at": run.get("escalated")}
+                    for key, run in sorted(runs.items(), key=lambda kv: str(kv[1].get("first_seen"))) if run.get("escalated")]
 
     # ------------------------------------------------------- a tick that never blocks
     def _box_patience(self) -> Any:
@@ -742,7 +1070,9 @@ class House:
                     break
                 # The seat of an agent still running the code this strategy corrects (it cannot be
                 # promoted: its defect is on record), else the weakest resident that has had its chance.
-                loser = self._defective_resident(row) or self._weakest(rules, evidenced=True, exclude=self._keep_for(reserved))
+                loser = self._defective_resident(row) or self._weakest(
+                    rules, evidenced=True, exclude=self._keep_for(reserved),
+                    newcomer=Newcomer(family=row.get("family"), venue=_code_venue(row["code"]), what=f"the merged strategy {row['name']}"))
                 if loser is None:
                     self._refuse_birth("strategies", len(rows) - len(born),
                                        "the league is full and no resident may be displaced, even by a newcomer with forward evidence"
@@ -762,6 +1092,7 @@ class House:
                     f"the league was full and the merged strategy {row['name']} ({child.id}) takes its seat"))
         if self.settings.enroll_displaces:
             self._retire_superseded()
+        self._supersede_by_research()  # L1: the research route joins the repair route (the constitution's key gates it)
         return born
 
     def _defective_shas(self, row: Mapping[str, Any]) -> set[str]:
@@ -807,6 +1138,190 @@ class House:
                                                f"(repair {row['repair'].get('key')}); the corrected child is judged on its own evidence")
                 retired += 1
         return retired
+
+    #: How long an L1 look that found no corrected entry is not taken again (`_supersede_by_research`).
+    SUPERSEDE_RECHECK_SECONDS = 3600
+
+    def _supersede_by_research(self) -> int:
+        """L1 (the close-the-gaps run, Sept 24, 2026; `CONSTITUTION["allocator"]["corrected_child_supersedes"]`,
+        off without the key): when a research child of a living parent has passed replay and its own account
+        of its program names the parent's ENTRY mechanism as the defect -- the liquidity it takes, the fee
+        that costs, the side it buys (`entry_defect`), borne out by the parent's own entry fills
+        (`_entry_fills`) -- the parent is superseded at once: demoted to practice through the evaluator first
+        when it is on real money, then retired as `superseded`, as the engineer's repair route retires the
+        agents a merged corrected child replaces (`_retire_superseded`). The child keeps its seat and enters
+        real money when the allocator's rules seat it on its own evidence, as a probe or a bunt by its
+        family's state; the House stakes nothing here. Evidence: meriwether-h2d625d kept taking 7%-fee taker
+        moneylines on real money after its child meriwether-h2d625d-2 passed replay (40 trades) with the
+        maker fix at 00:18:31Z Sept 24. Returns how many parents it superseded."""
+        if allocator_module.rules().get("corrected_child_supersedes") is not True:
+            return 0
+        now = self.clock()
+        done = 0
+        for child in list(self.registry.living()):
+            parent = self.registry.get(child.parent) if child.parent else None
+            if parent is None or not parent.alive or parent.code_sha256 == child.code_sha256:
+                continue
+            key = (parent.id, parent.code_sha256, child.id, child.code_sha256)
+            if now - self._supersede_seen.get(key, float("-inf")) < self.SUPERSEDE_RECHECK_SECONDS:
+                continue
+            why = self._corrected_entry(parent, child)
+            if why is None:
+                self._supersede_seen[key] = now
+                continue
+            done += self._supersede(parent, child, why)
+        return done
+
+    def _corrected_entry(self, parent: Agent, child: Agent) -> str | None:
+        """Why `child` supersedes `parent` under L1, or None: the child is seated on paper or above, research
+        wrote its current program (its parent's research candidate, or its own rewrite), that program passed
+        replay, its account of itself names an entry defect of the PARENT's current program, and the programs
+        bear it out -- a liquidity or fee defect needs a parent whose entries were takers and a child whose
+        program rests its entries post-only (`posts_maker_entries`), a side defect a parent that entered at
+        all. A maker parent is never superseded for "post-only" in its child's words (mullins-2 and mullins-14),
+        nor a taker parent for a child that takes too."""
+        if self.evaluator.rung(child.id) < 1:
+            return None
+        account = self._program_account(parent, child)
+        if account is None:
+            return None
+        passed = any(e.payload.get("passed") and e.payload.get("code_sha256") == child.code_sha256
+                     for who in (child.id, parent.id) for e in self.ledger.iter(kinds="eval.trial", agent=who))
+        if not passed:
+            return None
+        kind = entry_defect(account)
+        if kind is None:
+            return None
+        taker, maker = self._entry_fills(parent)
+        if kind in ("liquidity", "fee"):
+            if not (taker and taker >= maker and posts_maker_entries(child.code)):
+                return None
+            proven = self._taker_proven(parent)
+            if proven is not None:
+                # A maker "fix" of a mechanism whose family's pooled TAKER record is proven positive -- the record the
+                # real book's X0 rule reads to let that family take -- is not a defect fix (the main session's
+                # decision on the review of #245, Sept 24, 2026). Told once, as L1 tells its supersessions.
+                self._note_supersede_skipped(parent, child, kind, proven)
+                return None
+        if kind == "side" and not (taker or maker):
+            return None
+        return (f"{kind}: its account names the parent's entry as the defect, and {taker} of the parent's "
+                f"{taker + maker} entry fills were takers")
+
+    def _program_account(self, parent: Agent, child: Agent) -> str | None:
+        """The research account of the child's CURRENT program, when it is an account of its PARENT's current
+        program -- the one whose entries the parent trades:
+        - the purpose of the child's own rewrite (the `agent.strategy` row that adopted its current code),
+          when the program that rewrite replaced was the parent's current code (a mutation or copy of the
+          parent, fixed in place);
+        - else the reason it was born with, when it was born with new code from its parent's research
+          candidate while the parent ran the program it runs now, and it runs that code still.
+        None otherwise: a House mutation, a lab graduate, and a child whose rewrite fixed its OWN earlier
+        program. The review of #245 (Sept 24, 2026): meriwether-h2d625d trades KXMLBTOTAL unders; its child
+        meriwether-h2d625d-2 was born with a moneyline-favourites file its parent never ran and then fixed that
+        file's taker entry ("the current file buys at the ask"). Read as the parent's defect, L1's first pass
+        would have retired the floor's best real record (5 of 5 real settlements won) for it."""
+        changes: list[tuple[int, str | None, str, str, str]] = []  # (seq, code it replaced, its code, reason, kind)
+        current = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=child.id):
+            code = entry.payload.get("code_sha256")
+            if not code or code == current:
+                continue  # the House's own row after a rewrite ("it rewrote itself", `was`) repeats the code
+            changes.append((entry.seq, current, str(code), str(entry.payload.get("reason") or ""), entry.kind))
+            current = code
+        adopted = next((row for row in reversed(changes) if row[2] == child.code_sha256), None)
+        if adopted is None:
+            return None
+        _, replaced, _, reason, kind = adopted
+        if kind == "agent.strategy":
+            if replaced != parent.code_sha256 or not reason or reason.startswith("it rewrote itself"):
+                return None
+            return reason
+        fork = next((e for e in self.ledger.iter(kinds="agent.forked", agent=parent.id)
+                     if e.payload.get("child") == child.id and e.payload.get("new_code")), None)
+        if fork is None or self._code_at(parent, fork.seq) != parent.code_sha256:
+            return None
+        return reason
+
+    def _taker_proven(self, agent: Agent) -> dict[str, Any] | None:
+        """The agent's family's pooled TAKER record when it is proven positive, else None: read from the one source the
+        real book's `real_entry_liquidity` rule (X0) reads to let the family take -- `Allocator.family_taker`, which
+        the book is handed as `family_taker` -- never recomputed. None while the allocator is off, as the book reads it,
+        and when the record cannot be read (the book then treats the family as unproven too)."""
+        reader = getattr(getattr(self, "allocator", None), "family_taker", None)
+        if reader is None:
+            return None
+        try:
+            record = reader(agent.id)
+        except Exception:  # noqa: BLE001 - `Allocator.family_taker` never raises; an unreadable record proves nothing
+            return None
+        return dict(record) if isinstance(record, Mapping) and record.get("positive") is True else None
+
+    def _note_supersede_skipped(self, parent: Agent, child: Agent, kind: str, taker: Mapping[str, Any]) -> None:
+        """Tell once a pair (house.json `supersede_skipped`, so a restart does not tell it again) that L1 left a parent
+        in place because its family's taker record is proven: an info alert with the record, beside the alerts that
+        tell L1's supersessions."""
+        key = f"{parent.id}|{parent.code_sha256[:16]}|{child.id}|{child.code_sha256[:16]}"
+        with self._state_lock:
+            told = self._state.setdefault("supersede_skipped", {})
+            if key in told:
+                return
+            told[key] = now_iso(self.clock)
+            while len(told) > 200:
+                told.pop(next(iter(told)))
+        bound = taker.get("bound")
+        measured = f"{int(taker.get('n') or 0)} taker settlements" + ("" if bound is None else f", bound {float(bound):+.4g}")
+        self.alert("info", f"{parent.id} is not superseded by its research child {child.id}: the child's account names a {kind} "
+                           f"defect of the parent's taker entry, but the family {parent.family}'s pooled taker record is proven "
+                           f"positive ({measured}), which is what lets the family take on the real book: a maker fix of a "
+                           "proven taker mechanism is not a defect fix (allocator.corrected_child_supersedes)",
+                   parent=parent.id, child=child.id, family=parent.family, defect=kind, taker=dict(taker),
+                   rule="allocator.corrected_child_supersedes")
+
+    def _code_at(self, agent: Agent, seq: int) -> str | None:
+        """The code an agent ran at a ledger position: its birth's, or its latest `agent.strategy` row's before it."""
+        code = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=agent.id):
+            if entry.seq > seq:
+                break
+            code = entry.payload.get("code_sha256") or code
+        return code
+
+    def _entry_fills(self, agent: Agent) -> tuple[int, int]:
+        """(taker, maker) counts of the agent's own entry fills (buys, venue or cross) on every book."""
+        taker = maker = 0
+        for entry in self.ledger.iter(kinds="book.fill", agent=agent.id):
+            p = entry.payload
+            if p.get("side") != "buy" or p.get("source") not in ("venue", "cross"):
+                continue
+            taker += p.get("liquidity") == "taker"
+            maker += p.get("liquidity") == "maker"
+        return taker, maker
+
+    def _supersede(self, parent: Agent, child: Agent, why: str) -> bool:
+        """Supersede one parent (L1): on real money, demoted to practice through the evaluator first, as the
+        allocator demotes (`Allocator._move_down`: a `demote` verdict a rung, with its band numbers); then
+        retired as `superseded`, which winds its books down (a Kalshi contract is held to settlement)."""
+        with self._lifecycle_lock:
+            # Read outside the lock: the allocator's pass or a death may have moved either since (review of #245).
+            now_parent, now_child = self.registry.get(parent.id), self.registry.get(child.id)
+            if now_parent is None or not now_parent.alive or now_parent.code_sha256 != parent.code_sha256 \
+                    or now_child is None or not now_child.alive or now_child.code_sha256 != child.code_sha256:
+                return False
+            rung = self.evaluator.rung(parent.id)
+            if rung >= 2:
+                band_from = "swing" if rung >= 3 else (self.allocator.tier(parent) if allocator_module.enabled() else "bunt")
+                numbers = {"via": "house", "band_from": band_from, "band_to": "paper", "stake_usd": None, "reason_detail": why,
+                           "superseded_by": child.id, "rule": "allocator.corrected_child_supersedes"}
+                while self.evaluator.rung(parent.id) > 1:
+                    self.evaluator.demote(parent.id, f"superseded: its research child {child.id} passed replay with a fix to its "
+                                                     f"entry mechanism ({why})", numbers)
+            self.kill(parent, "superseded", f"its research child {child.id} passed replay with a fix to its entry mechanism ({why}); "
+                                            + ("it was demoted from real money first; " if rung >= 2 else "")
+                                            + "the child is judged on its own evidence and enters real money by its family's state")
+        self.alert("info", f"{parent.id} was superseded by its research child {child.id}"
+                           + (" and left real money" if rung >= 2 else "") + f": {why}")
+        return True
 
     def learn(self) -> int:
         """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook: once
@@ -1927,8 +2442,8 @@ class House:
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
-        # window (the backfilled vol and funding cover the live window): a strategy that reads either
-        # is replayed on the live tape.
+        # window (the backfilled history feeds cover the live window): a strategy that reads either is
+        # replayed on the live tape.
         if venue == "alpaca" and self.settings.deep_replay and not option and not wanted:
             deep = self._deep_tape(needs)
             if deep is not None:
@@ -2032,10 +2547,12 @@ class House:
         """Why the recorded feeds cannot carry a replay of these NEEDS; '' when they can. Every
         declared key must cover the replay gate's `min_blocks` blocks of the strategy's horizon inside
         the window (20 on Sept 22, 2026: twenty hours for an hourly strategy, twenty days for a daily
-        one) before a replay can judge a strategy that reads it. `sports` and `perps` are recorded
-        live and never backfilled, so that is twenty blocks of recording; `vol` and `funding` are
-        point-in-time history backfilled over the window (Sept 23, 2026), so they cover it as soon as
-        the backfill is in -- and a key still waiting for its first page is a wait, not missing data."""
+        one) before a replay can judge a strategy that reads it. The live feeds (`sports`, `perps` and
+        the live recorders of Sept 24, 2026) are never backfilled, so that is twenty blocks of
+        recording; the history feeds (`feeds.HISTORY_FEEDS`: `vol` and `funding` since Sept 23, the
+        forecast, earnings and open-interest histories since Sept 24) are point-in-time history
+        backfilled over the window, so they cover it as soon as the backfill is in -- and a key still
+        waiting for its first page is a wait, not missing data."""
         horizon = "day" if str(needs.get("horizon") or "") == "day" else "hour"
         block = 86400.0 if horizon == "day" else 3600.0
         need = int(CONSTITUTION["ladder"]["replay"]["min_blocks"])
@@ -2046,7 +2563,9 @@ class House:
             return (f"{feeds_module.BACKFILLING}: " + ", ".join(filling) + " -- the House is fetching their point-in-time history "
                     "(league/feeds.py), and the replay runs once it is in. A live wake is handed ctx['feeds'] as soon as a row is.")
         if missing:
-            polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in feeds_module.FEEDS}
+            # What the House records of the feeds these NEEDS declare (seventeen feeds since Sept 24, 2026:
+            # every key of all of them would bury the answer).
+            polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in wanted}
             return ("unsupported input: feeds not recorded: " + ", ".join(missing) + "; the House records "
                     + "; ".join(f"{feed} {', '.join(keys) or 'nothing'}" for feed, keys in polled.items()))
         blocks = {f"{feed} {key}": float(row.get("covered_seconds") or 0.0) / block for feed, key, row in rows}
@@ -2078,8 +2597,15 @@ class House:
 
     def _deep_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]] | None:
         """The development-window tape from the history store, or None when it is not all fetched
-        (then the live tape is used, exactly as before). Deep tapes are cached like live ones."""
+        (then the live tape is used, exactly as before). Deep tapes are cached like live ones.
+
+        A window the store HAS fetched and holds no bars of a symbol for (it did not trade yet) is
+        unsupported input, raised with that reason and never cached (Sept 24, 2026, D1's root: an
+        ADA/USD development tape over 2025-09-12..2025-11-14, where the store holds ADA/USD from
+        2026-02-01, was built with no steps, and the lab's step failed on it for hours). Replay,
+        research coverage and the lab read `tape_for`, so each says why and none counts a trial."""
         from . import deep_replay
+        from .history import series_without_bars
         from .tapes import TapeError
 
         store = self._history_store()
@@ -2096,8 +2622,14 @@ class House:
             with self._tape_lock:
                 hit = self._tapes.get(key)
                 if hit is None or self.clock() - hit[0] > 86400:
-                    self._tapes[key] = (self.clock(), deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
-                                                                          holdout=self.holdout_window)[1])
+                    empty = series_without_bars(store, deep_replay._symbols_of(needs), timeframe, start, end, feed=feed)
+                    if empty:
+                        raise ValueError("unsupported input: " + "; ".join(empty[:4]))
+                    tape = deep_replay.dev_tape(store, needs, feed=feed, days=self.settings.deep_replay_days or None,
+                                                holdout=self.holdout_window)[1]
+                    if not tape.get("steps"):
+                        raise ValueError(f"unsupported input: the development tape {key} has no steps: nothing was recorded in its window")
+                    self._tapes[key] = (self.clock(), tape)
                 return key, self._tapes[key][1]
         except TapeError:
             return None  # not fetched yet: a gap in the store is never a result against the strategy
@@ -2134,6 +2666,17 @@ class House:
             return all(self.evaluator.replay_gate(agent.family, r, lineage=lineage, counted=True)[0] for r in results.values())
 
         try:
+            # A sealed window the store holds no bars of a symbol for would be a failed run that spends
+            # one of the lineage's evaluations on nothing: refused before the seal is opened. Whether a
+            # symbol traded at all in the window is coverage, which `data.coverage` rows already
+            # publish; no price in the window is read (Sept 24, 2026).
+            from .history import series_without_bars
+
+            timeframe = str((needs.get("bars") or {}).get("timeframe") or "5Min")
+            empty = series_without_bars(store, deep_replay._symbols_of(needs), timeframe, self.holdout_window[0],
+                                        self.holdout_window[1], feed=feed)
+            if empty:
+                return {"evaluated": False, "refused": "unsupported input: " + "; ".join(empty[:4])}
             seal = deep_replay.HoldoutSeal(self.ledger, budget=self.settings.holdout_lineage_budget, window=self.holdout_window)
             return seal.evaluate(agent=agent.id, lineage=lineage[-1] if lineage else agent.id, code=code, params=params,
                                  run=run, passed=passed)
@@ -2600,7 +3143,10 @@ class House:
         if list(record.get("generation") or []) != list(generation):
             self._drop_audit(agent_id)
             return None
-        verdicts = list(self.ledger.iter(kinds="audit.verdict", agent=agent_id, after=int(record.get("since_seq") or 0)))
+        # A family swing's verdict (`family_swing`) is written against one member but is the family's, never this
+        # agent's own audit (review of #242, Sept 24, 2026).
+        verdicts = [e for e in self.ledger.iter(kinds="audit.verdict", agent=agent_id, after=int(record.get("since_seq") or 0))
+                    if not e.payload.get("family_swing")]
         if not verdicts:
             self._drop_audit(agent_id)
             return None
@@ -2638,7 +3184,8 @@ class House:
                           if e.seq == entered), None)
         if promotion is None or promotion.payload.get("decision") != "promote" or promotion.payload.get("audit_timing") != "after":
             return None
-        if any(not e.payload.get("error") for e in self.ledger.iter(kinds="audit.verdict", agent=agent.id, after=entered)):
+        if any(not e.payload.get("error") and not e.payload.get("family_swing")
+               for e in self.ledger.iter(kinds="audit.verdict", agent=agent.id, after=entered)):
             return None
         return dict(promotion.payload)
 
@@ -2787,8 +3334,9 @@ class House:
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
-            if rung == 2 and allocator_module.enabled() and self.allocator.tier(agent) != "bunt":
-                # Only a proven family's agent swings (Sept 24, 2026): a swing audit that finishes after its
+            if rung == 2 and allocator_module.enabled() and not self.allocator.swing_allowed(agent):
+                # Only a proven family's agent swings (Sept 24, 2026; the constitution's
+                # `allocator.swing_requires_proven_family` since Deploy B): a swing audit that finishes after its
                 # family's record stopped being proven does not commit (`Allocator.family` never raises).
                 self._promotion_status(agent, verdict, 'family', "its family's pooled record is not proven: "
                                                                   "only a proven family's agent swings")
@@ -3167,7 +3715,10 @@ class House:
         rules = self.game.get("audit") or {}
         if self._audit_charges_agent() and self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
             return {'stage': 'audit_credits', 'reason': 'the agent cannot cover its audit and operating credit floor'}
-        last = self.ledger.last("audit.verdict", agent=agent.id)
+        # The agent's own last verdict: a family swing's (`family_swing`, Deploy B) is written against one member of
+        # the family but judged the family's stake, and never starts this agent's cooldown (review of #242).
+        last = next((e for e in reversed(self.ledger.read(kinds="audit.verdict", agent=agent.id, limit=200, newest=True))
+                     if not e.payload.get("family_swing")), None)
         if last is None:
             return None
         current = getattr(self.auditor, 'policy_digest', None)
@@ -3225,6 +3776,14 @@ class House:
             quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
             if quantity <= 0:
                 continue
+            dust = self._dust_reason(book, holding.instrument, quantity)
+            if dust is not None:
+                # A holding the venue will not trade is never sent (Sept 24, 2026: 107 refused sells of haghani-
+                # h426990's 0.000000001 LINK/USD in twelve hours): booked as dust, and the account can close.
+                self._book_dust(agent, book, holding.instrument, quantity, dust)
+                continue
+            if self._wind_down_stopped(agent, book, holding.instrument, quantity):
+                continue  # the venue refused this very sale `WIND_DOWN_REFUSALS` times in a row: told once, not retried
             if market_hours(holding.instrument, now) is False:
                 # A stock or an option sells only in the regular session: outside it the book refuses
                 # a market sell ("market orders outside regular hours are not permitted") and an
@@ -3264,9 +3823,113 @@ class House:
             exits.append(intent)
         self._note_held_wind_downs(agent, book, held_back)
         if exits:
-            book.submit(exits)
+            outcomes = book.submit(exits)
+            self._note_wind_down_refusals(agent, book, exits, outcomes)
             book.poll()
         self._sweep(agent.id, book)
+
+    def _dust_reason(self, book: Book, instrument: Instrument, quantity: Decimal) -> str | None:
+        """Why a holding is one the venue will not trade, or None: worth under a cent (the reconciliation's
+        own dust line, `book.DUST_USD`) even at the best price quoted for it, or, where the venue's asset
+        record states it (`broker.asset`, a crypto pair), under the venue's minimal order quantity.
+
+        The mark is the last quote's BID (`Book._quote`), which a thin crypto book can leave as a stub: half a
+        LINK under a $0.01 bid and a $12.28 ask read as half a cent, and the House booked six dollars the venue
+        would buy as dust (the review of #245, Sept 24, 2026). So a holding under a cent at its mark is quoted
+        again and valued at the highest of its mark, bid and ask; with no ask quoted it is not called dust by
+        its value (the sale is tried, and the refusal invariant stands behind it)."""
+        from .book import DUST_USD
+
+        multiplier = Decimal(str(instrument.multiplier or 1))
+        mark = book.marks.get(instrument.key)
+        if mark is None or mark <= 0 or quantity * mark * multiplier < DUST_USD:
+            quote = book._quote(instrument)
+            ask = quote.ask if quote is not None and quote.ask is not None and quote.ask > 0 else None
+            if ask is not None:
+                best = max(p for p in (mark, quote.bid, ask) if p is not None and p > 0)
+                value = quantity * best * multiplier
+                if value < DUST_USD:
+                    return f"worth ${value:.8f} even at the ask, under a cent"
+        asset = getattr(book.broker, "asset", None)
+        if asset is not None and instrument.asset_class == "crypto":
+            try:
+                minimum = (asset(instrument.market_id or instrument.symbol) or {}).get("min_order_size")
+            except Exception:  # noqa: BLE001 - an unreadable record states no minimum
+                minimum = None
+            if minimum is not None and quantity < Decimal(str(minimum)):
+                return f"under the venue's minimal order quantity {minimum}"
+        return None
+
+    def _book_dust(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal, why: str) -> None:
+        """Book a holding the venue will not trade as dust (Sept 24, 2026), the way the reconciliation books a
+        sub-cent position difference (`Book._position_dust`): off the agent's account at no price, onto the
+        House row, which then holds the units the venue still shows, so the book still reconciles and the
+        account can close. Said once on the ledger: the two dust fills and one info alert.
+
+        The two fills are ONE ledger group (`Ledger.append_many`), applied to the book only once both are written:
+        as two appends, a crash or a failed write between them (a "database is locked" on a busy box) left the book
+        short of the venue by the holding -- under a cent the reconciliation re-books the crumb, but dust by the
+        venue's minimal quantity can be worth more, and that difference froze the book's entries, in the process
+        and after a restart (the review of #245, Sept 24, 2026)."""
+        from .book import text
+
+        common = {"book": book.name, "source": "dust", "instrument": instrument.to_dict(), "quantity": text(quantity), "price": "0",
+                  "fee_usd": "0", "cash_delta": "0", "real_money": book.real_money}
+        with book._lock:
+            entries = self.ledger.append_many([
+                {"kind": "book.fill", "agent": agent.id, "payload": {**common, "side": "sell", "position_delta": text(-quantity),
+                                                                     "reason": f"the House booked it as dust: {why}"}},
+                # The House row, as `Book._position_dust` books a surplus: the units the venue still shows.
+                {"kind": "book.fill", "agent": HOUSE, "payload": {**common, "side": "buy", "position_delta": text(quantity)}},
+            ])
+            for entry in entries:
+                book._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        self.alert("info", f"{agent.id}: {book.name} booked {text(quantity)} {instrument.market_id or instrument.symbol} as dust "
+                           f"instead of selling it ({why}); the account can close")
+
+    def _wind_down_stopped(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal) -> bool:
+        """Whether this sale was refused `WIND_DOWN_REFUSALS` times in a row, for this very quantity: then it
+        is not sent again until the holding changes, or until `WIND_DOWN_RETRY_SECONDS` after the last refusal
+        (a refusal then stops it for another day, with no second warning). `_note_wind_down_refusals` keeps
+        the count. The review of #245: a dead agent's holding never changes, so an outage refused three
+        times in a row stranded it for good."""
+        row = ((self._state.get("wind_down_refusals") or {}).get(agent.id) or {}).get(book.name, {}).get(instrument.key)
+        if not (row and int(row.get("count") or 0) >= WIND_DOWN_REFUSALS and row.get("quantity") == format(quantity, "f")):
+            return False
+        return self.clock() - float(row.get("epoch") or 0) < WIND_DOWN_RETRY_SECONDS
+
+    def _note_wind_down_refusals(self, agent: Agent, book: Book, exits: Sequence[Intent], outcomes: Sequence[Any]) -> None:
+        """The invariant for orders no agent sent at a wake (Sept 24, 2026): the same refusal of a House-sent
+        sale -- by the venue or the book -- `WIND_DOWN_REFUSALS` times in a row stops its retries, with ONE
+        warning naming the order; it is tried again once a day (`_wind_down_stopped`). A sale that goes through,
+        a different refusal or a changed quantity starts the count again. Kept in house.json
+        (`wind_down_refusals`), so a restart does not start it again."""
+        by_intent = {o.intent_id: o for o in outcomes}
+        with self._state_lock:
+            mine = self._state.setdefault("wind_down_refusals", {}).setdefault(agent.id, {}).setdefault(book.name, {})
+            told = []
+            for intent in exits:
+                outcome = by_intent.get(intent.id)
+                key = intent.instrument.key
+                if outcome is not None and outcome.status == "duplicate":
+                    continue  # the same intent twice in one second: no new answer from anyone
+                if outcome is None or outcome.status not in ("rejected", "refused"):
+                    mine.pop(key, None)
+                    continue
+                why = re.sub(r"\d+(?:\.\d+)?", "#", str(outcome.detail or ""))[:200]
+                quantity = format(intent.quantity, "f")
+                row = mine.get(key) or {}
+                count = int(row.get("count") or 0) + 1 if (row.get("why") == why and row.get("quantity") == quantity) else 1
+                mine[key] = {"why": why, "quantity": quantity, "count": count, "order": outcome.order_id, "epoch": self.clock(),
+                             "detail": str(outcome.detail or "")[:300], "at": now_iso(self.clock)}
+                if count == WIND_DOWN_REFUSALS:
+                    told.append(mine[key] | {"symbol": intent.instrument.market_id or intent.instrument.symbol})
+            if not mine:
+                (self._state.get("wind_down_refusals") or {}).get(agent.id, {}).pop(book.name, None)
+        for row in told:
+            self.alert("warning", f"{agent.id}: the House's sale of {row['quantity']} {row['symbol']} on {book.name} was refused "
+                                  f"{WIND_DOWN_REFUSALS} times in a row ({row['detail']}; order {row['order']}): it is not sent again "
+                                  "until the holding changes, or once a day", order=row["order"])
 
     def _note_held_wind_downs(self, agent: Agent, book: Book, held_back: Mapping[str, Decimal]) -> None:
         """Keep, in house.json, which of an abandoned account's positions wait for their market to
@@ -3368,6 +4031,11 @@ class House:
                 self._desk_displaced[agent.specialty] = self.clock()
             for key in ("next_wake", "memory", "last_research", "tried", "idle"):
                 self._state[key].pop(agent.id, None)
+            try:
+                self._hand_off_retained(agent, cause)  # S3: its latest replay-passed candidate waits for a seat
+            except Exception as exc:  # noqa: BLE001 - a hand-off that fails never keeps an agent alive
+                self.alert("warning", f"{agent.id}: its retained candidate could not be handed to the seat queue "
+                                      f"({type(exc).__name__}: {str(exc)[:160]}); the admission pass picks it up")
         try:
             self.sandbox.retire(agent.id)
         except Exception as exc:  # noqa: BLE001
@@ -3474,13 +4142,21 @@ class House:
             return False
         if self.paused():
             return False
-        if not self.pacer.may_spend(self._research_budget_kind(agent)):
+        kind = self._research_budget_kind(agent)
+        if not self.pacer.may_spend(kind):
             return False
         if self.deploying():
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
         if pending:
+            # A job still `queued` has bought nothing yet: the tick enqueues every due agent at once and
+            # the research lane's workers take them in turn (up to 34 waited at once, Sept 24 00Z), so it
+            # waits for the Sail cap like a new session; one under way resumes (review of #236).
+            if pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped():
+                return False
             return self.clock() >= pending["available"]
+        if kind == "sail" and self._sail_research_capped():
+            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
@@ -3549,7 +4225,13 @@ class House:
                                              "empty_streak": streak, "sampled": decision == "sample"}, agent=agent.id)
 
     def _note_research_result(self, agent_id: str, outcome: Any) -> None:
-        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy."""
+        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy. A session
+        that is no completed pass (`research_gate.completed_pass`: a provider failure) moves nothing,
+        as it moves nothing in the Jev gate's streak (Sept 24, 2026)."""
+        from .research_gate import completed_pass
+
+        if not completed_pass({"reason": getattr(outcome, "reason", "")}):
+            return
         useful = bool(getattr(outcome, "candidate", None) or int(getattr(outcome, "trials", 0) or 0)
                       or getattr(outcome, "consulted", ""))
         with self._state_lock:
@@ -3578,27 +4260,51 @@ class House:
         return ""
 
     def _weakest(self, rules: Mapping[str, Any], *, specialty: str | None = None, exclude: Sequence[str] = (),
-                 evidenced: bool = False) -> Agent | None:
+                 evidenced: bool = False, newcomer: Newcomer | None = None) -> Agent | None:
         """The agent a newcomer displaces, or None when nobody has earned displacing: the first of
         `_displaceable`, which holds the rules.
 
         `evidenced` (Sept 23, 2026): the newcomer has forward evidence of its own -- an Alpha Lab
         graduate that passed the House's replay and the sealed holdout, a replay-passed foundry card,
-        a merged strategy -- and may take a seat inside its holder's grace when the holder is
-        replay-only code (rung 0) or has never traded since its current program's opportunity. The
-        Alpha Lab (`Lab._seat_for`, `_finish_birth`) and the foundry (`Foundry._admit`) pass it; the
-        House's own mutation refill never does."""
-        rank = self._displaceable(rules, specialty=specialty, exclude=exclude, evidenced=evidenced)
+        a merged strategy, and since Sept 24, 2026 a dead author's retained research candidate -- and
+        may take a seat inside its holder's grace when the holder is replay-only code (rung 0) or has
+        never traded since its current program's opportunity. The Alpha Lab (`Lab._seat_for`,
+        `_finish_birth`), the foundry (`Foundry._admit`), `enroll` and `_admit_orphan` pass it; the
+        House's own mutation refill and a living author's research admission never do.
+
+        `newcomer` (S1, Sept 24, 2026): who asks, for the rules that compare it with the resident -- its
+        family's proof and its forward score (`Newcomer`). None: an unproven newcomer with no forward score."""
+        rank = self._displaceable(rules, specialty=specialty, exclude=exclude, evidenced=evidenced, newcomer=newcomer)
         return rank[0][-1] if rank else None
 
     def _displaceable(self, rules: Mapping[str, Any], *, specialty: str | None = None, exclude: Sequence[str] = (),
-                      evidenced: bool = False) -> list[tuple[Any, ...]]:
+                      evidenced: bool = False, newcomer: Newcomer | None = None) -> list[tuple[Any, ...]]:
         """Every resident a newcomer may displace, the one with the LEAST EVIDENCE of an edge first;
         each row ends with the agent (`_weakest` takes the first, health.json counts them).
 
         Never one on real money -- what that may cost is already bounded by the tuition, and the
         auditor put it there. Never a profitable one, however small its record. Never one too young
         to have had a fair chance. Of the rest, the one with the LEAST EVIDENCE of an edge.
+
+        **The evidence clock** (S1, the close-the-gaps run, Sept 24, 2026). Measured on the T0 snapshot:
+        103 deaths in 24 hours, median life 14.3 h, 70 of them before three fills, while a day-horizon
+        desk needs one to three days per settlement; displacement took traders with 38, 26 and 24 fills,
+        and mullins-14 holding a replay-passed candidate. So:
+        - a paper seat's grace is the larger of the plain grace (`displace_after_epochs` epochs, twelve
+          hours) and its desk's evidence clock (`evidence_clocks`: the median hours from a member's first
+          fill to its third independent settlement, measured from the ledger every day), the clock in
+          wall-clock hours on every desk (a desk that keeps hours still needs its twelve SESSION hours);
+        - a resident with `FORWARD_RULE_FILLS` (3) fills of its own since its program's opportunity is
+          displaced only by a newcomer whose forward score beats the resident's own forward record
+          (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
+          own YET there is nothing to compare, and it keeps its seat -- but a trader the lab can never
+          score (`Lab.can_score`: an options or unreplayed desk, a blocked program) is judged as before,
+          or its desk's waiters would starve for good (the review of #245);
+        - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
+          displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
+        - never-traded residents past their grace still go first, then the members of a family whose
+          pooled forward record is negative after `losing_family_min_blocks` active blocks (such a family
+          is not bred again, `_losing_family`), then the rest by rung, growth, blocks and purse.
 
         Sept 23, 2026 (the seat market follows evidence): 312 of 345 deaths since Sept 19 were
         displacements, 254 of them of rung-0 House mutations after a median three hours, while 20
@@ -3632,10 +4338,15 @@ class House:
         more than four closed trades, and three of them while holding contracts."""
         epoch = float(rules["epoch_seconds"])
         grace = float(rules.get("displace_after_epochs", 2)) * epoch
+        clocks = self._desk_clocks()
         now = self.clock()
         stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
         bound = float(self.settings.tick_seconds)
         recently = {desk for desk, at in self._desk_displaced.items() if now - at < bound}
+        newcomer = newcomer or Newcomer()
+        newcomer_proven = self._family_proven(newcomer.family, newcomer.venue)
+        losing_blocks = int(rules.get("losing_family_min_blocks", 6))
+        pooled = self.family_forward()
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
@@ -3648,6 +4359,8 @@ class House:
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
             agent_grace = grace
+            # S1: a paper seat's desk clock, in wall-clock hours (0 where none is measured: the plain grace).
+            clock = clocks.get(agent.specialty or "", 0.0) if standing.rung >= 1 else 0.0
             niche = self.niche_of(agent)
             keeps_hours = standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs)
             if standing.rung == 0 and (self._burst or evidenced):
@@ -3673,31 +4386,8 @@ class House:
                     agent_grace = 0
             if standing.rung == 1:
                 # A late replay pass or a new empty-record strategy has not had the old
-                # program's trading opportunity. Meriwether-8 passed replay at 00:21 and
-                # was displaced at 01:01 with zero forward blocks because its birth was
-                # already fourteen hours old. Recover the current program's start from
-                # the ledger, including across restarts; duplicate strategy rows do not
-                # buy another grace period.
-                #
-                # On a desk that keeps hours, a rewrite of an agent that has never traded is NOT a
-                # new opportunity (Sept 23, 2026): research rewrote idle stock agents every few
-                # hours (mcentee-34 three times in eight), each rewrite restarted the clock, and
-                # the agents that never traded outlived the ones that did.
-                first_fill = None
-                if keeps_hours:
-                    found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
-                    first_fill = None if found is None else found.seq
-                signature = None
-                for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
-                    p = entry.payload
-                    if entry.kind in ("agent.born", "agent.strategy"):
-                        current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
-                        if current != signature:
-                            if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
-                                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
-                            signature = current
-                    elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
-                        opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                # program's trading opportunity (`_program_opportunity`).
+                opportunity, opportunity_seq = self._program_opportunity(agent, keeps_hours=keeps_hours)
                 if self._burst:
                     from .episodes import completed
                     book = self.book_of(agent)
@@ -3745,14 +4435,157 @@ class House:
                 # its first regular session has closed.
                 agent_grace = 0
             # A desk that keeps hours offers nothing between the close and the next open: its grace
-            # is counted in regular-session time.
+            # is counted in regular-session time. The desk's evidence clock is wall-clock hours (S1).
             seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
-            if seated < agent_grace:
+            past_grace = seated >= grace and now - opportunity >= clock
+            if agent_grace > 0 and not past_grace:
                 continue
-            rank.append((standing.active_blocks > 0 or traded, standing.rung, standing.mean_growth, standing.active_blocks,
+            fills = self._own_fills(agent.id, after=opportunity_seq) if standing.rung == 1 else 0
+            has_traded = standing.active_blocks > 0 or traded or fills > 0
+            if not newcomer_proven and (has_traded or not past_grace) and self._family_proven(agent.family, agent.venue):
+                continue  # S1: a proven family's resident is never displaced by an unproven newcomer
+            if fills >= FORWARD_RULE_FILLS:
+                # S1: a trader is displaced only by a newcomer whose forward score beats its own record -- while it
+                # has one, or the lab can still give it one (`_forward_scorable`). A trader the lab never scores (an
+                # options or unreplayed desk, a blocked program) is judged as before: no record could ever be
+                # compared, and keeping its seat for that would starve its desk's waiters for good (review of #245).
+                mine = self._resident_forward(agent)
+                if (mine is not None or self._forward_scorable(agent)) \
+                        and (newcomer.forward is None or mine is None or not newcomer.forward > mine):
+                    continue
+            blocks, growth = pooled.get(agent.family, (0, 0.0))
+            losing = blocks >= losing_blocks and growth <= -1e-9  # `_losing_family`'s line, read without its alert
+            rank.append((has_traded, not losing, standing.rung, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
-        rank.sort(key=lambda row: row[:5])  # has it traded at all, replay-only first, then growth, how much, and its purse
+        # Has it traded at all, a losing family first, replay-only first, then growth, how much, and its purse.
+        rank.sort(key=lambda row: row[:6])
         return rank
+
+    def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
+        """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its
+        latest new program (`agent.strategy` with other code, parameters or NEEDS), or its latest seat on
+        rung 1, whichever is last.
+
+        A late replay pass or a new empty-record strategy has not had the old program's trading
+        opportunity. Meriwether-8 passed replay at 00:21 and was displaced at 01:01 with zero forward
+        blocks because its birth was already fourteen hours old. Recovered from the ledger, so it
+        survives restarts; duplicate strategy rows do not buy another grace period.
+
+        On a desk that keeps hours (`keeps_hours`), a rewrite of an agent that has never traded is NOT
+        a new opportunity (Sept 23, 2026): research rewrote idle stock agents every few hours (mcentee-34
+        three times in eight), each rewrite restarted the clock, and the agents that never traded
+        outlived the ones that did."""
+        opportunity, opportunity_seq = _epoch(agent.born_at), 0
+        first_fill = None
+        if keeps_hours:
+            found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
+            first_fill = None if found is None else found.seq
+        signature = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
+            p = entry.payload
+            if entry.kind in ("agent.born", "agent.strategy"):
+                current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
+                if current != signature:
+                    if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
+                        opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                    signature = current
+            elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
+                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+        return opportunity, opportunity_seq
+
+    def _own_fills(self, agent_id: str, *, after: int = 0, enough: int = FORWARD_RULE_FILLS) -> int:
+        """The agent's own fills after a ledger position, counted up to `enough`: venue and cross fills
+        (a row that names no source is a test's), never dust, a venue fee or the House's closing sale."""
+        count = 0
+        for entry in self.ledger.iter(kinds="book.fill", agent=agent_id, after=after):
+            p = entry.payload
+            if p.get("source") in (None, "venue", "cross") and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
+                count += 1
+                if count >= enough:
+                    break
+        return count
+
+    def _family_proven(self, family: str | None, venue: str | None) -> bool:
+        """Whether a family's pooled record is proven: the allocator's family record (`Allocator.family`,
+        Deploy A's P1; read, never recomputed here), "proven" or "swing". A family on no venue it names is
+        read on both. False for no family, and whenever the record cannot be read."""
+        if not family:
+            return False
+        reader = getattr(self.allocator, "family", None)
+        if reader is None:
+            return False
+        for place in ([venue] if venue else list(REAL_BOOK)):
+            try:
+                record = reader(family, place)
+            except Exception:  # noqa: BLE001 - `Allocator.family` never raises; an unreadable record proves nothing
+                continue
+            if record and (record.get("proven") or record.get("state") in ("proven", "swing")):
+                return True
+        return False
+
+    def _resident_forward(self, agent: Agent, *, ranked: bool = False) -> float | None:
+        """A resident's own forward record for the seat market (S2): the mean log growth per block of its
+        current program's latest forward window (`Lab.resident_forward`), or, `ranked`, its forward score
+        (only with the lab's `forward_min_active_blocks`). None without a lab or a record."""
+        reader = getattr(getattr(self, "lab", None), "resident_forward", None)
+        if reader is None:
+            return None
+        try:
+            return reader(agent, ranked=ranked)
+        except Exception:  # noqa: BLE001 - the lab's store is its own; no record is no record
+            return None
+
+    def _forward_scorable(self, agent: Agent) -> bool:
+        """Whether the lab's forward windows can ever give a resident's current program a record (`Lab.can_score`).
+        False with no lab. A read that fails counts as scorable: nobody loses a seat because a read failed."""
+        reader = getattr(getattr(self, "lab", None), "can_score", None)
+        if reader is None:
+            return False
+        try:
+            return bool(reader(agent))
+        except Exception:  # noqa: BLE001 - the lab's store is its own
+            return True
+
+    def evidence_clocks(self, *, fresh: bool = False) -> dict[str, Any]:
+        """The desks' evidence clocks (S1, Sept 24, 2026; `measure_evidence_clocks`), kept in house.json
+        (`evidence_clocks`: `at`, `epoch`, `days`, `desks`) and measured again when a day old -- at startup
+        (`__init__`) and then at the first seat question after the day has passed. One info alert says
+        what changed. Never raises: a measurement that fails keeps the last one and is tried an hour on."""
+        with self._clock_lock:
+            stored = self._state.get("evidence_clocks") or {}
+            now = self.clock()
+            if not fresh and stored and now - float(stored.get("epoch") or 0) < EVIDENCE_CLOCK_REFRESH_SECONDS:
+                return stored
+            try:
+                with (getattr(self.registry, "_lock", None) or nullcontext()):
+                    agents = list(self.registry.agents.values())
+                desks = measure_evidence_clocks(self.ledger, agents, now)
+            except Exception as exc:  # noqa: BLE001 - the last reading stands, and the floor goes on
+                retry = {**stored, "epoch": now - EVIDENCE_CLOCK_REFRESH_SECONDS + 3600}
+                with self._state_lock:
+                    self._state["evidence_clocks"] = retry
+                self.alert("warning", f"the desks' evidence clocks could not be measured ({type(exc).__name__}: {str(exc)[:160]})")
+                return retry
+            report = {"at": now_iso(self.clock), "epoch": now, "days": EVIDENCE_CLOCK_DAYS,
+                      "settlements": EVIDENCE_CLOCK_SETTLEMENTS, "desks": desks}
+            with self._state_lock:
+                self._state["evidence_clocks"] = report
+        measured = {d: row["hours"] for d, row in desks.items() if row.get("hours") is not None}
+        before = {d: (row or {}).get("hours") for d, row in (stored.get("desks") or {}).items() if (row or {}).get("hours") is not None}
+        if measured and measured != before:
+            unmeasured = sorted(d for d, row in desks.items() if row.get("hours") is None)
+            self.alert("info", "the desks' evidence clocks (median hours from a member's first fill to its third independent "
+                               f"settlement, last {EVIDENCE_CLOCK_DAYS:g} days): "
+                               + ", ".join(f"{d} {h:g} h" for d, h in sorted(measured.items(), key=lambda kv: kv[1]))
+                               + (f"; not reached on {', '.join(unmeasured)} (the plain grace)" if unmeasured else ""),
+                       evidence_clocks=desks)
+        return report
+
+    def _desk_clocks(self) -> dict[str, float]:
+        """Desk -> its measured evidence clock in seconds, for the desks where one was reached."""
+        desks = (self.evidence_clocks().get("desks") or {})
+        return {desk: float(row["hours"]) * 3600.0 for desk, row in desks.items()
+                if isinstance(row, Mapping) and row.get("hours") is not None}
 
     def _screen_pending(self, agent: Agent, since_seq: int, seated_for: float) -> bool:
         """Is a trading daily agent still short of the closed days its paper screen needs?
@@ -3784,21 +4617,37 @@ class House:
         hourly or daily, keeps its seat until it has closed that many trades, or until
         `displace_trading_after_sessions` (game.json) regular sessions have closed since its
         opportunity -- whichever comes first. Only its seat is kept: an unprofitable one is still
-        displaced once either is reached, and a profitable one never was displaceable."""
+        displaced once either is reached, and a profitable one never was displaceable.
+
+        The record is the one the bunt line reads (`allocator.bunt_ready`, Sept 24, 2026): closed trades,
+        or on an event book `bunt_min_settled` settlements, each counted once per event
+        (`allocator.closed_trades`). Before, only `bunt_min_trades` was read, so a Kalshi trader with three
+        independent settlements and fewer than five closes was treated as short of a record it had."""
         owed = int(rules.get("displace_trading_after_sessions", 3))
         if session_time(opportunity, now)[1] >= owed:
             return False
         if book is None:
             return False
-        closed, _ = allocator_module.closed_trades(self, agent.id, book.name)
-        return closed < int(CONSTITUTION["allocator"]["bunt_min_trades"])
+        line = CONSTITUTION["allocator"]
+        closed, settled = allocator_module.closed_trades(self, agent.id, book.name)
+        if book.name in allocator_module.EVENT_BOOKS and settled >= int(line.get("bunt_min_settled", 3)):
+            return False
+        return closed < int(line["bunt_min_trades"])
 
     # ------------------------------------------------------------ the seat market
     #: Who waits for a seat, in the order a freed seat goes to them (Sept 23, 2026): Alpha Lab
     #: graduates (replay and sealed holdout passed), replay-passed foundry cards, merged strategies.
-    #: A House mutation is staked only when none of them waits.
-    SEAT_WAITERS = ("graduates", "cards", "strategies")
-    SEAT_WAITER_NAMES = {"graduates": "Alpha Lab graduate", "cards": "replay-passed foundry card", "strategies": "merged strategy"}
+    #: A House mutation is staked only when none of them waits. Since Sept 24, 2026 (S3) the retained
+    #: research candidates of residents that died holding them rank with the graduates: neither class
+    #: holds a desk from the other, and both hold theirs from cards and merged strategies.
+    SEAT_WAITERS = ("graduates", "retained", "cards", "strategies")
+    SEAT_WAITER_NAMES = {"graduates": "Alpha Lab graduate", "retained": "retained research candidate",
+                         "cards": "replay-passed foundry card", "strategies": "merged strategy"}
+    #: S3 (Sept 24, 2026): a dead author's retained candidate waits for a seat this long after its author's
+    #: death (its replay grows old), and the House picks up, once, the candidates of authors that died in
+    #: this window before the rule was deployed (their admissions were cancelled with them).
+    RETAINED_TTL_SECONDS = 72 * 3600
+    RETAINED_CANCELLED = "parent retired or changed; candidate evidence retained"
 
     def _waiting_graduates(self) -> list[dict[str, Any]]:
         """Lab graduates that passed the House's replay (and the sealed holdout where it applies)
@@ -3808,11 +4657,11 @@ class House:
         if query is None:
             return []
         try:
-            rows = query("SELECT candidate, niche, at, detail FROM graduations WHERE state='passed' ORDER BY at")
+            rows = query("SELECT candidate, niche, family, at, detail FROM graduations WHERE state='passed' ORDER BY at")
         except Exception:  # noqa: BLE001 - the lab's table is its own; read again on the next tick
             return []
-        return [{"candidate": str(r["candidate"]), "niche": str(r["niche"] or ""), "since": float(r["at"] or 0),
-                 "detail": str(r["detail"] or "")[:120]} for r in rows]
+        return [{"candidate": str(r["candidate"]), "niche": str(r["niche"] or ""), "family": str(r["family"] or ""),
+                 "since": float(r["at"] or 0), "detail": str(r["detail"] or "")[:120]} for r in rows]
 
     def _waiting_cards(self) -> list[dict[str, Any]]:
         """Foundry cards that passed replay and were never born (`Foundry.inventory`)."""
@@ -3842,7 +4691,8 @@ class House:
         hit = self._data_cache.get("seat_waiters")
         if hit and not fresh and self.clock() - hit[0] < 60:
             return hit[1]
-        value = {"graduates": self._waiting_graduates(), "cards": self._waiting_cards(), "strategies": self._waiting_strategies()}
+        value = {"graduates": self._waiting_graduates(), "retained": self._retained_waiting(), "cards": self._waiting_cards(),
+                 "strategies": self._waiting_strategies()}
         self._data_cache["seat_waiters"] = (self.clock(), value)
         return value
 
@@ -3880,7 +4730,11 @@ class House:
         """The seat market once an hour (cached in state `seat_market`; health.json shows it): the
         residents an evidenced newcomer could displace, the never-traded residents past their grace,
         whether any waiting graduate can be seated (told as a refusal when none can), and a warning
-        when more than `seat_waiters_warning` newcomers have waited for over an hour."""
+        when more than `seat_waiters_warning` newcomers have waited for over an hour.
+
+        Since Sept 24, 2026 (S4, the close-the-gaps run): the seats that hold none of a forward score, a
+        fill or a grace still running (`seats_holding_none`, count and ids: `_seats_holding_none`), and
+        the desks' evidence clocks the grace follows (`evidence_clocks`, desk -> hours, and when)."""
         now = self.clock()
         cached = self._state.get("seat_market") or {}
         if not fresh and cached and now - float(cached.get("epoch") or 0) < 3600:
@@ -3901,13 +4755,19 @@ class House:
             living = self.registry.living()
             room = len(living) < int(rules["max_population"])
             seatable = 0
+            lab = getattr(self, "lab", None)
             for niche_id in {str(w["niche"]) for w in graduates if w.get("niche")}:
                 niche = self.niches.get(niche_id)
                 if niche is None or niche.dormant:
                     continue
-                if self.members(niche_id) < niche.max_members and (room or self._weakest(rules, evidenced=True)):
-                    seatable += 1
-                elif self._weakest(rules, specialty=niche_id, evidenced=True) is not None:
+                # Each graduate asks with its own family and forward score (S1), as `Lab._seat_for` does.
+                asking = [Newcomer(family=w.get("family") or None, venue=niche.venue,
+                                   forward=lab.forward_score(w["candidate"]) if lab is not None else None)
+                          for w in graduates if str(w.get("niche")) == niche_id]
+                if self.members(niche_id) < niche.max_members:
+                    if room or any(self._weakest(rules, evidenced=True, newcomer=n) for n in asking):
+                        seatable += 1
+                elif any(self._weakest(rules, specialty=niche_id, evidenced=True, newcomer=n) is not None for n in asking):
                     seatable += 1
             if not seatable:
                 desks = ", ".join(f"{d} {n}" for d, n in sorted(by_desk.items()) if any(str(w.get("niche")) == d for w in graduates))
@@ -3930,12 +4790,42 @@ class House:
         if tell:
             self.alert("warning", f"{total} newcomers have waited for seats for over an hour ({', '.join(f'{n} {cls}' for cls, n in counts.items() if n)}): "
                                   f"{len(rank)} residents could be displaced by one with forward evidence")
+        empty = self._seats_holding_none(rules)
+        clocks = self.evidence_clocks()
         report = {"at": now_iso(self.clock), "epoch": now, "waiters": counts, "waiters_by_desk": by_desk,
                   "displaceable": len(rank), "never_traded_past_grace": never_traded,
-                  "waiting_over_an_hour": bool(since) and now - since > 3600}
+                  "waiting_over_an_hour": bool(since) and now - since > 3600,
+                  "seats_holding_none": {"count": len(empty), "ids": empty[:40]},
+                  "evidence_clocks": {"at": clocks.get("at"), "hours": {d: row.get("hours") for d, row in (clocks.get("desks") or {}).items()}}}
         with self._state_lock:
             self._state["seat_market"] = report
         return report
+
+    def _seats_holding_none(self, rules: Mapping[str, Any]) -> list[str]:
+        """S4 (Sept 24, 2026): the living residents off real money whose seat holds none of a program with a
+        forward score (`Lab.resident_forward`, ranked), a fill of its own since its program's opportunity, or
+        a grace still running (the plain grace, or its desk's evidence clock, in wall-clock hours from that
+        opportunity), oldest first. The population stays 112; these are the seats that carry no evidence."""
+        grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
+        clocks = self._desk_clocks()
+        now = self.clock()
+        out: list[tuple[float, str]] = []
+        for agent in self.registry.living():
+            if now - _epoch(agent.born_at) < grace:
+                continue  # its program's opportunity is no older than its birth: its grace still runs
+            rung = self.evaluator.rung(agent.id)
+            if rung >= 2:
+                continue
+            opportunity, seq = self._program_opportunity(agent) if rung == 1 else (_epoch(agent.born_at), 0)
+            clock = clocks.get(agent.specialty or "", 0.0) if rung == 1 else 0.0
+            if now - opportunity < max(grace, clock):
+                continue
+            if self._own_fills(agent.id, after=seq, enough=1):
+                continue
+            if self._resident_forward(agent, ranked=True) is not None:
+                continue
+            out.append((opportunity, agent.id))
+        return [agent_id for _, agent_id in sorted(out)]
 
     def _seats_health(self) -> dict[str, Any]:
         """The `seats` block of health.json: the hourly watch, the waiters now and the last refusal a class."""
@@ -4226,6 +5116,53 @@ class House:
             return 'campaign allowance unavailable'
         return ''
 
+    def _sail_research_capped(self) -> bool:
+        """Whether the last hour's Sail research spend has reached turbo.json
+        `sail_research_usd_per_hour` (`_sail_cap_state`): then no NEW session starts on Sail."""
+        state = self._sail_cap_state()
+        return bool(state and state["capped"])
+
+    def _sail_cap_state(self) -> dict[str, Any] | None:
+        """The Sail research cap as health.json shows it, read at most once a minute; None without a
+        cap or a campaign guard. One `ops.budget` row ("sail research cap") each time it closes or
+        opens.
+
+        The hour's spend is the settled cost of the Sail commitments created in the last hour
+        (campaigns.sqlite `commitments`, kind `sail`: every Sail call is research, campaign
+        `baseline-research`). A call in flight counts once it settles, seconds to minutes later: its
+        reservation is its worst case, about $0.25 against a median $0.016, and six in flight would
+        read as a spent cap. Sept 23, 2026, 22-23Z: Sail research settled $11.66 in an hour (344
+        calls) once cheap research moved to Sail; $1.27 in the hour before T0."""
+        cap, guard = getattr(self, "_sail_research_cap", None), self.campaigns
+        if cap is None or guard is None:
+            return None
+        now = self.clock()
+        cached = getattr(self, "_sail_cap_cache", None)
+        if cached is not None and now - cached[0] < 60:
+            return cached[1]
+        try:
+            with guard.lock:
+                settled, calls, inflight, held = guard.db.execute(
+                    "SELECT COALESCE(SUM(cost),0), COALESCE(SUM(cost IS NOT NULL),0), COALESCE(SUM(cost IS NULL),0),"
+                    " COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) FROM commitments WHERE kind='sail' AND created>=?",
+                    (now - 3600,)).fetchone()
+        except Exception as exc:  # noqa: BLE001 - an unreadable meter caps nothing; the campaign's own limits stand
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}", "capped": False}
+        spent = (Decimal(int(settled)) / 1_000_000).quantize(CENT)
+        state = {"cap_usd": format(cap, "f"), "last_hour_usd": format(spent, "f"), "calls": int(calls),
+                 "inflight_calls": int(inflight), "inflight_reserved_usd": format((Decimal(int(held)) / 1_000_000).quantize(CENT), "f"),
+                 "capped": spent >= cap}
+        with self._state_lock:
+            before = bool(self._state.get("sail_research_capped"))
+            self._state["sail_research_capped"] = state["capped"]
+        if state["capped"] != before:
+            self.ledger.append("ops.budget", {"what": "sail research cap", "capped": state["capped"], "last_hour_usd": state["last_hour_usd"],
+                                              "cap_usd": state["cap_usd"], "calls": state["calls"],
+                                              "reason": ("the last hour's Sail research spend reached the cap: no new Sail session starts"
+                                                         if state["capped"] else "the last hour's Sail research spend is under the cap again")})
+        self._sail_cap_cache = (now, state)
+        return state
+
     def research_capabilities(self, agent: Agent) -> dict[str, Any]:
         from .capabilities import describe
         result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
@@ -4255,7 +5192,7 @@ class House:
             shipped = {'sports': 'live sports score feed', 'perps': 'perpetual funding/open-interest feed'}
             gone = {text for feed, text in shipped.items() if (described.get(feed) or {}).get('recording_since')}
             result['observations']['not_supplied'] = [x for x in result['observations'].get('not_supplied') or [] if x not in gone]
-            # The two backfilled histories (Sept 23, 2026), said plainly: a strategy that reads them can
+            # The backfilled histories (Sept 23 and 24, 2026), said plainly: a strategy that reads them can
             # be replayed now, which no live-recorded feed can offer on its first day.
             history = {feed: {'backfilled_since': (described.get(feed) or {}).get('backfilled_since'),
                               'replayable_now': (described.get(feed) or {}).get('replayable_now')}
@@ -4263,10 +5200,12 @@ class House:
             if history:
                 result['observations']['replayable_history'] = {
                     **history,
-                    'note': 'vol (Deribit DVOL, BTC and ETH, hourly candles stamped at their close) and funding (OKX settled '
-                            'funding per coin, stamped at settlement, with avg_24h, avg_7d, zscore_30d) are point-in-time '
-                            'history backfilled over the replay window: declare NEEDS["feeds"] = {"vol": [...], "funding": [...]} '
-                            'and a replay can judge the strategy now. Row shapes: observations.feeds and the contract.'}
+                    'note': 'vol (Deribit DVOL, BTC and ETH, hourly candles stamped at their close), funding (OKX settled '
+                            'funding per coin, stamped at settlement), forecast (GFS and ECMWF daily highs, lows and rain at one '
+                            'to three days lead per settlement station, stamped 11:00 local standard time), earnings (each 8-K '
+                            'Item 2.02 at EDGAR\'s acceptance time) and oi (OKX hourly open interest, stamped at the hour\'s end) '
+                            'are point-in-time history backfilled over the replay window: declare them in NEEDS["feeds"] and a '
+                            'replay can judge the strategy now. Row shapes: observations.feeds and the contract.'}
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -4296,8 +5235,8 @@ class House:
                 history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
                            if query.startswith('deep:') else {'tape': 'live recent tape',
                                                              'why': 'no feed reaches back into the history store\'s development window '
-                                                                    '(sports and perps are recorded live; vol and funding are backfilled '
-                                                                    'over the live replay window)' if wanted
+                                                                    '(the live feeds are recorded as received; the history feeds are '
+                                                                    'backfilled over the live replay window)' if wanted
                                                              else 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
             feeds = None
             if wanted:
@@ -4306,12 +5245,12 @@ class House:
                     'unsupported input: this House records no live feeds'
                 feeds = {'requested': wanted, 'coverage': tape.get('feeds_coverage'), 'replay_ready': not short,
                          **({'blocked_by': short} if short else {}),
-                         'note': 'Every row is replayed point in time by its t. sports and perps rows are recorded live with their '
-                                 'receive time, and nothing before recording began exists. vol and funding rows are point-in-time '
-                                 'history, stamped when each value became final (a DVOL candle at its close, a funding rate at its '
-                                 'settlement) and backfilled over the replay window (coverage.<feed>.<key>.backfill says from where '
-                                 'and since when), so they are replayable as soon as the backfill is in. A live wake is handed '
-                                 'ctx["feeds"] whether or not a replay may use them yet.'}
+                         'note': 'Every row is replayed point in time by its t. A live feed\'s rows are recorded with their receive '
+                                 'time, and nothing before recording began exists. A history feed\'s rows (' + ', '.join(feeds_module.HISTORY_FEEDS)
+                                 + ') are stamped when each value became final (a candle at its close, a rate at its settlement, an 8-K at '
+                                 'its acceptance, a forecast at its issue plus its publication allowance) and backfilled over the replay '
+                                 'window (coverage.<feed>.<key>.backfill says from where and since when), so they are replayable as soon as '
+                                 'the backfill is in. A live wake is handed ctx["feeds"] whether or not a replay may use them yet.'}
             return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
                     **({'feeds': feeds} if feeds else {}),
                     'proposed_inputs': needs is not None,
@@ -4378,7 +5317,7 @@ class House:
                                # P1 (Sept 24, 2026): your family's pooled record decides whether real money
                                # starts as a probe or a bunt (`allocator.family_proven`).
                                'your_family': {k: (self.allocator.board().get('agents') or {}).get(agent.id, {}).get(k)
-                                               for k in ('family', 'family_state', 'family_bound', 'family_n')},
+                                               for k in ('family', 'family_state', 'family_bound', 'family_n', 'capacity', 'stake_limit')},
                                'note': 'While enabled, the paper screen and the micro bound above no longer promote: bands and '
                                        'stakes follow E = W_paper^paper_weight x W_real at every mark pass.'}
                               if allocator_module.enabled() else None),
@@ -4443,12 +5382,20 @@ class House:
                 if candidate:
                     self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
-            self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
+            # Sept 24, 2026 (L2): a session the provider broke (a 5xx; `research_gate.provider_fault`) was
+            # refunded by the researcher and is not a completed pass: its job is closed as cancelled, so
+            # it does not restart the research clock, and the agent may research again in
+            # PROVIDER_RETRY_SECONDS instead of after its whole interval. Every other ending is a pass.
+            from .research_gate import provider_fault
+
+            broken = provider_fault(getattr(outcome, 'reason', ''))
+            retry = self.research_interval_hours(agent) * 3600 - PROVIDER_RETRY_SECONDS if broken else 0.0
+            self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'), cancelled=broken)
             self._note_research_result(agent.id, outcome)
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
-                        self._state['last_research'][agent.id] = self.clock()
+                        self._state['last_research'][agent.id] = self.clock() - max(0.0, retry)
             return outcome
 
     def _trace_adoption(self, agent_id: str, session: str, candidate: Mapping[str, Any]) -> None:
@@ -4506,7 +5453,10 @@ class House:
         loser = None
         if niche_full or full:
             if displace:
-                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,))
+                # It asks as its parent's family (S1, Sept 24, 2026). A living author's candidate waits out a new
+                # paper seat's grace, as before; a dead author's retained one is evidenced (`_admit_orphan`).
+                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,),
+                                      newcomer=Newcomer(family=parent.family, venue=parent.venue, what=f"{parent.id}'s research candidate"))
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
                 return None
@@ -4610,6 +5560,194 @@ class House:
                 # its seconds are the parent's, as a validation probe's are.
                 self._charge_box(agent_id, described, note="reading a candidate's NEEDS for an admission that did not seat it")
             return child
+
+    # ------------------------------------------------------- retained candidates (S3)
+    def _retainable(self, row: Mapping[str, Any]) -> bool:
+        """An admission whose candidate a seat can be given to: it passed the House's replay, and its
+        parameters are valid for its inputs."""
+        candidate = row.get("_candidate")
+        if not isinstance(candidate, Mapping) or candidate.get("passed") is not True or not candidate.get("code"):
+            return False
+        try:
+            return not parameters.inspect(candidate.get("params") or {}, candidate.get("needs") or {})["errors"]
+        except Exception:  # noqa: BLE001 - a candidate that cannot be read cannot be seated
+            return False
+
+    def _retain(self, author: Agent, row: dict[str, Any], why: str) -> dict[str, Any]:
+        """Hand one retained candidate of a dead author to the seat queue: its admission row goes
+        `orphaned` (written once) and a waiter is kept in house.json (`retained`, by session)."""
+        died = _epoch(author.died_at) if author.died_at else self.clock()
+        numbers = (row.get("_candidate") or {}).get("numbers") or {}
+        entry = {"session": row["session"], "author": author.id, "family": author.family, "venue": author.venue,
+                 "niche": author.specialty or "", "since": died, "trades": numbers.get("trades"),
+                 "return_pct": numbers.get("return_pct")}
+        if row.get("status") != "orphaned":
+            Admissions(self.ledger).record(row, "orphaned", why, author_died_at=author.died_at)
+        with self._state_lock:
+            self._state.setdefault("retained", {})[row["session"]] = entry
+            self._state.setdefault("retained_authors", {})[author.id] = died
+        self._data_cache.pop("seat_waiters", None)
+        return entry
+
+    def _hand_off_retained(self, author: Agent, cause: str) -> dict[str, Any] | None:
+        """S3 (the close-the-gaps run, Sept 24, 2026): a resident that dies holding a replay-passed research
+        candidate hands its LATEST one to the seat queue with its lineage, instead of it being cancelled with
+        it. mullins-14 died `displaced` at 00:12:02Z Sept 24 holding three (the latest made +38.4% on 113
+        replay trades) and its admissions were cancelled "parent retired or changed" at 01:38:54Z. Its other
+        admissions are cancelled by the admission pass as before. Called by `kill` under the lifecycle lock;
+        it reads only the author's own rows."""
+        latest = None
+        for row in Admissions(self.ledger).rows(agent=author.id):
+            if row.get("status") in ("queued", "deferred") and self._retainable(row):
+                latest = row  # oldest first: the last is the latest
+        if latest is None:
+            return None
+        return self._retain(self.registry.get(author.id), latest,
+                            f"its author {author.id} died ({cause}) holding it: it waits for a seat with its author's lineage")
+
+    def _adopt_orphans(self, rows: Sequence[dict[str, Any]]) -> int:
+        """The retroactive half of S3, from the admission pass's own fold: the latest replay-passed candidate of
+        each author that died within `RETAINED_TTL_SECONDS` -- still pending, or cancelled with it ("parent
+        retired or changed; candidate evidence retained") before this rule reached the floor -- enters the
+        seat queue, once an author. mullins-14's is the case."""
+        now = self.clock()
+        with self._state_lock:
+            handled = {a: at for a, at in (self._state.get("retained_authors") or {}).items()
+                       if now - float(at or 0) <= self.RETAINED_TTL_SECONDS}
+            self._state["retained_authors"] = handled
+        latest: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            author = self.registry.get(str(row.get("agent") or ""))
+            if author is None or author.alive or author.id in handled or not author.died_at:
+                continue
+            if now - _epoch(author.died_at) > self.RETAINED_TTL_SECONDS:
+                continue
+            status = row.get("status")
+            if (status in ("queued", "deferred", "orphaned") or (status == "cancelled" and row.get("reason") == self.RETAINED_CANCELLED)) \
+                    and self._retainable(row):
+                latest[author.id] = row  # the fold is oldest first: the last is the latest
+        for author_id, row in latest.items():
+            self._retain(self.registry.get(author_id), row, f"its author {author_id} died holding it: it waits for a seat with its "
+                                                            "author's lineage (picked up after the author's death)")
+        return len(latest)
+
+    def _retained_waiting(self, *, expired: bool = False) -> list[dict[str, Any]]:
+        """The retained candidates waiting for a seat (house.json `retained`) in the order the admission
+        pass seats them: a proven family's first -- the seat follows proof at the family level (at T0 only
+        mullins-14's weather-favorites was proven among fourteen authors that had died holding candidates
+        that day, and it had died after ten of them) -- then the longest wait. Those past
+        `RETAINED_TTL_SECONDS` only with `expired` (the admission pass drops them)."""
+        now = self.clock()
+        rows = [dict(r) for r in (self._state.get("retained") or {}).values()
+                if expired or now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS]
+        return sorted(rows, key=lambda r: (not self._family_proven(r.get("family"), r.get("venue")),
+                                           float(r.get("since") or 0), str(r.get("session"))))
+
+    def _admit_orphan(self, entry: Mapping[str, Any], rules: Mapping[str, Any], rows: Sequence[dict[str, Any]]) -> Agent | None:
+        """Seat one retained candidate of a dead author (S3), under the lifecycle lock: born on its author's
+        line (the author is its parent, so it inherits the author's selection path and holdout ration),
+        House-staked, seated on paper because its code passed replay as the author's candidate, and told as
+        a `retained` birth. It asks for a seat as its author's family with no forward score of its own
+        (`_weakest`, evidenced). A file that would displace a resident is read in the probe box first, as
+        `_admit_candidate` reads one; one that cannot be born, or that a living agent already runs, is
+        dropped; one past `RETAINED_TTL_SECONDS` is dropped as too old."""
+        queue = Admissions(self.ledger)
+        session = str(entry.get("session"))
+        row = next((r for r in rows if r.get("session") == session), None)
+        author = self.registry.get(str(entry.get("author") or ""))
+
+        def forget() -> None:
+            with self._state_lock:
+                (self._state.get("retained") or {}).pop(session, None)
+            self._data_cache.pop("seat_waiters", None)
+
+        if row is None or author is None or row.get("status") != "orphaned":
+            forget()  # seated, dropped or left unconfirmed by an earlier pass
+            return None
+        if self.clock() - float(entry.get("since") or 0) > self.RETAINED_TTL_SECONDS:
+            queue.record(row, "dropped", f"no seat within {self.RETAINED_TTL_SECONDS / 3600:g} hours of its author's death: "
+                                         "its replay is too old to seat")
+            forget()
+            return None
+        candidate = row["_candidate"]
+        living = self.registry.living()
+        sha = code_sha(candidate["code"])
+        if any(a.code_sha256 == sha and dict(a.params or {}) == dict(candidate.get("params") or {}) for a in living):
+            queue.record(row, "dropped", "a living agent already runs this program")
+            forget()
+            return None
+        niche = self.niche_of(author)
+        if niche is None or niche.dormant:
+            queue.record(row, "orphaned", "its desk is closed: it waits for it to open")
+            return None
+        niche_full = self.members(niche.id) >= niche.max_members
+        loser = None
+        if niche_full or len(living) >= int(rules["max_population"]):
+            loser = self._weakest(rules, specialty=niche.id if niche_full else None, evidenced=True,
+                                  newcomer=Newcomer(family=author.family, venue=author.venue, what=f"the retained candidate of {author.id}"))
+            if loser is None:
+                queue.record(row, "orphaned", f"waiting for an eligible seat: {'its desk' if niche_full else 'the league'} is full of "
+                                              "residents that may not be displaced")
+                return None
+        claim = getattr(self.sandbox, "claim", None)
+        with claim(PROBE_BOX, wait=self.settings.probe_wait_seconds) if claim is not None else nullcontext(True) as free:
+            if not free:
+                return None  # the probe box is in use by background work: the next admission pass
+            try:
+                described = self.sandbox.needs(PROBE_BOX, candidate["code"])
+                info = described.result
+                if not info.get("ok"):
+                    raise ValueError(str(info.get("error") or "its NEEDS could not be read"))
+                if loser is not None:
+                    # A bad file must not displace a resident: the replayed inputs, exactly (`_admit_candidate`).
+                    if not info.get("ok") or niche_of(info["needs"])[:2] != (author.venue, author.horizon):
+                        raise ValueError("it no longer describes its author's venue and horizon")
+                    if niches_module.constrain(info["needs"], niche) != candidate["needs"]:
+                        raise ValueError("its description differs from the inputs it was replayed on")
+                    parameters.require_valid({**info.get("params", {}), **candidate["params"]}, candidate["needs"])
+            except SandboxError as exc:
+                self._defer("retained", f"infrastructure: {type(exc).__name__}: {str(exc)[:200]}")
+                return None
+            except Exception as exc:  # noqa: BLE001 - the file cannot be born: nothing was written
+                queue.record(row, "dropped", f"it cannot be born: {type(exc).__name__}: {str(exc)[:160]}")
+                forget()
+                return None
+            queue.record(row, "admitting", "paper admission write started", displaced=loser.id if loser else None)
+            purpose = str(candidate.get("purpose") or "")
+            try:
+                if loser is not None:
+                    self.kill(loser, "displaced", self.postmortem(loser, "displaced",
+                              f"the retained research candidate of {author.id}, which died holding it, takes the seat"))
+                child = self.spawn(author.line or author.name, author.family, candidate["code"], parent=author.id,
+                                   params=candidate["params"], endowment=rules["endowment_usd"], described=described,
+                                   reason=f"the retained research candidate of {author.id}, which died holding it: {purpose}"[:1500])
+            except Exception as exc:  # noqa: BLE001 - an unknown write is kept for inspection, never retried
+                if isinstance(exc, ValueError) and loser is None:
+                    # `spawn` refused it before anything was written (no open specialty for its NEEDS).
+                    queue.record(row, "dropped", f"it cannot be born: {str(exc)[:200]}")
+                else:
+                    queue.record(row, "unconfirmed", f"admission interrupted: {type(exc).__name__}: {str(exc)[:160]}")
+                    self.alert("warning", f"{author.id}'s retained candidate: its admission is unconfirmed; retained for inspection")
+                forget()
+                return None
+        self.evaluator.seat(child.id, 1, f"its code passed replay as the candidate of {author.id}, which died before it was seated")
+        with self._state_lock:
+            self._state["tried"][child.id] = child.code_sha256
+        self.seat(child)
+        numbers = candidate.get("numbers") or {}
+        self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
+                                            "reason": purpose[:600], "new_code": True, "staked_by": "house", "retained": True},
+                           agent=author.id)
+        if self.ledger.get(f"birth-route:{child.id}") is None:
+            self.ledger.append("route.decision", {"task": f"birth:{child.id}", "route": "retained", "model": None,
+                                                   "reason": f"the retained research candidate of {author.id}, which died holding it",
+                                                   "evidence": {"author": author.id, "session": session, "replay_passed": True,
+                                                                "trades": numbers.get("trades"), "return_pct": numbers.get("return_pct"),
+                                                                "displaced": loser.id if loser else None}},
+                               id=f"birth-route:{child.id}")
+        queue.record(row, "admitted", "the retained candidate of a dead author was seated on paper", child=child.id)
+        forget()
+        return child
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""
@@ -4959,7 +6097,24 @@ class House:
         last = float(state.get('at') or state.get('since') or self._born_at)
         if self.clock() - self._born_at >= 300 and self.clock() - last >= float(rules['newcomer_seconds']):
             with self._lifecycle_lock:
-                for row in Admissions(self.ledger).pending():
+                rows = Admissions(self.ledger).rows()
+                # S3 (Sept 24, 2026): the retained candidates of dead authors first, oldest death first; they
+                # rank with the lab's graduates, and a living author can research again, a dead one cannot.
+                self._adopt_orphans(rows)
+                for entry in self._retained_waiting(expired=True):
+                    child = self._admit_orphan(entry, rules, rows)
+                    if child is not None:
+                        state['at'] = self.clock()
+                        return child
+                left = self._retained_waiting()
+                if left:
+                    self._refuse_birth("retained", len(left), "none could be seated: their desks are full of residents that may "
+                                                              "not be displaced, even by a newcomer with forward evidence")
+                for row in [r for r in rows if r.get('status') in ('queued', 'deferred', 'admitting') and r.get('_candidate')]:
+                    if row['session'] in (self._state.get('retained') or {}):
+                        # Handed to the seat queue in this very pass: an admission above displaced its author, whose
+                        # row this fold still reads as pending. Cancelled as its dead author's, it was lost (review of #245).
+                        continue
                     child = self._admit_candidate(row, displace=True)
                     if child is not None:
                         state['at'] = self.clock()
@@ -5151,6 +6306,32 @@ class House:
                 self._state[key] = 0
             if out.get("absorbed"):
                 self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": kind, **out})
+            self._watch_absorb(kind, out)
+
+    #: A release that keeps being refused this long is said once (Sept 24, 2026: the first check of
+    #: the OpenAI release compared a moving House figure with a reading a tick old and refused every
+    #: try for as long as research ran; nothing on the ledger or in health said so).
+    ABSORB_STALL_SECONDS = 1800
+
+    def _watch_absorb(self, kind: str, out: Mapping[str, Any]) -> None:
+        """The invariant on the release of stale holds: while every try comes back with a reason and
+        nothing released, since when is kept in the House's state, and past `ABSORB_STALL_SECONDS` one
+        warning says why, with the check's numbers; a release, or a try with nothing to release,
+        clears it (and an info alert says so if the warning went out)."""
+        key = f"absorb_stalled:{kind}"
+        stalled = self._state.setdefault("absorb_stalled", {})
+        if out.get("absorbed") or not out.get("why"):
+            row = stalled.pop(kind, None)
+            if row and row.get("told"):
+                self.alert("info", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds are being released again")
+            return
+        row = stalled.setdefault(kind, {"since": self.clock(), "told": False})
+        row["why"] = str(out.get("why"))[:200]
+        if not row["told"] and self.clock() - float(row["since"]) >= self.ABSORB_STALL_SECONDS:
+            row["told"] = True
+            minutes = (self.clock() - float(row["since"])) / 60
+            self.alert("warning", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds have not been released for {minutes:.0f} minutes: "
+                                  f"{row['why']}", check=dict(out.get("check") or {}), key=key)
 
     def tick(self) -> dict[str, Any]:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
@@ -5418,6 +6599,22 @@ class House:
             seats = self._seats_health()
         except Exception as exc:  # noqa: BLE001 - health is written whatever the seat market says
             seats = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        lab = self.lab.health() if self.lab is not None else None
+        # L3 (Sept 24, 2026): warnings that repeat, and the health failures the in-box watchdog reads.
+        try:
+            repeating = self._repeating_health()
+        except Exception as exc:  # noqa: BLE001
+            repeating = [{"error": f"{type(exc).__name__}: {str(exc)[:160]}"}]
+        try:
+            failures = self._health_failures(lab)
+        except Exception as exc:  # noqa: BLE001 - a check that cannot run is not a failure it found
+            failures = []
+            self.alert("warning", f"the health failures could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        try:
+            economy = {"sail_cap": self._sail_cap_state(),
+                       "merton": self.merton.pause_state() if getattr(self.merton, "pause_state", None) else None}
+        except Exception as exc:  # noqa: BLE001
+            economy = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
         health = {
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
             "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders()),
@@ -5446,15 +6643,68 @@ class House:
             "stopped_because": summary.get("stopped_because"),
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
-            "lab": self.lab.health() if self.lab is not None else None,  # closed since when, paid phases skipped, graduates waiting
+            "lab": lab,  # closed since when, paid phases skipped, graduates waiting
             "feeds": self.feeds.health() if self.feeds is not None else None,
             "shards": self.shards.health() if self.shards is not None else None,
             "deferred": deferred,
             "seats": seats,
+            "repeating_warnings": repeating,
+            "failures": failures,
+            "research_economy": economy,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.root / "health.json")
+
+    def _health_failures(self, lab: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+        """health.json `failures`: what the in-box watchdog (league/watchdog.py) reads as a failure of
+        the House, each `{check, text, since}`. The House says so once when one begins (an error
+        alert whose `began_at` is its `since`) and once when it ends (an info).
+
+        `lab_evaluates` (L3, Sept 24, 2026): the Alpha Lab evaluated nothing for LAB_IDLE_SECONDS
+        while its queue was not empty. At T0 of the close-the-gaps run its last batch was 23:37:17Z
+        with 618 candidates queued, and only a warning a step said anything. What the watchdog does
+        with it is in its `read_health`: a canary would refuse on it, the watch after a promotion
+        never rolls back for it (an hour of nothing cannot begin inside a ten-minute watch)."""
+        out = []
+        idle = self._lab_idle(lab)
+        if idle is not None:
+            out.append(idle)
+        current = {row["check"]: row for row in out}
+        with self._state_lock:
+            known = self._state.setdefault("health_failures", {})
+            began = [row for check, row in current.items() if check not in known]
+            ended = [check for check in list(known) if check not in current]
+            for row in began:
+                known[row["check"]] = row["since"]
+            for check in ended:
+                known.pop(check, None)
+        for row in began:
+            self.alert("error", f"health failure: {row['text']}", failure=row["check"], began_at=row["since"])
+        for check in ended:
+            self.alert("info", {"lab_evaluates": "the lab evaluates again"}.get(check, f"the health failure {check} has cleared"),
+                       failure=check)
+        return out
+
+    def _lab_idle(self, lab: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        """The lab's health failure, or None: candidates queued, and no batch for LAB_IDLE_SECONDS since
+        the later of its last batch and its oldest queued candidate (a queue that filled half an hour
+        ago has not had its hour)."""
+        if self.lab is None or not isinstance(lab, Mapping):
+            return None
+        queued = int(lab.get("queued") or 0)
+        if queued <= 0:
+            return None
+        last = self.lab._q("SELECT MAX(at) AS at FROM batches")[0]["at"]
+        oldest = self.lab._q("SELECT MIN(created) AS at FROM candidates WHERE status='queued'")[0]["at"]
+        since = max(float(last or 0), float(oldest or 0))
+        if not since or self.clock() - since < LAB_IDLE_SECONDS:
+            return None
+        shown = now_iso(lambda: float(last)) if last else "never"
+        notes = "".join(f"; {name}: {str(lab.get(key))[:200]}" for key, name in (("refusal", "closed"), ("error", "its step fails"))
+                        if lab.get(key))
+        return {"check": "lab_evaluates", "since": now_iso(lambda: since),
+                "text": f"the lab evaluated nothing in the last hour while {queued} candidates are queued (last batch {shown}{notes})"}
 
     def close(self, *, wait: float | None = 5.0) -> None:
         self._closing.set()
@@ -5467,6 +6717,14 @@ class House:
         self.ledger.close()
         if self.campaigns:
             self.campaigns.close()
+
+
+def _code_venue(code: str) -> str | None:
+    """The venue a strategy file's literal NEEDS name, read without running it; None when it names none."""
+    from .lab import static_literal
+
+    needs = static_literal(str(code or ""), "NEEDS") or {}
+    return str(needs.get("venue")) if needs.get("venue") else None
 
 
 def _epoch(iso: str) -> float:

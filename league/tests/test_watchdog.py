@@ -906,3 +906,72 @@ class InheritedFreeze(ReadHealthTest):
         self.assertTrue(watch().ok, "the freeze was already there when the watch began")
         write_health(self.root, self.clock, frozen=None, seq=2)
         self.assertTrue(watch().ok)
+
+
+class HealthFailuresAndInheritedConditions(ReadHealthTest):
+    """L3 (Sept 24, 2026). health.json `failures` (today: "the lab evaluated nothing in the last hour
+    while its queue is not empty") is a bad reading, and so is an escalated warning. What the
+    watchdog does with them: a canary, which inherits nothing, refuses on either; the watch after a
+    promotion counts a condition that BEGAN before the promotion (`since`, `began_at`) as inherited,
+    never as the new release's doing -- an hour of lab idleness cannot begin inside a ten-minute
+    watch, so the watch never rolls a release back for it; and `status` shows it as a reason."""
+
+    FAILURE = {"check": "lab_evaluates", "text": "the lab evaluated nothing in the last hour while 618 candidates are queued"}
+
+    def test_a_health_failure_is_a_bad_reading(self):
+        write_health(self.root, self.clock, failures=[{**self.FAILURE, "since": wd.iso(self.clock() - 4000)}])
+        health = self.read()
+        self.assertFalse(health.ok)
+        self.assertEqual(health.reasons, ("health failure (lab_evaluates): the lab evaluated nothing in the last hour while 618 candidates are queued",))
+
+    def test_one_that_began_before_the_promotion_is_inherited_and_one_after_it_is_not(self):
+        write_health(self.root, self.clock, failures=[{**self.FAILURE, "since": wd.iso(self.clock() - 4000)}])
+        healthy = self.read(inherited_before=self.clock() - 600)
+        self.assertTrue(healthy.ok, healthy.reasons)
+        self.assertEqual(healthy.detail["inherited_failures"], ["lab_evaluates"])
+        write_health(self.root, self.clock, failures=[{**self.FAILURE, "since": wd.iso(self.clock() - 30)}])
+        self.assertFalse(self.read(inherited_before=self.clock() - 600).ok)
+        write_health(self.root, self.clock, failures=[{**self.FAILURE, "since": "not a time"}])
+        self.assertFalse(self.read(inherited_before=self.clock() - 600).ok, "a failure that cannot say when it began is not inherited")
+
+    def test_an_error_whose_condition_began_before_the_promotion_is_inherited(self):
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})
+        since = ledger.head()[0]
+        ledger.append("ops.alert", {"level": "error", "text": "a warning repeated 10 times in 30 minutes: the lab's step failed (IndexError)",
+                                    "repeated": {"count": 10}, "began_at": wd.iso(self.clock() - 3000)})
+        ledger.append("ops.alert", {"level": "error", "text": "health failure: the lab evaluated nothing in the last hour",
+                                    "failure": "lab_evaluates", "began_at": wd.iso(self.clock() - 4000)})
+        write_health(self.root, self.clock, seq=ledger.head()[0])
+        self.assertFalse(self.read(since_seq=since).ok, "a canary inherits nothing")
+        quiet = self.read(since_seq=since, inherited_before=self.clock() - 600)
+        self.assertTrue(quiet.ok, quiet.reasons)
+        self.assertEqual((quiet.detail["error_alerts"], quiet.detail["inherited_alerts"]), (0, 2))
+        ledger.append("ops.alert", {"level": "error", "text": "a warning repeated 10 times in 30 minutes: something new",
+                                    "began_at": wd.iso(self.clock() - 60)})
+        broke = self.read(since_seq=since, inherited_before=self.clock() - 600)
+        self.assertFalse(broke.ok, "a run of repeats that began under the release is the release's doing")
+        self.assertIn("something new", broke.reasons[0])
+
+
+class TheWatchNeverRollsBackForTheLab(Case):
+    def test_the_labs_hour_of_nothing_is_read_as_inherited_through_the_watch(self):
+        root = self.base / "state"
+        root.mkdir(parents=True)
+        ledger = Ledger(root / "ledger.sqlite", clock=self.clock)
+        self.addCleanup(ledger.close)
+        ledger.append("ops.started", {"books": []})
+        failure = {"check": "lab_evaluates", "text": "the lab evaluated nothing in the last hour while 12 candidates are queued",
+                   "since": wd.iso(self.clock() - 3300)}
+        write_health(root, self.clock, seq=ledger.head()[0])
+        watch = HouseHealth(root, clock=self.clock, restart_within=None)
+        self.assertTrue(watch().ok)  # the reading before the promotion
+        for _ in range(4):
+            self.clock.advance(150)  # 55 minutes of nothing before the promotion becomes an hour inside the watch
+            ledger.append("ops.started", {"books": []})
+            ledger.append("ops.alert", {"level": "error", "text": f"health failure: {failure['text']}", "failure": "lab_evaluates",
+                                        "began_at": failure["since"]})
+            write_health(root, self.clock, seq=ledger.head()[0], failures=[failure])
+            reading = watch()
+            self.assertTrue(reading.ok, reading.reasons)
+        self.assertFalse(read_health(root, now=self.clock()).ok, "status still says so")

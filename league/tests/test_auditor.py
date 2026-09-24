@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import random
 import tempfile
 import unittest
 import urllib.error
@@ -530,3 +531,92 @@ class AGateThatDidNotRun(AuditorCase):
     def test_a_real_veto_carries_no_error(self):
         row = self.auditor(says({"approve": False, "summary": "look-ahead", "findings": [finding("blocker")]})).audit(self.agent, self.verdict)
         self.assertNotIn("error", row)
+
+
+class OrderOutcomesIndex(unittest.TestCase):
+    """`order_outcomes` on a House ledger answers from an index folded once and then only from the new
+    rows (Sept 24, 2026: every wake's snapshot re-read all 18,641 order and refusal rows, 4.5 s a read,
+    and the box's tick had slowed to 60 s). Its answers must equal the whole-ledger read exactly."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.db")
+
+    def random_rows(self, rng, n):
+        agents, books = ["a1", "a2", "a3", "a4"], ["kalshi", "kalshi-shadow"]
+        for _ in range(n):
+            book = rng.choice(books)
+            if rng.random() < 0.35:
+                self.ledger.append("book.refused", {"book": book, "intent_id": rng.choice(["i1", "i2", "i3", None]),
+                                                   "instrument": {"symbol": rng.choice(["X", "Y"])},
+                                                   "reasons": [rng.choice(["cap", "longshot", "self-cross"])]},
+                                   agent=rng.choice(agents))
+            else:
+                shares = [{"agent": a} for a in rng.sample(agents, rng.randint(1, 3))]
+                if rng.random() < 0.1:
+                    shares.append(dict(shares[0]))  # one agent named twice in an order's shares
+                status = rng.choice(["unknown", "open", "filled", "rejected", "canceled"])
+                self.ledger.append("book.order", {"book": book, "order_id": rng.choice(["o1", "o2", "o3", "o4", "o5"]),
+                                                  "side": rng.choice(["buy", "sell"]), "quantity": str(rng.randint(1, 9)),
+                                                  "status": status, "reason": rng.choice([None, "HTTP 403", "the venue refused"]),
+                                                  "shares": shares, "instrument": {"symbol": "X"}})
+
+    def test_the_index_answers_exactly_what_reading_the_whole_ledger_answers(self):
+        from league.auditor import _scan_outcomes, order_outcomes
+
+        rng = random.Random(24)
+        for _ in range(60):
+            self.random_rows(rng, rng.randint(0, 12))
+            for _ in range(4):
+                agent, book, limit = rng.choice(["a1", "a2", "a3", "a4", "nobody"]), rng.choice(["kalshi", "kalshi-shadow", "alpaca"]), rng.choice([1, 3, 12, 50])
+                self.assertEqual(order_outcomes(self.ledger, agent, book, limit=limit),
+                                 _scan_outcomes(self.ledger, agent, book, limit=limit), (agent, book, limit))
+
+    def test_after_the_first_read_only_new_rows_are_read_and_answers_are_copies(self):
+        from league.auditor import order_outcomes
+
+        class Counting(Ledger):
+            rows_read = 0
+
+            def iter(self, **kw):
+                for entry in super().iter(**kw):
+                    type(self).rows_read += 1
+                    yield entry
+
+        from league.auditor import _scan_outcomes
+
+        ledger = Counting(Path(self.dir.name) / "counting.db")
+        self.ledger = ledger
+        self.random_rows(random.Random(7), 40)
+        first = order_outcomes(ledger, "a1", "kalshi")
+        read_first = Counting.rows_read
+        self.assertEqual(read_first, 40)
+        self.assertTrue(first, "the fixture gives a1 outcomes on kalshi")
+        for row in first:  # a caller that changes what it was given changes nothing the next caller reads
+            row["status"] = "tampered"
+            (row.get("instrument") or {})["symbol"] = "tampered"
+        read_scan = Counting.rows_read
+        self.assertEqual(order_outcomes(ledger, "a1", "kalshi"), _scan_outcomes(ledger, "a1", "kalshi"))
+        self.random_rows(random.Random(8), 3)
+        before = Counting.rows_read
+        order_outcomes(ledger, "a2", "kalshi-shadow")
+        self.assertEqual(Counting.rows_read - before, 3, "a later read folds only the three new rows")
+        self.assertGreater(read_scan, 0)
+
+    def test_anything_but_a_house_ledger_is_read_the_whole_way(self):
+        from league.auditor import order_outcomes
+
+        class Fake:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def iter(self, kinds=None, agent=None, after=0):
+                return iter(self.rows)
+
+        entry = type("E", (), {})()
+        entry.kind, entry.agent, entry.id, entry.at, entry.seq = "book.refused", "a1", "r1", "2026-09-24T00:00:00Z", 1
+        entry.payload = {"book": "kalshi", "intent_id": "i1", "reasons": ["cap"]}
+        fake = Fake([entry])
+        self.assertEqual([r["status"] for r in order_outcomes(fake, "a1", "kalshi")], ["refused"])
+        self.assertEqual([r["status"] for r in order_outcomes(fake, "a1", "kalshi")], ["refused"], "a fake is never indexed")

@@ -107,7 +107,9 @@
       "max_factor": 8,
       "sample_percent": 10,
       "clock_runs": "winners_and_idle",
-      "abstain_lock_after": 3
+      "abstain_lock_after": 3,
+      "_about_sept24_lock_profile": "Sept 24, 2026 (the close-the-gaps run, L2): an agent under the abstention lock researches on abstain_lock_profile, the cheapest profile the code base names (league/routing.py TaskRouter.research_settings, from research_gate.ResearchGate.lock_profile). Measured Sept 22 on the same frozen packets (league/routing_evidence.json): flash_asap $0.0027 a call against Luna's $0.0080 and pro_asap's $0.0299, and it spends Sail, not the gateway month kept for audits. A cheaper Sail profile the session already runs on is kept. Bounds: any Sail profile ltcm/provider.py prices.",
+      "abstain_lock_profile": "flash_asap"
     }
   },
   "horizon": {
@@ -130,12 +132,35 @@
       168
     ]
   },
+  "merton_bounds": {
+    "_about": "Checked by economy.check_bounds (and so by league.ci): the teacher's schedule within these hours, and paused_until_profit any subset of these roles (Sept 24, 2026).",
+    "schedule_hours": {
+      "teacher": [
+        6,
+        24
+      ]
+    },
+    "paused_until_profit": [
+      "architect",
+      "toolsmith",
+      "operator",
+      "designer",
+      "teacher"
+    ]
+  },
   "merton": {
     "_about": "How often each of Merton's roles sits down, in hours, during the expedition. The pacer still gates every pass on the day's allowance, so this is how often a role MAY run, not how often it must.",
+    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, L2): the roles in paused_until_profit do not sit down while the floor's 24-hour REAL P&L is not positive -- the realized result of the real books' settlements and closing fills over the last 24 hours (league/merton.py RealPnl, which says why not the allocator's floor_pnl) -- with one ops.budget row ('merton pause') when a role pauses or resumes. Lifetime to Sept 24 the architect had spent $57, the teacher $21, the toolsmith $19, the operator $15 and the designer $8 for about one positive forward record. The teacher runs every 12 h (was 6; turbo merton_schedule_hours.teacher too, within merton_bounds); the auditor, the consultant and the engineer are not scheduled here and keep their cadence.",
+    "paused_until_profit": [
+      "architect",
+      "toolsmith",
+      "operator",
+      "designer"
+    ],
     "schedule_hours": {
       "operator": 4,
       "toolsmith": 3,
-      "teacher": 6,
+      "teacher": 12,
       "designer": 12,
       "architect": 3
     },
