@@ -532,7 +532,7 @@ ask; the House applies it when your research pass ends, as it does a retained ca
 
 - **`pause_entries`** holds your ENTRIES: every buy your code sends -- which opens or adds to a
   position -- is held by the House at each wake (the wake counts it as `held`; it is not a refusal),
-  and your resting buys are cancelled at your next wake. Your sells, cancels and settlements go on,
+  and your resting buys are cancelled when the pause is made. Your sells, cancels and settlements go on,
   and your code keeps running and keeping its memory. **`resume_entries`** lets your buys through
   again. Your standing says which state you are in, since when, why, and how many buys were held.
   A paused agent that does not trade is judged like any other: it earns nothing while it does not

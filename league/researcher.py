@@ -62,7 +62,7 @@ TOOLS: list[dict[str, Any]] = [
                                                      "source": {"type": "string", "enum": ["my_trades", "markets_now", "items"]},
                                                      "items": {"type": "array", "items": {"type": "string"}, "description": "only for source 'items'"}},
                     "required": ["question", "source"]}},
-    {"name": "pause_entries", "description": "Hold your deployed strategy's ENTRIES -- every buy, which opens or adds to a position -- from the end of this pass until you resume them. Your exits (sells), cancels and settlements go on; your resting buys are cancelled at your next wake, and each buy your code sends is held by the House and counted on the wake. It raises nothing: your limits, stake and band stay the book's and the allocator's, and a paused agent that does not trade can still be demoted or displaced by the usual rules. Recorded on the ledger with what it replaced. Free, not a trial. Say why.",
+    {"name": "pause_entries", "description": "Hold your deployed strategy's ENTRIES -- every buy, which opens or adds to a position -- from the end of this pass until you resume them. Your exits (sells), cancels and settlements go on; your resting buys are cancelled when it takes effect, and each buy your code sends is held by the House and counted on the wake. It raises nothing: your limits, stake and band stay the book's and the allocator's, and a paused agent that does not trade can still be demoted or displaced by the usual rules. Recorded on the ledger with what it replaced. Free, not a trial. Say why.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
     {"name": "resume_entries", "description": "Let your deployed strategy's entries through again from the end of this pass, after `pause_entries`. Recorded on the ledger like the pause. Free, not a trial. Say why.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
@@ -753,7 +753,7 @@ class Researcher:
         self._request_control(agent, session, name, {"note": reason}, out)
         paused = name == "pause_entries"
         return {"recorded": True, "takes_effect": "when this pass ends",
-                "note": ("from then on every buy your code sends is held and your resting buys are cancelled at your next wake; "
+                "note": ("from then on every buy your code sends is held, and your resting buys are cancelled then; "
                          "your sells, cancels and settlements go on. `resume_entries` in a later pass lets them through again."
                          if paused else "from then on your code's buys reach the book again, under the same limits as before.")}
 

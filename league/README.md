@@ -191,8 +191,8 @@ status is exposed in health and agent research context; qualification is distinc
    **Paused entries (X1, Sept 24, 2026).** An agent that paused its entries (`pause_entries`,
    `Registry.entries_paused`) has every buy its code sends held before sizing: counted as `held` on
    `agent.woke`, never a `book.refused` row (which would pull a research pass forward each wake),
-   and its resting buys that are its alone are cancelled (`_cancel_paused_entries`). Its sells,
-   cancels and settlements go on.
+   and its resting buys that are its alone are cancelled when the pause is made and at each wake
+   (`_cancel_paused_entries`). Its sells, cancels and settlements go on.
    **The horizon's basis (X2, Sept 24, 2026).** `tapes.resolution(row, close)` is when a Kalshi
    market is expected to pay and what that is judged by: its scheduled (expected) expiration where
    the venue gives one, its close otherwise, never the latest date it may expire (the daily diesel

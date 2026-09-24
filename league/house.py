@@ -4994,6 +4994,17 @@ class House:
                     row.update(params=dict(p["params"]), was={"params": dict(agent.params)}, replay=p.get("replay"))
                 self.ledger.append("agent.strategy", row, agent=agent_id, id=f"control:{key}")
                 self.registry.refresh()
+                if control == "pause_entries":
+                    # Its resting buys go now, not at its next wake, `wake_minutes` away (up to a day):
+                    # a bid left resting filled after the agent asked for no more entries (review of
+                    # #249). A cancel the venue refuses is asked again at each wake.
+                    book = self.book_of(agent)
+                    if book is not None:
+                        try:
+                            self._cancel_paused_entries(agent, book)
+                        except Exception as exc:  # noqa: BLE001 - the pause stands; its next wake cancels again
+                            self.alert("warning", f"{agent_id}: its resting buys could not be cancelled at its pause "
+                                                  f"({type(exc).__name__}: {str(exc)[:160]}); its next wake asks again")
                 if control == "edit_params":
                     with self._state_lock:
                         self._state["idle"].pop(agent_id, None)  # new parameters, a fresh count of the wakes they sit out

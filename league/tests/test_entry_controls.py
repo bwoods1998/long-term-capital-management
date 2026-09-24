@@ -109,6 +109,18 @@ class PauseAndResume(ControlCase):
         cancel = self.house.ledger.last("book.cancel", agent=agent.id)
         self.assertIsNotNone(cancel)
 
+    def test_its_resting_buys_are_cancelled_when_the_pause_is_made(self):
+        """Review of #249: they waited for its next wake, `wake_minutes` away (a day for a daily agent),
+        and a bid that filled meanwhile was an entry after the pause."""
+        agent = self.seated("rester", RESTER.replace('"wake_minutes": 5', '"wake_minutes": 1440'))
+        self.house.tick()
+        book = self.house.books["alpaca-paper"]
+        (order,) = book.open_orders(agent.id)
+        self.apply(agent, "pause_entries")
+        self.assertEqual(book.open_orders(agent.id), [])
+        self.assertIn(order.order_id, [e.payload.get("order_id") for e in self.house.ledger.iter(kinds="book.cancel", agent=agent.id)])
+        self.assertEqual(book.account(agent.id).holdings, {})
+
     def test_resume_lets_its_entries_through_again(self):
         agent = self.seated()
         self.apply(agent, "pause_entries")
