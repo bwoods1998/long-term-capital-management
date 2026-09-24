@@ -44,18 +44,20 @@ per further day (UNVERIFIED as a published statistic; it is the desk's prior, no
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
-from . import DataError, HttpTransport, iso, read_json, require
+from . import CONTACT_USER_AGENT, DataError, HttpTransport, iso, read_json, require
 
 HOST = "https://api.weather.gov"
 POINTS_URL = HOST + "/points/{lat},{lon}"
 OBSERVATION_URL = HOST + "/stations/{station}/observations/latest"
-USER_AGENT = "ltcm (agent@blakewoods.us)"
+USER_AGENT = CONTACT_USER_AGENT  # one constant for the whole package (ltcm/data/__init__.py)
 ACCEPT = "application/geo+json"
 SOURCE = "nws"
 
@@ -134,6 +136,64 @@ ALIASES = {
     "washington d c": "washington dc",
     "vegas": "las vegas",
 }
+
+
+#: The city a Kalshi weather series names after its kind (`KXHIGHNY`, `KXHIGHTPHX`, `KXLOWTNYC`,
+#: `KXRAINNYC`): the series hints above, plus `NYC`, which the low and rain series spell New York.
+#: Sept 24, 2026: the weather desk lists 20 high and 17 low series over these twenty cities.
+SERIES_CODES: dict[str, str] = {
+    **{re.sub(r"^KXHIGHT?", "", city.series_hint): city.key for city in CITIES.values()},
+    "NYC": "new york",
+}
+_SERIES = re.compile(r"^KX(?:HIGH|LOW|RAIN|SNOW)([A-Z]+)$")
+
+
+def city_for_series(series: Any) -> City | None:
+    """The city a Kalshi weather series settles on, or None when it names none this module knows.
+    The code after the kind may carry Kalshi's `T` (its newer cities) or a period letter (`D`, `M`,
+    `W`) first; the first reading that names a known city wins."""
+    found = _SERIES.match(str(series or "").strip().upper())
+    if not found:
+        return None
+    rest = found.group(1)
+    for code in (rest, rest[1:] if rest[:1] in ("T", "D", "M", "W") else None, rest[2:] if rest[:1] == "T" and rest[1:2] in ("D", "M", "W") else None):
+        if code and code in SERIES_CODES:
+            return CITIES[SERIES_CODES[code]]
+    return None
+
+
+def station_for(value: Any) -> str | None:
+    """The settlement station a strategy names by station (`KNYC`), city (`New York`, `nyc`) or
+    Kalshi series (`KXHIGHNY`, `KXLOWTNYC`); None when it names none of the twenty."""
+    text = str(value or "").strip()
+    if not text or len(text) > 40:
+        return None
+    upper = text.upper()
+    for city in CITIES.values():
+        if upper == city.station:
+            return city.station
+    city = city_for_series(upper)
+    if city is not None:
+        return city.station
+    key = normalize(text)
+    city = CITIES.get(ALIASES.get(key, key))
+    return city.station if city is not None else None
+
+
+def city_of_station(station: str) -> City:
+    for city in CITIES.values():
+        if city.station == str(station).upper():
+            return city
+    raise DataError(f"weather: no city settles on station {station!r}")
+
+
+def standard_offset_hours(city: City) -> float:
+    """The city's offset from UTC in local STANDARD time (-5 for New York, all year): the NWS keeps
+    its climate day, and so the CLI report a Kalshi market settles on, on standard time."""
+    zone = ZoneInfo(city.timezone)
+    january = datetime(2026, 1, 15, 12, tzinfo=zone)
+    offset = january.utcoffset() - (january.dst() or timedelta(0))
+    return offset.total_seconds() / 3600.0
 
 
 def city_for(name: Any) -> City:
@@ -274,6 +334,50 @@ class Weather:
             "description": _text(properties.get("textDescription")),
         }
 
+    def issued(self, city: City, *, days: int = 3) -> dict[str, Any]:
+        """The station's forecast as the NWS issued it (Sept 24, 2026, league/feeds.py records it):
+        `issued` is the forecast's own `updateTime`; `periods` are its 12-hour periods (the daytime
+        ones carry the high, the night ones the low); `days` are the next climate days' extremes of
+        the hourly forecast -- the local STANDARD time day the CLI report settles on -- with the
+        hours they cover (a day the hourly path does not cover whole says so, `hours` < 24)."""
+        grid = self.points(city)
+        daily = self._get(grid["forecast"], f"weather forecast {city.name}")
+        hourly = self._get(grid["hourly"], f"weather hourly {city.name}")
+        issued = _text(daily.get("updateTime"))
+        require(issued is not None, f"weather forecast {city.name}: no updateTime")
+        periods = []
+        for row in daily.get("periods") if isinstance(daily.get("periods"), list) else []:
+            if not isinstance(row, Mapping) or not _text(row.get("startTime")):
+                continue
+            temperature = fahrenheit(row.get("temperature"), row.get("temperatureUnit") or "F")
+            chance = row.get("probabilityOfPrecipitation")
+            periods.append({"name": _text(row.get("name")), "start": _text(row.get("startTime")), "end": _text(row.get("endTime")),
+                            "daytime": bool(row.get("isDaytime")),
+                            "temperature": None if temperature is None else float(temperature),
+                            "pop": _pop(chance), "short": _text(row.get("shortForecast"))})
+        require(periods, f"weather forecast {city.name}: no periods")
+        offset = standard_offset_hours(city)
+        extremes: dict[str, dict[str, Any]] = {}
+        for row in hourly.get("periods") if isinstance(hourly.get("periods"), list) else []:
+            if not isinstance(row, Mapping) or not _text(row.get("startTime")):
+                continue
+            temperature = fahrenheit(row.get("temperature"), row.get("temperatureUnit") or "F")
+            if temperature is None:
+                continue
+            start = datetime.fromisoformat(str(row["startTime"]).replace("Z", "+00:00")).astimezone(timezone.utc)
+            day = (start + timedelta(hours=offset)).date().isoformat()
+            entry = extremes.setdefault(day, {"date": day, "hourly_max": None, "hourly_min": None, "hours": 0, "pop_max": None})
+            value = float(temperature)
+            entry["hours"] += 1
+            entry["hourly_max"] = value if entry["hourly_max"] is None else max(entry["hourly_max"], value)
+            entry["hourly_min"] = value if entry["hourly_min"] is None else min(entry["hourly_min"], value)
+            pop = _pop(row.get("probabilityOfPrecipitation"))
+            if pop is not None:
+                entry["pop_max"] = pop if entry["pop_max"] is None else max(entry["pop_max"], pop)
+        require(extremes, f"weather hourly {city.name}: no hourly temperatures")
+        return {"source": SOURCE, "station": city.station, "city": city.name, "unit": "F", "issued": iso(issued),
+                "periods": periods[:14], "days": [extremes[day] for day in sorted(extremes)][: max(1, int(days)) + 1]}
+
     # ------------------------------------------------------------------ the answer
     def forecast(self, name: str) -> dict[str, Any]:
         """Today's and tomorrow's highs and lows, the hourly path, the latest observation."""
@@ -347,6 +451,17 @@ class Weather:
         }
 
 
+def _pop(value: Any) -> float | None:
+    """A probability of precipitation (`{"unitCode": "wmoUnit:percent", "value": 20}`) in percent."""
+    number = value.get("value") if isinstance(value, Mapping) else None
+    if number is None or isinstance(number, bool):
+        return None
+    try:
+        return float(number)
+    except (TypeError, ValueError):
+        return None
+
+
 def _local_date(stamp: str) -> str:
     """The calendar date in the period's own offset: `2026-09-16T06:00:00-04:00` -> 2026-09-16."""
     text = str(stamp)
@@ -362,6 +477,11 @@ __all__ = [
     "ALIASES",
     "CITIES",
     "City",
+    "SERIES_CODES",
+    "city_for_series",
+    "city_of_station",
+    "standard_offset_hours",
+    "station_for",
     "ERROR_BAND_F",
     "HOURLY_HOURS",
     "OBSERVATION_URL",

@@ -288,7 +288,7 @@ class Recorder(StoreCase):
 class Requests(StoreCase):
     def test_needs_feeds_are_held_to_known_names_six_keys_and_one_case(self):
         self.assertEqual(requested({"Sports": ["NFL", "KXEPLGAME", "football/college-football", "cricket", "nfl"],
-                                    "PERPS": ["btc/usd", "XBT", "ethusdt", "PEPE"], "weather": ["KXHIGHNY"]}),
+                                    "PERPS": ["btc/usd", "XBT", "ethusdt", "PEPE"], "fog": ["KXHIGHNY"]}),  # (weather is recorded since Sept 24)
                          {"sports": ["nfl", "epl", "ncaaf"], "perps": ["BTC", "ETH"]})
         self.assertEqual(len(requested({"perps": sorted(feeds.known_perps())})["perps"]), 6)
         self.assertEqual(requested({"sports": "mlb"}), {"sports": ["mlb"]})

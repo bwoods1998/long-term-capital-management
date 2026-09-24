@@ -1,0 +1,9 @@
+{
+  "family": "index-etfs-morning-range-stops",
+  "name": "scholes_session_gated_exits",
+  "repair": {
+    "key": "strategy_defect:scholes-h7dd043-2:6882c3a751f1",
+    "parent": "scholes-h7dd043-2"
+  },
+  "why": "Corrected child of scholes-h7dd043-2: gate market-order decisions before position management to weekday 09:30 <= New York time < 16:00, preventing the reported after-close sell requests while preserving overdue exits, ETF momentum logic, symbols and hourly horizon. Starts at rung 0 with no inherited record and must qualify independently."
+}

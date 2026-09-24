@@ -14,8 +14,11 @@ the micro-real stake, next to what the approved agents really made.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import threading
+import weakref
 from decimal import Decimal
 from typing import Any, Mapping
 
@@ -60,6 +63,13 @@ max_position_usd and max_order_usd) or an agent's FIRST SWING (a stake sized by 
 live grant for that venue (allocation_context.venue_capital_usd, venue_headroom_usd, fits). Judge capacity against
 that envelope, not against the legacy $50 / four-agent tuition or the $60 micro_real_limits, which apply only when
 no allocation_context is given. A real drawdown, hysteresis and a cooldown send a losing bunt back to paper.
+When allocation_context.family_swing is true (since Sept 24, 2026), the experiment is a FAMILY SWING: every member
+of the agent's family on real money is staked above the bunt (allocation_context.stake_usd each, ramp and caps in
+allocation_context.ramp), because the family's pooled REAL record qualified. Judge that record in family_packet:
+its independent events (one per event, whatever the strikes), the honest lower bound (for a favourites record the
+loss-rate bound, not only the t bound), whether a few events or one member carry it, whether the fills behind it
+would survive the larger size (family_packet.capacity), and whether the strategy code can behave in ways the
+record has not shown. The agent's own record (paper_fills, from its real book here) is one member's part of it.
 Answer with ONE JSON object and nothing else:
 {"approve": true|false, "confidence": 0.0-1.0, "summary": "two or three plain sentences",
  "findings": [{"severity": "blocker"|"concern"|"note", "issue": "...", "evidence": "what in the packet shows it"}]}
@@ -73,35 +83,100 @@ EXECUTION_POLICY = {
     "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."}
 
 
-def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
-    """Include refusals before submission as well as House orders attributed by their shares."""
+_OUTCOME_KINDS = ('book.order', 'book.refused')
+
+
+def _fold_outcome(orders: dict, entry: Any) -> None:
+    """One order or refusal row into one agent's outcomes on one book (keyed, in the order they last
+    moved): a refusal before submission by its intent id, a House order the agent has a share of by
+    its venue order id, a submission error carried to the order's later rows."""
+    p = entry.payload
+    if entry.kind == 'book.refused':
+        key = ('intent', p.get('intent_id') or entry.id)
+        orders.pop(key, None)
+        orders[key] = {'at': entry.at, **{k: p[k] for k in ('intent_id', 'instrument') if p.get(k) is not None},
+                       'status': 'refused',
+                       'reason': '; '.join(str(reason) for reason in p.get('reasons') or []),
+                       'submitted_to_venue': False}
+        return
+    key = ('order', p.get('order_id'))
+    previous = orders.pop(key, {})
+    row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
+    if p.get('status') == 'unknown' and p.get('reason'):
+        row['submission_error'] = p['reason']
+    elif previous.get('submission_error'):
+        row['submission_error'] = previous['submission_error']
+    orders[key] = row
+
+
+def _scan_outcomes(ledger: Any, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """`order_outcomes` read the whole way through the ledger: the reference `_OutcomeIndex` must equal,
+    and the path for anything that is not a House ledger (a test's fake)."""
     if limit <= 0:
         return []
-    orders = {}
-    for entry in ledger.iter(kinds=('book.order', 'book.refused')):
+    orders: dict = {}
+    for entry in ledger.iter(kinds=_OUTCOME_KINDS):
         p = entry.payload
         if p.get('book') != book:
             continue
         if entry.kind == 'book.refused':
             if entry.agent == agent:
-                key = ('intent', p.get('intent_id') or entry.id)
-                orders.pop(key, None)
-                orders[key] = {'at': entry.at, **{k: p[k] for k in ('intent_id', 'instrument') if p.get(k) is not None},
-                               'status': 'refused',
-                               'reason': '; '.join(str(reason) for reason in p.get('reasons') or []),
-                               'submitted_to_venue': False}
+                _fold_outcome(orders, entry)
             continue
-        if not any(s.get('agent') == agent for s in p.get('shares') or []):
-            continue
-        key = ('order', p.get('order_id'))
-        previous = orders.pop(key, {})
-        row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
-        if p.get('status') == 'unknown' and p.get('reason'):
-            row['submission_error'] = p['reason']
-        elif previous.get('submission_error'):
-            row['submission_error'] = previous['submission_error']
-        orders[key] = row
+        if any(isinstance(s, Mapping) and s.get('agent') == agent for s in p.get('shares') or []):
+            _fold_outcome(orders, entry)
     return list(orders.values())[-limit:]
+
+
+class _OutcomeIndex:
+    """Every agent's order outcomes on every book, folded from one ledger once and afterwards only from
+    the rows appended since. Sept 24, 2026: `order_outcomes` read every order and refusal row on the
+    ledger again for every wake's snapshot (`House.snapshot`), for research and for each audit packet --
+    18,641 rows at 05:28Z, 4.5 s a read on the owner's machine -- while the 1-vCPU box's tick had
+    slowed to 60 s. The same rule (`_fold_outcome`) over the same rows in the same order, so the answer
+    is `_scan_outcomes`'s exactly (`test_auditor.OrderOutcomesIndex` holds the two equal); each answer
+    is a deep copy, so no caller can change what the next one reads."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.books: dict[tuple[Any, Any], dict] = {}
+        self.lock = threading.Lock()
+
+    def outcomes(self, ledger: Ledger, agent: str, book: str, limit: int) -> list[dict[str, Any]]:
+        with self.lock:
+            for entry in ledger.iter(kinds=_OUTCOME_KINDS, after=self.cursor):
+                self._fold(entry)
+                self.cursor = entry.seq
+            orders = self.books.get((agent, book)) or {}
+            return copy.deepcopy(list(orders.values())[-limit:])
+
+    def _fold(self, entry: Any) -> None:
+        p = entry.payload
+        if entry.kind == 'book.refused':
+            _fold_outcome(self.books.setdefault((entry.agent, p.get('book')), {}), entry)
+            return
+        # Each agent with a share once, as `_scan_outcomes` asks "has this agent any share".
+        for agent in dict.fromkeys(s.get('agent') for s in p.get('shares') or [] if isinstance(s, Mapping)):
+            _fold_outcome(self.books.setdefault((agent, p.get('book')), {}), entry)
+
+
+_INDEXES: "weakref.WeakKeyDictionary[Ledger, _OutcomeIndex]" = weakref.WeakKeyDictionary()
+_INDEXES_LOCK = threading.Lock()
+
+
+def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """Include refusals before submission as well as House orders attributed by their shares: the
+    agent's last `limit` outcomes on `book`, oldest first. A House ledger keeps an index of them
+    (`_OutcomeIndex`); anything else is read the whole way through (`_scan_outcomes`)."""
+    if limit <= 0:
+        return []
+    if not isinstance(ledger, Ledger):
+        return _scan_outcomes(ledger, agent, book, limit=limit)
+    with _INDEXES_LOCK:
+        index = _INDEXES.get(ledger)
+        if index is None:
+            index = _INDEXES[ledger] = _OutcomeIndex()
+    return index.outcomes(ledger, agent, book, limit)
 
 
 class Auditor:
@@ -155,11 +230,13 @@ class Auditor:
             "strategy_code": agent.code,
             "params": agent.params,
             "needs": agent.needs,
-            "test_passed": verdict.numbers,
+            "test_passed": {k: v for k, v in verdict.numbers.items() if k != "family_packet"},  # the packet goes once, below
             "promotion_context": {"from_rung": verdict.rung, "to_rung": verdict.rung + 1,
                                   "paper_gate": CONSTITUTION["ladder"]["paper"],
                                   "completed_exposure_gate": CONSTITUTION['ladder'].get('completed_exposures'),
-                                  "purpose": ("the allocator's " + str((verdict.numbers.get('allocation_context') or {}).get('band_to') or 'bunt')
+                                  "purpose": (str((verdict.numbers.get('allocation_context') or {}).get('purpose'))
+                                              if (verdict.numbers.get('allocation_context') or {}).get('family_swing')
+                                              else "the allocator's " + str((verdict.numbers.get('allocation_context') or {}).get('band_to') or 'bunt')
                                               + ": a small real stake sized inside the owner's per-venue grant"
                                               if (verdict.numbers.get('allocation_context') or {}).get('allocator')
                                               else "bounded micro-real experiment"),
@@ -180,6 +257,10 @@ class Auditor:
                                   if (verdict.numbers.get('allocation_context') or {}).get('allocator') else CONSTITUTION["rungs"]["2"]),
             "execution_policy": dict(EXECUTION_POLICY),
             "audit_policy_digest": self.policy_digest,
+            # The family swing's first entry (C2, Sept 24, 2026) is audited on the family's REAL record: every
+            # member's real closes, event by event, the pooled numbers and the capacity measured
+            # (`Allocator._family_packet`). None for an agent's own promotion.
+            "family_packet": verdict.numbers.get("family_packet"),
         }
 
     # ------------------------------------------------------------------ audit
@@ -187,6 +268,10 @@ class Auditor:
         """`charge=False`: the House pays (game.json `audit.house_pays`, Sept 23, 2026). The cost is
         still recorded on the verdict and still booked against the owner's frontier allowance."""
         packet = self.packet(agent, verdict)
+        # Whose verdict this is when it judged a family swing (Sept 24, 2026), on every row this audit writes, a failed
+        # call's included: the allocator reads it back after a restart (`Allocator._family_verdict_on_ledger`), and the
+        # House's own audit readers never take it for the member's own verdict (review of #242).
+        family = {"family_swing": packet["test_passed"]["family_swing"]} if packet["test_passed"].get("family_swing") else {}
         try:
             # 12,000, as Merton's own passes get: reasoning tokens are spent out of this budget
             # before a single character of the JSON is written, and an audit that runs out of room
@@ -196,7 +281,7 @@ class Auditor:
             # No audit, no promotion: a gate that fails open is not a gate.
             self.ledger.append("audit.verdict", {"approve": False, "error": str(exc)[:300],
                 "policy_digest": packet['audit_policy_digest'],
-                "summary": "the audit could not run; the agent stays on paper"}, agent=agent.id)
+                "summary": "the audit could not run; the agent stays on paper", **family}, agent=agent.id)
             return {"approve": False, "error": str(exc)}
         if answer.cost_usd > 0 and charge:
             self.economy.charge(agent.id, answer.cost_usd, "frontier audit", detail={"model": answer.model})
@@ -224,6 +309,7 @@ class Auditor:
             "model": answer.model,
             "book": packet["test_passed"].get("book"),
             "blocks_at_audit": len(packet["paper_blocks"]),
+            **family,
         }
         self.ledger.append("audit.verdict", row, agent=agent.id)
         return row

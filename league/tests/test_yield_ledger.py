@@ -14,6 +14,48 @@ from league.tests.test_hypotheses import FoundryCase
 from league.yield_ledger import fold, line_of
 
 
+class ByProfile(unittest.TestCase):
+    """L2 (Sept 24, 2026): the hourly yield row reports candidates per dollar per profile. The gap
+    review priced a Sail pro_asap session at about $0.055 against Luna's $0.017 by hand; the row
+    now says it every hour, from each session's own research-token charges."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.ledger = Ledger(Path(self.dir.name) / "l.sqlite", clock=self.clock)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def session(self, name, profile, charges, *, candidate=False, reason="finished"):
+        for turn, usd in enumerate(charges):
+            self.ledger.append("credit.charge", {"usd": usd, "what": "research tokens", "detail": {"session": name, "turn": turn}},
+                               agent="mullins-2", id=f"tokens:{name}:{turn}")
+        self.ledger.append("agent.research", {"tool": "summary", "session": name, "profile": profile, "candidate": candidate, "trials": 0,
+                                              "reason": reason, "cost_usd": str(sum(Decimal(c) for c in charges))}, agent="mullins-2")
+
+    def test_candidates_per_dollar_by_profile(self):
+        self.ledger.append("credit.charge", {"usd": "0.020", "what": "research tokens", "detail": {"session": "before", "turn": 0}},
+                           agent="mullins-2", id="tokens:before:0")  # charged before the window...
+        self.clock.advance(1)
+        since = now_iso(self.clock)
+        self.clock.advance(60)
+        self.ledger.append("agent.research", {"tool": "summary", "session": "before", "profile": "pro_asap", "candidate": False,
+                                              "trials": 0, "reason": "finished", "cost_usd": "0.020"}, agent="mullins-2")  # ...its summary inside
+        self.session("a1", "pro_asap", ["0.030", "0.025"], candidate=True)
+        self.session("a2", "pro_asap", ["0.055"])
+        self.session("l1", "openai_luna", ["0.008", "0.009"], candidate=True)
+        self.session("l2", "openai_luna", ["0.004"], reason="provider: provider_http_502")
+        out = fold(self.ledger, since=since)
+        asap, luna = out["by_profile"]["pro_asap"], out["by_profile"]["openai_luna"]
+        self.assertEqual((asap["sessions"], asap["candidates"], asap["usd"]), (3, 1, "0.1300"))
+        self.assertEqual(asap["candidates_per_usd"], 7.69)
+        self.assertEqual((luna["sessions"], luna["candidates"], luna["provider_failures"], luna["usd"]), (2, 1, 1, "0.0210"))
+        self.assertEqual(luna["candidates_per_usd"], 47.62)
+        self.assertEqual(out["usd_per"]["research"]["candidates"], "0.0655", "the research line's own arithmetic is unchanged")
+
+
 class Fold(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

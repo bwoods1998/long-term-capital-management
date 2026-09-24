@@ -748,3 +748,60 @@ class JevClassify(ResearchCase):
         r = self.researcher([[("classify", {"question": "Is this a sports market of any kind?", "source": "items", "items": ["x"]})]])
         r.research(self.parent, {}, session="s1")
         self.assertIn("not available", self.tool_output(1)["error"])
+
+
+class AProviderFailureIsRefunded(ResearchCase):
+    """Sept 24, 2026 (the close-the-gaps run, L2): 13 sessions ended in a provider 502 and 13 in a
+    504 in the day before T0, each charged for the turns before the failure. What its model turns
+    were charged comes back in one grant; the session is not a completed pass (research_gate)."""
+
+    class Refused(RuntimeError):
+        def __init__(self, code):
+            super().__init__(code)
+            self.code = code
+
+    def failing(self, code, on_turn=3):
+        r = self.researcher([[("library_search", {"query": "x"})], [("library_search", {"query": "y"})]])
+        original, seen = self.script.respond, []
+
+        def respond(profile, conversation, **kwargs):
+            seen.append(profile)
+            if len(seen) == on_turn:
+                raise AProviderFailureIsRefunded.Refused(code)
+            return original(profile, conversation, **kwargs)
+
+        self.script.respond = respond
+        return r
+
+    def test_a_502_gives_back_what_its_turns_were_charged_once(self):
+        before = self.economy.balance(self.parent.id)
+        r = self.failing("provider_http_502")
+        out = r.research(self.parent, {}, session="s502")
+        self.assertEqual(out.reason, "provider: provider_http_502")
+        self.assertEqual(self.economy.balance(self.parent.id), before, "two charged turns, both returned")
+        grant = self.ledger.get("research-refund:s502")
+        self.assertEqual((grant.kind, D(grant.payload["usd"])), ("credit.grant", D("0.02")))
+        summary = [e.payload for e in self.ledger.iter(kinds="agent.research") if e.payload.get("tool") == "summary"][-1]
+        self.assertEqual((D(summary["refunded_usd"]), D(summary["cost_usd"])), (D("0.02"), D("0.02")))
+        self.assertEqual(D(r.refund_provider_fault(self.parent, "s502", out.reason, turns=5)), D("0.02"))
+        self.assertEqual(len([e for e in self.ledger.iter(kinds="credit.grant") if e.id == "research-refund:s502"]), 1)
+
+    def test_a_504_is_refunded_and_a_session_the_model_or_a_cap_ended_is_not(self):
+        self.failing("provider_http_504").research(self.parent, {}, session="s504")
+        self.assertIsNotNone(self.ledger.get("research-refund:s504"))
+        spent = self.economy.balance(self.parent.id)
+        self.failing("provider_desk_cap_exceeded").research(self.parent, {}, session="scap")
+        self.assertIsNone(self.ledger.get("research-refund:scap"))
+        self.assertLess(self.economy.balance(self.parent.id), spent)
+
+    def test_the_refund_and_the_gate_agree(self):
+        from league.research_gate import completed_pass, provider_fault
+
+        for reason in ("provider: provider_http_502", "provider: provider_http_504", "provider: provider_http_503"):
+            self.assertTrue(provider_fault(reason))
+            self.assertFalse(completed_pass({"reason": reason}), "a refunded session is never a completed pass")
+        for reason in ("finished", "no tool call", "max_turns"):
+            self.assertFalse(provider_fault(reason))
+            self.assertTrue(completed_pass({"reason": reason}))
+        self.assertFalse(provider_fault("provider: max_output_tokens"))
+        self.assertFalse(completed_pass({"reason": "provider: max_output_tokens"}), "a provider failure of any kind is not a pass")

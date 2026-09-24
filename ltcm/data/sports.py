@@ -30,6 +30,18 @@ Endpoints and the fields relied on (probed live Sept 18, 2026):
 Every value in a result is a str, float, int, bool or None so a row ships as JSON. Odds are
 American moneylines as signed ints and the spread is signed from the home side (negative when
 the home team is favored).
+
+Sept 24, 2026 (the House's `odds` recorder, league/feeds.py): ESPN's core API carries what the
+scoreboard does not -- every provider's line with its opening and current prices, and the
+matchup predictor's win probability. Probed that day:
+
+    GET https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/events/{id}/competitions/{id}/odds
+        items[]: provider {id, name, priority}, details ("GB -5.5"), spread (home-signed), overUnder,
+                 homeTeamOdds / awayTeamOdds: favorite, moneyLine (current), open {pointSpread.american,
+                 moneyLine.american}, current {...}
+    GET .../events/{id}/competitions/{id}/predictor
+        lastModified, homeTeam / awayTeam .statistics[]: gameProjection (win %), teamChanceTie (%)
+        (football and basketball; other sports answer 404)
 """
 
 from __future__ import annotations
@@ -41,6 +53,7 @@ from typing import Any, Mapping
 from . import DataError, HttpTransport, iso, read_json, require
 
 HOST = "https://site.api.espn.com"
+CORE_HOST = "https://sports.core.api.espn.com"
 #: ESPN's edge refuses some Python User-Agents; a curl one is answered.
 USER_AGENT = "curl/8.0"
 SOURCE = "espn"
@@ -217,6 +230,79 @@ def _last_play(payload: Mapping[str, Any]) -> "str | None":
     return None
 
 
+def _american(value: Any) -> "int | None":
+    """An American price from the core API: an int, or a dict carrying `american` ("-360", "+280")."""
+    if isinstance(value, Mapping):
+        value = value.get("american")
+    return _moneyline(value)
+
+
+def implied_home(home_ml: "int | None", away_ml: "int | None") -> "float | None":
+    """The home side's win probability the two moneylines imply once the book's margin is taken out
+    (each price's implied probability, over their sum). None unless both are there."""
+    def raw(price: "int | None") -> "float | None":
+        if price is None or price == 0:
+            return None
+        return 100.0 / (price + 100.0) if price > 0 else -price / (-price + 100.0)
+
+    home, away = raw(home_ml), raw(away_ml)
+    return round(home / (home + away), 4) if home is not None and away is not None and home + away > 0 else None
+
+
+def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
+    """The core API's odds of one competition as one row per provider, best priority first:
+    `{provider, details, spread, over_under, home_ml, away_ml, implied_home, open: {spread, home_ml,
+    away_ml}}` -- spreads signed from the home side, moneylines American, `implied_home` de-vigged."""
+    items = payload.get("items") if isinstance(payload, Mapping) else None
+    require(isinstance(items, list), "espn core odds: no items")
+    out = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        home = item.get("homeTeamOdds") if isinstance(item.get("homeTeamOdds"), Mapping) else {}
+        away = item.get("awayTeamOdds") if isinstance(item.get("awayTeamOdds"), Mapping) else {}
+        provider = item.get("provider") if isinstance(item.get("provider"), Mapping) else {}
+        opened_home = home.get("open") if isinstance(home.get("open"), Mapping) else {}
+        opened_away = away.get("open") if isinstance(away.get("open"), Mapping) else {}
+        home_ml, away_ml = _american(home.get("moneyLine")), _american(away.get("moneyLine"))
+        spread = opened_home.get("pointSpread") if isinstance(opened_home.get("pointSpread"), Mapping) else {}
+        out.append({
+            "provider": _text(provider.get("name")),
+            "priority": _int(provider.get("priority")),
+            "details": _text(item.get("details")),
+            "spread": _float(item.get("spread")),
+            "over_under": _float(item.get("overUnder")),
+            "home_ml": home_ml,
+            "away_ml": away_ml,
+            "implied_home": implied_home(home_ml, away_ml),
+            "open": {"spread": _float(str(spread.get("american") or "").replace("+", "") or None),
+                     "home_ml": _american(opened_home.get("moneyLine")), "away_ml": _american(opened_away.get("moneyLine"))},
+        })
+    out.sort(key=lambda row: (row["priority"] is None, row["priority"] or 0))
+    return out
+
+
+def parse_predictor(payload: Any) -> "dict[str, Any] | None":
+    """The matchup predictor's win probability of one competition, `{home, away, tie, modified}` as
+    fractions, or None when it carries no projection."""
+    if not isinstance(payload, Mapping):
+        return None
+
+    def stat(side: str, name: str) -> "float | None":
+        team = payload.get(side) if isinstance(payload.get(side), Mapping) else {}
+        for row in team.get("statistics") if isinstance(team.get("statistics"), list) else []:
+            if isinstance(row, Mapping) and row.get("name") == name:
+                return _float(row.get("value"))
+        return None
+
+    home, away = stat("homeTeam", "gameProjection"), stat("awayTeam", "gameProjection")
+    if home is None or away is None:
+        return None
+    tie = stat("homeTeam", "teamChanceTie")
+    return {"home": round(home / 100.0, 5), "away": round(away / 100.0, 5), "tie": round(tie / 100.0, 5) if tie is not None else None,
+            "modified": _text(payload.get("lastModified"))}
+
+
 class Sports:
     """League scoreboards and one game's summary, reduced to flat rows."""
 
@@ -288,6 +374,43 @@ class Sports:
         row["as_of"] = iso(float(self.clock()))
         return row
 
+    def core_odds(self, league: str, event_id: Any) -> "list[dict[str, Any]]":
+        """Every provider's line of one game from ESPN's core API (`parse_core_odds`)."""
+        sport, _, code = league_path(league).partition("/")
+        event = str(event_id or "").strip()
+        require(event.isdigit(), f"espn core odds: not an event id {event_id!r}")
+        url = f"{CORE_HOST}/v2/sports/{sport}/leagues/{code}/events/{event}/competitions/{event}/odds"
+        status, _, body = self.transport.get(url, {"Accept": "application/json", "User-Agent": USER_AGENT}, self.timeout)
+        if status == 404:
+            return []  # no book lists a line for this game: none shown, not a failure
+        if status != 200:
+            raise DataError(f"espn core odds {event}: HTTP {status} from {url}")
+        try:
+            import json
+
+            return parse_core_odds(json.loads(body.decode("utf-8")))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise DataError(f"espn core odds {event}: malformed JSON") from exc
+
+    def core_predictor(self, league: str, event_id: Any) -> "dict[str, Any] | None":
+        """The matchup predictor's win probability of one game, or None where ESPN has none (it
+        answers 404 outside football and basketball)."""
+        sport, _, code = league_path(league).partition("/")
+        event = str(event_id or "").strip()
+        require(event.isdigit(), f"espn predictor: not an event id {event_id!r}")
+        url = f"{CORE_HOST}/v2/sports/{sport}/leagues/{code}/events/{event}/competitions/{event}/predictor"
+        status, _, body = self.transport.get(url, {"Accept": "application/json", "User-Agent": USER_AGENT}, self.timeout)
+        if status == 404:
+            return None
+        if status != 200:
+            raise DataError(f"espn predictor {event}: HTTP {status} from {url}")
+        try:
+            import json
+
+            return parse_predictor(json.loads(body.decode("utf-8")))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise DataError(f"espn predictor {event}: malformed JSON") from exc
+
     @staticmethod
     def match_kalshi(title: str, rows: list[dict[str, Any]]) -> "dict[str, Any] | None":
         """The scoreboard row a Kalshi title names, with `side` (home|away) for the team named first.
@@ -338,4 +461,5 @@ def _team_position(team: Mapping[str, Any], haystack: str) -> "int | None":
     return min(hits) if hits else None
 
 
-__all__ = ["HOST", "LEAGUES", "Sports", "USER_AGENT", "event_row", "league_path"]
+__all__ = ["CORE_HOST", "HOST", "LEAGUES", "Sports", "USER_AGENT", "event_row", "implied_home", "league_path", "parse_core_odds",
+           "parse_predictor"]
