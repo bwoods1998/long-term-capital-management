@@ -5211,7 +5211,7 @@ class House:
         hit = self._data_cache.get("seat_waiters")
         if hit and not fresh and self.clock() - hit[0] < 60:
             return hit[1]
-        raw = {"proven": self._waiting_proven(), "graduates": self._waiting_graduates(), "retained": self._retained_waiting(),
+        raw = {"proven": self._waiting_proven(), "graduates": self._waiting_graduates(), "retained": self._retained_waiting(left=True),
                "cards": self._waiting_cards(), "strategies": self._waiting_strategies()}
         value = self._expire_waiters(raw)
         self._data_cache["seat_waiters"] = (self.clock(), value)
@@ -5294,15 +5294,24 @@ class House:
         """The waiters that remain once those the search has closed have left (R2 (1), Sept 24, 2026). A waiter
         leaves once, with its reason: house.json `seat_expired` (kept SEAT_EXPIRED_KEEP_SECONDS), one
         `route.decision` row (`seat-expired:<class>:<id>`, route "expired"), and an info alert at most once an hour
-        a desk. An expired retained candidate's admission row is dropped by the admission pass (`_admit_orphan`),
-        an expired merged strategy is not enrolled (`enroll`), an expired card's desk is kept from the foundry's
-        admission (`_refill`), and no seat is made for an expired graduate on a closed desk (`_displaceable`,
-        `_follow_the_search`). None is ever counted as waiting again: not in health.json, not in the refusals, not
-        in the desks the waiters reserve.
+        a desk. An expired retained candidate is held by the admission pass, never seated, until its desk reopens or
+        its TTL drops it (`_admit_orphan`), an expired merged strategy is not enrolled (`enroll`), an expired card's
+        desk is kept from the foundry's admission (`_refill`), and no seat is made for an expired graduate on a
+        closed desk (`_displaceable`, `_follow_the_search`). None is counted as waiting while its reason holds: not in
+        health.json, not in the refusals, not in the desks the waiters reserve.
 
         Measured at 15:06Z: 21 of the 82 waiters would have left -- the 20 of kalshi-crypto-15m (3 graduates, 6
         cards, 4 retained candidates, 7 merged corrected children whose defective code no living agent runs) and
-        a megacaps graduate whose window lost -0.000142 a block over 4 active blocks."""
+        a megacaps graduate whose window lost -0.000142 a block over 4 active blocks.
+
+        A waiter that left is asked again each pass, and is a waiter again once its reason is gone -- its desk
+        reopened, its forward window no longer loses (the review of #276, Sept 24, 2026). Before, it stayed out for
+        SEAT_EXPIRED_KEEP_SECONDS whatever happened: the foundry reopens a closed desk on one family's pooled record
+        there (kalshi-crypto-strikes at 15:06Z, on +0.234 over 17 active blocks and +0.026 over 7) and the House
+        reads that through a ten-minute cache, so the waiters of a desk that reopened stayed uncounted for a week
+        while the lab and the foundry, which never read the House's expiry, seated them there, and a retained
+        candidate was dropped for good by the next admission pass. Its ledger row stays (the first reason stands);
+        a second departure is kept in house.json and told as the first was."""
         desks = {str(w.get("niche") or "") for rows in raw.values() for w in rows}
         closed = self._search_closed_desks(desks)
         scores = self._waiter_forward() if raw.get("graduates") else {}
@@ -5314,18 +5323,23 @@ class House:
             known = set(expired)
         out: dict[str, list[dict[str, Any]]] = {}
         leaving: list[tuple[str, Mapping[str, Any], str, tuple[str, str]]] = []
+        back: list[str] = []
         for cls in self.SEAT_WAITERS:
             kept = []
             for waiter in raw.get(cls) or ():
                 key = self._waiter_key(cls, waiter)
-                if key in known:
-                    continue
                 why = self._expiry(cls, waiter, closed, scores)
                 if why is None:
                     kept.append(dict(waiter))
-                else:
+                    if key in known:
+                        back.append(key)  # its desk reopened, or its window no longer loses: a waiter again
+                elif key not in known:
                     leaving.append((cls, waiter, key, why))
             out[cls] = kept
+        if back:
+            with self._state_lock:
+                for key in back:
+                    self._state["seat_expired"].pop(key, None)
         if leaving:
             self._record_expired(leaving)
         return out
@@ -6699,17 +6713,19 @@ class House:
                                                             "author's lineage (picked up after the author's death)")
         return len(latest)
 
-    def _retained_waiting(self, *, expired: bool = False) -> list[dict[str, Any]]:
+    def _retained_waiting(self, *, expired: bool = False, left: bool = False) -> list[dict[str, Any]]:
         """The retained candidates waiting for a seat (house.json `retained`) in the order the admission
         pass seats them: a proven family's first -- the seat follows proof at the family level (at T0 only
         mullins-14's weather-favorites was proven among fourteen authors that had died holding candidates
         that day, and it had died after ten of them) -- then the longest wait. Those past
         `RETAINED_TTL_SECONDS`, and those that left the seat queue (R2, `_expire_waiters`), only with `expired`
-        (the admission pass drops them)."""
+        (the admission pass drops the first and holds the second); those that left the seat queue also with
+        `left` (`seat_waiters`, which asks each pass whether their reason is gone: the review of #276)."""
         now = self.clock()
         gone = self._state.get("seat_expired") or {}
         rows = [dict(r) for r in (self._state.get("retained") or {}).values()
-                if expired or (now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS and f"retained:{r.get('session')}" not in gone)]
+                if expired or (now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS
+                               and (left or f"retained:{r.get('session')}" not in gone))]
         return sorted(rows, key=lambda r: (not self._family_proven(r.get("family"), r.get("venue")),
                                            float(r.get("since") or 0), str(r.get("session"))))
 
@@ -6721,7 +6737,8 @@ class House:
         (`_weakest`, evidenced). A file that would displace a resident is read in the probe box first, as
         `_admit_candidate` reads one; one that cannot be born, or that a living agent already runs, is
         dropped; one past `RETAINED_TTL_SECONDS` is dropped as too old, and one that left the seat queue
-        because the search closed its desk (R2, `_expire_waiters`) is dropped with that reason."""
+        because the search closed its desk (R2, `_expire_waiters`) is held, never seated, until the desk reopens
+        or that TTL drops it."""
         queue = Admissions(self.ledger)
         session = str(entry.get("session"))
         row = next((r for r in rows if r.get("session") == session), None)
@@ -6735,15 +6752,15 @@ class House:
         if row is None or author is None or row.get("status") != "orphaned":
             forget()  # seated, dropped or left unconfirmed by an earlier pass
             return None
-        gone = (self._state.get("seat_expired") or {}).get(f"retained:{session}")
-        if gone:
-            queue.record(row, "dropped", f"it left the seat queue: {str(gone.get('why') or gone.get('rule'))[:240]}")
-            forget()
-            return None
         if self.clock() - float(entry.get("since") or 0) > self.RETAINED_TTL_SECONDS:
             queue.record(row, "dropped", f"no seat within {self.RETAINED_TTL_SECONDS / 3600:g} hours of its author's death: "
                                          "its replay is too old to seat")
             forget()
+            return None
+        if (self._state.get("seat_expired") or {}).get(f"retained:{session}"):
+            # It left the seat queue while the search closes its desk (R2, `_expire_waiters`): never counted, never
+            # seated there, and back in the queue if the desk reopens inside its TTL. Dropped here, a desk closed for
+            # one pass lost a replay-passed program for good (the review of #276).
             return None
         candidate = row["_candidate"]
         living = self.registry.living()

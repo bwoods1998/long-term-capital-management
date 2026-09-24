@@ -362,12 +362,15 @@ watch.
       forward window loses (`Lab.forward_score` at or below zero) leaves the queue once, with a
       `route.decision` row `seat-expired:<class>:<id>` (route `expired`, the reason and the rule), a
       house.json `seat_expired` entry kept a week, and one info alert a desk an hour ("N waiters for
-      <desk> left the seat queue"). It is never counted again: not in `waiters`, the refusals, the
-      reserved desks or the scoreboard's metric 5. An expired retained candidate's admission row is
-      `dropped` with the reason, an expired merged strategy is not enrolled, no card is admitted onto
-      a closed desk, and no seat is made there for a graduate (`_displaceable` gives an evidenced
-      newcomer no seat on a desk the search closes, and the House holds that desk's cap at its
-      members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
+      <desk> left the seat queue"). It is not counted while its reason holds: not in `waiters`, the
+      refusals, the reserved desks or the scoreboard's metric 5 (which reads house.json `seat_expired`).
+      It is asked again each pass, and is a waiter again once the reason is gone -- its desk reopened,
+      its window no longer loses (the review of #276: the foundry reopens a desk on one family's record
+      there, read through a ten-minute cache). An expired retained candidate is held, never seated,
+      until its desk reopens or its 72-hour TTL drops it, an expired merged strategy is not enrolled,
+      no card is admitted onto a closed desk, and no seat is made there for a graduate (`_displaceable`
+      gives an evidenced newcomer no seat on a desk the search closes, and the House holds that desk's
+      cap at its members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
       resident still runs is not expired: it takes that resident's seat. At 15:06Z 21 would have left
       (the 20 of kalshi-crypto-15m: 3 graduates, 6 cards, 4 retained candidates, 7 corrected children
       of dead parents; and a megacaps graduate whose window lost -0.000142 a block), and Deploy C's
@@ -812,7 +815,7 @@ watch.
   foundry's closed desk, or the lab's idle desk) or, a graduate, whose own forward window loses, left
   the queue with their reason (`route.decision` `seat-expired:<class>:<id>`). Nothing to do: they are
   not seated and not counted. A desk that should be open again reopens when a family there is
-  positive over `hypotheses.closed_reopen_blocks` active blocks on it.
+  positive over `hypotheses.closed_reopen_blocks` active blocks on it, and its waiters are waiters again.
 - **"N newcomers have waited over 2 hours for a seat on <desk> (the longest ..): <rule>"** (warning,
   once an hour a desk; R2, Sept 24, 2026): the two-hour invariant. The rule says what holds them: a
   free seat the birth passes have not reached yet (the lab's six births an hour, the refill's one a

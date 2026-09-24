@@ -417,9 +417,11 @@ status is exposed in health and agent research context; qualification is distinc
    foundry's rule (`Foundry._closed_desks`, E2: `hypotheses.closed_desks` until a family there is
    positive over `closed_reopen_blocks` active blocks on that desk) or the lab's idle rule
    (`Lab._idle_desk`, E1), both read through `_search_closed_desks` every ten minutes, or -- a lab
-   graduate -- its own forward window loses (`Lab.forward_score`). It leaves once, with its reason: a
-   `route.decision` row `seat-expired:<class>:<id>`, house.json `seat_expired` (a week), an info alert
-   at most once an hour a desk; an expired retained candidate's admission is `dropped`, an expired
+   graduate -- its own forward window loses (`Lab.forward_score`). It leaves with its reason: a
+   `route.decision` row `seat-expired:<class>:<id>` (once), house.json `seat_expired` (a week), an info
+   alert at most once an hour a desk; it is asked again each pass and is a waiter again once its reason
+   is gone (its desk reopened, its window no longer loses: the review of #276). An expired retained
+   candidate is held, never seated, until its desk reopens or its 72-hour TTL drops it, an expired
    merged strategy is not enrolled (one whose defect a living resident still runs is never expired: it
    takes that resident's seat), no card is admitted onto a closed desk (`_refill` passes the closed
    desks to the foundry as reserved), and an evidenced newcomer is given no seat on a desk the search
