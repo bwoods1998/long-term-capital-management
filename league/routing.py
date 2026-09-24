@@ -95,6 +95,17 @@ def best_profile(evidence: Mapping[str, Any], baseline: str, candidates: list[st
     return best, why
 
 
+def _cheaper(profile: str, than: str) -> bool:
+    """Whether a Sail profile is priced below another (output rate, then input): a session already
+    on a cheaper one than the abstention lock's is left where it is. Luna is not a Sail profile."""
+    from ltcm.provider import PROFILES, rates
+
+    if profile not in PROFILES or than not in PROFILES:
+        return False
+    (inp, _, out), (inp2, _, out2) = rates(profile), rates(than)
+    return (out, inp) < (out2, inp2)
+
+
 def _rate(arm: Mapping[str, Any]) -> float:
     """Useful artifacts per ATTEMPT: a provider error (a 503, a 25-minute timeout) is a turn the
     House waited for and got nothing from, so it counts against the route like a useless answer."""
@@ -116,6 +127,9 @@ class TaskRouter:
         self._lock = threading.Lock()
         self._counts: dict[tuple[str, str, str, str, str], int] = {}
         self._evidence_note: dict[tuple[str, str, str, str], Any] = {}
+        #: (agent) -> the profile an agent under the abstention lock must research on, or None
+        #: (`research_gate.ResearchGate.lock_profile`, wired by the service). None: no lock.
+        self.lock: Any = None
 
     def route(self, task: str, *, model: str | None = None, reason: str | None = None, evidence: Any = None) -> Route:
         """The table's route for a task, recorded. Unknown tasks are code: nothing is bought by default."""
@@ -130,6 +144,13 @@ class TaskRouter:
         when `sail_by_evidence` is on. Every outcome is recorded with its reason."""
         out = dict(settings)
         profile = str(out.get("profile") or "")
+        locked = self._locked(agent)
+        if locked and locked != profile and not _cheaper(profile, locked):
+            # Sept 24, 2026 (L2): an agent under the abstention lock has abstained three times in a
+            # row; its next session is bought on the cheapest profile, whatever cohort it is in.
+            out.update(profile=locked, fast_profile="")
+            self._note("research_routine", Route("research", locked, "abstention lock: the cheapest profile"), None)
+            return out
         if profile == "openai_luna":
             from .fast_research import MODEL as LUNA
             self._note("research_routine", Route("research", LUNA, "owner cohort: Luna share of new sessions"), None)
@@ -143,6 +164,14 @@ class TaskRouter:
             out["profile"] = chosen
         self._note("research_routine", Route("research", chosen, why), (self.evidence or {}).get("source"))
         return out
+
+    def _locked(self, agent: Any) -> str | None:
+        if self.lock is None:
+            return None
+        try:
+            return self.lock(agent) or None
+        except Exception:  # noqa: BLE001 - a lock that cannot be read changes no route
+            return None
 
     # ----------------------------------------------------------------- record
     def _note(self, task: str, decided: Route, evidence: Any) -> None:
