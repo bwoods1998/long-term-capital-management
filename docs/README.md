@@ -13,7 +13,7 @@ now; everything under "History" describes something that no longer runs.
   back and recover the running league, how a money rule is deployed and the live grant
   re-ratified, and the switches.
 - [Close the gaps to the north star](goals/LTCM_CLOSE_THE_GAPS.md) (plan, Sept 24): the next
-  twelve-hour run. It starts from the seven gaps measured on the night of Sept 23-24 (a search that
+  autonomous run, with no deadline, outside market hours. It starts from the seven gaps measured on the night of Sept 23-24 (a search that
   nudges parameters, a promotion line that promotes noise, capital that does not follow proof, an
   evidence clock slower than the seat clock, a loop broken at its joints, exits walled off, inputs
   that do not exist) and closes each one with a scoreboard read at T0 and T+11.

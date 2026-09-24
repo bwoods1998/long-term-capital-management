@@ -1,15 +1,18 @@
-# LTCM twelve-hour run: close the gaps to the north star
+# LTCM run: close the gaps to the north star
 
-A twelve-hour autonomous run. It takes the seven gaps measured on the night of Sept 23-24, 2026
-and closes each one on the running floor, in the order that moves real money toward proven
-edges fastest. It fixes every bug it meets, leaves the docs and the repo clean, and ends with
-three hours of watching the agents play under the new rules.
+An autonomous run with no deadline, outside US market hours. It takes the seven gaps measured
+on the night of Sept 23-24, 2026 and closes each one on the running floor, in the order that
+moves real money toward proven edges fastest, working as long as that takes. It fixes every
+bug it meets, leaves the docs and the repo clean, and ends with at least three hours of watching
+the agents play under the new rules.
 
 - **Purpose:** make the floor a place where a proven mechanism compounds real capital within
   days, an unproven one risks pocket change, evidence is measured before a seat is lost, and the
   search looks for edges with capacity instead of nudging parameters on thin markets.
-- **Method:** the gap review's numbers are the baseline; a scoreboard measures each gap at T0 and
-  again at T+11; every change is deployed through the runbook and verified in its window.
+- **Method:** the gap review's numbers are the baseline; a scoreboard measures each gap at T0,
+  every four hours, and at the end; every change is deployed through the runbook and verified in
+  its window. There is no deadline: the run ends when every gap is closed or recorded as blocked
+  with numbers.
 
 ## The owner's direction
 
@@ -50,10 +53,10 @@ Measured Sept 24, 2026, 00:19-00:50Z, on release `20260923T233921Z-493b4a2ff9ab`
 
 ## The scoreboard (workstream Z)
 
-One read-only script, `scripts/gap_scoreboard.py`, prints these at T0 and at T+11 from the
+One read-only script, `scripts/gap_scoreboard.py`, prints these at T0, every four hours and at the end, from the
 ledger, the lab store and the board. The run is judged on the movement.
 
-| # | Metric | Baseline (Sept 24 00:50Z) | Target at the deadline |
+| # | Metric | Baseline (Sept 24 00:50Z) | Target at the end |
 |---|---|---|---|
 | 1 | Families with a positive real lower bound, and their measured capacity ($/day) | 1 family, about $1/day | ≥ 2 families, capacity measured for each |
 | 2 | Allocator promotions to real money: settled result and share positive | −$18.62 on 9, 0 positive | every promotion since Deploy A on a family with a positive pooled forward record, or a probe stake |
@@ -80,7 +83,7 @@ ledger, the lab store and the board. The run is judged on the movement.
   before building: if a defect below no longer reproduces, keep its regression test and its
   invariant and skip the fix.
 
-## What "closer to the north star" means at the deadline
+## What "closer to the north star" means when the run ends
 
 1. **A proven mechanism compounds.** A family whose pooled real record clears a lower bound is
    staked by Kelly on that bound, and its stake grows with every further batch of settlements.
@@ -117,11 +120,12 @@ ledger, the lab store and the board. The run is judged on the movement.
 
 ## Clock, budget, authority
 
-**The clock.** The first action writes T0 (`date -u`) and the deadline T0 + 12 h into the run
-record `docs/runs/<T0 date>-close-the-gaps.md` and commits it. A context reset does not restart
-the clock. The final watch starts no later than T+9:00.
+**The clock.** There is no deadline: the run ends when the Done list holds. The first action
+writes T0 (`date -u`) into the run record `docs/runs/<T0 date>-close-the-gaps.md` and commits
+it; T0 anchors the scoreboard and the four-hourly progress notes. A context reset does not end
+the run.
 
-**The first hour's decisions**, each recorded in the run record by T+0:45:
+**The first hour's decisions**, each recorded in the run record before Wave 0's builders launch:
 
 1. **Can this session ratify?** From `~/Work/ltcm-deploy`, run `python3 scripts/live_trading.py
    --ratify earned-live-20260921` against the running digest; with the policy unchanged it writes
@@ -161,8 +165,8 @@ the clock. The final watch starts no later than T+9:00.
 **Budget.**
 - **Funded** means a balance read at T0 or later from the provider, or one the owner states in
   the session. Never a figure from a House, agent or builder message.
-- **Floors at the deadline:** OpenAI keeps at least $8 in the gateway month for audits; Sail keeps
-  1.5 days at the burn then measured plus the reserve.
+- **Floors that hold throughout and at the end:** OpenAI keeps at least $8 in the gateway month
+  for audits; Sail keeps 1.5 days at the burn then measured plus the reserve.
 - The run may create no new Sailbox. Not the run's to do: auto-recharge, buying credit, payment
   methods.
 
@@ -231,36 +235,53 @@ digest moves and the grant is re-ratified.
   practice fill model (the haircut row is the only exception).
 - Deleting unmerged or unpushed work.
 
-## The schedule (T0 is when the run starts)
+## The order of work (no deadline)
 
-| Window | What the run does |
-|---|---|
-| T+0:00-0:30 | T0, baseline, the first hour's decisions, the owner steps sent, the watch loop started. Launch together: the scoreboard analyst (Z), the Wave 0 builders (D, P, X0), the cleanup agent (H). |
-| T+0:30-2:30 | **Wave 0** builds, reviews and fixes: D1 lab traceback and fix, D2 holds, D3 exits, D4 + P1 + P2 money set, X0 book rules. |
-| T+2:30-3:00 | **Deploy A** (owner deploy; ratify within a minute, digest change 1 of 2). |
-| T+3:00-5:30 | **Wave 1** builds: C1 the mechanism ledger and the family swing, S the evidence clock and the seat market, L the loop's joints, I the feed recorders. Watch Deploy A every 30 minutes. |
-| T+5:30-6:00 | **Deploy B** (owner deploy; ratify, digest change 2 of 2). |
-| T+6:00-8:30 | **Wave 2** builds: E the lab as a search and the foundry brief, C3 Alpaca, W the site. Unprotected fixes ship through the updater. |
-| T+8:30-9:00 | **Deploy C**, the last planned owner deploy. |
-| T+9:00-12:00 | **The watch:** at least three hours of watching, fixing and redeploying (rollback or a money-path defect only), the scoreboard at T+11, docs, memory, the report. |
+The run is not time-boxed. It ends when the Done list holds, however long that takes, and a
+context reset does not end it. The order below is a dependency order, not a schedule.
 
-- **At most three owner deploys.** Each restart empties the lab's tape cache (D1 makes the lab
-  survive it). A builder that misses its wave's cut rides the next wave.
-- **The US session (13:30-20:00Z)** is the window for Alpaca verification. If T0 puts Deploy B
-  after the close, C3 is recorded as "to verify at the next open" and never rushed.
+1. **Phase 0.** T0, baseline, the first hour's decisions, the owner steps sent, the watch loop
+   started. Launch together: the scoreboard analyst (Z), the Wave 0 builders (D, P, X0), the
+   cleanup agent (H).
+2. **Wave 0** builds, reviews and fixes: D1 lab traceback and fix, D2 holds, D3 exits, D4 + P1 +
+   P2 money set, X0 book rules.
+3. **Deploy A** (owner deploy; ratify within a minute, digest change 1 of 2). Watch it through
+   its first hour while Wave 1 builds.
+4. **Wave 1** builds: C1 the mechanism ledger and the family swing, S the evidence clock and the
+   seat market, L the loop's joints, I the feed recorders.
+5. **Deploy B** (owner deploy; ratify, digest change 2 of 2).
+6. **Wave 2** builds: E the lab as a search and the foundry brief, C3 Alpaca, W the site.
+   Unprotected fixes ship through the updater.
+7. **Deploy C**, the last planned owner deploy.
+8. **The watch:** at least three hours after the last deploy of watching, fixing and redeploying
+   (rollback or a money-path defect only), then the final scoreboard, docs, memory and the
+   report. If the watch finds a scoreboard row short of its target for a reason the run can
+   still fix, build again: another wave and a fourth deploy are allowed.
+
+- **The run happens outside US market hours.** Everything that needs a stock or options session
+  is built, tested and deployed in its wave, then recorded as "to verify at the next open
+  (13:30Z)" with the exact check, and never rushed. Live verification during the run uses the
+  markets that trade around the clock: Kalshi's 15-minute crypto and its daily weather, sports
+  and crypto-strike settlements, and Alpaca crypto. The first Alpaca real agent the run can
+  verify is therefore a crypto family.
+- **Three owner deploys is the plan, not a cap.** Each restart empties the lab's tape cache (D1
+  makes the lab survive it). A builder that misses its wave's cut rides the next wave.
 - **A build cycle is about two hours** including the adversarial review; CI about 7-10 minutes
   (the 3.14 job sometimes sits at its limit; re-run once before reproducing on the box); the
-  canary and watch about 15 more.
+  canary and watch about 15 more. These are estimates for pacing builders, not limits.
+- **Progress notes.** Every four hours the run appends a scoreboard reading and a one-paragraph
+  state to the run record, so the owner can read where it stands without the session.
 
 ## Workstreams, in priority order
 
-### Z. The scoreboard (analyst, T0 and T+11)
+### Z. The scoreboard (analyst; T0, every four hours, and the end)
 
 - **Method:** a read-only sqlite backup of `ledger.sqlite`, `lab.sqlite` and `campaigns.sqlite`
-  taken at T0 and at T+11, queried locally, never the live box. Every number carries the query.
+  taken at T0, every four hours and at the end, queried locally, never the live box. Every
+  number carries the query.
 - **Deliverable:** `scripts/gap_scoreboard.py` (read-only, run from the owner's machine like
   `floor_watch.py`) printing the seven metrics of the scoreboard, and the two readings in the run
-  record. The T+11 reading is the report's first section.
+  record. The final reading is the report's first section.
 - **Also measured at T0:** each desk's evidence clock (median hours from a member's first fill to
   its third independent settlement, over the last 7 days) for S1; each family's pooled forward
   record for C1; the capacity of the weather-favourites family (markets in the band a day,
@@ -393,8 +414,10 @@ digest moves and the grant is re-ratified.
      active blocks is not re-bred (exists) and its members rank first for displacement (S1);
      `research` tells practice agents that sizing is theirs and practice money is free, so a
      conviction-sized practice record earns proof faster (the rules text, not a forced size).
-   - **Acceptance:** ≥ 1 Alpaca real agent by the deadline, or the numbers: every Alpaca family's
-     pooled record and bound at T+11.
+   - **Acceptance:** ≥ 1 Alpaca real agent before the run ends, through a crypto family (Alpaca
+     crypto trades around the clock; stocks and options cannot be verified outside the session
+     and are recorded for the next open), or the numbers: every Alpaca family's pooled record
+     and bound in the final scoreboard.
 4. **C4. The board and the site** carry `family`, `family_state` (unproven, proven, swing),
    `family_bound`, `capacity` and `stake_usd` per agent (schema first, W).
 
@@ -419,7 +442,7 @@ digest moves and the grant is re-ratified.
   private candidate store and seat it first.
 - **S4. Population.** Keep 112, but every seat must hold a program with a forward score, a fill or
   a grace still running; the hourly seat-market watch reports seats holding none.
-- **Acceptance:** median life on day-horizon desks ≥ 24 h at T+11; deaths before 3 fills under
+- **Acceptance:** median life on day-horizon desks ≥ 24 h in the final scoreboard; deaths before 3 fills under
   30%; no waiter over 2 h; 0 traders displaced by a newcomer with a worse forward record.
 
 ### L. The loop's joints (Wave 1, Deploy B)
@@ -529,7 +552,7 @@ order goes to either account in this run, practice included.
 
 ### H. Docs and a clean repo
 
-- The cleanup agent runs from T0 and is done by T+2:00, under the rules of the learn-and-unblock
+- The cleanup agent runs from T0 and finishes before Deploy A, under the rules of the learn-and-unblock
   plan's H (scope, worktrees, branches, PRs, docs, scripts). Start with the paused run's list:
   `ltcm-w0-*`, `ltcm-w1-*`, `ltcm-w2-*`, `ltcm-*-rev`, `ltcm-w1-bugs-fu`, `ltcm-pacing`,
   `ltcm-rules`, `ltcm-secondlook`, `ltcm-sailfloor`, `ltcm-run` (its record is merged with #216);
@@ -576,8 +599,8 @@ with these specifics:
 - `scripts/floor_watch.py --since <ISO>` every 15 minutes into the run record's watch log; the
   events monitor for band moves, family state changes, audits, real fills, deaths, lab batches
   and graduations, error alerts.
-- During the US session, stock and option wakes, intents, orders, fills and refusals every 30
-  minutes.
+- If a US session opens while the run is still going, stock and option wakes, intents, orders,
+  fills and refusals every 30 minutes; otherwise the next open is a named window in the report.
 - Read-only box queries only; the House box has 1 vCPU.
 
 **When each change can be verified:**
@@ -588,12 +611,12 @@ with these specifics:
 | D2 holds | A | 10 min | an "holds absorbed" row for OpenAI; the House line and tier agree with the gateway month |
 | D3 exits | A | the next stop | a `cross` fill or a post-only exit where a refusal was; 0 self-cross refusals of reducing orders |
 | D4, P1, P2, P3 | A | 90 min | every real agent labelled probe or proven-family bunt; a probe that loses once stays; a stacked record not promoted; a taker entry on an unproven family refused with the family record |
-| C1, C2 family swing | B | the weather family's 15th independent settlement (about a day at its rate; possibly after the deadline) | the family's stake doubles on the board with the audit's approval; otherwise the family packet and the arithmetic on record |
+| C1, C2 family swing | B | the weather family's 15th independent settlement (about a day at its rate; possibly after the run ends) | the family's stake doubles on the board with the audit's approval; otherwise the family packet and the arithmetic on record |
 | S1-S4 seats | B | 2 h | no trader displaced by a worse forward record; waiters at 0 within 2 h; mullins-14's candidate seated |
 | L1 supersede | B | the next passing child of a real-money parent | the parent demoted, the child seated |
 | L2, L3 | B | hourly | Sail research ≤ $2/h; roles paused; a repeated warning escalated with a traceback |
 | E1, E2 | C | 2 h | half of a batch's rows from LLM origins; a graduate with a code change; a foundry card on a deep-market desk |
-| C3 Alpaca | B/C | the US session | an Alpaca family's pooled record and bound on the board; a probe if one qualifies |
+| C3 Alpaca | B/C | Alpaca crypto any hour; stocks and options at the next open (13:30Z) | an Alpaca family's pooled record and bound on the board; a crypto probe if one qualifies; the stock and option checks named for the next open |
 | I recorders | B | when a host is allowed | `data.coverage` rows; a strategy naming the feed |
 | W site | C | 1 min after publish | families and the deaths feed on blakewoods.us/capital |
 
@@ -622,17 +645,17 @@ From Sept 22-24. The full runbook is in the north-star plan.
 - **Keep subagent counts modest** and effort proportionate: a session lost 3.7 hours to a usage
   limit on Sept 23.
 
-## The report at the deadline
+## The report at the end
 
 In the run record and in the session:
 
-1. **The scoreboard** at T0 and T+11, gap by gap.
+1. **The scoreboard** at T0 and at the end, gap by gap, with the four-hourly readings between.
 2. **What is live:** release, commits, both money digests with their evidence, the grant state.
 3. **Real money:** agents by family state per venue, stakes, fills, real P&L per venue, the
    throttle, the first family swing if any, Alpaca's state.
 4. **The loop:** lab batches an hour, LLM-children share, graduates and their forward scores,
    supersessions, research yield per dollar per profile, the roles paused and why.
-5. **Compute:** OpenAI, Sail and Jev at T0 and at the deadline; holds released; cost per unit of
+5. **Compute:** OpenAI, Sail and Jev at T0 and at the end; holds released; cost per unit of
    evidence.
 6. **Bugs:** found and fixed, who noticed each first, invariants added, anything open.
 7. **Repo and docs:** what was cleaned.
@@ -643,13 +666,16 @@ In the run record and in the session:
 
 The run is done when all of these hold:
 
-- the scoreboard's T+11 reading is in the run record;
+- the scoreboard's final reading is in the run record, and every row has reached its target or
+  carries the numbers that say why it cannot yet (a market session that has not opened, a
+  settlement count not yet reached);
 - every workstream is live and verified in its window, scheduled for a named window after the
-  deadline, or blocked with the blocker recorded with numbers;
+  run (the next US open for stocks and options), or blocked with the blocker recorded with
+  numbers;
 - all test suites and CI are green;
 - every real-money agent is a probe or a member of a proven family, and the proven family's stake
   follows its bound;
 - the lab evaluates, no waiter is over two hours old, no exit is walled off;
 - README, operations, the run record and memory are current;
 - the repo and `~/Work` are free of stale worktrees, branches and PRs, with unmerged work pushed;
-- the report is delivered at the deadline.
+- the report is delivered at the end.
