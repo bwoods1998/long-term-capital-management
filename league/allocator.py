@@ -1735,7 +1735,11 @@ class Allocator:
             usd = capacity.get("usd_per_day")
             agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target, "evidence": ev.row() if ev else None,
                                 "venue": agent.venue, "last_move": None, "family": agent.family,
-                                "family_state": record["state"], "family_bound": record["bound"], "family_n": record["n"],
+                                # The HONEST bound (the t bound, and the loss-rate gate for a lopsided record): the one
+                                # that proves the family. The t bound alone read weather favourites at +0.0033 while
+                                # the proof read -0.2112 (C-site's finding, Sept 24, 2026).
+                                "family_state": record["state"], "family_bound": record.get("honest_bound", record["bound"]),
+                                "family_n": record["n"],
                                 "capacity": {"usd_per_day": None if usd is None else round(float(usd), 4),
                                              "binds": bool(swing and swing.get("limit") == "capacity")},
                                 "stake_limit": swing.get("limit") if swing else None}
