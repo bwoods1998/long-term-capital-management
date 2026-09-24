@@ -345,7 +345,6 @@ recorded for the next open; live verification uses the markets that trade around
   to "proven"), and an audit approval lapses when the family leaves the swing. Rejected: an
   anytime-valid bound (about 3x wider at n = 30: real edges would need months) and leaving it (a
   money rule that swings on noise four times in ten repeats gap 2 at larger stakes).
-
 - 07:50Z — **B-seats (#245) review: not safe as built; four majors and four minors fixed** on
   `b-seats/review` (#254). L1 would have retired meriwether-h2d625d, the floor's best real record
   (sports-central-run-under, the one proven family), on its first pass: the "defect" its child fixed
