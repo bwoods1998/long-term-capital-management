@@ -137,8 +137,10 @@ Practice books are not held to these, and no sell ever is:
   family with no taker record measured is not yet proven.
 - `allocator.max_event_share` (25%): what you hold on one event at cost, your working buys on any of
   its markets and the new order together are at most a quarter of your equity on the book. An event
-  is a market's ticker less its last segment: every strike of one game's total, every band of one
-  city's high on one day.
+  is a market ticker's first two segments, Kalshi's own event: every strike of one game's total,
+  every band of one city's high on one day, every player prop of one game
+  (`KXMLBHIT-26AUG311940MILCHC-...` is `KXMLBHIT-26AUG311940MILCHC`). A ticker of two segments is its
+  own event.
 
 Your practice evidence on Alpaca is haircut for execution: every practice fill's notional is charged
 a few bps a side, by its asset class, at what that class's practice fills were measured to flatter

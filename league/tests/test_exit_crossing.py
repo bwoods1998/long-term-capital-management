@@ -589,10 +589,11 @@ class StaleCancelAnswerTest(CrossCase):
 
 
 class EventOfTickerTest(unittest.TestCase):
-    """Pinned with the A-money builder's `event_key` (Sept 24, 2026): a Kalshi market's event is its
-    ticker without the last `-` segment."""
+    """Pinned with the A-money builder's `event_key` (Sept 24, 2026), `league/tapes.py` and Kalshi's own
+    `event_ticker`: a Kalshi market's event is its ticker's first two `-` segments, and a ticker of fewer
+    than three segments is its own event."""
 
-    def test_the_event_is_the_ticker_without_its_last_segment(self):
+    def test_the_event_is_the_tickers_first_two_segments(self):
         from league.book import _event_of
 
         for ticker, event_ticker in (
@@ -600,6 +601,15 @@ class EventOfTickerTest(unittest.TestCase):
             ("KXMLBTOTAL-26SEP231835TORBALG2-10", "KXMLBTOTAL-26SEP231835TORBALG2"),
             ("KXBTCD-26SEP2401-T62999.99", "KXBTCD-26SEP2401"),
             ("KXHIGHNY-26SEP22-B75.5", "KXHIGHNY-26SEP22"),
+            # Review of #226: a player prop is its GAME's (Kalshi's recorded event_ticker for
+            # KXMLBHIT-26AUG311940MILCHC-CHCPCROWARMSTRONG4-1 is KXMLBHIT-26AUG311940MILCHC); 109 such
+            # tickers traded on the shadow book by T0. Dropping the last segment made each player an event.
+            ("KXMLBHIT-26SEP222140LAAATH-LAAMTROUT27-4", "KXMLBHIT-26SEP222140LAAATH"),
+            ("KXMLBHR-26SEP191840CHCCIN-CINKHAYES3-1", "KXMLBHR-26SEP191840CHCCIN"),
+            ("KXT20MATCH-26SEP230900GHANGA-A-NGA-A", "KXT20MATCH-26SEP230900GHANGA"),
+            # ... and a two-segment market is its own event (Kalshi: event_ticker == ticker), never its series.
+            ("KXMLBRFI-26SEP151940ATLCHC", "KXMLBRFI-26SEP151940ATLCHC"),
+            ("KXHMONTH-26AUG", "KXHMONTH-26AUG"),
         ):
             with self.subTest(ticker=ticker):
                 self.assertEqual(_event_of(ticker), event_ticker)

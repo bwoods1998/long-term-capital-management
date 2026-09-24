@@ -173,12 +173,18 @@ def market_key(instrument: Instrument) -> str:
 
 
 def _event_of(ticker: str) -> str:
-    """The Kalshi event a market belongs to: its ticker without the last `-` segment
-    (`KXMLBTOTAL-26SEP231840MILPHI-6` -> `KXMLBTOTAL-26SEP231840MILPHI`). Every real Kalshi ticker on
-    the ledger at T0 (Sept 24, 2026) has three segments; the book's instruments carry no event field.
-    The same rule as the evaluator's `event_key` (the money owner's), to be pointed at one function."""
+    """The Kalshi event a market belongs to: the ticker's first two `-` segments, SERIES-EVENT, as
+    Kalshi's own `event_ticker` reads (`KXMLBTOTAL-26SEP231840MILPHI-6` -> `KXMLBTOTAL-26SEP231840MILPHI`;
+    a player prop `KXMLBHIT-26AUG311940MILCHC-CHCPCROWARMSTRONG4-1` -> `KXMLBHIT-26AUG311940MILCHC`, the
+    game, as recorded), and a ticker of fewer than three segments is its own event (`KXMLBRFI-26SEP151940ATLCHC`
+    is a market and its event both). The book's instruments carry no event field. The same rule as
+    `league/tapes.py`, `ltcm/backtest.py` and the evaluator's `event_key` (the money owner's), to be pointed
+    at one function. Review of #226 (Sept 24, 2026): dropping only the LAST segment made each player of one
+    game its own event (four props of one game passed a 25% cap at 32% of the stake) and a two-segment
+    market's event its whole series (a second game's run-in-the-first refused as the first game's)."""
     ticker = str(ticker or "").strip().upper()
-    return ticker.rsplit("-", 1)[0] if "-" in ticker else ticker
+    parts = ticker.split("-")
+    return "-".join(parts[:2]) if len(parts) >= 3 else ticker
 
 
 def _allocator_rule(key: str) -> Decimal | None:

@@ -209,6 +209,31 @@ class MaxEventShareTest(RealEntryCase):
             self.assertEqual(self.bid("meriwether-h7d7702", f"{GAME}-7", "5", "0.60").status, "resting")  # $6.60
             self.assertEqual(self.bid("meriwether-h7d7702", f"{GAME}-8", "2", "0.60").status, "refused")  # $7.80 > $7.50
 
+    def test_props_of_four_players_of_one_game_are_one_event(self):
+        """Review of #226: with the event read as the ticker less its LAST segment, each player's prop was an
+        event of its own and four props of one game passed the 25% cap at $9.60 of $30."""
+        game = "KXMLBHIT-26SEP231940CWSKC"
+        props = [f"{game}-{player}-1" for player in ("KCSPEREZ13", "KCBWITT7", "CWSLROBERT88", "CWSAVAUGHN25")]
+        for ticker in props:
+            self.quote(ticker, "0.60", "0.62")
+        with rules("max_event_share"):
+            for ticker in props[:3]:
+                self.assertEqual(self.bid("meriwether-h7d7702", ticker, "4", "0.60").status, "resting")
+            fourth = self.bid("meriwether-h7d7702", props[3], "4", "0.60")
+        self.assertEqual(fourth.status, "refused")
+        self.assertIn(f"{game} would hold $9.60", fourth.detail)
+
+    def test_two_segment_markets_of_two_games_are_two_events(self):
+        """Review of #226: a two-segment market is its own event (Kalshi's event_ticker equals its ticker); read
+        as the ticker less its last segment, every game's run-in-the-first was one event, the series."""
+        for ticker in ("KXMLBRFI-26SEP231940CWSKC", "KXMLBRFI-26SEP231905TORBAL"):
+            self.quote(ticker, "0.60", "0.62")
+        with rules("max_event_share"):
+            first = self.bid("meriwether-h7d7702", "KXMLBRFI-26SEP231940CWSKC", "10", "0.60")  # $6.00 of $30
+            second = self.bid("meriwether-h7d7702", "KXMLBRFI-26SEP231905TORBAL", "10", "0.60")
+        self.assertEqual(first.status, "resting", first.detail)
+        self.assertEqual(second.status, "resting", second.detail)
+
     def test_without_the_key_the_fourth_strike_passes(self):
         for strike in (6, 7, 8, 9):
             self.assertEqual(self.bid("meriwether-h7d7702", f"{GAME}-{strike}", "4", "0.60").status, "resting")
