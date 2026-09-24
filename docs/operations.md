@@ -512,12 +512,17 @@ watch.
     lists it in `probes_waiting_flat`, and one info alert says why ("now: holding", "reserved"). While it
     waits, the House holds its entries the way an agent holds its own (`House._hold_draining_probes`: an
     `agent.strategy` `pause_entries` row under session `house:drain`, its resting buys cancelled, every sell
-    goes on; house.json `drain_holds`), and releases the hold with a `resume_entries` row once the pass no
-    longer lists it; a research request to resume is refused meanwhile. An agent that paused itself is left
-    as it is. Sept 24, 2026: krasker-14, an $80 options probe on options-pullback (19 blocks, -0.383), bought a
-    second real contract at 18:52:30Z while it waited, before the hold existed. A gate that
-    cannot be read this pass (a failed fold or forward read) holds every probe promotion at
-    `family_unreadable` and demotes nobody.
+    goes on; house.json `drain_holds`), and releases the hold with a `resume_entries` row once a pass has
+    ended the drain: the probe is back in practice (or dead, with no row), or its family's gate reads neither
+    losing nor unreadable. A pass that cannot read the gate, the family's record or the probe's own evidence
+    ends nothing, and while the allocator is off every hold is released. The row's session, not house.json,
+    says which pauses are the House's. A research request to resume is refused while the hold stands, and
+    while a probe that paused itself waits; one that paused itself is left as it is, and a pause research
+    asks for during the House's hold is its own (it outlasts the drain). The House's hold is not a pause of
+    its own to the seat market (`_paused_past`). Sept 24, 2026: krasker-14, an $80 options probe on
+    options-pullback (19 blocks, -0.383), bought a second real contract at 18:52:30Z while it waited, before
+    the hold existed. A gate that cannot be read this pass (a failed fold or forward read) holds every probe
+    promotion at `family_unreadable` and demotes nobody.
 - **Ledger rows from the Sept 23 revision:**
   - an `eval.verdict` progress row on rung 0 with `stage: "holdout"`: a development replay passed
     and the sealed holdout refused or failed it, with the reason and the holdout's coarse numbers;

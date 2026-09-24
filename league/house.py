@@ -234,6 +234,10 @@ PROVEN_UNBRED_RETRY_SECONDS = 3600.0
 POPULATION_RUNWAY_BAND_DAYS = 0.25
 #: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
 HOUSE_CLOSING = "the House is closing"
+#: Why a held probe's resting buy is cancelled (`House._cancel_paused_entries` under the R5 drain hold): the House's hold,
+#: which ends with the drain, not the agent's own pause, which ends when it resumes.
+DRAIN_HOLD_WHY = ("the House holds this probe's entries while it goes back to practice: its family's pooled forward record "
+                  "is losing (allocator.family_probe), so it only exits until it is flat")
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
 #: (Sept 24, 2026: 107 identical refusals of a 0.000000001 LINK/USD sale in 12 hours).
 WIND_DOWN_REFUSALS = 3
@@ -2119,64 +2123,128 @@ class House:
     def _cancel_paused_entries(self, agent: Agent, book: Book) -> list[str]:
         """Cancel a paused agent's resting buys (X1): a bid left resting would fill after the agent
         asked for no more entries. Only orders that are its alone: a share of another agent's order is
-        that agent's to manage. Exits are never touched. Returns the cancels' statuses."""
+        that agent's to manage. Exits are never touched. Returns the cancels' statuses. The order's
+        cancelled row says whose pause it is: the House's drain hold (`DRAIN_SESSION`) is not the
+        agent's own, and it ends when the drain does, not when the agent resumes."""
+        paused = self.registry.entries_paused(agent.id) or {}
+        why = (DRAIN_HOLD_WHY if paused.get("session") == self.DRAIN_SESSION
+               else "its own pause_entries: its entries are held until it resumes them")
         out = []
         for working in book.open_orders(agent.id):
             if working.side == "buy" and all(share.agent == agent.id for share in working.shares):
-                out.append(book.cancel(agent.id, working.order_id,
-                                       why="its own pause_entries: its entries are held until it resumes them").status)
+                out.append(book.cancel(agent.id, working.order_id, why=why).status)
         return out
 
     #: The House's own entry controls (the R5 drain hold) are recorded under this research session.
     DRAIN_SESSION = "house:drain"
 
-    def _hold_draining_probes(self, moved: Mapping[str, Any]) -> None:
+    def _hold_draining_probes(self, moved: Mapping[str, Any] | None) -> None:
         """R5's drain, completed (Sept 24, 2026). A probe on a losing family goes back to practice once it is flat
         (`allocator.family_probe`: an Alpaca probe holding a coin, a stock or an option is never sold for it), and until
         then it was lent nothing more -- but it could still buy: krasker-14, an $80 options probe on options-pullback (19
         active blocks, -0.383), bought a second real contract ($15) at 18:52:30Z, nine minutes into Deploy D, while it
         waited to be flat. A probe the allocator reports waiting (`probes_waiting_flat`, every pass) now has its entries
         held the way an agent holds its own (X1 `pause_entries`: buys held at the wake, its resting buys cancelled, every
-        sell goes on) by a House row under `DRAIN_SESSION`, so it drains; the hold is released by a House row once the
-        allocator no longer reports it (it went back to practice, died, or its family's record turned). An agent that had
-        paused itself is left as it is, and a research request to resume is refused while the hold stands
-        (`_control_refusal`). Kept in house.json `drain_holds` (agent -> since) across restarts."""
-        waiting = {str(a) for a in (moved.get("probes_waiting_flat") or ())}
-        with self._state_lock:
-            holds = dict(self._state.get("drain_holds") or {})
-        changed = False
-        for agent_id in sorted(waiting):
-            agent = self.registry.get(agent_id)
-            if agent is None or not agent.alive:
-                continue
-            paused = self.registry.entries_paused(agent_id)
-            if paused and agent_id not in holds:
-                continue  # its own pause: the drain needs no row of the House's
-            if paused:
-                continue  # held already
-            family = agent.family
-            self._house_control(agent, "pause_entries",
-                                f"the House holds this probe's entries while it goes back to practice: its family {family}'s pooled "
-                                "forward record is losing (allocator.family_probe), so it only exits until it is flat")
-            holds[agent_id] = now_iso(self.clock)
-            changed = True
-            book = self.book_of(agent)
-            if book is not None:
-                try:
-                    self._cancel_paused_entries(agent, book)
-                except Exception as exc:  # noqa: BLE001 - the hold stands; its next wake cancels again
-                    self.alert("warning", f"{agent_id}: its resting buys could not be cancelled at the drain hold "
-                                          f"({type(exc).__name__}: {str(exc)[:160]}); its next wake asks again")
-        for agent_id in sorted(set(holds) - waiting):
-            agent = self.registry.get(agent_id)
-            if agent is not None and agent.alive and self.registry.entries_paused(agent_id):
-                self._house_control(agent, "resume_entries", "the House releases its drain hold: the allocator no longer holds "
-                                                             "this agent as a probe waiting to go back to practice")
-            holds.pop(agent_id, None)
-            changed = True
-        if changed:
+        sell goes on) by a House row under `DRAIN_SESSION`, so it drains; the hold is released by a House row once the pass
+        has ended its drain (`_drain_ended`: it went back to practice, died, or its family's record turned). An agent that
+        had paused itself is left as it is, and a research request to resume is refused while the hold stands
+        (`_control_refusal`). Kept in house.json `drain_holds` (agent -> since) across restarts. `moved` is None while the
+        allocator is off: nothing drains a probe then, and every hold is released.
+
+        The adversarial review of the hold (Sept 24, 2026), each with a test in `league/tests/test_drain_hold.py`:
+        - A pass that cannot read the gate (a failed fold, forward or tape read), a family's record or a probe's own
+          evidence lists no probe waiting, as the gate fails closed; read as "no longer waiting", the hold was released and
+          the losing family's probe could buy on real money until the next readable pass held it again. Only a pass that
+          ended the drain releases it now.
+        - The ledger, not house.json, says which pauses are the House's (the row's session): house.json is saved at the
+          end of the tick, many steps after the pass, so a restart in between -- or a pass that stopped at one probe's row
+          -- left a House row with no `drain_holds` entry, read ever after as the probe's own pause and never released.
+        - The release writes a row only over the House's own pause: a pause research makes while the House holds is the
+          agent's own (`_apply_controls` takes the hold over), and outlasts the drain.
+        - A probe that paused itself before it waited is held by its own pause (no House row) and may not lift it while
+          it waits: it could, and its buys went through until the next pass.
+        - The rows are written under the lifecycle lock, as research writes its controls (`_apply_controls`, on its own
+          thread): a House row restates the strategy it read, and landing on an edit made meanwhile it would undo it.
+        - One probe whose row cannot be written is told and tried again at the next pass; the others are held."""
+        off = moved is None or moved.get("enabled") is False
+        waiting = set() if off else {str(a) for a in (moved.get("probes_waiting_flat") or ())}
+        with self._lifecycle_lock:
             with self._state_lock:
-                self._state["drain_holds"] = holds
+                kept = dict(self._state.get("drain_holds") or {})
+            holds = {**{agent_id: str(paused.get("since") or now_iso(self.clock)) for agent_id, paused in self._drain_rows().items()},
+                     **kept}
+            for agent_id in sorted(waiting):
+                agent = self.registry.get(agent_id)
+                if agent is None or not agent.alive:
+                    continue
+                if self.registry.entries_paused(agent_id):
+                    # Held already: by the House's row, or by its own pause, which the House leaves as it is and which it
+                    # may not lift while it waits (`_control_refusal`).
+                    holds.setdefault(agent_id, now_iso(self.clock))
+                    continue
+                try:
+                    self._house_control(agent, "pause_entries",
+                                        f"the House holds this probe's entries while it goes back to practice: its family "
+                                        f"{agent.family}'s pooled forward record is losing (allocator.family_probe), so it only "
+                                        "exits until it is flat")
+                except Exception as exc:  # noqa: BLE001 - the others are held; the next pass tries again
+                    self.alert("warning", f"{agent_id}: the House could not hold its entries at the drain ({type(exc).__name__}: "
+                                          f"{str(exc)[:160]}); the next pass tries again")
+                    continue
+                holds[agent_id] = now_iso(self.clock)
+                book = self.book_of(agent)
+                if book is not None:
+                    try:
+                        self._cancel_paused_entries(agent, book)
+                    except Exception as exc:  # noqa: BLE001 - the hold stands; its next wake cancels again
+                        self.alert("warning", f"{agent_id}: its resting buys could not be cancelled at the drain hold "
+                                              f"({type(exc).__name__}: {str(exc)[:160]}); its next wake asks again")
+            for agent_id in sorted(set(holds) - waiting):
+                agent = self.registry.get(agent_id)
+                alive = agent is not None and agent.alive
+                if alive and not off and not self._drain_ended(agent):
+                    continue  # the pass could not say its drain ended: the hold stands
+                paused = self.registry.entries_paused(agent_id) if alive else None
+                if paused and paused.get("session") == self.DRAIN_SESSION:
+                    why = ("the allocator is off: nothing drains a probe, and the House holds no entries for it" if off else
+                           "the House releases its drain hold: the allocator no longer holds this agent as a probe waiting "
+                           "to go back to practice")
+                    try:
+                        self._house_control(agent, "resume_entries", why)
+                    except Exception as exc:  # noqa: BLE001 - the hold stands until the next pass releases it
+                        self.alert("warning", f"{agent_id}: the House could not release its drain hold ({type(exc).__name__}: "
+                                              f"{str(exc)[:160]}); the next pass tries again")
+                        continue
+                holds.pop(agent_id, None)
+            if holds != kept:
+                with self._state_lock:
+                    self._state["drain_holds"] = holds
+
+    def _drain_rows(self) -> dict[str, dict[str, Any]]:
+        """The living agents whose entries stand paused by the House's own row (`DRAIN_SESSION`), as the registry folds
+        them from the ledger: {agent id: {"since", "note", "session"}}."""
+        registry = self.registry
+        with (getattr(registry, "_lock", None) or nullcontext()):
+            rows = {agent_id: dict(paused) for agent_id, paused in registry.paused.items()}
+        return {agent_id: paused for agent_id, paused in rows.items()
+                if paused.get("session") == self.DRAIN_SESSION and (agent := registry.get(agent_id)) is not None and agent.alive}
+
+    def _drain_ended(self, agent: Agent) -> bool:
+        """Whether the pass just run ended a held probe's drain: it left rung 2 (back to practice, or any other move), or
+        it is still a probe whose family's gate reads neither "losing" nor "unreadable" (its record turned, a probe
+        demotion holds the family only against newcomers, its family was proven, or the rule is off: the allocator
+        drains it no longer). A family record that cannot be read, a gate that cannot, or a read of either that
+        fails ends nothing: the pass could not say (`_hold_draining_probes`)."""
+        try:
+            if self.evaluator.rung(agent.id) != 2:
+                return True
+            allocator = self.allocator
+            if allocator.family(agent.family, agent.venue).get("error"):
+                return False
+            gate = allocator.probe_gate(agent)
+        except Exception:  # noqa: BLE001 - what cannot be read ends nothing
+            return False
+        return gate is None or gate.get("gate") not in ("losing", "unreadable")
 
     def _house_control(self, agent: Agent, control: str, note: str) -> None:
         """Record an entry control (X1) the House makes itself: the row an agent's own `pause_entries` or `resume_entries`
@@ -5040,9 +5108,15 @@ class House:
     def _paused_past(self, agent: Agent, grace: float, now: float) -> bool:
         """Whether the agent has held its own entries (X1, `pause_entries`) for `grace` seconds or more:
         a resident paused past its resident grace (the plain grace and its desk's evidence clock) holds
-        no evidence of trading, for displacement and the seat report alike (review of #249, P3)."""
+        no evidence of trading, for displacement and the seat report alike (review of #249, P3). The
+        House's drain hold (`DRAIN_SESSION`) is not its own: a probe the House demotes between passes
+        (an audit's veto after promotion) sits on practice under it until the next pass releases it,
+        and a hold older than the grace read as a pause past it (the adversarial review of the hold,
+        Sept 24, 2026)."""
         paused = self.registry.entries_paused(agent.id)
-        return bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
+        if not paused or paused.get("session") == self.DRAIN_SESSION:
+            return False
+        return now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
 
     @staticmethod
     def _fair_chance(clock: float, grace: float) -> float:
@@ -7128,8 +7202,14 @@ class House:
         a swing raised its notional 30 -> 37 in place and kept the band). Called under the lifecycle
         lock, as audits are started under it."""
         if control == "resume_entries":
+            # The R5 drain hold (`_hold_draining_probes`): the House's row, or the probe's own pause while it waits to be
+            # flat. The row's session speaks for the House too when house.json lost its entry (the adversarial review of
+            # the hold, Sept 24, 2026).
             with self._state_lock:
                 held = (self._state.get("drain_holds") or {}).get(agent.id)
+            paused = self.registry.entries_paused(agent.id) or {}
+            if not held and paused.get("session") == self.DRAIN_SESSION:
+                held = paused.get("since")
             if held:
                 return (f"the House holds your entries since {held}: your family's pooled forward record is losing, so a probe on it only "
                         "exits until it is flat and goes back to practice (allocator.family_probe); the hold ends then")
@@ -7177,7 +7257,7 @@ class House:
                 refusal = "" if agent is not None and agent.alive else "the agent is no longer alive"
                 refusal = refusal or self._control_refusal(agent, control)
                 paused = self.registry.entries_paused(agent_id)
-                if not refusal and control == "pause_entries" and paused:
+                if not refusal and control == "pause_entries" and paused and paused.get("session") != self.DRAIN_SESSION:
                     refusal = f"its entries were already paused (since {paused.get('since')})"
                 elif not refusal and control == "resume_entries" and not paused:
                     refusal = "its entries were not paused"
@@ -7205,7 +7285,11 @@ class House:
                                        "wake_minutes": agent.wake_minutes, "_code": agent.code, "control": control,
                                        "note": str(p.get("note") or "")[:600], "session": session, **({"reason": carried} if carried else {})}
                 if control == "pause_entries":
-                    row.update(entries="paused", was={"entries": "open"})
+                    # Over the House's drain hold, its own pause takes the hold over (the adversarial review of the hold,
+                    # Sept 24, 2026): refused as "already paused", it was lost, and the House's release then opened the
+                    # entries it had asked to hold. Its own now, it outlasts the drain, as a pause made before it does.
+                    row.update(entries="paused", was={"entries": "paused", "since": paused.get("since"), "session": self.DRAIN_SESSION}
+                               if paused else {"entries": "open"})
                 elif control == "resume_entries":
                     row.update(entries="open", was={"entries": "paused", "since": paused.get("since")})
                 else:
@@ -7999,12 +8083,22 @@ class House:
             lap(f"judge:{name}")
         if marked_any and allocator_module.enabled():
             # Capital is the ladder: bands and stakes follow the evidence of this very mark pass.
+            moved = None
             try:
                 moved = self.allocator.rebalance()
                 summary["allocator"] = {k: len(v) if isinstance(v, list) else v for k, v in moved.items()}
-                self._hold_draining_probes(moved)
             except Exception as exc:  # noqa: BLE001 - a pass that fails runs again at the next mark
                 self.alert("error", f"the allocator's pass failed ({type(exc).__name__}: {str(exc)[:200]})")
+            if moved is not None:  # a pass that failed says nothing of any drain: every hold stands
+                try:
+                    self._hold_draining_probes(moved)
+                except Exception as exc:  # noqa: BLE001 - the holds stand; the next pass keeps them again
+                    self.alert("warning", f"the drain holds could not be kept ({type(exc).__name__}: {str(exc)[:200]})")
+        elif marked_any:
+            try:
+                self._hold_draining_probes(None)  # the allocator is off: nothing drains a probe, and no hold stands for it
+            except Exception as exc:  # noqa: BLE001 - the holds stand until the next mark releases them
+                self.alert("warning", f"the drain holds could not be released ({type(exc).__name__}: {str(exc)[:200]})")
         lap("allocator")
         try:
             self._floor_invariants()  # code over the ledger's new rows; costs nothing, so it runs while paused too
