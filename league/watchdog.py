@@ -343,8 +343,11 @@ def read_health(  # noqa: PLR0913 - one reading, one place
         # that goes on being the old one by `max_age_seconds`, and a ledger that cannot say when the
         # House started leaves the freeze counted.
         health_at = epoch(raw.get("at")) if isinstance(raw, dict) else None
+        # No restart recorded yet: the file is certainly the old process's. A restart recorded at a
+        # time that cannot be read says nothing about whose file this is, so the freeze counts.
         previous_process = (inherited_before is not None and since_seq is not None and health_at is not None
-                            and "started_since" in detail and (restarted_at is None or health_at < restarted_at))
+                            and "started_since" in detail
+                            and (detail["started_since"] == 0 or (restarted_at is not None and health_at < restarted_at)))
         if previous_process:
             detail["frozen_by_previous_process"] = [name for name, _ in frozen_books]
         else:

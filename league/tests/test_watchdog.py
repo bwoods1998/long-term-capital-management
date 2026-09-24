@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from league import watchdog as wd
@@ -943,6 +944,18 @@ class FrozenByThePreviousProcess(ReadHealthTest):
         ledger = self.ledger()
         since = ledger.head()[0]
         self.assertFalse(self.read(since_seq=since).ok)  # `status`: no promotion to measure from
+
+    def test_a_restart_whose_time_cannot_be_read_leaves_the_freeze_counted(self):
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        ledger.append("ops.started", {"books": []})
+        with sqlite3.connect(self.root / "ledger.sqlite") as db:
+            started = db.execute("SELECT at FROM ledger WHERE kind = 'ops.started'").fetchone()[0]
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269", age=190)
+        real = wd.epoch
+        with unittest.mock.patch.object(wd, "epoch", lambda value: None if value == started else real(value)):  # a row no reader can date
+            health = self.read(since_seq=since, inherited_before=self.clock() - 30)
+        self.assertEqual(health.reasons, ("the alpaca-paper book is frozen: cash differs by -0.0269",))
 
     def test_the_old_file_still_goes_stale(self):
         ledger = self.ledger()
