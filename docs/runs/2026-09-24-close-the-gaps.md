@@ -777,6 +777,17 @@ recorded for the next open; live verification uses the markets that trade around
   and options desks woke 0 times; alpaca-open, which also trades coins around the clock, ran 7 wakes (1 intent). On the
   T0 snapshot 2,891 of 9,884 wakes in 48 hours (29%) had been stock or option agents outside the session. The open
   wake at 13:30Z Sept 25 is the named window for its other half.
+- 20:31Z — **The perf pass's review:** no divergence. On the real T+16 ledger the reviewer advanced a read-only view
+  through 26 cutoffs with every cache kept across them and compared each fold to the old code copied verbatim: 0
+  differences in every agent's rung and entry (340), the admission queue, evidence cutoffs, checkpoint sums, 600 agents'
+  program opportunity and seven foundry folds (the check caught 4 of 6 planted bugs; the 2 foundry-key bugs it could not
+  see were ruled out by tracing each fold's reads); rungs matched under four writer threads, in-tick promote, demote
+  and kill, and a restart. Judged safe for real money.
+- 20:52:34Z — **Deploy F live: the last deploy of the run.** `f/deploy` = main (with Merton's #284 and #285) + #283
+  (78860e2); PR #286 CI green at 20:40:24Z; merged (main `73bcf07`); owner deploy `20260924T204043Z-2b76cd7a7763`,
+  promoted 20:42:18Z, watch passed; money digest `535a7f15`, no ratify. First reading under it (20:49:42Z, 128 living,
+  the population at its ceiling): a 90.6 s mark tick (research 19.4 s, population 18.1, poll:kalshi-shadow 9.2); the
+  hour's slowest publish 10.1 s (it was 87.7 s under C′). **The three-hour watch runs from 20:42:18Z.**
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
