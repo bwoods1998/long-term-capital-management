@@ -90,3 +90,46 @@ class PhantomRepair(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CutoffsFoldedOnce(unittest.TestCase):
+    """Sept 24, 2026 (R6-perf): `evidence_cutoffs` read every `book.baseline` row on every call (3,194 calls in
+    six ticks of a full league on a copy of the 17:27Z snapshot). The repairs are folded once a ledger, then from
+    the new baseline rows only, and the cutoffs are the full read's."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite")
+        self.addCleanup(self.ledger.close)
+
+    def as_read_before(self, agent):
+        result = {}
+        for entry in self.ledger.iter(kinds='book.fill_correction', agent=agent):
+            result[entry.payload['book']] = entry.seq
+        for entry in self.ledger.iter(kinds='book.baseline'):
+            if any(r.get('agent') == agent for r in entry.payload.get('repairs') or []):
+                result[entry.payload['book']] = max(result.get(entry.payload['book'], 0), entry.seq)
+        return result
+
+    def baseline(self, book, *agents):
+        self.ledger.append("book.baseline", {"book": book, "cash": "0", "positions": {}, "note": "test",
+                                             "repairs": [{"agent": a, "order": "o"} for a in agents]})
+
+    def test_the_cutoffs_are_the_full_read_s_and_only_new_rows_are_read(self):
+        from unittest.mock import patch
+
+        agents = ("a", "b", "c")
+        self.baseline("alpaca-paper")
+        self.baseline("alpaca-paper", "a")
+        self.ledger.append("book.fill_correction", {"book": "kalshi-shadow"}, agent="b")
+        self.baseline("kalshi-shadow", "a", "b")
+        self.assertEqual({a: evidence_cutoffs(self.ledger, a) for a in agents}, {a: self.as_read_before(a) for a in agents})
+        self.ledger.append("book.fill_correction", {"book": "alpaca-paper"}, agent="a")  # after its repair: the later wins
+        self.baseline("alpaca-paper", "c")
+        self.ledger.append("book.fill_correction", {"book": "kalshi-shadow"}, agent="b")  # after its repair on that book
+        with patch.object(self.ledger, "read", wraps=self.ledger.read) as read:
+            got = {a: evidence_cutoffs(self.ledger, a) for a in agents}
+        self.assertEqual(got, {a: self.as_read_before(a) for a in agents})
+        baseline_reads = [c.kwargs for c in read.call_args_list if c.kwargs.get("kinds") == "book.baseline"]
+        self.assertTrue(baseline_reads and all(k["after"] > 0 for k in baseline_reads), "only the baseline rows after the fold's")

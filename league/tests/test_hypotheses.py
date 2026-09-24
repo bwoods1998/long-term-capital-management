@@ -945,3 +945,45 @@ class EndToEnd(FoundryCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoldsReadTheirOwnRows(FoundryCase):
+    """Sept 24, 2026 (R6-perf): the foundry's folds were keyed on the ledger's head, so every append anywhere
+    rebuilt them from all their rows at the next read; on the box the research threads append every few
+    seconds. A fold is now rebuilt when a row of its own kinds (or a birth, or its settings) is new, and it
+    answers as a fresh read."""
+
+    FOLDS = {"cards": lambda f: f.cards(), "evaluations": lambda f: f.evaluations(), "calls": lambda f: f.calls(),
+             "retired": lambda f: f.retired(), "desk_forward": lambda f: f.desk_forward(), "tried": lambda f: f._tried(),
+             "families": lambda f: f._families()}
+
+    def read(self, foundry):
+        return {name: fold(foundry) for name, fold in self.FOLDS.items()}
+
+    def test_other_rows_rebuild_nothing_and_its_own_rows_answer_as_a_fresh_read(self):
+        from unittest.mock import patch
+
+        from league.hypotheses import TASK_EVALUATE
+
+        self.call()
+        before = self.read(self.foundry)
+        self.assertEqual(before, self.read(Foundry(self.house, self.frontier)))
+        self.house.ledger.append("agent.research", {"tool": "notes", "text": "a research thread's row"}, agent="someone")
+        self.house.ledger.append("ops.alert", {"level": "info", "text": "and the House's"})
+        with patch.object(self.house.ledger, "iter", wraps=self.house.ledger.iter) as folded:
+            self.assertEqual(self.read(self.foundry), before)
+        self.assertEqual(folded.call_args_list, [], "no fold read its rows again for rows it does not read")
+        agent = self.seated()  # a birth: the folds that read the registry
+        self.trial(agent.id, "a-new-family", True)
+        self.earn(agent)
+        card = next(iter(before["cards"]))
+        self.house.ledger.append("trace.record", {"task": TASK_EVALUATE, "id": card, "outcome": "passed"})
+        self.house.ledger.append("hypothesis.retired", {"id": "family:a-new-family", "reason": "disproven"})
+        self.house.ledger.append("repair.status", {"key": "missing_data:x", "state": "verified"})
+        self.call()  # a new pass, new cards
+        after = self.read(self.foundry)
+        self.assertEqual(after, self.read(Foundry(self.house, self.frontier)))
+        self.assertNotEqual(after["evaluations"], before["evaluations"])
+        self.assertIn("a-new-family", after["families"])
+        self.house.game.setdefault("hypotheses", {})["fast_lane_min_blocks"] = 1  # its settings, too
+        self.assertEqual(self.foundry.desk_forward(), Foundry(self.house, self.frontier).desk_forward())

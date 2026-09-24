@@ -137,6 +137,17 @@ FOREGROUND_TIMEOUT = 1500  # a long asap turn is awaited inline, patiently; the 
 MAX_BODY_BYTES = 8_000_000
 PLACES = Decimal("0.00000001")
 ZERO = Decimal(0)
+#: The requests `reconcile_stale` looks at: prepared or dispatched, untouched since the cutoff, in the
+#: order the table holds them (rowid), which is the order the full scan it replaces returned them in.
+#: Read through `requests_open` (status, updated_at). Measured on the House box, Sept 24, 2026: the
+#: league's `provider.sqlite` held 11,461 requests in 1.73 GB (bodies and responses are kept), the
+#: status sits after the body in each row, and the query with no index was a full `SCAN requests` of
+#: 5.0-5.9 s (2.3-2.4 s of CPU on the one vCPU) that the House ran on EVERY tick (`_pace_inference`,
+#: the tick's `schedule` step: 17-52 s that hour) to find one request (dispatched Sept 19).
+STALE_REQUESTS_SQL = (
+    "SELECT * FROM requests WHERE rowid IN (SELECT rowid FROM requests WHERE status IN ('prepared', 'dispatched') "
+    "AND updated_at < ?) ORDER BY rowid"
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -157,6 +168,7 @@ CREATE TABLE IF NOT EXISTS requests (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS requests_desk ON requests(desk_id, created_at);
+CREATE INDEX IF NOT EXISTS requests_open ON requests(status, updated_at);
 CREATE TABLE IF NOT EXISTS budget_days (
     day TEXT NOT NULL,
     desk_id TEXT NOT NULL,
@@ -786,10 +798,7 @@ class Provider:
         with self._lock:
             rows = [
                 dict(r)
-                for r in self._db.execute(
-                    "SELECT * FROM requests WHERE status IN ('prepared', 'dispatched') AND updated_at < ?",
-                    (cutoff,),
-                ).fetchall()
+                for r in self._db.execute(STALE_REQUESTS_SQL, (cutoff,)).fetchall()
                 if not self._active.get(r["id"])
             ]
         for row in rows:

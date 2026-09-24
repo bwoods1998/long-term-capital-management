@@ -7,8 +7,39 @@ remain subject to reconciliation. Original rows, quantities, stakes and baseline
 from decimal import Decimal
 import json
 from pathlib import Path
+import threading
+import weakref
 
 ZERO = Decimal(0)
+
+
+class _Repairs:
+    """Each agent's latest repaired attribution by book (`book.baseline` rows whose `repairs` name it), folded
+    once from every baseline row, then only from the rows after `cursor`.
+
+    Sept 24, 2026 (R6-perf): `evidence_cutoffs` read every `book.baseline` row on every call, and it is called
+    for each agent many times a tick (through `episodes.completed`, the allocator and the auditor): in six
+    ticks of a full league on a copy of the 17:27Z snapshot, 3,194 calls in the seat market alone parsed
+    41,522 baseline rows. The ledger is append-only and the fold is in sequence order, so the latest repair
+    it holds is the one the full read found."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cursor = 0
+        self.latest = {}  # agent -> {book: seq of its latest repaired attribution}
+
+    def of(self, ledger, agent):
+        with self.lock:
+            for entry in ledger.iter(kinds='book.baseline', after=self.cursor):
+                for named in {r.get('agent') for r in entry.payload.get('repairs') or []}:
+                    books = self.latest.setdefault(named, {})
+                    books[entry.payload['book']] = max(books.get(entry.payload['book'], 0), entry.seq)
+                self.cursor = entry.seq
+            return dict(self.latest.get(agent) or {})
+
+
+_REPAIRS = weakref.WeakKeyDictionary()  # ledger -> its `_Repairs`
+_REPAIRS_LOCK = threading.Lock()
 
 
 def evidence_cutoffs(ledger, agent):
@@ -17,9 +48,12 @@ def evidence_cutoffs(ledger, agent):
     for entry in ledger.iter(kinds='book.fill_correction', agent=agent):
         result[entry.payload['book']] = entry.seq
     # A repaired attribution (`repair_paper_phantoms`) starts the agent's evidence afresh too.
-    for entry in ledger.iter(kinds='book.baseline'):
-        if any(r.get('agent') == agent for r in entry.payload.get('repairs') or []):
-            result[entry.payload['book']] = max(result.get(entry.payload['book'], 0), entry.seq)
+    with _REPAIRS_LOCK:
+        repairs = _REPAIRS.get(ledger)
+        if repairs is None:
+            repairs = _REPAIRS[ledger] = _Repairs()
+    for book, seq in repairs.of(ledger, agent).items():
+        result[book] = max(result.get(book, 0), seq)
     return result
 
 
