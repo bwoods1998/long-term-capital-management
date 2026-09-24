@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 BOX_SNIPPET = r'''
-import sqlite3, pathlib, json, sys, collections, math, time
+import sqlite3, pathlib, json, sys, collections, math, time, calendar
 root = pathlib.Path('/workspace/state')
 since = sys.argv[1]
 out = {}
@@ -120,6 +120,12 @@ if lab is not None:
         out['lab'] = {t: lab.execute(f'select count(*) from "{t}"').fetchone()[0] for t in tables}
     except Exception as exc:
         out['lab'] = f'unreadable: {exc}'
+    try:  # D1 (Sept 24, 2026): the batches run in the window, what the lab's acceptance is read from
+        n, c = lab.execute('select count(*), coalesce(sum(candidates), 0) from batches where at >= ?',
+                           (calendar.timegm(time.strptime(since[:19], '%Y-%m-%dT%H:%M:%S')),)).fetchone()
+        out['lab_batches'] = {'batches': n, 'candidates': c}
+    except Exception as exc:
+        out['lab_batches'] = f'unreadable: {exc}'
 lab_rows = collections.Counter(k for a, at, k, p in db.execute("select agent, at, kind, payload from ledger where kind like 'lab.%' and at >= ?", (since,)).fetchall())
 if lab_rows:
     out['lab_ledger'] = dict(lab_rows)
@@ -147,6 +153,8 @@ out['blocks'] = {
     'seats': {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour')} if seats else None,
     'lab': {'closed_since': labh.get('closed_since'), 'llm_paused': (labh.get('llm') or {}).get('paused'),
             'waiting_seat': (labh.get('waiting_seat') or {}).get('count'), 'queued': labh.get('queued')} if labh else None}
+# D1 (Sept 24, 2026): whether the lab's step is failing, and since when (five in a row sets it).
+out['lab_step'] = {k: labh.get(k) for k in ('failing_since', 'failures_in_a_row', 'error')} if labh else None
 row = db.execute("select at, payload from ledger where kind='ops.budget' and payload like '%\"what\": \"yield\"%' order by seq desc limit 1").fetchone()
 if row:
     yp = json.loads(row[1])
@@ -212,7 +220,10 @@ def render(box: dict, site: dict, gateway: dict) -> str:
     lines.append("## top evidence")
     lines += [f"  {r['E']:.4f} {r['agent']} {r['venue']} {r['band']} Wp={r['W_paper']} Wr={r['W_real']} trades={r['trades']}/{r['real_trades']} stake={r['stake']}"
               for r in box["top_evidence"]]
-    lines.append(f"## lab {box.get('lab')} {box.get('lab_ledger', '')}")
+    step = box.get("lab_step") or {}
+    lines.append(f"## lab failing_since {step.get('failing_since') or '-'}  failures_in_a_row {step.get('failures_in_a_row') or 0}"
+                 f"  error {step.get('error') or '-'}  batches since --since {box.get('lab_batches')}"
+                 f"  tables {box.get('lab')} {box.get('lab_ledger', '')}")
     lines.append(f"## costs {json.dumps(box['costs'])}  gateway {json.dumps(gateway)}")
     if box.get("blocks"):
         lines.append(f"## blocks {json.dumps(box['blocks'], default=str)}")
