@@ -2068,7 +2068,10 @@ class Lab:
         deep-market desks first (`deep_desks`: stocks, index ETFs, the crypto majors, the open desks; E1 of
         the close-the-gaps run, Sept 24, 2026: the search had nudged parameters on thin Kalshi markets, where
         the one earning family's capacity was measured at about $7.81 a day), the one whose grid is emptiest;
-        the other desks when no deep desk can be searched."""
+        the other desks when no deep desk can be searched. A desk the idle rule holds (`_idle_desk`) comes
+        after every desk a leap's graduates may be born onto (the review of #262: at T4 alpaca-open, offered
+        markets with no intent ever, tied alpaca-crypto-majors for the emptiest deep desk, and 18 of the lab's
+        Sol programs were already there, every one held from graduating)."""
         from .hypotheses import REPLAY_VIEW
         from .house import CONTRACT_PATH
 
@@ -2077,7 +2080,7 @@ class Lab:
             return False
         deep = {str(d) for d in (self.settings.get("deep_desks") or [])}
         filled = {r["niche"]: r["n"] for r in self._q("SELECT niche, COUNT(*) AS n FROM archive GROUP BY niche")}
-        niche = min(desks, key=lambda n: (n.id not in deep, filled.get(n.id, 0), self._rng.random()))
+        niche = min(desks, key=lambda n: (bool(self._idle_desk(n.id)), n.id not in deep, filled.get(n.id, 0), self._rng.random()))
         cells = [{**describe_cell(r["cell"]), "fitness": r["elite_fitness"], "idea": r["idea"], "origin": r["origin"],
                   "trades_per_day": (json.loads(r["summary"] or "{}")).get("trades_per_day")} for r in self.elites(niche.id)]
         foundry = getattr(self.house, "hypotheses", None)

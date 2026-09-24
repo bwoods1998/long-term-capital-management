@@ -365,6 +365,19 @@ class Search(ForwardCase):
             self.lab.leap()
         self.assertEqual({asked["user"]["desk"]["id"] for asked in self.sol.asked}, {"alpaca-index-etfs"})
 
+    def test_sol_does_not_leap_onto_a_desk_the_idle_rule_holds_while_another_can_graduate(self):
+        """The review of #262: at T4 alpaca-open (offered markets, no intent ever: idle) tied alpaca-crypto-majors for
+        the emptiest deep desk, and every Sol program there was held from graduating."""
+        self.house.game["lab"]["deep_desks"] = ["alpaca-index-etfs", self.niche.id]
+        self.elite(KNOB)  # the majors desk has a cell and the index ETFs none: the ETFs are the emptier
+        resident = self.seated("resident", KNOB.replace('"symbols": ["BTC/USD"]', '"symbols": ["SPY"]'))
+        self.assertEqual(resident.specialty, "alpaca-index-etfs")
+        self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 4}, agent=resident.id)
+        self.assertIn("wrote no intent", self.lab._idle_desk("alpaca-index-etfs"))
+        for _ in range(3):
+            self.lab.leap()
+        self.assertEqual({asked["user"]["desk"]["id"] for asked in self.sol.asked}, {self.niche.id})
+
 
 if __name__ == "__main__":
     unittest.main()
