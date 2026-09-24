@@ -129,9 +129,159 @@ PROBE_BOX = "house-probe"
 ORDER_INVARIANTS_EVERY_SECONDS = 60.0
 ORDER_INVARIANTS_FIRST_ROWS = 2000
 QUIET_ROUND_THE_CLOCK_SECONDS = 1800.0
+#: The evidence clock (S1, the close-the-gaps run, Sept 24, 2026): per desk, the Kaplan-Meier median hours
+#: from a member's first own fill to its third independent settlement (distinct events on the event
+#: books, closed trades on Alpaca, any book), over the members whose first fill is in the last
+#: `EVIDENCE_CLOCK_DAYS`, measured again once a day. The scoreboard (`scripts/gap_scoreboard.py`
+#: `evidence_clocks`) measured it at T0: kalshi-crypto-15m 1.9 h, alpaca-crypto-alts 3.8, kalshi-crypto-
+#: strikes 4.4, alpaca-megacaps 4.4, alpaca-index-etfs 18.1, kalshi-sports 20.5, alpaca-options 23.9,
+#: kalshi-weather 31.8, kalshi-prices 36.5, while the seat clock was twelve hours for every desk.
+EVIDENCE_CLOCK_DAYS = 7.0
+EVIDENCE_CLOCK_REFRESH_SECONDS = 86400.0
+EVIDENCE_CLOCK_SETTLEMENTS = 3
+#: A resident with this many fills of its own since its program's opportunity is displaced only by a
+#: newcomer whose forward score beats its own forward record (S1).
+FORWARD_RULE_FILLS = 3
+#: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
+HOUSE_CLOSING = "the House is closing"
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
 #: (Sept 24, 2026: 107 identical refusals of a 0.000000001 LINK/USD sale in 12 hours).
 WIND_DOWN_REFUSALS = 3
+
+#: L1 (Sept 24, 2026): the words with which a research child's own account of its program names its
+#: parent's ENTRY mechanism as the defect -- the liquidity it takes, the fee that costs, the side it
+#: buys -- and the fix. Read together with the parent's own entry fills (`House._entry_fills`), never alone:
+#: mullins-14's birth reason says "post-only" about a maker parent's code and names no defect of it.
+_DEFECT_WORDS = re.compile(r"\b(defects?|fix(?:es|ed)?|wrong|replac(?:e|es|ed|ing)|switch(?:es|ed)?|instead of|loses|losing|bleeds?)\b", re.I)
+_TAKER_WORDS = re.compile(r"\b(takers?|marketable|cross(?:es|ing)? the (?:touch|spread)|at the ask|lift(?:s|ing)? the (?:ask|offer)|market orders?)\b", re.I)
+_MAKER_WORDS = re.compile(r"\b(makers?|post[- ]only|resting (?:bids?|orders?|limits?)|rest(?:s|ing)? (?:a |its )?(?:bids?|limits?)|join(?:s|ing)? the bid)\b", re.I)
+_FEE_WORDS = re.compile(r"\bfees?\b", re.I)
+_SIDE_WORDS = re.compile(r"\b(?:wrong|opposite) side\b|\bside (?:is|was) wrong\b|\bflip(?:s|ped|ping)? (?:the |its )?side\b", re.I)
+
+
+def entry_defect(text: str) -> str | None:
+    """Which part of an entry mechanism a research child's account of its program names as the defect:
+    "liquidity" (a taker entry, fixed by resting maker orders), "fee" (the fee a taker entry pays, fixed
+    the same way), "side" (the side it buys), or None when it names none of them as a defect."""
+    text = str(text or "")
+    if _SIDE_WORDS.search(text):
+        return "side"
+    if not (_DEFECT_WORDS.search(text) and _MAKER_WORDS.search(text)):
+        return None
+    if _TAKER_WORDS.search(text):
+        return "liquidity"
+    if _FEE_WORDS.search(text):
+        return "fee"
+    return None
+
+
+@dataclass(frozen=True)
+class Newcomer:
+    """Who asks for a seat (S1, the close-the-gaps run, Sept 24, 2026): its family and venue, whose pooled
+    record the allocator keeps (`Allocator.family`: proven or not), and its forward score (`Lab.forward_score`,
+    None without one). A caller that does not know yet which newcomer it seats -- the House's own mutation
+    refill, the foundry's card pass -- passes none: an unproven newcomer with no forward score."""
+
+    family: str | None = None
+    venue: str | None = None
+    forward: float | None = None
+    what: str = ""
+
+
+def kaplan_meier_median(times: Sequence[tuple[float, bool]]) -> float | None:
+    """The median of (time, reached) with the unreached censored at their time (as the scoreboard's
+    `kaplan_meier_median`); None when the survival curve never falls to one half."""
+    rows = sorted(times)
+    at_risk, survival = len(rows), 1.0
+    i = 0
+    while i < len(rows):
+        t = rows[i][0]
+        events = censored = 0
+        while i < len(rows) and rows[i][0] == t:
+            events += 1 if rows[i][1] else 0
+            censored += 0 if rows[i][1] else 1
+            i += 1
+        if events:
+            survival *= 1.0 - events / at_risk
+            if survival <= 0.5:
+                return t
+        at_risk -= events + censored
+    return None
+
+
+def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, days: float = EVIDENCE_CLOCK_DAYS,
+                            settlements: int = EVIDENCE_CLOCK_SETTLEMENTS) -> dict[str, dict[str, Any]]:
+    """Per desk: the hours from a member's first own fill to its `settlements`-th independent settlement,
+    for the members whose first own fill is in the last `days` -- the scoreboard's definition, read from the
+    House's own ledger (Sept 24, 2026). An own fill is a venue or cross fill, never the House's closing sale;
+    a settlement is a `book.settle` or a sale that left the position flat, on any book, counted once per
+    EVENT on the event books (`evaluator.event_key`, the allocator's count) and once per trade on Alpaca,
+    after each book's evidence cutoff. A member that has not reached it is censored at its death or now.
+
+    Each desk: `members`, `reached`, `hours` (the Kaplan-Meier median, None when it is not reached: most
+    members never traded enough to measure how long the desk's markets take, which says nothing of the
+    markets' clock, so the plain grace stands there), `median_reached_hours` and `longest_waiting_hours`."""
+    from .evaluator import EVENT_BOOKS, event_key
+
+    start = now - days * 86400.0
+    rows = list(ledger.iter(kinds=("book.fill", "book.settle", "book.fill_correction", "book.baseline")))
+    cutoffs: dict[tuple[str, str], int] = {}
+    for entry in rows:
+        p = entry.payload
+        if entry.kind == "book.fill_correction":
+            key = (entry.agent, str(p.get("book")))
+            cutoffs[key] = max(cutoffs.get(key, 0), entry.seq)
+        elif entry.kind == "book.baseline":
+            for repair in p.get("repairs") or []:
+                if isinstance(repair, Mapping):
+                    key = (str(repair.get("agent")), str(p.get("book")))
+                    cutoffs[key] = max(cutoffs.get(key, 0), entry.seq)
+    first: dict[str, float] = {}
+    closes: dict[str, list[tuple[float, str]]] = {}
+    for entry in rows:
+        if entry.kind not in ("book.fill", "book.settle") or entry.agent == HOUSE:
+            continue
+        p = entry.payload
+        book = str(p.get("book"))
+        if entry.seq <= cutoffs.get((entry.agent, book), 0):
+            continue
+        at = _epoch(entry.at)
+        if entry.kind == "book.fill" and p.get("source") in ("venue", "cross") \
+                and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
+            first.setdefault(entry.agent, at)
+        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)):
+            key = (event_key(p.get("instrument")) if book in EVENT_BOOKS else None) or f"#{entry.seq}"
+            closes.setdefault(entry.agent, []).append((at, key))
+    desks: dict[str, list[tuple[float, bool]]] = {}
+    for agent in agents:
+        began = first.get(agent.id)
+        if began is None or began < start or not agent.specialty:
+            continue
+        seen: set[str] = set()
+        third = None
+        for at, key in closes.get(agent.id, ()):
+            if at < began:
+                continue
+            seen.add(key)
+            if len(seen) >= settlements:
+                third = at
+                break
+        if third is not None:
+            desks.setdefault(agent.specialty, []).append(((third - began) / 3600.0, True))
+        else:
+            ended = _epoch(agent.died_at) if not agent.alive and agent.died_at else now
+            desks.setdefault(agent.specialty, []).append((max(0.0, ended - began) / 3600.0, False))
+    out: dict[str, dict[str, Any]] = {}
+    for desk, times in sorted(desks.items()):
+        reached = sorted(t for t, ok in times if ok)
+        waiting = [t for t, ok in times if not ok]
+        median = kaplan_meier_median(times)
+        middle = (reached[(len(reached) - 1) // 2] + reached[len(reached) // 2]) / 2 if reached else None
+        out[desk] = {"members": len(times), "reached": len(reached),
+                     "hours": None if median is None else round(median, 1),
+                     "median_reached_hours": None if middle is None else round(middle, 1),
+                     "longest_waiting_hours": round(max(waiting), 1) if waiting else None}
+    return out
 
 
 @dataclass
@@ -342,6 +492,11 @@ class House:
         self._deferred_told: dict[str, float] = {}
         #: When each desk last lost a resident to displacement (`kill`): one a desk a tick (`_displaceable`).
         self._desk_displaced: dict[str, float] = {}
+        #: The desks' evidence clocks are measured by one thread at a time (`evidence_clocks`, S1).
+        self._clock_lock = threading.Lock()
+        #: (parent, its code, child, its code) -> when L1 last found no corrected entry there
+        #: (`_supersede_by_research`): the look is taken again at most hourly a pair.
+        self._supersede_seen: dict[tuple[str, str, str, str], float] = {}
         self.researcher = None
         if provider is not None:
             self.researcher = Researcher(
@@ -392,6 +547,9 @@ class House:
         # configured; its tools for researchers, and longer sessions for agents with evidence.
         from .lab import attach as attach_lab
         attach_lab(self)
+        # The desks' evidence clocks (S1, Sept 24, 2026), measured at startup when the stored reading is a
+        # day old or missing: a few thousand fill rows, well under a second, before any seat is judged.
+        self.evidence_clocks()
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -745,7 +903,9 @@ class House:
                     break
                 # The seat of an agent still running the code this strategy corrects (it cannot be
                 # promoted: its defect is on record), else the weakest resident that has had its chance.
-                loser = self._defective_resident(row) or self._weakest(rules, evidenced=True, exclude=self._keep_for(reserved))
+                loser = self._defective_resident(row) or self._weakest(
+                    rules, evidenced=True, exclude=self._keep_for(reserved),
+                    newcomer=Newcomer(family=row.get("family"), venue=_code_venue(row["code"]), what=f"the merged strategy {row['name']}"))
                 if loser is None:
                     self._refuse_birth("strategies", len(rows) - len(born),
                                        "the league is full and no resident may be displaced, even by a newcomer with forward evidence"
@@ -765,6 +925,7 @@ class House:
                     f"the league was full and the merged strategy {row['name']} ({child.id}) takes its seat"))
         if self.settings.enroll_displaces:
             self._retire_superseded()
+        self._supersede_by_research()  # L1: the research route joins the repair route (the constitution's key gates it)
         return born
 
     def _defective_shas(self, row: Mapping[str, Any]) -> set[str]:
@@ -810,6 +971,115 @@ class House:
                                                f"(repair {row['repair'].get('key')}); the corrected child is judged on its own evidence")
                 retired += 1
         return retired
+
+    #: How long an L1 look that found no corrected entry is not taken again (`_supersede_by_research`).
+    SUPERSEDE_RECHECK_SECONDS = 3600
+
+    def _supersede_by_research(self) -> int:
+        """L1 (the close-the-gaps run, Sept 24, 2026; `CONSTITUTION["allocator"]["corrected_child_supersedes"]`,
+        off without the key): when a research child of a living parent has passed replay and its own account
+        of its program names the parent's ENTRY mechanism as the defect -- the liquidity it takes, the fee
+        that costs, the side it buys (`entry_defect`), borne out by the parent's own entry fills
+        (`_entry_fills`) -- the parent is superseded at once: demoted to practice through the evaluator first
+        when it is on real money, then retired as `superseded`, as the engineer's repair route retires the
+        agents a merged corrected child replaces (`_retire_superseded`). The child keeps its seat and enters
+        real money when the allocator's rules seat it on its own evidence, as a probe or a bunt by its
+        family's state; the House stakes nothing here. Evidence: meriwether-h2d625d kept taking 7%-fee taker
+        moneylines on real money after its child meriwether-h2d625d-2 passed replay (40 trades) with the
+        maker fix at 00:18:31Z Sept 24. Returns how many parents it superseded."""
+        if allocator_module.rules().get("corrected_child_supersedes") is not True:
+            return 0
+        now = self.clock()
+        done = 0
+        for child in list(self.registry.living()):
+            parent = self.registry.get(child.parent) if child.parent else None
+            if parent is None or not parent.alive or parent.code_sha256 == child.code_sha256:
+                continue
+            key = (parent.id, parent.code_sha256, child.id, child.code_sha256)
+            if now - self._supersede_seen.get(key, float("-inf")) < self.SUPERSEDE_RECHECK_SECONDS:
+                continue
+            why = self._corrected_entry(parent, child)
+            if why is None:
+                self._supersede_seen[key] = now
+                continue
+            self._supersede(parent, child, why)
+            done += 1
+        return done
+
+    def _corrected_entry(self, parent: Agent, child: Agent) -> str | None:
+        """Why `child` supersedes `parent` under L1, or None: the child is seated on paper or above, research
+        wrote its current program (its parent's research candidate, or its own rewrite), that program passed
+        replay, its account of itself names an entry defect, and the parent's entries bear it out -- a
+        liquidity or fee defect needs a parent whose entries were takers, a side defect one that entered at
+        all. A maker parent is never superseded for "post-only" in its child's words (mullins-2 and mullins-14)."""
+        if self.evaluator.rung(child.id) < 1:
+            return None
+        account = self._program_account(parent, child)
+        if account is None:
+            return None
+        passed = any(e.payload.get("passed") and e.payload.get("code_sha256") == child.code_sha256
+                     for who in (child.id, parent.id) for e in self.ledger.iter(kinds="eval.trial", agent=who))
+        if not passed:
+            return None
+        kind = entry_defect(account)
+        if kind is None:
+            return None
+        taker, maker = self._entry_fills(parent)
+        if kind in ("liquidity", "fee") and not (taker and taker >= maker):
+            return None
+        if kind == "side" and not (taker or maker):
+            return None
+        return (f"{kind}: its account names the parent's entry as the defect, and {taker} of the parent's "
+                f"{taker + maker} entry fills were takers")
+
+    def _program_account(self, parent: Agent, child: Agent) -> str | None:
+        """The research account of the child's CURRENT program: the purpose of the `agent.strategy` row that
+        adopted it (its own research rewrite), else the reason it was born with when it was born from its
+        parent's research candidate (a fork with new code). None when research did not write it (a House
+        mutation, a lab graduate)."""
+        adopted = None
+        for entry in self.ledger.iter(kinds="agent.strategy", agent=child.id):
+            p = entry.payload
+            if p.get("code_sha256") == child.code_sha256 and p.get("reason") and not str(p["reason"]).startswith("it rewrote itself"):
+                adopted = str(p["reason"])
+        if adopted is not None:
+            return adopted
+        born = self.ledger.get(f"born:{child.id}")
+        if born is None or born.payload.get("code_sha256") != child.code_sha256:
+            return None
+        if not any(e.payload.get("child") == child.id and e.payload.get("new_code") for e in self.ledger.iter(kinds="agent.forked", agent=parent.id)):
+            return None
+        return str(born.payload.get("reason") or "")
+
+    def _entry_fills(self, agent: Agent) -> tuple[int, int]:
+        """(taker, maker) counts of the agent's own entry fills (buys, venue or cross) on every book."""
+        taker = maker = 0
+        for entry in self.ledger.iter(kinds="book.fill", agent=agent.id):
+            p = entry.payload
+            if p.get("side") != "buy" or p.get("source") not in ("venue", "cross"):
+                continue
+            taker += p.get("liquidity") == "taker"
+            maker += p.get("liquidity") == "maker"
+        return taker, maker
+
+    def _supersede(self, parent: Agent, child: Agent, why: str) -> None:
+        """Supersede one parent (L1): on real money, demoted to practice through the evaluator first, as the
+        allocator demotes (`Allocator._move_down`: a `demote` verdict a rung, with its band numbers); then
+        retired as `superseded`, which winds its books down (a Kalshi contract is held to settlement)."""
+        with self._lifecycle_lock:
+            rung = self.evaluator.rung(parent.id)
+            if rung >= 2:
+                band_from = "swing" if rung >= 3 else (self.allocator.tier(parent) if allocator_module.enabled() else "bunt")
+                numbers = {"via": "house", "band_from": band_from, "band_to": "paper", "stake_usd": None, "reason_detail": why,
+                           "superseded_by": child.id, "rule": "allocator.corrected_child_supersedes"}
+                while self.evaluator.rung(parent.id) > 1:
+                    self.evaluator.demote(parent.id, f"superseded: its research child {child.id} passed replay with a fix to its "
+                                                     f"entry mechanism ({why})", numbers)
+            self.kill(parent, "superseded", f"its research child {child.id} passed replay with a fix to its entry mechanism ({why}); "
+                                            + ("it was demoted from real money first; " if rung >= 2 else "")
+                                            + "the child is judged on its own evidence and enters real money by its family's state")
+        self.alert("info", f"{parent.id} was superseded by its research child {child.id}"
+                           + (" and left real money" if rung >= 2 else "") + f": {why}")
 
     def learn(self) -> int:
         """Load the teacher's merged lessons (league/playbook/*.md) into the ledger's playbook: once
@@ -3459,6 +3729,11 @@ class House:
                 self._desk_displaced[agent.specialty] = self.clock()
             for key in ("next_wake", "memory", "last_research", "tried", "idle"):
                 self._state[key].pop(agent.id, None)
+            try:
+                self._hand_off_retained(agent, cause)  # S3: its latest replay-passed candidate waits for a seat
+            except Exception as exc:  # noqa: BLE001 - a hand-off that fails never keeps an agent alive
+                self.alert("warning", f"{agent.id}: its retained candidate could not be handed to the seat queue "
+                                      f"({type(exc).__name__}: {str(exc)[:160]}); the admission pass picks it up")
         try:
             self.sandbox.retire(agent.id)
         except Exception as exc:  # noqa: BLE001
@@ -3669,27 +3944,49 @@ class House:
         return ""
 
     def _weakest(self, rules: Mapping[str, Any], *, specialty: str | None = None, exclude: Sequence[str] = (),
-                 evidenced: bool = False) -> Agent | None:
+                 evidenced: bool = False, newcomer: Newcomer | None = None) -> Agent | None:
         """The agent a newcomer displaces, or None when nobody has earned displacing: the first of
         `_displaceable`, which holds the rules.
 
         `evidenced` (Sept 23, 2026): the newcomer has forward evidence of its own -- an Alpha Lab
         graduate that passed the House's replay and the sealed holdout, a replay-passed foundry card,
-        a merged strategy -- and may take a seat inside its holder's grace when the holder is
-        replay-only code (rung 0) or has never traded since its current program's opportunity. The
-        Alpha Lab (`Lab._seat_for`, `_finish_birth`) and the foundry (`Foundry._admit`) pass it; the
-        House's own mutation refill never does."""
-        rank = self._displaceable(rules, specialty=specialty, exclude=exclude, evidenced=evidenced)
+        a merged strategy, a research candidate that passed replay -- and may take a seat inside its
+        holder's grace when the holder is replay-only code (rung 0) or has never traded since its
+        current program's opportunity. The Alpha Lab (`Lab._seat_for`, `_finish_birth`), the foundry
+        (`Foundry._admit`), `enroll` and the research admissions pass it; the House's own mutation
+        refill never does.
+
+        `newcomer` (S1, Sept 24, 2026): who asks, for the rules that compare it with the resident -- its
+        family's proof and its forward score (`Newcomer`). None: an unproven newcomer with no forward score."""
+        rank = self._displaceable(rules, specialty=specialty, exclude=exclude, evidenced=evidenced, newcomer=newcomer)
         return rank[0][-1] if rank else None
 
     def _displaceable(self, rules: Mapping[str, Any], *, specialty: str | None = None, exclude: Sequence[str] = (),
-                      evidenced: bool = False) -> list[tuple[Any, ...]]:
+                      evidenced: bool = False, newcomer: Newcomer | None = None) -> list[tuple[Any, ...]]:
         """Every resident a newcomer may displace, the one with the LEAST EVIDENCE of an edge first;
         each row ends with the agent (`_weakest` takes the first, health.json counts them).
 
         Never one on real money -- what that may cost is already bounded by the tuition, and the
         auditor put it there. Never a profitable one, however small its record. Never one too young
         to have had a fair chance. Of the rest, the one with the LEAST EVIDENCE of an edge.
+
+        **The evidence clock** (S1, the close-the-gaps run, Sept 24, 2026). Measured on the T0 snapshot:
+        103 deaths in 24 hours, median life 14.3 h, 70 of them before three fills, while a day-horizon
+        desk needs one to three days per settlement; displacement took traders with 38, 26 and 24 fills,
+        and mullins-14 holding a replay-passed candidate. So:
+        - a paper seat's grace is the larger of the plain grace (`displace_after_epochs` epochs, twelve
+          hours) and its desk's evidence clock (`evidence_clocks`: the median hours from a member's first
+          fill to its third independent settlement, measured from the ledger every day), the clock in
+          wall-clock hours on every desk (a desk that keeps hours still needs its twelve SESSION hours);
+        - a resident with `FORWARD_RULE_FILLS` (3) fills of its own since its program's opportunity is
+          displaced only by a newcomer whose forward score beats the resident's own forward record
+          (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
+          own there is nothing to compare, and it keeps its seat;
+        - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
+          displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
+        - never-traded residents past their grace still go first, then the members of a family whose
+          pooled forward record is negative after `losing_family_min_blocks` active blocks (such a family
+          is not bred again, `_losing_family`), then the rest by rung, growth, blocks and purse.
 
         Sept 23, 2026 (the seat market follows evidence): 312 of 345 deaths since Sept 19 were
         displacements, 254 of them of rung-0 House mutations after a median three hours, while 20
@@ -3723,10 +4020,15 @@ class House:
         more than four closed trades, and three of them while holding contracts."""
         epoch = float(rules["epoch_seconds"])
         grace = float(rules.get("displace_after_epochs", 2)) * epoch
+        clocks = self._desk_clocks()
         now = self.clock()
         stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
         bound = float(self.settings.tick_seconds)
         recently = {desk for desk, at in self._desk_displaced.items() if now - at < bound}
+        newcomer = newcomer or Newcomer()
+        newcomer_proven = self._family_proven(newcomer.family, newcomer.venue)
+        losing_blocks = int(rules.get("losing_family_min_blocks", 6))
+        pooled = self.family_forward()
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
@@ -3739,6 +4041,8 @@ class House:
             opportunity = _epoch(agent.born_at)
             opportunity_seq = 0
             agent_grace = grace
+            # S1: a paper seat's desk clock, in wall-clock hours (0 where none is measured: the plain grace).
+            clock = clocks.get(agent.specialty or "", 0.0) if standing.rung >= 1 else 0.0
             niche = self.niche_of(agent)
             keeps_hours = standing.rung == 1 and niche is not None and niche.keeps_hours(agent.needs)
             if standing.rung == 0 and (self._burst or evidenced):
@@ -3764,31 +4068,8 @@ class House:
                     agent_grace = 0
             if standing.rung == 1:
                 # A late replay pass or a new empty-record strategy has not had the old
-                # program's trading opportunity. Meriwether-8 passed replay at 00:21 and
-                # was displaced at 01:01 with zero forward blocks because its birth was
-                # already fourteen hours old. Recover the current program's start from
-                # the ledger, including across restarts; duplicate strategy rows do not
-                # buy another grace period.
-                #
-                # On a desk that keeps hours, a rewrite of an agent that has never traded is NOT a
-                # new opportunity (Sept 23, 2026): research rewrote idle stock agents every few
-                # hours (mcentee-34 three times in eight), each rewrite restarted the clock, and
-                # the agents that never traded outlived the ones that did.
-                first_fill = None
-                if keeps_hours:
-                    found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
-                    first_fill = None if found is None else found.seq
-                signature = None
-                for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
-                    p = entry.payload
-                    if entry.kind in ("agent.born", "agent.strategy"):
-                        current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
-                        if current != signature:
-                            if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
-                                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
-                            signature = current
-                    elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
-                        opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                # program's trading opportunity (`_program_opportunity`).
+                opportunity, opportunity_seq = self._program_opportunity(agent, keeps_hours=keeps_hours)
                 if self._burst:
                     from .episodes import completed
                     book = self.book_of(agent)
@@ -3836,14 +4117,142 @@ class House:
                 # its first regular session has closed.
                 agent_grace = 0
             # A desk that keeps hours offers nothing between the close and the next open: its grace
-            # is counted in regular-session time.
+            # is counted in regular-session time. The desk's evidence clock is wall-clock hours (S1).
             seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
-            if seated < agent_grace:
+            past_grace = seated >= grace and now - opportunity >= clock
+            if agent_grace > 0 and not past_grace:
                 continue
-            rank.append((standing.active_blocks > 0 or traded, standing.rung, standing.mean_growth, standing.active_blocks,
+            fills = self._own_fills(agent.id, after=opportunity_seq) if standing.rung == 1 else 0
+            has_traded = standing.active_blocks > 0 or traded or fills > 0
+            if not newcomer_proven and (has_traded or not past_grace) and self._family_proven(agent.family, agent.venue):
+                continue  # S1: a proven family's resident is never displaced by an unproven newcomer
+            if fills >= FORWARD_RULE_FILLS:
+                # S1: a trader is displaced only by a newcomer whose forward score beats its own record.
+                mine = self._resident_forward(agent)
+                if newcomer.forward is None or mine is None or not newcomer.forward > mine:
+                    continue
+            blocks, growth = pooled.get(agent.family, (0, 0.0))
+            losing = blocks >= losing_blocks and growth <= -1e-9  # `_losing_family`'s line, read without its alert
+            rank.append((has_traded, not losing, standing.rung, standing.mean_growth, standing.active_blocks,
                          float(self.economy.balance(agent.id)), agent))
-        rank.sort(key=lambda row: row[:5])  # has it traded at all, replay-only first, then growth, how much, and its purse
+        # Has it traded at all, a losing family first, replay-only first, then growth, how much, and its purse.
+        rank.sort(key=lambda row: row[:6])
         return rank
+
+    def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
+        """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its
+        latest new program (`agent.strategy` with other code, parameters or NEEDS), or its latest seat on
+        rung 1, whichever is last.
+
+        A late replay pass or a new empty-record strategy has not had the old program's trading
+        opportunity. Meriwether-8 passed replay at 00:21 and was displaced at 01:01 with zero forward
+        blocks because its birth was already fourteen hours old. Recovered from the ledger, so it
+        survives restarts; duplicate strategy rows do not buy another grace period.
+
+        On a desk that keeps hours (`keeps_hours`), a rewrite of an agent that has never traded is NOT
+        a new opportunity (Sept 23, 2026): research rewrote idle stock agents every few hours (mcentee-34
+        three times in eight), each rewrite restarted the clock, and the agents that never traded
+        outlived the ones that did."""
+        opportunity, opportunity_seq = _epoch(agent.born_at), 0
+        first_fill = None
+        if keeps_hours:
+            found = next(iter(self.ledger.iter(kinds="book.fill", agent=agent.id)), None)
+            first_fill = None if found is None else found.seq
+        signature = None
+        for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
+            p = entry.payload
+            if entry.kind in ("agent.born", "agent.strategy"):
+                current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
+                if current != signature:
+                    if signature is None or not keeps_hours or (first_fill is not None and first_fill < entry.seq):
+                        opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+                    signature = current
+            elif p.get("decision") in ("seat", "promote", "demote") and p.get("to_rung") == 1:
+                opportunity, opportunity_seq = _epoch(entry.at), entry.seq
+        return opportunity, opportunity_seq
+
+    def _own_fills(self, agent_id: str, *, after: int = 0, enough: int = FORWARD_RULE_FILLS) -> int:
+        """The agent's own fills after a ledger position, counted up to `enough`: venue and cross fills
+        (a row that names no source is a test's), never dust, a venue fee or the House's closing sale."""
+        count = 0
+        for entry in self.ledger.iter(kinds="book.fill", agent=agent_id, after=after):
+            p = entry.payload
+            if p.get("source") in (None, "venue", "cross") and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
+                count += 1
+                if count >= enough:
+                    break
+        return count
+
+    def _family_proven(self, family: str | None, venue: str | None) -> bool:
+        """Whether a family's pooled record is proven: the allocator's family record (`Allocator.family`,
+        Deploy A's P1; read, never recomputed here), "proven" or "swing". A family on no venue it names is
+        read on both. False for no family, and whenever the record cannot be read."""
+        if not family:
+            return False
+        reader = getattr(self.allocator, "family", None)
+        if reader is None:
+            return False
+        for place in ([venue] if venue else list(REAL_BOOK)):
+            try:
+                record = reader(family, place)
+            except Exception:  # noqa: BLE001 - `Allocator.family` never raises; an unreadable record proves nothing
+                continue
+            if record and (record.get("proven") or record.get("state") in ("proven", "swing")):
+                return True
+        return False
+
+    def _resident_forward(self, agent: Agent, *, ranked: bool = False) -> float | None:
+        """A resident's own forward record for the seat market (S2): the mean log growth per block of its
+        current program's latest forward window (`Lab.resident_forward`), or, `ranked`, its forward score
+        (only with the lab's `forward_min_active_blocks`). None without a lab or a record."""
+        reader = getattr(getattr(self, "lab", None), "resident_forward", None)
+        if reader is None:
+            return None
+        try:
+            return reader(agent, ranked=ranked)
+        except Exception:  # noqa: BLE001 - the lab's store is its own; no record is no record
+            return None
+
+    def evidence_clocks(self, *, fresh: bool = False) -> dict[str, Any]:
+        """The desks' evidence clocks (S1, Sept 24, 2026; `measure_evidence_clocks`), kept in house.json
+        (`evidence_clocks`: `at`, `epoch`, `days`, `desks`) and measured again when a day old -- at startup
+        (`__init__`) and then at the first seat question after the day has passed. One info alert says
+        what changed. Never raises: a measurement that fails keeps the last one and is tried an hour on."""
+        with self._clock_lock:
+            stored = self._state.get("evidence_clocks") or {}
+            now = self.clock()
+            if not fresh and stored and now - float(stored.get("epoch") or 0) < EVIDENCE_CLOCK_REFRESH_SECONDS:
+                return stored
+            try:
+                with (getattr(self.registry, "_lock", None) or nullcontext()):
+                    agents = list(self.registry.agents.values())
+                desks = measure_evidence_clocks(self.ledger, agents, now)
+            except Exception as exc:  # noqa: BLE001 - the last reading stands, and the floor goes on
+                retry = {**stored, "epoch": now - EVIDENCE_CLOCK_REFRESH_SECONDS + 3600}
+                with self._state_lock:
+                    self._state["evidence_clocks"] = retry
+                self.alert("warning", f"the desks' evidence clocks could not be measured ({type(exc).__name__}: {str(exc)[:160]})")
+                return retry
+            report = {"at": now_iso(self.clock), "epoch": now, "days": EVIDENCE_CLOCK_DAYS,
+                      "settlements": EVIDENCE_CLOCK_SETTLEMENTS, "desks": desks}
+            with self._state_lock:
+                self._state["evidence_clocks"] = report
+        measured = {d: row["hours"] for d, row in desks.items() if row.get("hours") is not None}
+        before = {d: (row or {}).get("hours") for d, row in (stored.get("desks") or {}).items() if (row or {}).get("hours") is not None}
+        if measured and measured != before:
+            unmeasured = sorted(d for d, row in desks.items() if row.get("hours") is None)
+            self.alert("info", "the desks' evidence clocks (median hours from a member's first fill to its third independent "
+                               f"settlement, last {EVIDENCE_CLOCK_DAYS:g} days): "
+                               + ", ".join(f"{d} {h:g} h" for d, h in sorted(measured.items(), key=lambda kv: kv[1]))
+                               + (f"; not reached on {', '.join(unmeasured)} (the plain grace)" if unmeasured else ""),
+                       evidence_clocks=desks)
+        return report
+
+    def _desk_clocks(self) -> dict[str, float]:
+        """Desk -> its measured evidence clock in seconds, for the desks where one was reached."""
+        desks = (self.evidence_clocks().get("desks") or {})
+        return {desk: float(row["hours"]) * 3600.0 for desk, row in desks.items()
+                if isinstance(row, Mapping) and row.get("hours") is not None}
 
     def _screen_pending(self, agent: Agent, since_seq: int, seated_for: float) -> bool:
         """Is a trading daily agent still short of the closed days its paper screen needs?
@@ -3875,21 +4284,37 @@ class House:
         hourly or daily, keeps its seat until it has closed that many trades, or until
         `displace_trading_after_sessions` (game.json) regular sessions have closed since its
         opportunity -- whichever comes first. Only its seat is kept: an unprofitable one is still
-        displaced once either is reached, and a profitable one never was displaceable."""
+        displaced once either is reached, and a profitable one never was displaceable.
+
+        The record is the one the bunt line reads (`allocator.bunt_ready`, Sept 24, 2026): closed trades,
+        or on an event book `bunt_min_settled` settlements, each counted once per event
+        (`allocator.closed_trades`). Before, only `bunt_min_trades` was read, so a Kalshi trader with three
+        independent settlements and fewer than five closes was treated as short of a record it had."""
         owed = int(rules.get("displace_trading_after_sessions", 3))
         if session_time(opportunity, now)[1] >= owed:
             return False
         if book is None:
             return False
-        closed, _ = allocator_module.closed_trades(self, agent.id, book.name)
-        return closed < int(CONSTITUTION["allocator"]["bunt_min_trades"])
+        line = CONSTITUTION["allocator"]
+        closed, settled = allocator_module.closed_trades(self, agent.id, book.name)
+        if book.name in allocator_module.EVENT_BOOKS and settled >= int(line.get("bunt_min_settled", 3)):
+            return False
+        return closed < int(line["bunt_min_trades"])
 
     # ------------------------------------------------------------ the seat market
     #: Who waits for a seat, in the order a freed seat goes to them (Sept 23, 2026): Alpha Lab
     #: graduates (replay and sealed holdout passed), replay-passed foundry cards, merged strategies.
-    #: A House mutation is staked only when none of them waits.
-    SEAT_WAITERS = ("graduates", "cards", "strategies")
-    SEAT_WAITER_NAMES = {"graduates": "Alpha Lab graduate", "cards": "replay-passed foundry card", "strategies": "merged strategy"}
+    #: A House mutation is staked only when none of them waits. Since Sept 24, 2026 (S3) the retained
+    #: research candidates of residents that died holding them rank with the graduates: neither class
+    #: holds a desk from the other, and both hold theirs from cards and merged strategies.
+    SEAT_WAITERS = ("graduates", "retained", "cards", "strategies")
+    SEAT_WAITER_NAMES = {"graduates": "Alpha Lab graduate", "retained": "retained research candidate",
+                         "cards": "replay-passed foundry card", "strategies": "merged strategy"}
+    #: S3 (Sept 24, 2026): a dead author's retained candidate waits for a seat this long after its author's
+    #: death (its replay grows old), and the House picks up, once, the candidates of authors that died in
+    #: this window before the rule was deployed (their admissions were cancelled with them).
+    RETAINED_TTL_SECONDS = 72 * 3600
+    RETAINED_CANCELLED = "parent retired or changed; candidate evidence retained"
 
     def _waiting_graduates(self) -> list[dict[str, Any]]:
         """Lab graduates that passed the House's replay (and the sealed holdout where it applies)
@@ -3899,11 +4324,11 @@ class House:
         if query is None:
             return []
         try:
-            rows = query("SELECT candidate, niche, at, detail FROM graduations WHERE state='passed' ORDER BY at")
+            rows = query("SELECT candidate, niche, family, at, detail FROM graduations WHERE state='passed' ORDER BY at")
         except Exception:  # noqa: BLE001 - the lab's table is its own; read again on the next tick
             return []
-        return [{"candidate": str(r["candidate"]), "niche": str(r["niche"] or ""), "since": float(r["at"] or 0),
-                 "detail": str(r["detail"] or "")[:120]} for r in rows]
+        return [{"candidate": str(r["candidate"]), "niche": str(r["niche"] or ""), "family": str(r["family"] or ""),
+                 "since": float(r["at"] or 0), "detail": str(r["detail"] or "")[:120]} for r in rows]
 
     def _waiting_cards(self) -> list[dict[str, Any]]:
         """Foundry cards that passed replay and were never born (`Foundry.inventory`)."""
@@ -3933,7 +4358,8 @@ class House:
         hit = self._data_cache.get("seat_waiters")
         if hit and not fresh and self.clock() - hit[0] < 60:
             return hit[1]
-        value = {"graduates": self._waiting_graduates(), "cards": self._waiting_cards(), "strategies": self._waiting_strategies()}
+        value = {"graduates": self._waiting_graduates(), "retained": self._retained_waiting(), "cards": self._waiting_cards(),
+                 "strategies": self._waiting_strategies()}
         self._data_cache["seat_waiters"] = (self.clock(), value)
         return value
 
@@ -3971,7 +4397,11 @@ class House:
         """The seat market once an hour (cached in state `seat_market`; health.json shows it): the
         residents an evidenced newcomer could displace, the never-traded residents past their grace,
         whether any waiting graduate can be seated (told as a refusal when none can), and a warning
-        when more than `seat_waiters_warning` newcomers have waited for over an hour."""
+        when more than `seat_waiters_warning` newcomers have waited for over an hour.
+
+        Since Sept 24, 2026 (S4, the close-the-gaps run): the seats that hold none of a forward score, a
+        fill or a grace still running (`seats_holding_none`, count and ids: `_seats_holding_none`), and
+        the desks' evidence clocks the grace follows (`evidence_clocks`, desk -> hours, and when)."""
         now = self.clock()
         cached = self._state.get("seat_market") or {}
         if not fresh and cached and now - float(cached.get("epoch") or 0) < 3600:
@@ -3992,13 +4422,19 @@ class House:
             living = self.registry.living()
             room = len(living) < int(rules["max_population"])
             seatable = 0
+            lab = getattr(self, "lab", None)
             for niche_id in {str(w["niche"]) for w in graduates if w.get("niche")}:
                 niche = self.niches.get(niche_id)
                 if niche is None or niche.dormant:
                     continue
-                if self.members(niche_id) < niche.max_members and (room or self._weakest(rules, evidenced=True)):
-                    seatable += 1
-                elif self._weakest(rules, specialty=niche_id, evidenced=True) is not None:
+                # Each graduate asks with its own family and forward score (S1), as `Lab._seat_for` does.
+                asking = [Newcomer(family=w.get("family") or None, venue=niche.venue,
+                                   forward=lab.forward_score(w["candidate"]) if lab is not None else None)
+                          for w in graduates if str(w.get("niche")) == niche_id]
+                if self.members(niche_id) < niche.max_members:
+                    if room or any(self._weakest(rules, evidenced=True, newcomer=n) for n in asking):
+                        seatable += 1
+                elif any(self._weakest(rules, specialty=niche_id, evidenced=True, newcomer=n) is not None for n in asking):
                     seatable += 1
             if not seatable:
                 desks = ", ".join(f"{d} {n}" for d, n in sorted(by_desk.items()) if any(str(w.get("niche")) == d for w in graduates))
@@ -4021,12 +4457,40 @@ class House:
         if tell:
             self.alert("warning", f"{total} newcomers have waited for seats for over an hour ({', '.join(f'{n} {cls}' for cls, n in counts.items() if n)}): "
                                   f"{len(rank)} residents could be displaced by one with forward evidence")
+        empty = self._seats_holding_none(rules)
+        clocks = self.evidence_clocks()
         report = {"at": now_iso(self.clock), "epoch": now, "waiters": counts, "waiters_by_desk": by_desk,
                   "displaceable": len(rank), "never_traded_past_grace": never_traded,
-                  "waiting_over_an_hour": bool(since) and now - since > 3600}
+                  "waiting_over_an_hour": bool(since) and now - since > 3600,
+                  "seats_holding_none": {"count": len(empty), "ids": empty[:40]},
+                  "evidence_clocks": {"at": clocks.get("at"), "hours": {d: row.get("hours") for d, row in (clocks.get("desks") or {}).items()}}}
         with self._state_lock:
             self._state["seat_market"] = report
         return report
+
+    def _seats_holding_none(self, rules: Mapping[str, Any]) -> list[str]:
+        """S4 (Sept 24, 2026): the living residents off real money whose seat holds none of a program with a
+        forward score (`Lab.resident_forward`, ranked), a fill of its own since its program's opportunity, or
+        a grace still running (the plain grace, or its desk's evidence clock, in wall-clock hours from that
+        opportunity), oldest first. The population stays 112; these are the seats that carry no evidence."""
+        grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
+        clocks = self._desk_clocks()
+        now = self.clock()
+        out: list[tuple[float, str]] = []
+        for agent in self.registry.living():
+            rung = self.evaluator.rung(agent.id)
+            if rung >= 2:
+                continue
+            opportunity, seq = self._program_opportunity(agent) if rung == 1 else (_epoch(agent.born_at), 0)
+            clock = clocks.get(agent.specialty or "", 0.0) if rung == 1 else 0.0
+            if now - opportunity < max(grace, clock):
+                continue
+            if self._own_fills(agent.id, after=seq, enough=1):
+                continue
+            if self._resident_forward(agent, ranked=True) is not None:
+                continue
+            out.append((opportunity, agent.id))
+        return [agent_id for _, agent_id in sorted(out)]
 
     def _seats_health(self) -> dict[str, Any]:
         """The `seats` block of health.json: the hourly watch, the waiters now and the last refusal a class."""
@@ -4597,7 +5061,10 @@ class House:
         loser = None
         if niche_full or full:
             if displace:
-                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,))
+                # A candidate that passed the House's replay is evidenced like a card (Sept 24, 2026, S3), and
+                # asks as its parent's family (S1).
+                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,), evidenced=True,
+                                      newcomer=Newcomer(family=parent.family, venue=parent.venue, what=f"{parent.id}'s research candidate"))
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')
                 return None
@@ -4701,6 +5168,190 @@ class House:
                 # its seconds are the parent's, as a validation probe's are.
                 self._charge_box(agent_id, described, note="reading a candidate's NEEDS for an admission that did not seat it")
             return child
+
+    # ------------------------------------------------------- retained candidates (S3)
+    def _retainable(self, row: Mapping[str, Any]) -> bool:
+        """An admission whose candidate a seat can be given to: it passed the House's replay, and its
+        parameters are valid for its inputs."""
+        candidate = row.get("_candidate")
+        if not isinstance(candidate, Mapping) or candidate.get("passed") is not True or not candidate.get("code"):
+            return False
+        try:
+            return not parameters.inspect(candidate.get("params") or {}, candidate.get("needs") or {})["errors"]
+        except Exception:  # noqa: BLE001 - a candidate that cannot be read cannot be seated
+            return False
+
+    def _retain(self, author: Agent, row: dict[str, Any], why: str) -> dict[str, Any]:
+        """Hand one retained candidate of a dead author to the seat queue: its admission row goes
+        `orphaned` (written once) and a waiter is kept in house.json (`retained`, by session)."""
+        died = _epoch(author.died_at) if author.died_at else self.clock()
+        numbers = (row.get("_candidate") or {}).get("numbers") or {}
+        entry = {"session": row["session"], "author": author.id, "family": author.family, "venue": author.venue,
+                 "niche": author.specialty or "", "since": died, "trades": numbers.get("trades"),
+                 "return_pct": numbers.get("return_pct")}
+        if row.get("status") != "orphaned":
+            Admissions(self.ledger).record(row, "orphaned", why, author_died_at=author.died_at)
+        with self._state_lock:
+            self._state.setdefault("retained", {})[row["session"]] = entry
+            self._state.setdefault("retained_authors", {})[author.id] = died
+        self._data_cache.pop("seat_waiters", None)
+        return entry
+
+    def _hand_off_retained(self, author: Agent, cause: str) -> dict[str, Any] | None:
+        """S3 (the close-the-gaps run, Sept 24, 2026): a resident that dies holding a replay-passed research
+        candidate hands its LATEST one to the seat queue with its lineage, instead of it being cancelled with
+        it. mullins-14 died `displaced` at 00:12:02Z Sept 24 holding three (the latest made +38.4% on 113
+        replay trades) and its admissions were cancelled "parent retired or changed" at 01:38:54Z. Its other
+        admissions are cancelled by the admission pass as before. Called by `kill` under the lifecycle lock;
+        it reads only the author's own rows."""
+        latest = None
+        for row in Admissions(self.ledger).rows(agent=author.id):
+            if row.get("status") in ("queued", "deferred") and self._retainable(row):
+                latest = row  # oldest first: the last is the latest
+        if latest is None:
+            return None
+        return self._retain(self.registry.get(author.id), latest,
+                            f"its author {author.id} died ({cause}) holding it: it waits for a seat with its author's lineage")
+
+    def _adopt_orphans(self, rows: Sequence[dict[str, Any]]) -> int:
+        """The retroactive half of S3, from the admission pass's own fold: the latest replay-passed candidate of
+        each author that died within `RETAINED_TTL_SECONDS` -- still pending, or cancelled with it ("parent
+        retired or changed; candidate evidence retained") before this rule reached the floor -- enters the
+        seat queue, once an author. mullins-14's is the case."""
+        now = self.clock()
+        with self._state_lock:
+            handled = {a: at for a, at in (self._state.get("retained_authors") or {}).items()
+                       if now - float(at or 0) <= self.RETAINED_TTL_SECONDS}
+            self._state["retained_authors"] = handled
+        latest: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            author = self.registry.get(str(row.get("agent") or ""))
+            if author is None or author.alive or author.id in handled or not author.died_at:
+                continue
+            if now - _epoch(author.died_at) > self.RETAINED_TTL_SECONDS:
+                continue
+            status = row.get("status")
+            if (status in ("queued", "deferred", "orphaned") or (status == "cancelled" and row.get("reason") == self.RETAINED_CANCELLED)) \
+                    and self._retainable(row):
+                latest[author.id] = row  # the fold is oldest first: the last is the latest
+        for author_id, row in latest.items():
+            self._retain(self.registry.get(author_id), row, f"its author {author_id} died holding it: it waits for a seat with its "
+                                                            "author's lineage (picked up after the author's death)")
+        return len(latest)
+
+    def _retained_waiting(self, *, expired: bool = False) -> list[dict[str, Any]]:
+        """The retained candidates waiting for a seat (house.json `retained`), longest wait first; those
+        past `RETAINED_TTL_SECONDS` only with `expired` (the admission pass drops them)."""
+        now = self.clock()
+        rows = [dict(r) for r in (self._state.get("retained") or {}).values()
+                if expired or now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS]
+        return sorted(rows, key=lambda r: (float(r.get("since") or 0), str(r.get("session"))))
+
+    def _admit_orphan(self, entry: Mapping[str, Any], rules: Mapping[str, Any], rows: Sequence[dict[str, Any]]) -> Agent | None:
+        """Seat one retained candidate of a dead author (S3), under the lifecycle lock: born on its author's
+        line (the author is its parent, so it inherits the author's selection path and holdout ration),
+        House-staked, seated on paper because its code passed replay as the author's candidate, and told as
+        a `retained` birth. It asks for a seat as its author's family with no forward score of its own
+        (`_weakest`, evidenced). A file that would displace a resident is read in the probe box first, as
+        `_admit_candidate` reads one; one that cannot be born, or that a living agent already runs, is
+        dropped; one past `RETAINED_TTL_SECONDS` is dropped as too old."""
+        queue = Admissions(self.ledger)
+        session = str(entry.get("session"))
+        row = next((r for r in rows if r.get("session") == session), None)
+        author = self.registry.get(str(entry.get("author") or ""))
+
+        def forget() -> None:
+            with self._state_lock:
+                (self._state.get("retained") or {}).pop(session, None)
+            self._data_cache.pop("seat_waiters", None)
+
+        if row is None or author is None or row.get("status") != "orphaned":
+            forget()  # seated, dropped or left unconfirmed by an earlier pass
+            return None
+        if self.clock() - float(entry.get("since") or 0) > self.RETAINED_TTL_SECONDS:
+            queue.record(row, "dropped", f"no seat within {self.RETAINED_TTL_SECONDS / 3600:g} hours of its author's death: "
+                                         "its replay is too old to seat")
+            forget()
+            return None
+        candidate = row["_candidate"]
+        living = self.registry.living()
+        sha = code_sha(candidate["code"])
+        if any(a.code_sha256 == sha and dict(a.params or {}) == dict(candidate.get("params") or {}) for a in living):
+            queue.record(row, "dropped", "a living agent already runs this program")
+            forget()
+            return None
+        niche = self.niche_of(author)
+        if niche is None or niche.dormant:
+            queue.record(row, "orphaned", "its desk is closed: it waits for it to open")
+            return None
+        niche_full = self.members(niche.id) >= niche.max_members
+        loser = None
+        if niche_full or len(living) >= int(rules["max_population"]):
+            loser = self._weakest(rules, specialty=niche.id if niche_full else None, evidenced=True,
+                                  newcomer=Newcomer(family=author.family, venue=author.venue, what=f"the retained candidate of {author.id}"))
+            if loser is None:
+                queue.record(row, "orphaned", f"waiting for an eligible seat: {'its desk' if niche_full else 'the league'} is full of "
+                                              "residents that may not be displaced")
+                return None
+        claim = getattr(self.sandbox, "claim", None)
+        with claim(PROBE_BOX, wait=self.settings.probe_wait_seconds) if claim is not None else nullcontext(True) as free:
+            if not free:
+                return None  # the probe box is in use by background work: the next admission pass
+            try:
+                described = self.sandbox.needs(PROBE_BOX, candidate["code"])
+                info = described.result
+                if not info.get("ok"):
+                    raise ValueError(str(info.get("error") or "its NEEDS could not be read"))
+                if loser is not None:
+                    # A bad file must not displace a resident: the replayed inputs, exactly (`_admit_candidate`).
+                    if not info.get("ok") or niche_of(info["needs"])[:2] != (author.venue, author.horizon):
+                        raise ValueError("it no longer describes its author's venue and horizon")
+                    if niches_module.constrain(info["needs"], niche) != candidate["needs"]:
+                        raise ValueError("its description differs from the inputs it was replayed on")
+                    parameters.require_valid({**info.get("params", {}), **candidate["params"]}, candidate["needs"])
+            except SandboxError as exc:
+                self._defer("retained", f"infrastructure: {type(exc).__name__}: {str(exc)[:200]}")
+                return None
+            except Exception as exc:  # noqa: BLE001 - the file cannot be born: nothing was written
+                queue.record(row, "dropped", f"it cannot be born: {type(exc).__name__}: {str(exc)[:160]}")
+                forget()
+                return None
+            queue.record(row, "admitting", "paper admission write started", displaced=loser.id if loser else None)
+            purpose = str(candidate.get("purpose") or "")
+            try:
+                if loser is not None:
+                    self.kill(loser, "displaced", self.postmortem(loser, "displaced",
+                              f"the retained research candidate of {author.id}, which died holding it, takes the seat"))
+                child = self.spawn(author.line or author.name, author.family, candidate["code"], parent=author.id,
+                                   params=candidate["params"], endowment=rules["endowment_usd"], described=described,
+                                   reason=f"the retained research candidate of {author.id}, which died holding it: {purpose}"[:1500])
+            except Exception as exc:  # noqa: BLE001 - an unknown write is kept for inspection, never retried
+                if isinstance(exc, ValueError) and loser is None:
+                    # `spawn` refused it before anything was written (no open specialty for its NEEDS).
+                    queue.record(row, "dropped", f"it cannot be born: {str(exc)[:200]}")
+                else:
+                    queue.record(row, "unconfirmed", f"admission interrupted: {type(exc).__name__}: {str(exc)[:160]}")
+                    self.alert("warning", f"{author.id}'s retained candidate: its admission is unconfirmed; retained for inspection")
+                forget()
+                return None
+        self.evaluator.seat(child.id, 1, f"its code passed replay as the candidate of {author.id}, which died before it was seated")
+        with self._state_lock:
+            self._state["tried"][child.id] = child.code_sha256
+        self.seat(child)
+        numbers = candidate.get("numbers") or {}
+        self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd"], "box_forked": False,
+                                            "reason": purpose[:600], "new_code": True, "staked_by": "house", "retained": True},
+                           agent=author.id)
+        if self.ledger.get(f"birth-route:{child.id}") is None:
+            self.ledger.append("route.decision", {"task": f"birth:{child.id}", "route": "retained", "model": None,
+                                                   "reason": f"the retained research candidate of {author.id}, which died holding it",
+                                                   "evidence": {"author": author.id, "session": session, "replay_passed": True,
+                                                                "trades": numbers.get("trades"), "return_pct": numbers.get("return_pct"),
+                                                                "displaced": loser.id if loser else None}},
+                               id=f"birth-route:{child.id}")
+        queue.record(row, "admitted", "the retained candidate of a dead author was seated on paper", child=child.id)
+        forget()
+        return child
 
     def _commit_research(self, agent_id: str, generation: tuple, outcome: Any) -> dict[str, Any] | None:
         """Apply a candidate under the lifecycle lock, or return it for a separate child."""
@@ -5050,7 +5701,20 @@ class House:
         last = float(state.get('at') or state.get('since') or self._born_at)
         if self.clock() - self._born_at >= 300 and self.clock() - last >= float(rules['newcomer_seconds']):
             with self._lifecycle_lock:
-                for row in Admissions(self.ledger).pending():
+                rows = Admissions(self.ledger).rows()
+                # S3 (Sept 24, 2026): the retained candidates of dead authors first, oldest death first; they
+                # rank with the lab's graduates, and a living author can research again, a dead one cannot.
+                self._adopt_orphans(rows)
+                for entry in self._retained_waiting(expired=True):
+                    child = self._admit_orphan(entry, rules, rows)
+                    if child is not None:
+                        state['at'] = self.clock()
+                        return child
+                left = self._retained_waiting()
+                if left:
+                    self._refuse_birth("retained", len(left), "none could be seated: their desks are full of residents that may "
+                                                              "not be displaced, even by a newcomer with forward evidence")
+                for row in [r for r in rows if r.get('status') in ('queued', 'deferred', 'admitting') and r.get('_candidate')]:
                     child = self._admit_candidate(row, displace=True)
                     if child is not None:
                         state['at'] = self.clock()
@@ -5558,6 +6222,14 @@ class House:
         self.ledger.close()
         if self.campaigns:
             self.campaigns.close()
+
+
+def _code_venue(code: str) -> str | None:
+    """The venue a strategy file's literal NEEDS name, read without running it; None when it names none."""
+    from .lab import static_literal
+
+    needs = static_literal(str(code or ""), "NEEDS") or {}
+    return str(needs.get("venue")) if needs.get("venue") else None
 
 
 def _epoch(iso: str) -> float:

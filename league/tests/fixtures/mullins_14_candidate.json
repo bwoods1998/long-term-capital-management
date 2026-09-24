@@ -1,0 +1,87 @@
+{
+ "_about": "mullins-14 and its retained candidate, as the live ledger held them at the T0 snapshot of Sept 24, 2026 (01:42Z): the author (family weather-favorites, desk kalshi-weather) died `displaced` at 00:12:02Z holding three replay-passed candidates; the latest (session research:mullins-14:4e891af6217f4dd49cff3bb43e17ff22, queued 22:43:51Z Sept 23) widens the hours-to-close window from 12 h to 18 h: 113 trades, +38.4% in replay. S3 of the close-the-gaps run seats it.",
+ "admission": {
+  "cancelled_reason": "parent retired or changed; candidate evidence retained",
+  "generation": [
+   "e8c4962b54ea0797d7b1e7fc3300cd5eee43946f9adf789be596f2b110ae31ef",
+   "[{\"bid_max\":0.97,\"bid_min\":0.9,\"max_hours\":12.0,\"max_open\":6,\"max_spread\":0.03,\"min_hours\":1.0,\"min_volume_24h\":1000.0,\"notional_usd\":10.0,\"requote_minutes\":180.0},{\"horizon\":\"day\",\"max_hours_to_close\":12,\"series\":[\"KXRAIN\",\"KXRAINDNYC\"],\"style\":\"rain-favorites-no-safety\",\"venue\":\"kalshi\",\"wake_minutes\":60}]",
+   0,
+   183643
+  ],
+  "queued_at": "2026-09-23T22:43:51.362Z",
+  "session": "research:mullins-14:4e891af6217f4dd49cff3bb43e17ff22"
+ },
+ "author": {
+  "born_at": "2026-09-22T18:54:44.300Z",
+  "code": "from datetime import datetime, timezone\n\nNEEDS = {\n    \"venue\": \"kalshi\",\n    \"horizon\": \"day\",\n    \"style\": \"rain-favorites-no-safety\",\n    \"series\": [\"KXRAIN\", \"KXRAINDNYC\"],\n    \"max_hours_to_close\": 12,\n    \"wake_minutes\": 60,\n}\nPARAMS = {\n    \"bid_min\": 0.90,\n    \"bid_max\": 0.97,\n    \"max_spread\": 0.03,\n    \"min_hours\": 1.0,\n    \"max_hours\": 12.0,\n    \"min_volume_24h\": 1000.0,\n    \"notional_usd\": 10.0,\n    \"max_open\": 6,\n    \"requote_minutes\": 180.0,\n}\nEPS = 1e-9\n\ndef num(x, default=None):\n    try:\n        y = float(x)\n        if y != y or abs(y) == float(\"inf\"):\n            return default\n        return y\n    except (TypeError, ValueError):\n        return default\n\ndef when(x):\n    try:\n        s = str(x).strip()\n        if s.endswith(\"Z\") or s.endswith(\"z\"):\n            s = s[:-1] + \"+00:00\"\n        d = datetime.fromisoformat(s)\n        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)\n    except (TypeError, ValueError):\n        return None\n\ndef decide(ctx):\n    p = dict(PARAMS)\n    p.update(ctx.get(\"params\") or {})\n    def knob(k):\n        return num(p.get(k), PARAMS[k])\n\n    now = when(ctx.get(\"now\"))\n    positions = [x for x in (ctx.get(\"positions\") or [])\n                 if isinstance(x, dict) and (num(x.get(\"quantity\"), 0.0) or 0.0) > 0]\n    orders = [x for x in (ctx.get(\"open_orders\") or []) if isinstance(x, dict)]\n    busy = {str(x.get(\"market\")) for x in positions}\n    busy.update(str(x.get(\"market\")) for x in orders)\n    cancels = []\n    for o in orders:\n        submitted = when(o.get(\"submitted_at\"))\n        if o.get(\"order_id\") and submitted is not None and now is not None:\n            age = (now - submitted).total_seconds() / 60.0\n            if age > knob(\"requote_minutes\"):\n                cancels.append(str(o[\"order_id\"]))\n\n    risk = ctx.get(\"event_risk\") or {}\n    remaining = risk.get(\"remaining_by_market_usd\") or {}\n    found = []\n    for m in (ctx.get(\"markets\") or []):\n        if not isinstance(m, dict) or not m.get(\"market\"):\n            continue\n        yb = num(m.get(\"yes_bid\"))\n        ya = num(m.get(\"yes_ask\"))\n        hc = num(m.get(\"hours_to_close\"))\n        hr = num(m.get(\"hours_to_resolve\"))\n        vol = num(m.get(\"volume_24h\"), 0.0)\n        if yb is None or ya is None or hc is None or hr is None:\n            continue\n        if not (0.0 < yb < ya < 1.0):\n            continue\n        no_bid = round(1.0 - ya, 4)\n        no_ask = round(1.0 - yb, 4)\n        if no_bid < knob(\"bid_min\") - EPS or no_bid > knob(\"bid_max\") + EPS:\n            continue\n        if no_ask - no_bid > knob(\"max_spread\") + EPS:\n            continue\n        if hc < knob(\"min_hours\") or hc > knob(\"max_hours\"):\n            continue\n        if hr > 48.0 or vol < knob(\"min_volume_24h\"):\n            continue\n        ticker = str(m[\"market\"])\n        if ticker in busy:\n            continue\n        capacity = num(remaining.get(ticker), None)\n        if capacity is not None and capacity < 1.0:\n            continue\n        price = round(no_bid - 0.01, 2)\n        if price < knob(\"bid_min\") or price >= no_ask:\n            continue\n        found.append((-vol, ticker, price, hc, hr, capacity))\n    found.sort()\n\n    limits = ctx.get(\"limits\") or {}\n    equity = num(ctx.get(\"equity\"), 0.0) or 0.0\n    cash = num(ctx.get(\"cash\"), 0.0) or 0.0\n    reserved = sum((num(o.get(\"quantity\"), 0.0) or 0.0) *\n                   (num(o.get(\"limit_price\"), 0.0) or 0.0)\n                   for o in orders if o.get(\"side\") == \"buy\")\n    free = max(0.0, cash - reserved) * 0.98\n    cap = min(knob(\"notional_usd\"),\n              num(limits.get(\"max_order_usd\"), knob(\"notional_usd\")),\n              num(limits.get(\"max_position_usd\"), knob(\"notional_usd\")))\n    if equity > 0:\n        cap = min(cap, 0.30 * equity)\n    slots = max(0, min(8, int(knob(\"max_open\")) - len(busy)))\n    intents = []\n    for _, ticker, price, hc, hr, capacity in found:\n        if len(intents) >= slots:\n            break\n        allowed = min(cap, free)\n        if capacity is not None:\n            allowed = min(allowed, capacity)\n        qty = int(allowed / price + EPS)\n        if qty < 1 or qty * price < 1.0:\n            continue\n        free -= qty * price\n        intents.append({\n            \"market\": ticker,\n            \"leg\": \"no\",\n            \"side\": \"buy\",\n            \"quantity\": qty,\n            \"type\": \"limit\",\n            \"limit_price\": price,\n            \"post_only\": True,\n            \"reason\": \"Rain-market NO favourite; resting one-cent below the current NO bid to avoid post-only crosses, with resolution within 48 hours and available event capacity.\",\n        })\n    return {\n        \"intents\": intents,\n        \"cancels\": cancels,\n        \"thought\": \"Restricted to rain favourites and applied resolution, capacity, cash, and non-crossing post-only safeguards.\",\n        \"memory\": {},\n    }\n",
+  "code_sha256": "e8c4962b54ea0797d7b1e7fc3300cd5eee43946f9adf789be596f2b110ae31ef",
+  "died": "displaced",
+  "died_at": "2026-09-24T00:12:02.642Z",
+  "family": "weather-favorites",
+  "id": "mullins-14",
+  "needs": {
+   "horizon": "day",
+   "max_hours_to_close": 12,
+   "series": [
+    "KXRAIN",
+    "KXRAINDNYC"
+   ],
+   "style": "rain-favorites-no-safety",
+   "venue": "kalshi",
+   "wake_minutes": 60
+  },
+  "params": {
+   "bid_max": 0.97,
+   "bid_min": 0.9,
+   "max_hours": 12.0,
+   "max_open": 6,
+   "max_spread": 0.03,
+   "min_hours": 1.0,
+   "min_volume_24h": 1000.0,
+   "notional_usd": 10.0,
+   "requote_minutes": 180.0
+  },
+  "specialty": "kalshi-weather",
+  "strategy_rows": 0
+ },
+ "candidate": {
+  "code": "from datetime import datetime, timezone\n\nNEEDS = {\n    \"venue\": \"kalshi\",\n    \"horizon\": \"day\",\n    \"style\": \"rain-favorites-no-safety\",\n    \"series\": [\"KXRAIN\", \"KXRAINDNYC\"],\n    \"max_hours_to_close\": 18,\n    \"wake_minutes\": 60,\n}\nPARAMS = {\n    \"bid_min\": 0.90,\n    \"bid_max\": 0.97,\n    \"max_spread\": 0.03,\n    \"min_hours\": 1.0,\n    \"max_hours\": 18.0,\n    \"min_volume_24h\": 1000.0,\n    \"notional_usd\": 10.0,\n    \"max_open\": 6,\n    \"requote_minutes\": 180.0,\n}\nEPS = 1e-9\n\ndef num(x, default=None):\n    try:\n        y = float(x)\n        if y != y or abs(y) == float(\"inf\"):\n            return default\n        return y\n    except (TypeError, ValueError):\n        return default\n\ndef when(x):\n    try:\n        s = str(x).strip()\n        if s.endswith(\"Z\") or s.endswith(\"z\"):\n            s = s[:-1] + \"+00:00\"\n        d = datetime.fromisoformat(s)\n        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)\n    except (TypeError, ValueError):\n        return None\n\ndef decide(ctx):\n    p = dict(PARAMS)\n    p.update(ctx.get(\"params\") or {})\n    def knob(k):\n        return num(p.get(k), PARAMS[k])\n\n    now = when(ctx.get(\"now\"))\n    positions = [x for x in (ctx.get(\"positions\") or [])\n                 if isinstance(x, dict) and (num(x.get(\"quantity\"), 0.0) or 0.0) > 0]\n    orders = [x for x in (ctx.get(\"open_orders\") or []) if isinstance(x, dict)]\n    busy = {str(x.get(\"market\")) for x in positions}\n    busy.update(str(x.get(\"market\")) for x in orders)\n    cancels = []\n    for o in orders:\n        submitted = when(o.get(\"submitted_at\"))\n        if o.get(\"order_id\") and submitted is not None and now is not None:\n            age = (now - submitted).total_seconds() / 60.0\n            if age > knob(\"requote_minutes\"):\n                cancels.append(str(o[\"order_id\"]))\n\n    risk = ctx.get(\"event_risk\") or {}\n    remaining = risk.get(\"remaining_by_market_usd\") or {}\n    found = []\n    for m in (ctx.get(\"markets\") or []):\n        if not isinstance(m, dict) or not m.get(\"market\"):\n            continue\n        yb = num(m.get(\"yes_bid\"))\n        ya = num(m.get(\"yes_ask\"))\n        hc = num(m.get(\"hours_to_close\"))\n        hr = num(m.get(\"hours_to_resolve\"))\n        vol = num(m.get(\"volume_24h\"), 0.0)\n        if yb is None or ya is None or hc is None or hr is None:\n            continue\n        if not (0.0 < yb < ya < 1.0):\n            continue\n        no_bid = round(1.0 - ya, 4)\n        no_ask = round(1.0 - yb, 4)\n        if no_bid < knob(\"bid_min\") - EPS or no_bid > knob(\"bid_max\") + EPS:\n            continue\n        if no_ask - no_bid > knob(\"max_spread\") + EPS:\n            continue\n        if hc < knob(\"min_hours\") or hc > knob(\"max_hours\"):\n            continue\n        if hr > 48.0 or vol < knob(\"min_volume_24h\"):\n            continue\n        ticker = str(m[\"market\"])\n        if ticker in busy:\n            continue\n        capacity = num(remaining.get(ticker), None)\n        if capacity is not None and capacity < 1.0:\n            continue\n        price = round(no_bid - 0.01, 2)\n        if price < knob(\"bid_min\") or price >= no_ask:\n            continue\n        found.append((-vol, ticker, price, hc, hr, capacity))\n    found.sort()\n\n    limits = ctx.get(\"limits\") or {}\n    equity = num(ctx.get(\"equity\"), 0.0) or 0.0\n    cash = num(ctx.get(\"cash\"), 0.0) or 0.0\n    reserved = sum((num(o.get(\"quantity\"), 0.0) or 0.0) *\n                   (num(o.get(\"limit_price\"), 0.0) or 0.0)\n                   for o in orders if o.get(\"side\") == \"buy\")\n    free = max(0.0, cash - reserved) * 0.98\n    cap = min(knob(\"notional_usd\"),\n              num(limits.get(\"max_order_usd\"), knob(\"notional_usd\")),\n              num(limits.get(\"max_position_usd\"), knob(\"notional_usd\")))\n    if equity > 0:\n        cap = min(cap, 0.30 * equity)\n    slots = max(0, min(8, int(knob(\"max_open\")) - len(busy)))\n    intents = []\n    for _, ticker, price, hc, hr, capacity in found:\n        if len(intents) >= slots:\n            break\n        allowed = min(cap, free)\n        if capacity is not None:\n            allowed = min(allowed, capacity)\n        qty = int(allowed / price + EPS)\n        if qty < 1 or qty * price < 1.0:\n            continue\n        free -= qty * price\n        intents.append({\n            \"market\": ticker,\n            \"leg\": \"no\",\n            \"side\": \"buy\",\n            \"quantity\": qty,\n            \"type\": \"limit\",\n            \"limit_price\": price,\n            \"post_only\": True,\n            \"reason\": \"Rain-market NO favourite; resting one-cent below the current NO bid to avoid post-only crosses, with resolution within 48 hours and available event capacity.\",\n        })\n    return {\n        \"intents\": intents,\n        \"cancels\": cancels,\n        \"thought\": \"Restricted to rain favourites and applied resolution, capacity, cash, and non-crossing post-only safeguards.\",\n        \"memory\": {},\n    }",
+  "needs": {
+   "horizon": "day",
+   "max_hours_to_close": 18,
+   "series": [
+    "KXRAIN",
+    "KXRAINDNYC"
+   ],
+   "style": "rain-favorites-no-safety",
+   "venue": "kalshi",
+   "wake_minutes": 60
+  },
+  "numbers": {
+   "blocks": 45,
+   "code_sha256": "6093367eaebbb399b644f58f8938c3cce25a2b7e122883a98d55926566eaa6a4",
+   "deflated_sharpe": 0.9665637679850184,
+   "family": "weather-favorites",
+   "oos_mean_log_growth": 0.004689042588,
+   "passed": true,
+   "reasons": [],
+   "return_pct": 38.4,
+   "sharpe": 0.6200893818255124,
+   "trades": 113,
+   "trials": 18
+  },
+  "params": {
+   "bid_max": 0.97,
+   "bid_min": 0.9,
+   "max_hours": 18.0,
+   "max_open": 6,
+   "max_spread": 0.03,
+   "min_hours": 1.0,
+   "min_volume_24h": 1000.0,
+   "notional_usd": 10.0,
+   "requote_minutes": 180.0
+  },
+  "passed": true,
+  "purpose": "Widen the hours-to-close window from 12h to 18h (NEEDS.max_hours_to_close 12->18 AND PARAMS.max_hours 12->18). Lab evidence (free lab_submit, no trial) showed this is the only meaningful improvement among my timing variants: the 18h window beats the current 12h config on out-of-sample log growth in every fold (mean 0.00807 vs 0.00718) with roughly half the max drawdown (2.1% vs 4.4%), while widening further to 24h adds no value (0.00688, equal to 12h). This directly tests my specialty's core \"which hours before close a rain-favourite NO is safest\" question, and the answer found is that the saf"
+ }
+}
