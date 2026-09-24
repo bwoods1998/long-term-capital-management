@@ -671,6 +671,24 @@ recorded for the next open; live verification uses the markets that trade around
   - proven-family births may take replay-pending seats (bounded at the owed births);
   - at most one overdue warning a desk an hour;
   - `enroll` ignores desk caps (pre-existing).
+- 18:29Z — **R5's review** (`r5/review`, 6 defects fixed, each with a test that fails on the builder's head; league
+  suite 3,109 OK):
+  - a hold's "since" counted blocks in progress at the demotion (haghani-56's hold ended at 14:02:40Z on six blocks
+    that began before it; counted rightly it ends at 15:03:44Z);
+  - a hold could end on part of a pass's batch of blocks (3 of 12 demotions on the snapshot);
+  - a silent Alpaca cancel stopped the whole allocator pass and raised an error alert (a rollback risk in a watch);
+  - a failed ledger read left the gate open on old data;
+  - the board's unguarded forward read;
+  - a waiting probe lent more while the gate was unreadable.
+
+  Checked and sound: the losing line equals `House.family_forward` with `families.losing`; proven families' bunts
+  are never gated; no forced sale anywhere (a Kalshi probe goes back at once with its contracts held to settlement,
+  an Alpaca or options probe waits until flat); demotions run before promotions; the site checkpoint carries none of
+  the new fields. Owner call recorded, not changed: the gate goes by family LABEL, so at 15:06Z 48 of 97 practice
+  agents sat on losing families, 26 of them born with code unlike their parent's. The lasting fix is a family keyed
+  by mechanism (the attribution defect #276's follow-up stops for new births).
+- 18:30Z — `d/deploy` = main + #276 + `r2/review` + 7b69e2c + #278 + #279 + #280 + `r5/review` (bf80ec8): 546 tests of the
+  touched modules OK in 30 s on the tmpfs, `league.ci` passes; CI running.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
