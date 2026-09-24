@@ -4575,40 +4575,52 @@ class House:
         return 'openai' if profile == 'openai_luna' else 'sail'
 
     def research_due(self, agent: Agent) -> bool:
+        """Is a research pass due for this agent now: every check below must pass.
+
+        The campaign's budget (`pacer.may_spend`) is asked after the checks that read and write nothing
+        (Sept 24, 2026, R6-perf): it cost 17.7 ms a call on a copy of the 17:27Z snapshot (a scan of
+        campaigns.sqlite's 50,360 commitments and two sums over them), and this was asked of every
+        living agent on every tick, about 2 s of a tick's CPU there, though most agents are not due for
+        their own reasons (a pass in hand, its interval not over). The answer is the same conjunction of
+        the same checks. The Sail research cap and the gate, which write (an `ops.budget` row when the
+        cap opens or closes, `research.gate` rows), are still asked only after the budget, as before."""
         if self._closing.is_set() or not agent.alive or self.researcher is None or not self.settings.research:
             return False
         if self.paused():
             return False
         kind = self._research_budget_kind(agent)
-        if not self.pacer.may_spend(kind):
-            return False
         if self.deploying():
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
         if pending:
+            if self.clock() < pending["available"]:
+                return False
+            if not self.pacer.may_spend(kind):
+                return False
             # A job still `queued` has bought nothing yet: the tick enqueues every due agent at once and
             # the research lane's workers take them in turn (up to 34 waited at once, Sept 24 00Z), so it
             # waits for the Sail cap like a new session; one under way resumes (review of #236).
-            if pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped():
-                return False
-            return self.clock() >= pending["available"]
-        if kind == "sail" and self._sail_research_capped():
-            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
+            return not (pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped())
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
         last = max(float(self._state["last_research"].get(agent.id) or 0), self.research_jobs.last_finished(agent.id))
         # A new execution failure is actionable evidence. Give it one prompt response,
-        # retaining the provider budget, earned-credit and durable-job checks above.
+        # retaining the provider budget, earned-credit and durable-job checks.
         refusal = self.ledger.last('book.refused', agent=agent.id)
         book = self.book_of(agent)
-        if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
-                and _epoch(refusal.at) > last and self.clock() - last >= 60):
-            return True
-        interval = self.research_interval_hours(agent) * 3600
-        if self.clock() - last < interval:
+        prompt = (refusal is not None and book is not None and refusal.payload.get('book') == book.name
+                  and _epoch(refusal.at) > last and self.clock() - last >= 60)
+        interval = 0.0
+        if not prompt:
+            interval = self.research_interval_hours(agent) * 3600
+            if self.clock() - last < interval:
+                return False
+        if not self.pacer.may_spend(kind):
             return False
-        return self._gate(agent, last, interval)
+        if kind == "sail" and self._sail_research_capped():
+            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
+        return True if prompt else self._gate(agent, last, interval)
 
     def _gate(self, agent: Agent, last: float, interval: float) -> bool:
         """Back off research that keeps coming back empty while nothing about the agent has changed.
