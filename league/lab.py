@@ -2128,8 +2128,8 @@ class Lab:
         again before its birth (`_hold`): a losing forward window, a desk idle for `idle_desk_hours`, or
         a parameter change of a program the desk already runs without a forward score above the desk's
         living median. A held candidate is not tried and not refused: it graduates when the reason goes
-        (its window wins, the desk trades again, a feed it asked for arrives). What was held, and why, is
-        `held` in `stats` and health.json."""
+        (its window wins, the desk trades again, a feed it asked for arrives); a passer held before its birth
+        is in its own state, `held`. What was held, and why, is `held` in `stats` and health.json."""
         settings = self.settings
         out = []
         scores = self.forward_scores()
@@ -2144,10 +2144,12 @@ class Lab:
             return reason
 
         # A passer that found its desk or the league full is asked again at most every ten minutes: each
-        # try ranks every living agent under the House's lifecycle lock (Deploy 3 review). So is one held.
+        # try ranks every living agent under the House's lifecycle lock (Deploy 3 review). So is one held:
+        # its own state, `held`, which the House's seat market does not read as a waiter (`graduations`
+        # 'passed' is what `House._waiting_graduates` and the scoreboard count), so it reserves no seat.
         for row in self._q("SELECT g.candidate, g.lineage, c.code_sha256 FROM graduations g JOIN candidates c ON c.id = g.candidate"
-                           " WHERE g.state='passed' AND ((g.detail NOT LIKE '%earned their seats%' AND g.detail NOT LIKE 'held:%')"
-                           " OR g.at < ?) ORDER BY g.at", (self._now() - 600,)):
+                           " WHERE (g.state='passed' AND (g.detail NOT LIKE '%earned their seats%' OR g.at < ?))"
+                           " OR (g.state='held' AND g.at < ?) ORDER BY g.at", (self._now() - 600, self._now() - 600)):
             # A birth a crash interrupted is finished whatever the cap: its agent already exists.
             resumed = self._born_already(row["lineage"], row["code_sha256"])
             if self.births_last_hour() >= int(settings["max_births_per_hour"]) and resumed is None:
@@ -2157,8 +2159,7 @@ class Lab:
                 reason = hold(candidate)
                 if reason:
                     grad = self._q("SELECT line, family FROM graduations WHERE candidate=?", (row["candidate"],))[0]
-                    out.append(self._record(candidate, "held", f"held: {reason}", line=grad["line"], family=grad["family"],
-                                            table_state="passed"))
+                    out.append(self._record(candidate, "held", f"held: {reason}", line=grad["line"], family=grad["family"]))
                     continue
             out.append(self._birth(row["candidate"]))
         budget = int(settings["max_graduations_per_step"])
@@ -2805,10 +2806,12 @@ class Lab:
         seat market reads waited behind the archive's never-scored elites."""
         ids = list(residents if residents is not None else self._residents())[:400]
         marks = ",".join("?" for _ in ids)
-        rows = self._q("SELECT c.*, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations WHERE state='passed') AS waiting,"
-                       f" c.id IN ({marks}) AS resident FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
+        # A graduate held before its birth (E1, Sept 24, 2026: `held`) is scored as a waiting one is: a forward
+        # window is what releases it.
+        rows = self._q("SELECT c.*, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations WHERE state IN ('passed', 'held'))"
+                       f" AS waiting, c.id IN ({marks}) AS resident FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
                        " WHERE (c.status='evaluated' AND c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
-                       f" WHERE state='passed')) OR (c.status IN ('queued', 'evaluated', 'failed') AND c.id IN ({marks}))"
+                       f" WHERE state IN ('passed', 'held'))) OR (c.status IN ('queued', 'evaluated', 'failed') AND c.id IN ({marks}))"
                        " GROUP BY c.id ORDER BY (scored IS NULL) DESC, (scored IS NULL AND waiting) DESC, (scored IS NULL AND resident) DESC,"
                        " scored, c.evaluated LIMIT ?", (*ids, *ids, int(limit)))
         return [r for r in rows if self._desk(r["niche"]) is not None]

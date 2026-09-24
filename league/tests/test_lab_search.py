@@ -242,10 +242,18 @@ class Holds(ForwardCase):
         out = self.lab.graduate()
         self.assertEqual(out[0]["state"], "held")
         row = self.lab._q("SELECT state, detail FROM graduations WHERE candidate=?", (nudge,))[0]
-        self.assertEqual(row["state"], "passed")
+        self.assertEqual(row["state"], "held")  # not 'passed', what the House's seat market counts as a waiter
         self.assertTrue(row["detail"].startswith("held: forward"), row["detail"])
-        self.assertEqual(self.lab.waiting(), [])  # it reserves no seat
+        self.assertEqual(self.lab.waiting(), [])
+        self.assertEqual(self.house._waiting_graduates(), [])  # it reserves no seat
         self.assertEqual(self.house.ledger.get(f"lab.graduate:{nudge}:held").payload["state"], "held")
+        self.assertIn(nudge, [r["id"] for r in self.lab.forward_due(48)])  # a forward window is what releases it
+        self.assertEqual(self.lab.graduate(), [])  # asked again after ten minutes
+        self.clock.advance(601)
+        self.forward_row(nudge, 0.003)
+        with patch.object(self.house, "_weakest", return_value=None):
+            self.assertEqual(self.lab.graduate()[0]["state"], "waiting_seat")  # released: a waiter again
+        self.assertEqual([w["candidate"] for w in self.house._waiting_graduates()], [nudge])
 
 
 class Search(ForwardCase):

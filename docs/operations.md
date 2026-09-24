@@ -386,10 +386,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     - `calls`: each Luna and Sol call's cost, programs written and programs refused;
     - `graduations`: each graduate's latest state (`refused`, `holdout_rationed`, `replay_failed`,
       `replay_unavailable`, `holdout_failed`, `passed`, `waiting_probe`, `waiting_seat`,
-      `refused_at_birth`, `born`), its line, family and agent. Since Sept 24, 2026 (E1) a passer
-      held before its birth stays `passed` with a `detail` that starts `held:` and the reason (it
-      is asked again every ten minutes and reserves no seat); an elite held before the House's
-      replay has no row at all (it was not tried);
+      `refused_at_birth`, `born`), its line, family and agent. Since Sept 24, 2026 (E1) also `held`:
+      a passer held before its birth, its `detail` starting `held:` with the reason; it is asked
+      again every ten minutes, scored in the forward windows as a waiting graduate is, and, not
+      being `passed`, reserves no seat in the House's seat market nor counts as a waiter on the
+      scoreboard. A program held before the House's replay has no row at all (it was not tried);
     - `forward` (S2, Sept 23, 2026): one row per candidate and forward-window run: `window_start`
       and `window_end` (epochs; the window starts at the hour after the program's code was frozen,
       so no search, replay or holdout saw a step of it), `blocks`, `active_blocks`, `log_growth`,
