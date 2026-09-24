@@ -159,6 +159,17 @@ The first positive floor since the grant, and all of it from two sports agents.
    `kalshi-open` desk's one member has not woken for 146 minutes; `kalshi-sports` offered markets
    on 32 wakes in the last hour with no intent while its two real agents earned the day's profit.
 
+**The 20-minute watch (14:28-14:48Z, five readings).** No real fill and no band move after
+haghani-63's Alpaca probe at 14:25Z; practice: 7 Alpaca fills (+$2.52) and 4 Kalshi; the stock desks
+in the last half hour: 3 equity and 3 option intents, 5 practice fills, no refusal; ticks 80-197 s.
+Warnings each reading: 78 newcomers waiting over an hour, graduates at 6 hours, `kalshi-sports`
+offered on 32 wakes with no intent, `kalshi-attention` with no wake for 30 minutes, 3 of 24 earnings
+polls failing. **A new defect at 14:38Z:** `alpaca-paper` read "cash differs by −0.0322" and froze
+(a practice entry was refused "the alpaca-paper book is frozen until it reconciles" at 14:48Z);
+a 3-cent difference under the $1 warning line still freezes every Alpaca practice entry until the
+book adopts the venue on its third failed reading. R6 takes it: a practice book's sub-dollar cash
+difference should be booked as dust or absorbed at once, never freeze the book.
+
 **Compute at the resume:** OpenAI $463 of $607 spent ($143.83 left in the House line, $3.71 settled in
 the last hour; tier "all"); Sail $162.33 (research capped at $2 an hour); Jev unchanged.
 
