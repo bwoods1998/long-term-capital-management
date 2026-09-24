@@ -381,6 +381,144 @@ class WhatIsRecorded(RecorderCase):
         self.assertIn("KNYC", answer)
 
 
+# ---------------------------------------------------------------------------------- earnings
+class Edgar:
+    """An EDGAR whose company browse feed lists synthetic 8-Ks newest first, paged by start and count
+    as the real one is (ltcm/tests/fixtures/feeds/edgar_8k_aapl.atom is its shape)."""
+
+    def __init__(self, filings: dict):
+        self.filings = filings  # ticker -> [(acceptance ISO with offset, items, form)], any order
+        self.asked: list = []
+
+    def feed(self, method, url, body):
+        q = query(url)
+        ticker, start, count = q["CIK"], int(q["start"]), int(q["count"])
+        self.asked.append((ticker, start, count))
+        if ticker not in self.filings:
+            return (200, {"content-type": "text/html"}, b"<!DOCTYPE HTML><html><head><title>Company Information: </title></head></html>")
+        rows = sorted(self.filings[ticker], key=lambda r: datetime.fromisoformat(r[0]).timestamp(), reverse=True)[start:start + count]
+        entries = "".join(
+            f"<entry><content type=\"text/xml\"><accession-number>0000000001-26-{i + start:06d}</accession-number>"
+            f"<filing-date>{accepted[:10]}</filing-date><filing-href>https://www.sec.gov/Archives/edgar/data/1/{i}/x-index.htm</filing-href>"
+            f"<filing-type>{form}</filing-type><items-desc>{items}</items-desc></content><updated>{accepted}</updated></entry>"
+            for i, (accepted, items, form) in enumerate(rows))
+        body = (f"<?xml version=\"1.0\" ?><feed xmlns=\"http://www.w3.org/2005/Atom\"><company-info><cik>0000320193</cik>"
+                f"<conformed-name>{ticker} Inc.</conformed-name></company-info>{entries}<updated>2026-09-24T00:00:00-04:00</updated></feed>")
+        return (200, {"content-type": "application/atom+xml"}, body.encode())
+
+    def transport(self) -> FakeTransport:
+        from ltcm.data.edgar import BROWSE_URL
+
+        return FakeTransport({BROWSE_URL + "?*": self.feed})
+
+
+def quarters(first: str, count: int, *, hour: str = "16:30:28-04:00") -> list:
+    """`count` earnings 8-Ks a quarter apart from `first`, with a director change between each."""
+    day = date.fromisoformat(first)
+    out = []
+    for i in range(count):
+        at = day + timedelta(days=91 * i)
+        out.append((f"{at.isoformat()}T{hour}", "items 2.02 and 9.01", "8-K"))
+        out.append((f"{(at + timedelta(days=20)).isoformat()}T17:05:00-04:00", "item 5.02", "8-K"))
+    return out
+
+
+class Earnings(RecorderCase):
+    def setUp(self):
+        super().setUp()
+        self.clock.set("2026-09-24T03:30:00Z")
+
+    def test_each_announcement_is_stamped_at_its_acceptance_and_backfilled_two_years(self):
+        edgar = Edgar({"AAPL": quarters("2024-01-30", 11)})
+        store = self.recorder({"earnings": ["AAPL"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        out = store.run()
+        self.assertEqual(out["failed"], [])
+        stamps = self.stamps(store, "earnings", "AAPL")
+        expected = [epoch(f"{(date(2024, 1, 30) + timedelta(days=91 * i)).isoformat()}T20:30:28Z") for i in range(11)]
+        target = self.clock() - 740 * 86400
+        self.assertEqual(stamps, [at for at in expected if at >= target])  # 2.02 only, each at its acceptance time
+        row = store.latest({"earnings": ["AAPL"]}, self.clock())["earnings"]["AAPL"]
+        self.assertEqual((row["t"], row["accepted"], row["items"], row["form"]), (feeds.stamp(expected[-1]), "2026-07-28T20:30:28Z",
+                                                                                   ["2.02", "9.01"], "8-K"))
+        self.assertEqual(row["previous"], [feeds.stamp(at) for at in expected[-5:-1]][::-1])  # the four before it, newest first
+        # Never before its acceptance, live or in a replay.
+        before = store.latest({"earnings": ["AAPL"]}, expected[-1] - 0.001)["earnings"]["AAPL"]
+        self.assertEqual(before["t"], feeds.stamp(expected[-2]))
+        tape = store.series({"earnings": ["AAPL"]}, expected[-3] + 1, expected[-1] - 1, 3600)["earnings"]["AAPL"]
+        self.assertEqual([r["t"] for r in tape], [feeds.stamp(expected[-3]), feeds.stamp(expected[-2])])
+        # The searched span counts as covered: an Alpaca daily window has its 20 day-blocks at once.
+        window = store.coverage({"earnings": ["AAPL"]}, self.clock() - 126 * 86400, self.clock())["earnings"]["AAPL"]
+        self.assertEqual(window["covered_seconds"], 126 * 86400.0)
+        self.assertTrue(window["backfill"]["complete"])
+
+    def test_a_live_pass_reads_back_only_a_day_before_its_last_poll_and_adds_a_new_filing(self):
+        filings = quarters("2025-10-30", 4)
+        edgar = Edgar({"AAPL": filings})
+        store = self.recorder({"earnings": ["AAPL"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        store.run()
+        asked = len(edgar.asked)
+        self.clock.advance(600)
+        self.assertTrue(store.due())
+        store.run()
+        self.assertEqual(edgar.asked[asked:], [("AAPL", 0, 40)])  # one page: a day before the last poll is on it
+        self.clock.advance(600)  # 03:50Z
+        filings.append(("2026-09-23T23:46:00-04:00", "items 2.02 and 9.01", "8-K"))  # accepted four minutes ago
+        filings.append(("2026-09-23T23:59:00-04:00", "items 2.02 and 9.01", "8-K"))  # "accepted" after now: never stored
+        store.run()
+        row = store.latest({"earnings": ["AAPL"]}, self.clock())["earnings"]["AAPL"]
+        self.assertEqual(row["t"], "2026-09-24T03:46:00.000Z")
+        self.assertEqual(self.stamps(store, "earnings", "AAPL")[-1], epoch("2026-09-24T03:46:00Z"))
+        self.assertEqual(store.latest({"earnings": ["AAPL"]}, epoch("2026-09-24T03:45:59Z"))["earnings"]["AAPL"]["accepted"],
+                         "2026-07-30T20:30:28Z")
+
+    def test_a_ticker_edgar_does_not_know_is_not_listed_and_a_filer_without_8ks_has_no_rows(self):
+        edgar = Edgar({"VALE": []})  # a foreign issuer files 6-Ks; this EDGAR knows no HOOD at all
+        store = self.recorder({"earnings": ["HOOD", "VALE"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        out = store.run()
+        self.assertEqual([(k, feeds.NOT_LISTED in e) for _, k, e in out["failed"]], [("HOOD", True)])
+        self.assertFalse(store.coverage({"earnings": ["HOOD"]})["earnings"]["HOOD"]["backfill"]["pending"])  # unavailable, not waiting
+        self.assertEqual(store.latest({"earnings": ["HOOD", "VALE"]}, self.clock()), {})
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 0)
+
+    def test_a_listing_too_long_to_read_fails_rather_than_claim_the_span(self):
+        edgar = Edgar({"JPM": [(f"2026-09-{1 + i // 20:02d}T{10 + i % 12:02d}:00:00-04:00", "item 8.01", "8-K") for i in range(400)]})
+        store = self.recorder({"earnings": ["JPM"]}, transports={"earnings": edgar.transport()}, backfill_pages=10)
+        out = store.run()
+        self.assertTrue(out["failed"] and "was not read to its end" in out["failed"][0][2], out["failed"])
+        entry = store.coverage({"earnings": ["JPM"]}, self.clock() - 86400 * 30, self.clock())["earnings"]["JPM"]
+        self.assertEqual(entry["covered_seconds"], 0.0)
+
+    def test_the_next_date_is_recorded_at_receipt_and_a_page_without_one_is_not_a_failure(self):
+        from ltcm.data.nasdaq import HOST
+        from ltcm.tests.test_data_nasdaq import recorded
+
+        pages = {"AAPL": recorded(), "HOOD": {"data": {"announcement": "", "reportText": "No earnings data is available."}}}
+        transport = FakeTransport({f"{HOST}/api/analyst/*": lambda m, url, b: pages[url.split("/")[-2]]})
+        store = self.recorder({"earnings_date": ["AAPL", "HOOD"]}, transports={"earnings_date": transport})
+        out = store.run()
+        self.assertEqual([(k, feeds.NOT_LISTED in e) for _, k, e in out["failed"]], [("HOOD", True)])
+        row = store.latest({"earnings_date": ["AAPL", "HOOD"]}, self.clock())["earnings_date"]
+        self.assertEqual(sorted(row), ["AAPL"])
+        self.assertEqual((row["AAPL"]["t"], row["AAPL"]["date"], row["AAPL"]["estimated"]), ("2026-09-24T03:30:00.000Z", "2026-10-29", True))
+        self.assertEqual(store.latest({"earnings_date": ["AAPL"]}, self.clock() - 0.001), {})
+        self.assertEqual(store.health()["earnings_date"]["failing"], ["HOOD"])  # said, but scheduled like a success
+        self.clock.advance(6 * 3600)
+        store.run()
+        self.assertEqual(store.coverage({"earnings_date": ["AAPL"]})["earnings_date"]["AAPL"]["snapshots"], 1)  # unchanged: once
+
+    def test_needs_and_requests_for_earnings(self):
+        self.assertEqual(requested({"earnings": ["aapl", "SPY", "BTC/USD", "VALE"], "earnings_date": ["HOOD", "XYZ"]}),
+                         {"earnings": ["AAPL", "VALE"], "earnings_date": ["HOOD"]})
+        self.assertEqual({name: request_feed(name) for name in (
+            "point_in_time_earnings_calendar", "megacap_earnings_calendar", "point_in_time_earnings_surprise_panel",
+            "point_in_time_earnings_calendar_and_surp", "forward_earnings_event_feed", "earnings_announcement_times_history",
+            "point_in_time_earnings_dates_for_the_16_")},
+            {"point_in_time_earnings_calendar": "earnings_date", "megacap_earnings_calendar": "earnings_date",
+             "point_in_time_earnings_surprise_panel": None, "point_in_time_earnings_calendar_and_surp": None,
+             "forward_earnings_event_feed": "earnings_date", "earnings_announcement_times_history": "earnings",
+             "point_in_time_earnings_dates_for_the_16_": "earnings_date"})
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime

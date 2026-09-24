@@ -2180,13 +2180,205 @@ class ForecastHistory(Source):
             and not words & {"observation", "observations", "observed", "actual", "actuals"}
 
 
+#: The desks whose stocks report earnings (the brief's two), and the desk whose symbols are funds.
+EARNINGS_DESKS = ("alpaca-megacaps", "alpaca-options")
+FUND_DESKS = ("alpaca-index-etfs",)
+
+
+def earnings_tickers(niches: Mapping[str, Any]) -> list[str]:
+    """The stocks the megacap and options desks trade, funds (SPY, QQQ, IWM) left out: a fund files
+    no earnings."""
+    funds = {str(s).upper() for desk in FUND_DESKS if desk in niches for s in getattr(niches[desk], "universe", ())}
+    out: list[str] = []
+    for desk in EARNINGS_DESKS:
+        niche = niches.get(desk)
+        if niche is None or getattr(niche, "dormant", False):
+            continue
+        for symbol in getattr(niche, "universe", ()):
+            symbol = str(symbol).upper()
+            if symbol not in funds and "/" not in symbol and symbol not in out:
+                out.append(symbol)
+    return out
+
+
+@lru_cache(maxsize=1)
+def known_tickers() -> frozenset[str]:
+    """Every stock a strategy may ask the earnings feeds for: those of the desks listed in niches.json."""
+    from . import niches as niches_module
+
+    return frozenset(earnings_tickers(niches_module.load()))
+
+
+def _ticker_key(raw: Any) -> str | None:
+    text = str(raw or "").strip().upper()
+    return text if text in known_tickers() else None
+
+
+_CALENDAR_WORDS = frozenset(("calendar", "calendars", "date", "dates", "upcoming", "forward", "next", "schedule", "scheduled",
+                             "event", "events"))
+
+
+def _earnings_words(words: set[str]) -> bool:
+    """An earnings request the House can answer: times and dates, not the surprise (estimates
+    against actuals), which it does not hold."""
+    return "earnings" in words and not any(word.startswith("surp") for word in words) and not words & {"estimate", "estimates",
+                                                                                                         "actuals", "panel"}
+
+
+class EarningsHistory(Source):
+    """Each earnings announcement of the stocks the equity desks trade, as EDGAR accepted it: the 8-K
+    reporting Item 2.02 (results of operations), stamped at its acceptance time -- the source's own
+    final timestamp, so the history is backfilled honestly. Full-text search (efts) answers a date
+    only; the company browse feed on www.sec.gov carries the acceptance time (Sept 24, 2026)."""
+
+    name = "earnings"
+    host = "www.sec.gov"
+    source = "sec: www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=<ticker>&type=8-K&output=atom (each 8-K's items and acceptance time)"
+    cadence = "every 10 minutes a stock (its newest 8-Ks); backfilled two years"
+    what = ("per stock the alpaca-megacaps and alpaca-options desks trade, each earnings announcement the company filed -- the 8-K "
+            "reporting Item 2.02, results of operations -- as {form, accession, filed, accepted, items, url, previous}: previous "
+            "is the acceptance times of the four announcements before it, newest first")
+    point_in_time = ("each row is stamped with EDGAR's acceptance time, the moment the filing became public, and shown only from "
+                     "then on, live and in replay; the history is backfilled from EDGAR's listing and stamped the same way, never "
+                     "with when it was fetched. The 8-K follows the company's press release by minutes, so a row can trail the news, "
+                     "never lead it")
+    history = True
+    sparse = True
+    every = 600.0
+    gap = 3600.0
+    lookback_days = 370
+    backfill_days = 370
+    max_keys = 32
+    timeout = 30.0
+    example = "AAPL"
+    note = ("A stock with no row has had no announcement in the searched span, or files its results another way (a foreign "
+            "issuer's 6-K is not recorded); the next date is the earnings_date feed.")
+    #: Filings read a page, and pages a pass at most (320 8-Ks is years of any stock here).
+    LISTING = 40
+    MAX_LISTING_PAGES = 8
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return earnings_tickers(recorder.niches())
+
+    def key_of(self, raw: Any) -> str | None:
+        return _ticker_key(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data import CONTACT_USER_AGENT, HttpTransport
+        from ltcm.data.edgar import MIN_INTERVAL, Edgar
+
+        return Edgar(transport or HttpTransport(user_agent=CONTACT_USER_AGENT, min_interval=MIN_INTERVAL), timeout=self.timeout)
+
+    def endpoint(self, key: str) -> str:
+        return f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={key}&type=8-K&output=atom"
+
+    def page(self, fetcher: Any, key: str, *, before: float | None, floor: float, now: float, recorder: "FeedRecorder") -> dict[str, Any]:
+        """The 2.02 filings accepted in [floor, now] (and before `before`), from the listing read
+        newest first until a filing older than the floor: a live pass reads back to a day before its
+        last good poll (EDGAR shows a filing moments after its acceptance), the backfill to its
+        target. A listing longer than `MAX_LISTING_PAGES` fails the page -- it never claims a span it
+        did not read -- and a ticker EDGAR does not know is `NOT_LISTED`."""
+        from ltcm.data import DataError
+
+        if before is None:
+            last = (recorder._load_stats().get((self.name, key)) or {}).get("last_good")
+            if last is not None:
+                floor = max(float(floor), float(last) - 86400.0)
+        rows: list[tuple[float, dict[str, Any]]] = []
+        for number in range(self.MAX_LISTING_PAGES):
+            try:
+                answer = fetcher.filings(key, form="8-K", start=number * self.LISTING, count=self.LISTING)
+            except DataError as exc:
+                if "no company feed" in str(exc):
+                    raise DataError(f"{NOT_LISTED} EDGAR knows no filer {key}") from exc
+                raise
+            for entry in answer["entries"]:
+                at = _epoch(entry["accepted"])
+                if at < floor:
+                    return {"rows": rows, "reached": True, "exhausted": False}
+                if at > now or (before is not None and at >= before):
+                    continue
+                if "2.02" in entry["items"] and str(entry.get("form") or "").startswith("8-K"):
+                    rows.append((at, {"ticker": key, "cik": answer["cik"], "company": answer["company"], "form": entry["form"],
+                                      "accession": entry["accession"], "filed": entry["filed"], "accepted": entry["accepted"],
+                                      "items": entry["items"], "url": entry["url"]}))
+            if len(answer["entries"]) < self.LISTING:
+                return {"rows": rows, "reached": False, "exhausted": True}  # the listing ends: the filer's whole history read
+        raise DataError(f"sec filings {key}: more than {self.MAX_LISTING_PAGES * self.LISTING} 8-Ks since {stamp(floor)}; "
+                        "the span was not read to its end")
+
+    def derive(self, rows: Sequence[tuple[float, Mapping[str, Any]]], since: float | None) -> list[tuple[float, dict[str, Any]]]:
+        """Each announcement with `previous`: the acceptance times of the four before it, newest first."""
+        out = []
+        for index, (at, payload) in enumerate(rows):
+            earlier = [stamp(prior) for prior, _ in rows[max(0, index - 4):index]]
+            out.append((at, {**payload, "previous": earlier[::-1]}))
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        # Not "time": every point_in_time_* request has it. A calendar is the next date (earnings_date).
+        return _earnings_words(words) and not words & _CALENDAR_WORDS and bool(
+            words & {"announcement", "announcements", "8k", "filing", "filings", "history", "historical", "edgar", "sec",
+                     "released", "release", "acceptance", "accepted"})
+
+
+class EarningsDate(Source):
+    """The next earnings date of each stock the equity desks trade, as Nasdaq shows it now (the
+    company's own date, or Zacks' estimate from its past dates). Nasdaq publishes no time a date
+    first appeared, so a row is stamped when the House read it, and never backfilled."""
+
+    name = "earnings_date"
+    host = "api.nasdaq.com"
+    source = "nasdaq: api.nasdaq.com/api/analyst/<SYMBOL>/earnings-date (the next announcement date, per stock)"
+    cadence = "every six hours a stock"
+    what = ("per stock the alpaca-megacaps and alpaca-options desks trade, the next earnings announcement Nasdaq shows: {date, "
+            "estimated (Zacks' estimate from past reporting dates, not the company's own), time (after_close, before_open or "
+            "None), eps_forecast, analysts, last_year_eps, announcement}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay; Nasdaq "
+                     "publishes no time a date first appeared, so nothing is backfilled and a changed date is a new row")
+    every = 6 * 3600.0
+    gap = 18 * 3600.0
+    max_keys = 32
+    timeout = 20.0
+    example = "AAPL"
+    note = "A date Nasdaq estimates can move; the row that moved it is stamped when the House first saw it."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return earnings_tickers(recorder.niches())
+
+    def key_of(self, raw: Any) -> str | None:
+        return _ticker_key(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.nasdaq import Nasdaq
+
+        return Nasdaq(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data import DataError
+
+        out: dict[str, Any] = {}
+        for key in keys:
+            try:
+                out[key] = fetcher.earnings_date(key)
+            except DataError as exc:
+                # A page that names no date says the stock has none scheduled there: not a failure.
+                out[key] = DataError(f"{NOT_LISTED} {exc}") if "names no date" in str(exc) else exc
+            except Exception as exc:  # noqa: BLE001 - a stock whose page fails is a failed poll of that stock
+                out[key] = exc
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        return _earnings_words(words) and bool(words & _CALENDAR_WORDS)
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
 
 #: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
-RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory())
+RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():
