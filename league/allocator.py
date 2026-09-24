@@ -282,13 +282,22 @@ def _log1p(r: float) -> float:
     return max(stats.RUIN, math.log1p(r)) if math.isfinite(r) else 0.0
 
 
-def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidence: float) -> dict[str, Any]:
+def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidence: float, *,
+          win_rate: float | None = None, risk: float = 1.0) -> dict[str, Any]:
     """One observation per group (an event, or a trade where nothing groups them): the weighted mean
     of its members' values at the largest of their weights -- correlated bets are never counted as
     independent. Then the weighted mean m, the reliability-weighted sd s, n_eff = (sum w)^2 / sum w^2
     and the one-sided lower bound m - t(confidence, n_eff - 1) * s / sqrt(n_eff) on Student's t (the
     coordinator's precision, Sept 24, 2026; no bound under two effective observations). `positive`
-    when there are `min_n` observations and the bound is above zero."""
+    when there are `min_n` observations and the bound is above zero.
+
+    With `win_rate` (the ladder's `lopsided_win_rate`), a LOPSIDED record -- that share or more of its
+    observations winning: favourites, many small wins and a rare whole loss -- must also clear the
+    House's exact loss-rate gate at the same confidence (`stats.lopsided_growth_lcb`, the rule
+    `Evaluator._judge_family` and `judge` apply beside their t bounds): until a loss is on the record
+    a t bound is badly anti-conservative (`stats`' own note). Review of #224, Sept 24, 2026: an
+    edgeless 93c favourites family passes the t bound alone at its 10th observation about half the
+    time, and crypto-15m-favorites was proven on 10 small wins on Sept 20 before its 11th lost."""
     observations = []
     for units in groups.values():
         if units:
@@ -305,7 +314,13 @@ def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidenc
     if n_eff >= 2:
         sd = math.sqrt(math.fsum(w * (v - mean) ** 2 for v, w in observations) / (weight - squares / weight))
         out.update(sd=sd, bound=mean - stats.t_quantile(confidence, n_eff - 1) * sd / math.sqrt(n_eff))
-    out["positive"] = bool(out["n"] >= min_n and out["bound"] is not None and out["bound"] > 0)
+    gate = None
+    if win_rate is not None:
+        returns = [math.expm1(v) for v, _ in observations]
+        lopsided = stats.lopsided(returns, win_rate)
+        gate = stats.lopsided_growth_lcb(returns, risk, 1.0 - confidence) if lopsided else None
+        out.update(lopsided=lopsided, loss_gate=gate)
+    out["positive"] = bool(out["n"] >= min_n and out["bound"] is not None and out["bound"] > 0 and (gate is None or gate > 0))
     return out
 
 
@@ -369,6 +384,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
         members = sorted(a.id for a in list(registry.agents.values()) if a.family == family and a.venue == venue)
     units: dict[str, list[tuple[float, float, str, str]]] = {}
     real_keys: set[str] = set()
+    risked: list[float] = []  # each entry's cash over what had been lent then, as `trade_returns` reads its risk
     for member in members:
         rows = tape.rows.get(member) or []
         cutoffs = tape.cutoffs.get(member) or {}
@@ -376,6 +392,14 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
             stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
             if staked_base(stakes, through) <= 0:
                 continue  # never lent anything on this book: no record there
+            for r in rows:
+                p = r.payload
+                if (r.kind == "book.fill" and p.get("book") == book and p.get("side") == "buy" and p.get("source") in ("venue", "cross")
+                        and cutoffs.get(book, 0) < r.seq <= through):
+                    lent = staked_base(stakes, r.seq)
+                    if lent > 0:
+                        with contextlib.suppress(KeyError, TypeError, ValueError):
+                            risked.append(-float(p["cash_delta"]) / lent)
             closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book,
                                           since_seq=cutoffs.get(book, 0), until_seq=through)
             by_event = per_event(book)
@@ -398,10 +422,13 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 if book == REAL_BOOK[venue]:
                     real_keys.add(key)
     minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
+    win_rate = float(CONSTITUTION["ladder"]["lopsided_win_rate"])
+    risk = math.fsum(risked) / len(risked) if risked else 1.0  # with no entry seen, all of it was at risk
 
     def side(liquidity: str | None) -> dict[str, Any]:
         chosen = {k: [u for u in group if liquidity is None or (u[2] == "taker") == (liquidity == "taker")] for k, group in units.items()}
-        pooled = _pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()}, minimum, confidence)
+        pooled = _pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()}, minimum, confidence,
+                       win_rate=win_rate, risk=risk)
         pooled["members"] = len({u[3] for group in chosen.values() for u in group})
         return pooled
 
@@ -410,6 +437,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
             "members_counted": whole.pop("members"), "n": whole["n"], "n_eff": whole["n_eff"], "mean_log": whole["mean_log"],
             "sd": whole["sd"], "bound": whole["bound"], "proven": whole["positive"],
             "state": "proven" if whole["positive"] else "unproven", "real_n": len(real_keys),
+            "lopsided": whole.get("lopsided"), "loss_gate": whole.get("loss_gate"), "risk_per_entry": risk,
             "maker": side("maker"), "taker": side("taker"), "rule": rule}
 
 
