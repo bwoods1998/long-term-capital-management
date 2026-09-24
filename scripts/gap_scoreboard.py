@@ -973,6 +973,17 @@ def seated_deaths(dead: Sequence[Agent], few: Sequence[Agent], rungs: Rungs, liv
 
 
 # ---------------------------------------------------------------------------------- metric 5
+def left_the_seat_queue(snap: Snapshot, key: str) -> bool:
+    """Whether the House's seat queue has let this waiter go (`<class>:<id>`, R2, Sept 24, 2026): its own state when the
+    snapshot carries it (house.json `seat_expired`, which the House clears once the reason is gone -- the search reopened
+    the desk, the forward window no longer loses: the review of #276), else the ledger's `seat-expired:` row (written
+    once, the first departure)."""
+    state = snap.json.get("house.json")
+    if isinstance(state, Mapping) and isinstance(state.get("seat_expired"), Mapping):
+        return key in state["seat_expired"]
+    return snap.at_of(f"seat-expired:{key}") is not None
+
+
 def waiting_cards(snap: Snapshot, agents: Mapping[str, Agent]) -> list[dict[str, Any]]:
     """Foundry cards that passed replay and were never born (`Foundry.inventory`, folded from the
     ledger). A card waits for a seat from its passing evaluation (the House's own list dates it from
@@ -997,9 +1008,12 @@ def waiting_cards(snap: Snapshot, agents: Mapping[str, Agent]) -> list[dict[str,
             born.add(founder[5:])
         elif founder in by_strategy:
             born.add(by_strategy[founder])
+    # A card that left the House's seat queue (R2, Sept 24, 2026: its desk closed by the search) waits no more while
+    # the House says so (`left_the_seat_queue`, `House._expire_waiters`).
     return [{"card": c, "niche": cards[c].get("niche"), "since": passed_at,
              "created": float(cards[c].get("created_epoch") or cards[c]["_t"])}
-            for c, (outcome, passed_at) in outcomes.items() if outcome == "passed" and c in cards and c not in born]
+            for c, (outcome, passed_at) in outcomes.items() if outcome == "passed" and c in cards and c not in born
+            and not left_the_seat_queue(snap, f"cards:{c}")]
 
 
 def research_children(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs) -> list[dict[str, Any]]:
@@ -1041,6 +1055,7 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
         born = Counter()
         born_window = Counter()
         waiting = []
+        expired = 0
         for candidate, state, origin, at in snap.lab.execute(
                 "SELECT g.candidate, g.state, c.origin, g.at FROM graduations g LEFT JOIN candidates c ON c.id = g.candidate"):
             origin = str(origin or "unknown")
@@ -1049,6 +1064,9 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
                 if float(at) >= since:
                     born_window[origin] += 1
             elif state == "passed":
+                if left_the_seat_queue(snap, f"graduates:{candidate}"):
+                    expired += 1  # left the House's seat queue (R2, Sept 24, 2026): never counted as waiting
+                    continue
                 # From the ledger's `lab.graduate:<id>:passed` row, written once, as `Lab.waiting`
                 # counts it: the table's `at` moves at every retry.
                 passed = snap.at_of(f"lab.graduate:{candidate}:passed")
@@ -1060,6 +1078,7 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
         out["born_graduates_by_origin"] = dict(born)
         out["born_graduates_in_window_by_origin"] = dict(born_window)
         out["graduates_waiting"] = len(waiting)
+        out["graduates_left_the_queue"] = expired
         out["graduates_longest_wait_h"] = _r((now - min(waiting)) / HOUR, 2) if waiting else None
     cards = waiting_cards(snap, agents)
     out["cards_waiting"] = len(cards)

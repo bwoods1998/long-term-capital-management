@@ -158,6 +158,38 @@ class SeatMarketLine(unittest.TestCase):
         self.assertIn("haghani-9 alpaca-paper crypto:LINKUSD refused 3x", text)
 
 
+class LongestWaitLine(unittest.TestCase):
+    """R2 (Sept 24, 2026): no newcomer waits over two hours, or the watch says where and why. At 15:06Z 50 of the 82
+    waiters had waited over two hours; the watch printed the waiters by class and nothing of where or why."""
+
+    def test_the_watch_prints_the_longest_wait_its_rule_the_expired_waiters_and_the_population(self):
+        rule = "its 4 seats (4 members) are held: 3 real money, 1 a winner"
+        seats = {"at": "2026-09-24T15:00:00Z", "waiters": {"proven": 0, "graduates": 14, "retained": 1, "cards": 1, "strategies": 1},
+                 "longest_wait": {"class": "retained", "id": "research:hilibrand-h6ca596:4bbf", "desk": "kalshi-crypto-strikes",
+                                  "hours": 21.4, "since": "t", "reason": rule},
+                 "over_two_hours": {"kalshi-crypto-strikes": {"count": 15, "longest_hours": 21.4, "longest": "retained:x", "rule": rule}},
+                 "expired": {"last_day": 21, "by_rule": {"closed": 20, "forward": 1}, "by_desk": {"kalshi-crypto-15m": 20}},
+                 "population": {"max_population": 128, "ceiling": 128, "held_at": 112, "runway_days": 4.51,
+                                "rule": "toward the ceiling 128: Sail's runway 4.51 days is over 1.5 days"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            Ledger(state / "ledger.sqlite").close()
+            (state / "health.json").write_text(json.dumps({"at": "2026-09-24T15:00:00Z", "release": "r", "seats": seats}))
+            run = subprocess.run([sys.executable, "-c", floor_watch.BOX_SNIPPET, "2026-09-24T00:00:00", str(state)],
+                                 capture_output=True, text=True, timeout=120, cwd=ROOT)
+            self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+            box = json.loads(run.stdout.strip().splitlines()[-1])
+        block = box["blocks"]["seats"]
+        self.assertEqual(block["longest_wait"]["reason"], rule)
+        self.assertEqual(block["over_two_hours"]["kalshi-crypto-strikes"]["count"], 15)
+        self.assertEqual(block["population"]["max_population"], 128)
+        text = floor_watch.render(box, {}, {})
+        self.assertIn("longest wait 21.4 h: retained research:hilibrand-h6ca596:4bbf for kalshi-crypto-strikes -- " + rule, text)
+        self.assertIn("over 2 h on kalshi-crypto-strikes: 15 (longest 21.4 h): " + rule, text)
+        self.assertIn("left the queue in a day 21 {'closed': 20, 'forward': 1}", text)
+        self.assertIn("population 128 of 128: toward the ceiling 128", text)
+
+
 class TickStepsLine(unittest.TestCase):
     """C-perf (Sept 24, 2026): the tick took 51-64 s and nothing said which step cost what. The House
     writes `tick_steps` in health.json; the watch prints the last tick's slowest steps, each step's

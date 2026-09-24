@@ -294,12 +294,17 @@ class SeatCaps(unittest.TestCase):
     def test_desk_caps_and_the_population_follow_the_evidence(self):
         root = Path(__file__).resolve().parents[1]
         niches = {row["id"]: row for row in json.loads((root / "niches.json").read_text())["niches"]}
-        for desk, cap in {"kalshi-weather": 14, "kalshi-sports": 16, "alpaca-index-etfs": 14, "kalshi-crypto-15m": 10,
-                          "kalshi-crypto-strikes": 4, "kalshi-sports-props": 4, "kalshi-attention": 4}.items():
+        # R2 (Sept 24, 2026): the seats follow the waiters that remain once the search's closed desks are taken out
+        # (niches.json `_about` has the 15:06Z count behind each), and fewer where the search is closed.
+        for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 19, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
+                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 8, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
+                          "kalshi-attention": 4}.items():
             self.assertEqual(niches[desk]["max_members"], cap, desk)
         turbo = json.loads((root / "turbo.json").read_text())
-        self.assertEqual((turbo["max_population"], turbo["newcomer_seconds"]), (112, 600))
+        self.assertEqual((turbo["max_population"], turbo["newcomer_seconds"]), (128, 600))
         self.assertGreaterEqual(sum(int(row.get("max_members") or 5) for row in niches.values()), turbo["max_population"])
+        game = json.loads((root / "game.json").read_text())
+        self.assertEqual((game["economy"]["max_population_short_runway"], game["economy"]["population_runway_days"]), (112, 1.5))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,16 @@ Measured, not assumed:
   0.0001995 at 80,967.80 raised cash by $16.11, not $16.15: the fee on a sell comes out of the
   proceeds. The adapter reports a fee of zero on both, so the book applies this model.
 - **Alpaca equities and options**: no commission. The regulatory pennies on a sell are below the
-  model and are absorbed by reconciliation as dust.
+  model and are absorbed by reconciliation as dust. Except, on a PRACTICE book (`option_clearing`),
+  an option fill's OCC clearing fee. Measured Sept 21-24, 2026 on the paper account: one "OCC
+  Clearing Fee" activity for each of the 46 option trades of Sept 21-23, $0.03 for one contract and
+  $0.05 for two ($0.025 a contract, rounded up to the cent a fill), taken from cash at the fill
+  ($0.03 on a one-contract buy; $0.02 on a sale, the last cent in the next morning's batch) but
+  listed as a FEE activity only the next morning, when the book had already frozen on it or booked
+  it as dust. It is the agent's cost, so the fill pays it. The rest of an option day's fees (ORF on
+  every contract, TAF and the regulatory fee on sales) are summed and taken in the overnight batch,
+  and `Book._book_venue_fees` books them to the House when that cash moves. A real book keeps no
+  option fee until a real option fill has shown when the real account takes it.
 - **Kalshi**: the venue reports each order's fees, and the book uses the venue's number. This
   model is for the shadow book and for crosses: 0.07 x C x P x (1 - P) times the series
   multiplier, rounded up to $0.0001 per order; a resting fill pays nothing except on the series
@@ -28,6 +37,8 @@ QTY_PLACES = Decimal("0.000000001")  # Alpaca's nine decimals
 
 ALPACA_CRYPTO_TAKER = Decimal("0.0025")
 ALPACA_CRYPTO_MAKER = Decimal("0.0015")
+#: The OCC clearing fee on an Alpaca option fill, a contract (rounded up to the cent a fill).
+ALPACA_OPTION_CLEARING = Decimal("0.025")
 
 
 @dataclass(frozen=True)
@@ -41,10 +52,12 @@ class Charge:
 class Fees:
     """The fee model of one venue family (`alpaca` or `kalshi`)."""
 
-    def __init__(self, family: str):
+    def __init__(self, family: str, *, option_clearing: bool = False):
         if family not in ("alpaca", "kalshi"):
             raise ValueError(f"no fee model for {family!r}")
         self.family = family
+        #: Charge an Alpaca option fill the OCC clearing fee the venue takes at the fill (a practice book).
+        self.option_clearing = bool(option_clearing) and family == "alpaca"
         self._kalshi = FeeModel.for_venue("kalshi") if family == "kalshi" else None
 
     def charge(
@@ -69,6 +82,8 @@ class Fees:
                 # Rounded up: the venue never rounds a fee in our favour.
                 return Charge(quantity=(quantity * rate).quantize(QTY_PLACES, rounding=ROUND_CEILING))
             return Charge(usd=(quantity * price * instrument.multiplier * rate).quantize(CENT, rounding=ROUND_CEILING))
+        if instrument.asset_class == "option" and self.option_clearing and quantity > 0:
+            return Charge(usd=(quantity * ALPACA_OPTION_CLEARING).quantize(CENT, rounding=ROUND_CEILING))
         return Charge()
 
 

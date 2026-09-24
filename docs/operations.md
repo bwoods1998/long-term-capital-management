@@ -80,9 +80,14 @@ python3 scripts/floor_box.py maintenance off                 # resume on the nex
 - **What the pause is, on the record:** the ledger shows the two Sept 22 wake holes as a pause
   lifting at 15:28:11Z (every kind of work resumed in that second) and a Sail allowance closing at
   11:01Z on Sept 21. Neither is a scheduler fault, and the House now says which markets a stop
-  leaves unattended: a warning once per half hour for each round-the-clock desk (coins, Kalshi)
-  with living members and no wake for 30 minutes while the House is NOT paused
-  (`House._order_path_invariants`); and a warning once a day when an intent is refused for an agent
+  leaves unattended: a warning for each round-the-clock desk (coins, Kalshi) with living members
+  and no wake for 30 minutes, or for twice its briskest member's `wake_minutes` when that is longer,
+  while the House is NOT paused, told once per that long (`House._order_path_invariants`). The clock
+  starts at the latest of the desk's last wake, the House's start, a pause and its oldest living
+  member's birth. Sept 24, 2026: kalshi-attention's one member, waking every 30 minutes as scheduled,
+  was called unwoken twelve times that day at 30 or 31 minutes, and kalshi-open was called unwoken
+  "for 146 minutes" 29 seconds after its first member ever was born (the clock had started at the
+  House's own start); since then neither is a warning. And a warning once a day when an intent is refused for an agent
   that is not alive (the House's own wind-down walking into a wall each mark pass, as 607 "no seat"
   and 576 "outside regular hours" refusals did on Sept 21-23 before anyone read the ledger).
 
@@ -148,10 +153,12 @@ watch.
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
-  digest needs the ratify. The close-the-gaps run's Deploy B (Sept 24, 2026: the mechanism ledger's
-  unit, the family swing with its entry looks, `swing_requires_proven_family`, `corrected_child_supersedes`) moves them to
-  constitution `915c978e…`, money `c02ed852…` (the grant's 101 seats unchanged: the smallest real stake
-  is still the $10 probe). Its Deploy A had set `8116302e…` / `521c4586…`; at that run's T0 they were `34adf385…` / `c2b0e09c…` (40 agents, a $25 stake line). Deploy A of the
+  digest needs the ratify. The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
+  `allocator.family_probe`, no probe on a losing family) moves them to constitution `38a57fe9…`, money
+  `535a7f15…`: its deploy needs the ratify (the grant's 101 seats unchanged). Its Deploy B (the mechanism
+  ledger's unit, the family swing with its entry looks, `swing_requires_proven_family`,
+  `corrected_child_supersedes`) had set constitution `915c978e…`, money `c02ed852…` (the grant's 101 seats
+  unchanged: the smallest real stake is still the $10 probe). Its Deploy A had set `8116302e…` / `521c4586…`; at that run's T0 they were `34adf385…` / `c2b0e09c…` (40 agents, a $25 stake line). Deploy A of the
   learn-and-unblock run (17:34Z, Sept 23, 2026) had set `52c6c7e5…` / `1d63a56e…`, the grant
   re-ratified at 17:34:36Z. Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
   line); that day's Deploys 2-7 changed no money rule and needed no ratify.
@@ -201,7 +208,11 @@ watch.
     (the `retained` candidates of dead authors too), the displaceable count, the seats holding no
     evidence (`seats_holding_none`: count and the first ids), the desks' evidence clocks, and why each
     class of waiter was last refused a seat; and each House-sent sale stopped after three identical
-    refusals (`wind down stopped`, from house.json `wind_down_refusals`);
+    refusals (`wind down stopped`, from house.json `wind_down_refusals`). Since R2 (Sept 24, 2026) the
+    `longest wait` line (class, id, desk, hours and the rule that holds its desk), an `over 2 h on`
+    line a desk where newcomers have waited over two hours (count, longest, rule), and one line with
+    the waiters that left the queue in the last day by rule and the population the league may grow to
+    now (`population <now> of <ceiling>` and why, from Sail's runway);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why) and, since Deploy A, `settled_usd`,
     `inflight_usd` and the `previous` month, refusals, alerts, and the site checkpoint's age and
@@ -268,7 +279,13 @@ watch.
     not recorded yet) or a site that refuses the House (`polls`: RealClearPolling's bot wall) shows
     in `failing` with its reason and is not warned about hourly. Each recording feed also writes an
     hourly `data.coverage` ledger row (`asset: feed`, `host`, `status`: current, partial or
-    unavailable).
+    unavailable). An `earnings` stock is named in the hourly "feeds: N of 24 earnings polls failed 3
+    times in a row" warning only after three failed polls in a row (`Source.warn_after`), and EDGAR is
+    given 45 s to answer (Sept 24, 2026: its browse feed took a median 6.4 s, 44% of polls over 10 s,
+    and 31 of 995 polls hit the old 30 s read timeout, every stock read at its next poll; a failed
+    pass is asked again five minutes later and reads back a day before the last good poll, so one
+    timeout loses no filing). `failing` shows a stock at its first failure. A warning quotes each URL
+    without its query, so the reason (a read timeout, an HTTP status) is on the line.
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `tick_steps` (Sept 24, 2026): where the tick's time went, on the monotonic clock. `last`: the
     last tick's `at`, `total_seconds` (from its start to its health block written) and `steps`, the
@@ -346,6 +363,82 @@ watch.
     holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
     admission pass on their author's line (a proven family's first, then the longest wait), dropped
     after 72 hours.
+    **R2 and R3 (Sept 24, 2026, the close-the-gaps run): the seat market's capacity.** Measured at
+    15:06Z: 82 newcomers waited (41 graduates, the longest 24.5 h since passing; 15 cards, 47.3 h; 11
+    retained candidates; 15 merged strategies) in a league of 112 of 112 whose every desk they waited
+    for was full; 50 had waited over two hours and the only warning said how many, not where or why.
+    - `waiters` has a first class, `proven` (R3): a proven family's program owed births on its desk.
+      Every class is what REMAINS once the search has closed a waiter's way: a waiter whose desk the
+      search closes (the foundry's closed desks, `Foundry._closed_desks`: game.json
+      `hypotheses.closed_desks` until a family there is positive over `closed_reopen_blocks` active
+      blocks on that desk; the lab's idle desks, `Lab._idle_desk`) or, for a lab graduate, whose own
+      forward window loses (`Lab.forward_score` at or below zero) leaves the queue once, with a
+      `route.decision` row `seat-expired:<class>:<id>` (route `expired`, the reason and the rule), a
+      house.json `seat_expired` entry kept a week, and one info alert a desk an hour ("N waiters for
+      <desk> left the seat queue"). It is not counted while its reason holds: not in `waiters`, the
+      refusals, the reserved desks or the scoreboard's metric 5 (which reads house.json `seat_expired`).
+      It is asked again each pass, and is a waiter again once the reason is gone -- its desk reopened,
+      its window no longer loses (the review of #276: the foundry reopens a desk on one family's record
+      there, read through a ten-minute cache). An expired retained candidate is held, never seated,
+      until its desk reopens or its 72-hour TTL drops it, an expired merged strategy is not enrolled,
+      no card is admitted onto a closed desk, and no seat is made there for a graduate (`_displaceable`
+      gives an evidenced newcomer no seat on a desk the search closes, and the House holds that desk's
+      cap at its members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
+      resident still runs is not expired: it takes that resident's seat. At 15:06Z 21 would have left
+      (the 20 of kalshi-crypto-15m: 3 graduates, 6 cards, 4 retained candidates, 7 corrected children
+      of dead parents; and a megacaps graduate whose window lost -0.000142 a block), and Deploy C's
+      lab holds 17 nudges itself: 44 remain. kalshi-crypto-strikes was NOT closed: the search had
+      reopened it on two lab families positive there (17 and 7 active blocks, one on real money).
+    - `expired`: the waiters that left the queue in the last day (`last_day`, `by_rule`, `by_desk`).
+    - `over_two_hours` (desk -> `count`, `longest_hours`, `longest`, `rule`) and `longest_wait`
+      (`class`, `id`, `desk`, `hours`, `since`, `reason`), the invariant: no newcomer waits over two
+      hours, or one warning a desk an hour ("N newcomers have waited over 2 hours for a seat on
+      <desk> (the longest ..): <rule>") names the desk, the count, the longest wait and the rule that
+      holds them -- a free seat the birth passes have not reached (the lab births at most 6 an hour,
+      the refill one a `newcomer_seconds`), or the rules that keep every resident of the desk from
+      the best waiter that asks, counted: real money, a winner, inside its grace or its desk's
+      evidence clock, a trader short of its record, its day screen pending, a proven family's
+      member, a forward record the newcomer does not beat, one displacement a desk a tick, the
+      search closes the desk, the desk held for the proven family's births. `longest_wait` is
+      recomputed every tick; its `reason` is the hourly watch's.
+    - `caps` (desk -> `cap`, `base` (niches.json), `members`, `waiting`) and `population`
+      (`max_population` now, `ceiling` (turbo.json), `held_at`, `runway_days`, the `sail` reading and
+      the `rule`): the league grows toward turbo.json `max_population` (128) only while Sail's runway
+      -- the latest balance less `sail_reserve_usd` over the trailing day's falls, from the Sail
+      meter's `ops.budget` "sail" rows -- is over `economy.population_runway_days` (1.5); otherwise,
+      or unread (or unreadable), it is held at `economy.max_population_short_runway` (112), killing
+      nobody (an info or warning alert when it moves). Once held it grows again only over the floor
+      by `POPULATION_RUNWAY_BAND_DAYS` (0.25 d; house.json `population_held`, `grows_over_days`), so a
+      runway hovering at the floor does not flip it. At 15:06Z: $162.30 against $34.88 a day, 4.51 days.
+    - S3 in `displaceable`: a waiter with a winning forward window takes the seat of a practice
+      resident whose desk evidence clock has run (its seat older than the clock -- the plain 12-hour
+      grace where none is measured -- and its fair chance; on a desk that keeps hours, a session
+      closed since) with no positive record of its own (no winning standing, no positive forward
+      window), past the S1 forward rule and the trading and screen protections; never inside its
+      clock or fair chance, a real-money seat, a winner, a proven family's member by an unproven
+      newcomer, one holding a position while its market is shut, or one holding an event contract
+      still to settle (the settlements its clock waits for; `_awaits_settlement`); one a desk a tick. At 15:06Z 29
+      practice seats were stale by this test (10 index ETFs, 5 options, 4 crypto-15m, 3 megacaps, 2
+      crypto majors, 2 sports, 2 sports props, 1 attention); one waiter had a winning window
+      (a megacaps graduate, +0.000102 a block over 3 active blocks).
+    - R3: a proven family's program (its anchor: the living member on the highest rung with fills of
+      its own that runs the markets and style of the family's founding program, `_family_program`;
+      its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
+      on its desk, a House mutation of the anchor's PARAMS inside their bounds at the newcomer cadence
+      (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
+      living members run it; while it is owed, no newcomer of another family may displace a resident of
+      its desk, and the desk is reserved from cards (and, in a full league, from merged strategies); a
+      free seat there is not held: the lab's graduates, retained candidates and merged strategies take one
+      without asking. Not at the family's measured capacity (E3), not for a losing family, and not for an
+      hour after its program had no distinct valid PARAMS mutation left (then nothing is owed and its desk
+      is not held). A member that inherited the family's name with other code is not its program
+      (meriwether-h2d625d-2). Since the same day a research fork or a retained candidate whose NEEDS name
+      other markets or another style than its parent's program is born into its own family
+      (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its parent as before); a fix of
+      the same program keeps the family -- a proven family's name only when that program is the family's
+      founding one (its first member's NEEDS at birth, `_family_program`), so a member carrying the name
+      with another program cannot pass the proof to its forks, and never anchors R3 (the review of #276).
+      Agents born before keep their family on the ledger.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -363,7 +456,29 @@ watch.
   ledger as `family.record` (private) at most every five minutes when it changed, the capacity
   estimate's clock-driven rates aside (`families.change_view`): the durable record of every state
   change. The family states and the swing's audits live in `allocator.json`
-  (`families`, `family_audits`).
+  (`families`, `family_audits`). Since R3 and R5 of the close-the-gaps run (Sept 24, 2026), for the watch
+  and the owner and never the site (the publisher copies the site's fields by name):
+  - every row has `family_forward` (`blocks`, `growth`: the family's pooled forward record, the House's
+    `family_forward`, every member ever born), and a practice or rung-2 row `probe_gate`: null, `"losing"`
+    (no probe is seated from the family; a probe seated on it goes back to practice), `"held since
+    <time>"` (the earliest probe demotion of the family whose record since has not turned positive over
+    6 active blocks), or `"unreadable"` (the gate could not be read this pass: no probe is seated);
+  - a real row has `equity_usd` beside `stake_usd`. `stake_usd` is the NET LOAN (what was lent, less the
+    profit swept back), not what the account is worth: at the resume the notes read meriwether-h2d625d's
+    $20.06 stake as short of its $37.50 target while its equity was $41.67;
+  - each family has `swing_clock`: `real_n`, `real_since` (its first real dollar), `real_days`,
+    `real_per_day` (independent real settlements a day over its real life, once that life is an hour
+    long), `needs` (`real_settlements` to the next entry look, `look_at`, the look's `confidence`, whether
+    the pooled `proof` is still missing, the `audit` that follows a passing look, and `grant`: the live
+    grant does not yet release stakes above the bunt) and `days_to_swing` at its own rate (null with no
+    rate, with no member on real money, or with only the pooled proof left). It moves with
+    the clock alone, so it is never on a `family.record` row. sports-central-run-under at 15:06Z Sept 24:
+    real n 5 since 04:52Z Sept 23, 3.5 a day, 10 to the look at 15, about 2.9 days;
+  - `allocator.json` `probe_holds`: the ledger position the probe demotions were folded to (`cursor`),
+    each family's probe demotions still in force (`families`: a list of `seq`, `at`, `agent`, `why`; a
+    demotion whose family record since has turned is dropped for good) and the mechanism ledger's state per
+    family as its `family.record` rows said it (`states`). A House that lost the file folds the ledger again
+    to the same holds.
 - **`promotion_status`** has a row for each living agent on paper or above that has been judged,
   with the `stage` its next move waits on. Each change of stage or reason is also an
   `eval.verdict` row with `decision: "progress"`. Since Sept 23, 2026:
@@ -384,6 +499,19 @@ watch.
     with `capital_usd` and `headroom_usd`),
     `venue_cash` (the account's free cash cannot take the stake now), `campaign` (the grant has not
     released the swing band) and `accounting_integrity`.
+  - The probe gate (R5, Sept 24, 2026; `allocator.family_probe`), before any audit or displacement:
+    `family_losing` ("its family X's pooled forward record is -0.0600 over 6 active blocks: no probe is
+    seated from a family at or below zero after 6") and `family_held` ("Y, a probe of its family X, went
+    back to practice at <time>: no probe is seated from the family until its pooled forward record since
+    then is positive over 6 active blocks (it is +0.0500 over 5)"), each with `family_forward` and, held,
+    `held_since`. A new row is written only when a block closes and the numbers move. A probe on a losing
+    family goes back to practice with a `demote` row carrying `rule: "allocator.family_probe"` and
+    `family_forward`; on Alpaca its working bids are cancelled first (the demotion path's own first step),
+    and while it still holds a position the demotion would sell, or a buy is still in question at the venue,
+    it keeps its seat (its own exits go on, nothing is sold for it, it is lent nothing more), the pass summary
+    lists it in `probes_waiting_flat`, and one info alert says why ("now: holding", "reserved"). A gate that
+    cannot be read this pass (a failed fold or forward read) holds every probe promotion at
+    `family_unreadable` and demotes nobody.
 - **Ledger rows from the Sept 23 revision:**
   - an `eval.verdict` progress row on rung 0 with `stage: "holdout"`: a development replay passed
     and the sealed holdout refused or failed it, with the reason and the holdout's coarse numbers;
@@ -740,10 +868,41 @@ watch.
 - **"the desks' evidence clocks ..."** (info, at most daily): the House measured each desk's
   evidence clock and the seat grace follows it (`house.json` `evidence_clocks`); a measurement that
   fails is a warning and the last reading stands.
+- **"N waiters for <desk> left the seat queue (...): its desk <desk> is closed by the search: ..."**
+  (info, at most once an hour a desk; R2, Sept 24, 2026): waiters whose desk the search closes (the
+  foundry's closed desk, or the lab's idle desk) or, a graduate, whose own forward window loses, left
+  the queue with their reason (`route.decision` `seat-expired:<class>:<id>`). Nothing to do: they are
+  not seated and not counted. A desk that should be open again reopens when a family there is
+  positive over `hypotheses.closed_reopen_blocks` active blocks on it, and its waiters are waiters again.
+- **"N newcomers have waited over 2 hours for a seat on <desk> (the longest ..): <rule>"** (warning,
+  once an hour a desk; R2, Sept 24, 2026): the two-hour invariant. The rule says what holds them: a
+  free seat the birth passes have not reached yet (the lab's six births an hour, the refill's one a
+  `newcomer_seconds`), or the residents' protections, counted (real money, winners, inside the grace
+  or the desk's evidence clock, traders short of their record, a proven family's members ...). Read it
+  with `health.json` `seats.over_two_hours`: a desk whose seats are all real money or winners needs a
+  cap (`league/niches.json`), a forward-scored waiter (S3) or patience, not a rule change.
+- **"the league's population is now N (was M): ..."** (info when it grows, warning when it is held;
+  R2, Sept 24, 2026): Sail's runway crossed `economy.population_runway_days` (1.5 days) or its meter
+  went unread; the league grows toward turbo.json `max_population` only while the runway holds, and is
+  held at `economy.max_population_short_runway` (112) otherwise; once held, it grows again only over
+  1.75 days (the quarter-day band), and a restart that finds it held says so once. Nobody is killed: a
+  held league stops growing.
+- **"K proven family's births wait for a seat: <family> on <desk>: ..."** (warning, once an hour; R3):
+  the proven family's program is owed births and its desk (or the full league) has no resident a
+  proven family's newcomer may displace.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
-  (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer)
+  (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer).
+  Since Sept 24, 2026 an offer is a market of a series the program's NEEDS names that resolves inside
+  its horizon (`House._offered`): the busiest live series a desk shows a program whose own series
+  have nothing in its window (`ctx["note"]`) is not one, and such a wake is `shut` (nothing in its
+  window), not `barren` -- greenwich-h4cb387, NFL props within six hours ten hours before the game,
+  was shown UEFA and DJI markets and called quiet at 14:58Z. A desk whose offered agents are all day
+  programs is told only after a day without an intent (`QUIET_DESK_DAY_SECONDS`, counted from its first
+  unanswered offer since its last intent, once a day), and the warning says for how many hours:
+  kalshi-sports, whose favourites programs trade around game time, was told six times on Sept 24
+  while two of its agents made the floor's profit
   and `<agent>: a real-money bunt on <book> was frozen by a daily-loss rule` (once an agent a day:
   the book's daily rule is meant not to apply to a rung-2 bunt; if this fires, it is applying).
 - **An exit that met the House's own resting order** (D3, Sept 24, 2026). It is no longer refused
@@ -766,9 +925,17 @@ watch.
   "no price is left above the House's own best bid to rest this exit at" (a House bid at the top of an
   event's range, or a stale quote, while a cross is not allowed) and "no ask to rest this exit at".
   A crossed book reconciles to the cent: the venue saw only the cancel.
-- **"does not reconcile" on a paper book, by cents.** This is a warning, not an error (#108): it is
-  the venue's end-of-day fee activity. An error means real money, or positions that disagree; read
-  the `book.reconciled` rows.
+- **A practice book's cents are dust, not a freeze** (Sept 24, 2026, `book.PRACTICE_DUST_USD`). A
+  practice book's cash difference under $1.00, with every position agreeing and no order in doubt, is
+  booked to the House row at once: a `book.fill` row with `source: dust` and a `detail` beginning
+  "practice book:". The cents are Alpaca's option fees (the OCC clearing fee, $0.03 on a one-contract
+  buy and $0.02 on a sale, is taken from cash at the fill but listed as a FEE activity only the next
+  morning), a maker's refund on a crypto fill, and cent rounding on fractional fills. Until then they
+  froze `alpaca-paper` (every Alpaca practice entry refused, 11 on Sept 24) until more fills raised the
+  per-fill tolerance or three readings adopted the venue, and a freeze at 15:37:27Z rolled Deploy C
+  back inside its watch. A "does not reconcile" warning on a practice book now means a dollar or
+  more, or cents beside an order whose outcome is unknown; an error means real money, or positions
+  that disagree. Read the `book.reconciled` rows. A real book is unchanged: its cents still freeze it.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:
   `{"key", "kind", "summary", "agents", "severity"}`. It is admitted whatever its priority.
   `{"drill": "<stamp>"}` plants the labelled synthetic drill; `scripts/repair_drill.py --plant`
@@ -838,6 +1005,8 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
+| | `SEAT_WAIT_WARN_SECONDS`, `SEARCH_CLOSED_TTL_SECONDS`, `SEAT_EXPIRED_KEEP_SECONDS`, `SAIL_BURN_WINDOW_SECONDS`, `SAIL_BURN_MIN_SPAN_SECONDS` | 2 h, 10 min, 7 d, 1 d, 6 h | The seat market's capacity (R2, Sept 24, 2026): how long a newcomer waits before one warning a desk an hour names its desk, count and rule; how often the search's closed desks are read (the foundry's rule reads every block of every agent that lived on them); how long an expired waiter is remembered; and Sail's burn for the population rule (the falls of the Sail meter's readings over the trailing day, scaled to a day, none measured under six hours of readings). Constants in `league/house.py` |
+| | `POPULATION_RUNWAY_BAND_DAYS`, `PROVEN_UNBRED_RETRY_SECONDS` | 0.25 d, 1 h | The review of #276 (Sept 24, 2026): once the population rule holds the league it grows again only over the runway floor by this band (the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the 15:06Z snapshot's readings, so at the floor it flipped and the league crept up); and a proven family's program with no distinct valid PARAMS mutation left is held, its desk not kept from other families, this long before it is asked again. Constants in `league/house.py` |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
 | `league/tapes.py` | `SETTLED_MEMO_ROWS` (`KalshiData.settled_memo_rows`) | 400,000 rows | A Kalshi series' day whose every market has settled is read from `ltcm.history` once a process and kept in memory: only the fields the tape reads (`SETTLED_FIELDS`, times as epoch seconds), the least recently used day out first (Sept 24, 2026). Measured on the real listings: 240-245 bytes a row held for KXBTC, KXBTCD, KXETH and KXETHD (3,350-3,470 as History parses it), 347 for the other series, so at most about 140 MB; a 14-day tape of those four is 293,888 rows. A second such tape costs about a quarter of what it did (on the developer machine: about 58 s every time before, 10-12 s once held; interleaved on a varying clock, a median 80 against 19.5 CPU-seconds). 0: every read is History's, as before. A day still settling keeps `settled_listing_ttl` (600 s) |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |
@@ -867,6 +1036,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `merton.schedule_hours.teacher` | 12 | The teacher's cadence (6 until Sept 24, 2026), bounded 6-24 h by `merton_bounds` (`economy.check_bounds`, so `league.ci`). The burst no longer accelerates it |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
+| | `economy.proven_family_members`, `population_runway_days`, `max_population_short_runway` | 4 (1-8), 1.5 d (1.5-7), 112 (64-128) | R2 and R3 (Sept 24, 2026): how many living members a proven family's program runs on before the House stops breeding it first on its desk (`House._proven_births`: House mutations of the anchor's PARAMS; at 15:06Z sports-central-run-under ran its program on one member); the Sail runway above which the league grows toward turbo.json `max_population`, and the population it is held at otherwise (`House._population_rule`) |
 | `league/constitution.py` | `allocator.corrected_child_supersedes` | on (Deploy B) | L1 (Sept 24, 2026): a research child that passed replay with a fix to its real-money parent's entry mechanism (liquidity, fee, side, borne out by the parent's own entry fills) supersedes the parent at once, demoted from real money through the evaluator and retired `superseded` (`House._supersede_by_research`). The account must be of the parent's CURRENT program and a liquidity or fee fix must rest its entries post-only (review of #245: the child meriwether-h2d625d-2 fixed its own moneyline file, not its parent's KXMLBTOTAL entries); a parent whose family's pooled taker record is proven positive (`Allocator.family_taker`, as X0 reads it) is not superseded for a liquidity or fee fix. Absent or false: only merged repairs supersede (`_retire_superseded`). A money rule: re-ratify after a change |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
@@ -874,6 +1044,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `allocator` `bunt_at`, `bunt_min_trades`, `bunt_min_settled` | 1.01, 5, 3 | Paper → bunt: E at the line and 5 closed paper trades, or 3 settlements on Kalshi (plan default 1.03; set from the Sept 23 06:45 UTC distribution, bounds 1.0-1.25) |
 | | `allocator.bunt_usd` | Kalshi $30, Alpaca $25 | A PROVEN family's bunt (since Sept 24, 2026; plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum). Kalshi $10 → $30 on Sept 23, 2026 ~17:00 UTC: a $10 bunt was a one-loss trial (any lost $5 position over $1.54 crossed the hysteresis line) |
 | | `allocator.probe_bunt_usd` | Kalshi $10, Alpaca $25 | An UNPROVEN family's first real stake (P1, Sept 24, 2026; table Kalshi $5-15, Alpaca $20-25): the nine promotions of Sept 23-24 all ran unproven mechanisms and settled -$18.62. A probe becomes a bunt the pass after its family is proven and back when the bound falls (free cash only). An options probe is still $80. The grant's seats follow the smallest real stake: floor($1,017.75 / $10) = 101 (40 at $25) |
+| | `allocator.family_probe` | `losing_min_blocks` 6, `reseat` `gain_since_demotion` | No probe on a losing family (R5, Sept 24, 2026; the close-the-gaps run's third money-digest change, granted by the owner). A family is LOSING when its pooled forward record -- the House's `family_forward`: active `eval.block` count and summed log growth over every member ever born, living or dead (the allocator reads the same rows from its tape) -- is at or below zero after 6 active blocks (`families.losing`, the House's breeding line, `economy.losing_family_min_blocks`; a record that nets to zero is not a loss). Then no probe is seated from it (`family_losing`), and a probe seated on it goes back to practice at the next pass by the demotion path: a Kalshi contract is held to settlement, and on Alpaca, where that path sells (an option at the bid, a stock or an option at the next open outside the session), the probe keeps its seat until it holds nothing that path would sell (dust is booked, not sold): its working bids are cancelled first, as the path itself does (a fill that races the cancel is a position, and it waits), a buy the book still asks the venue about waits, and it is lent nothing more meanwhile (no sale is forced). Under `reseat` `gain_since_demotion` each probe demoted from real money, for any reason (hysteresis, the stay drawdown, displacement, drift, an audit's veto, this rule), holds its family until the family's record SINCE that demotion turns: positive over 6 active blocks (`family_held`). A turn is for good, and each demotion is its own hold, so a later probe's turn never releases an earlier one's. The demotions are the ledger's own `eval.verdict` rows: a probe's by its `band_from`, or, for a row that names no band (drift, audit veto, tuition), by the family's state in its last `family.record` row before it; a seat whose stake never landed (`unfunded`) holds nothing. A probe newcomer never displaces a probe of its own family, an audit that approves a known defect's seat asks the gate again (`House._commit_promotion` -> `Allocator.refuses_probe`), and a gate that cannot be read seats no probe and demotes nobody that pass (`family_unreadable`). A proven or swinging family's agents are bunts and are never gated. Evidence (docs/research/queries/2026-09-24/R5-family-probe.py, 15:06Z snapshot): 11 of the allocator's 21 promotions since Sept 23 went onto such families, -$8.12 on 22 closes, no stay positive; the other 10 made +$28.96 on 34 closes. At 15:06Z 9 of 14 seated probes ($139.75 of $168.94) sat on losing families: on that snapshot the first pass would return the 6 on Kalshi (hawkins-19, hilibrand-h6ca596-3, huang-h427345-4, huang-h51fdd3-6, huang-l0c6f38, huang-l5aa23e) and the 3 crypto-alts-reversion probes on Alpaca once each is flat (haghani-62 and -63 held crypto then). Since the snapshot: huang-h51fdd3-6 (crypto-15m-doge-flat-spot-no, losing) lost $1.20 on an XRP 15-minute contract at 16:00:36Z and was demoted at 16:03:31Z; krasker-14 (alpaca-options, options-pullback) was seated as an $80 options probe at 16:47:37Z while its family read 19 practice blocks, -0.3829 (16:53:40Z; bound -0.1088 on n 28), which this rule refuses. Absent: probes on any record, as before |
 | | `allocator.family_proven` | 10 independent settlements, practice 0.5, real 1, 80%, `lopsided_gate` true, `unit` `at_risk`, `reference_share` 0.01 | The proof (P1): a family's pooled forward record (`families.family_record`: every member ever born, living or dead; one observation per event, members of one event pooled at the largest weight; an Alpaca practice trade pays `alpaca_paper_haircut_bps`, as E does) with a one-sided 80% lower bound (Student's t on n_eff - 1) above zero, and a lopsided record (80% or more of its observations winning: favourites) also above the House's exact loss-rate gate at 80% (`stats.lopsided_growth_lcb`, as `Evaluator._judge_family` applies it; `lopsided_gate` false restores the t bound alone). Since Deploy B an event is what it made per dollar its positions put at risk (`unit` `at_risk`: ln(1 + 1% x r) / 1%, a worthless contract -1.005), weighing what it put at risk against its member's mean on that book (the review of #242: weighed alike, small wins and large losses read as an edge while the dollars lost); `account` restores Deploy A's account growth, under which a real row on a $30 stake weighed several times a practice row on the $200 purse. On the T0 snapshot this proves what Deploy A proves: sports-central-run-under (+0.1423 at risk; its winners carried twice its losers' dollars) and nothing else (weather-favorites' loss-rate bound -0.2112). The board shows `family`, `family_state`, `family_bound`, `family_n`, and "probe" as its own band in rows, the summary and the moves (the site shows it as Probe) |
 | | `allocator.family_swing` | 15 real settlements, 2x the bunt, doubling every 10, capacity 0.5 on 5 markets over 7 days, `entry_every` 5, `entry_confidence` 0.9 | The family swing (C2, Deploy B, Sept 24, 2026): a PROVEN family (the pooled record, `family_proven`: the real record alone never proves nor swings a family) ENTERS when its entry look passes and the frontier auditor approves that entry (`audit:family:<family>@<venue>` on the audit lane, the family packet with `allocation_context` and the look; `audit.verdict` rows carry `family_swing`). The look is judged only at 15 real independent settlements and every 5 more (15, 20, 25, ...: `families.entry_checkpoint`, from the count alone, so a restart never looks early), on the first that many real events, with the honest lower bound at 90% -- the t bound and, for favourites, the loss-rate bound (`families.entry_look`); a failed look waits for the next checkpoint. Why: an edgeless family re-read at every settlement at 80% entered 37% of the time by 30 real settlements and 44% by 50 in the main session's simulation (`scratchpad/rev-bfam/sim_rules2.py`); at every 5th at 90%, 19% and 22%. It STAYS, and the ramp doubles, while the whole real record's honest bound at 80% holds at every pass (`families.swing_ready`) and it is still proven. Every member on real money is staked at the ramp: 2 x `bunt_usd` ($60 Kalshi), doubled after each 10 further WINNING independent real settlements while the bound stays above zero, capped by the FAMILY's full Kelly on that bound against the venue's capital (capital at risk on one event, so the stake is that over the most one event may hold: `max_event_share`, 25% on Kalshi) and 60% of it, shared by its members on real money (a newcomer seated in the same pass shares from its first dollar), and held where the fill rate at the next size is under half the fill rate at the size before (the board's `stake_limit` "capacity"); never under the bunt; the envelope's headroom bounds every raise. The bound at zero or below, or a live grant that stops releasing rung 3 (`allows_live(3)`, read every pass): back to bunts (probes if the pooled proof went too), free cash only. An approval licenses entries until it lapses (`allocator.json` `family_audits` status `lapsed`, an info alert): when the family leaves the swing, or when a member takes a new program (`agent.strategy`) or a member is born into the family (`agent.born`: a research child, how a real-money line changes its code) after the audit looked; the next entry is audited again, and a swing already running is untouched. The family's `audit.verdict` (`family_swing`) is never read as the verdict on the member it was written against (`audit_standing`, `House._audit_wait`). A swinging member's band is "swing" on the board and to the book (its daily-loss rule). Without the key: no family swing. At T0 no family's real record qualifies (weather-favorites: 5 real events, all won; at 93c its loss-rate bound needs 23 clean real events at 80% and 32 at 90%: its first passing look would be at 35) |
 | | `allocator.swing_requires_proven_family` | on | The agent-level swing (`swing_at`) is a proven or swinging family's agent's only (Sept 24, 2026; carried as a key in Deploy B so the ratified digest records it): an unproven family's agent at the swing line stays a probe, a swing whose family loses its proof drops to rung 2, and a swing audit that finishes after that does not commit (`House._commit_promotion` reads `Allocator.swing_allowed`). Off: the agent-level swing of Sept 23 for every family |
@@ -908,12 +1079,12 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/research_routes.json` | `cache.layout`, `cache.explicit_hints` | `messages`, on | The Luna cache layout; `packet` is the old layout |
 | | `routing.sail_by_evidence` | off | Let measured evidence move new Sail sessions to a cheaper tier |
 | `league/turbo.json` | `research_minutes`, `research_workers`, `replay_workers` | 15, 16, 12 | The funded burst's research interval and workers (5, 32 and 8 until Sept 23, 2026). In force while the burst is, which it is while the live grant is active |
-| | `max_population`, `newcomer_seconds`, `endowment_usd` | 112, 600 s, $8 | The burst's population ceiling (64 until Sept 23, 2026, when foundry cards that passed replay waited for seats; 96 until the seat market of Sept 23, when 20 lab graduates, 6 replay-passed cards and 6 merged strategies waited: 16 more boxes cost about $0.43 a day of Sail, 2.9 days of runway), the House mutation cadence (120 s until then; no mutation is staked while any waiter waits) and House endowment |
+| | `max_population`, `newcomer_seconds`, `endowment_usd` | 128, 600 s, $8 | The burst's population ceiling (64 until Sept 23, 2026, when foundry cards that passed replay waited for seats; 96 until the seat market of Sept 23, when 20 lab graduates, 6 replay-passed cards and 6 merged strategies waited: 16 more boxes cost about $0.43 a day of Sail, 2.9 days of runway; 112 until R2, Sept 24, when 82 newcomers waited, 44 once the search's closed desks were taken out: the league grows to 128 only while Sail's runway is over `economy.population_runway_days`, and is held at `economy.max_population_short_runway` otherwise; 4.51 days at 15:06Z), the House mutation cadence (120 s until then; no mutation is staked while any waiter waits) and House endowment |
 | | `fork_threshold_usd` | $10 | The credits an agent needs before it may fork a parameter copy of itself. Above the endowment, so only an agent that has earned payouts forks. Until Sept 23, 2026 the burst forced $2, every newborn forked at once (22 copies in 40 minutes), and the foundry's replay-passing cards waited for seats on full desks |
 | | `merton_schedule_hours` | operator 48, designer 96, toolsmith 48, architect 24, teacher 12 | Merton's burst cadence, set by each role's measured yield. Until Sept 24, 2026 `load_turbo` dropped this key, so it never reached the House and the burst's own defaults ran (operator 0.25 h, toolsmith and architect 0.5 h, teacher and designer 1 h, stretched by backoff): the ledger shows the teacher about hourly and the architect every 30-60 minutes on Sept 23. The teacher is bounded 6-24 h (`TURBO_MERTON_HOURS`) |
 | | `sail_research_usd_per_hour` | $2 | L2, Sept 24, 2026: no NEW research session starts on Sail while the settled cost of the Sail commitments created in the last hour (`campaigns.sqlite`; every Sail call is research) has reached it; a session under way resumes, a job still queued for a research worker waits like a new session, and Luna is not capped. A call in flight counts once it settles, so the hour can overshoot by what is in flight. One `ops.budget` "sail research cap" row when it closes or opens; `health.json` `research_economy.sail_cap` shows it. Bounds $1-4 (`TURBO_RANGES`). Sail settled $5-6.5 an hour on Sept 23 at 19-23Z and $1.27 in the hour before T0 |
 | | `luna_fraction` | 0.95 | The share of agents whose research runs on GPT-6 Luna; the rest stay on Sail as the comparison (a Luna session cost about $0.011 against about $0.06 on Sail, Sept 23, 2026) |
-| `league/niches.json` | `max_members` | Kalshi: crypto strikes 4, crypto 15-minute 10, weather 14, sports 16, props 4, prices 8, attention 4. Alpaca: crypto majors and alts 12, index ETFs 14, megacaps 12, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`) |
+| `league/niches.json` | `max_members` | Kalshi: crypto strikes 6, crypto 15-minute 8, weather 17, sports 19, props 6, prices 8, attention 4. Alpaca: crypto majors 12, alts 16, index ETFs 18, megacaps 16, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`). R2 (Sept 24, 2026): the seats follow the 44 waiters that remained at 15:06Z once the search's closed desks and the lab's holds were taken out (megacaps +4 for 4 graduates, index ETFs +4 for 9 waiters, weather +3 for the longest card and two retained candidates, crypto alts +4 for 4 cards and 4 corrected children behind 9 winners and 3 probes, props +2 for two retained candidates, crypto strikes +2 for the two lab families the search reopened it on, sports +3 for the proven family's births), and fewer where the search is closed (15-minute crypto 10 -> 8; while the search closes a desk the House holds its cap at its members, `House._follow_the_search`). The caps add up to 154, above the population's ceiling (128) |
 | | `open`, `asset_classes`, `exclude_patterns` | `kalshi-open` and `alpaca-open` (8 seats each); Alpaca `equity`, `crypto`; Kalshi `^KXMVE` | The open desks (Sept 23, 2026): a desk whose universe is every tradable market of its venue. `status: dormant` closes one. `niches.OPEN_DISCOVERY` (24) is the length of an open desk's discovery list, of which a strategy naming nothing it may trade is shown the first twelve (`MAX_UNIVERSE`); a Kalshi desk missing from the last survey is surveyed within the half hour, not at the next day's turn |
 | `gateway/wrangler.jsonc` | `FRONTIER_MONTH_USD` (and `FRONTIER_MONTH_MAX_USD`), `TYPESAFE_PILOT_USD` | $607, $42 | The OpenAI month and Jev's lifetime allowance, aligned to metered plus the owner's funded balances: the month on Sept 24, 2026 ($394.46 metered + $213 funded; $408 before), Jev on Sept 23. Never above funded money. Deployed with `wrangler deploy`, not through the canary |
 | | `COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`, `FRONTIER_MONTH_MAX_USD` | 0.3, $1,017.75, $408 | Compute follows profit (Sept 23, 2026, `gateway/lib/equity.mjs`): the month's cap is `FRONTIER_MONTH_USD` plus 0.3 of the real accounts' equity above the grant's capital, held to `FRONTIER_MONTH_MAX_USD`. That ceiling equals the funded month, so today profit is reported (`profit_index.earned_usd`) and buys nothing; raise it with each OpenAI top-up bought from profit. An unset share or baseline, or an unreadable or stale reading, gives exactly `FRONTIER_MONTH_USD`. The House's line mirrors the raise (`CampaignBudget.mirror_gateway_bonus`) |

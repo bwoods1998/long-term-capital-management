@@ -56,10 +56,15 @@ class ResidentWindows(ForwardCase):
         self.clock.advance(float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"]) * 10)
         newcomer = Newcomer(forward=0.05)
         self.assertTrue(self.lab.can_score(trader))
-        self.assertIsNone(self.house._weakest(rules, newcomer=newcomer), "not scored yet: it keeps its seat until it has a record")
+        self.assertIsNone(self.house._weakest(rules, newcomer=Newcomer(forward=-0.05)),
+                          "not scored yet: it keeps its seat until it has a record")
+        # R2's S3 (Sept 24, 2026): that wait ends with its desk's evidence clock (the plain grace on a desk with none): long
+        # past it, with no positive record of its own, a newcomer with a winning forward window takes the seat.
+        self.assertEqual(self.house._weakest(rules, newcomer=newcomer).id, trader.id)
         self.niche.replay = False  # as alpaca-options: a desk the lab never searches
         self.assertFalse(self.lab.can_score(trader))
-        self.assertEqual(self.house._weakest(rules, newcomer=newcomer).id, trader.id)
+        self.assertEqual(self.house._weakest(rules, newcomer=Newcomer(forward=-0.05)).id, trader.id,
+                         "never scorable: the tournament judges it as before, whatever the newcomer's score")
         self.niche.replay = True
         self.lab.seed(force=True)
         self.lab._x("UPDATE candidates SET status='blocked' WHERE id=?", (self.lab.resident_candidate(trader),))

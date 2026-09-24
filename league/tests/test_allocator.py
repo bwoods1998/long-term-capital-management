@@ -303,8 +303,12 @@ class Mechanics(HouseCaseReal):
         self.assertLessEqual(house.allocator.committed("alpaca"), house.allocator.capital("alpaca"))
         waiting = house._state["promotion_status"][agents[0].id]
         self.assertEqual(waiting["stage"], "envelope")
-        # A newcomer with better evidence displaces the weakest FLAT bunt, one a pass.
-        star = self.agent("star", code=IDLE)
+        # A newcomer with better evidence displaces the weakest FLAT bunt, one a pass. Of another family: since R5
+        # (Sept 24, 2026, `allocator.family_probe`) a displaced probe holds its family, so a probe newcomer never
+        # displaces a probe of its own family (test_family_probe).
+        star = self.house.spawn("star", "alloc-star", IDLE, reason="test", endowment="2.5")
+        self.house.evaluator.seat(star.id, 1, "test: straight to paper")
+        self.house._state["tried"][star.id] = star.code_sha256
         table[star.id] = dict(e=1.50, w_paper=2.0, paper_trades=9)
         for a in agents[2:]:
             table[a.id] = {**table[a.id], "w_real": 1.0}
@@ -618,6 +622,9 @@ class ReviewRegressions(unittest.TestCase):
 
 class NoFlapping(HouseCaseReal):
     def test_a_demoted_bunt_waits_out_the_cooldown_before_it_may_bunt_again(self):
+        # A proven family's bunt: since R5 (Sept 24, 2026, `allocator.family_probe`) a demoted PROBE also holds its
+        # family until the family's record since the demotion turns (test_family_probe); the cooldown is read here.
+        self.proven_family()
         house = self.house
         a = self.agent()
 

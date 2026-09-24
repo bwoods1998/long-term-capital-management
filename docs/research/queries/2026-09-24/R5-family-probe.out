@@ -1,0 +1,57 @@
+ledger through seq 526226 (2026-09-24T15:05:38.370Z); board at 2026-09-24T15:03:49.208Z
+
+1. Allocator promotions to real money since 2026-09-23T00:00:00Z
+  2026-09-23T12:10:19 huang-h51fdd3-2        crypto-15m-doge-flat-spot-no       bunt   forward   7 blocks -0.1349 LOSING stay   -2.44 on  4 closes (2 positive); ended 22:01:31 E 0.7897 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-23T12:50:25 meriwether-h2d625d     sports-central-run-under           bunt   forward   1 blocks +0.0028        stay  +19.47 on  5 closes (5 positive); ended open 
+  2026-09-23T13:35:56 huang-h427345          crypto-15m-prior-window-reset      bunt   forward   5 blocks +0.0015        stay   +0.00 on  0 closes (0 positive); ended 14:57:45 E 0.7157 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-23T18:49:05 huang-l23cdb7          crypto-15m-lab-335592              bunt   forward   5 blocks -0.0447        stay   -0.67 on  2 closes (1 positive); ended 20:25:51 E 0.7350 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-23T20:07:05 meriwether-h7d7702     sports-central-over-under          bunt   forward   0 blocks +0.0000        stay   +0.00 on  0 closes (0 positive); ended 23:33:37 E 0.8038 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-23T21:02:43 hilibrand-h6ca596-3    crypto-strikes-vol-shock-upside    bunt   forward   8 blocks -0.4422 LOSING stay   -0.20 on  6 closes (2 positive); ended open 
+  2026-09-23T22:36:33 huang-hd8ff7c-3        crypto-15m-spot-impulse-lag        bunt   forward   3 blocks +0.0087        stay   -3.65 on  5 closes (2 positive); ended 01:44:20 E 0.7749 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-23T23:50:01 huang-hd8ff7c-4        crypto-15m-spot-impulse-lag        bunt   forward   5 blocks +0.0363        stay   -4.66 on  3 closes (1 positive); ended 01:01:35 E 0.8583 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-24T00:17:18 huang-h427345-2        crypto-15m-prior-window-reset      bunt   forward  17 blocks -0.4677 LOSING stay   -3.64 on  6 closes (2 positive); ended 03:24:31 E 0.8093 fell below 0.8585 (the bunt line with hysteresis)
+  2026-09-24T00:39:48 meriwether-h7d7702     sports-central-over-under          bunt   forward   2 blocks -0.0414        stay  +16.30 on  1 closes (1 positive); ended open 
+  2026-09-24T00:39:48 hilibrand-lc04657      crypto-strikes-lab-955dae          bunt   forward   6 blocks +0.0146        stay   +5.51 on 16 closes (16 positive); ended open 
+  2026-09-24T02:17:34 haghani-56             crypto-alts-reversion              bunt   forward 241 blocks -0.1779 LOSING stay   -0.44 on  1 closes (0 positive); ended 13:06:12 its growth has decayed from the record that earned this rung
+  2026-09-24T10:33:12 huang-l5aa23e          crypto-15m-lab-335592              probe  forward  20 blocks -0.4346 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T10:44:48 huang-l0c6f38          crypto-15m-lab-335592              probe  forward  20 blocks -0.4346 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T10:50:33 huang-h51fdd3-6        crypto-15m-doge-flat-spot-no       probe  forward  26 blocks -0.4835 LOSING stay   -1.40 on  5 closes (2 positive); ended open 
+  2026-09-24T11:47:28 huang-l55a341-2        crypto-15m-lab-0492e4              probe  forward   6 blocks +0.2372        stay   -3.35 on  2 closes (0 positive); ended 13:52:27 down 36% of its real record from its high-water mark: back t
+  2026-09-24T13:28:59 haghani-62             crypto-alts-reversion              probe  forward 336 blocks -0.1103 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T13:29:00 huang-h427345-4        crypto-15m-prior-window-reset      probe  forward  24 blocks -0.7121 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T13:35:13 haghani-r42c38c        crypto-alts-reversion              probe  forward 336 blocks -0.1103 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T13:46:55 hilibrand-l98e85b      crypto-strikes-lab-1b9d16          probe  forward   5 blocks +0.0159        stay   +0.00 on  0 closes (0 positive); ended open 
+  2026-09-24T14:25:14 haghani-63             crypto-alts-reversion              probe  forward 345 blocks -0.0599 LOSING stay   +0.00 on  0 closes (0 positive); ended open 
+  losing: 11 promotions, -8.12 realized on 22 closes, 8 positive closes, 0 stays positive
+  not losing: 10 promotions, +28.96 realized on 34 closes, 26 positive closes, 3 stays positive
+
+2. Probes seated at the snapshot
+  haghani-62             alpaca  crypto-alts-reversion              stake  25.00 forward 351 blocks -0.0569  LOSING
+  haghani-63             alpaca  crypto-alts-reversion              stake  25.00 forward 351 blocks -0.0569  LOSING
+  haghani-r42c38c        alpaca  crypto-alts-reversion              stake  25.00 forward 351 blocks -0.0569  LOSING
+  hawkins-19             kalshi  prices-favorites                   stake  14.13 forward  23 blocks -0.2225  LOSING
+  hilibrand-h6ca596-3    kalshi  crypto-strikes-vol-shock-upside    stake  10.62 forward  26 blocks -0.2168  LOSING
+  hilibrand-l98e85b      kalshi  crypto-strikes-lab-1b9d16          stake  10.00 forward   7 blocks +0.0262
+  hilibrand-lc04657      kalshi  crypto-strikes-lab-955dae          stake   6.82 forward  18 blocks +0.2342
+  huang-h427345-4        kalshi  crypto-15m-prior-window-reset      stake  10.00 forward  25 blocks -0.7019  LOSING
+  huang-h51fdd3-6        kalshi  crypto-15m-doge-flat-spot-no       stake  10.00 forward  35 blocks -0.6226  LOSING
+  huang-l0c6f38          kalshi  crypto-15m-lab-335592              stake  10.00 forward  22 blocks -0.2777  LOSING
+  huang-l5aa23e          kalshi  crypto-15m-lab-335592              stake  10.00 forward  22 blocks -0.2777  LOSING
+  meriwether-h7d7702     kalshi  sports-central-over-under          stake   0.00 forward   2 blocks -0.0414
+  mullins-2              kalshi  weather-favorites                  stake   5.09 forward  35 blocks +0.1462
+  mullins-6              kalshi  weather-favorites                  stake   7.28 forward  35 blocks +0.1462
+  9 of 14 seated probes on a losing family: $139.75 of stake (haghani-62, haghani-63, haghani-r42c38c, hawkins-19, hilibrand-h6ca596-3, huang-h427345-4, huang-h51fdd3-6, huang-l0c6f38, huang-l5aa23e)
+
+3. Demotions from rung 2, the hold's classification, and each family's forward record since
+  2026-09-23T01:38:59 meriwether-35          sports-favorites                 band_from None  ledger state -              since:  11 blocks -0.1258
+  2026-09-23T04:52:46 meriwether-h2d625d     sports-central-run-under         band_from None  ledger state -              since:   2 blocks +0.0349
+  2026-09-23T14:57:45 huang-h427345          crypto-15m-prior-window-reset    band_from bunt  ledger state -              since:  19 blocks -0.6131
+  2026-09-23T15:02:48 haghani-37             crypto-alts-reversion            band_from None  ledger state -              since: 196 blocks +0.1026  turned
+  2026-09-23T20:25:51 huang-l23cdb7          crypto-15m-lab-335592            band_from bunt  ledger state -              since:  15 blocks -0.2758
+  2026-09-23T22:01:31 huang-h51fdd3-2        crypto-15m-doge-flat-spot-no     band_from bunt  ledger state -              since:  20 blocks -0.3961
+  2026-09-23T23:33:37 meriwether-h7d7702     sports-central-over-under        band_from bunt  ledger state -              since:   2 blocks -0.0414
+  2026-09-24T01:01:35 huang-hd8ff7c-4        crypto-15m-spot-impulse-lag      band_from bunt  ledger state -              since:  31 blocks -0.6410
+  2026-09-24T01:44:20 huang-hd8ff7c-3        crypto-15m-spot-impulse-lag      band_from bunt  ledger state -              since:  31 blocks -0.6410
+  2026-09-24T03:24:31 huang-h427345-2        crypto-15m-prior-window-reset    band_from bunt  ledger state -              since:   4 blocks -0.0974
+  2026-09-24T13:06:12 haghani-56             crypto-alts-reversion            band_from None  ledger state unproven PROBE since:  15 blocks +0.0534  turned
+  2026-09-24T13:52:27 huang-l55a341-2        crypto-15m-lab-0492e4            band_from probe ledger state unproven PROBE since:   2 blocks -0.4573
