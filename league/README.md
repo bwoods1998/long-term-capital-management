@@ -262,7 +262,8 @@ status is exposed in health and agent research context; qualification is distinc
    book of half the practice stake and caps, judged by the replay gate with this look and every
    earlier edit look of the line in the deflation, no `eval.trial`, never the holdout, one a day
    passed or not, read in full by `_edit_looks`; an `edit_replay` row).
-   After any candidate, the pass's entry controls are applied (`_apply_controls`): each an
+   After any candidate and before the job is done, the pass's entry controls are applied
+   (`_apply_controls`; a restart resumes an unfinished job and applies them): each an
    `agent.strategy` row restating the strategy in force with `control`
    (`pause_entries`, `resume_entries` or `edit_params`), `was`, the agent's `note` and the
    `reason` carried from the row before (so `hypotheses._mechanism` still reads the strategy's).

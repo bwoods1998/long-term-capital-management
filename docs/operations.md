@@ -512,11 +512,12 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   wind down at once.
 - **A living stock or options agent is not woken at night** (Sept 24, 2026, the wake skip): no
   `agent.woke` row, no box run, no order between the close and the open, counted in `health.json`
-  `wakes_skipped`. A position it holds overnight is exited at its first wake a few seconds after the
-  bell. "market orders outside regular hours are not permitted" from a living agent now means an
-  open-desk agent that names a coin (still woken all night) sent a stock or option SELL at night;
-  its stock or option buys are refused by the House first ("outside the regular session no stock or
-  option entry is sent").
+  `wakes_skipped`. It is woken a few seconds after the bell, and its own exit of a position held
+  overnight goes then, if its strategy sends one: the skip itself sells nothing (a dead agent's
+  held wind-down still sells at the bell). "market orders outside regular hours are not permitted"
+  from a living agent now means an open-desk agent that names a coin (still woken all night) sent a
+  stock or option SELL at night; its stock or option buys are refused by the House first ("outside
+  the regular session no stock or option entry is sent").
 - **An agent paused its own entries, or edited its parameters in place** (X1, Sept 24, 2026). Its
   `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
   and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
