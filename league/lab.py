@@ -188,6 +188,9 @@ DEFAULTS: dict[str, Any] = {
     "forward_days": 7,
     "forward_min_active_blocks": 3,
     "forward_min_trades": 3,
+    # A tape the House fails to build the same way this many hourly tries in a row is unsupported input and
+    # its rows are blocked (Sept 24, 2026: three submissions failed every hour and sat at the queue's front).
+    "tape_failures_before_block": 12,
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -224,6 +227,9 @@ TAPE_INDEX_MAX = 64
 #: The tail of a traceback an alert carries (`_traceback`, a private key: `ledger.public_view`
 #: strips it from everything published).
 TRACEBACK_CHARS = 2000
+#: What the House's tape reader says when NEEDS ask for more history than it will ever fetch
+#: (`league/tapes.py`: at most `MAX_PAGES` pages a read): unsupported input, never re-queued.
+TOO_LONG = "ask for a shorter window"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -1212,7 +1218,7 @@ class Lab:
             self._forget_tape(key)
             raise
         except Exception as exc:  # noqa: BLE001 - no tape is a blocked candidate, not a crash
-            message = f"{type(exc).__name__}: {str(exc)[:200]}"
+            message = self._tape_failure(key, f"{type(exc).__name__}: {str(exc)[:200]}")
             self._tape_errors[key] = (self._now(), message)
             self._forget_tape(key)
             raise LabError(message) from None
@@ -1239,7 +1245,54 @@ class Lab:
         self._tapes[key] = (self._now(), ident, cut)
         source = tape.get("source") if isinstance(tape.get("source"), Mapping) else {}
         self._index_tape(key, ident, str(tape_id), "history-dev" if source.get("window") else "live")
+        self._tape_built(key)
         return ident, cut
+
+    def _tape_failures(self) -> dict[str, dict[str, Any]]:
+        """Tape key -> its failed builds in a row (`meta` `tape_failures`): the folded error, how many
+        hourly tries in a row it came back, since when."""
+        try:
+            raw = json.loads(self._meta("tape_failures") or "{}")
+        except ValueError:
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _tape_failure(self, key: str, message: str) -> str:
+        """What a failed build of the House's tape for these NEEDS means for the rows that need it.
+
+        Unsupported input -- the row is blocked, not re-queued -- when the House's tape reader refuses the
+        size of what the NEEDS ask for (`TOO_LONG`: it follows at most `tapes.MAX_PAGES` pages a read, so the
+        same NEEDS get the same answer on every try). mcentee-hddb4ae's three alpaca-megacaps submissions
+        (12 names of daily bars with a 260-bar warm-up) failed that way every hour on Sept 23-24, 2026 and
+        were re-queued at priority 0 for ever, at the front of the queue.
+
+        And the invariant for the answers nobody wrote down: the same failure (numbers folded) that has come
+        back `tape_failures_before_block` hourly tries in a row is unsupported input too, with ONE warning;
+        the count is kept in `meta` (`tape_failures`), so a restart does not start it again, and a build that
+        works clears it (`_tape_built`). Anything else: the message as it is, tried again after the hour."""
+        if TOO_LONG in message:
+            return f"unsupported input: {message}"
+        failures = self._tape_failures()
+        folded = re.sub(r"\d+", "#", message)
+        row = failures.pop(key, None) or {}
+        same = row.get("error") == folded
+        tries = int(row.get("tries") or 0) + 1 if same else 1
+        since = float(row.get("since") or self._now()) if same else self._now()
+        failures[key] = {"error": folded, "tries": tries, "since": since}
+        self._set_meta("tape_failures", json.dumps(dict(list(failures.items())[-TAPE_INDEX_MAX:])))
+        limit = int(self.settings["tape_failures_before_block"])
+        if tries < limit:
+            return message
+        if tries == limit:
+            self.house.alert("warning", f"the lab blocks the queued rows whose tape failed the same way {tries} times in a row since "
+                                        f"{_iso(since)}: {message}")
+        return f"unsupported input: the House's tape for these NEEDS failed the same way {tries} times in a row ({message})"
+
+    def _tape_built(self, key: str) -> None:
+        """A tape that built clears its failures in a row."""
+        failures = self._tape_failures()
+        if failures.pop(key, None) is not None:
+            self._set_meta("tape_failures", json.dumps(failures))
 
     def _load_tape_index(self) -> dict[str, dict[str, Any]]:
         """The tape index as `meta` `tape_index` holds it, its fresh entries only, oldest first."""
@@ -1311,13 +1364,21 @@ class Lab:
         if not rows:
             return None
         self._batch_turn = getattr(self, "_batch_turn", 0) + 1
-        largest_turn = int(rows[0]["priority"]) != 0 and self._batch_turn % 2 == 0
+
+        def needs_key(row: sqlite3.Row) -> str:
+            try:
+                return tape_key(json.loads(row["needs"]))
+            except (TypeError, ValueError):
+                return str(row["needs"])
+
+        # An agent's submission is served first -- one that CAN be served: a row whose tape failed this hour
+        # is not the queue's front (Sept 24, 2026: three submissions whose tape never built sat at priority 0,
+        # and the largest-group turn never ran while they did).
+        now = self._now()
+        failed = {key for key, (at, _) in self._tape_errors.items() if now - at < 3600}
+        front = next((r for r in rows if needs_key(r) not in failed), rows[0])
+        largest_turn = int(front["priority"]) != 0 and self._batch_turn % 2 == 0
         if largest_turn:
-            def needs_key(row: sqlite3.Row) -> str:
-                try:
-                    return tape_key(json.loads(row["needs"]))
-                except (TypeError, ValueError):
-                    return str(row["needs"])
             sizes: dict[str, int] = {}
             for row in rows:
                 sizes[needs_key(row)] = sizes.get(needs_key(row), 0) + 1
