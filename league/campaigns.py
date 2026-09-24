@@ -122,10 +122,14 @@ class CampaignBudget:
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
         phase = self.db.execute("SELECT * FROM phase WHERE id=?", (self.policy["phase"],)).fetchone()
-        if self.db.execute("SELECT COUNT(*) FROM phase").fetchone()[0] != 1:
-            raise CampaignClosed("campaign policy changed; explicit migration is required")
-        if phase["policy"] != encoded:
-            self._amend(phase["policy"], encoded)
+        try:
+            if self.db.execute("SELECT COUNT(*) FROM phase").fetchone()[0] != 1:
+                raise CampaignClosed("campaign policy changed; explicit migration is required")
+            if phase["policy"] != encoded:
+                self._amend(phase["policy"], encoded)
+        except BaseException:
+            self.db.close()  # a refused phase is never opened, and its connection is not left behind
+            raise
         self.started = phase["started"]
         self.ends = self.started + float(self.policy["duration_hours"]) * 3600
 
