@@ -289,7 +289,9 @@ def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, d
     House's own ledger (Sept 24, 2026). An own fill is a venue or cross fill, never the House's closing sale;
     a settlement is a `book.settle` or a sale that left the position flat, on any book, counted once per
     EVENT on the event books (`evaluator.event_key`, the allocator's count) and once per trade on Alpaca,
-    after each book's evidence cutoff. A member that has not reached it is censored at its death or now.
+    after each book's evidence cutoff -- never the House's closing sale either: a forced exit at a death
+    says nothing of how long the desk's markets take (the review of #245). A settlement after a death is
+    the market's own verdict and counts. A member that has not reached it is censored at its death or now.
 
     Each desk: `members`, `reached`, `hours` (the Kaplan-Meier median, None when it is not reached: most
     members never traded enough to measure how long the desk's markets take, which says nothing of the
@@ -322,7 +324,9 @@ def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, d
         if entry.kind == "book.fill" and p.get("source") in ("venue", "cross") \
                 and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
             first.setdefault(entry.agent, at)
-        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)):
+        closing = str(p.get("reason") or "").startswith(HOUSE_CLOSING)  # the House's sale at a death, never the member's
+        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)
+                                           and not closing):
             key = (event_key(p.get("instrument")) if book in EVENT_BOOKS else None) or f"#{entry.seq}"
             closes.setdefault(entry.agent, []).append((at, key))
     desks: dict[str, list[tuple[float, bool]]] = {}
@@ -1189,8 +1193,16 @@ class House:
         if kind is None:
             return None
         taker, maker = self._entry_fills(parent)
-        if kind in ("liquidity", "fee") and not (taker and taker >= maker and posts_maker_entries(child.code)):
-            return None
+        if kind in ("liquidity", "fee"):
+            if not (taker and taker >= maker and posts_maker_entries(child.code)):
+                return None
+            proven = self._taker_proven(parent)
+            if proven is not None:
+                # A maker "fix" of a mechanism whose family's pooled TAKER record is proven positive -- the record the
+                # real book's X0 rule reads to let that family take -- is not a defect fix (the main session's
+                # decision on the review of #245, Sept 24, 2026). Told once, as L1 tells its supersessions.
+                self._note_supersede_skipped(parent, child, kind, proven)
+                return None
         if kind == "side" and not (taker or maker):
             return None
         return (f"{kind}: its account names the parent's entry as the defect, and {taker} of the parent's "
@@ -1230,6 +1242,41 @@ class House:
         if fork is None or self._code_at(parent, fork.seq) != parent.code_sha256:
             return None
         return reason
+
+    def _taker_proven(self, agent: Agent) -> dict[str, Any] | None:
+        """The agent's family's pooled TAKER record when it is proven positive, else None: read from the one source the
+        real book's `real_entry_liquidity` rule (X0) reads to let the family take -- `Allocator.family_taker`, which
+        the book is handed as `family_taker` -- never recomputed. None while the allocator is off, as the book reads it,
+        and when the record cannot be read (the book then treats the family as unproven too)."""
+        reader = getattr(getattr(self, "allocator", None), "family_taker", None)
+        if reader is None:
+            return None
+        try:
+            record = reader(agent.id)
+        except Exception:  # noqa: BLE001 - `Allocator.family_taker` never raises; an unreadable record proves nothing
+            return None
+        return dict(record) if isinstance(record, Mapping) and record.get("positive") is True else None
+
+    def _note_supersede_skipped(self, parent: Agent, child: Agent, kind: str, taker: Mapping[str, Any]) -> None:
+        """Tell once a pair (house.json `supersede_skipped`, so a restart does not tell it again) that L1 left a parent
+        in place because its family's taker record is proven: an info alert with the record, beside the alerts that
+        tell L1's supersessions."""
+        key = f"{parent.id}|{parent.code_sha256[:16]}|{child.id}|{child.code_sha256[:16]}"
+        with self._state_lock:
+            told = self._state.setdefault("supersede_skipped", {})
+            if key in told:
+                return
+            told[key] = now_iso(self.clock)
+            while len(told) > 200:
+                told.pop(next(iter(told)))
+        bound = taker.get("bound")
+        measured = f"{int(taker.get('n') or 0)} taker settlements" + ("" if bound is None else f", bound {float(bound):+.4g}")
+        self.alert("info", f"{parent.id} is not superseded by its research child {child.id}: the child's account names a {kind} "
+                           f"defect of the parent's taker entry, but the family {parent.family}'s pooled taker record is proven "
+                           f"positive ({measured}), which is what lets the family take on the real book: a maker fix of a "
+                           "proven taker mechanism is not a defect fix (allocator.corrected_child_supersedes)",
+                   parent=parent.id, child=child.id, family=parent.family, defect=kind, taker=dict(taker),
+                   rule="allocator.corrected_child_supersedes")
 
     def _code_at(self, agent: Agent, seq: int) -> str | None:
         """The code an agent ran at a ledger position: its birth's, or its latest `agent.strategy` row's before it."""
@@ -3817,16 +3864,26 @@ class House:
         """Book a holding the venue will not trade as dust (Sept 24, 2026), the way the reconciliation books a
         sub-cent position difference (`Book._position_dust`): off the agent's account at no price, onto the
         House row, which then holds the units the venue still shows, so the book still reconciles and the
-        account can close. Said once on the ledger: the two dust fills and one info alert."""
+        account can close. Said once on the ledger: the two dust fills and one info alert.
+
+        The two fills are ONE ledger group (`Ledger.append_many`), applied to the book only once both are written:
+        as two appends, a crash or a failed write between them (a "database is locked" on a busy box) left the book
+        short of the venue by the holding -- under a cent the reconciliation re-books the crumb, but dust by the
+        venue's minimal quantity can be worth more, and that difference froze the book's entries, in the process
+        and after a restart (the review of #245, Sept 24, 2026)."""
         from .book import text
 
+        common = {"book": book.name, "source": "dust", "instrument": instrument.to_dict(), "quantity": text(quantity), "price": "0",
+                  "fee_usd": "0", "cash_delta": "0", "real_money": book.real_money}
         with book._lock:
-            entry = self.ledger.append("book.fill", {
-                "book": book.name, "source": "dust", "instrument": instrument.to_dict(), "side": "sell", "quantity": text(quantity),
-                "price": "0", "fee_usd": "0", "cash_delta": "0", "position_delta": text(-quantity), "real_money": book.real_money,
-                "reason": f"the House booked it as dust: {why}"}, agent=agent.id)
-            book._apply(entry.kind, agent.id, entry.payload, entry.at)
-            book._position_dust(instrument, quantity)
+            entries = self.ledger.append_many([
+                {"kind": "book.fill", "agent": agent.id, "payload": {**common, "side": "sell", "position_delta": text(-quantity),
+                                                                     "reason": f"the House booked it as dust: {why}"}},
+                # The House row, as `Book._position_dust` books a surplus: the units the venue still shows.
+                {"kind": "book.fill", "agent": HOUSE, "payload": {**common, "side": "buy", "position_delta": text(quantity)}},
+            ])
+            for entry in entries:
+                book._apply(entry.kind, entry.agent, entry.payload, entry.at)
         self.alert("info", f"{agent.id}: {book.name} booked {text(quantity)} {instrument.market_id or instrument.symbol} as dust "
                            f"instead of selling it ({why}); the account can close")
 

@@ -321,7 +321,8 @@ status is exposed in health and agent research context; qualification is distinc
    traders with 38, 26 and 24 fills displaced, and mullins-14's replay-passed candidate cancelled with
    it). Each desk's **evidence clock** -- the Kaplan-Meier median hours from a member's first own fill
    to its third independent settlement over the last `EVIDENCE_CLOCK_DAYS` (7), the scoreboard's
-   definition (`measure_evidence_clocks`, events counted as the allocator counts them) -- is measured
+   definition (`measure_evidence_clocks`, events counted as the allocator counts them; the House's
+   closing sales at a death are the House's, never a member's settlement) -- is measured
    at startup and daily (`evidence_clocks`, house.json `evidence_clocks`, an info alert when it
    changes); a paper seat's grace is the larger of the plain grace and its desk's clock, the clock in
    wall-clock hours (a desk that keeps hours still needs its twelve session hours), and a clock the
@@ -355,13 +356,15 @@ status is exposed in health and agent research context; qualification is distinc
    code, or the parent's research candidate made while it ran that code -- never the child's fix of
    its own earlier file, which is how meriwether-h2d625d-2's maker rewrite read at T0), borne out by the
    programs (`_entry_fills`: a taker parent, and `posts_maker_entries`: a child whose entries rest
-   post-only, for a liquidity or fee defect) -- demoted from real money through the evaluator first; the child
+   post-only, for a liquidity or fee defect), and never a parent whose family's pooled TAKER record is
+   proven positive (`_taker_proven`: `Allocator.family_taker`, the record the real book's X0 rule reads to
+   let the family take; the skip is told once, `supersede_skipped`) -- demoted from real money through the evaluator first; the child
    enters real money on its own evidence. A pair it found nothing in is looked at again hourly.
    **Dust and refused wind-downs** (Sept 24, 2026): a holding the venue will not trade (worth under a
    cent even at the ask -- one under a cent at its mark, the last bid, is quoted again -- or under the
    venue's minimal order quantity where its asset record states one)
    is booked as dust (`_book_dust`: off the account, onto the House row, as `Book._position_dust`
-   books a reconciliation's crumbs) instead of sent, and the same refusal of a House-sent sale
+   books a reconciliation's crumbs, both rows one ledger group) instead of sent, and the same refusal of a House-sent sale
    `WIND_DOWN_REFUSALS` (3) times in a row stops its retries with one warning naming the order
    (`wind_down_refusals` in house.json), until the holding changes or a day has passed
    (`WIND_DOWN_RETRY_SECONDS`).

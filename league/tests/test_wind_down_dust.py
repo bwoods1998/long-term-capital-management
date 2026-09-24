@@ -111,6 +111,39 @@ class DustWindDown(SeatCase):
         self.assertEqual(len(self.broker.submitted), 5)
         self.assertNotIn(self.LINK.key, ((self.house._state.get("wind_down_refusals") or {}).get(agent.id) or {}).get(book.name, {}))
 
+    def test_a_crash_between_the_two_dust_rows_leaves_the_book_consistent(self):
+        """The review of #245 (Sept 24, 2026): the agent's dust row and the House's were two appends, so a crash
+        between them left the book short of the venue by the holding. Under a cent the reconciliation re-books the
+        crumb; dust by the venue's minimal quantity can be worth more, and that difference freezes the book's
+        entries. Both rows are one ledger group now: both or neither, in the process and after a restart."""
+        from unittest.mock import patch
+
+        from league.ledger import HOUSE, Ledger
+
+        agent = self.seated("haghani")
+        book = self.hold(agent, "0.5")  # six dollars of LINK ...
+        self.broker.cash -= Decimal("0.5") * Decimal("12.27")  # (the venue paid for it too)
+        self.assertTrue(book.reconcile().ok)
+        self.broker.asset = lambda symbol: {"min_order_size": Decimal("1")}  # ... under the venue's minimal quantity
+        real = Ledger._append_one
+
+        def crash(ledger, kind, payload, *, agent=HOUSE, **kw):
+            if kind == "book.fill" and payload.get("source") == "dust" and agent == HOUSE:
+                raise RuntimeError("the House stopped between the two dust rows")
+            return real(ledger, kind, payload, agent=agent, **kw)
+
+        with patch.object(Ledger, "_append_one", crash):
+            self.house.kill(agent, "displaced", "test")
+        self.assertTrue(book.reconcile().ok, "in the same process")
+        self.house.close(wait=None)
+        self.house = self.new_house()  # a restart on the same ledger and venue
+        restarted = self.house.books["alpaca-paper"]
+        self.assertTrue(restarted.reconcile().ok, "after a restart")
+        self.house._retry_wind_down(self.house.registry.get(agent.id), restarted)  # the next pass books it whole
+        dust = [(e.agent, e.payload["position_delta"]) for e in self.house.ledger.iter(kinds="book.fill") if e.payload.get("source") == "dust"]
+        self.assertEqual(dust, [(agent.id, "-0.5"), ("house", "0.5")])
+        self.assertTrue(restarted.reconcile().ok)
+
 if __name__ == "__main__":
     import unittest
 

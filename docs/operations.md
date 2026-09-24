@@ -186,6 +186,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   - the lab's `lab.sqlite` table counts, its `lab.*` ledger rows, the batches it ran since `--since`,
     and from `health.json` whether its step is failing (`failing_since`, `failures_in_a_row`,
     `error`; D1, Sept 24, 2026);
+  - the seat market (`## seats`, S1-S4 of the close-the-gaps run, Sept 24, 2026): waiters by class
+    (the `retained` candidates of dead authors too), the displaceable count, the seats holding no
+    evidence (`seats_holding_none`: count and the first ids), the desks' evidence clocks, and why each
+    class of waiter was last refused a seat; and each House-sent sale stopped after three identical
+    refusals (`wind down stopped`, from house.json `wind_down_refusals`);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why) and, since Deploy A, `settled_usd`,
     `inflight_usd` and the `previous` month, refusals, alerts, and the site checkpoint's age and
@@ -297,7 +302,8 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     real money with no ranked forward score, no fill since their program's opportunity and no
     grace left -- seats that carry no evidence) and `evidence_clocks` (`at`, and `hours` by desk:
     the median hours from a member's first fill to its third independent settlement over the last
-    7 days, null where the median was never reached and the plain 12-hour grace stands).
+    7 days, the House's closing sales at a death not counted, null where the median was never
+    reached and the plain 12-hour grace stands).
     `retained` waiters are the latest replay-passed research candidates of residents that died
     holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
     admission pass on their author's line (a proven family's first, then the longest wait), dropped
@@ -607,7 +613,8 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   the venue will not trade -- worth under a cent even at the ask (a holding under a cent at its mark,
   the last bid, is quoted again: a stub bid on a thin book is not a price), or under the venue's
   minimal order quantity where the asset record states one -- and moved it off the account onto the House row, as
-  the reconciliation books position dust (two `book.fill` rows with `source: dust`); the account then
+  the reconciliation books position dust (two `book.fill` rows with `source: dust`, written as one
+  ledger group: a crash between them cannot leave the book short of the venue); the account then
   closes. Before, haghani-h426990's 0.000000001 LINK/USD was sent every five minutes and refused 107
   times ("order qty must be >= minimal qty of order 0.000000002").
 - **"the House's sale of ... was refused 3 times in a row"** (warning): the same refusal of a
@@ -624,6 +631,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   entries post-only, for a liquidity or fee defect); the parent was demoted from real money (a `demote` verdict,
   `band_to: paper`, `superseded_by`) and retired `superseded`. The child enters real money when the
   allocator's rules seat it on its own evidence.
+- **"... is not superseded by its research child ..."** (info, once a parent and child pair; house.json
+  `supersede_skipped`): L1 found a maker fix of the parent's taker entry, but the family's pooled TAKER
+  record is proven positive (`Allocator.family_taker`, the record the real book's X0 rule reads to let
+  the family take): a maker fix of a proven taker mechanism is not a defect fix. The alert carries the
+  record (`taker`); the pair is judged again hourly, and supersedes once the record is no longer proven.
 - **"the desks' evidence clocks ..."** (info, at most daily): the House measured each desk's
   evidence clock and the seat grace follows it (`house.json` `evidence_clocks`); a measurement that
   fails is a warning and the last reading stands.
@@ -753,7 +765,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `merton.schedule_hours.teacher` | 12 | The teacher's cadence (6 until Sept 24, 2026), bounded 6-24 h by `merton_bounds` (`economy.check_bounds`, so `league.ci`). The burst no longer accelerates it |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
-| `league/constitution.py` | `allocator.corrected_child_supersedes` | on (Deploy B) | L1 (Sept 24, 2026): a research child that passed replay with a fix to its real-money parent's entry mechanism (liquidity, fee, side, borne out by the parent's own entry fills) supersedes the parent at once, demoted from real money through the evaluator and retired `superseded` (`House._supersede_by_research`). The account must be of the parent's CURRENT program and a liquidity or fee fix must rest its entries post-only (review of #245: the child meriwether-h2d625d-2 fixed its own moneyline file, not its parent's KXMLBTOTAL entries). Absent or false: only merged repairs supersede (`_retire_superseded`). A money rule: re-ratify after a change |
+| `league/constitution.py` | `allocator.corrected_child_supersedes` | on (Deploy B) | L1 (Sept 24, 2026): a research child that passed replay with a fix to its real-money parent's entry mechanism (liquidity, fee, side, borne out by the parent's own entry fills) supersedes the parent at once, demoted from real money through the evaluator and retired `superseded` (`House._supersede_by_research`). The account must be of the parent's CURRENT program and a liquidity or fee fix must rest its entries post-only (review of #245: the child meriwether-h2d625d-2 fixed its own moneyline file, not its parent's KXMLBTOTAL entries); a parent whose family's pooled taker record is proven positive (`Allocator.family_taker`, as X0 reads it) is not superseded for a liquidity or fee fix. Absent or false: only merged repairs supersede (`_retire_superseded`). A money rule: re-ratify after a change |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
 | | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5; crypto 4, equity 2, option 24 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional at the rate of the fill's asset class (A8, Sept 23, 2026 ~22:00 UTC: each class's practice optimism against the order's reference at intent time, the larger of the notional-weighted mean and the round-trip reading, rounded up, never below 2; `docs/research/queries/2026-09-23/A8-haircut.py`). Options tightened from 10, crypto and stocks loosened to what was measured. A plain number charges every class (the rollback); a class not named pays the table's largest rate |

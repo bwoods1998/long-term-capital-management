@@ -124,6 +124,24 @@ class EvidenceClocks(EvidenceCase):
         self.assertEqual(saved["evidence_clocks"]["desks"][DESK]["hours"], 20.0)
         self.assertEqual(len(alerts(self.house, "info", "evidence clock")), 1)
 
+    def test_the_houses_closing_sales_are_not_a_members_settlements(self):
+        """The review of #245 (Sept 24, 2026): the House's sale of a dead member's holdings ("the House is closing
+        this account") counted as the member's settlement, so a member with two closes that died holding a third
+        position "reached" its third settlement at its death. The House's closing sales are the House's: a forced
+        exit at death says nothing of how long the desk's markets take (the scoreboard's own-fill rule)."""
+        member = self.seated("member")
+        self.buy(member)
+        self.clock.advance(3600)
+        self.close(member, 2)
+        self.house.registry.died(member.id, "displaced", "test")
+        self.clock.advance(60)
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "instrument": BTC, "side": "sell", "quantity": "0.001",
+                                               "price": "61000", "source": "venue", "realized": "1.0", "flat": True,
+                                               "reason": "the House is closing this account"}, agent=member.id)
+        desk = self.house.evidence_clocks(fresh=True)["desks"][DESK]
+        self.assertEqual((desk["members"], desk["reached"]), (1, 0), "censored at its death: its third close was the House's")
+        self.assertEqual(desk["longest_waiting_hours"], 1.0)
+
     def test_the_clocks_are_measured_at_startup_and_again_each_day(self):
         started = House(Path(self.dir.name) / "fresh", brokers={"alpaca-paper": FakeBroker("alpaca-paper")},
                         sandbox=LocalSandbox(Path(self.dir.name) / "fresh-boxes"), clock=self.clock,
@@ -575,6 +593,29 @@ class CorrectedChildren(EvidenceCase):
         with self.supersedes():
             self.assertEqual(self.house._supersede_by_research(), 0)
         self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+
+    def test_a_parent_whose_familys_taker_record_is_proven_is_not_superseded_for_a_maker_fix(self):
+        """The main session's decision on the review of #245 (Sept 24, 2026): a liquidity or fee "fix" of a mechanism
+        whose family's pooled TAKER record is proven positive -- the record the real book's X0 rule reads to let that
+        family take (`Allocator.family_taker`) -- is not a defect fix. The skip is told once, with its reason."""
+        parent = self.parent()
+        child = self.house.spawn(parent.line or parent.name, parent.family, parent.code, parent=parent.id,
+                                 params={"notional": 15.0}, reason="a parameter mutation of its parent")
+        self.house.evaluator.seat(child.id, 1, "test")
+        self.rewrite(child, MAKER, TAKER_FIX)
+        proven = {"family": parent.family, "positive": True, "n": 12, "mean_log": 0.021, "bound": 0.0043}
+        with self.supersedes(), patch.object(self.house.allocator, "family_taker", return_value=proven) as read:
+            self.assertEqual(self.house._supersede_by_research(), 0)
+            self.clock.advance(self.house.SUPERSEDE_RECHECK_SECONDS + 1)
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        read.assert_called_with(parent.id)
+        self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+        told = alerts(self.house, "info", "is not superseded", child.id, "taker record")
+        self.assertEqual(len(told), 1, "told once")
+        self.assertIn("12 taker settlements", told[0])
+        with self.supersedes(), patch.object(self.house.allocator, "family_taker", return_value={**proven, "positive": False}):
+            self.clock.advance(self.house.SUPERSEDE_RECHECK_SECONDS + 1)
+            self.assertEqual(self.house._supersede_by_research(), 1, "once the taker record is no longer proven, the fix supersedes")
 
 if __name__ == "__main__":
     import unittest
