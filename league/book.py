@@ -19,8 +19,20 @@ Every agent that trades on a venue trades through that venue's one `Book`. The b
 - reconciles its total cash and positions to the venue's, and books sub-cent differences as dust.
 
 Limit orders are never pooled: each is one venue order owned by one agent, so its fills need no
-apportioning. An intent that would cross one of the House's own resting orders is refused, as a
+apportioning. An ENTRY that would cross one of the House's own resting orders is refused, as a
 venue refuses a post-only order that would cross: the agent re-prices or waits.
+
+Exits are never walled off (D3, Sept 24, 2026). A sell that would cross the House's own resting
+order is cleared instead: the seller's own crossing order is cancelled first; a peer's resting bid
+is cancelled at the venue and, once the venue has confirmed the cancel and what had filled, the two
+are crossed inside the House at the bid's price (`_cross_resting`: the seller a taker, the bidder a
+maker, the House row balancing, one `book.cross_plan`); what cannot be crossed so (a cancel not
+confirmed, an order the venue has not acknowledged, any doubt) is re-priced as a post-only limit at
+the ask, and the order row says why. Before, 74 sells in the 48 hours to Sept 24 01:42Z were
+refused against a sibling's resting bid, and their positions sat hours past their stops.
+
+The real book's entry rules (X0, Sept 24, 2026) are read through the allocator's constitution keys:
+`longshot_floor_real`, `real_entry_liquidity` and `max_event_share` (`_real_entry_reasons`).
 
 Sliced exits (Sept 23, 2026). A sell -- an agent's exit, a wind-down, the horizon rule, a stop --
 worth more than the order cap is sent as SLICES, each its own venue order of at most the cap,
@@ -96,6 +108,12 @@ EXIT_PLAN_TTL_SECONDS = 3600
 NEVER_ARRIVED_SECONDS = 60
 NEVER_ARRIVED_RECHECK_SECONDS = 900
 NEVER_ARRIVED = "the venue has no such order"
+#: How often, and how far apart, an exit clearing the House's own order in its way (D3) reads that
+#: order again when the venue has not yet confirmed its cancel: Alpaca answers a cancel with 204 and
+#: moves the order through `pending_cancel` (read as open) to `canceled`. Past these reads the
+#: cancel is not confirmed within the pass, and the exit rests post-only at the ask instead.
+CANCEL_CONFIRM_READS = 2
+CANCEL_CONFIRM_WAIT_SECONDS = 0.25
 #: What the gateway counts an Alpaca market order at: the venue's own touch plus ten per cent
 #: (`gateway/lib/router.mjs`, "a market order may fill through the touch"). A slice sized on this
 #: price fits the gateway's per-order cap on its own pricing, not only on the book's.
@@ -152,6 +170,38 @@ def market_key(instrument: Instrument) -> str:
     if instrument.asset_class == "event":
         return f"event:{(instrument.market_id or instrument.symbol).upper()}:{instrument.venue}"
     return instrument.key
+
+
+def _event_of(ticker: str) -> str:
+    """The Kalshi event a market belongs to: its ticker without the last `-` segment
+    (`KXMLBTOTAL-26SEP231840MILPHI-6` -> `KXMLBTOTAL-26SEP231840MILPHI`). Every real Kalshi ticker on
+    the ledger at T0 (Sept 24, 2026) has three segments; the book's instruments carry no event field.
+    The same rule as the evaluator's `event_key` (the money owner's), to be pointed at one function."""
+    ticker = str(ticker or "").strip().upper()
+    return ticker.rsplit("-", 1)[0] if "-" in ticker else ticker
+
+
+def _allocator_rule(key: str) -> Decimal | None:
+    """A decimal money rule of the allocator's constitution that the book reads (X0), or None when
+    the key is absent or unreadable: then the book is exactly as it was without it."""
+    value = (CONSTITUTION.get("allocator") or {}).get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return money(str(value) if isinstance(value, (int, float)) else value)
+    except (ValueError, ArithmeticError):
+        return None
+
+
+#: `allocator.real_entry_liquidity`'s one value that holds a real event entry to a post-only limit.
+MAKER_UNLESS_TAKER_POSITIVE = "maker_unless_family_taker_positive"
+#: What the House tells an agent whose own resting order stood in its exit's way (`_clear_the_way`).
+OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would have met it, and an account never "
+                 "trades against itself")
+#: What a peer is told when its resting bid is cancelled to cross another agent's exit inside the House.
+PEER_CROSS_WHY = ("cancelled by the House to cross another agent's exit inside the House at your limit, as a maker "
+                  "(see your cross fill); the rest of this bid is not re-placed: bid again at your next wake if you "
+                  "still want it")
 
 
 # --------------------------------------------------------------------------------------- data
@@ -368,6 +418,17 @@ class Outcome:
     filled: Decimal = ZERO
 
 
+@dataclass
+class Clearing:
+    """What `Book._clear_the_way` did about the House's own orders an exit would have met (D3)."""
+
+    crossed: Decimal = ZERO  # sold inside the House to peers' resting bids
+    price: Decimal | None = None  # what it was sold at (the bids' prices, weighted)
+    left: Decimal = ZERO  # still to sell
+    doubt: str | None = None  # why what is left must rest post-only at the ask instead of its own order type
+    detail: str = ""
+
+
 @dataclass(frozen=True)
 class Reconciliation:
     ok: bool
@@ -455,6 +516,7 @@ class Book:
         event_capital_budget: Any = None,
         band_of: Any = None,
         halt_basis_usd: Any = None,
+        family_taker: Any = None,
     ):
         self.name = name
         self.broker = broker
@@ -476,6 +538,11 @@ class Book:
         #: the book's own rules stand exactly as before.
         self.band_of = band_of  # callable(agent) -> str | None
         self.halt_basis_usd = halt_basis_usd  # callable() -> Decimal | None
+        #: X0 (Sept 24, 2026): the agent's family's pooled TAKER record, from the allocator
+        #: (`{"family", "positive", "n", "mean_log", "bound"}` or None), which
+        #: `allocator.real_entry_liquidity` reads on a real event book. None, or no callable, is "not
+        #: measured", and unmeasured is not proven: a taker entry is refused.
+        self.family_taker = family_taker  # callable(agent) -> dict | None
         self.engine = RiskEngine()
         self.limits: dict[str, Limits] = {}
         self.accounts: dict[str, Account] = {}
@@ -976,7 +1043,8 @@ class Book:
     def risk_lines(self, agent: str) -> dict[str, Any]:
         """The daily-loss lines this book holds `agent` to now, for whatever publishes or reports the
         limits (health, an agent's standing): the per-desk rule, or "stay_drawdown" when the
-        allocator's lines govern a real bunt instead, and the halt with its basis."""
+        allocator's lines govern a real bunt instead, and the halt with its basis; and the real
+        book's entry rules in force (`entry_rules`, X0; empty on a practice book)."""
         pct, why = self._desk_daily_loss(agent)
         basis = self.halt_basis()
         return {
@@ -985,7 +1053,86 @@ class Book:
             "halt_pct": float(self._halt_pct(basis)),
             "halt_basis": "staked_accounts" if basis is None else "venue_grant_capital",
             "halt_basis_usd": None if basis is None else float(basis),
+            "entry_rules": self.entry_rules(),
         }
+
+    def entry_rules(self) -> dict[str, Any]:
+        """The constitution's entry rules this book enforces (X0, Sept 24, 2026): on a real book only,
+        and only the keys the constitution carries. Each binds entries on event contracts."""
+        if not self.real_money:
+            return {}
+        out: dict[str, Any] = {}
+        floor = _allocator_rule("longshot_floor_real")
+        if floor is not None:
+            out["longshot_floor_real"] = float(floor)
+        if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") == MAKER_UNLESS_TAKER_POSITIVE:
+            out["real_entry_liquidity"] = MAKER_UNLESS_TAKER_POSITIVE
+        share = _allocator_rule("max_event_share")
+        if share is not None:
+            out["max_event_share"] = float(share)
+        return out
+
+    def _family_taker(self, agent: str) -> Mapping[str, Any] | None:
+        """The agent's family's pooled taker record from the House, or None when it is not measured,
+        not wired, or cannot be read (never a pass: unmeasured is not proven)."""
+        if self.family_taker is None:
+            return None
+        try:
+            record = self.family_taker(agent)
+        except Exception:  # noqa: BLE001 - a record the House cannot read is an unmeasured one
+            return None
+        return record if isinstance(record, Mapping) else None
+
+    def _real_entry_reasons(self, intent: Intent, quote: Quote | None, equity: Decimal, account: Account,
+                            reservations: Sequence[tuple[str, Instrument, str, Decimal, Decimal, str]]) -> list[str]:
+        """X0 (Sept 24, 2026): the real book's entry rules on event contracts, each read through a key
+        of the allocator's constitution and absent with it. The longshot floor rides the risk engine's
+        own longshot rule (`check`); these are the other two.
+
+        - `real_entry_liquidity` "maker_unless_family_taker_positive": an entry must be a post-only
+          limit unless the agent's family has a positive pooled TAKER record (`family_taker`). The taker
+          mechanisms were the loss engine of the allocator's nine promotions to real money (15-minute
+          crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16).
+        - `max_event_share`: the agent's exposure to one event -- its holdings there at cost, its
+          working buys on every market of the event, and this order -- at most that share of its
+          equity on the book. meriwether-h7d7702 held NO at strikes 6, 7 and 8 of one MLB total, which
+          lost together (Sept 23, 2026)."""
+        if not self.real_money or intent.side != "buy" or intent.instrument.asset_class != "event":
+            return []
+        reasons: list[str] = []
+        liquidity = str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "")
+        if liquidity == MAKER_UNLESS_TAKER_POSITIVE and not (intent.order_type == "limit" and intent.post_only):
+            record = self._family_taker(intent.agent)
+            if not (record is not None and record.get("positive") is True):
+                family = str((record or {}).get("family") or "").strip()
+                if record is not None and record.get("n") is not None:
+                    bound = record.get("bound")
+                    measured = f"{int(record['n'])} taker settlements" + ("" if bound is None else f", bound {float(bound):.4g}")
+                else:
+                    measured = "no pooled taker record is measured for this agent's family"
+                reasons.append(
+                    f"a real entry on {family or 'this venue'} must be a post-only limit until the family's pooled taker record "
+                    f"is positive ({measured}): send a limit with post_only, which rests or is refused "
+                    "(constitution allocator.real_entry_liquidity)"
+                )
+        share = _allocator_rule("max_event_share")
+        if share is not None and share > 0:
+            event = _event_of(intent.instrument.market_id or intent.instrument.symbol)
+            price = intent.limit_price if intent.order_type == "limit" and intent.limit_price else (quote.ask if quote is not None else None)
+            if price is not None and price > 0:
+                held = sum((h.cost for h in account.holdings.values() if h.instrument.asset_class == "event" and h.cost > 0
+                            and _event_of(h.instrument.market_id or h.instrument.symbol) == event), ZERO)
+                working = sum((quantity * at * instrument.multiplier for owner, instrument, side, quantity, at, _ in reservations
+                               if owner == intent.agent and side == "buy" and instrument.asset_class == "event"
+                               and _event_of(instrument.market_id or instrument.symbol) == event), ZERO)
+                total = held + working + intent.quantity * price * intent.instrument.multiplier
+                if total > share * max(equity, ZERO):
+                    reasons.append(
+                        f"one event may hold at most {float(share):.0%} of the stake: {event} would hold ${total:.2f} of this "
+                        f"account's ${equity:.2f} (holdings at cost, working buys on every market of the event, and this order; "
+                        "constitution allocator.max_event_share)"
+                    )
+        return reasons
 
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
@@ -1118,8 +1265,12 @@ class Book:
             self.day_open[agent] = (day, opened[agent])
             self._day_open_unmarked.add(agent)
 
-    def check(self, intent: Intent, quote: Quote | None, now: str, *, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[str]:
-        """Every reason this intent may not trade. Empty means it may."""
+    def check(self, intent: Intent, quote: Quote | None, now: str, *, pending: Sequence[tuple[Intent, Quote]] = (),
+              clearing: bool = False) -> list[str]:
+        """Every reason this intent may not trade. Empty means it may.
+
+        `clearing`: the caller clears the way for a sell itself (`_clear_the_way`), so a sell is not
+        refused for crossing the House's own resting order (D3). An entry always is."""
         reasons: list[str] = []
         limits = self.limits.get(intent.agent)
         if limits is None:
@@ -1179,6 +1330,16 @@ class Book:
                 working_sells[key] = working_sells.get(key, ZERO) + quantity
             else:
                 working_buys[key] = working_buys.get(key, ZERO) + value
+        # X0 (Sept 24, 2026): on a real book the longshot floor is the larger of the book's own
+        # `min_event_price` (0.15, which practice books keep) and `allocator.longshot_floor_real`:
+        # 20-cent ETH strikes lost twice on real money on Sept 23. The risk engine's rule applies it,
+        # to entries only, as it always has.
+        min_event_price = money(self.rules["min_event_price"])
+        real_floor = _allocator_rule("longshot_floor_real") if self.real_money else None
+        if real_floor is not None and real_floor > min_event_price:
+            min_event_price = real_floor
+        else:
+            real_floor = None
         ctx = RiskContext(
             manifest=self._manifest(intent.agent, limits),
             desk_equity=equity,
@@ -1198,7 +1359,7 @@ class Book:
             venue_capabilities=capabilities,
             working_sells=working_sells,
             working_event_buys=working_event_buys,
-            min_event_price=money(self.rules["min_event_price"]),
+            min_event_price=min_event_price,
             max_event_market_pct=money(self.rules["max_event_market_pct"]),
             max_event_market_floor_pct=money(self.rules["max_event_market_floor_pct"]),
             max_event_cluster_floor_pct=money(self.rules["max_event_cluster_floor_pct"]),
@@ -1209,6 +1370,9 @@ class Book:
         for reason in decision.reasons:
             if halt_basis is not None and reason.startswith("floor daily loss"):
                 reason += f" of the {self.broker.venue} grant capital ${halt_basis:.2f} (constitution allocator.real_halt)"
+            if real_floor is not None and reason.startswith("buying a longshot"):
+                reason += (f"; on real money the floor is {real_floor} (constitution allocator.longshot_floor_real), where cheap "
+                           f"contracts lost twice on Sept 23, 2026; practice books keep {self.rules['min_event_price']}")
             reasons.append(reason)
         # The league's own rules.
         reference = decision.reference_price
@@ -1279,8 +1443,9 @@ class Book:
                 reasons.append("the House cannot tell when this market resolves, so it cannot be entered")
             elif hours > limits.max_hours_to_resolve:
                 reasons.append(f"this market is expected to resolve in {hours:.0f} hours; entries must resolve within {limits.max_hours_to_resolve:g}")
+        reasons.extend(self._real_entry_reasons(intent, quote, equity, account, reservations))
         crossing = self._would_cross_own(intent, quote)
-        if crossing:
+        if crossing and not (clearing and reducing):
             reasons.append(crossing)
         if intent.order_type != "market":
             # These market orders will be routed after the limits. A limit placed now must not
@@ -1308,6 +1473,315 @@ class Book:
                 return "this price would trade against the House's own resting order; re-price or wait"
         return None
 
+    # ------------------------------------------------------------ exits (D3)
+    def _crossing_orders(self, intent: Intent) -> list[Working]:
+        """The House's open orders this intent could execute against (`_would_cross_own`'s test, in YES
+        space for Kalshi legs), best price for the intent first -- a sell meets the highest bid first,
+        as at the venue -- then the earliest, then by id; an unpriced order (a market order in flight)
+        last."""
+        side, price = yes_space(intent.instrument, intent.side, intent.limit_price)
+        key = market_key(intent.instrument)
+        found: list[tuple[tuple[Any, ...], Working]] = []
+        for working in self.orders.values():
+            if not working.open or market_key(working.instrument) != key:
+                continue
+            other_side, other_price = yes_space(working.instrument, working.side, working.limit_price)
+            if other_side == side:
+                continue
+            if price is None or other_price is None or (side == "buy" and price >= other_price) or (side == "sell" and price <= other_price):
+                rank = (1, ZERO) if other_price is None else (0, -other_price if side == "sell" else other_price)
+                found.append(((*rank, working.submitted_at, working.order_id), working))
+        return [working for _, working in sorted(found, key=lambda pair: pair[0])]
+
+    @staticmethod
+    def _doubt_about(working: Working) -> str | None:
+        """Why the House cannot say where one of its own crossing orders stands (None: it can). A market
+        order in flight, or an order the venue has not acknowledged, may trade at any moment: doubt,
+        and doubt neither crosses nor takes liquidity (`_clear_the_way`, step 3)."""
+        if working.order_type != "limit" or working.limit_price is None or working.limit_price <= 0:
+            return f"the House's order {working.order_id} that could meet it is a market order still in flight"
+        if working.status not in ("accepted", "partially_filled") or not working.broker_order_id:
+            return f"the venue has not acknowledged the House's order {working.order_id} that could meet it"
+        return None
+
+    def _crossable(self, working: Working, intent: Intent, *, cross: bool, touch: Decimal | None) -> bool:
+        """Whether this resting order of another agent's may be cancelled and crossed with the exit
+        inside the House: one agent's bid on the same leg, on a book in good standing, AT OR ABOVE the
+        venue's bid for the leg -- where a sell at the venue would really have met it. A bid under the
+        touch is not what the venue would have filled the exit against: crossed at its limit, the
+        bidder would buy at a price the market never reached (its record flattered by the gap) and
+        the exiter would sell under the bid it could have had (Sept 24, 2026: the alpaca-crypto-alts
+        bids rested 1.3-3% under their 32-bar means). Such an exit goes to the venue instead, one step
+        above the House's bid (`_floored_exit`). A slice (`cross=False`) is never crossed, and neither
+        is a post-only exit, which asked never to take: it rests one step above the House's bid."""
+        if not cross or intent.post_only or self.frozen or touch is None:
+            return False
+        try:
+            if self.kill_switch and self.kill_switch():
+                return False
+        except Exception:  # noqa: BLE001 - a switch that cannot be read is on, for this purpose
+            return False
+        if len(working.shares) != 1 or working.side != "buy" or position_key(working.instrument) != position_key(intent.instrument):
+            return False
+        return working.limit_price is not None and working.limit_price >= touch
+
+    def _clear_the_way(self, intent: Intent, quote: Quote | None, now: str, *, cross: bool = True) -> Clearing | None:
+        """D3 (Sept 24, 2026): a sell that would cross the House's own resting order is never refused
+        for it. None when nothing of the House's stands in its way (the normal path, unchanged).
+
+        1. The seller's OWN crossing orders are cancelled first, through `cancel`.
+        2. A PEER's resting bid at or above the venue's bid (`_crossable`), best price first, is read
+           at the venue (a fill since the last poll is booked, and an order already gone is passed
+           over), cancelled, and crossed with the exit inside the House at the bid's price
+           (`_cross_resting`) only once the venue has confirmed the cancel and what had filled
+           (`cancel` books the venue's answer to a read AFTER the cancel). What the exit still needs
+           meets the next such bid; what is left of a bid is not re-placed. The first bid that may not
+           be crossed stops the crossing, and what is left goes to the venue one step above the House's
+           best bid (`_exit_past_the_house`).
+        3. Doubt about a crossing order -- a cancel not confirmed, an order the venue has not
+           acknowledged, a market order in flight, a venue that cannot be read -- stops the crossing,
+           and what is left of the exit rests post-only at the ask (`_post_only_exit`).
+        A fill in flight is never booked twice: every venue fill goes through `_attribute`, which books
+        only the venue's cumulative count above what is booked, and a cross takes only what the venue
+        says was left unfilled of an order it says is cancelled."""
+        if intent.side != "sell" or not self._crossing_orders(intent):
+            return None
+        touch = quote.bid if quote is not None and quote.bid is not None and quote.bid > 0 else None
+        doubt: str | None = None
+        withdrawn: list[str] = []
+        for working in [w for w in self._crossing_orders(intent) if any(s.agent == intent.agent for s in w.shares)]:
+            if working.status not in ("accepted", "partially_filled") or not all(s.agent == intent.agent for s in working.shares):
+                doubt = doubt or f"your own order {working.order_id} could meet it and the venue has not confirmed where it stands"
+                continue
+            self.cancel(intent.agent, working.order_id, why=OWN_CROSS_WHY)
+            self._await_cancel(working, now, why=OWN_CROSS_WHY)
+            if working.open:
+                doubt = doubt or f"the venue has not confirmed the cancel of your own order {working.order_id}"
+            else:
+                withdrawn.append(working.order_id)
+        left = intent.quantity
+        parts: list[tuple[Working, Share, Decimal]] = []
+        for _ in range(len(self.orders) + 1):
+            peers = [w for w in self._crossing_orders(intent) if not any(s.agent == intent.agent for s in w.shares)]
+            if left <= 0 or not peers:
+                break
+            working = peers[0]
+            doubt = doubt or self._doubt_about(working)
+            if doubt or not self._crossable(working, intent, cross=cross, touch=touch):
+                break
+            reference = working.broker_order_id or working.order_id
+            try:
+                self._attribute(working, self.broker.get_order(reference), now)  # a fill since the last poll is booked first
+            except BrokerError as exc:
+                doubt = f"the venue could not be read about the House's order {working.order_id} ({str(exc)[:120]})"
+                break
+            if not working.open:
+                continue  # filled or closed at the venue: it no longer rests
+            share = working.shares[0]
+            need = min(left, share.quantity - share.filled) * working.limit_price * working.instrument.multiplier
+            if self._account(share.agent).cash < need:
+                doubt = f"the bidder of the House's order {working.order_id} cannot pay for it"  # never: its bid reserved the cash
+                break
+            self.cancel(share.agent, working.order_id, why=PEER_CROSS_WHY)
+            self._await_cancel(working, now, why=PEER_CROSS_WHY)
+            if working.open:
+                doubt = f"the venue has not confirmed the cancel of the House's resting bid {working.order_id}"
+                break
+            if working.status != "cancelled":
+                continue  # it filled or expired at the venue first: nothing of it is left to cross
+            quantity = min(left, share.quantity - share.filled)
+            if quantity > 0:
+                parts.append((working, share, quantity))
+                left -= quantity
+        cleared = Clearing(left=left, doubt=doubt)
+        notes = [f"your own resting order{'s' if len(withdrawn) > 1 else ''} {', '.join(withdrawn)} cancelled first"] if withdrawn else []
+        if parts:
+            cleared.crossed, cleared.price = self._cross_resting(intent, parts, now)
+            notes.append(
+                f"{text(cleared.crossed)} sold inside the House at {text(cleared.price)} to the House's own resting "
+                f"bid{'s' if len(parts) > 1 else ''} ({', '.join(f'{s.agent} {w.order_id}' for w, s, _ in parts)}), "
+                "each cancelled at the venue first: no venue order"
+            )
+        cleared.detail = "; ".join(notes)
+        return cleared
+
+    def _await_cancel(self, working: Working, now: str, *, why: str = "") -> None:
+        """Read an order whose cancel the venue has not confirmed yet again, a moment apart and a
+        bounded number of times (`CANCEL_CONFIRM_READS`), booking each answer through `_attribute`, so
+        a cancel still passing through Alpaca's `pending_cancel` is not taken for one the venue refused.
+        A read that fails ends the wait: the order stays open to the book, and the poll asks again."""
+        reference = working.broker_order_id or working.order_id
+        for _ in range(CANCEL_CONFIRM_READS):
+            if not working.open:
+                return
+            self.sleep(CANCEL_CONFIRM_WAIT_SECONDS)
+            try:
+                order = self.broker.get_order(reference)
+            except BrokerError:
+                return
+            self._attribute(working, order, now, reason=why if order.status == "cancelled" else "")
+
+    def _cross_resting(self, intent: Intent, parts: Sequence[tuple[Working, Share, Decimal]], now: str) -> tuple[Decimal, Decimal]:
+        """Cross an exit with peers' resting bids the venue has confirmed cancelled: one `book.cross_plan`
+        committed as one ledger transaction (`_commit_cross`), so a restart, or the next submit or poll,
+        finishes it from the ledger alone and an older release sees all of it or none.
+
+        Each bidder buys at its own limit as a maker; the seller sells the sum at the bids' weighted
+        price as a taker (`cross:<exit intent>`); fees are what the venue would have charged each side,
+        and a House row mirrors every fill exactly, so the accounts still sum to the venue's, which saw
+        nothing. Fill ids keep the fold's rule (`<source>:<intent id>`): the exit intent is crossed here
+        at most once and never also netted (`submit`), and a bid is cancelled so it is crossed once."""
+        plan_id = f"cross-plan:{self.name}:" + hashlib.sha256(f"resting|{intent.id}".encode()).hexdigest()[:32]
+        sold = sum((quantity for _, _, quantity in parts), ZERO)
+        price = parts[0][0].limit_price if len(parts) == 1 else money(
+            sum((quantity * working.limit_price for working, _, quantity in parts), ZERO) / sold).quantize(QTY_PLACES)
+        orders = [working.order_id for working, _, _ in parts]
+        accounts = {intent.agent: copy.deepcopy(self._account(intent.agent))}
+        for _, share, _ in parts:
+            accounts.setdefault(share.agent, copy.deepcopy(self._account(share.agent)))
+        fills: list[dict[str, Any]] = []
+
+        def add(agent: str, intent_id: str, payload: dict[str, Any]) -> None:
+            payload["cross_plan_id"] = plan_id
+            fills.append({"id": f"cross:{intent_id}", "agent": agent, "payload": payload})
+            self._apply_account_fill(accounts[agent], payload, now)
+            fills.append({"id": f"cross-house:{intent_id}", "agent": HOUSE, "payload": {
+                "book": self.name, "source": "cross-house", "cross_plan_id": plan_id, "intent_id": intent_id,
+                "instrument": payload["instrument"], "side": "buy" if payload["side"] == "sell" else "sell",
+                "quantity": payload["quantity"], "price": payload["price"], "fee_usd": "0",
+                "cash_delta": text(-money(payload["cash_delta"])), "position_delta": text(-money(payload["position_delta"])),
+                "real_money": self.real_money,
+            }})
+
+        charge = self.fees.charge(intent.instrument, "sell", sold, price, liquidity="taker")
+        payload = self._fill_payload(intent.agent, intent, quantity=sold, price=price, charge=charge, source="cross", order_id=None,
+                                     account=accounts[intent.agent])
+        payload.update(resting_orders=orders, note=("crossed inside the House at the resting bid's price: this exit would have met the "
+                                                    "House's own resting bid, which was cancelled at the venue first; no venue order"))
+        add(intent.agent, intent.id, payload)
+        for working, share, quantity in parts:
+            charge = self.fees.charge(working.instrument, "buy", quantity, working.limit_price, liquidity="maker")
+            payload = self._fill_payload(share.agent, None, quantity=quantity, price=working.limit_price, charge=charge, source="cross",
+                                         order_id=None, instrument=working.instrument, side="buy", reason=share.reason,
+                                         intent_id=share.intent_id, liquidity="maker", account=accounts[share.agent])
+            payload.update(resting_order=working.order_id, note=(
+                f"crossed inside the House: another agent's exit met your resting bid {working.order_id}, which was cancelled at the "
+                f"venue first; you bought {text(quantity)} at your limit as a maker; the rest of that bid is not re-placed: bid again "
+                "at your next wake if you still want it"))
+            add(share.agent, share.intent_id, payload)
+        self._commit_cross({"book": self.name, "plan_id": plan_id, "at": now, "fills": fills,
+                            "resting": {"exit_intent_id": intent.id, "orders": orders}})
+        return sold, price
+
+    def _price_step(self, instrument: Instrument, price: Decimal) -> Decimal:
+        """One step of the venue's price grid at `price` (`venues.price_increment`: a Kalshi market's
+        cent, a stock's cent, a coin's stated increment), or -- where the venue has stated none -- one
+        unit in the last place of `price` itself: a House order the venue accepted at that price is on
+        a grid at least that fine."""
+        from .venues import price_increment
+
+        asset = None
+        lookup = getattr(self.broker, "asset", None)
+        if instrument.asset_class == "crypto" and callable(lookup):
+            try:
+                asset = lookup(instrument.market_id or instrument.symbol)
+            except Exception:  # noqa: BLE001 - an unread record is an unknown increment
+                asset = None
+        step = price_increment(instrument, price, asset=asset if isinstance(asset, Mapping) else None)
+        return step if step is not None and step > 0 else ONE.scaleb(price.as_tuple().exponent)
+
+    def _beyond(self, intent: Intent, bound: Decimal) -> Decimal | None:
+        """A price for this sell one step past the House's own best opposite order `bound` (YES space),
+        back in the leg's own dollars; None when that leaves the instrument's range."""
+        side, _ = yes_space(intent.instrument, intent.side, None)
+        step = self._price_step(intent.instrument, bound)
+        price = yes_space(intent.instrument, side, bound + step if side == "sell" else bound - step)[1]
+        if price is None or price <= 0 or (intent.instrument.asset_class == "event" and price >= ONE):
+            return None
+        return price
+
+    def _floored_exit(self, rest: Intent, best: Working) -> tuple[Intent | None, str]:
+        """What is left of an exit sent to the venue as a limit one step past the House's own best
+        crossing bid `best`: marketable against every better bid of the market's, never able to trade at
+        or through the House's own. What a sell at the market would have done there, less the one fill
+        it must not have."""
+        bound = yes_space(best.instrument, best.side, best.limit_price)[1]
+        price = self._beyond(rest, bound)
+        if price is None:
+            return None, f"no price lies between the House's own resting bid at {text(best.limit_price)} and the end of the market"
+        if rest.limit_price is not None:
+            price = max(price, rest.limit_price)  # never more aggressive than the agent asked
+        if rest.post_only:
+            note = (f"the House rested this post-only exit at {text(price)}, one step above the House's own resting bid at "
+                    f"{text(best.limit_price)}: at your price it would have met the House's own bid")
+        else:
+            note = (f"the House sent this exit as a limit at {text(price)}, one step above the House's own resting bid at "
+                    f"{text(best.limit_price)}: it takes the market's better bids and never trades against the House's own")
+        return dataclasses.replace(rest, order_type="limit", limit_price=price), note
+
+    def _post_only_exit(self, rest: Intent, quote: Quote | None, doubt: str) -> tuple[Intent | None, str]:
+        """What is left of an exit that could not be cleared, re-priced as a post-only limit at the ask
+        (D3, step 3), and the note that tells the agent why -- or None and the reason when no price
+        exists. Never at or through the House's own best opposite order, read in YES space for a Kalshi
+        leg: a consistent venue quote never asks at or under a bid still resting, so this binds only on
+        a stale quote, where the exit rests one price step past the House's bid instead."""
+        ask = quote.ask if quote is not None else None
+        if ask is None or ask <= 0:
+            return None, (f"no ask to rest this exit at, and a sell at the market here could meet the House's own resting order "
+                          f"({doubt}); ask again at your next wake")
+        price: Decimal | None = ask
+        side, at = yes_space(rest.instrument, "sell", ask)
+        opposite = [yes_space(w.instrument, w.side, w.limit_price)[1] for w in self.orders.values()
+                    if w.open and w.limit_price is not None and market_key(w.instrument) == market_key(rest.instrument)
+                    and yes_space(w.instrument, w.side, w.limit_price)[0] != side]
+        if opposite:
+            bound = max(opposite) if side == "sell" else min(opposite)
+            if (side == "sell" and at <= bound) or (side == "buy" and at >= bound):
+                price = self._beyond(rest, bound)
+        if price is None:
+            return None, f"no price can rest this exit past the House's own resting order ({doubt}); ask again at your next wake"
+        note = (f"the House re-priced this exit as a post-only limit at the ask {text(price)}: at the market it could meet the "
+                f"House's own resting order, which could not be crossed inside the House ({doubt})")
+        return dataclasses.replace(rest, order_type="limit", limit_price=price, post_only=True), note
+
+    def _exit_past_the_house(self, rest: Intent, quote: Quote | None, doubt: str | None) -> tuple[Intent | None, str]:
+        """How what is left of an exit goes to the venue without meeting the House's own orders, and the
+        note that says what changed: as asked when nothing of the House's is in its way; one step past
+        the House's best bid when its orders there are known (`_floored_exit`); post-only at the ask on
+        any doubt (`_post_only_exit`). None, with the reason, when no price exists."""
+        if doubt is None:
+            crossing = self._crossing_orders(rest)
+            if not crossing:
+                return rest, ""
+            doubt = next((reason for reason in map(self._doubt_about, crossing) if reason), None)
+            if doubt is None:
+                floored, note = self._floored_exit(rest, crossing[0])
+                if floored is not None:
+                    return floored, note
+                doubt = note
+        return self._post_only_exit(rest, quote, doubt)
+
+    def _finish_clearing(self, intent: Intent, cleared: Clearing, quote: Quote | None, now: str) -> Outcome:
+        """Send what is left of a cleared exit, after the batch's market orders (`submit`): alone, never
+        netted, and past the House's own orders as they stand now (`_exit_past_the_house`); one outcome
+        for the whole intent."""
+        if cleared.left <= 0:
+            return Outcome(intent.id, intent.agent, "crossed", cleared.detail, None, cleared.crossed)
+        rest, note = self._exit_past_the_house(dataclasses.replace(intent, quantity=cleared.left), quote, cleared.doubt)
+        if rest is None:
+            refused = self._refuse(intent, [note])
+            return Outcome(intent.id, intent.agent, "partial" if cleared.crossed > 0 else "refused",
+                           "; ".join(part for part in (cleared.detail, refused.detail) if part), None, cleared.crossed)
+        market = rest.order_type == "market"
+        sent = self._send(rest, cleared.left, now, quote, reference_price=quote.bid if (market and quote is not None) else None, note=note)
+        filled = cleared.crossed + sent.filled
+        if cleared.crossed <= 0:
+            status = sent.status
+        else:
+            status = "filled" if filled >= intent.quantity else "partial"
+        detail = "; ".join(part for part in (cleared.detail, note, sent.detail) if part)
+        return Outcome(intent.id, intent.agent, status, detail, sent.order_id, filled)
+
     # ------------------------------------------------------------------ submit
     def submit(self, intents: Iterable[Intent]) -> list[Outcome]:
         """Take one batch of intents: record, check, net the market orders, route, attribute."""
@@ -1317,6 +1791,10 @@ class Book:
             now = now_iso(self.clock)
             market_groups: dict[str, list[tuple[Intent, Quote]]] = {}
             pending: list[tuple[Intent, Quote]] = []
+            #: Exits cleared of the House's own orders (`_clear_the_way`) that still have something to sell:
+            #: sent after the batch's market orders, each alone. A crossed exit is never also netted: both
+            #: would book `cross:<intent id>`.
+            cleared: list[tuple[Intent, Clearing, Quote | None]] = []
             for intent in intents:
                 if intent.id in self.seen_intents:
                     outcomes.append(Outcome(intent.id, intent.agent, "duplicate", "already recorded"))
@@ -1326,24 +1804,33 @@ class Book:
                 )
                 self._apply(entry.kind, intent.agent, entry.payload, entry.at)
                 quote = self._quote(intent.instrument)
-                reasons = self.check(intent, quote, now, pending=pending)
+                reasons = self.check(intent, quote, now, pending=pending, clearing=True)
                 if reasons:
                     outcomes.append(self._refuse(intent, reasons))
                     continue
-                if intent.order_type == "market":
-                    if quote is None or quote.bid is None or quote.ask is None or quote.bid <= 0:
-                        outcomes.append(self._refuse(intent, ["no two-sided quote to price a market order against"]))
+                if intent.order_type == "market" and (quote is None or quote.bid is None or quote.ask is None or quote.bid <= 0):
+                    outcomes.append(self._refuse(intent, ["no two-sided quote to price a market order against"]))
+                    continue
+                if intent.side == "sell":
+                    self._supersede(intent)
+                    clearing = self._clear_the_way(intent, quote, now)
+                    if clearing is not None and (clearing.crossed > 0 or clearing.doubt is not None or self._crossing_orders(intent)):
+                        if clearing.left <= 0:
+                            outcomes.append(self._finish_clearing(intent, clearing, quote, now))
+                        else:
+                            # What is left holds its units for the rest of the batch, as a queued sell does.
+                            pending.append((dataclasses.replace(intent, quantity=clearing.left), quote))
+                            cleared.append((intent, clearing, quote))
                         continue
-                    if intent.side == "sell":
-                        self._supersede(intent)
+                if intent.order_type == "market":
                     market_groups.setdefault(intent.instrument.key, []).append((intent, quote))
                     pending.append((intent, quote))
                 else:
-                    if intent.side == "sell":
-                        self._supersede(intent)
                     outcomes.append(self._send(intent, intent.quantity, now, quote))
             for group in market_groups.values():
                 outcomes.extend(self._net(group, now))
+            for intent, clearing, quote in cleared:
+                outcomes.append(self._finish_clearing(intent, clearing, quote, now))
         return outcomes
 
     def _refuse(self, intent: Intent, reasons: Sequence[str]) -> Outcome:
@@ -1565,12 +2052,16 @@ class Book:
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None,
-               slice_of: tuple[str, int] | None = None) -> Outcome:
+               slice_of: tuple[str, int] | None = None, note: str = "") -> Outcome:
         """Send one venue order for these intents' quantities, then attribute what filled at once.
 
         `slice_of` is (plan id, index) for one slice of a sliced exit: its client order id is
         derived from the plan and the index, so each slice is a distinct order and the same slice
-        can never be sent twice, whatever its size came to."""
+        can never be sent twice, whatever its size came to.
+
+        `note` is what the House changed about the order and why (D3: an exit re-priced post-only to
+        the ask). It is the `reason` of the rows written as the order is sent, beside any reason the
+        venue gives, because an agent reads its orders' latest row (`recent_order_outcomes`)."""
         first = intents[0]
         total = sum(quantities, ZERO)
         identity = "|".join(sorted(i.id for i in intents)) if slice_of is None else f"{slice_of[0]}#{slice_of[1]}"
@@ -1597,17 +2088,20 @@ class Book:
             base["slice"] = {"plan": slice_of[0], "index": int(slice_of[1])}
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
-        self._order_row(base, "new", None, suffix="new")
+        def told(reason: str = "") -> str:
+            return "; ".join(part for part in (reason, note) if part)
+
+        self._order_row(base, "new", None, suffix="new", reason=told())
         try:
             order = self.broker.submit(order_intent)
         except RejectedOrder as exc:
-            self._order_row(base, "rejected", None, suffix="rejected", reason=str(exc))
+            self._order_row(base, "rejected", None, suffix="rejected", reason=told(str(exc)))
             return Outcome(first.id, first.agent, "rejected", str(exc), order_id)
         except (BrokerError, ValueError) as exc:
             # A gateway 502, venue 5xx or unreadable success may follow an accepted write.
             # Only an explicit rejection establishes that no order exists; preserve every
             # other outcome for client-id polling, without submitting another order.
-            self._order_row(base, "unknown", None, suffix="unknown", reason=str(exc))
+            self._order_row(base, "unknown", None, suffix="unknown", reason=told(str(exc)))
             return Outcome(first.id, first.agent, "unknown", str(exc), order_id)
         # Persist the acknowledgement as pollable until every fill has been attributed.
         # Recording `filled` first used to strand the venue position after a crash here.
@@ -1616,11 +2110,11 @@ class Book:
         # rejections by Sept 23, 2026 had an empty one, and only the wake's outcome knew why.
         closed_unfilled = order.filled_quantity <= 0 and order.status not in OPEN_STATUSES
         self._order_row(base, "accepted" if order.filled_quantity > 0 else order.status, order.broker_order_id, suffix="sent",
-                        reason=str(order.reason or "") if closed_unfilled else "")
+                        reason=told(str(order.reason or "") if closed_unfilled else ""))
         working = self.orders[order_id]
         self._attribute(working, order, now)
         if working.open and not working.rested:
-            self._order_row(base, working.status, working.broker_order_id, suffix="rested", rested=True)
+            self._order_row(base, working.status, working.broker_order_id, suffix="rested", rested=True, reason=told())
         if working.filled >= working.quantity:
             status = "filled"
         elif working.filled > 0:
@@ -1681,8 +2175,9 @@ class Book:
             base["slice"] = {"plan": working.slice_of, "index": int(working.slice_index or 0)}
         return base
 
-    def _attribute(self, working: Working, order: Order, now: str) -> None:
-        """Give each intent behind an order its part of what the venue has filled since last time."""
+    def _attribute(self, working: Working, order: Order, now: str, *, reason: str = "") -> None:
+        """Give each intent behind an order its part of what the venue has filled since last time.
+        `reason` goes on the row recording a new status, when one is written."""
         self._finish_allocation(working)
         filled = money(order.filled_quantity)
         delta = filled - working.filled
@@ -1739,7 +2234,8 @@ class Book:
                             suffix=f"allocation:{text(filled)}", allocation=plan)
             self._finish_allocation(working)
         if order.status != working.status:
-            self._order_row(self._base_of(working), order.status, order.broker_order_id or working.broker_order_id, suffix=f"{order.status}:{text(filled)}")
+            self._order_row(self._base_of(working), order.status, order.broker_order_id or working.broker_order_id, suffix=f"{order.status}:{text(filled)}",
+                            reason=reason)
 
     def _finish_allocation(self, working: Working) -> None:
         plan = working.allocation
@@ -1803,11 +2299,12 @@ class Book:
         price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote)
         return price is not None and quantity * price * intent.instrument.multiplier > money(self.rules["max_order_usd"])
 
-    def _send(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None, *, reference_price: Decimal | None = None) -> Outcome:
+    def _send(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None, *, reference_price: Decimal | None = None,
+              note: str = "") -> Outcome:
         """Route one intent's order; a sell worth more than the order cap is sent in slices."""
         if intent.side == "sell" and self._over_cap(intent, quantity, quote):
-            return self._start_exit_plan(intent, quantity, now, quote)
-        return self._route([intent], [quantity], now, reference_price=reference_price)
+            return self._start_exit_plan(intent, quantity, now, quote, note=note)
+        return self._route([intent], [quantity], now, reference_price=reference_price, note=note)
 
     def _slice_quantity(self, intent: Intent, available: Decimal, quote: Quote | None, cap: Decimal) -> Decimal:
         """The next slice: `available` cut into equal parts of at most the cap, on the instrument's
@@ -1846,7 +2343,7 @@ class Book:
     def _plan_slices(self, plan_id: str) -> list[Working]:
         return [self.orders[order_id] for order_id in self._plan_orders.get(plan_id, ()) if order_id in self.orders]
 
-    def _start_exit_plan(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None) -> Outcome:
+    def _start_exit_plan(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None, *, note: str = "") -> Outcome:
         """Record the plan for a sell too large for one order, then send what this pass can."""
         cap = money(self.rules["max_order_usd"])
         price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote) or ZERO
@@ -1861,7 +2358,7 @@ class Book:
         entry = self.ledger.append("book.exit_plan", payload, agent=intent.agent, id=plan_id)
         self._apply(entry.kind, entry.agent, entry.payload, entry.at)
         plan = self.exit_plans.get(plan_id)
-        sent = self._advance_plan(plan, now, quote=quote, checked=True) if plan is not None else []
+        sent = self._advance_plan(plan, now, quote=quote, checked=True, note=note) if plan is not None else []
         slices = self._plan_slices(plan_id)
         filled = sum((w.filled for w in slices), ZERO)
         if filled >= quantity:
@@ -1891,7 +2388,7 @@ class Book:
                 except Exception:  # noqa: BLE001 - the plan is retried next pass either way
                     pass
 
-    def _advance_plan(self, plan: ExitPlan, now: str, *, quote: Quote | None = None, checked: bool = False) -> list[str]:
+    def _advance_plan(self, plan: ExitPlan, now: str, *, quote: Quote | None = None, checked: bool = False, note: str = "") -> list[str]:
         """Send slices of `plan` until one does not finish at once, and return their order ids.
 
         Each slice sizes off what is still held and not already offered, and off what the plan
@@ -1900,7 +2397,13 @@ class Book:
         an Alpaca market order the venue fills a moment later) is too, since it already holds its
         own units; one refused, rejected or only partly filled ends this pass and leaves the rest
         to the next. `checked` is for the pass inside `submit`, where the whole intent has just
-        passed `check`; on every later pass each slice is checked again, as a new order would be."""
+        passed `check`; on every later pass each slice is checked again, as a new order would be.
+
+        A later slice that would meet the House's own resting order is not refused for it (D3): the
+        seller's own crossing order is cancelled, and a slice that would meet another agent's goes one
+        step above the House's bid, or post-only to the ask on doubt (`_clear_the_way` with
+        `cross=False`, `_exit_past_the_house`): a plan is never crossed inside the House, whose fills
+        would share the intent's one cross id."""
         sent: list[str] = []
         intent = plan.intent
         key = intent.instrument.key
@@ -1951,13 +2454,20 @@ class Book:
                 break
             size = self._slice_quantity(intent, available, fresh, plan.cap_usd)
             part = dataclasses.replace(intent, quantity=size)
+            told = note if checked else ""
             if not checked:
-                reasons = self.check(part, fresh, now)
+                reasons = self.check(part, fresh, now, clearing=True)
                 if reasons:
                     self._refuse_slice(plan, index, reasons)
                     break
-            outcome = self._route([part], [size], now, reference_price=fresh.bid if (market and fresh is not None) else None,
-                                  slice_of=(plan.plan_id, index))
+                cleared = self._clear_the_way(part, fresh, now, cross=False)
+                if cleared is not None:
+                    part, told = self._exit_past_the_house(part, fresh, cleared.doubt)
+                    if part is None:
+                        self._refuse_slice(plan, index, [told])
+                        break
+            outcome = self._route([part], [size], now, reference_price=fresh.bid if (part.order_type == "market" and fresh is not None) else None,
+                                  slice_of=(plan.plan_id, index), note=told)
             if outcome.order_id:
                 sent.append(outcome.order_id)
             order = self.orders.get(outcome.order_id or "")
@@ -2061,7 +2571,15 @@ class Book:
             self._attribute(working, order, now)
         return checked
 
-    def cancel(self, agent: str, order_id: str) -> Outcome:
+    def cancel(self, agent: str, order_id: str, *, why: str = "") -> Outcome:
+        """Cancel one of `agent`'s orders at the venue and book what the venue then says of it.
+
+        What is booked is the venue's answer to a READ after the cancel, not the cancel's own answer
+        (Sept 24, 2026, found building D3): the Kalshi adapter reads the order, deletes it, and returns
+        the count it read BEFORE the delete, so a fill landing in between was closed as "cancelled"
+        without it, never polled again, and left the real book a position short of its venue. A read
+        that fails books nothing: the order stays open to the book and the next poll asks again. `why`
+        is the reason on the order's cancelled row (the House's own cancels say why; D3)."""
         with self._lock:
             working = self.orders.get(order_id)
             if working is None or not any(s.agent == agent for s in working.shares):
@@ -2069,12 +2587,18 @@ class Book:
             if not working.open:
                 return Outcome("", agent, "refused", f"order is already {working.status}", order_id)
             now = now_iso(self.clock)
+            reference = working.broker_order_id or working.order_id
             try:
-                order = self.broker.cancel(working.broker_order_id or working.order_id)
+                self.broker.cancel(reference)
             except BrokerError as exc:
                 return Outcome("", agent, "rejected", str(exc), order_id)
             self.ledger.append("book.cancel", {"book": self.name, "order_id": order_id}, agent=agent, id=f"cancel:{order_id}")
-            self._attribute(working, order, now)
+            try:
+                order = self.broker.get_order(reference)
+            except BrokerError:
+                order = None
+            if order is not None:
+                self._attribute(working, order, now, reason=why if order.status == "cancelled" else "")
             plan = self.exit_plans.get(working.slice_of or "")
             if plan is not None:
                 # Cancelling a slice withdraws the exit: the rest of it is not sent behind the
