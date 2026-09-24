@@ -730,6 +730,23 @@ recorded for the next open; live verification uses the markets that trade around
   at the wake, resting buys cancelled, sells go on; a House row under session `house:drain`), and releases it with a
   `resume_entries` row once the pass no longer lists it; a research resume is refused meanwhile; an agent's own pause
   is left alone. Seven tests; in adversarial review before it ships with the perf pass (Deploy E).
+- 19:32Z — **The drain hold's review** (`r5/drain-review` 2f10623, 8 issues fixed, 11 tests failing on b8b3d98; league
+  suite 3,180 OK). The worst (medium-high): a pass that could not read the probe gate, a family's record or a probe's
+  evidence left the probe out of `probes_waiting_flat`, and the hold was released, so a losing family's probe could buy
+  until the next readable pass. Now a hold ends only when a pass ended the drain (the probe left rung 2, or its family
+  reads neither losing nor unreadable). Also fixed:
+  - holds orphaned by a restart or a failed row (the row's session now decides whose pause it is);
+  - the House resuming a pause research asked for during the hold;
+  - a self-paused waiting probe resuming before the pass;
+  - the lifecycle lock;
+  - holds with the allocator off;
+  - the seat market reading the House's hold as the agent's own;
+  - misleading cancel records.
+
+  Left as recorded (protected files): the lab restarts a drained probe's forward window on release, as it does for an
+  agent's own pause.
+- 19:33Z — **Deploy E assembled:** `e/deploy` = main + `r5/drain-review` (86cdc91), PR #282; `house.py` and docs only,
+  money digest unchanged (`535a7f15`), no ratify. 185 tests of the touched modules OK; CI running.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
