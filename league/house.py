@@ -5821,6 +5821,10 @@ class House:
                     self._refuse_birth("retained", len(left), "none could be seated: their desks are full of residents that may "
                                                               "not be displaced, even by a newcomer with forward evidence")
                 for row in [r for r in rows if r.get('status') in ('queued', 'deferred', 'admitting') and r.get('_candidate')]:
+                    if row['session'] in (self._state.get('retained') or {}):
+                        # Handed to the seat queue in this very pass: an admission above displaced its author, whose
+                        # row this fold still reads as pending. Cancelled as its dead author's, it was lost (review of #245).
+                        continue
                     child = self._admit_candidate(row, displace=True)
                     if child is not None:
                         state['at'] = self.clock()

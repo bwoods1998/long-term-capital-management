@@ -380,6 +380,25 @@ class RetainedCandidates(EvidenceCase):
         self.assertEqual(child.parent, author.id)
         self.assertEqual(self.row("research:older:1")["status"], "orphaned")
 
+    def test_a_candidate_handed_on_during_an_admission_pass_is_not_cancelled_by_it(self):
+        """The review of #245 (Sept 24, 2026): the pass folds the admission rows once. An admission displaced a
+        resident, whose candidate went to the seat queue; the admission then seated nobody, and the loop reached the
+        dead author's row as folded ("deferred") and cancelled it: the retained candidate was lost."""
+        living = self.seated("living")
+        self.queued(living, self.retained(BUYER + "\n# the living author's candidate\n"), "research:living:1")
+        loser = self.seated("loser")
+        self.queued(loser, self.retained(BUYER + "\n# the loser's own candidate\n"), "research:loser:1")
+        self.rules.update(newcomer_seconds=600, max_population=2)
+        self.clock.advance(self.grace + 601)
+        with patch.object(self.house, "fork", return_value=None):  # capacity or endowment unavailable after the kill
+            self.assertIsNone(self.house._refill(self.rules))
+        self.assertFalse(self.house.registry.get(loser.id).alive)
+        self.assertEqual(self.row("research:loser:1")["status"], "orphaned")
+        self.assertEqual([w["session"] for w in self.house.seat_waiters(fresh=True)["retained"]], ["research:loser:1"])
+        self.clock.advance(601)
+        child = self.house._refill(self.rules)
+        self.assertEqual((child.parent, self.row("research:loser:1")["status"]), (loser.id, "admitted"), "and it is seated next")
+
     def test_a_candidate_nobody_can_make_room_for_waits_is_told_and_expires(self):
         author = self.seated("author")
         self.queued(author, self.retained(BUYER + "\n# waiting\n"), "research:author:1")
