@@ -800,6 +800,16 @@ recorded for the next open; live verification uses the markets that trade around
   −0.00223 on 263 events). The line is a sign test; a bound would hold such a family out. An owner call, recorded.
   L3 (warnings escalate) has had no live instance since Deploy B: no warning repeated 10 times in 30 minutes (0
   escalations on the ledger).
+- 21:27:54Z — **The in-box updater shipped Merton's #287** (a post-only central-under child for meriwether-h7d7702) as
+  `main-8d48771e009d` (main `927afc2`), promoted at 21:16:32Z, watch passed; Merton's merges ship this way throughout.
+  The watch stays anchored on the run's last deploy (F, 20:42:18Z).
+- 21:48Z — **A defect in the daily backup, found in the watch.** From 21:31:55Z Sail's checkpoint service answered 503
+  ("prewarm base snapshot ... DeadlineExceeded"), and `Backup.due` read only the last successful backup, so the House
+  tried at every tick: five tries and five error alerts in 13 minutes. Trading is untouched, but error alerts during a
+  deploy's watch roll the release back, so the outage would also have rolled back whatever release was under watch. Fixed
+  on this branch (e04a36c): a failed try waits 30 minutes, doubling up to six hours; the error alert carries `began_at`
+  (the first failure of the run) so the watchdog inherits an outage that began before a promotion; the House test fails
+  without it. It ships with the final PR (an updater release), not as a redeploy: not a money-path defect.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
