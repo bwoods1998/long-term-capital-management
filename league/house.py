@@ -7925,8 +7925,8 @@ class House:
         # tick after a restart showed them a closed desk's niches.json cap (the review of #276). Cached: cheap twice.
         try:
             self._follow_the_search()
-        except Exception as exc:  # noqa: BLE001 - the caps stand as they are; the population step tries again
-            self.alert("warning", f"the seat market's caps could not follow the search ({type(exc).__name__}: {str(exc)[:160]})")
+        except Exception:  # noqa: BLE001 - the caps stand as they are; the population step tries again and says so
+            pass  # (once a tick: two warnings of one text a tick would reach the repeat escalation twice as fast)
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         lap("hypotheses")
