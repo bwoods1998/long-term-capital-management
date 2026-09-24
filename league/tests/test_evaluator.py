@@ -15,6 +15,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from league import stats
 from league.constitution import CONSTITUTION
@@ -1462,6 +1463,18 @@ class Screen(EvalCase):
         self.assertEqual(verdict.decision, "eligible")
         self.assertIn("cleared the screen", verdict.reason)
         self.assertEqual((verdict.numbers["active_blocks"], verdict.numbers["trades"]), (15, 12))
+
+    def test_the_screen_counts_independent_closed_trades(self):
+        """D4 (Sept 24, 2026): the closed trades that gate a promotion are INDEPENDENT ones
+        (`independent_closed`: one an event on the event books), while the statistics still read every
+        trade. Review of #224: the gate reading `len(returns)` again passed every other test."""
+        growth = [0.004 if i % 2 == 0 else -0.003 for i in range(15)]
+        with patch.object(Evaluator, "independent_closed", return_value=4) as independent:
+            verdict = self.run_blocks(growth)
+        self.assertEqual(verdict.decision, "hold")
+        self.assertEqual(verdict.reason, "4 closed trades; 5 needed before any promotion")
+        self.assertEqual(verdict.numbers["trades"], 12)  # the statistics saw every trade
+        self.assertTrue(independent.called)
 
     def test_the_screen_spends_no_alpha(self):
         verdict = self.run_blocks([0.004 if i % 2 == 0 else -0.003 for i in range(15)])

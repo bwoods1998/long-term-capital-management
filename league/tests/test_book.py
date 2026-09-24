@@ -10,7 +10,7 @@ from league.book import Book, BookError, Intent, Limits, allocate, market_key, y
 from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.ledger import HOUSE, Ledger
-from league.tests.fakes import Clock, FakeBroker, iso
+from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
 
 D = Decimal
 BTC = Instrument("crypto", "BTC-USD", "alpaca-paper", market_id="BTC/USD")
@@ -28,6 +28,11 @@ class BookCase(unittest.TestCase):
     cash = "100000"
 
     def setUp(self):
+        # These tests are about the book, not the real book's entry rules (X0), which a test opts into.
+        # Undone by tearDown, which the cases built by hand call, and by a cleanup should setUp fail.
+        self._entry_rules = without_real_entry_rules()
+        self._entry_rules.start()
+        self.addCleanup(self._restore_entry_rules)
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
@@ -38,6 +43,12 @@ class BookCase(unittest.TestCase):
     def tearDown(self):
         self.ledger.close()
         self.dir.cleanup()
+        self._restore_entry_rules()
+
+    def _restore_entry_rules(self):
+        patcher, self._entry_rules = getattr(self, "_entry_rules", None), None
+        if patcher is not None:
+            patcher.stop()
 
     def new_book(self):
         return Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=self.real, clock=self.clock)
@@ -288,17 +299,33 @@ class PaperBookTest(BookCase):
         self.broker.set_quote(BTC, "80000", "80010")
         self.assertNotIn("day order", " ".join(self.book.check(crypto, self.broker.quote(BTC), iso(self.clock))))
 
-    def test_a_resting_order_blocks_an_order_that_would_hit_it(self):
+    def test_a_resting_order_blocks_an_entry_that_would_hit_it(self):
+        self.seat("maker")
+        self.seat("taker")
+        self.broker.set_quote(SPY, "50.00", "50.02")
+        self.book.submit([self.intent("maker", SPY, "buy", "1")])
+        self.assertEqual(self.book.submit([self.intent("maker", SPY, "sell", "1", order_type="limit", limit_price="50.02")])[0].status, "resting")
+        hit = self.book.submit([self.intent("taker", SPY, "buy", "1")])[0]
+        self.assertEqual(hit.status, "refused")
+        self.assertIn("own resting order", hit.detail)
+        below = self.book.submit([self.intent("taker", SPY, "buy", "1", order_type="limit", limit_price="49.99")])[0]
+        self.assertEqual(below.status, "resting")
+
+    def test_an_exit_that_would_hit_a_resting_bid_is_crossed_inside_the_house(self):
+        """D3 (Sept 24, 2026): this sell was refused ("own resting order") and its holder waited; the
+        bid is now cancelled at the venue and the two are crossed at its price (test_exit_crossing)."""
+        self.book.reconcile()
         self.seat("maker")
         self.seat("taker")
         self.broker.set_quote(SPY, "50.00", "50.02")
         self.book.submit([self.intent("taker", SPY, "buy", "1")])
         self.assertEqual(self.book.submit([self.intent("maker", SPY, "buy", "1", order_type="limit", limit_price="50.00")])[0].status, "resting")
         hit = self.book.submit([self.intent("taker", SPY, "sell", "1")])[0]
-        self.assertEqual(hit.status, "refused")
-        self.assertIn("own resting order", hit.detail)
-        above = self.book.submit([self.intent("taker", SPY, "sell", "1", order_type="limit", limit_price="50.05")])[0]
-        self.assertEqual(above.status, "resting")
+        self.assertEqual(hit.status, "crossed", hit.detail)
+        self.assertEqual(self.book.account("taker").holdings, {})
+        self.assertEqual(self.book.account("maker").holdings[SPY.key].quantity, D("1"))
+        self.assertEqual(self.book.account("maker").cash, D("150"))
+        self.assertTrue(self.book.reconcile().ok)
 
     def test_a_resting_fill_arrives_on_a_later_poll_as_a_maker(self):
         self.book.reconcile()  # the House opens every book's baseline before anything trades
@@ -632,6 +659,9 @@ class PaperBookTest(BookCase):
         out = self.book.submit([self.intent("a1", BTC, "buy", "0.0005")])[0]
         self.assertEqual(out.status, "unknown")
         self.assertFalse(self.book.reconcile().ok)  # an unknown order is not a reconciled book
+        self.book.poll()
+        self.assertEqual(len(self.book.open_orders()), 1)  # one "no such order" is remembered, not believed (Sept 23, 2026)
+        self.clock.advance(61)
         self.book.poll()
         self.assertEqual(self.book.open_orders(), [])
         self.assertEqual(self.book.account("a1").holdings, {})
@@ -1087,6 +1117,119 @@ class DailyLossRulesTest(BookCase):
         self.basis[0] = None  # no grant names the venue: the old basis
         self.assertTrue([r for r in self.reasons("a2", "KXBTCD-26SEP2019-T80999", "5") if r.startswith("floor daily loss")])
         self.assertEqual(self.book.risk_lines("a2")["halt_basis"], "staked_accounts")
+
+
+class DayOpenAcrossRestartTest(BookCase):
+    """The #198 review (Sept 23, 2026, pre-existing): `Book.day_open` lived in memory only, so a House
+    restart mid-day forgot every account's start-of-day equity, and both the per-desk daily-loss rule
+    and the real book's halt started again from the restart's equity. The opening is persisted per
+    book beside the ledger and restored at construction, with the day's stakes replayed from the
+    ledger exactly as they adjusted it live."""
+
+    venue = "kalshi"
+    family = "kalshi"
+    real = True
+    cash = "500"
+    LOST = ("KXBTCD-26SEP2017-T80999", "KXHIGHNY-26SEP20-B80")  # two clusters: no concentration cap refuses
+
+    def setUp(self):
+        super().setUp()
+        self.basis: list = [D("200")]  # the halt: 8% of $200 = $16 of the day's loss
+        self.book = self.restarted()
+        for ticker in (*self.LOST, "KXBTCD-26SEP2019-T80999"):
+            self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
+        self.seat("a1", usd="200", position="100", order="75")
+
+    def restarted(self, marks=True):
+        """A House restart: a new Book folded from the same ledger, reconciled to the venue."""
+        book = Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=True, clock=self.clock,
+                    band_of=lambda agent: None, halt_basis_usd=lambda: self.basis[0], event_capital_budget=lambda: D("517.75"))
+        book.reconcile()
+        if getattr(self, "book", None) is not None:
+            book.limits.update(self.book.limits)
+            if marks:
+                book.marks.update(self.book.marks)  # the marks come back with the first mark pass
+        return book
+
+    def lose(self, ticker, quantity, mark):
+        out = self.book.submit([self.intent("a1", event(ticker=ticker), "buy", quantity)])[0]
+        self.assertEqual(out.status, "filled", out.detail)
+        self.book.marks[event(ticker=ticker).key] = D(mark)
+
+    def halted(self):
+        instrument = event(ticker="KXBTCD-26SEP2019-T80999")
+        reasons = self.book.check(self.intent("a1", instrument, "buy", "1"), self.broker.quote(instrument), iso(self.clock))
+        return [r for r in reasons if r.startswith("floor daily loss")]
+
+    def day(self):
+        return self.book._day_pnl("a1", iso(self.clock))
+
+    def test_a_loss_before_a_restart_still_counts_after_it(self):
+        self.lose(self.LOST[0], "40", "0.22")  # about -$12.70: 6% of the $200 basis
+        before = self.day()
+        self.assertTrue(D("-16") < before < D("-11"), before)
+        self.assertEqual(self.halted(), [])
+        self.clock.advance(600)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)  # not zero: the restart does not forget the morning
+        self.lose(self.LOST[1], "20", "0.22")  # about 3% more after the restart: 9% in all
+        self.assertLess(self.day(), D("-16"))
+        self.assertEqual(len(self.halted()), 1)  # refused at the 8% line, not given 8% more
+
+    def test_a_new_utc_day_resets_the_opening(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        self.assertLess(self.day(), D("-11"))
+        self.clock.advance(86_400)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), D(0))  # a new day opens at the equity it finds
+        self.assertEqual(self.halted(), [])
+
+    def test_a_stake_during_the_day_adjusts_the_opening_before_and_after_a_restart(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        before = self.day()
+        self.book.stake("a1", "50", note="capital lent is not the day's profit")
+        self.assertEqual(self.day(), before)
+        self.book.stake("a1", "-30", note="nor is capital taken back its loss")
+        self.assertEqual(self.day(), before)
+        self.clock.advance(600)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)  # each stake adjusts the opening once: never twice, never forgotten
+        self.book.stake("a1", "10", note="after the restart too")
+        self.assertEqual(self.day(), before)
+        self.book = self.restarted()
+        self.assertEqual(self.day(), before)
+
+    def test_an_unreadable_file_is_the_old_behaviour_not_a_crash(self):
+        self.lose(self.LOST[0], "40", "0.22")
+        path = self.book._day_open_path()
+        self.assertTrue(path is not None and path.exists())
+        path.write_text("{not json")
+        self.book = self.restarted()
+        self.assertEqual(self.day(), D(0))  # forgotten, as before this fix, and said nowhere worse
+
+
+    # Review of #211 (Sept 23, 2026): marks live in memory only, and the House's startup reconcile quotes
+    # only a position that differs from the venue, so until the first mark pass (up to 300 s later; the
+    # tick's wakes come first) a holding was valued at cost against an opening taken at its mark.
+    def test_a_holdings_loss_still_counts_before_the_first_mark_pass(self):
+        self.lose(self.LOST[0], "60", "0.50")
+        self.broker.set_quote(event(ticker=self.LOST[0]), "0.20", "0.22")
+        self.book.mark()  # the day's loss is on the holding: 60 x $0.32 is past 8% of $200
+        self.assertTrue(self.halted())
+        self.book = self.restarted(marks=False)  # the first check after a restart, before the mark pass
+        self.assertTrue(self.halted())  # was lifted: the holding read at its $0.52 cost
+
+    def test_a_winner_unmarked_after_a_restart_is_not_a_false_halt(self):
+        self.lose(self.LOST[0], "60", "0.50")
+        self.clock.advance(86400)  # held overnight: the new day's opening is taken at the mark
+        for ticker in (*self.LOST, "KXBTCD-26SEP2019-T80999"):
+            self.broker.set_quote(event(ticker=ticker), "0.50", "0.52")
+        self.broker.set_quote(event(ticker=self.LOST[0]), "0.90", "0.92")
+        self.book.mark()
+        self.assertEqual(self.day(), D(0))
+        self.book = self.restarted(marks=False)
+        self.assertEqual(self.day(), D(0))  # was -$22.80: a winner read at cost as the day's loss
+        self.assertFalse(self.halted())
 
 
 class PracticeDailyLossTest(BookCase):

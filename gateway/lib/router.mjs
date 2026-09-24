@@ -372,7 +372,8 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
   const hold = await gate.frontierReserve({ micro: String(frontier.worstCase(admitted.price, bytes, admitted.maxOutput)), at: now() });
   if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
   const agent = request.headers.get(frontier.AGENT_HEADER);
-  let upstream;
+  const settle = actual => gate.frontierSettle({ month: hold.month, reserved: hold.micro, actual, agent, tracked: hold.tracked === true, at: now() });
+  let upstream, text;
   try {
     upstream = await fetcher(frontier.HOST + frontier.PATH, {
       method: 'POST',
@@ -384,19 +385,23 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
       // Sept 21, 2026 most agent consultations ended this way, about $3 each for nothing.
       signal: AbortSignal.timeout(570000),
     });
+    // Read inside the guard (Sept 24, 2026): an answer cut off mid-body used to throw past the
+    // settle, the Worker answered "error code: 1101", and the hold was left in flight for good.
+    text = await upstream.text();
   } catch {
-    // Nothing came back. The provider may still bill a call it received, so the hold stays.
-    await gate.frontierSettle({ month: hold.month, reserved: hold.micro, actual: null, agent, at: now() });
+    // Nothing came back, or not all of it. The provider may still bill a call it received, so the hold stays.
+    await settle(null);
     return fail('The frontier model did not answer.', 502);
   }
-  const text = await upstream.text();
   let actual = null;
   if (upstream.ok) {
     try { actual = frontier.actualCost(admitted.price, JSON.parse(text).usage); } catch { actual = null; }
   } else if (upstream.status >= 400 && upstream.status < 500) {
     actual = 0n;  // refused by the provider before any generation: nothing was billed
+  } else if (frontier.unprocessed(upstream.status, text)) {
+    actual = 0n;  // the provider's own capacity refusal, turned away before any work (frontier.unprocessed)
   }
-  const settled = await gate.frontierSettle({ month: hold.month, reserved: hold.micro, actual: actual === null ? null : String(actual), agent, at: now() });
+  const settled = await settle(actual === null ? null : String(actual));
   return new Response(text, {
     status: upstream.status,
     headers: {

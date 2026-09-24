@@ -50,6 +50,13 @@ def tearDownModule():
 
 class WindingDownEvidence(unittest.TestCase):
     def setUp(self):
+        # These tests are about evidence after a wind-down, not the real book's entry rules (X0, Deploy
+        # A, Sept 24, 2026): their fixture enters a real Kalshi position at market.
+        from league.tests.fakes import without_real_entry_rules
+
+        rules = without_real_entry_rules()
+        rules.start()
+        self.addCleanup(rules.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.real = FakeBroker("kalshi", cash="1000", family="kalshi")

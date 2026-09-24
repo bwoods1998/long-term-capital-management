@@ -137,14 +137,15 @@ The capital board's fields (personal-site #4, Sept 23, 2026), each optional:
 
 | Key | Type |
 |---|---|
-| `band` | `replay paper bunt swing star` (`BANDS`). `paper` is the House's word; the page says Practice and never shows "paper". Without the allocator the publisher sends the rung's band (0 replay, 1 paper, 2 bunt, 3 swing) and none of the three below. |
-| `stake_usd` | money or null: the real stake on `bunt swing star`, null otherwise. Published with 2 places. |
+| `band` | `replay paper probe bunt swing star` (`BANDS`; `probe` since Sept 24, 2026, personal-site #6). `paper` is the House's word; the page says Practice and never shows "paper". Without the allocator the publisher sends the rung's band (0 replay, 1 paper, 2 bunt, 3 swing) and none of the three below. |
+| `stake_usd` | money or null: the real stake on `probe bunt swing star`, null otherwise. Published with 2 places. |
 | `evidence` | null, or shape `{W_paper, W_real, E, trades}` + optional `real_trades`: multiples are unsigned decimal strings with <= 6 places (published with exactly 6, `"1.034512"`), trades counters. |
 | `last_move` | null, or exact `{at, from_band, to_band, reason}`: `at` instant <= `published_at` + 60 s, `from_band` a band or null, `to_band` a band, `reason` prose(300). |
+| `family_state`, `family_n` | The agent's family in the mechanism ledger (Sept 24, 2026, the close-the-gaps run's C4; `validDesk`). **Both or neither.** `family_state` one of `unproven proven swing` (`FAMILY_STATES`; `swing` is the House's word, the page says "compounding"), `family_n` counter(1,000,000) (`MAX_SETTLEMENTS`: the family's independent settlements, practice and real). The page's readout: "weather favorites · proven · 16 settlements". The family's bound and capacity are not desk fields (a desk with `family_bound` or `capacity` is refused): they ride the board's `families`. |
 
 ### board (optional; personal-site #4) shape
 
-REQUIRED `bands`, `moves`; optional `throttle`, `enabled` boolean.
+REQUIRED `bands`, `moves`; optional `throttle`, `enabled` boolean, and since Sept 24, 2026 `families` and `lab` (below).
 `bands`: `{<venueName>: {<band>: exact {count: counter(100000), capital_usd: money}}}`, <= 8 venues.
 `moves`: <= 50, ids unique, oldest first; each shape REQUIRED `id` eventId, `at` instant (<= `published_at`
 + 60 s), `agent` deskId, `from_band` band or null, `to_band` band, `reason` prose(300); optional
@@ -153,10 +154,36 @@ signedMoney, envelope_usd: money}`. The page reads the lanes' notes from `bands`
 `moves` (deduplicated against the tape by id: the House uses the `eval.verdict` ledger id), and
 says so above the lanes when the throttle is on.
 
+`families` (`validFamilies`, the mechanism ledger; the site accepts it from this run's site change, deployed
+before the floor publishes it): **exact** `{unproven: counter(100000), rows}`; `rows` <= 8 (`MAX_FAMILY_ROWS`),
+one per `venue`+`family`, only proven and compounding families (the unproven are the count), the strongest
+first. Row **exact**: `family` deskId (named as a desk's `family` is: `publish.desk_family`), `venue` venueName,
+`state` `proven` or `swing`, `n` and `real_n` counter(1,000,000) with `real_n <= n`, `bound` a signed decimal
+with <= 6 places (published with 6: the family's honest lower bound on growth a settlement, the t bound or, for a
+lopsided record, the loss-rate bound if lower: `publish.honest_bound`), `stake_usd` money or null (a member's
+stake on real money), `members_real` counter(160), `capacity_usd_per_day` signedMoney or null (published with 2
+places). The page: "sports central run under · proven · 11 settlements, 2 real · lower bound +14.2% · 1 agent at
+$30 · capacity $57/day", then "44 strategies still unproven" (or "No proven edge yet · 45 strategies unproven").
+
+`lab` (`validLabReading`): **exact** `{at, tested_last_hour, graduates_waiting}`: `at` instant <= `published_at`
++ 60 s (the publisher reads it before stamping the checkpoint), counters (1,000,000 and 100,000). From the
+newest private `lab.stats` row (`Lab.stats` over the last hour: `evaluated`, `waiting_seat.count`), sent only
+while at most 30 minutes old (`publish.LAB_READING_MAX_AGE`), with or without the allocator. The page draws
+"84 strategies tested in the last hour · 3 graduates waiting for a seat" while the reading is at most 30
+minutes older than the checkpoint.
+
 Band moves on the tape are `lab.progress` (component `league`) sentences the page parses:
 `<agent> climbs|drops from <Replay|Practice|Bunt|Swing|Star> to <Band>[ with a $<stake> real stake]: <reason>.`
 and `<agent>'s real stake is now $<stake>[ (<Bunt|Swing|Star>)]: <reason>.` The old
-`<agent> climbs|drops from rung N to rung M: <reason>.` still parses.
+`<agent> climbs|drops from rung N to rung M: <reason>.` still parses. Births and deaths
+(`league_news`): `<agent> is born (a child of <parent>|a founding seed, ...). <reason>` and
+`<agent> died of <cause>. <detail>`. Since Sept 24, 2026 the page says why, in fixed phrasings
+only: a birth whose reason says `an Alpha Lab graduate` is a "lab graduate", one that says `a parameter
+mutation of its parent` a "tweak of <parent>", any other with a parent a "child of <parent>"; a death by
+the first words of its cause (`displaced` "lost its seat", `evidence` "lost too much", `superseded`
+"replaced by its fix", `redundant` "a duplicate", `credits` "out of credits", `never qualified` "never
+passed its history test", `stuck` "idle too long"; any other says nothing). A desk's
+`gate.evidence.lifecycle.cause` is read the same way.
 
 ### position row (S:281-297) shape
 

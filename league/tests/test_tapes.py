@@ -707,7 +707,8 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertEqual(step["markets"][1]["strike"], 81250.0)
 
     def test_history_is_asked_for_minute_candles_an_event_at_a_time(self):
-        self.assertEqual(self.history.settled_calls, [("KXBTCD", int(parse_time(START)), int(parse_time(END)))])
+        day = int(parse_time("2026-09-10T00:00:00Z"))  # the listing is read a whole UTC day at a time (L4)
+        self.assertEqual(self.history.settled_calls, [("KXBTCD", day, day + DAY - 1)])
         calls = {tuple(sorted(names)): (lo, hi, period) for names, lo, hi, period in self.history.candle_calls}
         self.assertEqual(calls, {
             (A, B): (parse_time("2026-09-10T12:00:00Z"), parse_time("2026-09-10T13:00:00Z"), 1),
@@ -766,12 +767,13 @@ class KalshiTapeTest(unittest.TestCase):
         self.assertGreater(len(orders), 1)                             # and the seed is what orders it
 
     def test_listing_is_cut_on_utc_days(self):
+        """Whole UTC days, never the tape's own start or end: those move with the clock, and a URL
+        that never repeats is one the disk cache can never answer (L4, Sept 24, 2026)."""
         history = FakeHistory([], {})
         tape = KalshiData(None, history, clock=clock).tape(["KXBTCD", "KXETHD"], start="2026-09-08T22:00:00Z", end="2026-09-10T02:00:00Z")
         self.assertEqual((tape["steps"], tape["results"]), ([], {}))
-        day = parse_time("2026-09-09T00:00:00Z")
-        windows = [(int(parse_time("2026-09-08T22:00:00Z")), int(day) - 1), (int(day), int(day) + DAY - 1),
-                   (int(day) + DAY, int(parse_time("2026-09-10T02:00:00Z")))]
+        day = int(parse_time("2026-09-09T00:00:00Z"))
+        windows = [(day - DAY, day - 1), (day, day + DAY - 1), (day + DAY, day + 2 * DAY - 1)]
         self.assertEqual(history.settled_calls, [(name, lo, hi) for name in ("KXBTCD", "KXETHD") for lo, hi in windows])
 
     def test_an_early_close_shows_the_close_the_listing_showed(self):
@@ -819,6 +821,96 @@ class KalshiTapeTest(unittest.TestCase):
             kalshi.tape(["KXBTCD"], start=END, end=START)
         with self.assertRaisesRegex(TapeError, "at least one series"):
             kalshi.tape([], start=START, end=END)
+
+
+class ListingTransport:
+    """The Kalshi endpoints `ltcm.history.History` reads, over a list of settled market rows: pages
+    of `page` rows with a cursor, and no candles. `listings` records each listing request's window."""
+
+    def __init__(self, rows, page=2):
+        self.rows, self.page, self.listings = rows, page, []
+
+    def get(self, url, headers=None, timeout=30):
+        import json as _json
+        import urllib.parse as _parse
+
+        parts = _parse.urlsplit(url)
+        query = dict(_parse.parse_qsl(parts.query))
+        if parts.path.endswith("/candlesticks"):
+            return 200, {}, _json.dumps({"markets": []}).encode()
+        lo, hi = int(query["min_close_ts"]), int(query["max_close_ts"])
+        self.listings.append((query.get("series_ticker"), lo, hi, query.get("cursor")))
+        rows = sorted((r for r in self.rows if r["ticker"].startswith(query.get("series_ticker", "") + "-")
+                       and lo <= parse_time(r["close_time"]) <= hi), key=lambda r: r["ticker"])
+        start = int(query.get("cursor") or 0)
+        cursor = str(start + self.page) if start + self.page < len(rows) else ""
+        return 200, {}, _json.dumps({"markets": rows[start:start + self.page], "cursor": cursor}).encode()
+
+
+class TheSettledListingIsReadOnce(unittest.TestCase):
+    """L4 (Sept 24, 2026, the close-the-gaps run): the House's log showed KXETHD's settled listing
+    read again, seven pages at a time, for every Kalshi tape it built (2,183 `[history] kalshi
+    settled` lines). A tape's first day window began at the tape's own start, which moves with the
+    clock, so its URL never repeated and `ltcm.history`'s disk cache never answered it; and the day
+    still settling was read whole every time. A settled day is now read on whole UTC days (the same
+    URL every time, so the disk cache answers it), and the day still settling is served from memory
+    for `settled_listing_ttl` seconds, then read again only from where it could still change."""
+
+    def setUp(self):
+        from ltcm.history import History
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.now = [parse_time("2026-09-10T14:02:00Z")]
+        rows = []
+        for day in ("07", "08", "09", "10"):
+            for hour in ("01", "05", "09", "13"):
+                for strike in ("T2599.99", "T2699.99"):
+                    close = f"2026-09-{day}T{hour}:00:00Z"
+                    if parse_time(close) < self.now[0]:
+                        rows.append({"ticker": f"KXETHD-26SEP{day}{hour}-{strike}", "event_ticker": f"KXETHD-26SEP{day}{hour}",
+                                     "status": "finalized", "result": "yes", "open_time": f"2026-09-{day}T00:00:00Z",
+                                     "close_time": close, "yes_bid": 0, "yes_ask": 100, "volume": 5})
+        self.transport = ListingTransport(rows)
+        self.history = lambda: History(self.transport, cache_dir=Path(self.dir.name) / "cache", clock=lambda: self.now[0],
+                                       sleep=lambda s: None, verbose=False, min_interval=0)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def build(self, kalshi, *, back_days=3):
+        end = self.now[0] - 120
+        return kalshi.tape(["KXETHD"], start=iso(end - back_days * DAY), end=iso(end))
+
+    def test_a_second_tape_reads_nothing_the_house_already_holds(self):
+        kalshi = KalshiData(None, self.history(), clock=lambda: self.now[0])
+        first = self.build(kalshi)
+        self.assertEqual(len(first["results"]), 0)  # no candles, so no steps: the listing is what is measured
+        read = len(self.transport.listings)
+        self.assertGreater(read, 0)
+        self.now[0] += 60  # the next agent's tape a minute later, over a window a minute later
+        self.build(kalshi)
+        self.assertEqual(self.transport.listings[read:], [], "nothing the House holds is read again")
+
+    def test_a_restart_reads_only_the_day_still_settling(self):
+        self.build(KalshiData(None, self.history(), clock=lambda: self.now[0]))
+        read = len(self.transport.listings)
+        self.now[0] += 60
+        self.build(KalshiData(None, self.history(), clock=lambda: self.now[0]))  # a new process, the same disk cache
+        today = int(parse_time("2026-09-10T00:00:00Z"))
+        again = self.transport.listings[read:]
+        self.assertTrue(again)
+        self.assertEqual({lo for _, lo, _, _ in again}, {today}, "settled days come from the disk cache")
+
+    def test_after_its_ttl_the_settling_day_is_read_only_from_where_it_can_still_change(self):
+        kalshi = KalshiData(None, self.history(), clock=lambda: self.now[0])
+        self.build(kalshi)
+        read = len(self.transport.listings)
+        before = self.now[0]
+        self.now[0] += kalshi.settled_listing_ttl + 60
+        tape = self.build(kalshi)
+        again = self.transport.listings[read:]
+        self.assertEqual({lo for _, lo, _, _ in again}, {int(before - 12 * 3600)})
+        self.assertEqual(tape["meta"]["listed"], 3 * 8, "every settled market of the window is still listed")
 
 
 if __name__ == "__main__":

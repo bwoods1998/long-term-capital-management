@@ -1,0 +1,22 @@
+snapshot /tmp/claude-1000/-home-bwoods1998-Work/d98458ca-7959-468b-aee6-0082aa607bc1/scratchpad/snap2/ledger.sqlite (head seq 373126 at 2026-09-23T21:36:30.056Z)
+
+=== alpaca-paper venue fills since 2026-09-21 vs the order reference at intent time (+ adverse, - optimistic)
+asset | side | order type | n | median bps | mean bps | p10 | p90
+crypto | buy | limit | 187 | +0.00 | +0.00 | +0.00 | +0.00
+crypto | buy | market | 12 | -1.45 | -0.93 | -8.91 | +5.81
+crypto | sell | limit | 108 | -0.00 | -6.74 | -14.47 | -0.00
+crypto | sell | market | 61 | -2.11 | -4.57 | -18.91 | +8.11
+equity | buy | market | 73 | -0.18 | -0.14 | -0.98 | +0.28
+equity | sell | market | 63 | -0.28 | -0.29 | -1.20 | +0.55
+option | buy | limit | 28 | +0.00 | -8.12 | +0.00 | +0.00
+option | sell | limit | 18 | -0.00 | -55.56 | -0.00 | -0.00
+fills with no reference price (not measured): {}
+
+=== per class: the haircut covers the larger of the aggregate and the round-trip optimism (see the docstring)
+crypto: n 368 (>= 30: True), $12,148 filled; median +0.00, mean -2.77, NOTIONAL-WEIGHTED mean -3.13 (buys -0.01, sells -6.63; round trip 3.32 a side); buy n 199 median +0.00 mean -0.06; sell n 169 median -0.00 mean -5.96 -> haircut 4 bps a side [worse-side reading, for the record: 6]
+equity: n 136 (>= 30: True), $4,005 filled; median -0.23, mean -0.21, NOTIONAL-WEIGHTED mean -0.21 (buys -0.17, sells -0.26; round trip 0.22 a side); buy n 73 median -0.18 mean -0.14; sell n 63 median -0.28 mean -0.29 -> haircut 2 bps a side [worse-side reading, for the record: 2]
+option: n 46 (>= 30: True), $982 filled; median +0.00, mean -26.68, NOTIONAL-WEIGHTED mean -21.15 (buys -15.10, sells -32.84; round trip 23.97 a side); buy n 28 median +0.00 mean -8.12; sell n 18 median -0.00 mean -55.56 -> haircut 24 bps a side [worse-side reading, for the record: 56]
+
+=== real Alpaca fills per class (all time): {'crypto': 2} {'crypto': [0.0, -0.0]}
+
+=== the table: {'crypto': 4, 'equity': 2, 'option': 24}

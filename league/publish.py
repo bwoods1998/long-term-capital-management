@@ -11,6 +11,9 @@
    and the board's summary (count and capital per band per venue, the last 50 moves, the throttle),
    read from the House's allocator (`house.allocator.board()`). Without an allocator, or when it
    fails, each agent's band follows its rung and nothing else is claimed.
+7. The mechanism ledger (Sept 24, 2026): each agent's family state and settlements, and the proven
+   and compounding families with their proof, stake and capacity beside the unproven count, from
+   the allocator's board; and the lab's hourly line, from its own newest `lab.stats` row.
 
 The site validates every byte (`personal-site/capital/schema.js`; the contract this file is
 written against is `league/tests/fixtures/site_contract.md`). One bad event refuses its whole
@@ -154,11 +157,14 @@ def hours_between(start: str | None, end: str) -> float | None:
 
 # ------------------------------------------------------------------------- the capital board
 # The allocator's bands, lowest first (Workstream A, Sept 23, 2026). The site's validators know these
-# five words and no others (capital/schema.js `BANDS`). "paper" is the House's word: the page says
-# "Practice", and so does every sentence published here.
-BANDS = ("replay", "paper", "bunt", "swing", "star")
-REAL_BANDS = ("bunt", "swing", "star")
-BAND_LABELS = {"replay": "Replay", "paper": "Practice", "bunt": "Bunt", "swing": "Swing", "star": "Star"}
+# words and no others (capital/schema.js `BANDS`). "paper" is the House's word: the page says
+# "Practice", and so does every sentence published here. "probe" (Sept 24, 2026, the close-the-gaps
+# run's P1): a first real stake at pocket-change size for an agent whose family has not proven its
+# edge; a member of a proven family is a "bunt". Both are rung 2 and the page's Level 2; the site has
+# accepted the band since personal-site #6 (deployed 01:55Z Sept 24), before any board carried it.
+BANDS = ("replay", "paper", "probe", "bunt", "swing", "star")
+REAL_BANDS = ("probe", "bunt", "swing", "star")
+BAND_LABELS = {"replay": "Replay", "paper": "Practice", "probe": "Probe", "bunt": "Bunt", "swing": "Swing", "star": "Star"}
 RUNG_BANDS = ("replay", "paper", "bunt", "swing")  # before the allocator: rung 0..3
 MAX_BOARD_MOVES = 50
 MULTIPLE_PLACES = 6  # wealth multiples and E, as unsigned decimal strings: "1.034512"
@@ -277,7 +283,8 @@ def site_board_move(value: Any, published_at: str) -> dict[str, Any] | None:
 
 def site_board(board: Mapping[str, Any], published_at: str) -> dict[str, Any]:
     """The allocator's summary in the site's shape: per venue, count and capital per band; the last
-    50 moves (oldest first, ids unique); the throttle; whether the allocator is running."""
+    50 moves (oldest first, ids unique); the throttle; whether the allocator is running; and since
+    Sept 24, 2026 the proven families (`site_families`), when the board carries its mechanism ledger."""
     bands: dict[str, dict[str, Any]] = {}
     raw = board.get("bands")
     for venue, per in (list(raw.items())[:8] if isinstance(raw, Mapping) else []):
@@ -304,7 +311,112 @@ def site_board(board: Mapping[str, Any], published_at: str) -> dict[str, Any]:
         pnl, envelope = _number(throttle.get("floor_pnl_usd")), site_stake(throttle.get("envelope_usd"))
         if pnl is not None and envelope is not None:
             out["throttle"] = {"active": throttle["active"], "floor_pnl_usd": money(pnl, 2, signed=True), "envelope_usd": envelope}
+    families = site_families(board.get("families"))
+    if families is not None:
+        out["families"] = families
     return out
+
+
+# ------------------------------------------------------------------------- the mechanism ledger
+# A family's states (C1 and C4, the close-the-gaps run, Sept 24, 2026; `league/families.py`) as the site
+# knows them (capital/schema.js `FAMILY_STATES`): "unproven", "proven", and "swing", the House's word for a
+# proven family whose stakes compound, which the page calls compounding and never shows.
+FAMILY_STATES = ("unproven", "proven", "swing")
+PROVEN_STATES = ("proven", "swing")
+MAX_FAMILY_ROWS = 8  # the site's MAX_FAMILY_ROWS: the proven edges it lists, the strongest first
+MAX_SETTLEMENTS = 1_000_000  # the site's MAX_SETTLEMENTS: a family's independent settlements
+MAX_UNPROVEN = 100_000
+MAX_TESTED = 1_000_000  # the site's bound on the strategies the lab tested in an hour
+MAX_WAITING = 100_000
+BOUND_PLACES = 6  # a lower bound on growth a settlement, as a signed decimal string: "0.142300"
+_MAX_BOUND = Decimal("999999")
+_MAX_USD = Decimal("999999999")
+#: The lab's hourly reading (`lab.stats`, written by `Lab.publish` every `stats_every_minutes`, 10) is sent
+#: while it is at most this old: an older one no longer says what the last hour was.
+LAB_READING_MAX_AGE = 1800.0
+_HOUR = Decimal(3600)
+
+
+def _bounded(value: Any, limit: Decimal) -> Decimal | None:
+    number = _number(value)
+    return None if number is None else max(-limit, min(number, limit))
+
+
+def site_family_fields(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A desk's family in the mechanism ledger: {family_state, family_n}, together or not at all (the site
+    refuses one without the other). The family's bound and capacity are the family's numbers, not the
+    member's: they ride the board's `families`, once a family."""
+    state, n = row.get("family_state"), _count(row.get("family_n"))
+    if state not in FAMILY_STATES or n is None:
+        return {}
+    return {"family_state": state, "family_n": min(n, MAX_SETTLEMENTS)}
+
+
+def honest_bound(row: Mapping[str, Any]) -> Decimal | None:
+    """The bound a family's proof rests on: its t bound, and for a lopsided record (favourites: many small
+    wins and a rare whole loss) the House's loss-rate bound beside it, whichever is lower (`families.pool`'s
+    `honest_bound`: the board's row carries the two apart). Weather favourites at T0 (Sept 24, 2026) read
+    +0.0033 on the t bound and -0.21 on the loss-rate bound: unproven, and the lower number says why."""
+    bound, gate = _number(row.get("bound")), _number(row.get("loss_gate"))
+    if bound is None:
+        return None
+    return min(bound, gate) if gate is not None else bound
+
+
+def site_families(raw: Any) -> dict[str, Any] | None:
+    """The board's `families` (per venue, per family: `families.row_of`) in the site's shape: the proven and
+    compounding families, compounding first and then by settlements, at most `MAX_FAMILY_ROWS`, one a family
+    and venue, each named as a desk's family is (`desk_family`); and how many of the families followed are
+    unproven. A row the site would refuse is left out; None when the House sent no block."""
+    if not isinstance(raw, Mapping):
+        return None
+    rows: list[dict[str, Any]] = []
+    unproven = 0
+    for venue, per in list(raw.items())[:8]:
+        if not isinstance(venue, str) or not _VENUE.match(venue) or not isinstance(per, Mapping):
+            continue
+        for name, row in per.items():
+            if not isinstance(row, Mapping):
+                continue
+            state = row.get("state")
+            if state == "unproven":
+                unproven += 1
+                continue
+            n, bound = _count(row.get("n")), _bounded(honest_bound(row), _MAX_BOUND)
+            if state not in PROVEN_STATES or n is None or bound is None:
+                continue  # a family proven on no bound is not a proof the page can show
+            n = min(n, MAX_SETTLEMENTS)
+            real, capacity = row.get("real"), row.get("capacity")
+            real_n = _count(real.get("n")) if isinstance(real, Mapping) else None
+            usd = _bounded(capacity.get("usd_per_day"), _MAX_USD) if isinstance(capacity, Mapping) else None
+            rows.append({"family": desk_family(str(name)), "venue": venue, "state": state, "n": n, "real_n": min(real_n or 0, n),
+                         "bound": money(bound, BOUND_PLACES, signed=True), "stake_usd": site_stake(_bounded(row.get("stake_usd"), _MAX_USD)),
+                         "members_real": min(_count(row.get("members_real")) or 0, MAX_DESKS),
+                         "capacity_usd_per_day": None if usd is None else money(usd, 2, signed=True)})
+    rows.sort(key=lambda r: (r["state"] != "swing", -r["n"], r["venue"], r["family"]))
+    shown: list[dict[str, Any]] = []
+    for row in rows:
+        if len(shown) < MAX_FAMILY_ROWS and all((row["venue"], row["family"]) != (r["venue"], r["family"]) for r in shown):
+            shown.append(row)
+    return {"unproven": min(unproven, MAX_UNPROVEN), "rows": shown}
+
+
+def site_lab(entry: Any, now: float) -> dict[str, Any] | None:
+    """The lab's hourly reading in the site's shape ({at, tested_last_hour, graduates_waiting}), from its newest
+    `lab.stats` row (`Lab.stats` over the last hour: the candidates its batches evaluated, and its graduates
+    waiting for a seat). None with no row, one older than `LAB_READING_MAX_AGE`, one not over an hour, or a
+    count the site would refuse: the newest reading decides, and the site is never sent an older one."""
+    if entry is None:
+        return None
+    p = entry.payload if isinstance(entry.payload, Mapping) else {}
+    at, waiting = site_instant(entry.at), p.get("waiting_seat")
+    tested = _count(p.get("evaluated"))
+    graduates = _count(waiting.get("count")) if isinstance(waiting, Mapping) else None
+    if at is None or _number(p.get("window_seconds")) != _HOUR or tested is None or graduates is None:
+        return None
+    if now - _epoch(at) > LAB_READING_MAX_AGE:
+        return None
+    return {"at": at, "tested_last_hour": min(tested, MAX_TESTED), "graduates_waiting": min(graduates, MAX_WAITING)}
 
 
 def ledger_board_move(entry: Entry, agent: Any) -> dict[str, Any] | None:
@@ -636,9 +748,11 @@ class Publisher:
 
     # ---------------------------------------------------------------- checkpoint
     def checkpoint(self, house: Any) -> dict[str, Any]:
-        # The board and the accounts are read first: the site refuses a checkpoint whose venue
-        # readings (found on the first live publish) or band moves are stamped later than itself.
+        # The board, the lab's reading and the accounts are read first: the site refuses a checkpoint
+        # whose venue readings (found on the first live publish), band moves or lab reading are stamped
+        # later than itself.
         board = self.allocator_board(house)
+        lab = self.lab_reading(house)
         account = self.account(house)
         at = now_iso(self.clock)
         ledger = house.ledger
@@ -740,6 +854,8 @@ class Publisher:
             "lab": {"experiments": [], "curve": curve, "calibration": {"n": 0, "brier": None}},
         }
         body["board"] = self._board_block(board, at, living_rows, ledger_moves)
+        if lab is not None:
+            body["board"]["lab"] = lab  # with or without the allocator: the lab's line is its own
         return self.fit(body, order)
 
     # ----------------------------------------------------------------- the capital board
@@ -763,6 +879,15 @@ class Publisher:
         agents = board.get("agents")
         return board if isinstance(agents, Mapping) and agents else None
 
+    def lab_reading(self, house: Any) -> dict[str, Any] | None:
+        """The lab's hourly reading for the board's `lab` (`site_lab`, from the newest `lab.stats` row), or
+        None: none written, none fresh, or none that can be read. A display line never costs the floor its
+        checkpoint."""
+        try:
+            return site_lab(house.ledger.last("lab.stats"), self.clock())
+        except Exception:  # noqa: BLE001 - the lab's line is a courtesy; the checkpoint is not
+            return None
+
     @staticmethod
     def _rung(house: Any, agent: Any) -> int | None:
         try:
@@ -784,8 +909,9 @@ class Publisher:
     @classmethod
     def band_fields(cls, board: Mapping[str, Any] | None, agent_id: str, rung: int | None, at: str) -> dict[str, Any]:
         """A desk row's board fields. With the allocator: `band`, `stake_usd` (real bands only, else
-        null), `evidence` and `last_move` (null when there is none). Without it, or for an agent the
-        allocator does not list: the band the rung implies, and nothing else."""
+        null), `evidence` and `last_move` (null when there is none), and since Sept 24, 2026 its family's
+        `family_state` and `family_n` when the board carries them (`site_family_fields`). Without it, or
+        for an agent the allocator does not list: the band the rung implies, and nothing else."""
         fields: dict[str, Any] = {}
         band = cls._band(board, agent_id, rung)
         if band is not None:
@@ -799,6 +925,7 @@ class Publisher:
                 "evidence": site_evidence(row.get("evidence")),
                 "last_move": site_last_move(row.get("last_move"), at),
             })
+            fields.update(site_family_fields(row))
         except Exception:  # noqa: BLE001 - odd allocator data costs the row its evidence, not the checkpoint
             fields = {"band": band} if band is not None else {}
         return fields

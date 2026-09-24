@@ -107,7 +107,11 @@ def summary(ledger, agent, *, candidate=False, trials=0, reason="finished", text
 
 
 class GateCase(HouseCase):
-    def ready(self, *, p=0.1, fail=False, rng=None, settings=None):
+    def ready(self, *, p=0.1, fail=False, rng=None, settings=None, legacy=True):
+        """`legacy`: the Sept 22 rule (the clock runs anyone, no abstention lock), which the tests
+        below describe; the Sept 23 evidence-only rule has its own module (test_research_evidence_gate)."""
+        if legacy:
+            settings = {"clock_runs": "all", "abstain_lock_after": 0, **dict(settings or {})}
         self.house.settings.research = True
         self.house.pacer = Pacer(self.house.ledger, clock=self.clock, expedition={
             "start": now_iso(self.clock)[:10], "days": 10, "sail_usd": "50", "openai_usd": "50"})

@@ -12,6 +12,16 @@ from typing import Any, Mapping
 from .constitution import CONSTITUTION
 
 
+def _haircut_words(bps: Any) -> str:
+    """The Alpaca paper haircut in words: one number for every class, or (A8, Sept 23, 2026) each
+    asset class's own measured rate."""
+    if not isinstance(bps, Mapping):
+        return f"{bps} bps a side"
+    names = {"crypto": "crypto", "equity": "stocks", "option": "options"}
+    order = [k for k in names if k in bps] + sorted(k for k in bps if k not in names)
+    return ", ".join(f"{bps[k]} bps a side on {names.get(k, k)}" for k in order)
+
+
 def rules_text(game: Mapping[str, Any], constitution: Mapping[str, Any] | None = None) -> str:
     c = dict(constitution or CONSTITUTION)
     ladder, rungs, tuition, e = c["ladder"], c["rungs"], c["tuition"], game["economy"]
@@ -105,13 +115,109 @@ or never swings at all.
                          "your rank: capital follows it at every mark pass.")
         weights = alloc.get("evidence") or {}
         bunt = alloc["bunt_usd"]
+        probe = alloc.get("probe_bunt_usd") or bunt
+        proof = alloc.get("family_proven") or {}
         w = float(weights.get("paper_weight", 0.5))
         need = float(alloc["bunt_at"]) ** (1 / w) if w > 0 else float(alloc["bunt_at"])
+        per_event = str(alloc.get("independent_settlements") or "trade") == "event"
+        after = int(alloc.get("hysteresis_after_settled") or 0)
+        event_share = float(alloc.get("position_share_event") or alloc["position_share"])
+        # Promotion on proof (the close-the-gaps run, Sept 24, 2026): what the agents read about it. The agent-level
+        # swing is a proven family's member's while `swing_requires_proven_family` says so (Deploy B's key).
+        swing_gate = (", for a PROVEN family's member only (a probe stays a probe\n  until its family is proven)"
+                      if alloc.get("swing_requires_proven_family") else "")
+        counted = (" On Kalshi trades and settlements count ONCE PER EVENT: strikes stacked on one game are one\n"
+                   "  bet, not three, and move you no faster." if per_event else "")
+        lopsided = (" (a favourites record also\n  passes the loss-rate test: a run of small wins with no loss proves nothing yet)"
+                    if proof.get("lopsided_gate") is True else "")
+        # The mechanism ledger (C1, Deploy B, Sept 24, 2026; league/families.py): what an event is worth, what a
+        # family is, what sizing on practice buys, and the family swing's numbers, all read from the constitution.
+        at_risk = str(proof.get("unit") or "account") == "at_risk"
+        measured = "what their events made per dollar put at risk" if at_risk else "their mean log growth an event"
+        if at_risk:
+            # Each event weighs what it put at risk against the member's mean on that book (review of #242).
+            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE. An event is measured per dollar it put at risk\n"
+                      "  and weighs what it put at risk against your usual size on that book: scaling every bet up or down\n"
+                      "  proves nothing faster, a big losing bet counts for its dollars, and a token size measures fees and fills\n"
+                      "  you will never pay trading real money: size a practice position the way your code would size it with\n"
+                      "  real money. What proves (or disproves) a family faster is MORE independent events. This is\n"
+                      "  information, never an order: your size is your code's.\n")
+        else:
+            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE: a conviction-sized practice record proves (or\n"
+                      "  disproves) your family faster than a token one. Information, never an order: your size is your code's.\n")
+        swing_rule = alloc.get("family_swing") if isinstance(alloc.get("family_swing"), dict) else None
+        family_swing_text = ""
+        if swing_rule:
+            start = float(swing_rule.get("start_multiple", 2))
+            favourites = " (the loss-rate test too, for favourites)" if proof.get("lopsided_gate") is True else ""
+            # The entry's looks and the approval's lapse (the main session's decisions on the review of #242).
+            first, every = int(swing_rule.get("min_real_settlements", 15)), int(swing_rule.get("entry_every", 1))
+            entry_at = float(swing_rule.get("entry_confidence", proof.get("confidence", 0.8)))
+            looks = (f"there and at every {every} more ({first}, {first + every}, {first + 2 * every}, ...)" if every > 1
+                     else "there and at every settlement after it")
+            family_swing_text = (
+                f"- THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches {first} independent\n"
+                f"  settlements, its entry is judged {looks}: on those first settlements,\n"
+                f"  with their lower bound at {entry_at:.0%} above zero{favourites}. If a look passes and the frontier\n"
+                "  auditor approves the entry on that record, the family SWINGS: every member on real money is staked\n"
+                f"  {start:g}x the bunt (${start * float(bunt['kalshi']):.0f} at Kalshi), doubled after every {swing_rule.get('doubling_every', 10)} further WINNING real\n"
+                f"  settlements while the whole real record's lower bound at {float(proof.get('confidence', 0.8)):.0%} stays above zero, up to Kelly on that\n"
+                f"  bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the whole family (shared by its members on real money), and held\n"
+                f"  where the family's fills at the bigger size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one.\n"
+                "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
+                "  and its next entry is audited again, as it is when a member of the family takes a new program or\n"
+                "  a new member is born into it. A swinging member's positions are the same share of its stake, and the\n"
+                "  real book holds it to its daily-loss line as it holds every swing.\n")
+        proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
+  Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
+  when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
+  settlements (one an event; practice at {float(proof.get('practice_weight', 0.5)):g} weight, real money at {float(proof.get('real_weight', 1)):g}) and the one-sided
+  {float(proof.get('confidence', 0.8)):.0%} lower bound on {measured} is above zero{lopsided}. A probe becomes a bunt the pass
+  after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
+  nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
+  settlements, never by one agent's three lucky ones.
+  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
+  foundry card starts a family of its own and proves itself from zero; your research children stay in
+  your family, whatever they change, and their trades add to its record (its maker and taker entries are
+  pooled apart: a child that makes the market where you took it builds the maker record, and the taker
+  record decides whether a real entry may take).
+{sizing}{family_swing_text}""" if alloc.get("probe_bunt_usd") else "")
+        # The real book's entry rules and exits (Deploy A, Sept 24, 2026: X0 and D3 in league/book.py,
+        # read through the constitution's allocator keys): what an agent on real money must know before
+        # it sends an order, so a refusal is never a surprise.
+        entry_rules = []
+        if alloc.get("real_entry_liquidity") == "maker_unless_family_taker_positive":
+            entry_rules.append("an entry must be a POST-ONLY LIMIT (it rests on the book, or the venue refuses it)\n"
+                               "    until your family's pooled TAKER record is proven positive: market orders and\n"
+                               "    crossing limits are refused")
+        if alloc.get("longshot_floor_real"):
+            entry_rules.append(f"no entry under {float(alloc['longshot_floor_real']) * 100:.0f}c: cheap contracts lost on real money")
+        if alloc.get("max_event_share"):
+            entry_rules.append(f"one event (every strike of one game, one city's day) holds at most "
+                               f"{float(alloc['max_event_share']):.0%} of\n    your equity on the book")
+        real_book_text = ("- REAL MONEY AT KALSHI. Entries:\n" + "".join(f"  * {rule};\n" for rule in entry_rules)
+                          + "  Exits are never refused for meeting another agent's resting order: the House crosses it\n"
+                            "  inside at the market's price, or re-prices your exit so it cannot trade with the House's\n"
+                            "  own bid, and says so on your order.\n" if entry_rules else "")
+        trial_text = (f"""  ONE EARLY LOSS IS NOT A DEMOTION: that exit line applies once you have {after} independent real
+  settlements in your stay on real money (closed trades at Alpaca); until then only losing
+  {float(alloc['real_drawdown_demote']):.0%} of your real record from its high, or DRIFT (your real edge falling far below the practice
+  record that earned the seat: haghani-37 went back after one 2% loss on Sept 23), sends you back to practice. (Sept 23, 2026: four of
+  the allocator's nine new bunts were sent back by their first loss.) After them, one lost position
+  larger than about {1 - float(alloc['hysteresis']):.0%} of your stake can drop E under the line, and a binary contract loses
+  its whole position: keep positions small until your wins have built a buffer.
+""" if after > 0 else f"""  A FRESH BUNT IS A ONE-LOSS TRIAL if you let it be: with W_real at 1, one lost position larger than
+  about {1 - float(alloc['hysteresis']):.0%} of your stake drops E under the exit line, and a binary contract loses its whole
+  position (Sept 23, 2026: huang-h427345 was sent back to paper by one $2.55 settlement on a $10 bunt).
+  Keep a bunt's positions under that share until your wins have built a buffer; a bunt keeps what it
+  makes, so the buffer grows with every win.
+""")
         rungs_text = f"""- CAPITAL IS THE LADDER (the owner's rule since Sept 23, 2026). Your rank is your capital, and it
   moves at every mark pass, around the clock, with NO calendar gates, NO looks and NO screens.
   EVIDENCE IS WEALTH: W_paper is your paper account's wealth multiple since you were seated
   (${rungs['1']['stake_usd']} purse, ${rungs['1']['max_position_usd']} a position, ${rungs['1']['max_order_usd']} an order; stakes lent or returned are not profit; the block in
-  progress counts; Alpaca paper fills are haircut {weights.get('alpaca_paper_haircut_bps', 0)} bps a side because paper fills flatter).
+  progress counts; Alpaca paper fills are haircut {_haircut_words(weights.get('alpaca_paper_haircut_bps', 0))} because paper
+  fills flatter, each class by what its own paper fills were measured to flatter).
   W_real is the same on real money since your first real dollar, never reset. Your evidence is
   E = W_paper^{w:g} x W_real: paper counts as its square root, real results dominate.
   An edgeless strategy reaches a high W only by luck, however it sizes (Ville's inequality), so
@@ -119,20 +225,15 @@ or never swings at all.
   purse proves an edge twenty times slower than one that trades the whole of it.
 - The bands. PAPER (rung 1): trade forward on paper. BUNT (rung 2): E >= {alloc['bunt_at']} (paper up about
   {need - 1:.1%} on the whole purse) with {alloc['bunt_min_trades']} closed trades (or {alloc['bunt_min_settled']} settlements on Kalshi) puts you on REAL
-  money at once: ${bunt['kalshi']} at Kalshi, ${bunt['alpaca']} at Alpaca, a position up to {float(alloc['position_share']):.0%} of it. SWING (rung 3):
-  E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
+  money at once, as a probe or a bunt (below): a position up to {event_share:.0%} of the stake on Kalshi, {float(alloc['position_share']):.0%} at
+  Alpaca.{counted} SWING (rung 3){swing_gate}: E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
   frontier model; your stake is the bunt x min(E, {alloc['e_cap']})^{alloc['kappa']}, up to {float(alloc['max_share_of_venue']):.0%} of the venue, so it
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
-- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
+{proof_text}{real_book_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
   {alloc['swing_exit_w_real']}; losing {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to paper at once.
-  A FRESH BUNT IS A ONE-LOSS TRIAL if you let it be: with W_real at 1, one lost position larger than
-  about {1 - float(alloc['hysteresis']):.0%} of your stake drops E under the exit line, and a binary contract loses its whole
-  position (Sept 23, 2026: huang-h427345 was sent back to paper by one $2.55 settlement on a $10 bunt).
-  Keep a bunt's positions under that share until your wins have built a buffer; a bunt keeps what it
-  makes, so the buffer grows with every win.
-  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
+{trial_text}  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
   capital per venue, plus realized profit there) is full, the best E is seated first and a newcomer
-  with better evidence displaces the weakest flat bunt. If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
+  with better evidence displaces the weakest flat bunt (a probe only a probe). If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
   real stake is halved until it is back above {-float(alloc['throttle']['restore_above']):.0%} down.
 - PERFORMANCE FEE: {float(alloc['performance_fee_share']):.0%} of every dollar of realized REAL profit (a settlement or a sale) is paid to
   you as compute credits. Stars buy frontier research, consults and forks with it; losses cost nothing extra.

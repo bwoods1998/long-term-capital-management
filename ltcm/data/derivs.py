@@ -27,6 +27,10 @@ Hosts, endpoints and the fields relied on (probed live Sept 18, 2026):
             docs also list realizedRate, the rate actually charged, and about three months of
             history -- both UNVERIFIED on a probe)
         /api/v5/public/open-interest?instType=SWAP&instId=..      oi, oiCcy, oiUsd
+        /api/v5/rubik/stat/contracts/open-interest-history?instId=..&period=1H&limit=100&end=<ms>
+            data[]: [ts, oi, oiCcy, oiUsd] newest first, `end` exclusive (probed Sept 24, 2026). The
+            newest hour's value changes while that hour runs (it moved within a minute that day), so
+            an hour's point is final only when the hour has ended.
         /api/v5/market/ticker?instId=..                           last, bidPx, askPx
     https://api.hyperliquid.xyz
         POST /info {"type": "metaAndAssetCtxs"}
@@ -54,13 +58,13 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from . import DataError, HttpTransport, TransportError, iso, read_json, require
+from . import CONTACT_USER_AGENT, DataError, HttpTransport, TransportError, iso, read_json, require
 
 DERIBIT_HOST = "https://www.deribit.com"
 OKX_HOST = "https://www.okx.com"
 HYPERLIQUID_HOST = "https://api.hyperliquid.xyz"
 KRAKEN_HOST = "https://futures.kraken.com"
-USER_AGENT = "ltcm (agent@blakewoods.us)"
+USER_AGENT = CONTACT_USER_AGENT  # one constant for the whole package (ltcm/data/__init__.py)
 SOURCE = "derivs"
 
 #: Deribit allows 20 public requests a second unauthenticated; OKX 20 per 2 seconds. Ten a second
@@ -279,6 +283,27 @@ class Derivatives:
             if at is None or at <= 0 or rate is None:
                 continue
             out.append({"time_ms": int(at), "rate": rate, "funding_rate": funding, "realized_rate": realized})
+        return out
+
+    def okx_open_interest_history(self, symbol: str = "BTC", *, end_ms: "int | None" = None, limit: int = 100,
+                                  period: str = "1H") -> list[dict[str, Any]]:
+        """One page of OKX's open interest of `<symbol>-USDT-SWAP` by `period`, newest first:
+        `[{ts_ms, oi_contracts, oi_coin, oi_usd}]`, `ts_ms` the start of the period. `end_ms` pages back
+        (periods starting before it). A venue that fails raises; an instrument OKX does not list
+        answers `okx code 51001`."""
+        inst = f"{str(symbol).upper()}-USDT-SWAP"
+        params: dict[str, Any] = {"instId": inst, "period": str(period), "limit": max(1, min(int(limit), 100))}
+        if end_ms is not None:
+            params["end"] = int(end_ms)
+        rows = self._okx("/api/v5/rubik/stat/contracts/open-interest-history", params, f"okx open interest history {inst}")
+        out = []
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) < 4:
+                continue
+            at, contracts, coin, usd = (_float(value) for value in row[:4])
+            if at is None or at <= 0 or usd is None:
+                continue
+            out.append({"ts_ms": int(at), "oi_contracts": contracts, "oi_coin": coin, "oi_usd": usd})
         return out
 
     def hyperliquid_all(self) -> dict[str, dict[str, Any]]:

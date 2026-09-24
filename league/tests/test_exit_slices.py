@@ -17,7 +17,7 @@ from ltcm.broker import Instrument, Quote, RejectedOrder, UnknownOutcome
 from league.book import EXIT_PLAN_TTL_SECONDS, GATEWAY_MARKET_MARKUP, Book, Intent, Limits
 from league.fees import Fees
 from league.ledger import Ledger
-from league.tests.fakes import Clock, FakeBroker, iso
+from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
 from league.tests.test_house import HouseCase
 from league.tests.test_paper import ScriptedMarketData
 from league.tests.test_sim import Touches
@@ -85,6 +85,8 @@ class SliceCase(unittest.TestCase):
     cash = "100000"
 
     def setUp(self):
+        # These tests enter real Kalshi positions at market: not about the real book's entry rules (X0).
+        self.enterContext(without_real_entry_rules())
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
@@ -421,7 +423,10 @@ class CryptoSlices(SliceCase):
         self.book.submit([self.intent("a1", self.instrument, "sell", held)])
         self.broker.submit = original
         book = self.restart()
-        book.poll()
+        book.poll()  # the venue has no such order: heard once, the slice stays unknown and the plan waits
+        self.assertFalse(book.reconcile().ok)
+        self.clock.advance(61)
+        book.poll()  # heard again a minute later: the slice is closed as never arrived
         self.assertTrue(book.reconcile().ok)
         book.poll()
         self.assertEqual(self.held(self.instrument), 0)

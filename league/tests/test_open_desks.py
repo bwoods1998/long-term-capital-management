@@ -386,11 +386,13 @@ class TheAllocator(HouseCaseReal):
             self.assertEqual(real.account(agent.id).staked, D("25"))
             self.assertEqual(real.limits[agent.id].max_position_usd, D("12.50"))
             self.assertEqual(real.limits[agent.id].asset_classes, real.limits[fixed.id].asset_classes)
-            self.assertEqual(house.allocator.board()["agents"][agent.id]["band"], "bunt")
+            # An unproven family's agent is seated as a probe (Sept 24, 2026); on Alpaca a probe is $25 too.
+            self.assertEqual(house.allocator.board()["agents"][agent.id]["band"], "probe")
         self.assertEqual(house.allocator.target_stake(opened, "swing", None), house.allocator.target_stake(fixed, "swing", None))
         self.assertLessEqual(house.allocator.committed("alpaca"), house.allocator.capital("alpaca"))
-        # And it goes back to paper on the same evidence that sends any other bunt back.
-        table = {a.id: dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=2) for a in (fixed, opened)}
+        # And it goes back to paper on the same evidence that sends any other bunt back (past the one-loss
+        # trial: three real results in its stay, Sept 24, 2026).
+        table = {a.id: dict(e=0.80, w_paper=1.21, w_real=0.73, paper_trades=6, real_trades=3, real_stay_closed=3) for a in (fixed, opened)}
         with self.evidence_of(table):
             self.tick()
         self.assertEqual([house.evaluator.rung(a.id) for a in (fixed, opened)], [1, 1])
