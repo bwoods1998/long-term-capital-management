@@ -643,6 +643,16 @@ recorded for the next open; live verification uses the markets that trade around
   (losing by `families.losing`), bound −0.109, n 28. It is inside the envelope and has sent no real order yet;
   R5 refuses exactly this, and its builder has the case (a demoted options probe must never be sold at market or
   outside the session). Alpaca real agents: 4 (three crypto-alts probes, all on a losing family, and this one).
+- 17:52Z — **Deploy D integrated** (`d/deploy`, draft PR #281): main + #276 (R2/R3 with the family follow-up
+  1493318: a research fork or retained candidate on other markets or another style is born into its own family; 71 of
+  the 98 such children on the snapshot, 28 living, would have been) + #278 (practice option fees) + #279 (R6 items 2-5)
+  + #280 (R5: money digest `c02ed852` → `535a7f15`, constitution `38a57fe9`). One docs conflict (league/README.md's
+  house.py row: R2's text plus R6's two sentences). `league.ci --no-tests` passes; the reviews `r2/review` and
+  `r5/review` and the perf pass `r6/perf` merge on top before the deploy.
+- 17:53Z — **Local tests belong on the tmpfs.** 460 tests of the seat, book, allocator, watchdog, options and
+  family-probe modules ran in 26 s with `TMPDIR` on `/tmp`, against about 11 tests a minute with it on `~/Work`'s disk
+  (the builders' full suites crawled for 45 minutes and were stopped). The sqlite-heavy tests pay the disk's fsync; the
+  tmpfs is small (3.8 GB), so one suite at a time.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
