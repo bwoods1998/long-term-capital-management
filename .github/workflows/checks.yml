@@ -35,7 +35,9 @@ jobs:
         run: npm run check && npm test
   tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20, not 10 (Sept 24, 2026): the 3.14 job hit a 10-minute limit twice in a row on Deploy C' (#274:
+    # 15:58:41-16:08:56Z and 16:09:28-16:19:43Z) while 3.11 took 9m07s; it had sat at the limit since Sept 23.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
