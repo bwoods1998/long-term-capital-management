@@ -629,7 +629,8 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   its replay; already paused). A paused agent's wakes show `held` (buys the House held, never a
   refusal) and its resting buys are cancelled. Held buys are not activity: its wakes count barren,
   the stuck rule applies, and a practice resident paused past the grace is displaceable like an idle
-  one. The allocator promotes no paused agent (a `progress` status with stage `paused`), and after
+  one, and the seat report (`seats_holding_none`, the watch's seat line) counts it as holding none.
+  The allocator promotes no paused agent (a `progress` status with stage `paused`), and after
   24 hours paused holds a real agent's stake to its probe by free cash only (a `size` verdict whose
   reason says "held to the probe"; the board row's `entries_paused_since`).
   `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are

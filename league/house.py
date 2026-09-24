@@ -4648,8 +4648,7 @@ class House:
             # Its own pause (X1; review of #249, P3): held buys are not activity, and a resident paused past
             # the grace is displaceable like one that never traded -- no trader's, screen's or grace's
             # wait, ranked with the idle. A winner and real money stay protected, as for everyone.
-            paused = self.registry.entries_paused(agent.id) if standing.rung == 1 else None
-            idle_pause = bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= max(grace, clock)
+            idle_pause = standing.rung == 1 and self._paused_past(agent, max(grace, clock), now)
             if idle_pause:
                 agent_grace = 0
             traded = False
@@ -4714,6 +4713,13 @@ class House:
         # Has it traded at all, a losing family first, replay-only first, then growth, how much, and its purse.
         rank.sort(key=lambda row: row[:6])
         return rank
+
+    def _paused_past(self, agent: Agent, grace: float, now: float) -> bool:
+        """Whether the agent has held its own entries (X1, `pause_entries`) for `grace` seconds or more:
+        a resident paused past its resident grace (the plain grace and its desk's evidence clock) holds
+        no evidence of trading, for displacement and the seat report alike (review of #249, P3)."""
+        paused = self.registry.entries_paused(agent.id)
+        return bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
 
     def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
         """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its
@@ -5066,7 +5072,9 @@ class House:
         """S4 (Sept 24, 2026): the living residents off real money whose seat holds none of a program with a
         forward score (`Lab.resident_forward`, ranked), a fill of its own since its program's opportunity, or
         a grace still running (the plain grace, or its desk's evidence clock, in wall-clock hours from that
-        opportunity), oldest first. The population stays 112; these are the seats that carry no evidence."""
+        opportunity), oldest first -- and every resident that has held its own entries for longer than that
+        grace (`_paused_past`), as displacement counts it. The population stays 112; these are the seats
+        that carry no evidence."""
         grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
         clocks = self._desk_clocks()
         now = self.clock()
@@ -5079,6 +5087,11 @@ class House:
                 continue
             opportunity, seq = self._program_opportunity(agent) if rung == 1 else (_epoch(agent.born_at), 0)
             clock = clocks.get(agent.specialty or "", 0.0) if rung == 1 else 0.0
+            if rung == 1 and self._paused_past(agent, max(grace, clock), now):
+                # Its own pause, past its grace: held buys are not trading, and its fills and forward score
+                # are its record, not evidence that it trades now (review of #249, P3; the seat report).
+                out.append((opportunity, agent.id))
+                continue
             if now - opportunity < max(grace, clock):
                 continue
             if self._own_fills(agent.id, after=seq, enough=1):

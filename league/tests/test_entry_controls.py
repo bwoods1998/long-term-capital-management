@@ -559,6 +559,25 @@ class PausedIsNotActive(ControlCase):
             self.clock.advance(301)
         self.assertEqual(self.house.registry.get(agent.id).cause, "stuck")
 
+    def test_the_seat_report_counts_a_trader_paused_past_its_grace_as_holding_none(self):
+        """What displacement counts, the seat report counts: `seats_holding_none` in health.json's seats block,
+        the line `scripts/floor_watch.py` prints."""
+        agent = self.seated("sized", SIZED)
+        self.data.price = 79000.0  # under its line: it buys, a trader
+        self.broker.set_quote(self.btc, "78995", "79005")
+        self.house.tick()
+        rules = self.house.game["economy"]
+        grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
+        self.clock.advance(grace + 60)
+        self.assertEqual(self.house._seats_holding_none(rules), [])  # a fill of its own since its program began
+        pause(self.house, agent)
+        self.clock.advance(grace - 60)
+        self.assertEqual(self.house._seats_holding_none(rules), [])  # paused, but not past its grace
+        self.clock.advance(120)
+        self.assertEqual(self.house._seats_holding_none(rules), [agent.id])
+        watch = self.house._seat_market_watch(fresh=True)["seats_holding_none"]
+        self.assertEqual((watch["count"], watch["ids"]), (1, [agent.id]))
+
     def test_a_trader_paused_past_the_grace_is_displaceable_like_an_idle_one(self):
         agent = self.seated("sized", SIZED)
         self.data.price = 79000.0  # under its line: it buys, and is a trader short of its record

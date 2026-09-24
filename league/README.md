@@ -195,8 +195,9 @@ status is exposed in health and agent research context; qualification is distinc
    and its resting buys that are its alone are cancelled when the pause is made and at each wake
    (`_cancel_paused_entries`). Its sells, cancels and settlements go on. Held buys are not activity
    (review of #249, P3): the wake counts it barren when it is shown live markets (the stuck rule
-   and research's idle cadence read that), and `_displaceable` takes a resident paused past the
-   grace like one that never traded. The allocator promotes a paused agent to no real band (its
+   and research's idle cadence read that), `_displaceable` takes a resident paused past the grace
+   like one that never traded, and the seat report counts it as holding none (`_paused_past`,
+   `_seats_holding_none`). The allocator promotes a paused agent to no real band (its
    status says "paused"), and after `allocator.PAUSED_STAKE_AFTER_SECONDS` (24 h) holds a paused
    real agent's stake to the probe by free cash only (P2; the board row's `entries_paused_since`).
    **The horizon's basis (X2, Sept 24, 2026).** `resolution.resolution(row, close)` is when a Kalshi
