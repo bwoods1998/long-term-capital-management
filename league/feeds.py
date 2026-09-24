@@ -93,7 +93,7 @@ import math
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -442,7 +442,7 @@ def request_feed(name: Any) -> str | None:
     if "funding" in words and words & _PERPS_CONTEXT:
         return "funding" if words & (_HISTORY | _SETTLED) else "perps"
     for feed, source in RECORDERS.items():  # the recorders of Sept 24, 2026, each by its own words
-        if source.asks(words):
+        if source.asks(words) and (source.history or not words & _HISTORY):  # a live feed holds no history
             return feed
     if words & _HISTORY:
         return None
@@ -2372,13 +2372,126 @@ class EarningsDate(Source):
         return _earnings_words(words) and bool(words & _CALENDAR_WORDS)
 
 
+_TENOR = re.compile(r"^(\d{1,2})\s*-?\s*(M|MO|MON|MONTH|MONTHS|W|WK|WEEK|WEEKS|Y|YR|YRS|YEAR|YEARS)$")
+
+
+def _tenor_key(raw: Any) -> str | None:
+    """A Treasury tenor as the treasury feed names it (`10Y`, `3M`, `6W`) from `10y`, `10-year`, `3 MONTH`."""
+    from ltcm.data.rates import TENORS
+
+    found = _TENOR.match(str(raw or "").strip().upper())
+    if not found:
+        return None
+    unit = found.group(2)[0]
+    key = f"{int(found.group(1))}{'M' if unit == 'M' else 'W' if unit == 'W' else 'Y'}"
+    return key if key in TENORS else None
+
+
+class ReferenceRates(Source):
+    """SOFR and the other reference rates the New York Fed publishes each business day, for Kalshi's
+    rates series (KXSOFRD). Its API answers an effective date, never the moment a rate appeared."""
+
+    name = "rates"
+    host = "markets.newyorkfed.org"
+    source = "nyfed: markets.newyorkfed.org/api/rates/all/latest.json (SOFR, EFFR, OBFR, TGCR, BGCR)"
+    cadence = "every 30 minutes (published about 08:00 ET each business day, EFFR about 09:00)"
+    what = ("per reference rate (SOFR, EFFR, OBFR, TGCR, BGCR), the newest the New York Fed has published: {type, effective_date, "
+            "rate (percent), p1, p25, p75, p99, volume_bn, revised} and EFFR's target_from and target_to")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay: the New "
+                     "York Fed publishes an effective date, never the moment a rate appeared, so nothing is backfilled")
+    batch = True
+    every = 1800.0
+    gap = 3 * 1800.0
+    example = "SOFR"
+    note = "effective_date is the business day the rate applies to; it is published the next business day."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        from ltcm.data.rates import REFERENCE_RATES
+
+        return list(REFERENCE_RATES)
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.rates import REFERENCE_RATES
+
+        text = str(raw or "").strip().upper()
+        return text if text in REFERENCE_RATES else None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.rates import Rates
+
+        return Rates(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data import DataError
+
+        rates = fetcher.reference_rates()
+        return {key: rates[key] if key in rates else DataError(f"nyfed rates: no {key} in the answer") for key in keys}
+
+    def asks(self, words: set[str]) -> bool:
+        return bool(words & {"sofr", "effr", "obfr", "tgcr", "bgcr"}) or ({"fed", "funds"} <= words and bool(words & {"rate", "rates",
+                                                                                                                  "effective"}))
+
+
+class ParYields(Source):
+    """The Treasury's daily par yield curve, for Kalshi's Treasury yield series (KXUST2AD, KXUST10AD).
+    Every entry of its feed carries the feed's own `<updated>`, not the moment the day's curve
+    appeared (Sept 24, 2026), so a curve is stamped when the House first read it."""
+
+    name = "treasury"
+    host = "home.treasury.gov"
+    source = "treasury: home.treasury.gov daily_treasury_yield_curve XML (par yields by tenor, the current month's)"
+    cadence = "hourly (the day's curve is published after the close)"
+    what = ("per tenor (1M, 6W, 2M, 3M, 4M, 6M, 1Y, 2Y, 3Y, 5Y, 7Y, 10Y, 20Y, 30Y), the newest par yield the Treasury has "
+            "published: {tenor, date, yield (percent)}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay: the "
+                     "Treasury's feed carries no time a curve appeared, so nothing is backfilled")
+    batch = True
+    every = 3600.0
+    gap = 3 * 3600.0
+    timeout = 60.0
+    example = "10Y"
+    note = "date is the business day of the curve."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        from ltcm.data.rates import TENORS
+
+        return list(TENORS)
+
+    def key_of(self, raw: Any) -> str | None:
+        return _tenor_key(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.rates import Rates
+
+        return Rates(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data import DataError
+
+        today = datetime.fromtimestamp(now, timezone.utc)
+        curves = fetcher.par_yields(today.strftime("%Y%m"))
+        if not curves:  # the month's first curve is not out yet: the newest is last month's
+            last_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+            curves = fetcher.par_yields(last_month)
+        if not curves:
+            raise DataError("treasury par yields: no curve published in this month or the last")
+        latest = curves[-1]
+        return {key: ({"tenor": key, "date": latest["date"], "yield": latest["yields"][key]} if key in latest["yields"]
+                      else DataError(f"treasury par yields: no {key} on {latest['date']}")) for key in keys}
+
+    def asks(self, words: set[str]) -> bool:
+        return (bool(words & {"treasury", "treasuries", "ust"}) and bool(words & {"yield", "yields", "curve", "par", "rate", "rates"})) \
+            or {"par", "yield"} <= words
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
 
 #: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
-RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate())
+RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
+                                         ReferenceRates(), ParYields())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():

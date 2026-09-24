@@ -519,6 +519,52 @@ class Earnings(RecorderCase):
              "point_in_time_earnings_dates_for_the_16_": "earnings_date"})
 
 
+# ------------------------------------------------------------------------------------- rates
+class Rates(RecorderCase):
+    def test_one_request_answers_every_rate_each_stamped_at_receipt(self):
+        from ltcm.data.rates import REFERENCE_URL
+        from ltcm.tests.test_data_rates import recorded_rates
+
+        answer = recorded_rates()
+        answer["refRates"] = [row for row in answer["refRates"] if row["type"] != "TGCR"]  # one rate missing today
+        transport = FakeTransport({REFERENCE_URL: answer})
+        store = self.recorder({"rates": ["SOFR", "EFFR", "TGCR"]}, transports={"rates": transport})
+        out = store.run()
+        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(out["polled"], ["rates"])
+        self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("rates", "TGCR")])  # that one fails; the others stand
+        rows = store.latest({"rates": ["sofr", "EFFR", "TGCR"]}, self.clock())["rates"]
+        self.assertEqual(sorted(rows), ["EFFR", "SOFR"])
+        self.assertEqual((rows["SOFR"]["t"], rows["SOFR"]["effective_date"], rows["SOFR"]["rate"]), ("2026-09-24T03:30:00.000Z", "2026-09-22", 3.87))
+        self.assertEqual(store.latest({"rates": ["SOFR"]}, self.clock() - 0.001), {})
+        self.clock.advance(1800)
+        store.run()
+        self.assertEqual(store.coverage({"rates": ["SOFR"]})["rates"]["SOFR"]["snapshots"], 1)  # the same rate: stored once
+
+    def test_the_newest_curve_by_tenor_and_last_months_at_a_months_start(self):
+        from ltcm.data.rates import PAR_YIELD_URL
+        from ltcm.tests.test_data_rates import recorded_curve
+
+        empty = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        transport = FakeTransport({PAR_YIELD_URL + "?*": lambda m, url, b: (200, {}, recorded_curve() if url.endswith("202609") else empty)})
+        store = self.recorder({"treasury": ["2Y", "10Y"]}, transports={"treasury": transport})
+        store.run()
+        rows = store.latest({"treasury": ["10y", "2-year", "11Y"]}, self.clock())["treasury"]
+        self.assertEqual(rows["10Y"], {"tenor": "10Y", "date": "2026-09-23", "yield": 5.11, "t": "2026-09-24T03:30:00.000Z"})
+        self.assertEqual(rows["2Y"]["yield"], 4.85)
+        self.clock.set("2026-10-01T03:30:00Z")  # October's first curve is not out: the newest is September's
+        store.run()
+        self.assertEqual(store.latest({"treasury": ["10Y"]}, self.clock())["treasury"]["10Y"]["date"], "2026-09-23")
+        self.assertEqual([c["query"]["field_tdr_date_value_month"] for c in transport.calls], ["202609", "202610", "202609"])
+
+    def test_requests_for_rates(self):
+        self.assertEqual({name: request_feed(name) for name in ("sofr_daily_fixings", "treasury_par_yield_curve", "fed_funds_effective_rate",
+                                                                "ust_10y_yield_history", "rates_desk_macro_calendar")},
+                         {"sofr_daily_fixings": "rates", "treasury_par_yield_curve": "treasury", "fed_funds_effective_rate": "rates",
+                          "ust_10y_yield_history": None, "rates_desk_macro_calendar": None})
+        self.assertEqual(requested({"rates": ["sofr", "LIBOR"], "treasury": ["10 years", "DGS10"]}), {"rates": ["SOFR"], "treasury": ["10Y"]})
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime
