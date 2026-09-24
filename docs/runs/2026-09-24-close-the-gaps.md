@@ -369,7 +369,7 @@ recorded for the next open; live verification uses the markets that trade around
   digest for Deploy B: `c02ed852` (constitution `915c978e`, the pinned one). On the T0 snapshot:
   sports-central-run-under proven (+0.1423), weather-favorites unproven (loss-rate bound -0.2112),
   nothing swings and no family has reached its first look (every real count under 15).
-- 07:55Z — **The tick's cause found and fixed (#257).** The box's tick had slowed from 30-40 s at
+- 07:50Z — **The tick's cause found and fixed (#257).** The box's tick had slowed from 30-40 s at
   plan time to about 60 s. `auditor.order_outcomes`, called for every wake's snapshot, each research
   standing and each audit packet, re-read every `book.order` and `book.refused` row on the ledger:
   18,641 rows at T+4, 9.8 s a call through the `Ledger` on the owner's machine (first noticed by the
