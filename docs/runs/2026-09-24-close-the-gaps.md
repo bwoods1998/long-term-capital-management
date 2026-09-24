@@ -359,6 +359,16 @@ recorded for the next open; live verification uses the markets that trade around
   parents with a corrected child" starts at 0. Decided: L1 also skips a parent whose family's taker
   record is proven (X0 allows its taker entries); the reviewer is adding that, `seats_holding_none`
   in `floor_watch.py`, and checks of two more suspects.
+- 08:20Z — **The swing-entry decision is built** on `b-families/review` (#252 at `7fe1703`, CI
+  green): `proven` follows the pooled record alone and only a proven family swings; the entry is
+  judged at 15 real settlements and every 5 after on the first that many real events, the t bound and
+  the loss-rate bound both at 90%, the look derived from the real count (a restart cannot look early);
+  holding and doubling stay at 80% on the whole record; an approval lapses when the family leaves the
+  swing or a member rewrites its program after the audit began (and, being added, when a member is
+  born into the family after it). 93c favourites now need 32 clean real events instead of 23. Money
+  digest for Deploy B: `c02ed852` (constitution `915c978e`, the pinned one). On the T0 snapshot:
+  sports-central-run-under proven (+0.1423), weather-favorites unproven (loss-rate bound -0.2112),
+  nothing swings and no family has reached its first look (every real count under 15).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
