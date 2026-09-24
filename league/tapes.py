@@ -49,7 +49,9 @@ import re
 import threading
 import time
 import urllib.parse
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 from typing import Any, Callable, Iterable
 
@@ -78,6 +80,28 @@ CANDLE_WARMUP_SECONDS = DAY
 #: A settled listing can still grow for this long after its markets close (a weather market is
 #: paid the next morning): `ltcm.history.LISTING_SETTLE_SECONDS`, the line past which it caches.
 LISTING_SETTLE_SECONDS = 12 * 3600
+#: What `KalshiData` keeps of a settled market once its day has settled (`_settled_day`): every
+#: field the tape reads from the row -- `_settled_events` (ticker, event_ticker, title, result,
+#: open_time, close_time, settlement_ts), `listed_close` and `_listed_stop` (can_close_early,
+#: latest_expiration_time, scheduled_close_time), `resolve_time` (expected_expiration_time,
+#: expiration_time) and `parse_strike` (floor_strike, cap_strike). A row read back from memory has
+#: these and no other: a new reader of the settled rows adds its field here.
+SETTLED_FIELDS = ("ticker", "event_ticker", "title", "result", "open_time", "close_time", "settlement_ts", "can_close_early",
+                  "latest_expiration_time", "scheduled_close_time", "expected_expiration_time", "expiration_time",
+                  "floor_strike", "cap_strike")
+#: Of those, the times: held as epoch seconds, `parse_time`'s own answer, which it reads back
+#: unchanged. Sept 24, 2026: the tape's own parse of these strings, row by row on every build, was
+#: about half of what a settled day cost it (`_settled_day`); History's parse was the other half.
+SETTLED_TIMES = frozenset({"open_time", "close_time", "settlement_ts", "latest_expiration_time", "scheduled_close_time",
+                           "expected_expiration_time", "expiration_time"})
+#: The bound of that memory, in rows (a day with no market counts as one); the least recently used
+#: day leaves first. Measured Sept 24, 2026 on the real settled listings of the owner's History
+#: cache: a held row costs 240-245 bytes for KXBTC, KXBTCD, KXETH and KXETHD (History's parsed row
+#: 3,350-3,470), and 347 on average over 3,134 series-days of the other series (weather, sports,
+#: props: six markets a day at the median, so less repeats within a day). 400,000 rows is at most
+#: about 140 MB; a 14-day window of those four crypto-strike series is 293,888 rows (KXETHD alone
+#: 6,940 a day, 1.7 MB held).
+SETTLED_MEMO_ROWS = 400_000
 
 _SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9./]{0,19}$")
 _SERIES = re.compile(r"^[A-Z0-9][A-Z0-9._]{0,39}$")
@@ -548,6 +572,24 @@ def _day_windows(start_ts: float, end_ts: float) -> "list[tuple[int, int]]":
     return out
 
 
+def _held(field: str, value: Any, pool: "dict[Any, Any]") -> Any:
+    """A settled row's field as `KalshiData`'s memo holds it: a time (`SETTLED_TIMES`) as epoch
+    seconds, what `parse_time` makes of it and reads back unchanged, and a time it cannot read as it
+    was, so it fails the same way later; one object for equal text, decimals and times within a day
+    (`pool`). Only immutable values are shared, and a decimal only with one of the same digits."""
+    if field in SETTLED_TIMES and isinstance(value, str):
+        key = ("time", value)
+        if key not in pool:
+            try:
+                pool[key] = parse_time(value)
+            except TapeError:
+                pool[key] = value
+        return pool[key]
+    if isinstance(value, (str, Decimal)):
+        return pool.setdefault((type(value), str(value)), value)
+    return value
+
+
 class KalshiData:
     """Kalshi markets for the live `ctx`, and settled ones resampled into a tape.
 
@@ -579,6 +621,12 @@ class KalshiData:
         self.settled_listing_ttl = 600.0
         self._settling: dict[tuple[str, int], tuple[float, float, dict[str, Any]]] = {}  # (series, day) -> (read at, settled by, rows)
         self._settling_lock = threading.Lock()
+        #: Days whose every market had settled, kept after their first read (`_settled_day`): only
+        #: `SETTLED_FIELDS`, at most `settled_memo_rows` rows, the least recently used day out first
+        #: (0: nothing is kept and every read is History's). Under `_settling_lock`.
+        self.settled_memo_rows = SETTLED_MEMO_ROWS
+        self._settled_memo: "OrderedDict[tuple[str, int], tuple[tuple[Any, ...], ...]]" = OrderedDict()
+        self._settled_memo_held = 0
 
     def _paced(self, **query: Any) -> Any:
         """One venue read: never sooner than `min_interval` after the last, and a rate-limit
@@ -830,14 +878,30 @@ class KalshiData:
         Sept 24, 2026 (L4): a tape's first window began at the tape's own start, which moves with
         the clock, so that URL never repeated and the cache never answered it, and the day still
         settling was read whole every time: KXETHD's listing was read again, seven pages at a time,
-        for every Kalshi tape the House built (2,183 `[history] kalshi settled` lines in the log)."""
+        for every Kalshi tape the House built (2,183 `[history] kalshi settled` lines in the log).
+
+        A settled day is then kept in memory (`_remember_settled`) and read from History once a
+        process. Sept 24, 2026 (C-perf): after L4 the disk cache answered, but every page was
+        decompressed and every row parsed again for every tape (about 3,200 of those log lines every
+        30 minutes, CPU under the GIL beside the tick); measured on the real rows of KXBTC, KXBTCD,
+        KXETH and KXETHD, a 14-day tape of the four took about 58 s, the second build as slow as the
+        first, half of it History's parse and half the tape's parse of the same rows' times."""
         now = float(self.clock())
         last = day + DAY - 1
         settled_by = now - LISTING_SETTLE_SECONDS
         if last <= settled_by:
+            memo = self.settled_memo_rows > 0
             with self._settling_lock:
                 self._settling.pop((name, day), None)
-            return list(self.history.kalshi_settled(name, start_ts=day, end_ts=last) or [])
+                held = self._settled_memo.get((name, day)) if memo else None
+                if held is not None:
+                    self._settled_memo.move_to_end((name, day))
+            if held is None:
+                rows = self.history.kalshi_settled(name, start_ts=day, end_ts=last) or []
+                if not memo:
+                    return list(rows)
+                held = self._remember_settled((name, day), rows)
+            return [dict(zip(SETTLED_FIELDS, values)) for values in held]
         with self._settling_lock:
             held = self._settling.get((name, day))
         if held is not None and now - held[0] < self.settled_listing_ttl:
@@ -857,6 +921,28 @@ class KalshiData:
         with self._settling_lock:
             self._settling[(name, day)] = (now, settled_by, rows)
         return list(rows.values())
+
+    def _remember_settled(self, key: "tuple[str, int]", rows: "Iterable[Any]") -> "tuple[tuple[Any, ...], ...]":
+        """A settled day as the memo holds it: each row's `SETTLED_FIELDS` in that order, its times as
+        epoch seconds, and one object for each text, decimal or time the day repeats (an event's
+        ladder repeats its title, event, times and strikes on every market). The day is kept unless
+        it alone is over `settled_memo_rows`, and the least recently used days leave until the memo
+        is within it. What is returned is what every later read gets, so the first tape of a day
+        reads the rows the next ones do."""
+        pool: dict[Any, Any] = {}
+        held = tuple(tuple(_held(field, row.get(field), pool) for field in SETTLED_FIELDS) for row in rows if isinstance(row, dict))
+        with self._settling_lock:
+            bound = int(self.settled_memo_rows)
+            if max(1, len(held)) <= bound:
+                replaced = self._settled_memo.pop(key, None)  # two tapes that missed the same day at once
+                if replaced is not None:
+                    self._settled_memo_held -= max(1, len(replaced))
+                self._settled_memo[key] = held
+                self._settled_memo_held += max(1, len(held))
+            while self._settled_memo and self._settled_memo_held > bound:
+                _, gone = self._settled_memo.popitem(last=False)
+                self._settled_memo_held -= max(1, len(gone))
+        return held
 
     def _settled_events(self, names: "list[str]", start_ts: float, end_ts: float) -> "tuple[dict[str, list[dict[str, Any]]], int]":
         """The settled yes/no markets closing in [start, end], grouped by event, and their count.
