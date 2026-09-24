@@ -3618,6 +3618,11 @@ class House:
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
         if pending:
+            # A job still `queued` has bought nothing yet: the tick enqueues every due agent at once and
+            # the research lane's workers take them in turn (up to 34 waited at once, Sept 24 00Z), so it
+            # waits for the Sail cap like a new session; one under way resumes (review of #236).
+            if pending.get("status") == "queued" and kind == "sail" and self._sail_research_capped():
+                return False
             return self.clock() >= pending["available"]
         if kind == "sail" and self._sail_research_capped():
             return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)

@@ -214,10 +214,26 @@ class TheSailResearchCap(GateCase):
         rows = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail research cap"]
         self.assertEqual([r["capped"] for r in rows], [True, False])
 
+    def test_a_job_queued_while_the_cap_was_open_does_not_start_once_it_has_closed(self):
+        """Review of #236 (Sept 24, 2026): the tick enqueues every due agent at once and the research
+        lane (6 workers) takes them one by one; each worker asks `research_due` again, which let any
+        queued job through as a session "under way". Up to 34 research jobs waited for the lane at
+        once on Sept 24 00Z, so the cap could have been passed by every session queued before it
+        closed. A job not begun has bought nothing: it waits for the cap like a new session."""
+        self.assertTrue(self.house.research_due(self.agent))
+        job = self.house.research_jobs.enqueue(self.agent.id, self.house._generation(self.agent.id))  # the lane is busy
+        self.spend("2.40")
+        self.house._sail_cap_cache = None
+        self.assertFalse(self.house.research_due(self.agent), "queued, not begun: no paid call yet, so the cap holds it")
+        self.assertEqual(self.house.research_jobs.active(self.agent.id)["session"], job["session"], "the job stays queued")
+        self.clock.advance(3601)
+        self.assertTrue(self.house.research_due(self.agent), "the hour's spend left the window: the queued job runs")
+
     def test_a_session_already_started_resumes_and_luna_is_not_capped(self):
         self.spend("3.00")
         self.assertFalse(self.house.research_due(self.agent))
-        self.house.research_jobs.enqueue(self.agent.id, self.house._generation(self.agent.id))
+        job = self.house.research_jobs.enqueue(self.agent.id, self.house._generation(self.agent.id))
+        self.house.research_jobs.start(job["session"], {"standing": {}})
         self.assertTrue(self.house.research_due(self.agent), "a session already under way is not stopped half-paid")
         other = self.seated("luna-agent")
         self.house._state["last_research"][other.id] = self.clock() - self.interval
