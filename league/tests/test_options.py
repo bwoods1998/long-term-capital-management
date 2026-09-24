@@ -176,6 +176,91 @@ class BookRules(BookCase):
         self.assertFalse(self.book.reconcile().ok)
 
 
+class PracticeOptionFees(BookCase):
+    """A practice option fill pays the OCC clearing fee Alpaca's paper account takes at the fill
+    (`Fees.option_clearing`, Sept 24, 2026): $0.03 a contract rounded up to the cent a fill, which the
+    venue lists only the next morning. Until then every option fill left the book three cents over the
+    venue (14:39:07Z: "cash differs by -0.0322", krasker-14's AAL buy), and the next morning's row was
+    booked again against whatever shortfall came next."""
+
+    def new_book(self):
+        return Book(self.venue, self.broker, self.ledger, fees=Fees(self.family, option_clearing=True), real_money=self.real,
+                    clock=self.clock)
+
+    def setUp(self):
+        super().setUp()
+        self.broker.fees = Fees("alpaca", option_clearing=True)  # the paper venue takes it at the fill
+        self.clock.now = 1790002800.0  # 2026-09-21T15:00:00Z
+        self.broker.clock_iso = now_iso(self.clock)
+        self.call = call()
+        self.broker.set_quote(self.call, "0.40", "0.44")
+        self.book.limits["a"] = Limits(D("100"), D("75"), asset_classes=("option",))
+        self.book.stake("a", "200")
+
+    def trade(self, side="buy", price="0.44"):
+        return self.book.submit([self.intent("a", self.call, side, "1", order_type="limit", limit_price=price)])[0]
+
+    def venue_fee_rows(self):
+        return [e.payload for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue-fee"]
+
+    def test_the_model_charges_three_cents_a_contract_rounded_up_a_fill_and_only_when_asked(self):
+        fees = Fees("alpaca", option_clearing=True)
+        self.assertEqual([fees.charge(self.call, side, D(n), D("0.44")).usd for side, n in (("buy", 1), ("sell", 1), ("sell", 2), ("buy", 3))],
+                         [D("0.03"), D("0.03"), D("0.05"), D("0.08")])
+        self.assertEqual(Fees("alpaca").charge(self.call, "buy", D(1), D("0.44")).usd, D(0))  # a real book: not measured yet
+        spy = instrument_for("alpaca-paper", {"symbol": "SPY"})
+        self.assertEqual(fees.charge(spy, "sell", D(1), D("500")).usd, D(0))  # equities unchanged
+
+    def test_the_fill_pays_the_fee_and_the_book_reconciles_to_the_cent(self):
+        self.assertEqual(self.trade().status, "filled")
+        fill = [e.payload for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue"][-1]
+        self.assertEqual((D(fill["fee_usd"]), D(fill["cash_delta"])), (D("0.03"), D("-44.03")))
+        self.assertEqual(self.book.account("a").cash, D("155.97"))
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(result.dust_booked, D(0))
+        self.assertEqual(self.trade("sell", "0.40").status, "filled")
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, D(0)))
+        self.assertEqual(self.book.account("a").realized, D("-4.06"))  # the premium's $4 and both fills' fees
+
+    def test_the_next_mornings_clearing_row_is_not_booked_again_and_the_regulators_are(self):
+        self.assertEqual(self.trade().status, "filled")
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.cash -= D("0.02")  # the overnight batch takes the day's ORF
+        self.broker.fee_activities = lambda since=None: [
+            {"id": "20260921::occ", "usd": D("0.03"), "date": "2026-09-21", "description": "OCC Clearing Fee"},
+            {"id": "20260921::orf", "usd": D("0.02"), "date": "2026-09-21", "description": "ORF fee for proceed of 1 contracts"}]
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(result.dust_booked, D(0))
+        self.assertEqual([(row["detail"], row["cash_delta"]) for row in self.venue_fee_rows()],
+                         [("2026-09-21 ORF fee for proceed of 1 contracts", "-0.02")])
+
+    def test_a_shortfall_beside_a_fill_in_flight_books_no_fee(self):
+        """Sept 24, 2026, 11:29:48Z: an in-flight BTC buy read "cash differs by -24.1299; positions
+        differ: crypto:BTCUSD:alpaca-paper 0.000299081", and $0.87 of the day before's fee rows were
+        booked against it; the fill landed seven seconds later and the book froze on +0.8700 for ten
+        minutes, until it adopted the venue."""
+        self.assertEqual(self.trade().status, "filled")
+        self.assertTrue(self.book.reconcile().ok)
+        self.broker.fee_activities = lambda since=None: [
+            {"id": "20260923::orf", "usd": D("0.38"), "date": "2026-09-23", "description": "ORF fee for proceed of 25 contracts"},
+            {"id": "20260923::taf", "usd": D("0.04"), "date": "2026-09-23", "description": "OPT TAF fee for proceed of 11 contracts"}]
+        btc = instrument_for("alpaca-paper", {"symbol": "BTC/USD"})
+        self.broker.cash -= D("24.13")  # the venue shows a fill the book has not polled yet
+        self.broker.held[btc.key] = (btc, D("0.000299081"))
+        result = self.book.reconcile()
+        self.assertFalse(result.ok)
+        self.assertIn("positions differ", result.detail)
+        self.assertEqual(self.venue_fee_rows(), [])  # the price of units is not a fee
+        self.broker.cash += D("24.13")
+        self.broker.held.pop(btc.key)
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual((result.dust_booked, self.venue_fee_rows()), (D(0), []))
+
+
 @old_ladder()
 class InTheHouse(HouseCase):
     def options_agent(self, name="options-breakout", rung=1):
