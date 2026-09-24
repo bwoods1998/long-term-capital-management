@@ -61,9 +61,10 @@ promotion waits, its status naming the numbers), and a probe seated on it goes b
 next pass by `_move_down`, which holds a Kalshi contract to settlement; on Alpaca, where that path sells
 what the account holds, only once the probe is flat (`_unflat`; its working bids are cancelled first,
 as the path itself does): no sale is ever forced. Each probe demoted from real money, for any reason,
-HOLDS its family until the family's record since that demotion turns -- is positive over as many blocks
-(`probe_hold`, read from the ledger's `eval.verdict` rows, `fold_demotions`). A gate that cannot be read
-seats no probe and demotes nobody. A proven or swinging family's agents are bunts, never gated.
+HOLDS its family until the family's record since that demotion -- the blocks that began after it -- turns:
+is positive over as many blocks at a pass (`probe_hold`, read from the ledger's `eval.verdict` rows,
+`fold_demotions`). A gate that cannot be read seats no probe, lends no probe more and demotes nobody. A
+proven or swinging family's agents are bunts, never gated.
 Measured on the 15:06Z snapshot: 11 of the allocator's 21 promotions since Sept 23 went onto such
 families and realized -$8.12 on 22 closes, no stay positive; the other 10 made +$28.96.
 
