@@ -2484,6 +2484,85 @@ class ParYields(Source):
             or {"par", "yield"} <= words
 
 
+class SportsOdds(Source):
+    """The sportsbook lines and win probabilities of the games on each league's board, from ESPN's
+    core API: a second price for every Kalshi game contract. The events are the ones on the House's
+    own recorded scoreboard (the `sports` feed), so the two feeds agree on what a game is."""
+
+    name = "odds"
+    host = "sports.core.api.espn.com"
+    source = ("espn: sports.core.api.espn.com/v2/sports/<sport>/leagues/<league>/events/<id>/competitions/<id>/odds and "
+              "/predictor, for the pre-game events of the league's recorded scoreboard")
+    cadence = "every 30 minutes a league, for its games starting within 36 hours"
+    what = ("per league, each game on its recorded board that has not started and starts within 36 hours: {id, name, start, home, "
+            "away, lines: [{provider, details, spread (home-signed), over_under, home_ml, away_ml, implied_home (de-vigged), open: "
+            "{spread, home_ml, away_ml}}], win_probability: {home, away, tie, modified} (ESPN's matchup predictor; football and "
+            "basketball only, else None)}")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay; ESPN "
+                     "keeps no history of its lines here, so nothing is backfilled")
+    every = 1800.0
+    gap = 3 * 1800.0
+    max_keys = 24
+    timeout = 20.0
+    example = "nfl"
+    note = "A league whose board is not recorded yet has no row; lines is [] for a game no book prices."
+    HORIZON = 36 * 3600.0
+    MAX_EVENTS = 16
+    #: Where ESPN's matchup predictor exists (other sports answer 404).
+    PREDICTED = ("football", "basketball")
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return recorder.keys("sports")
+
+    def key_of(self, raw: Any) -> str | None:
+        return _sports_key(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.sports import Sports
+
+        return Sports(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data import DataError
+
+        out: dict[str, Any] = {}
+        for league in keys:
+            path = SPORTS_LEAGUES.get(league)
+            board = ((recorder.latest({"sports": [league]}, now).get("sports") or {}).get(league)) if path else None
+            if board is None:
+                out[league] = DataError(f"{NOT_LISTED} no {league} scoreboard is recorded yet")
+                continue
+            games = []
+            for event in board.get("events") or []:
+                try:
+                    start = _epoch(event.get("start"))
+                except (TypeError, ValueError):
+                    continue
+                if event.get("status") == "pre" and now <= start <= now + self.HORIZON:
+                    games.append(event)
+            rows = []
+            try:
+                for event in sorted(games, key=lambda e: str(e.get("start")))[:self.MAX_EVENTS]:
+                    lines = fetcher.core_odds(path, event["id"])
+                    predicted = fetcher.core_predictor(path, event["id"]) if path.split("/")[0] in self.PREDICTED else None
+                    rows.append({"id": event["id"], "name": event.get("name"), "start": event.get("start"),
+                                 "home": (event.get("home") or {}).get("team"), "away": (event.get("away") or {}).get("team"),
+                                 "lines": lines, "win_probability": predicted})
+            except Exception as exc:  # noqa: BLE001 - one game's lines that fail fail the league's poll: never a partial board
+                out[league] = exc
+                continue
+            out[league] = {"league": league, "events": rows}
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        if words & {"outcome", "outcomes", "resolved", "settlement", "settled", "kalshi", "consensus"}:
+            return False
+        sporting = bool(words & _SPORTS_CONTEXT) or bool(words & {"nfl", "ncaaf", "mlb", "nba", "nhl", "wnba", "epl", "mls"})
+        priced = bool(words & {"odds", "moneyline", "moneylines", "sportsbook", "sportsbooks", "betting", "vegas", "bookmaker",
+                               "bookmakers"}) or ("win" in words and bool(words & {"probability", "probabilities", "prob"}))
+        return sporting and priced
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
@@ -2491,7 +2570,7 @@ def _register(*sources: Source) -> dict[str, Source]:
 #: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
 RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
-                                         ReferenceRates(), ParYields())
+                                         ReferenceRates(), ParYields(), SportsOdds())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():

@@ -565,6 +565,64 @@ class Rates(RecorderCase):
         self.assertEqual(requested({"rates": ["sofr", "LIBOR"], "treasury": ["10 years", "DGS10"]}), {"rates": ["SOFR"], "treasury": ["10Y"]})
 
 
+# ---------------------------------------------------------------------------------- sports odds
+def board(*games) -> dict:
+    """An NFL scoreboard (the site API's shape, ltcm/tests/test_data_sports.py) of (id, start, state)."""
+    return {"events": [{"id": gid, "name": f"Away {gid} at Home {gid}", "date": start, "competitions": [{
+        "competitors": [{"homeAway": "home", "score": "0", "team": {"displayName": f"Home {gid}"}},
+                        {"homeAway": "away", "score": "0", "team": {"displayName": f"Away {gid}"}}],
+        "status": {"type": {"state": state}}}]} for gid, start, state in games]}
+
+
+class Odds(RecorderCase):
+    def transport(self, **over):
+        from ltcm.data.sports import CORE_HOST
+        from ltcm.tests.test_data_sports import NFL, core
+
+        routes = {NFL: board(("401872948", "2026-09-24T20:00Z", "pre"), ("401872949", "2026-09-24T01:00Z", "in"),
+                             ("401872950", "2026-09-27T17:00Z", "pre")),
+                  CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/odds": core("espn_core_odds_401872948.json"),
+                  CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/predictor":
+                      core("espn_core_predictor_401872948.json")}
+        routes.update(over)
+        return FakeTransport(routes)
+
+    def test_the_lines_of_the_boards_coming_games_are_recorded_at_receipt(self):
+        fake = self.transport()
+        store = self.recorder({"sports": ["nfl"], "odds": ["nfl"]}, transports=fake)
+        out = store.run()
+        self.assertEqual(out["polled"], ["sports:nfl", "odds:nfl"])  # the board first, then its lines
+        self.assertEqual(out["failed"], [])
+        row = store.latest({"odds": ["KXNFLGAME"]}, self.clock())["odds"]["nfl"]
+        self.assertEqual(row["t"], "2026-09-24T03:30:00.000Z")
+        # Only the game that has not started and starts within 36 hours: not the one on now, not Sunday's.
+        self.assertEqual([e["id"] for e in row["events"]], ["401872948"])
+        game = row["events"][0]
+        self.assertEqual((game["home"], game["lines"][0]["home_ml"], game["lines"][0]["implied_home"], game["win_probability"]["home"]),
+                         ("Home 401872948", -245, 0.6806, 0.74465))
+        self.assertEqual(store.latest({"odds": ["nfl"]}, self.clock() - 0.001), {})
+        self.assertFalse(any("401872950" in c["url"] or "401872949" in c["url"] for c in fake.calls))
+
+    def test_a_league_without_a_board_is_not_listed_and_a_failed_line_fails_the_league(self):
+        from ltcm.data.sports import CORE_HOST
+
+        store = self.recorder({"odds": ["nfl"]}, transports=self.transport())
+        out = store.run()
+        self.assertEqual([(k, feeds.NOT_LISTED in e) for _, k, e in out["failed"]], [("nfl", True)])  # no board recorded: waits
+        broken = self.transport(**{CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/odds":
+                                   TransportError("the host is down")})
+        other = FeedRecorder(path=Path(self.dir.name) / "other.sqlite", transports=broken, clock=self.clock, ledger=None,
+                             keys={"sports": ["nfl"], "odds": ["nfl"]})
+        self.addCleanup(other.close)
+        out = other.run()
+        self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("odds", "nfl")])
+        self.assertEqual(other.latest({"odds": ["nfl"]}, self.clock()), {})  # never a partial board
+        self.assertEqual({name: request_feed(name) for name in ("nfl_sportsbook_odds", "live_win_probability_nfl",
+                                                                "resolved_sports_moneyline_price_outcome_", "live_sports_scores")},
+                         {"nfl_sportsbook_odds": "odds", "live_win_probability_nfl": "odds",
+                          "resolved_sports_moneyline_price_outcome_": None, "live_sports_scores": "sports"})
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime
