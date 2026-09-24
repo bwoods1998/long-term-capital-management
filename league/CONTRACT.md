@@ -135,21 +135,25 @@ parent's family whatever they change, and its maker and taker entries are pooled
 EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
 strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
 
-THE FAMILY SWING (since Deploy B, Sept 24, 2026, `allocator.family_swing`). When your family's REAL
-record alone has 15 or more independent settlements and its honest lower bound is above zero (the
-t bound, and the loss-rate bound for a favourites record), and the frontier auditor approves its first
-entry on that record (the family packet: every member's real closes, event by event, with the stake
-it would take), every member on real money is staked at the family's ramp: twice `bunt_usd` ($60 on
-Kalshi) when the family enters, doubled after every 10 further WINNING independent real settlements
-while the bound stays above zero, up to full Kelly on that bound against the venue's capital (capital
+THE FAMILY SWING (since Deploy B, Sept 24, 2026, `allocator.family_swing`). Only a PROVEN family
+swings (its pooled record: a real record alone neither proves nor swings a family). Its entry is judged
+when its REAL record reaches 15 independent settlements and at every 5 more (15, 20, 25, ...), on those
+first settlements, with the honest lower bound at 90% above zero (the t bound, and the loss-rate bound
+for a favourites record); a look that fails waits for the next one. When a look passes and the frontier
+auditor approves the entry on that record (the family packet: every member's real closes, event by
+event, the look, with the stake it would take), every member on real money is staked at the family's
+ramp: twice `bunt_usd` ($60 on Kalshi) when the family enters, doubled after every 10 further WINNING
+independent real settlements while the whole real record's honest bound at 80% stays above zero (read
+at every pass), up to full Kelly on that bound against the venue's capital (capital
 at risk on one event: the stake is that over the 25% of it one Kalshi event may hold) and 60% of the
 venue (both the FAMILY's, shared by its members on real money, a member seated in the same pass
 included from its first dollar), held where the family's fill
 rate at the bigger size is under half its fill rate at the smaller one ("capacity" on the board), and
 never under the bunt. The envelope's headroom bounds every raise. A bound at zero or below returns the
 members to bunts (to probes if the pooled proof has gone too), by free cash only, and so does a live
-grant that stops releasing stakes above the bunt (its rung 3); an approval on record lets the family
-re-enter without a second audit. The family's audit is the family's: it is never read as the verdict on
+grant that stops releasing stakes above the bunt (its rung 3). Leaving the swing lapses the family's
+approval, and so does a new program taken by any member after the audit looked: the next entry is
+audited again. The family's audit is the family's: it is never read as the verdict on
 the member it was written against, whose own promotions are audited as before. A swinging member's positions are the same
 share of its stake, and the book holds it to its daily-loss rule as it holds every swing.
 
