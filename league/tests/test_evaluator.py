@@ -1156,6 +1156,34 @@ class Rungs(EvalCase):
         self.ev.promote("a", 2, "test")
         self.assertEqual(Evaluator(self.ledger).rung("a"), 2)
 
+    def test_the_latest_move_is_folded_once_and_then_from_the_new_verdicts_only(self):
+        """Sept 24, 2026 (R6-perf): `rung` and `_rung_entered` read every verdict of the agent on every call
+        (150,000 rows parsed a tick on a copy of the 17:27Z snapshot). The latest move is now folded from the
+        verdicts after the last one read; it answers as the per-agent scan did, and another writer's verdict
+        on the same ledger counts at once."""
+        def scanned(agent):  # the answer as it was read before: the agent's verdicts, newest first
+            for entry in reversed(self.ledger.read(kinds="eval.verdict", agent=agent, limit=10_000, newest=True)):
+                if entry.payload.get("decision") in ("promote", "demote", "seat"):
+                    return int(entry.payload["to_rung"]), entry.seq
+            return 0, 0
+
+        self.ev.seat("a", 1, "test")
+        self.ev.seat("b", 1, "test")
+        for _ in range(3):
+            self.ledger.append("eval.verdict", {"decision": "look", "rung": 1}, agent="a")
+        self.assertEqual((self.ev.rung("a"), self.ev._rung_entered("a")), scanned("a"))
+        other = Evaluator(self.ledger, constitution=BOUND)  # another thread's evaluator on the same ledger
+        other.promote("a", 2, "passed")
+        self.ledger.append("eval.verdict", {"decision": "look", "rung": 2, "to_rung": 9}, agent="a")
+        other.seat("c", 1, "test")
+        with patch.object(self.ledger, "read", wraps=self.ledger.read) as read:
+            answers = {agent: (self.ev.rung(agent), self.ev._rung_entered(agent)) for agent in ("a", "b", "c", "nobody")}
+        self.assertEqual(answers, {agent: scanned(agent) for agent in answers})
+        self.assertEqual(answers["a"][0], 2)
+        self.assertTrue(read.call_args_list)
+        self.assertTrue(all(call.kwargs.get("agent") is None and call.kwargs.get("after", 0) > 0 for call in read.call_args_list),
+                        "only the verdicts after the last one folded are read")
+
 
 # =================================================================================================
 # drift

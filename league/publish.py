@@ -28,9 +28,11 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from decimal import ROUND_HALF_UP, Decimal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -605,6 +607,84 @@ def _short(value: Any) -> str:
 
 
 # ------------------------------------------------------------------------------ publisher
+#: The spend buckets of the checkpoint's `run`, and the bucket of a `credit.charge` by what it bought.
+BUCKETS = ("tokens", "boxes", "search", "other")
+
+
+def _bucket(what: str) -> str:
+    return "tokens" if "token" in what else ("boxes" if "sandbox" in what else ("search" if what == "web search" else "other"))
+
+
+class _Folds:
+    """What a checkpoint reads from the whole ledger, folded once and then from the new rows only.
+
+    Sept 24, 2026 (R6-perf): `checkpoint` read every `credit.charge` row twice a tick (the spend buckets,
+    then each desk's cost agent by agent), every `provider.request` row for the models used, each agent's
+    every verdict and the newest 10,000 wakes. Traced on a copy of the 17:27Z snapshot: about 250,000
+    rows parsed a tick, 3.5 s of the tick's CPU on the developer machine; the box's `publish` step took
+    11.6-87.7 s a tick that hour (with the site's own answer inside it). The ledger is append-only and
+    every fold is in sequence order, from zero as the full read summed, so the new rows folded onto the
+    old sums ARE the sums read afresh. A row a fold cannot read stops it there, as it stopped the full
+    read, and the next checkpoint tries the same row again."""
+
+    KINDS = ("credit.charge", "ops.budget", "provider.request", "merton.pass", "audit.verdict", "agent.woke",
+             "agent.intent", "eval.verdict")
+    #: `run.sessions_today` counts today's wakes among the newest this many, as it always has.
+    NEWEST_WAKES = 10_000
+
+    def __init__(self, ledger: Any) -> None:
+        self.ledger = ledger
+        self.lock = threading.Lock()
+        self.seq = 0
+        self.spend = {bucket: ZERO for bucket in BUCKETS}
+        self.spend_days: dict[str, dict[str, Decimal]] = {}  # UTC day -> bucket -> charges that day
+        self.cost: dict[str, Decimal] = {}  # agent -> its charges
+        self.sail: Decimal | None = None  # the Sail meter's falls (`ops.budget` "sail" with `spent_usd`); None: never metered
+        self.sail_days: dict[str, Decimal] = {}
+        self.profiles: set[str] = set()  # the model profiles `provider.request` rows name
+        self.frontier_paid = False  # a Merton pass or an audit that cost something
+        self.wake_days: deque[str] = deque(maxlen=self.NEWEST_WAKES)  # the day of each of the newest wakes
+        self.intents: dict[str, int] = {}  # agent -> its `agent.intent` rows
+        self.looks: dict[str, Mapping[str, Any]] = {}  # agent -> its latest look's payload
+        self.moves: dict[str, list[Entry]] = {}  # agent -> its promotions and demotions, oldest first
+
+    def advance(self) -> "_Folds":
+        with self.lock:
+            for entry in self.ledger.iter(kinds=self.KINDS, after=self.seq):
+                self._fold(entry)
+                self.seq = entry.seq
+        return self
+
+    def _fold(self, entry: Entry) -> None:
+        kind, p, day = entry.kind, entry.payload, entry.at[:10]
+        if kind == "credit.charge":
+            amount, bucket = Decimal(p["usd"]), _bucket(p.get("what", ""))
+            self.spend[bucket] += amount
+            self.spend_days.setdefault(day, {b: ZERO for b in BUCKETS})[bucket] += amount
+            self.cost[entry.agent] = self.cost.get(entry.agent, ZERO) + amount
+        elif kind == "ops.budget":
+            if p.get("what") == "sail" and p.get("spent_usd") is not None:
+                amount = Decimal(p["spent_usd"])
+                self.sail = (ZERO if self.sail is None else self.sail) + amount
+                self.sail_days[day] = self.sail_days.get(day, ZERO) + amount
+        elif kind == "provider.request":
+            if p.get("profile"):
+                self.profiles.add(str(p["profile"]))
+        elif kind in ("merton.pass", "audit.verdict"):
+            if not self.frontier_paid and Decimal(str(p.get("cost_usd") or 0)) > 0:
+                self.frontier_paid = True
+        elif kind == "agent.woke":
+            self.wake_days.append(day)
+        elif kind == "agent.intent":
+            self.intents[entry.agent] = self.intents.get(entry.agent, 0) + 1
+        elif kind == "eval.verdict":
+            decision = p.get("decision")
+            if decision == "look":
+                self.looks[entry.agent] = p
+            elif decision in ("promote", "demote"):
+                self.moves.setdefault(entry.agent, []).append(entry)
+
+
 class Publisher:
     def __init__(
         self,
@@ -635,6 +715,13 @@ class Publisher:
 
             self._flows = AccountPerformance({**self.performance, "venues": sorted(self.real_brokers)}, self.real_brokers, clock=clock)
         self._venue_rows: dict[str, dict[str, Any]] = {}
+        self._folds: _Folds | None = None  # what the checkpoint sums over the whole ledger (`_folded`)
+
+    def _folded(self, house: Any) -> _Folds:
+        """The checkpoint's folds of `house`'s ledger, brought up to its newest row (`_Folds`)."""
+        if self._folds is None or self._folds.ledger is not house.ledger:
+            self._folds = _Folds(house.ledger)
+        return self._folds.advance()
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -757,15 +844,9 @@ class Publisher:
         at = now_iso(self.clock)
         ledger = house.ledger
         desks, curve_rows = [], {}
-        spend = {"tokens": ZERO, "boxes": ZERO, "search": ZERO, "other": ZERO}
-        spend_today = dict(spend)
-        for entry in ledger.iter(kinds="credit.charge"):
-            amount = Decimal(entry.payload["usd"])
-            what = entry.payload.get("what", "")
-            bucket = "tokens" if "token" in what else ("boxes" if "sandbox" in what else ("search" if what == "web search" else "other"))
-            spend[bucket] += amount
-            if entry.at[:10] == at[:10]:
-                spend_today[bucket] += amount
+        folds = self._folded(house)  # every whole-ledger sum below, from the new rows only (R6-perf)
+        spend = dict(folds.spend)
+        spend_today = dict(folds.spend_days.get(at[:10]) or {bucket: ZERO for bucket in BUCKETS})
         living, dead = list(house.registry.living()), list(house.registry.dead())
         rungs = {agent.id: self._rung(house, agent) for agent in living + dead}
         bands = {agent.id: self._band(board, agent.id, rungs[agent.id]) for agent in living + dead}
@@ -825,10 +906,9 @@ class Publisher:
         # unassigned infrastructure. Without it, publish only the attributed Sail estimate.
         sail_total = spend["tokens"] + spend["boxes"] + spend["search"]
         sail_today = spend_today["tokens"] + spend_today["boxes"] + spend_today["search"]
-        metered = [e for e in ledger.iter(kinds="ops.budget") if e.payload.get("what") == "sail" and e.payload.get("spent_usd") is not None]
-        if metered:
-            sail_total = sum((Decimal(e.payload["spent_usd"]) for e in metered), ZERO)
-            sail_today = sum((Decimal(e.payload["spent_usd"]) for e in metered if e.at[:10] == at[:10]), ZERO)
+        if folds.sail is not None:  # metered
+            sail_total = folds.sail
+            sail_today = folds.sail_days.get(at[:10], ZERO)
         pacer = getattr(house, "pacer", None)
         daily_cap = pacer.allowance("sail") if pacer is not None else Decimal(house.game["economy"]["daily_pool_usd"])
         wakes = ledger.count(kinds="agent.woke")
@@ -843,7 +923,7 @@ class Publisher:
             "infra": {"host": "sailbox" if os.environ.get("SAILBOX_ID") or Path("/workspace").exists() else "local"},
             "run": {
                 "started_at": started_at, "uptime_seconds": int(max(self.clock() - _epoch(started_at), 0)), "availability_7d_pct": None,
-                "sessions_total": wakes, "sessions_today": min(wakes, sum(1 for e in ledger.read(kinds="agent.woke", limit=10000, newest=True) if e.at[:10] == at[:10])),
+                "sessions_total": wakes, "sessions_today": min(wakes, sum(1 for day in folds.wake_days if day == at[:10])),
                 "decisions_total": ledger.count(kinds="agent.intent"),
                 "sail_model_spend_today_usd": money(spend_today["tokens"], 4), "sail_model_spend_total_usd": money(spend["tokens"], 4),
                 "sail_infra_spend_total_usd": money(spend["boxes"], 4), "sail_spend_total_usd": money(sail_total, 4),
@@ -1011,12 +1091,12 @@ class Publisher:
     def displayed(cls, house: Any, living: list[Any], dead: list[Any], *, bands: Mapping[str, str | None] | None = None) -> set[str]:
         return set(cls.ranked(house, living, dead, bands=bands))
 
-    @staticmethod
-    def _models_used(house: Any, token_spend: Decimal) -> list[str]:
+    def _models_used(self, house: Any, token_spend: Decimal) -> list[str]:
         from ltcm.provider import DISPLAY_NAMES, PROFILES
         from .frontier import MODEL
 
-        profiles = {str(e.payload["profile"]) for e in house.ledger.iter(kinds="provider.request") if e.payload.get("profile")}
+        folds = self._folded(house)
+        profiles = set(folds.profiles)
         if not profiles and token_spend > 0:
             # Older research charges did not carry a profile. The configured profile is the best
             # available attribution for those rows, rather than a hardcoded model from launch day.
@@ -1025,7 +1105,7 @@ class Publisher:
         for profile in profiles:
             model = PROFILES[profile][0] if profile in PROFILES else profile
             models.add(DISPLAY_NAMES.get(model, model))
-        if any(Decimal(str(e.payload.get("cost_usd") or 0)) > 0 for e in house.ledger.iter(kinds=("merton.pass", "audit.verdict"))):
+        if folds.frontier_paid:
             frontier = getattr(getattr(house, "merton", None), "frontier", None)
             models.add(str(getattr(frontier, "model", MODEL)))
         return [clean_text(model, 40) for model in sorted(models)[:8]]
@@ -1038,11 +1118,11 @@ class Publisher:
         capital = staked if staked > 0 else Decimal(CONSTITUTION["rungs"]["1"]["stake_usd"]) if account else ZERO
         equity = book.equity(agent.id) if account else ZERO
         pnl = (equity - staked) if account and staked > 0 else (account.realized if account else ZERO)
-        cost = sum((Decimal(e.payload["usd"]) for e in house.ledger.iter(kinds="credit.charge", agent=agent.id)), ZERO)
-        intents = house.ledger.count(kinds="agent.intent", agent=agent.id)
-        verdicts = list(house.ledger.iter(kinds="eval.verdict", agent=agent.id))
-        looks = [e.payload for e in verdicts if e.payload.get("decision") == "look"]
-        moves = [e for e in verdicts if e.payload.get("decision") in ("promote", "demote")]
+        folds = self._folds if self._folds is not None and self._folds.ledger is house.ledger else self._folded(house)
+        cost = folds.cost.get(agent.id, ZERO)
+        intents = folds.intents.get(agent.id, 0)
+        look = folds.looks.get(agent.id)  # its latest look
+        moves = folds.moves.get(agent.id, [])
         lifecycle = {"born_at": agent.born_at, "died_at": agent.died_at, "cause": agent.cause,
                      "last_move": {"id": moves[-1].id, "at": moves[-1].at,
                                    **{k: moves[-1].payload.get(k) for k in ("decision", "from_rung", "to_rung", "reason")}} if moves else None}
@@ -1069,14 +1149,14 @@ class Publisher:
             "parent_id": agent.parent if agent.parent != agent.id else None,
             "mode": "live" if (book is not None and book.real_money) else "shadow",
             "venues": ["kalshi" if agent.venue == "kalshi" else "alpaca"],
-            "capital_usd": money(capital, 2), "cost_usd": money(cost, 4), "max_drawdown_pct": money(Decimal(str(looks[-1].get("drawdown") or 0)) * 100 if looks else 0, 4),
+            "capital_usd": money(capital, 2), "cost_usd": money(cost, 4), "max_drawdown_pct": money(Decimal(str(look.get("drawdown") or 0)) * 100 if look is not None else 0, 4),
             "equity": money(equity, 4, signed=True), "cash": money(account.cash if account else 0, 4, signed=True), "daily_pnl": "0",
             "return_pct": money((pnl / capital * 100) if capital > 0 else 0, 4, signed=True),
             "days_live": int(max(self.clock() - born, 0) // 86400), "orders": intents,
             "status": "active" if agent.alive else "retired",
             "gate": {"name": f"rung {rung}", "passed": rung >= 2, "evidence": clean({"decisions": intents, "rung": rung, "credits_usd": money(house.economy.balance(agent.id), 4, signed=True),
                      "niche": agent.niche, "accounting_ok": accounting_ok, "lifecycle": lifecycle,
-                     "last_look": {k: looks[-1].get(k) for k in ("look", "active_blocks", "mean", "lcb", "ucb", "alpha_spent")} if looks else None})},
+                     "last_look": {k: look.get(k) for k in ("look", "active_blocks", "mean", "lcb", "ucb", "alpha_spent")} if look is not None else None})},
             "updated_at": at, "pnl_usd": money(pnl, 4, signed=True), "positions": positions,
         }
         if agent.alive and next_wake:

@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 import sys
 from pathlib import Path
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
@@ -175,13 +176,36 @@ class Evaluator:
         self.clock = clock
         self.archive = archive
         self._evaluation_policy = None
+        #: Each agent's latest move (promote, demote or seat) as (its seq, its payload), folded from the
+        #: eval.verdict rows after `_moves_seq` (`_last_move`).
+        self._moves: dict[str, tuple[int, Mapping[str, Any]]] = {}
+        self._moves_seq = 0
+        self._moves_lock = threading.Lock()
 
     # ------------------------------------------------------------------ state
+    def _last_move(self, agent: str) -> tuple[int, Mapping[str, Any]] | None:
+        """The agent's latest promote, demote or seat verdict: (its seq, its payload), or None.
+
+        Sept 24, 2026 (R6-perf): `rung` and `_rung_entered` read and parsed every verdict the agent had
+        (up to 10,000; 397 at most on the floor, nearly all of them looks) on every call, and the tick asks
+        thousands of times: on a copy of the 17:27Z snapshot, 150,000 verdict rows parsed a tick through
+        them (tuition, publish, research, the allocator, population, judging). The ledger is append-only,
+        so the latest move is folded once from all verdicts and then from the new rows only, which is
+        the same answer while an agent has fewer than 10,000 verdicts after its last move."""
+        with self._moves_lock:
+            while True:
+                batch = self.ledger.read(kinds="eval.verdict", after=self._moves_seq, limit=5000)
+                if not batch:
+                    break
+                for entry in batch:
+                    if entry.payload.get("decision") in ("promote", "demote", "seat"):
+                        self._moves[entry.agent] = (entry.seq, entry.payload)
+                self._moves_seq = batch[-1].seq
+            return self._moves.get(agent)
+
     def rung(self, agent: str) -> int:
-        for entry in reversed(self.ledger.read(kinds="eval.verdict", agent=agent, limit=10_000, newest=True)):
-            if entry.payload.get("decision") in ("promote", "demote", "seat"):
-                return int(entry.payload["to_rung"])
-        return 0
+        move = self._last_move(agent)
+        return int(move[1]["to_rung"]) if move is not None else 0
 
     def max_rung(self, agent: str) -> int:
         """The highest rung the agent has ever stood on."""
@@ -190,10 +214,8 @@ class Evaluator:
 
     def _rung_entered(self, agent: str) -> int:
         """The ledger sequence number at which the agent entered its current rung."""
-        for entry in reversed(self.ledger.read(kinds="eval.verdict", agent=agent, limit=10_000, newest=True)):
-            if entry.payload.get("decision") in ("promote", "demote", "seat"):
-                return entry.seq
-        return 0
+        move = self._last_move(agent)
+        return move[0] if move is not None else 0
 
     def seat(self, agent: str, rung: int, reason: str) -> None:
         """Place an agent on a rung without a test (used once, for nothing above rung 0, and by

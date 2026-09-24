@@ -85,3 +85,84 @@ class ExhaustedLines(HouseCase):
         self.clock.advance(601)
         self.house._refill(rules)
         self.assertEqual(self.house.ledger.count(kinds="hypothesis.retired"), 1)
+
+
+class TheBudgetIsAskedLast(HouseCase):
+    """Sept 24, 2026 (R6-perf): `research_due` asked the campaign's budget first, of every living agent on
+    every tick: 17.7 ms a call on a copy of the 17:27Z snapshot, about 2 s of a tick. It is asked after the
+    checks that read and write nothing, so only of agents otherwise due; the answer is the old order's."""
+
+    def setUp(self):
+        super().setUp()
+        self.house.settings.research = True
+        self.house.researcher = SimpleNamespace()
+        self.house.game["research"]["min_hours_between"] = 1
+        self.house.game["research"]["gate"] = {"after": 2, "max_factor": 8, "sample_percent": 0}
+        self.house.game["research"]["pace"] = {}
+
+    def old_research_due(self, agent):
+        """`research_due` as it was before R6-perf, check for check: the answer to match."""
+        from decimal import Decimal
+
+        from league.house import _epoch
+
+        house = self.house
+        if house._closing.is_set() or not agent.alive or house.researcher is None or not house.settings.research:
+            return False
+        if house.paused():
+            return False
+        kind = house._research_budget_kind(agent)
+        if not house.pacer.may_spend(kind):
+            return False
+        if house.deploying():
+            return False
+        pending = house.research_jobs.active(agent.id)
+        if pending:
+            if pending.get("status") == "queued" and kind == "sail" and house._sail_research_capped():
+                return False
+            return house.clock() >= pending["available"]
+        if kind == "sail" and house._sail_research_capped():
+            return False
+        rules = house.game.get("research") or {}
+        if house.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
+            return False
+        last = max(float(house._state["last_research"].get(agent.id) or 0), house.research_jobs.last_finished(agent.id))
+        refusal = house.ledger.last('book.refused', agent=agent.id)
+        book = house.book_of(agent)
+        if (refusal is not None and book is not None and refusal.payload.get('book') == book.name
+                and _epoch(refusal.at) > last and house.clock() - last >= 60):
+            return True
+        interval = house.research_interval_hours(agent) * 3600
+        if house.clock() - last < interval:
+            return False
+        return house._gate(agent, last, interval)
+
+    def test_the_old_order_s_answer_and_the_budget_asked_only_of_agents_otherwise_due(self):
+        from unittest.mock import patch
+
+        agents = {name: self.seated(name) for name in ("just", "due", "broke", "refused", "waiting", "resumes")}
+        for agent in agents.values():
+            self.house.economy.grant(agent.id, "5", "rich enough to research")
+        self.house.economy.charge(agents["broke"].id, "5.95", "spent")
+        now = self.clock()
+        state = self.house._state["last_research"]
+        state.update({agents["just"].id: now, agents["due"].id: now - 7200, agents["broke"].id: now - 7200,
+                      agents["refused"].id: now - 120, agents["waiting"].id: now - 7200, agents["resumes"].id: now - 7200})
+        self.house.ledger.append("book.refused", {"book": "alpaca-paper", "reasons": ["too big"]}, agent=agents["refused"].id)
+        pending = {agents["waiting"].id: {"session": "s-w", "status": "queued", "available": now + 600},
+                   agents["resumes"].id: {"session": "s-r", "status": "queued", "available": now - 1}}
+        for budget in (True, False):
+            for capped in (False, True):
+                asked = []
+                with patch.object(self.house.research_jobs, "active", side_effect=lambda agent_id: pending.get(agent_id)), \
+                        patch.object(self.house, "_sail_research_capped", side_effect=lambda: asked.append("cap") or capped), \
+                        patch.object(self.house.pacer, "may_spend", side_effect=lambda kind: asked.append(kind) or budget):
+                    new = {name: self.house.research_due(agent) for name, agent in agents.items()}
+                    budget_asks, cap_asks = sum(1 for a in asked if a != "cap"), asked.count("cap")
+                    asked.clear()
+                    old = {name: self.old_research_due(agent) for name, agent in agents.items()}
+                self.assertEqual(new, old, (budget, capped))
+                self.assertEqual(budget_asks, 3, "asked of `due`, `refused` and `resumes` only, the agents otherwise due")
+                self.assertLessEqual(cap_asks, 3 if budget else 0, "the cap, which writes, only after the budget said yes")
+                if budget and not capped:
+                    self.assertEqual({name for name, due in new.items() if due}, {"due", "refused", "resumes"})
