@@ -45,8 +45,8 @@ class TheTickSteps(HouseCase):
     def test_a_slow_step_is_the_slowest_for_an_hour(self):
         invariants = self.house._floor_invariants
 
-        def slow():
-            time.sleep(0.3)
+        def slow():  # a House's first tick also pays its first epoch (0.13 s here): the slow step is well clear of it
+            time.sleep(1.0)
             return invariants()
 
         with patch.object(self.house, "_floor_invariants", slow):
@@ -54,20 +54,20 @@ class TheTickSteps(HouseCase):
         steps = self.health()
         last = steps["last"]["steps"]
         self.assertEqual(max(last, key=last.get), "floor_invariants")
-        self.assertGreaterEqual(last["floor_invariants"], 0.3)
+        self.assertGreaterEqual(last["floor_invariants"], 1.0)
         self.assertEqual(steps["slowest_hour"][0]["step"], "floor_invariants")
         slow_at = steps["slowest_hour"][0]["at"]
         self.clock.advance(1800)
         self.house.tick()  # half an hour on, a quick tick: still the hour's slowest step
         steps = self.health()
-        self.assertLess(steps["last"]["steps"]["floor_invariants"], 0.3)
+        self.assertLess(steps["last"]["steps"]["floor_invariants"], 1.0)
         self.assertEqual((steps["slowest_hour"][0]["step"], steps["slowest_hour"][0]["at"]), ("floor_invariants", slow_at))
         self.assertEqual(steps["ticks_in_hour"], 2)
         self.clock.advance(1900)
         self.house.tick()  # the slow tick is over an hour old
         steps = self.health()
         hour = {row["step"]: row["seconds"] for row in steps["slowest_hour"]}
-        self.assertLess(hour.get("floor_invariants", 0), 0.3)
+        self.assertLess(hour.get("floor_invariants", 0), 1.0)
         self.assertEqual(steps["ticks_in_hour"], 2)
 
     def test_each_background_lane_s_last_run_is_in_health_and_not_in_the_tick(self):
