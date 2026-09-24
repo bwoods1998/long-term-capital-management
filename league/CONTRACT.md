@@ -142,11 +142,13 @@ line on which the House stops breeding a family). When it is at or below zero af
 family is LOSING: no probe is seated from it (your promotion waits with the stage `family_losing` and the
 family's numbers), and a probe seated on it goes back to practice at the next pass. On Kalshi that
 demotion sells nothing (a contract is held to settlement); on Alpaca, where the demotion would sell what
-the account holds, a probe keeps its seat until it holds nothing the demotion would sell (dust is
-booked, not sold) and has no working order -- your own exits go on, and nothing is sold for you. A probe that goes back to practice from real money for ANY
-reason (hysteresis, the stay drawdown, displacement, drift, an audit's veto, this rule) HOLDS its family:
-no probe from it is seated until the family's forward record SINCE that demotion is positive over 6
-active blocks (stage `family_held`, with when the hold began). A newcomer never displaces a probe of its
+the account holds (an option at the bid, a stock at the next open), your working bids are cancelled first
+and a probe keeps its seat until it holds nothing the demotion would sell (dust is booked, not sold) --
+your own exits go on, nothing is sold for you, and you are lent nothing more. A probe that goes back to
+practice from real money for ANY reason (hysteresis, the stay drawdown, displacement, drift, an audit's
+veto, this rule) HOLDS its family until the family's forward record SINCE that demotion turns: positive
+over 6 active blocks (stage `family_held`, with when the hold began). A turn is for good, and each such
+demotion is its own hold. A newcomer never displaces a probe of its
 own family (that would hold the family, and it, at once). A proven or swinging family's members are
 bunts and are never held. Measured on Sept 24, 2026: 11 of the allocator's 21 promotions since Sept 23
 went onto losing families and lost $8.12 on 22 closes, no stay ending positive; the other 10 made $28.96.

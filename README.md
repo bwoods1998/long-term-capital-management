@@ -124,10 +124,12 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   run's third money-digest change): when a family's forward record -- every member's active blocks,
   living or dead, and their summed log growth, the line on which the House stops breeding it -- is at
   or below zero after 6 active blocks, no probe is seated from it, and a probe seated on it goes back to
-  practice at the next pass (on Kalshi its contracts are held to settlement; on Alpaca only once it
-  holds nothing the demotion would sell -- dust is booked, not sold -- and has no working order: no
-  sale is forced). A probe that goes back to practice for any reason holds its family until the
-  family's record since then is positive over 6 active blocks. Measured on the 15:06Z snapshot: 11
+  practice at the next pass (on Kalshi its contracts are held to settlement; on Alpaca its bids are
+  cancelled and it goes back once it holds nothing the demotion would sell -- dust is booked, not sold:
+  no sale is forced, and it is lent nothing more meanwhile). Each probe that goes back to practice, for
+  any reason, holds its family until the family's record since that demotion turns positive over 6
+  active blocks; the options probe krasker-14 (options-pullback: 19 practice blocks, -0.3829) seated
+  as an $80 probe at 16:47:37Z is the kind of seat this refuses. Measured on the 15:06Z snapshot: 11
   of the allocator's 21 promotions since Sept 23 went onto losing families and realized -$8.12 on
   22 closes, no stay positive; the other 10 made +$28.96. On Kalshi, closed trades and settlements
   count once per event, so strikes stacked on one game are one bet. The board labels each real
