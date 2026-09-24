@@ -168,12 +168,15 @@ def read_health(  # noqa: PLR0913 - one reading, one place
     verify: bool = False,
     stall_seconds: float = 450,
     inherited_frozen: "Iterable[str] | None" = None,
+    inherited_before: float | None = None,
 ) -> Health:
     """Is the House whose state directory is `root` healthy, and if not, why not.
 
     From `<root>/health.json` (written at the end of every tick): a missing, unreadable or stale
-    file, and any book that is `frozen` and not named in `inherited_frozen` (what was already
-    frozen before the release under watch was promoted). Against `previous` (an earlier reading of the same
+    file, any book that is `frozen` and not named in `inherited_frozen` (what was already
+    frozen before the release under watch was promoted), and each health failure the House
+    reports (`failures`: `{check, text, since}`; since Sept 24, 2026 "the lab evaluated nothing in
+    the last hour while its queue is not empty"). Against `previous` (an earlier reading of the same
     House; hand each reading to the next and the baselines carry): more than half of the living
     agents gone since the first reading of the chain, a `ledger_seq` that went backwards, and a
     `ledger_seq` that has not advanced for `stall_seconds` (0: it must advance between any two
@@ -181,6 +184,14 @@ def read_health(  # noqa: PLR0913 - one reading, one place
     `since_seq`, `ops.started` rows after it (reported in `detail`, for the caller that wants to
     know the House really restarted), and, only when `verify` is asked because it is O(n), the
     whole hash chain.
+
+    `inherited_before` (the watch after a promotion passes the promotion's moment): a health
+    failure whose `since`, or an error alert whose `began_at` (a warning that repeated, a health
+    failure the House announced), is earlier than it began under the release before and is
+    reported in `detail` as inherited, not as a reason -- the Sept 19-20 lesson of the frozen books
+    applied to conditions that last. So an hour of lab idleness can never roll a release back (it
+    cannot begin inside a ten-minute watch), a canary (which inherits nothing, and runs no lab)
+    still refuses on any of them, and `status` shows them all.
 
     A House stopped on purpose (`<root>/STOP`) is not stale and not stalled: it is stopped.
     """
@@ -234,6 +245,15 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                 detail.setdefault("frozen_before", []).append(str(name))
             else:
                 reasons.append(f"the {name} book is frozen: {str(frozen)[:200]}")
+        failures = raw.get("failures") if isinstance(raw.get("failures"), list) else []
+        for failure in failures:
+            if not isinstance(failure, dict):
+                continue
+            began = epoch(failure.get("since"))
+            if inherited_before is not None and began is not None and began < float(inherited_before):
+                detail.setdefault("inherited_failures", []).append(str(failure.get("check")))
+            else:
+                reasons.append(f"health failure ({failure.get('check')}): {str(failure.get('text') or '')[:300]}")
 
     before = previous.detail if previous is not None else {}
 
@@ -279,6 +299,12 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                             # itself and no release of any kind could land. A canary inherits
                             # nothing and still catches everything it causes.
                             if any(text.startswith(book) for book in inherited):
+                                inherited_alerts += 1
+                                continue
+                            # A condition that began before the promotion (Sept 24, 2026): a warning
+                            # that had been repeating, or a health failure already under way.
+                            began = epoch(alert.get("began_at"))
+                            if inherited_before is not None and began is not None and began < float(inherited_before):
                                 inherited_alerts += 1
                                 continue
                             errors.append((row_seq, text))
@@ -881,8 +907,9 @@ class HouseHealth:
     """The production `read_house_health`: `read_health` on the House's real state directory,
     each reading handed to the next. The FIRST reading is the one `deploy` takes just before it
     promotes, and it fixes the baselines: error alerts count from the ledger's head at that
-    moment, and the living agents are compared with that moment's. A House that has recorded no
-    `ops.started` since then, `restart_within` seconds on, never restarted into the new release:
+    moment, the living agents are compared with that moment's, and a condition that began before
+    it (a health failure's `since`, an error's `began_at`) is inherited. A House that has recorded
+    no `ops.started` since then, `restart_within` seconds on, never restarted into the new release:
     healthy readings of the OLD process say nothing about the new code, so that is a bad reading."""
 
     def __init__(self, root: str | Path, *, clock: Callable[[], float] = time.time, max_age_seconds: float = 300,
@@ -909,7 +936,8 @@ class HouseHealth:
             inherited = read_health(self.root, now=now, max_age_seconds=self.max_age_seconds, since_seq=0, stall_seconds=0)
             self.inherited_frozen = tuple(name for name, frozen in (inherited.detail.get("books") or {}).items() if frozen)
         health = read_health(self.root, now=now, max_age_seconds=self.max_age_seconds, previous=self.previous,
-                             since_seq=self.since_seq, stall_seconds=self.stall_seconds, inherited_frozen=self.inherited_frozen)
+                             since_seq=self.since_seq, stall_seconds=self.stall_seconds, inherited_frozen=self.inherited_frozen,
+                             inherited_before=self.first_at)
         waited = now - float(self.first_at)
         if (not first and self.restart_within is not None and waited >= self.restart_within and not health.detail.get("stopped")
                 and health.detail.get("started_since") == 0):
