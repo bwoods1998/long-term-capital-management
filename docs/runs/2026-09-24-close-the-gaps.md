@@ -754,6 +754,24 @@ recorded for the next open; live verification uses the markets that trade around
   so an owner deploy) is in adversarial review: on a disk copy of the T+16 snapshot it cut six ticks' main-thread CPU
   64.1 → 22.0 s (growing league) and 73.6 → 27.2 s (full league); the biggest single item was `reconcile_stale`'s full
   scan of the 1.73 GB provider.sqlite every tick (5.0-5.9 s wall on the box), now an index.
+- 20:01Z — **R4: the stock and options session, 13:30-20:00Z** (`session.py` on the box; the watch loop's 30-minute
+  readings in between):
+
+  | Desk | Wakes | Intents | Fills | Refused | Living | ≥ 5 closed trades | Best E with ≥ 5 | Best E any |
+  |---|---|---|---|---|---|---|---|---|
+  | alpaca-index-etfs | 470 | 50 (all market) | 47 | 5 (3 practice freeze, 2 over the $75 order cap) | 18 | 2 | 0.9998 | 1.0001 (2 trades) |
+  | alpaca-megacaps | 487 | 48 (all market) | 48 | 1 (practice freeze) | 16 | 3 | 1.0019 | 1.0026 (2) |
+  | alpaca-options | 117 | 29 (all limit) | 29 (2 real: krasker-14) | 0 | 8 | 1 | 0.8080 | 1.0751 (krasker-11, 4) |
+  | alpaca-open | 208 | 33 | 32 (21 crypto, 11 equity) | 1 (self-cross entry) | 5 | 2 | 0.9995 | 1.0003 (3) |
+
+  **The number that decides the week:** no equity agent is within reach of the bunt line (E ≥ 1.01 on 5 closed
+  trades): the best with 5 or more is 1.0019, and a stock trade moves E by about 0.0004. The one agent over the line
+  in E, krasker-11 (1.0751 on 4 options trades), sits on options-pullback, a losing family (19 blocks, −0.383), so R5
+  seats no probe from it. The readings: 14:38-15:08Z 68 wakes / 11 intents / 3 fills (4 entries refused by the freeze);
+  15:08-15:38Z 73 / 8 / 8; 15:38-16:08Z (the rollback) 102 / 14 / 12; 16:40-17:10Z 85 / 9 / 8; 17:10-17:40Z 85 / 8 / 7;
+  17:40-18:10Z 104 / 10 / 9; 18:11-18:41Z 114 / 17 / 15 (krasker-14's first real option fill). A7 (fractional `day`
+  limits) had no instance: no equity program writes a limit order. The foundry wrote cards for the open desks
+  (kalshi-open at 17:15Z) but none for megacaps, ETFs or options in the session.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
