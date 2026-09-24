@@ -168,24 +168,35 @@ def _paper_haircut(house: Any, agent: str, book_name: str, bps: Any) -> float:
     return min(total, 5.0)
 
 
-def closed_trades(house: Any, agent: str, book_name: str) -> tuple[int, int]:
-    """(closed trades, settlements) on one book since its evidence cutoff: every settlement, and every
-    sale that left the position flat, counted as `Evaluator.trade_returns` counts them, but never
-    dropped because the net stake is zero or less after sweeps (Sept 23, 2026 review)."""
-    from .accounting import evidence_cutoffs
+def closed_trades(house: Any, agent: str, book_name: str, *, since_seq: int = 0) -> tuple[int, int]:
+    """(closed trades, settlements) on one book since its evidence cutoff (and after `since_seq`):
+    every settlement, and every sale that left the position flat, counted as `Evaluator.trade_returns`
+    counts them, but never dropped because the net stake is zero or less after sweeps (Sept 23, 2026
+    review).
 
-    cutoff = evidence_cutoffs(house.ledger, agent).get(book_name, 0)
-    closed = settled = 0
+    INDEPENDENT on the event books (D4, the close-the-gaps run, Sept 24, 2026): under the constitution's
+    `independent_settlements: "event"` each counts once per distinct EVENT (`evaluator.event_key`), so
+    three strikes of one game that all settle are one settlement and one closed trade, and a flat sale
+    counts toward its event the same way. meriwether-h7d7702 reached the bunt line "on 6 closed trades"
+    at 00:39:48Z Sept 24 that were two games. Alpaca books count every closed trade. W is unchanged."""
+    from .accounting import evidence_cutoffs
+    from .evaluator import count_key, per_event
+
+    cutoff = max(evidence_cutoffs(house.ledger, agent).get(book_name, 0), int(since_seq or 0))
+    by_event = per_event(book_name)
+    closed: set[str] = set()
+    settled: set[str] = set()
     for entry in house.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent, after=cutoff):
         p = entry.payload
         if p.get("book") != book_name:
             continue
         if entry.kind == "book.settle":
-            closed += 1
-            settled += 1
+            key = count_key(entry.seq, p, by_event)
+            closed.add(key)
+            settled.add(key)
         elif p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True):
-            closed += 1
-    return closed, settled
+            closed.add(count_key(entry.seq, p, by_event))
+    return len(closed), len(settled)
 
 
 def real_stay_start(house: Any, agent: str) -> int | None:
@@ -312,7 +323,12 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
         if ev.cooling:
             return "paper", "back from real money within the re-entry cooldown"
         if bunt_ready(ev, p):
-            return "bunt", f"E {ev.e:.4f} is at or above {p['bunt_at']:g} on {ev.paper_trades} closed trades"
+            from .evaluator import per_event
+
+            counted = f"{ev.paper_trades} closed trades" + (f" ({ev.paper_settled} settled)" if ev.venue == "kalshi" else "")
+            if per_event(PAPER_BOOK.get(ev.venue, "")):
+                counted += ", one an event"  # D4 (Sept 24, 2026): stacked strikes on one game are one bet
+            return "bunt", f"E {ev.e:.4f} is at or above {p['bunt_at']:g} on {counted}"
         return "paper", "E below the bunt line or too few trades"
     if ev.real_drawdown >= p["real_drawdown_demote"]:
         return "paper", f"down {ev.real_drawdown:.0%} of its real record from its high-water mark: back to paper at once"
