@@ -13,6 +13,7 @@ from decimal import Decimal
 from league.book import Limits
 from league.economy import check_bounds, load_game
 from league.ledger import now_iso
+from league.tapes import parse_time
 from league.tests.test_book import BookCase
 from league.tests.test_house import BUYER, HouseCase
 from league.venues import instrument_for
@@ -189,9 +190,11 @@ class HorizonBySchedule(unittest.TestCase):
     Measured on the T0 snapshot (ledger to 01:41Z Sept 24): 138 horizon refusals, 71 of them on the
     daily diesel print (KXDIESELD-26SEP21 34, -26SEP22 36, -26SEP23 1; hawkins-3 27, hawkins-9 16,
     hawkins-8 14, hawkins-2 14), each "expected to resolve in 171-185 hours" while the market stopped
-    trading a few hours later. The venue schedules that print's expiration a week on (its expected
-    expiration equals its latest; review of #249), so it is refused still, now saying so; the close
-    stands in only for a market the venue gives no expected expiration, of which none was seen."""
+    trading a few hours later. The venue's "expected" expiration for that print is a deadline a week
+    on (it equals its latest; review of #249), so P1 judges it by its close plus the diesel series'
+    measured settle lag (`tapes.SettleLags`, fed by the settled markets the House's tapes read), and
+    by the deadline while that cannot be measured. The close stands in only for a market the venue
+    gives no expected expiration, of which none was seen."""
 
     def setUp(self):
         from league.tapes import KalshiData
@@ -251,14 +254,50 @@ class HorizonBySchedule(unittest.TestCase):
         return self.house._intents(self.agent, self.book, [{"market": ticker, "leg": "yes", "side": "buy", "quantity": 1, "type": "limit",
                                                             "limit_price": 0.96, "post_only": True, "reason": "test"}])
 
-    def test_the_daily_diesel_print_is_refused_by_the_expiration_the_venue_schedules(self):
-        """Review of #249: X2 does not admit it. The strategy is shown the hours the rule judges."""
+    def diesel_orders(self):
+        return [e.payload for e in self.house.ledger.iter(kinds="book.order") if e.payload.get("instrument", {}).get("market_id") == self.diesel["ticker"]]
+
+    def test_while_no_settle_lag_is_measured_the_daily_diesel_print_is_refused_by_its_deadline_saying_so(self):
+        """Fewer than 20 of the series' settled markets on record: the rule before P1, and the strategy
+        is shown the hours the rule judges."""
+        from league.tests.test_tapes import diesel_settled
+
+        self.data.settle_lags.observe(diesel_settled(19, 5.86, last_close="2026-09-21T05:59:00Z"))
         self.house.tick()
-        self.assertEqual(self.refusals(), ["this market is expected to resolve in 172 hours, by its scheduled expiration "
-                                           "(2026-09-29T07:30:00Z); entries must resolve within 48"])
-        orders = [e.payload for e in self.house.ledger.iter(kinds="book.order") if e.payload.get("instrument", {}).get("market_id") == self.diesel["ticker"]]
-        self.assertEqual(orders, [])
+        self.assertEqual(self.refusals(), ["this market is expected to resolve in 172 hours, by its expected expiration (2026-09-29T07:30:00Z), "
+                                           "a deadline days after its close: its series has fewer than 20 settled markets on record to measure "
+                                           "when it pays; entries must resolve within 48"])
+        self.assertEqual(self.diesel_orders(), [])
         self.assertEqual(self.house._state["memory"][self.agent.id]["hours"], {self.diesel["ticker"]: 172.1881})  # what the strategy was shown
+
+    def test_the_daily_diesel_print_is_entered_by_its_series_measured_settle_lag(self):
+        """P1, review of #249: on the local history cache the last 40 diesel dailies paid within 5.86 hours
+        of the close (p95). The book, the House and the strategy's view read the one answer."""
+        from league.tests.test_tapes import diesel_settled
+
+        self.data.settle_lags.observe(diesel_settled(40, 5.86, last_close="2026-09-21T05:59:00Z"))
+        self.house.tick()
+        self.assertEqual(self.refusals(), [])
+        self.assertTrue(self.diesel_orders(), "the bid reached the book")
+        due = parse_time("2026-09-22T05:59:00Z") + 5.86 * 3600
+        self.assertAlmostEqual(self.house._resolves_at(self.contract(self.diesel["ticker"])), due, places=3)  # what the book judges
+        self.assertEqual(self.house._state["memory"][self.agent.id]["hours"], {self.diesel["ticker"]: 8.5314})  # 2.67 h to the close + 5.86
+
+    def test_a_series_that_pays_past_the_horizon_stays_refused_and_says_by_its_measured_lag(self):
+        from league.tests.test_tapes import diesel_settled
+
+        self.data.settle_lags.observe(diesel_settled(40, 60.0, last_close="2026-09-19T05:59:00Z"))
+        self.house.tick()
+        self.assertEqual(self.refusals(), ["this market is expected to resolve in 63 hours, by its close plus its series' measured settle lag "
+                                           "(2026-09-24T17:59:00Z: 60 hours after the close, the 95th percentile of its last 40 settled markets; "
+                                           "its expected expiration, 2026-09-29T07:30:00Z, is a deadline, not a schedule); entries must resolve "
+                                           "within 48"])
+        self.assertEqual(self.diesel_orders(), [])
+
+    def test_the_house_keeps_the_settle_lags_beside_its_state(self):
+        from league.house import SETTLE_LAGS_FILE
+
+        self.assertEqual(self.data.settle_lags.path, self.house.root / SETTLE_LAGS_FILE)
 
     def test_a_market_scheduled_past_the_horizon_is_refused_and_the_refusal_says_by_its_schedule(self):
         intents, dropped = self.bid(self.scheduled["ticker"])

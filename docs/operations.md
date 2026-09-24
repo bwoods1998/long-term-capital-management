@@ -533,13 +533,16 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   and sets no audit verdict aside. An edit is a new strategy to `allocator.audit_standing`, so an
   agent whose code was approved is audited again before a first swing.
 - **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
-  expected to resolve in N hours, by its scheduled expiration (...)" or "..., by its close (...):
-  the venue lists no scheduled expiration for it". A Kalshi market is judged by the scheduled
-  (expected) expiration where the venue gives one and by its close otherwise, never by the
-  deprecated latest date it may expire. The venue gives one for every market seen, and for the
-  diesel prints and the AI-token and AI-share weeklies it is a week after the close: their refusals
-  ("171-202 hours") continue and now say "by its scheduled expiration". The House asks before the
-  book; the book still judges every entry after it, from the same answer. The book's own shorter
+  expected to resolve in N hours, by its scheduled expiration (...)", "..., by its close plus its
+  series' measured settle lag (...)", "..., by its expected expiration (...), a deadline days
+  after its close: its series has fewer than 20 settled markets on record ..." or "..., by its
+  close (...): the venue lists no scheduled expiration for it". An expected expiration two days
+  or more after the close is a deadline (the diesel prints, the AI-share weeklies); such a market
+  is judged by its close plus the p95 settle lag of its series' last 40 settled markets on record
+  (at least 20), which `settle_lags.json` beside the House's state keeps (fed by every Kalshi
+  tape's settled markets; recomputed once a day; delete it to measure afresh). A series stuck on
+  "fewer than 20 settled markets" is one no tape has replayed enough of yet. The House asks before
+  the book; the book still judges every entry after it, from the same answer. The book's own shorter
   text ("expected to resolve in N hours; entries must resolve within 48", no basis) would now mean
   the two looks disagreed, at the boundary a moment apart.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,

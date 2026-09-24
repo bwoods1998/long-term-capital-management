@@ -399,14 +399,22 @@ longer than 48 hours. Equities are not bounded. Exits are never refused.
 
 "Expected to pay" is the market's SCHEDULED expiration where Kalshi gives one, and its close where
 it does not; never the deprecated latest date the market may expire (Sept 24, 2026). Kalshi gives
-one for every market seen. For the diesel prints and the AI-token and AI-share weeklies it is a
-week after the close, so those are still refused for a `day` strategy, though each has paid within
-12 hours of its close. `hours_to_resolve` is measured to that same moment, live and on a replay
-tape, so a strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule.
-A refusal says which it judged by: "this market is expected to resolve in 60 hours, by its
-scheduled expiration (...)" or "..., by its close (...): the venue lists no scheduled expiration
-for it". A market the House cannot look up is still refused ("the House cannot tell when this
-market resolves").
+one for every market seen, but for many series it is a DEADLINE, not a schedule: two days or more
+after the close (the diesel prints 169.5 hours, the AI-share weeklies 168), the latest the market
+may expire if its data comes late. Such a market is judged by its close plus its series' measured
+settle lag: the 95th percentile of (settlement - close) over the series' last 40 settled markets of
+that kind on the House's record (at least 20 of them; settlements before the day began), never
+before the close and never after the deadline. A series with fewer on record is judged by the
+deadline, as before. (Measured on the House's cache of Sept 5-17: the last 40 diesel dailies paid
+within 5.9 hours of the close, the weeklies within 7.8.) `hours_to_resolve` is measured to that
+same moment, live and on a replay tape (where a step reads only settlements known before its day),
+so a strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule. A
+refusal says which it judged by: "this market is expected to resolve in 60 hours, by its scheduled
+expiration (...)", "..., by its close plus its series' measured settle lag (...)", "..., by its
+expected expiration (...), a deadline days after its close: its series has fewer than 20 settled
+markets on record ...", or "..., by its close (...): the venue lists no scheduled expiration for
+it". A market the House cannot look up is still refused ("the House cannot tell when this market
+resolves").
 
 ## The open desks: any market of the venue
 

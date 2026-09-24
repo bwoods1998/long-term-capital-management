@@ -197,9 +197,12 @@ status is exposed in health and agent research context; qualification is distinc
    market is expected to pay and what that is judged by: its scheduled (expected) expiration where
    the venue gives one, its close otherwise, never the deprecated latest date it may expire
    (`ltcm/data/kalshi.py` keeps `expected_expiration_time` apart). The venue gives one for every
-   market seen (1.36 million cached rows, review of #249); for the diesel prints and the AI-token
-   and AI-share weeklies it is a week after the close, so their 71 + 62 refusals of Sept 20-22
-   continue, though each paid within 12 hours of its close. The live view's
+   market seen (1.36 million cached rows, review of #249), but where it lies two days or more after
+   the close it is a deadline (the diesel prints, the AI-share weeklies), and the market is judged
+   by its close plus its series' measured settle lag (`tapes.SettleLags`: the p95 of the last 40 of
+   its settled markets before the day, at least 20; fed by every Kalshi tape's settled markets and
+   kept in `settle_lags.json` beside the House's state; review of #249, P1), or by the deadline
+   while that cannot be measured. The live view's
    `hours_to_resolve`, a replay tape's and the book's horizon rule (`KalshiData.resolves_at`,
    `resolution_of`) read it alike. A Kalshi entry past the horizon is refused by the House before
    the book (`_horizon_refusal`), saying which it was judged by; what it cannot look up it leaves

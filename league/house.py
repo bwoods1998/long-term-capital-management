@@ -82,6 +82,9 @@ QUIET_DESK_SECONDS = 3600.0
 QUIET_DESK_WAKES = 3
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
+#: Beside the House's state: when each deadline-type Kalshi series' markets paid after their close
+#: (`tapes.SettleLags`), which the horizon rule judges such a market by.
+SETTLE_LAGS_FILE = "settle_lags.json"
 #: X1 (Sept 24, 2026): an in-place parameter edit is replayed first on a book this share of the
 #: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
 #: passed or not, so it cannot search its parameters in place for a lucky look that is no trial.
@@ -253,6 +256,13 @@ class House:
 
         self.holdout_window: tuple[str, str] = HOLDOUT  # the sealed window (tests shorten it)
         self.kalshi_data = kalshi_data
+        if kalshi_data is not None and hasattr(kalshi_data, "settle_lags") and getattr(kalshi_data, "settle_lags", None) is None:
+            # When each deadline-type series' markets pay after their close, measured on the settled
+            # markets its replay tapes read, and kept beside the House's state (`tapes.SettleLags`):
+            # what the horizon rule judges such a market by (review of #249, P1).
+            from .tapes import SettleLags
+
+            kalshi_data.settle_lags = SettleLags(self.root / SETTLE_LAGS_FILE)
         self.provider = provider
         self.auditor = auditor
         self.publisher = publisher
@@ -468,8 +478,10 @@ class House:
 
         X2 (Sept 24, 2026, the close-the-gaps run): the book refuses an entry expected to pay past the
         agent's horizon ("this market is expected to resolve in N hours"), and its refusal cannot say
-        what N was measured to: the market's scheduled expiration, or its close where the venue lists
-        none (`tapes.resolution`). The House asks the book's own question of the book's own answer
+        what N was measured to (`tapes.resolution`): the market's scheduled expiration; its close plus
+        its series' measured settle lag, where the venue's "expected" expiration is a deadline days
+        after the close; that deadline, where the lag cannot be measured yet; or its close, where the
+        venue lists none. The House asks the book's own question of the book's own answer
         (`_resolves_at` reads the same `KalshiData.resolution_of`, the same seat limit) before the
         book does, and says which. Whatever it cannot tell it leaves to the book, which refuses it
         ("cannot tell when this market resolves"): this never admits an entry the book would refuse."""
@@ -482,16 +494,26 @@ class House:
             return ""
         try:
             found = lookup(instrument.market_id or instrument.symbol)
-            due, basis = found if found else (None, None)
-            hours = None if due is None else (float(due) - self.clock()) / 3600.0
+            hours = None if found is None else (float(found.due) - self.clock()) / 3600.0
         except Exception:  # noqa: BLE001 - not knowing is the book's to refuse
             return ""
         if hours is None or hours <= float(horizon):
             return ""
-        from .tapes import SCHEDULED, iso as tape_iso
+        from .tapes import CLOSE, DEADLINE, SCHEDULED, SETTLE_LAG_MIN_MARKETS, SETTLE_LAG, iso as tape_iso
 
-        judged = (f"by its scheduled expiration ({tape_iso(due)})" if basis == SCHEDULED
-                  else f"by its close ({tape_iso(due)}): the venue lists no scheduled expiration for it")
+        if found.basis == SCHEDULED:
+            judged = f"by its scheduled expiration ({tape_iso(found.due)})"
+        elif found.basis == SETTLE_LAG:
+            judged = (f"by its close plus its series' measured settle lag ({tape_iso(found.due)}: {found.lag_hours:g} hours after the "
+                      f"close, the 95th percentile of its last {found.markets} settled markets; its expected expiration, "
+                      f"{tape_iso(found.deadline)}, is a deadline, not a schedule)")
+        elif found.basis == DEADLINE:
+            judged = (f"by its expected expiration ({tape_iso(found.due)}), a deadline days after its close: its series has fewer than "
+                      f"{SETTLE_LAG_MIN_MARKETS} settled markets on record to measure when it pays")
+        elif found.basis == CLOSE:
+            judged = f"by its close ({tape_iso(found.due)}): the venue lists no scheduled expiration for it"
+        else:
+            judged = f"({tape_iso(found.due)})"
         return f"this market is expected to resolve in {hours:.0f} hours, {judged}; entries must resolve within {float(horizon):g}"
 
     # ------------------------------------------------------------------ state
