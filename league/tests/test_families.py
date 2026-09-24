@@ -623,6 +623,21 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.rebalance()
         self.assertEqual(self.house.allocator.family_state(agents[0]), "swing")
 
+    def test_a_failed_audit_request_is_not_a_failed_record(self):
+        """Review of #242: an error while ASKING for the family's audit (its member's evidence unreadable) made the whole
+        family unreadable for money: its proven members were swept to $10 probes at every pass while its state said proven."""
+        (a, b), book = self.seated_bunts()
+        alloc = self.house.allocator
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        with patch.object(allocator.Allocator, "_family_swing_verdict", side_effect=KeyError("pnl")):
+            self.rebalance()
+            self.assertEqual(alloc.family_state(a), "proven")
+            self.assertEqual([book.account(x.id).staked for x in (a, b)], [D("30")] * 2)
+        alerts = [e.payload.get("text") for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertTrue(any("audit request" in str(t) for t in alerts))
+        self.rebalance(); self.house.wait(5); self.rebalance()  # asked again at the next pass, and it swings
+        self.assertEqual(alloc.family_state(a), "swing")
+
     def test_without_an_auditor_there_is_no_family_swing(self):
         """A gate that fails open is not a gate: no auditor, no first entry."""
         agents, book = self.seated_bunts()

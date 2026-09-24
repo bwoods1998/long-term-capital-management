@@ -667,8 +667,9 @@ class Allocator:
                 keys.add((family, venue))
         return sorted(keys)
 
-    def _family_error(self, family: str, venue: str, exc: BaseException) -> None:
-        """One warning per family and distinct error, however many wakes and passes meet it."""
+    def _family_error(self, family: str, venue: str, exc: BaseException, *, then: str | None = None) -> None:
+        """One warning per family and distinct error, however many wakes and passes meet it. `then`: what follows, when
+        it is not the unreadable record's fallback."""
         why = f"{type(exc).__name__}: {str(exc)[:160]}"
         key = (family, venue, why)
         if key in self._family_alerted:
@@ -676,8 +677,8 @@ class Allocator:
         self._family_alerted.add(key)
         try:
             self.house.alert("warning", f"allocator: {family}{' at ' + venue if venue else ''} could not be read ({why}); "
-                                        "until it can, its agents count as an unproven family's: probes, no swing, "
-                                        "post-only real entries")
+                                        + (then or "until it can, its agents count as an unproven family's: probes, no swing, "
+                                                   "post-only real entries"))
         except Exception:  # noqa: BLE001 - the alert is a courtesy; the fallback is the protection
             pass
 
@@ -809,7 +810,14 @@ class Allocator:
             with self._lock:
                 self.state.setdefault("families", {})[key] = new
             if ready and state != "swing":
-                self._request_family_audit(key, out, members_real)
+                try:
+                    self._request_family_audit(key, out, members_real)
+                except Exception as exc:  # noqa: BLE001 - asking for the audit is not the record (review of #242)
+                    # A failure here (the member's evidence unreadable, say) used to make the whole family unreadable
+                    # for money: its proven members were swept to probes at every pass it lasted. It is told once and
+                    # asked again at the next pass; the family keeps its state and its stakes.
+                    self._family_error(f"the {family} family swing's audit request", venue, exc,
+                                       then="the family keeps its state and stakes, and its audit is asked for again at the next pass")
         out.update(state=state, since=since, swing=swing, members_real=members_real, members_real_ids=counted, swing_inputs=inputs)
         return out
 
