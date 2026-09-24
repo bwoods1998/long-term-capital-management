@@ -1321,12 +1321,15 @@ class House:
             skips["last_at"] = now_iso(self.clock)
 
     def _generation(self, agent_id: str) -> tuple[str, str, int, int] | None:
-        """Identity of the strategy and rung stay, read while holding the lifecycle lock."""
+        """Identity of the strategy and rung stay, read while holding the lifecycle lock. An agent's
+        own pause or resume of its entries (X1) restates its strategy and does not move it
+        (`allocator.adopted_strategy`): an audit, a candidate's admission, a promotion or a death
+        keyed to the generation stands. A buy decided before a pause is held at `_submit_wakes`."""
         agent = self.registry.get(agent_id)
         if agent is None or not agent.alive:
             return None
         strategy = json.dumps([agent.params, agent.needs], sort_keys=True, separators=(",", ":"))
-        last_strategy = self.ledger.last("agent.strategy", agent=agent_id)
+        last_strategy = allocator_module.adopted_strategy(self.ledger, agent_id)
         return agent.code_sha256, strategy, last_strategy.seq if last_strategy else 0, self.evaluator._rung_entered(agent_id)
 
     def wake(self, agent: Agent) -> dict[str, Any]:
@@ -1390,7 +1393,7 @@ class House:
         asked = list(result.get("intents") or []) if result.get("ok") else []
         # X1 (Sept 24, 2026): an agent that paused its entries (`pause_entries`) has every buy held here,
         # counted on the wake and never refused (a refusal row would buy it a research pass each wake);
-        # its sells go on. A pause landing after this read changes the generation: the wake is dropped.
+        # its sells go on. A pause made after this read holds the buys at the batch (`_submit_wakes`).
         paused = self.registry.entries_paused(agent.id)
         held = 0
         if paused:
@@ -1458,6 +1461,10 @@ class House:
                     # 22; this is the same guard on the agents' side of the path).
                     self._note_unseated(agent, book_name, len(rows))
                     continue
+                if self.registry.entries_paused(agent.id):
+                    # Its own pause, made after this wake decided (X1): a pause moves no generation
+                    # (`_generation`), so its buys are held here. Its sells go on.
+                    rows = [intent for intent in rows if intent.side != 'buy']
                 if self.paused() and any(intent.side == 'buy' for intent in rows):
                     self.ledger.append('book.refused', {'book': book_name,
                         'reasons': ['the House is paused for maintenance: exits and cancels only']}, agent=agent.id)
@@ -2573,7 +2580,7 @@ class House:
                 return {"error": "your strategy changed during this pass: look at it again before you edit it"}
             if self.evaluator.rung(current.id) < 1:
                 return {"error": "on rung 0 a replay is the way up: submit the edited file with `replay` (a counted trial)"}
-            refusal = self._control_refusal(current)
+            refusal = self._control_refusal(current, "edit_params")
             if refusal:
                 return {"error": refusal}
             current = deepcopy(current)
@@ -4872,15 +4879,21 @@ class House:
                 return candidate
         return None
 
-    def _control_refusal(self, agent: Agent) -> str:
-        """Why no control change (X1) may be recorded for this agent now, or "".
+    def _control_refusal(self, agent: Agent, control: str) -> str:
+        """Why this control (X1) may not be recorded for this agent now, or "".
 
-        A control is an `agent.strategy` row, and two readers take any such row as new code: an audit
-        in flight is dropped as stale when the generation moves (a veto of an agent already on real
-        money would then never be acted on), and `allocator.audit_standing` reads no verdict from
-        before the latest row (a veto would be set aside before its cooldown). So none is recorded
-        while an audit of the agent runs or is owed, or while its latest audit is a veto. Called
-        under the lifecycle lock, as audits are started under it."""
+        A pause or resume restates the strategy in force: it moves no generation and sets no audit
+        verdict aside (`allocator.adopted_strategy`), so it is always made -- a vetoed or audited agent
+        on real money can hold its own entries (review of #249).
+
+        An edit is a new strategy (its PARAMS), and two readers take it as one: an audit in flight is
+        dropped as stale when the generation moves (a veto of an agent already on real money would
+        then never be acted on), and `allocator.audit_standing` reads no verdict from before it (a veto
+        would be set aside before its cooldown). So none is made while an audit of the agent runs or
+        is owed, or while its latest audit is a veto. Called under the lifecycle lock, as audits are
+        started under it."""
+        if control != "edit_params":
+            return ""
         with self._state_lock:
             auditing = agent.id in (self._state.get(self.AUDITS) or {})
         if auditing or self._audit_owed(agent) is not None:
@@ -4914,7 +4927,7 @@ class House:
             with self._lifecycle_lock:
                 agent = self.registry.get(agent_id)
                 refusal = "" if agent is not None and agent.alive else "the agent is no longer alive"
-                refusal = refusal or self._control_refusal(agent)
+                refusal = refusal or self._control_refusal(agent, control)
                 paused = self.registry.entries_paused(agent_id)
                 if not refusal and control == "pause_entries" and paused:
                     refusal = f"its entries were already paused (since {paused.get('since')})"

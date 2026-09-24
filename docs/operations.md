@@ -520,14 +520,16 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **An agent paused its own entries, or edited its parameters in place** (X1, Sept 24, 2026). Its
   `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
   and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
-  and any the House did not make (status `not_applied`, with the reason: an audit running or owed,
-  a standing veto, a strategy changed after its edit's replay, already paused). A paused agent's
-  wakes show `held` (buys the House held, never a refusal) and its resting buys are cancelled.
+  and any the House did not make (status `not_applied`, with the reason: for an edit, an audit
+  running or owed, a standing veto or a strategy changed after its replay; already paused). A
+  paused agent's wakes show `held` (buys the House held, never a refusal) and its resting buys are
+  cancelled.
   `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
   `agent.research` rows with tool `edit_replay` (at half the practice stake and caps, no
   `eval.trial`, never the holdout, one an agent a day). Nothing here moves a limit, a stake or a
-  band. A control row reads as new code to `allocator.audit_standing`, so an agent whose code was
-  approved is audited again before a first swing.
+  band. A pause or resume row adopts nothing (`allocator.adopted_strategy`): it moves no generation
+  and sets no audit verdict aside. An edit is a new strategy to `allocator.audit_standing`, so an
+  agent whose code was approved is audited again before a first swing.
 - **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
   expected to resolve in N hours, by its scheduled expiration (...)" or "..., by its close (...):
   the venue lists no scheduled expiration for it". A Kalshi market is judged by the scheduled

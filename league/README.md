@@ -264,9 +264,12 @@ status is exposed in health and agent research context; qualification is distinc
    `agent.strategy` row restating the strategy in force with `control`
    (`pause_entries`, `resume_entries` or `edit_params`), `was`, the agent's `note` and the
    `reason` carried from the row before (so `hypotheses._mechanism` still reads the strategy's).
-   None is made while an audit of the agent runs or is owed, or while its latest audit is a veto:
-   a control row moves the generation, which drops an audit in flight, and
-   `allocator.audit_standing` reads no verdict from before the latest row. What cannot be made is a
+   A pause or resume row adopts nothing: `allocator.adopted_strategy` passes over it, so it moves
+   no generation (an audit in flight, a promotion, a death and a waiting candidate's admission are
+   keyed to it) and sets no audit verdict aside, and a buy decided before a pause is held at
+   `_submit_wakes`. An edit is a new strategy: none is made while an audit of the agent runs or is
+   owed, or while its latest audit is a veto (the generation moves, which drops an audit in flight,
+   and `allocator.audit_standing` reads no verdict from before it). What cannot be made is a
    `not_applied` status row saying why; ids make a restart's second look a no-op.
    Selected candidates are saved privately as soon as replay selects them, including candidates
    whose later fork is deferred or fails. That journal preserves work; it does not automatically

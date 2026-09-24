@@ -547,8 +547,10 @@ ask; the House applies it when your research pass ends, as it does a retained ca
   One edit replay a day, passed or not; it costs sandbox seconds. On rung 0 there is no edit in
   place: `replay` the edited file.
 
-No control is made while an audit of your strategy is running or owed, or while its latest audit is
-a veto (the change would set the audit's verdict aside); the House says so on your record.
+A pause or a resume is always made: it restates your strategy, so it sets no audit's verdict aside
+and moves nothing an audit, a promotion or your candidate waiting for a seat is keyed to. No edit is
+made while an audit of your strategy is running or owed, or while its latest audit is a veto (an
+edit is a new strategy and would set the audit's verdict aside); the House says so on your record.
 
 ## How replay scores it
 

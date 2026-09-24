@@ -16,6 +16,7 @@ the line and never touches the holdout. Neither raises a limit, a stake or a ban
 
 from decimal import Decimal
 
+from league import allocator as allocator_module
 from league.tests.test_house import BUYER, HouseCase
 from league.tests.test_order_guards import RESTER
 
@@ -135,17 +136,72 @@ class PauseAndResume(ControlCase):
         self.assertEqual(len(self.strategy_rows(agent)), 1)
         self.assertIn("already paused", self.not_applied(agent)[0])
 
-    def test_no_control_is_recorded_while_an_audit_runs_or_a_veto_stands(self):
+    def test_no_edit_is_recorded_while_an_audit_runs_or_a_veto_stands(self):
         agent = self.seated()
+        edit = dict(params={**agent.params, "notional": 10.0}, was=agent.params, code_sha256=agent.code_sha256)
         with self.house._state_lock:
             self.house._state.setdefault(self.house.AUDITS, {})[agent.id] = {"generation": [], "since_seq": 0}
-        self.assertEqual(self.apply(agent, "pause_entries"), [])
+        self.assertEqual(self.apply(agent, "edit_params", **edit), [])
         self.assertIn("an audit of your strategy is under way", self.not_applied(agent)[0])
         self.house._drop_audit(agent.id)
         self.house.ledger.append("audit.verdict", {"approve": False, "summary": "a test veto"}, agent=agent.id)
-        self.assertEqual(self.apply(agent, "pause_entries", session="s2"), [])
+        self.assertEqual(self.apply(agent, "edit_params", session="s2", **edit), [])
         self.assertIn("vetoed", self.not_applied(agent)[1])
-        self.assertEqual(self.strategy_rows(agent), [])  # a control row would read as new code and set the veto aside
+        self.assertEqual(self.strategy_rows(agent), [])  # an edit would read as new code and set the veto aside
+
+    def test_a_vetoed_or_audited_agent_can_still_hold_its_entries(self):
+        """Review of #249: a pause was refused under a veto, so a real bunt whose swing audit was vetoed
+        could never hold its own entries. A pause restates its strategy: the veto still stands after it."""
+        agent = self.seated()
+        self.house.ledger.append("audit.verdict", {"approve": False, "summary": "a veto of its swing"}, agent=agent.id)
+        self.assertEqual(self.apply(agent, "pause_entries"), ["pause_entries"])
+        self.assertEqual(allocator_module.audit_standing(self.house, agent), "vetoed")
+        with self.house._state_lock:
+            self.house._state.setdefault(self.house.AUDITS, {})[agent.id] = {"generation": [], "since_seq": 0}
+        self.assertEqual(self.apply(agent, "resume_entries", session="s2"), ["resume_entries"])
+        self.assertEqual(self.not_applied(agent), [])
+
+    def test_a_pause_sets_no_approval_aside_and_moves_no_generation(self):
+        """Review of #249: a pause or resume row read as new code. It set an audit's approval aside (so an
+        approved agent was audited again before its swing) and moved the generation an audit in flight,
+        a promotion and a death are keyed to."""
+        agent = self.seated()
+        self.house.ledger.append("audit.verdict", {"approve": True, "summary": "approved"}, agent=agent.id)
+        generation = self.house._generation(agent.id)
+        self.apply(agent, "pause_entries")
+        self.apply(agent, "resume_entries", session="s2")
+        self.assertEqual(len(self.strategy_rows(agent)), 2)
+        self.assertEqual(allocator_module.audit_standing(self.house, agent), "approved")
+        self.assertEqual(self.house._generation(agent.id), generation)
+
+    def test_a_pause_does_not_cancel_its_own_candidate_waiting_for_a_seat(self):
+        """Review of #249: a replay-passed candidate waiting for a seat is admitted only while its author's
+        generation stands, and a pause moved it: the admission was cancelled ("parent retired or changed")."""
+        from league.admissions import Admissions
+
+        agent = self.seated()
+        queue = Admissions(self.house.ledger)
+        candidate = {"passed": True, "params": dict(agent.params), "needs": dict(agent.needs), "code": agent.code,
+                     "purpose": "a replay-passing candidate waiting for a seat"}
+        row = queue.enqueue(agent.id, self.house._generation(agent.id), candidate, "s0")
+        queue.record(row, "deferred", "niche is full; waiting for an eligible seat")
+        self.apply(agent, "pause_entries")
+        (waiting,) = [r for r in queue.pending() if r["session"] == "s0"]
+        self.house._admission_gate(waiting)
+        (after,) = [r for r in queue.rows() if r["session"] == "s0"]
+        self.assertNotEqual(after["status"], "cancelled", after.get("reason"))
+
+    def test_a_sell_decided_before_the_pause_still_goes(self):
+        agent = self.seated()
+        self.house.tick()  # it buys
+        book = self.house.books["alpaca-paper"]
+        self.assertIn(self.btc.key, book.account(agent.id).holdings)
+        self.clock.advance(301)
+        out = self.house.wake(agent)  # it decides to sell
+        self.assertEqual([i.side for i in out["intents"]], ["sell"])
+        self.apply(agent, "pause_entries")
+        self.house._submit_wakes("alpaca-paper", [out])
+        self.assertEqual(book.account(agent.id).holdings, {})
 
     def test_a_control_row_keeps_the_reason_the_strategy_was_adopted(self):
         agent = self.seated()

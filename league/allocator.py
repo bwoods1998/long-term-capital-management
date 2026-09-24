@@ -476,11 +476,36 @@ def left_real_at(house: Any, agent: str) -> float | None:
     return None
 
 
+#: X1 (Sept 24, 2026): an agent's own pause and resume of its entries are `agent.strategy` rows that
+#: restate the strategy in force (`House._apply_controls`). They adopt nothing, so no reader that asks
+#: "since the strategy it runs was adopted" may start from one: not the audit's standing, not the
+#: House's generation (review of #249: a pause set an approval aside, dropped an audit in flight and
+#: cancelled the agent's own replay-passed candidates waiting for a seat).
+RESTATING_CONTROLS = frozenset(("pause_entries", "resume_entries"))
+
+
+def adopted_strategy(ledger: Any, agent_id: str) -> Any:
+    """The agent's latest `agent.strategy` row that adopted what it runs (its code, PARAMS or NEEDS),
+    or None: a pause or resume of its entries (`RESTATING_CONTROLS`) is passed over."""
+    latest = ledger.last("agent.strategy", agent=agent_id)
+    if latest is None or latest.payload.get("control") not in RESTATING_CONTROLS:
+        return latest
+    rows = ledger.read(kinds="agent.strategy", agent=agent_id, limit=16, newest=True)
+    found = next((e for e in reversed(rows) if e.payload.get("control") not in RESTATING_CONTROLS), None)
+    if found is not None or len(rows) < 16:
+        return found
+    for entry in ledger.iter(kinds="agent.strategy", agent=agent_id):
+        if entry.payload.get("control") not in RESTATING_CONTROLS:
+            found = entry
+    return found
+
+
 def audit_standing(house: Any, agent: Any) -> str:
     """"approved" when the latest real audit verdict on the agent's CURRENT code approved it,
     "vetoed" when it refused, "none" when there is none (errors are not verdicts; a verdict from
-    before the agent last adopted code does not speak for the code it runs now)."""
-    adopted = house.ledger.last("agent.strategy", agent=agent.id)
+    before the agent last adopted code does not speak for the code it runs now). A pause or resume of
+    its entries adopts nothing (`adopted_strategy`); an in-place edit of its PARAMS does."""
+    adopted = adopted_strategy(house.ledger, agent.id)
     since = adopted.seq if adopted is not None else 0
     latest = None
     for entry in house.ledger.iter(kinds="audit.verdict", agent=agent.id, after=since):
