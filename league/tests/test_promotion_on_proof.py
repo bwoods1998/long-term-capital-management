@@ -663,7 +663,10 @@ class ProbesAndBunts(KalshiHouse):
         self.real.set_quote(instrument, ".79", ".80")
         book.resolves_at = lambda instrument: self.clock() + 3600
         intent = Intent.new(agent=a.id, instrument=instrument, side="buy", quantity=D(3), reason="test", created_at=now_iso(self.clock))
-        self.assertEqual(book.submit([intent])[0].status, "filled")
+        from league.tests.fakes import without_real_entry_rules
+
+        with without_real_entry_rules():  # the fixture's entry is at market; X0 is not what this tests
+            self.assertEqual(book.submit([intent])[0].status, "filled")
         held = {k: h.quantity for k, h in book.account(a.id).holdings.items()}
         self.assertTrue(held)
         self.families["weather-favorites"] = canned("weather-favorites", proven=False, n=17, bound=-0.002)
