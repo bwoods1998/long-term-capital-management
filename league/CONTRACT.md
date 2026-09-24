@@ -469,6 +469,10 @@ House's wind-down or horizon rule -- is never refused for it:
 - **When the House cannot tell where one of its orders stands** (a cancel the venue has not
   confirmed, an order the venue has not acknowledged), what is left of your sell rests as a post-only
   limit at the ask instead.
+- **An exit the House re-priced never walls your next sell off.** Your next sell of the instrument
+  replaces it: the House cancels it first and checks your sell as if it were gone. And it lives one
+  pass: at each pass the House reads it again, and once nothing of the House's stands in its way
+  it sends your order again as you asked; while the doubt stands it follows the ask.
 
 Whatever the House changed is the `reason` on your order's rows in `recent_order_outcomes`.
 

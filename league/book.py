@@ -209,6 +209,14 @@ OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would
 PEER_CROSS_WHY = ("cancelled by the House to cross another agent's exit inside the House at your limit, as a maker "
                   "(see your cross fill); the rest of this bid is not re-placed: bid again at your next wake if you "
                   "still want it")
+#: What an agent is told when its own new sell replaces an exit the House had re-priced (`_withdraw_repriced`), when
+#: the House re-prices such an exit again at a later pass (`_recheck_repriced`), and on the order sent again.
+SUPERSEDED_WHY = ("cancelled by the House: your newer sell of this instrument replaces this exit, which the House had "
+                  "re-priced for you")
+RECHECK_WHY = ("cancelled by the House to send your exit again: the House's own orders that stood in its way have "
+               "changed since it was re-priced")
+RESENT_NOTE = ("sent again by the House as you asked: nothing of the House's stands in its way any more; your "
+               "re-priced exit was cancelled first")
 #: What that peer is told when the venue confirmed the House's cancel only after the pass had given the cross up
 #: (`_clear_the_way`: two re-reads, then doubt): its bid is gone and nothing was crossed (review of #226).
 PEER_UNCROSSED_WHY = ("cancelled by the House to cross another agent's exit inside the House, but the venue confirmed "
@@ -367,6 +375,10 @@ class Working:
     allocation: dict[str, Any] | None = None  # durable targets for an incremental venue fill being attributed
     slice_of: str | None = None  # the exit plan this order is one slice of (`ExitPlan.plan_id`)
     slice_index: int | None = None  # which slice: 0, 1, 2 ... in the order they were sent
+    #: The AGENT'S own order terms when the House re-priced this exit (D3: one step above the House's bid, or post-only
+    #: at the ask on doubt): such an order never walls the agent's own next exit off (`_withdraw_repriced`) and lives
+    #: one pass (`_recheck_repriced`). From the order rows' `house_repriced`, so a restart keeps it (review of #226).
+    repriced: dict[str, Any] | None = None
 
     @property
     def open(self) -> bool:
@@ -800,6 +812,7 @@ class Book:
                 submitted_at=p.get("submitted_at") or "",
                 liquidity=str(p.get("liquidity") or "taker"),
                 reference_price=None if p.get("reference_price") is None else money(p["reference_price"]),
+                repriced=dict(p["house_repriced"]) if p.get("house_repriced") else None,
             )
             part = p.get("slice") or {}
             if part.get("plan"):
@@ -1846,9 +1859,10 @@ class Book:
             # of a market exit is a market order again. Started with `rest`, every later slice kept the first
             # slice's floor and flags, the market fell under it, and the stop rested for the plan's hour (review
             # of #226, Sept 24, 2026).
-            sent = self._start_exit_plan(asked, cleared.left, now, quote, note=note)
+            sent = self._start_exit_plan(asked, cleared.left, now, quote)
         else:
-            sent = self._route([rest], [cleared.left], now, reference_price=quote.bid if (market and quote is not None) else None, note=note)
+            sent = self._route([rest], [cleared.left], now, reference_price=quote.bid if (market and quote is not None) else None, note=note,
+                               repriced=self._terms(asked) if note else None)
         filled = cleared.crossed + sent.filled
         if cleared.crossed <= 0:
             status = sent.status
@@ -1879,6 +1893,10 @@ class Book:
                 )
                 self._apply(entry.kind, intent.agent, entry.payload, entry.at)
                 quote = self._quote(intent.instrument)
+                if intent.side == "sell":
+                    # The agent's own sell replaces any exit of its there that the House re-priced, which would
+                    # otherwise hold the units and wall this sell off (review of #226): withdrawn before `check`.
+                    self._withdraw_repriced(intent, now)
                 reasons = self.check(intent, quote, now, pending=pending, clearing=True)
                 if reasons:
                     outcomes.append(self._refuse(intent, reasons))
@@ -2127,7 +2145,8 @@ class Book:
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None,
-               slice_of: tuple[str, int] | None = None, note: str = "") -> Outcome:
+               slice_of: tuple[str, int] | None = None, note: str = "", repriced: Mapping[str, Any] | None = None,
+               again: str | None = None) -> Outcome:
         """Send one venue order for these intents' quantities, then attribute what filled at once.
 
         `slice_of` is (plan id, index) for one slice of a sliced exit: its client order id is
@@ -2140,6 +2159,10 @@ class Book:
         first = intents[0]
         total = sum(quantities, ZERO)
         identity = "|".join(sorted(i.id for i in intents)) if slice_of is None else f"{slice_of[0]}#{slice_of[1]}"
+        if again:
+            # The same intent sent again after the House cancelled its re-priced order (`_recheck_repriced`): its own
+            # client order id, derived from the order it replaces, so it is never the cancelled order again.
+            identity = f"{identity}#again:{again}"
         nonce = hashlib.sha256(identity.encode()).hexdigest()[:24]
         order_intent = self._order_intent(first, quantity=total, nonce=nonce)
         order_id = "ord-" + order_intent.id[3:]
@@ -2161,6 +2184,8 @@ class Book:
         }
         if slice_of is not None:
             base["slice"] = {"plan": slice_of[0], "index": int(slice_of[1])}
+        if repriced is not None:
+            base["house_repriced"] = dict(repriced)
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
         def told(reason: str = "") -> str:
@@ -2248,6 +2273,8 @@ class Book:
         }
         if working.slice_of is not None:
             base["slice"] = {"plan": working.slice_of, "index": int(working.slice_index or 0)}
+        if working.repriced is not None:
+            base["house_repriced"] = dict(working.repriced)
         return base
 
     def _attribute(self, working: Working, order: Order, now: str, *, reason: str = "") -> None:
@@ -2382,7 +2409,7 @@ class Book:
               note: str = "") -> Outcome:
         """Route one intent's order; a sell worth more than the order cap is sent in slices."""
         if intent.side == "sell" and self._over_cap(intent, quantity, quote):
-            return self._start_exit_plan(intent, quantity, now, quote, note=note)
+            return self._start_exit_plan(intent, quantity, now, quote)
         return self._route([intent], [quantity], now, reference_price=reference_price, note=note)
 
     def _slice_quantity(self, intent: Intent, available: Decimal, quote: Quote | None, cap: Decimal) -> Decimal:
@@ -2422,7 +2449,7 @@ class Book:
     def _plan_slices(self, plan_id: str) -> list[Working]:
         return [self.orders[order_id] for order_id in self._plan_orders.get(plan_id, ()) if order_id in self.orders]
 
-    def _start_exit_plan(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None, *, note: str = "") -> Outcome:
+    def _start_exit_plan(self, intent: Intent, quantity: Decimal, now: str, quote: Quote | None) -> Outcome:
         """Record the plan for a sell too large for one order, then send what this pass can."""
         cap = money(self.rules["max_order_usd"])
         price = self._cap_price(intent.instrument, intent.order_type, intent.limit_price, quote) or ZERO
@@ -2437,7 +2464,7 @@ class Book:
         entry = self.ledger.append("book.exit_plan", payload, agent=intent.agent, id=plan_id)
         self._apply(entry.kind, entry.agent, entry.payload, entry.at)
         plan = self.exit_plans.get(plan_id)
-        sent = self._advance_plan(plan, now, quote=quote, checked=True, note=note) if plan is not None else []
+        sent = self._advance_plan(plan, now, quote=quote, checked=True) if plan is not None else []
         slices = self._plan_slices(plan_id)
         filled = sum((w.filled for w in slices), ZERO)
         if filled >= quantity:
@@ -2467,7 +2494,7 @@ class Book:
                 except Exception:  # noqa: BLE001 - the plan is retried next pass either way
                     pass
 
-    def _advance_plan(self, plan: ExitPlan, now: str, *, quote: Quote | None = None, checked: bool = False, note: str = "") -> list[str]:
+    def _advance_plan(self, plan: ExitPlan, now: str, *, quote: Quote | None = None, checked: bool = False) -> list[str]:
         """Send slices of `plan` until one does not finish at once, and return their order ids.
 
         Each slice sizes off what is still held and not already offered, and off what the plan
@@ -2534,7 +2561,7 @@ class Book:
                 break
             size = self._slice_quantity(intent, available, fresh, plan.cap_usd)
             part = dataclasses.replace(intent, quantity=size)
-            told = note if checked else ""
+            told, repriced = "", None
             if not checked:
                 reasons = self.check(part, fresh, now, clearing=True)
                 if reasons:
@@ -2549,8 +2576,9 @@ class Book:
                 if part is None:
                     self._refuse_slice(plan, index, [told])
                     break
+                repriced = self._terms(intent) if told else None
             outcome = self._route([part], [size], now, reference_price=fresh.bid if (part.order_type == "market" and fresh is not None) else None,
-                                  slice_of=(plan.plan_id, index), note=told)
+                                  slice_of=(plan.plan_id, index), note=told, repriced=repriced)
             if outcome.order_id:
                 sent.append(outcome.order_id)
             order = self.orders.get(outcome.order_id or "")
@@ -2609,7 +2637,10 @@ class Book:
             checked += self._recheck_never_arrived(now)
             if self._reconciled_here:
                 # Every fill the venue reported is booked first: the next slice of an exit sizes
-                # off what is still held after them, never off what was held a pass ago.
+                # off what is still held after them, never off what was held a pass ago. An exit the House
+                # re-priced is read again first (`_recheck_repriced`), so a plan whose re-priced slice it
+                # cancels sends the rest, cleared as the House's orders stand now.
+                self._recheck_repriced(now)
                 self._advance_plans(now)
         return checked
 
@@ -2670,25 +2701,119 @@ class Book:
             if not working.open:
                 return Outcome("", agent, "refused", f"order is already {working.status}", order_id)
             now = now_iso(self.clock)
-            self._cancel_why.pop(order_id, None)  # a new cancel says its own why
-            reference = working.broker_order_id or working.order_id
-            try:
-                self.broker.cancel(reference)
-            except BrokerError as exc:
-                return Outcome("", agent, "rejected", str(exc), order_id)
-            self.ledger.append("book.cancel", {"book": self.name, "order_id": order_id}, agent=agent, id=f"cancel:{order_id}")
-            try:
-                order = self.broker.get_order(reference)
-            except BrokerError:
-                order = None
-            if order is not None:
-                self._attribute(working, order, now, reason=why if order.status == "cancelled" else "")
+            refused = self._cancel_at_venue(working, agent, now, why=why)
+            if refused is not None:
+                return Outcome("", agent, "rejected", refused, order_id)
             plan = self.exit_plans.get(working.slice_of or "")
             if plan is not None:
                 # Cancelling a slice withdraws the exit: the rest of it is not sent behind the
                 # canceller's back. Whoever cancelled it (the agent, the horizon rule) asks again.
                 self._close_plan(plan, f"a slice ({order_id}) was cancelled")
             return Outcome("", agent, working.status, "", order_id, working.filled)
+
+    def _cancel_at_venue(self, working: Working, agent: str, now: str, *, why: str = "") -> str | None:
+        """The venue half of `cancel`: ask the venue to cancel, write the `book.cancel` row, and book the venue's
+        answer to a READ after the cancel (see `cancel`). Returns the venue's refusal, or None. It never closes an
+        exit plan: `cancel` does that for a slice the agent or a House rule withdraws, and `_recheck_repriced` keeps
+        the plan, whose next slice is cleared again."""
+        self._cancel_why.pop(working.order_id, None)  # a new cancel says its own why
+        reference = working.broker_order_id or working.order_id
+        try:
+            self.broker.cancel(reference)
+        except BrokerError as exc:
+            return str(exc)
+        self.ledger.append("book.cancel", {"book": self.name, "order_id": working.order_id}, agent=agent, id=f"cancel:{working.order_id}")
+        try:
+            order = self.broker.get_order(reference)
+        except BrokerError:
+            order = None
+        if order is not None:
+            self._attribute(working, order, now, reason=why if order.status == "cancelled" else "")
+        return None
+
+    @staticmethod
+    def _terms(intent: Intent) -> dict[str, Any]:
+        """The agent's own order terms, kept on an exit the House re-priced (`house_repriced`), so the House can send
+        the agent's order again, as asked, once nothing of the House's stands in its way (`_recheck_repriced`)."""
+        return {"order_type": intent.order_type, "limit_price": text(intent.limit_price), "post_only": intent.post_only,
+                "time_in_force": intent.time_in_force, "created_at": intent.created_at, "expires_at": intent.expires_at}
+
+    def _withdraw_repriced(self, intent: Intent, now: str) -> None:
+        """The agent's own new sell of an instrument supersedes every exit of its there that the House re-priced
+        (review of #226, the owner's decision): each is cancelled through the venue, read again until the venue
+        confirms it (`_await_cancel`), and only then is the new sell checked, against the position as if it were
+        gone. One whose cancel the venue has not confirmed still holds its units, so the new sell can never sell
+        them twice; it is refused for them, and the cancelled row says why once the venue confirms it."""
+        for working in list(self.orders.values()):
+            if (working.repriced is None or not working.open or working.side != "sell"
+                    or working.instrument.key != intent.instrument.key or not working.shares
+                    or not all(share.agent == intent.agent for share in working.shares)):
+                continue
+            self.cancel(intent.agent, working.order_id, why=SUPERSEDED_WHY)
+            self._await_cancel(working, now, why=SUPERSEDED_WHY)
+            if working.open:
+                self._cancel_why[working.order_id] = SUPERSEDED_WHY
+
+    def _recheck_repriced(self, now: str) -> None:
+        """An exit the House re-priced lives one pass (review of #226, the owner's decision). Each poll reads it again:
+        where the House would still put the agent's order now (`_exit_past_the_house` as the orders stand), it stays;
+        otherwise it is cancelled and what the venue left of it is sent again -- as the agent asked once nothing of
+        the House's stands in its way, one step above the House's bid, or post-only at the NEW ask while in doubt. A
+        slice's plan sends its rest itself, cleared as it stands (`_advance_plan`, next in the poll). An order whose
+        cancel the venue has not confirmed is read again next pass; one the House cannot price now is left, and the
+        agent's own next sell supersedes it (`_withdraw_repriced`). Nothing is crossed here: a cross takes the
+        agent's own next sell, which clears the way afresh."""
+        for working in list(self.orders.values()):
+            terms = working.repriced
+            if (terms is None or not working.open or working.side != "sell" or len(working.shares) != 1
+                    or working.status not in ("accepted", "partially_filled") or not working.broker_order_id):
+                continue  # not one the venue has acknowledged as resting: the poll finds out first
+            if working.slice_of is not None and working.slice_of not in self.exit_plans:
+                continue  # a slice of a plan that has ended: the agent's next sell supersedes it
+            try:
+                self._recheck_one(working, terms, now)
+            except Exception:  # noqa: BLE001 - one order read again next pass must not stop the poll or the plans after it
+                continue
+
+    def _recheck_one(self, working: Working, terms: Mapping[str, Any], now: str) -> None:
+        share = working.shares[0]
+        left = share.quantity - share.filled
+        if left <= 0:
+            return
+        asked = Intent(
+            id=share.intent_id, agent=share.agent, instrument=working.instrument, side="sell", quantity=left,
+            order_type=str(terms.get("order_type") or "market"),
+            limit_price=None if terms.get("limit_price") is None else money(terms["limit_price"]),
+            post_only=bool(terms.get("post_only")), time_in_force=str(terms.get("time_in_force") or default_tif(working.instrument, "market")),
+            reason=share.reason, created_at=str(terms.get("created_at") or working.submitted_at), expires_at=terms.get("expires_at"),
+        )
+        quote = self._quote(working.instrument)
+        target, _ = self._exit_past_the_house(asked, quote, None)
+        if target is None or (target.order_type, target.limit_price, target.post_only) == (
+                working.order_type, working.limit_price, working.post_only):
+            return  # still where the House would put it, or no price for it now
+        if working.slice_of is None and self._over_cap(target, left, quote):
+            return  # sent again it would be over the order cap: the agent's own next sell sends it in slices
+        if self._cancel_at_venue(working, share.agent, now, why=RECHECK_WHY) is not None:
+            return  # the venue refused the cancel: read again next pass
+        self._await_cancel(working, now, why=RECHECK_WHY)
+        if working.open:
+            self._cancel_why[working.order_id] = RECHECK_WHY
+            return
+        if working.slice_of is not None:
+            return  # the plan sends what is left, cleared as the orders stand now
+        holding = self._account(share.agent).holdings.get(working.instrument.key)
+        offered = sum((s.quantity - s.filled for w in self.orders.values() if w.open and w.side == "sell"
+                       and w.instrument.key == working.instrument.key for s in w.shares if s.agent == share.agent), ZERO)
+        left = min(share.quantity - share.filled, (holding.quantity if holding is not None else ZERO) - offered)
+        if left <= 0:
+            return
+        target, note = self._exit_past_the_house(dataclasses.replace(asked, quantity=left), quote, None)
+        if target is None:
+            return
+        market = target.order_type == "market"
+        self._route([target], [left], now, reference_price=quote.bid if (market and quote is not None) else None,
+                    note=note or RESENT_NOTE, repriced=dict(terms) if note else None, again=working.order_id)
 
     def cancel_all(self, agent: str) -> int:
         return sum(1 for w in self.open_orders(agent) if self.cancel(agent, w.order_id).status == "cancelled")

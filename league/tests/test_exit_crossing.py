@@ -486,6 +486,94 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.18"), False))
         self.assertIn("one step above the House's own resting bid", out.detail)
 
+    def fallback_exit(self, held, bid_quantity="3"):
+        """The doubt path of the review of #226: a peer's bid at the touch, whose cancel the venue has not confirmed
+        after two re-reads (Alpaca's pending_cancel), so the time stop rests post-only at the ask, 12.19."""
+        bid = self.rest_bid("buyer", self.inst, bid_quantity, "12.17")
+        pending = lambda order_id: self.broker.get_order(order_id)  # noqa: E731
+        with patch.object(self.broker, "cancel", side_effect=pending):
+            first = self.book.submit([self.intent("seller", self.inst, "sell", held, reason=EXIT_REASON)])[0]
+        self.assertEqual(first.status, "resting", first.detail)
+        self.assertEqual((self.broker.submitted[-1].limit_price, self.broker.submitted[-1].post_only), (D("12.19"), True))
+        return bid, self.book.orders[first.order_id]
+
+    def test_a_time_stop_in_a_falling_market_supersedes_the_houses_fallback_and_gets_out(self):
+        """Review of #226 (owner's decision): the House's post-only fallback held the units, so the agent's next time
+        stop was refused ("sell exceeds position") while the market fell through it. The agent's own next sell now
+        cancels the House's re-priced exit first and is checked as if it were gone."""
+        held = self.hold("seller", self.inst, "1.62")
+        bid, fallback = self.fallback_exit(held)
+        self.broker.orders[bid].status = "cancelled"  # the venue finishes the House's cancel of the peer's bid
+        self.broker.set_quote(self.inst, "12.00", "12.02")  # and the market falls
+        again = self.book.submit([self.intent("seller", self.inst, "sell", held, reason=EXIT_REASON)])[0]
+        self.assertEqual(again.status, "filled", again.detail)
+        self.assertEqual(self.book.account("seller").holdings, {})
+        self.assertEqual(fallback.status, "cancelled")
+        told = [r for r in order_outcomes(self.ledger, "seller", self.book.name) if r.get("order_id") == fallback.order_id][-1]
+        self.assertIn("your newer sell of this instrument replaces this exit", told["reason"])
+        sold = [e.payload for e in self.ledger.iter(kinds="book.fill", agent="seller") if e.payload["side"] == "sell"]
+        self.assertEqual([(p["source"], D(p["price"])) for p in sold], [("venue", D("12.00"))])
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_the_houses_fallback_is_sent_again_as_asked_at_the_next_pass_once_nothing_is_in_the_way(self):
+        """Review of #226 (owner's decision): the fallback lives one pass. Here the peer's bid is gone and the market
+        has fallen; with no new intent, and across a restart, the next poll cancels the resting fallback and sends
+        the agent's own market sell again, which gets out at the new bid."""
+        held = self.hold("seller", self.inst, "1.62")
+        bid, fallback = self.fallback_exit(held)
+        self.broker.orders[bid].status = "cancelled"
+        self.broker.set_quote(self.inst, "12.00", "12.02")
+        seats = dict(self.book.limits)
+        self.book = self.new_book()  # a restart: the order rows alone say the fallback was the House's re-price
+        self.book.limits.update(seats)
+        self.book.reconcile()
+        self.book.poll()
+        self.assertEqual(self.book.account("seller").holdings, {})
+        self.assertEqual(self.book.orders[fallback.order_id].status, "cancelled")
+        told = [r for r in order_outcomes(self.ledger, "seller", self.book.name) if r.get("order_id") == fallback.order_id][-1]
+        self.assertIn("to send your exit again", told["reason"])
+        again = self.broker.submitted[-1]
+        self.assertEqual((again.side, again.order_type, again.quantity), ("sell", "market", held))
+        self.assertNotEqual(f"ord-{again.id[3:]}", fallback.order_id)  # its own client order id
+        sold = [e.payload for e in self.ledger.iter(kinds="book.fill", agent="seller") if e.payload["side"] == "sell"]
+        self.assertEqual([(p["source"], D(p["price"]), p["intent_id"]) for p in sold],
+                         [("venue", D("12.00"), fallback.shares[0].intent_id)])  # the same intent, filled once
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_while_the_doubt_stands_the_fallback_follows_the_ask_and_does_not_churn(self):
+        """Review of #226 (owner's decision): while the House's order in the way is still in doubt (a peer's bid the
+        venue has not acknowledged), the next pass re-prices the fallback to the NEW ask; a pass that finds nothing
+        changed leaves it where it is."""
+        held = self.hold("seller", self.inst, "1.62")
+        self.seat("buyer")
+        self.broker.lose_next_submit = True  # the peer's bid is `unknown`: in doubt until the venue says where it stands
+        self.assertEqual(self.book.submit([self.intent("buyer", self.inst, "buy", "3", order_type="limit",
+                                                       limit_price="12.00")])[0].status, "unknown")
+        first = self.book.submit([self.intent("seller", self.inst, "sell", held, reason=EXIT_REASON)])[0]
+        self.assertEqual((self.broker.submitted[-1].limit_price, self.broker.submitted[-1].post_only), (D("12.19"), True))
+        self.broker.set_quote(self.inst, "12.08", "12.10")
+        self.clock.advance(30)
+        self.book.poll()
+        self.assertEqual(self.book.orders[first.order_id].status, "cancelled")
+        moved = self.broker.submitted[-1]
+        self.assertEqual((moved.side, moved.order_type, moved.limit_price, moved.post_only), ("sell", "limit", D("12.10"), True))
+        sent = len(self.broker.submitted)
+        self.clock.advance(10)
+        self.book.poll()
+        self.assertEqual(len(self.broker.submitted), sent)  # nothing changed: nothing cancelled or sent again
+        self.assertEqual(self.book.account("seller").holdings[self.inst.key].quantity, held)  # still offered once, never twice
+
+    def test_a_supersede_the_venue_has_not_confirmed_never_sells_the_units_twice(self):
+        held = self.hold("seller", self.inst, "1.62")
+        bid, fallback = self.fallback_exit(held)
+        pending = lambda order_id: self.broker.get_order(order_id)  # noqa: E731 - the fallback's cancel stays pending
+        with patch.object(self.broker, "cancel", side_effect=pending):
+            again = self.book.submit([self.intent("seller", self.inst, "sell", held, reason=EXIT_REASON)])[0]
+        self.assertEqual(again.status, "refused", again.detail)  # its units are still offered by the fallback
+        self.assertTrue(fallback.open)
+        offered = sum((w.remaining for w in self.book.open_orders("seller") if w.side == "sell"), D(0))
+        self.assertEqual(offered, held)  # offered once, never twice
+
     def test_without_a_fresh_market_bid_nothing_is_crossed(self):
         """Review of #226 (owner's decision): a cross pays the seller the market's bid, so a quote older than the book
         lets a quote be (`max_quote_age_seconds`, 900 s) prices no cross: the exit takes the doubt path and rests

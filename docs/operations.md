@@ -413,7 +413,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   keeping the gap, no venue order (with no fresh market bid, no cross); a peer's bid under the market's bid left alone, the exit sent as a
   limit one step above it; and on doubt (a cancel the venue has not confirmed after two re-reads a
   quarter-second apart, an order it has not acknowledged) the exit resting post-only at the ask.
-  Each re-priced order's `book.order` rows carry the reason. A self-cross refusal on a SELL is a
+  Each re-priced order's `book.order` rows carry the reason, and `house_repriced` (the agent's own
+  order terms): such an order lives one pass (each poll re-prices it, or cancels it and sends the
+  agent's order again, a new client order id for the same intent, once nothing is in the way), and
+  the agent's own next sell of the instrument cancels it first (its cancelled row says so). A self-cross refusal on a SELL is a
   defect: `book.refused` rows whose `reasons` mention "House's own resting order" should all be buys.
   Two sells may still be refused where no price exists at all, and neither is a self-cross refusal:
   "no price is left above the House's own best bid to rest this exit at" (a House bid at the top of an
