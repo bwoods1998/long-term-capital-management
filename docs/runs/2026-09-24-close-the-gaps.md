@@ -185,6 +185,29 @@ recorded for the next open; live verification uses the markets that trade around
   roles that were overdue while the tier was below "all"). L2 (Wave 1) pauses the four roles until the
   floor's real P&L is positive.
 
+- 02:00Z — **H, the cleanup's first pass** (`scratchpad/cleanup-report.md`): 13 of the paused Sept 23
+  run's worktrees removed (all merged and clean: `ltcm-pacing`, `ltcm-rules`, `ltcm-w0-*` ×7,
+  `ltcm-w1-bugs`, `-lab`, `-loop`, `-seats`) and their 13 merged remote branches deleted; 10 more were
+  inside the plan's six-hour window (eligible from 03:35Z to 07:30Z) and wait for a second pass;
+  `w2-options/design` (draft #210) kept. Open Merton PRs #217 and #208 (Huang BTC 15-minute repairs)
+  fail CI because `league/ci.py` `regression_tape` gives a Kalshi strategy that observes spot bars no
+  `observed_bars`: a CI defect, assigned to Wave 1 (B-loop). `scripts/recover_coinbase_exits.py` is
+  unreferenced (a deletion candidate).
+- 02:33-03:07Z — **Wave 0's PRs:** #224 A-money (D4, P1-P3's keys; money digest c2b0e09c → 223e2f0e,
+  the grant 40 → 101 seats at a $10 probe), #226 A-book (D3, X0, and a latent `Book.cancel` race: a
+  fill between Kalshi's read and delete was booked as cancelled), #227 A-holds (D2 and the gateway's
+  settled/in-flight split), #228 A-lab (D1). The lab's IndexError, reproduced from the snapshot: a Luna
+  child on alpaca-crypto-alts asking ADA/USD 15Min, whose deep tape
+  (`deep:alpaca:ADA/USD:15Min:100:hour:2025-09-12:2025-11-14:sip`) had 0 steps because the history store
+  holds ADA/USD only from 2026-02-01; `_search_tape` read `steps[0]` outside its guard, so one queued
+  row failed every step.
+- 03:0xZ — adversarial reviews launched for #224, #226 and #227 (A-lab is reviewed by the main session:
+  not a money path). The Wave 1 recorders (B-feeds) launched from `90a15f6`.
+- 03:09Z — a live defect found by the Deploy A check: the House's wind-down of the dead agent
+  haghani-h426990's practice account has sent a 0.000000001 LINK/USD sell every ~5 minutes since 15:44Z
+  Sept 23, and Alpaca refused all 107 ("order qty must be >= minimal qty"). Assigned to Wave 1 with an
+  invariant (B-seats).
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
