@@ -153,6 +153,18 @@ def alert_key(text: Any) -> str:
     return re.sub(r"\s+", " ", folded).strip()[:300]
 
 
+def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str) -> dict[str, Any]:
+    """Count one warning of `text`, written at `now` (`stamp` in ISO), into its run of repeats: runs
+    quiet for the window are dropped first, and a run keeps the times inside the window."""
+    for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+        runs.pop(quiet)
+    run = runs.setdefault(alert_key(text), {"first_seen": stamp, "count": 0, "times": [], "escalated": None})
+    run["count"] = int(run.get("count") or 0) + 1
+    run["times"] = [t for t in run.get("times") or [] if now - float(t) < REPEAT_WINDOW_SECONDS][-4 * REPEAT_WARNINGS:] + [now]
+    run.update(text=text[:300], last_seen=stamp, last_epoch=now)
+    return run
+
+
 @dataclass
 class Settings:
     """The House's own dials (not the game's, not the constitution's)."""
@@ -625,14 +637,15 @@ class House:
         `repeated` (the folded text, the count, first and last seen) and `began_at` (when the run of
         repeats began: `league/watchdog.py` counts an error whose condition began before a promotion
         as inherited, never as the new release's doing)."""
-        self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
+        row = self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
         if str(level).lower() == "warning":
-            self._repeating(str(text), payload)
+            self._repeating(str(text), payload, seq=getattr(row, "seq", None))
 
-    def _repeating(self, text: str, payload: Mapping[str, Any]) -> None:
+    def _repeating(self, text: str, payload: Mapping[str, Any], *, seq: int | None = None) -> None:
         """Count one warning toward its run of repeats; escalate once when the run reaches the line.
         The runs live in the House's state (house.json), so a restart neither forgets a run nor
-        escalates it again."""
+        escalates it again; a House whose state holds none rebuilds them from the ledger
+        (`_repeating_runs`, before `seq`: this warning's own row, which is counted here)."""
         lock, state = getattr(self, "_state_lock", None), getattr(self, "_state", None)
         if lock is None or state is None:
             return  # an alert raised while the House is still being built
@@ -640,13 +653,7 @@ class House:
         key = alert_key(text)
         escalate = None
         with lock:
-            runs = state.setdefault("repeating_warnings", {})
-            for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
-                runs.pop(quiet)
-            run = runs.setdefault(key, {"first_seen": now_iso(self.clock), "count": 0, "times": [], "escalated": None})
-            run["count"] = int(run.get("count") or 0) + 1
-            run["times"] = [t for t in run.get("times") or [] if now - float(t) < REPEAT_WINDOW_SECONDS][-4 * REPEAT_WARNINGS:] + [now]
-            run.update(text=text[:300], last_seen=now_iso(self.clock), last_epoch=now)
+            run = _count_repeat(self._repeating_runs(before=seq), text, now, now_iso(self.clock))
             if len(run["times"]) >= REPEAT_WARNINGS and not run.get("escalated"):
                 run["escalated"] = now_iso(self.clock)
                 escalate = {k: run[k] for k in ("first_seen", "last_seen", "count")} | {"in_window": len(run["times"])}
@@ -658,11 +665,50 @@ class House:
                 "repeated": {"text": key, "count": escalate["count"], "first_seen": escalate["first_seen"], "last_seen": escalate["last_seen"]},
                 "began_at": escalate["first_seen"]})
 
+    def _repeating_runs(self, *, before: int | None = None) -> dict[str, Any]:
+        """The runs of repeats in the House's state (call under `_state_lock`). A state that holds
+        none -- the first start of this code over an older House's house.json, or a lost house.json
+        -- rebuilds them from the ledger's own recent warnings and escalations, so a condition that
+        was already repeating keeps the moment it began and an escalated run is not said again.
+
+        Review of #236 (Sept 24, 2026): Deploy A's House counted no runs, so Deploy B's House would
+        have begun every run at its own restart, and a warning that repeated all through Deploy A (a
+        site refusing every checkpoint: 11 in the 12 minutes after three restarts on Sept 23) would
+        have escalated inside Deploy B's watch with `began_at` after the promotion -- and the
+        watchdog would have rolled the healthy release back for a condition it inherited."""
+        runs = self._state.get("repeating_warnings")
+        if isinstance(runs, dict):
+            return runs
+        runs = {}
+        try:
+            rows = self.ledger.read(kinds="ops.alert", limit=2000, newest=True)
+        except Exception:  # noqa: BLE001 - a ledger that cannot be read leaves the runs to begin now
+            rows = []
+        for entry in rows:
+            if before is not None and entry.seq >= before:
+                continue  # the warning being counted now
+            level, repeated = str(entry.payload.get("level") or "").lower(), entry.payload.get("repeated")
+            try:
+                at = _epoch(entry.at)
+            except (TypeError, ValueError):
+                continue
+            if level == "error" and isinstance(repeated, Mapping):
+                escalated = runs.get(str(repeated.get("text") or ""))
+                if escalated is not None:
+                    escalated["escalated"] = entry.at
+            elif level == "warning":
+                _count_repeat(runs, str(entry.payload.get("text") or ""), at, entry.at)
+        now = self.clock()
+        for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+            runs.pop(quiet)
+        self._state["repeating_warnings"] = runs
+        return runs
+
     def _repeating_health(self) -> list[dict[str, Any]]:
         """health.json `repeating_warnings`: each escalated run until it has been quiet for the window."""
         now = self.clock()
         with self._state_lock:
-            runs = self._state.setdefault("repeating_warnings", {})
+            runs = self._repeating_runs()
             for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
                 runs.pop(quiet)
             return [{"text": run.get("text"), "key": key, "count": run.get("count"), "first_seen": run.get("first_seen"),

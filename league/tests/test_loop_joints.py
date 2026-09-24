@@ -92,6 +92,49 @@ class RepeatedWarnings(GateCase):
         self.assertEqual(len(self.alerts("error")), 1)
         self.assertEqual(health(self.house)["repeating_warnings"][0]["count"], 13)
 
+    def test_a_house_with_no_runs_rebuilds_them_from_the_ledger_so_the_watch_inherits_them(self):
+        """Review of #236 (Sept 24, 2026): Deploy A's House counted no runs, so Deploy B's House found
+        none in house.json and began every run at its own restart. A site refusing every checkpoint
+        through Deploy A then escalated inside Deploy B's ten-minute watch with `began_at` after the
+        promotion, and the watchdog would have rolled the healthy release back for a condition it
+        inherited. A House with no runs rebuilds them from the ledger's own warnings."""
+        from league.watchdog import HouseHealth
+
+        text = 'publishing failed (PublishError: the site refused the checkpoint: HTTP 400 {"error":"Invalid checkpoint."})'
+        first = None
+        for _ in range(20):  # the release before: one warning a tick, and no runs kept
+            row = self.house.ledger.append("ops.alert", {"level": "warning", "text": text})
+            first = first or row.at
+            self.clock.advance(40)
+        self.house._state.pop("repeating_warnings", None)
+        health(self.house)  # its last tick; the next House loads a house.json with no runs
+        self.house._state.pop("repeating_warnings", None)
+        self.house._save_state()
+        watch = HouseHealth(self.house.root, clock=self.clock, restart_within=None)
+        self.assertTrue(watch().ok)  # the reading just before the promotion
+        self.house.close(wait=None)
+        self.house = self.new_house()
+        for _ in range(15):  # the watch after the promotion: the same refusal, one a tick
+            self.clock.advance(40)
+            self.house.alert("warning", text)
+            health(self.house)
+            reading = watch()
+            self.assertTrue(reading.ok, reading.reasons)
+        errors = self.alerts("error")
+        self.assertEqual(len(errors), 1, "the run had repeated before the restart: it escalates once")
+        self.assertEqual(errors[0]["began_at"], first, "and began when the first warning of the run was written")
+        self.assertEqual(health(self.house)["repeating_warnings"][0]["first_seen"], first)
+
+    def test_a_run_rebuilt_from_the_ledger_that_had_escalated_does_not_escalate_again(self):
+        for _ in range(10):
+            self.house.alert("warning", "alpaca-paper: could not poll (TransportError)")
+            self.clock.advance(20)
+        self.assertEqual(len(self.alerts("error")), 1)
+        self.house._state.pop("repeating_warnings", None)  # a lost house.json
+        self.house.alert("warning", "alpaca-paper: could not poll (TransportError)")
+        self.assertEqual(len(self.alerts("error")), 1)
+        self.assertEqual(health(self.house)["repeating_warnings"][0]["count"], 11)
+
     def test_numbers_and_ids_fold_and_words_do_not(self):
         self.assertEqual(alert_key("haghani-52: its wake failed (GET /v2/orders/7974aa54-fbb9-4d9a-9aa0-61dbb64ca0d6 timed out)"),
                          alert_key("haghani-51: its wake failed (GET /v2/orders/daa7473c-ecf3-4897-90ef-092a4786e741 timed out)"))
