@@ -253,7 +253,9 @@ def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, d
     House's own ledger (Sept 24, 2026). An own fill is a venue or cross fill, never the House's closing sale;
     a settlement is a `book.settle` or a sale that left the position flat, on any book, counted once per
     EVENT on the event books (`evaluator.event_key`, the allocator's count) and once per trade on Alpaca,
-    after each book's evidence cutoff. A member that has not reached it is censored at its death or now.
+    after each book's evidence cutoff -- never the House's closing sale either: a forced exit at a death
+    says nothing of how long the desk's markets take (the review of #245). A settlement after a death is
+    the market's own verdict and counts. A member that has not reached it is censored at its death or now.
 
     Each desk: `members`, `reached`, `hours` (the Kaplan-Meier median, None when it is not reached: most
     members never traded enough to measure how long the desk's markets take, which says nothing of the
@@ -286,7 +288,9 @@ def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, d
         if entry.kind == "book.fill" and p.get("source") in ("venue", "cross") \
                 and not str(p.get("reason") or "").startswith(HOUSE_CLOSING):
             first.setdefault(entry.agent, at)
-        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)):
+        closing = str(p.get("reason") or "").startswith(HOUSE_CLOSING)  # the House's sale at a death, never the member's
+        if entry.kind == "book.settle" or (p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True)
+                                           and not closing):
             key = (event_key(p.get("instrument")) if book in EVENT_BOOKS else None) or f"#{entry.seq}"
             closes.setdefault(entry.agent, []).append((at, key))
     desks: dict[str, list[tuple[float, bool]]] = {}

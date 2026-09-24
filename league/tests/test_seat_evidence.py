@@ -124,6 +124,24 @@ class EvidenceClocks(EvidenceCase):
         self.assertEqual(saved["evidence_clocks"]["desks"][DESK]["hours"], 20.0)
         self.assertEqual(len(alerts(self.house, "info", "evidence clock")), 1)
 
+    def test_the_houses_closing_sales_are_not_a_members_settlements(self):
+        """The review of #245 (Sept 24, 2026): the House's sale of a dead member's holdings ("the House is closing
+        this account") counted as the member's settlement, so a member with two closes that died holding a third
+        position "reached" its third settlement at its death. The House's closing sales are the House's: a forced
+        exit at death says nothing of how long the desk's markets take (the scoreboard's own-fill rule)."""
+        member = self.seated("member")
+        self.buy(member)
+        self.clock.advance(3600)
+        self.close(member, 2)
+        self.house.registry.died(member.id, "displaced", "test")
+        self.clock.advance(60)
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "instrument": BTC, "side": "sell", "quantity": "0.001",
+                                               "price": "61000", "source": "venue", "realized": "1.0", "flat": True,
+                                               "reason": "the House is closing this account"}, agent=member.id)
+        desk = self.house.evidence_clocks(fresh=True)["desks"][DESK]
+        self.assertEqual((desk["members"], desk["reached"]), (1, 0), "censored at its death: its third close was the House's")
+        self.assertEqual(desk["longest_waiting_hours"], 1.0)
+
     def test_the_clocks_are_measured_at_startup_and_again_each_day(self):
         started = House(Path(self.dir.name) / "fresh", brokers={"alpaca-paper": FakeBroker("alpaca-paper")},
                         sandbox=LocalSandbox(Path(self.dir.name) / "fresh-boxes"), clock=self.clock,

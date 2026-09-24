@@ -316,7 +316,8 @@ status is exposed in health and agent research context; qualification is distinc
    traders with 38, 26 and 24 fills displaced, and mullins-14's replay-passed candidate cancelled with
    it). Each desk's **evidence clock** -- the Kaplan-Meier median hours from a member's first own fill
    to its third independent settlement over the last `EVIDENCE_CLOCK_DAYS` (7), the scoreboard's
-   definition (`measure_evidence_clocks`, events counted as the allocator counts them) -- is measured
+   definition (`measure_evidence_clocks`, events counted as the allocator counts them; the House's
+   closing sales at a death are the House's, never a member's settlement) -- is measured
    at startup and daily (`evidence_clocks`, house.json `evidence_clocks`, an info alert when it
    changes); a paper seat's grace is the larger of the plain grace and its desk's clock, the clock in
    wall-clock hours (a desk that keeps hours still needs its twelve session hours), and a clock the

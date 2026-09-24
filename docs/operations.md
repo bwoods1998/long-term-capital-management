@@ -253,7 +253,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     real money with no ranked forward score, no fill since their program's opportunity and no
     grace left -- seats that carry no evidence) and `evidence_clocks` (`at`, and `hours` by desk:
     the median hours from a member's first fill to its third independent settlement over the last
-    7 days, null where the median was never reached and the plain 12-hour grace stands).
+    7 days, the House's closing sales at a death not counted, null where the median was never
+    reached and the plain 12-hour grace stands).
     `retained` waiters are the latest replay-passed research candidates of residents that died
     holding them (house.json `retained`; their admission rows say `orphaned`), seated first by the
     admission pass on their author's line (a proven family's first, then the longest wait), dropped
