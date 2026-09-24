@@ -1115,6 +1115,29 @@ class RulesText(unittest.TestCase):
         with patch.dict(CONSTITUTION["allocator"]["family_proven"], {"lopsided_gate": False}):
             self.assertNotIn("loss-rate test", rules_text(game))
 
+    def test_the_agents_are_told_the_real_books_entry_rules_and_that_exits_are_never_walled_off(self):
+        """Deploy A (Sept 24, 2026): the book refuses a real Kalshi entry that is not a post-only limit
+        (unless the family's taker record is proven), under 30c, or past 25% of the equity in one event,
+        and clears an exit past the House's own orders (D3, X0). The reviews of #224 and #226 found the
+        agents' rules text said none of it: a refusal must never be the first an agent hears of a rule."""
+        import json
+        from league.rules import rules_text
+
+        with open("league/game.json") as f:
+            game = json.load(f)
+        text = " ".join(rules_text(game).split())
+        self.assertIn("REAL MONEY AT KALSHI. Entries:", text)
+        self.assertIn("an entry must be a POST-ONLY LIMIT", text)
+        self.assertIn("until your family's pooled TAKER record is proven positive", text)
+        self.assertIn("no entry under 30c", text)
+        self.assertIn("holds at most 25% of your equity on the book", text)
+        self.assertIn("Exits are never refused for meeting another agent's resting order", text)
+        start = text.index("REAL MONEY AT KALSHI")
+        self.assertNotIn("paper", text[start:text.index("- Down is as fast as up.")].lower())
+        without = {**CONSTITUTION, "allocator": {k: v for k, v in CONSTITUTION["allocator"].items()
+                                                 if k not in ("real_entry_liquidity", "longshot_floor_real", "max_event_share")}}
+        self.assertNotIn("REAL MONEY AT KALSHI", rules_text(game, without))
+
     def test_the_trial_does_not_promise_that_only_the_drawdown_can_send_a_probe_back(self):
         """Review of #224 (Sept 24, 2026): the trial holds the hysteresis exit only; drift (`ladder.drift`,
         a money rule the plan leaves as it is) still demotes a real agent whose edge falls far below the

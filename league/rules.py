@@ -136,6 +136,23 @@ or never swings at all.
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
 """ if alloc.get("probe_bunt_usd") else "")
+        # The real book's entry rules and exits (Deploy A, Sept 24, 2026: X0 and D3 in league/book.py,
+        # read through the constitution's allocator keys): what an agent on real money must know before
+        # it sends an order, so a refusal is never a surprise.
+        entry_rules = []
+        if alloc.get("real_entry_liquidity") == "maker_unless_family_taker_positive":
+            entry_rules.append("an entry must be a POST-ONLY LIMIT (it rests on the book, or the venue refuses it)\n"
+                               "    until your family's pooled TAKER record is proven positive: market orders and\n"
+                               "    crossing limits are refused")
+        if alloc.get("longshot_floor_real"):
+            entry_rules.append(f"no entry under {float(alloc['longshot_floor_real']) * 100:.0f}c: cheap contracts lost on real money")
+        if alloc.get("max_event_share"):
+            entry_rules.append(f"one event (every strike of one game, one city's day) holds at most "
+                               f"{float(alloc['max_event_share']):.0%} of\n    your equity on the book")
+        real_book_text = ("- REAL MONEY AT KALSHI. Entries:\n" + "".join(f"  * {rule};\n" for rule in entry_rules)
+                          + "  Exits are never refused for meeting another agent's resting order: the House crosses it\n"
+                            "  inside at the market's price, or re-prices your exit so it cannot trade with the House's\n"
+                            "  own bid, and says so on your order.\n" if entry_rules else "")
         trial_text = (f"""  ONE EARLY LOSS IS NOT A DEMOTION: that exit line applies once you have {after} independent real
   settlements in your stay on real money (closed trades at Alpaca); until then only losing
   {float(alloc['real_drawdown_demote']):.0%} of your real record from its high, or DRIFT (your real edge falling far below the practice
@@ -167,7 +184,7 @@ or never swings at all.
   until its family is proven): E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
   frontier model; your stake is the bunt x min(E, {alloc['e_cap']})^{alloc['kappa']}, up to {float(alloc['max_share_of_venue']):.0%} of the venue, so it
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
-{proof_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
+{proof_text}{real_book_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under
   {alloc['swing_exit_w_real']}; losing {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to paper at once.
 {trial_text}  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
   capital per venue, plus realized profit there) is full, the best E is seated first and a newcomer
