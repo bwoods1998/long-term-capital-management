@@ -168,7 +168,9 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `alpaca`) on the "real money" line with the performance fees, and the practice books on their
     own line;
   - the top evidence (E, W_paper, W_real, trades, stake);
-  - the lab's `lab.sqlite` table counts and its `lab.*` ledger rows;
+  - the lab's `lab.sqlite` table counts, its `lab.*` ledger rows, the batches it ran since `--since`,
+    and from `health.json` whether its step is failing (`failing_since`, `failures_in_a_row`,
+    `error`; D1, Sept 24, 2026);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
     checkpoint's age and whether it carries the board.
@@ -179,7 +181,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
     (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
     (`count`, `longest_hours`, up to eight graduates with their line, desk and hours), `queued`
-    and `born_total`.
+    and `born_total`. Since D1 (Sept 24, 2026): `failing_since` (null until five steps in a row
+    have failed; then the first failure's time, until a step works again), `failures_in_a_row`,
+    `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
+    `indexed`: the tapes built in the last six hours that a restart remembers).
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
@@ -281,13 +286,22 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
       forward record; the archive's `fitness` is never rewritten by it. `SELECT candidate,
       active_blocks, mean_log_growth FROM forward f WHERE at = (SELECT MAX(at) FROM forward WHERE
       candidate = f.candidate) ORDER BY mean_log_growth DESC` is the forward leaderboard;
-    - `meta`: cursors and stamps (`forward_at`: the last completed forward run).
+    - `meta`: cursors and stamps (`forward_at`: the last completed forward run). Since D1 (Sept 24,
+      2026) also the step's failure record (`failures_in_a_row`, `failures_first_at`,
+      `last_failure` with its phase and error, `failing_since` once escalated) and `tape_index`:
+      a JSON object, tape key -> `at` (built), `ident` (the lab's tape id, as `batches.tape_id`
+      names it), `house` (the House's tape id) and `source` (`history-dev`, rebuilt from the
+      history store on the House's disk; `live`, fetched), for the tapes of the last six hours.
+      A `blocked` candidate's `error` says why: unsupported input (a sealed tape, missing
+      observed bars, a tape with no steps: nothing was recorded in its window), or "the lab could
+      not read its NEEDS or its tape" / "the lab could not score its result" with the exception.
   - **`lab.stats` ledger rows**, at most every ten minutes (`stats_every_minutes`), over the last
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
     `coverage` (cells by desk), `queued`, `spend` (OpenAI, the Sail estimate, the royalty balance),
     `born_total`, `refusal`, `llm` (`paused`: why Luna and Sol are being skipped, or null;
     `skipped`: the Luna and Sol phases skipped since the process started), `closed_since`,
+    `failing_since`, `failures_in_a_row` and `error` (D1, Sept 24, 2026: as in `health.json`),
     `waiting_seat` (`count`, `longest_hours`) and, since S2 (Sept 23, 2026), `forward`
     (`last_run_at`; `last_run` with `candidates`, `scored`, `batches`, `seconds` and `skipped` by
     reason, for example `no forward data yet` or `the run's box seconds are spent`; `records`, the
@@ -381,6 +395,24 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   agents that have earned their seats (`league/niches.json` seats, `league/turbo.json`
   `max_population`); the lab asks again every ten minutes. `health.json` `lab.waiting_seat` lists
   them, longest wait first.
+- **"the lab's step failed (<error>)"** (a warning, each failed phase of a step; D1, Sept 24,
+  2026). The payload names the `phase` (`royalties`, `seed`, `breed`, `batches`, `graduate`,
+  `forward`) and carries the last 2,000 characters of the traceback as `_traceback` (private:
+  never published). Read it with `SELECT payload FROM ledger WHERE kind='ops.alert' AND payload
+  LIKE '%step failed%' ORDER BY seq DESC LIMIT 1`. The other phases of the step still ran. From
+  23:21:59Z Sept 23 this warning came every one to three minutes for over two hours with no
+  traceback: one queued candidate whose tape had no steps failed every step.
+- **"the Alpha Lab's step has failed N times in a row since <time> (<error>)"** (an error, once
+  per run of failures, after `failures_alert_after`, 5). It carries the traceback like the
+  warnings, and `health.json` `lab.failing_since` is set until a step works again, when "the
+  Alpha Lab's step works again after N failures in a row since <time>" (an info) clears it. The
+  count is in `lab.sqlite` `meta`, so a restart does not reset it. Like every error alert, the
+  watchdog reads it: inside a release's ten-minute watch after promotion it rolls the release back.
+- **"the lab could not evaluate N queued candidate(s) and blocked them (<error>)"** (a warning,
+  at most one a step; D1). A row's NEEDS, tape or result raised something the lab has no refusal
+  for; `candidates` names the rows, each now `blocked` with its error, and `_traceback` is the
+  first one's. More than `row_errors_per_step` (8) in one step is the lab's own defect, not the
+  rows': the step fails (the warning above) and the rest of the queue is left as it was.
 - **Research ends with `provider: campaign_post_unconfirmed`.** A Sail request was in flight when
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
@@ -479,7 +511,8 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_usd_per_hour` | $0.20 | The price the lab records for its box's time (`lab.stats` `spend.sail_usd_estimate`, `batches.sail_usd`) |
 | | `lab.holdout_reserve`, `stats_every_minutes`, `max_queue`, `max_tapes_per_step` | 1, 10, 600, 4 | Not in `game.json`: defaults in `league/lab.py` `DEFAULTS`, which a `game.json` `lab` key of the same name overrides. The sealed-holdout evaluations of a living line the lab never spends (they stay with the line's own forks); how often a `lab.stats` row is written; the most candidates queued at once; search tapes built a step |
 | | `lab.closed_alert_minutes`, `seat_wait_alert_hours` | 30, 6 | Also `DEFAULTS` only (Sept 23, 2026): after how long closed the lab raises its one warning, and after how long waiting for a seat a graduate is named once |
-| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour |
+| | `lab.failures_alert_after`, `row_errors_per_step` | 5, 8 | `DEFAULTS` only (D1, Sept 24, 2026): failed steps in a row before the one error alert and `health.json` `lab.failing_since`; queued rows a step may block for an error of the lab's own before the step fails instead |
+| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour. But `forward_box_seconds` is the run's own time and the tapes it builds fill it: on Sept 23 (22:11Z, 23:14Z) a run scored 4 and 5 of its 48 due and skipped the rest, so 25 graduates waiting for seats need several hourly runs. Since D1 a waiting graduate's first window comes before an elite's |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
