@@ -66,6 +66,9 @@ class CampaignBudget:
     #: A reservation asks a registered reader (`meter_reader`) for a new reading once the last one is
     #: this old, so a reading is never 180 s stale (`ready`) merely because a tick ran long.
     METER_READ_SECONDS = 60
+    #: A meter reading older than this is no reading: the kind's reservations are refused (`ready`),
+    #: and a monthly meter's own line no longer bounds what is left (`_provider_left`).
+    METER_FRESH_SECONDS = 180
 
     def __init__(self, path: str | Path, policy: Mapping[str, Any] | None = None, *, clock=time.time):
         self.policy = dict(policy or load_policy())
@@ -115,10 +118,22 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS gateway_bonus(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS meter_month(id TEXT PRIMARY KEY, month TEXT NOT NULL, high INTEGER NOT NULL,
                 carried INTEGER NOT NULL, settled_high INTEGER, settled_carried INTEGER NOT NULL,
-                covers_from REAL NOT NULL, anchor_at REAL, anchor_row INTEGER, anchor_settled INTEGER, at REAL NOT NULL);
+                covers_from REAL NOT NULL, anchor_at REAL, anchor_row INTEGER, anchor_settled INTEGER, at REAL NOT NULL,
+                cap INTEGER, spent INTEGER, reading_row INTEGER);
             CREATE TABLE IF NOT EXISTS phase_amendments(id TEXT NOT NULL, at REAL NOT NULL, old_policy TEXT NOT NULL,
                 new_policy TEXT NOT NULL, why TEXT NOT NULL);
         """)
+        # The gateway's own line (Sept 24, 2026 review) joined `meter_month` after its first build: a
+        # store that build created gains it here, and reads it as unknown until the next reading.
+        columns = lambda: {r[1] for r in self.db.execute("PRAGMA table_info(meter_month)")}  # noqa: E731
+        for name, decl in (("cap", "INTEGER"), ("spent", "INTEGER"), ("reading_row", "INTEGER")):
+            if name not in columns():
+                try:
+                    self.db.execute(f"ALTER TABLE meter_month ADD COLUMN {name} {decl}")
+                except sqlite3.OperationalError:
+                    if name not in columns():  # another process added it first
+                        self.db.close()
+                        raise
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
         phase = self.db.execute("SELECT * FROM phase WHERE id=?", (self.policy["phase"],)).fetchone()
@@ -479,7 +494,7 @@ class CampaignBudget:
             return True
         with self.lock:
             row = self.db.execute("SELECT checked,failed FROM meter_health WHERE id=?", (kind,)).fetchone()
-            return bool(row and not row[1] and 0 <= self.clock() - row[0] <= 180)
+            return bool(row and not row[1] and 0 <= self.clock() - row[0] <= self.METER_FRESH_SECONDS)
 
     def _used(self, kind: str) -> int:
         settled, before, other, pending = self._sums(kind)
@@ -491,12 +506,43 @@ class CampaignBudget:
         return self.external.get(kind, 0) + max(settled, measured) + before + other + pending
 
     def remaining(self, kind: str) -> Decimal:
+        """What `kind` may still commit: the House's own line, and never more than the provider's own
+        monthly line has left while that line has a fresh reading (`_provider_left`)."""
         with self.lock:
             burst = self.burst()
             if burst:
                 cap = micro(burst['policy']['caps_usd'].get(kind, '0'))
-                return Decimal(max(0, cap - self._burst_used(kind, burst))) / UNIT if self.running() else Decimal(0)
-            return Decimal(max(0, self.caps[kind] - self._used(kind))) / UNIT
+                line = max(0, cap - self._burst_used(kind, burst)) if self.running() else 0
+            else:
+                line = max(0, self.caps[kind] - self._used(kind))
+            left = self._provider_left(kind)
+            return Decimal(line if left is None else min(line, left)) / UNIT
+
+    def _provider_left(self, kind: str) -> int | None:
+        """What `kind`'s provider line has left now, in micro-dollars: its monthly cap less its spend at
+        the last fresh reading (the gateway's frontier month for OpenAI: `/v1/health` `frontier.cap_usd`
+        less `frontier.spent_usd`), less what the House has committed on that line since the reading
+        (its settled costs, and the holds of calls that may reach it since). None without a reading
+        younger than `METER_FRESH_SECONDS`: the House's own line stands alone then, and a metered
+        kind's reservations are refused anyway (`ready`).
+
+        Why (Sept 24, 2026 review): the House's OpenAI line is raised by owner top-ups and settles at
+        the House's own prices, and with the phantom holds absorbed it read about $70-79 above the
+        gateway's month, which is aligned to what the owner funded. Every reader of `remaining` --
+        reservations, the pacer, the agents' credit pool, the tier, health -- would have planned on
+        money that was never funded. The month itself only refuses at its cap (402); this is the
+        House never reading more than that. History is not rewritten: no top-up is lowered and no
+        settled row changes, so the line comes back the moment the gateway cannot be read."""
+        row = self.db.execute("SELECT cap, spent, reading_row, at FROM meter_month WHERE id=?", (kind,)).fetchone()
+        if row is None or row["cap"] is None or row["spent"] is None:
+            return None
+        if not 0 <= self.clock() - float(row["at"]) <= self.METER_FRESH_SECONDS:
+            return None
+        prefix = self.METER_COVERS.get(kind, "")
+        since = self.db.execute(
+            "SELECT COALESCE(SUM(COALESCE(cost, reserved)),0) FROM commitments WHERE kind=? AND rowid>? AND substr(id,1,?)=?",
+            (kind, int(row["reading_row"] or 0), len(prefix), prefix)).fetchone()[0]
+        return max(0, int(row["cap"]) - int(row["spent"]) - int(since))
 
     def meter_reader(self, kind: str, read: Callable[[], Any]) -> None:
         """How `kind`'s meter is read, for a reservation that finds the last reading a minute old.
@@ -638,10 +684,13 @@ class CampaignBudget:
                 raise
         return Decimal(added) / UNIT
 
-    def observe_month(self, kind: str, month: str, spent: Any, *, settled: Any = None,
+    def observe_month(self, kind: str, month: str, spent: Any, *, settled: Any = None, cap: Any = None,
                       previous: Mapping[str, Any] | None = None, evidence: Mapping[str, Any] | None = None) -> bool:
         """One reading of a provider's MONTHLY meter, the gateway's frontier month for OpenAI
-        (`/v1/health` `frontier`: `month`, `spent_usd`, `settled_usd`, `previous`). Sept 24, 2026.
+        (`/v1/health` `frontier`: `month`, `spent_usd`, `settled_usd`, `cap_usd`, `previous`). Sept 24, 2026.
+
+        `cap` is the month's cap in force. With `spent`, it is what the month itself has left, and while
+        the reading is fresh the House's line never reads above that (`remaining`, `_provider_left`).
 
         The month's `spent_usd` is not monotone: a call is reserved at its worst case and settled at
         what it cost, so the month falls whenever a call settles below its worst case, and it starts
@@ -678,6 +727,7 @@ class CampaignBudget:
         try:
             high_now = micro(spent)
             settled_now = None if settled is None else micro(settled)
+            cap_now = None if cap is None else micro(cap)
             final = None
             if previous:
                 name = previous.get("month")
@@ -741,9 +791,13 @@ class CampaignBudget:
                         "high_micro_usd": int(row["high"]), "final_reported": closed,
                         "final_micro_usd": old_high, "carried_micro_usd": state["carried"],
                         "covers_from": state["covers_from"]}))
+                # What the month itself has left at this reading, and the last commitment it can have
+                # seen: the House reserves before it calls the gateway, so a later row is not in it.
+                last_row = int(self.db.execute("SELECT COALESCE(MAX(rowid),0) FROM commitments").fetchone()[0])
+                state.update(cap=cap_now, spent=high_now, reading_row=last_row)
                 if state["anchor_at"] is None and state["settled_high"] is not None:
                     state["anchor_at"] = now
-                    state["anchor_row"] = int(self.db.execute("SELECT COALESCE(MAX(rowid),0) FROM commitments").fetchone()[0])
+                    state["anchor_row"] = last_row
                     state["anchor_settled"] = int(state["settled_carried"]) + int(state["settled_high"])
                     inside, before, other, pending = self._sums(kind)
                     notes.append(("anchor", {
@@ -751,13 +805,13 @@ class CampaignBudget:
                         "month": month, "row": state["anchor_row"], "gateway_settled_micro_usd": state["anchor_settled"],
                         "house_settled_micro_usd": inside + before, "house_unmetered_settled_micro_usd": other,
                         "house_pending_micro_usd": pending}))
+                state.update(id=kind, at=now)
+                columns = ("id", "month", "high", "carried", "settled_high", "settled_carried", "covers_from", "anchor_at",
+                           "anchor_row", "anchor_settled", "at", "cap", "spent", "reading_row")
                 self.db.execute(
-                    "INSERT INTO meter_month VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
-                    "month=excluded.month, high=excluded.high, carried=excluded.carried, settled_high=excluded.settled_high, "
-                    "settled_carried=excluded.settled_carried, covers_from=excluded.covers_from, anchor_at=excluded.anchor_at, "
-                    "anchor_row=excluded.anchor_row, anchor_settled=excluded.anchor_settled, at=excluded.at",
-                    (kind, state["month"], state["high"], state["carried"], state["settled_high"], state["settled_carried"],
-                     state["covers_from"], state["anchor_at"], state["anchor_row"], state["anchor_settled"], now))
+                    f"INSERT INTO meter_month({','.join(columns)}) VALUES({','.join('?' * len(columns))}) "
+                    "ON CONFLICT(id) DO UPDATE SET " + ", ".join(f"{c}=excluded.{c}" for c in columns[1:]),
+                    tuple(state.get(c) for c in columns))
                 self.db.execute("UPDATE meter SET latest=MAX(latest, ?) WHERE id=?", (int(state["carried"]) + int(state["high"]), kind))
                 self.db.execute("INSERT INTO meter_health VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET checked=excluded.checked",
                                 (kind, now))
@@ -781,6 +835,9 @@ class CampaignBudget:
         return {"month": row["month"], "high_usd": usd(row["high"]), "carried_usd": usd(row["carried"]),
                 "total_usd": usd(int(row["carried"]) + int(row["high"])),
                 "settled_total_usd": None if settled is None else usd(settled),
+                # The month's own line at the last reading: its cap in force and its spend then.
+                "cap_usd": None if row["cap"] is None else usd(row["cap"]),
+                "spent_usd": None if row["spent"] is None else usd(row["spent"]),
                 "covers_from": row["covers_from"], "read_at": row["at"],
                 "anchor": None if row["anchor_at"] is None else
                 {"at": row["anchor_at"], "row": row["anchor_row"], "settled_usd": usd(row["anchor_settled"])}}
@@ -926,10 +983,13 @@ class CampaignBudget:
         with self.lock:
             burst = self.burst()
             extra = burst['policy']['caps_usd'] if burst else {}
-            # Each burst line once (one scan a kind), shared by the accounts, the burst and the meters.
+            # Each burst line once (one scan a kind), shared by the accounts, the burst and the meters,
+            # and bounded by the provider's own month as `remaining` is (`_provider_left`).
             lines = {k: self._line(k, burst) for k in extra} if burst else {}
             running = self.running()
-            left = {k: str(Decimal(max(0, v['cap'] - v['used'])) / UNIT if running else Decimal(0)) for k, v in lines.items()}
+            bound = {k: self._provider_left(k) for k in lines}
+            house = {k: max(0, v['cap'] - v['used']) if running else 0 for k, v in lines.items()}
+            left = {k: str(Decimal(v if bound[k] is None else min(v, bound[k])) / UNIT) for k, v in house.items()}
             return {"phase": self.policy["phase"], "started": self.started, "ends": self.ends,
                 "running": self.running(), "cap_usd": usd(micro(self.policy['total_cap_usd']) + sum(micro(v) for v in extra.values())),
                 "foundation_cap_usd": self.policy['total_cap_usd'],
@@ -943,7 +1003,7 @@ class CampaignBudget:
                     "remaining_usd": left[kind] if kind in left else str(self.remaining(kind))}
                     for kind, cap in self.caps.items()},
                 "meters_ready": {kind: self.ready(kind) for kind in self.caps},
-                "meters": {kind: self._meter_report(kind, lines.get(kind), left.get(kind))
+                "meters": {kind: self._meter_report(kind, lines.get(kind), left.get(kind), house.get(kind), bound.get(kind))
                            for kind in self.policy.get("meter_required", [])},
                 "pending_calls": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost IS NULL").fetchone()[0],
                 "reservation_breaches": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost>reserved").fetchone()[0],
@@ -954,10 +1014,13 @@ class CampaignBudget:
                     'note': 'Additional owner research allowance. Original phase and commitments are retained; expiry closes new paid work.'} if burst else None),
                 "note": "Commitments include unresolved calls and external reserves; this is not a vendor invoice."}
 
-    def _meter_report(self, kind: str, line: Mapping[str, int] | None, left: str | None) -> dict[str, Any]:
+    def _meter_report(self, kind: str, line: Mapping[str, int] | None, left: str | None,
+                      house: int | None = None, bound: int | None = None) -> dict[str, Any]:
         """One metered provider in `health.json` `campaign.meters`: whether its meter is fresh, and
-        the arithmetic of its burst line, remaining = cap - max(settled, measured) - before_meter -
-        unmetered settled - pending (`_sums`; Sept 24, 2026)."""
+        the arithmetic of its burst line: house_line = cap - max(settled, measured) - before_meter -
+        unmetered settled - pending (`_sums`; Sept 24, 2026), and remaining = the smaller of that and
+        what the provider's own month has left at a fresh reading (`provider_left_usd`, null without
+        one; `_provider_left`)."""
         health = self.db.execute("SELECT checked, failed FROM meter_health WHERE id=?", (kind,)).fetchone()
         out: dict[str, Any] = {"ready": self.ready(kind), "checked_at": health["checked"] if health else None,
                                "failed": bool(health["failed"]) if health else False}
@@ -965,6 +1028,8 @@ class CampaignBudget:
             out["line"] = {"cap_usd": usd(line["cap"]), "settled_usd": usd(line["settled"]),
                            "measured_usd": usd(line["measured"]), "before_meter_usd": usd(line["before"]),
                            "unmetered_settled_usd": usd(line["unmetered"]), "pending_usd": usd(line["pending"]),
+                           "house_line_usd": None if house is None else usd(house),
+                           "provider_left_usd": None if bound is None else usd(bound),
                            "remaining_usd": left}
         month = self.month_meter(kind)
         if month is not None:

@@ -280,8 +280,11 @@ figure that never falls: the month's highest `spent_usd` plus the finals of earl
 older than six hours, is absorbed into that figure: the gateway reserved the call's worst case
 here before calling OpenAI, so this month already counts it once. It releases nothing unless this
 month's `settled_usd` has grown by at least what the House settled since its anchor (see
-`docs/operations.md`, The OpenAI meter). Deploy the gateway before the House release that reads
-these fields; a House that finds no `settled_usd` releases nothing.
+`docs/operations.md`, The OpenAI meter). While a reading is fresh, the House's own OpenAI line
+never reads above this month's `cap_usd` less `spent_usd` (less what the House committed since
+the reading), so aligning `FRONTIER_MONTH_USD` to the funded balance bounds the House too. Deploy
+the gateway before the House release that reads these fields; a House that finds no `settled_usd`
+releases nothing.
 
 ## Pull requests
 

@@ -180,10 +180,14 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled). `meters` (Sept 24, 2026) has one entry per metered provider (`sail`,
     `openai`): `ready` (read in the last 180 s), `checked_at`, and `line`, the burst line's
-    arithmetic: `remaining_usd` = `cap_usd` - max(`settled_usd`, `measured_usd`) -
-    `before_meter_usd` - `unmetered_settled_usd` - `pending_usd`. OpenAI's entry also has `month`:
-    the gateway month last read, its highest reading (`high_usd`), the finals carried from earlier
-    months (`carried_usd`), `settled_total_usd`, `covers_from` and the check's `anchor`.
+    arithmetic: `house_line_usd` = `cap_usd` - max(`settled_usd`, `measured_usd`) -
+    `before_meter_usd` - `unmetered_settled_usd` - `pending_usd`; `provider_left_usd`, what the
+    gateway's month has left at a fresh reading less what the House committed since (null without
+    one); and `remaining_usd`, the smaller of the two, which is what every reader of the House's
+    line sees. OpenAI's entry also has `month`: the gateway month last read, its highest reading
+    (`high_usd`), the finals carried from earlier months (`carried_usd`), `settled_total_usd`, the
+    month's own `cap_usd` and `spent_usd` at the last reading, `covers_from` and the check's
+    `anchor`.
   - `hypotheses`: cards, pending evaluations, the foundry's `refusal` reason and its window spend.
   - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
     (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
@@ -395,9 +399,17 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     the month), the `ops.budget` "holds absorbed" rows with `kind: "openai"`, and
     `meter_reconciliations` in `campaigns.sqlite` (the meter's start, its anchors and every month
     it closed). The tier still reads the nearer of the House line and the gateway's month.
+  - **Never above the month.** While a reading is fresh, the House's OpenAI line reads at most the
+    gateway month's `cap_usd` less its `spent_usd`, less what the House has committed since that
+    reading: reservations, the pacer, the agents' credit pool, the tier and `health.json` all see
+    the smaller line. The gateway's month is the one aligned to the owner's funded balance; the
+    House's own line is raised by top-ups and settles at the House's prices, and on the T0 snapshot
+    it read $273.85 after the release against the month's $203.74. Nothing is rewritten: no top-up
+    is lowered and no settled row changes (`house_line_usd` keeps the House's own arithmetic).
   - **An unread gateway.** Three minutes without a reading and OpenAI reservations are refused:
     Merton, audits and the lab's Luna and Sol calls wait. Sail work, trading and exits go on. A
-    reservation that finds the reading a minute old reads the gateway again first.
+    reservation that finds the reading a minute old reads the gateway again first. The House's
+    line then stands alone (`provider_left_usd` null).
   - **The first deploy** records the policy change in `phase_amendments` beside the phase's pinned
     policy, which is never rewritten, so a rollback to the release before still opens the phase.
     Only a new meter may be added this way; any other change to `campaigns.json` still refuses to
@@ -484,8 +496,10 @@ egress, funds itself or changes a venue account.
   auto-recharge (about 2.6 days of runway at $32 a day on Sept 23). After a top-up, align
   `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` (`gateway/wrangler.jsonc`) and the House line
   (`scripts/campaign_topup.py`) up to the funded balance, never above. Since Sept 24, 2026 the
-  House line no longer counts holds with no answer (**The OpenAI meter**), so read its arithmetic
-  in `health.json` `campaign.meters.openai.line` before aligning it.
+  House line no longer counts holds with no answer (**The OpenAI meter**), and while the gateway's
+  month is read the line never reads above what that month has left, so aligning the gateway's
+  month to the funded balance bounds the House's line too; read `house_line_usd` and
+  `provider_left_usd` in `health.json` `campaign.meters.openai.line` before aligning the House's own.
 - **Level-3 options:** a second Alpaca practice account that no House reconciles, with its keys in
   the gateway, to settle the multi-leg unknowns before any spread trades (the design is
   `docs/design/2026-09-24-level-3-debit-verticals.md` on its draft branch).

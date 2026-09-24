@@ -164,8 +164,9 @@ status is exposed in health and agent research context; qualification is distinc
    than an hour with no response are absorbed into it (`CampaignBudget.absorb_stale`, Sept 23,
    2026) and an `ops.budget` "holds absorbed" row says so. OpenAI's meter is the gateway's frontier
    month, read here on every tick (`FrontierMonth` into `CampaignBudget.observe_month`, Sept 24,
-   2026): OpenAI holds older than six hours with no answer are absorbed into it the same way, and
-   a gateway unread for three minutes stops paid OpenAI work, never the floor. When stopped, only
+   2026): OpenAI holds older than six hours with no answer are absorbed into it the same way, the
+   House's OpenAI line never reads above what that month has left while it is read, and a gateway
+   unread for three minutes stops paid OpenAI work, never the floor. When stopped, only
    agents holding real-money positions or orders are woken, so they can exit; research, Merton,
    payouts and births wait.
 3. **Wake each agent that is due** (at most 16 a tick, 6 side by side; its own `wake_minutes`, 5 to

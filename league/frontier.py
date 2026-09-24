@@ -253,8 +253,10 @@ class FrontierMonth:
         """One reading to OpenAI's meter. A reading the meter refuses leaves it unread (and OpenAI's
         reservations refused after 180 s); it never makes the month itself unreadable here."""
         try:
+            # `cap`: the month's own line, which the House's OpenAI line never reads above while this
+            # reading is fresh (`CampaignBudget.remaining`).
             self.meter.observe_month("openai", str(month.get("month") or ""), month["spent_usd"],
-                                     settled=month.get("settled_usd"), previous=month.get("previous"),
+                                     settled=month.get("settled_usd"), cap=month["cap_usd"], previous=month.get("previous"),
                                      evidence={k: month.get(k) for k in ("cap_usd", "calls", "inflight_usd")})
         except Exception:  # noqa: BLE001 - see above
             pass

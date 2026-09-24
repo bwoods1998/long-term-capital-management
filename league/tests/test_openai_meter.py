@@ -22,7 +22,9 @@ from decimal import Decimal
 import io
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 from league.campaigns import CampaignBudget, CampaignClosed, CampaignPacer, load_policy
@@ -102,8 +104,8 @@ class Floor(unittest.TestCase):
         self.guard = self.open("sail", "openai")
         return self.guard
 
-    def read(self, spent, settled=None, month="2026-09", previous=None):
-        return self.guard.observe_month("openai", month, spent, settled=settled, previous=previous)
+    def read(self, spent, settled=None, month="2026-09", previous=None, cap=None):
+        return self.guard.observe_month("openai", month, spent, settled=settled, previous=previous, cap=cap)
 
     def history(self):
         """Jev's backing, a call booked above the gateway's price, two calls that never answered,
@@ -377,6 +379,84 @@ class HoldsBeforeTheMeterCovers(Floor):
         # month cannot count September's calls, so $10 of them must not vanish inside its $30.
         used = Decimal(g.report()["burst"]["committed_usd"]["openai"])
         self.assertEqual(used, Decimal("30") + Decimal("10") + Decimal("2"))
+
+
+class TheHouseLineNeverReadsAboveTheMonth(Floor):
+    """Sept 24, 2026 review: the plan aligns the House's OpenAI line "up to funded money, never above".
+    With the phantom holds absorbed, the House line read $273.85 on the T0 snapshot while the gateway's
+    month -- itself aligned to the owner's funded balance ($607 = $394.46 metered at T0 + $213 funded)
+    -- had $203.74 left. Every reader of `remaining` sees at most the month's own line while a reading
+    is fresh, and the House's own line when there is none (and then nothing is reserved)."""
+
+    def test_every_reader_sees_the_months_line_when_it_is_the_lower(self):
+        g = self.metered()
+        self.read("10.00", "10.000000", cap="12.00")  # the month has $2 left; the House's own line $30
+        pacer = CampaignPacer(None, g, clock=self.clock)
+        self.assertEqual(g.remaining("openai"), Decimal("2"))
+        self.assertEqual(pacer.remaining("openai"), Decimal("2"))
+        self.assertEqual(pacer.room("openai"), Decimal("2"))
+        report = g.report()
+        self.assertEqual(report["accounts"]["openai"]["remaining_usd"], "2")
+        self.assertEqual(report["burst"]["remaining_usd"]["openai"], "2")
+        line = report["meters"]["openai"]["line"]
+        self.assertEqual((line["house_line_usd"], line["provider_left_usd"], line["remaining_usd"]), ("30", "2", "2"))
+        self.assertEqual(report["meters"]["openai"]["month"]["cap_usd"], "12")
+        with self.assertRaises(CampaignClosed):
+            g.reserve("frontier:too-dear", "foundation-review", "2.50")  # the House's own line would admit it
+        self.assertTrue(g.reserve("frontier:fits", "foundation-review", "1.50"))
+        self.assertEqual(g.remaining("openai"), Decimal("0.5"), "a hold made since the reading comes off the month")
+        g.settle("frontier:fits", "0.40")
+        self.assertEqual(g.remaining("openai"), Decimal("1.6"), "and then its cost")
+        self.read("10.40", "10.400000", cap="12.00")  # the month has counted it now: never twice
+        self.assertEqual(g.remaining("openai"), Decimal("1.6"))
+
+    def test_the_agents_credit_pool_is_sized_from_the_bounded_line(self):
+        g = self.metered()
+        self.read("10.00", "10.000000", cap="12.00")
+        self.assertTrue(g.activate_live_trading("earned", {"alpaca": "500", "kalshi": "500"})["active"])
+        pacer = CampaignPacer(None, g, clock=self.clock)
+        # (Sail's $2 x 0.75 + OpenAI's $2 x 0.5) x one hour of the eight-hour burst; the House's own
+        # $30 would have made it $2.06.
+        self.assertEqual(pacer.credit_pool(per_seconds=3600), Decimal("0.31"))
+
+    def test_a_month_with_more_left_never_raises_the_house_line(self):
+        g = self.metered()
+        self.read("0.00", "0.000000", cap="400.00")
+        self.call("frontier:dear", "40.00", "35.00")  # booked at the House's own (dearer) prices
+        self.read("20.00", "20.000000", cap="400.00")
+        self.assertEqual(g.remaining("openai"), Decimal("5"))
+        self.assertEqual(g.report()["meters"]["openai"]["line"]["provider_left_usd"], "380")
+
+    def test_without_a_fresh_reading_the_house_line_stands_alone_and_nothing_is_reserved(self):
+        g = self.metered()
+        self.read("10.00", "10.000000", cap="12.00")
+        self.advance(181)
+        self.assertEqual(g.remaining("openai"), Decimal("30"))
+        self.assertIsNone(g.report()["meters"]["openai"]["line"]["provider_left_usd"])
+        with self.assertRaises(CampaignClosed):
+            g.reserve("frontier:unmetered", "foundation-review", "0.10")
+
+    def test_the_gateway_month_reader_passes_the_months_cap(self):
+        g = self.metered()
+        gateway = Gateway({"month": "2026-09", "spent_usd": "10.00", "settled_usd": "10.000000", "cap_usd": "12.00"})
+        month = FrontierMonth("https://gw.test", lambda: "t" * 20, opener=gateway, clock=self.clock, meter=g)
+        self.assertEqual(month.remaining(), Decimal("2.00"))
+        self.assertEqual(g.remaining("openai"), Decimal("2"))
+
+    def test_a_store_the_first_build_opened_gains_the_months_line(self):
+        path = Path(self.tmp.name) / "first-build.sqlite"
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE meter_month(id TEXT PRIMARY KEY, month TEXT NOT NULL, high INTEGER NOT NULL, "
+                   "carried INTEGER NOT NULL, settled_high INTEGER, settled_carried INTEGER NOT NULL, covers_from REAL NOT NULL, "
+                   "anchor_at REAL, anchor_row INTEGER, anchor_settled INTEGER, at REAL NOT NULL)")
+        db.commit()
+        db.close()
+        g = CampaignBudget(path, rules("sail", "openai"), clock=self.clock)
+        self.addCleanup(g.close)
+        g.observe_balance("sail", "100.00")
+        g.observe_month("openai", "2026-09", "10.00", settled="10.000000", cap="12.00")
+        g.activate_burst("night", night())
+        self.assertEqual(g.remaining("openai"), Decimal("2"))
 
 
 class TheHouseAbsorbs(HouseCase):
