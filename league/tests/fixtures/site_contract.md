@@ -137,8 +137,8 @@ The capital board's fields (personal-site #4, Sept 23, 2026), each optional:
 
 | Key | Type |
 |---|---|
-| `band` | `replay paper bunt swing star` (`BANDS`). `paper` is the House's word; the page says Practice and never shows "paper". Without the allocator the publisher sends the rung's band (0 replay, 1 paper, 2 bunt, 3 swing) and none of the three below. |
-| `stake_usd` | money or null: the real stake on `bunt swing star`, null otherwise. Published with 2 places. |
+| `band` | `replay paper probe bunt swing star` (`BANDS`; `probe` since Sept 24, 2026, personal-site #6). `paper` is the House's word; the page says Practice and never shows "paper". Without the allocator the publisher sends the rung's band (0 replay, 1 paper, 2 bunt, 3 swing) and none of the three below. |
+| `stake_usd` | money or null: the real stake on `probe bunt swing star`, null otherwise. Published with 2 places. |
 | `evidence` | null, or shape `{W_paper, W_real, E, trades}` + optional `real_trades`: multiples are unsigned decimal strings with <= 6 places (published with exactly 6, `"1.034512"`), trades counters. |
 | `last_move` | null, or exact `{at, from_band, to_band, reason}`: `at` instant <= `published_at` + 60 s, `from_band` a band or null, `to_band` a band, `reason` prose(300). |
 
