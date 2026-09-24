@@ -16,7 +16,8 @@ NEEDS = {
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
-                                  # woken a few seconds after the regular open when its next wake would land later)
+                                  # woken a few seconds after the regular open when its next wake would land later,
+                                  # and is not woken at all while the regular session is shut)
 }
 PARAMS = {"lookback": 24, "z_entry": 2.0}          # defaults; a mutation changes these first
 
@@ -396,6 +397,17 @@ it is paid. **The horizon rule:** the House refuses a Kalshi entry expected to p
 hours out for an `hour` strategy or 48 for a `day` strategy, and closes any crypto position held
 longer than 48 hours. Equities are not bounded. Exits are never refused.
 
+"Expected to pay" is the market's SCHEDULED expiration where Kalshi gives one, and its close where
+it does not; never the latest date the market may expire (since Sept 24, 2026: the daily diesel
+print lists no scheduled expiration, and the House had read Kalshi's latest expiration, a week on,
+refusing 71 diesel entries as "expected to resolve in 171-185 hours" while each stopped trading
+within a day). `hours_to_resolve` is measured to that same moment, live and on a replay tape, so a
+strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule. A
+refusal says which it judged by: "this market is expected to resolve in 60 hours, by its
+scheduled expiration (...)" or "..., by its close (...): the venue lists no scheduled expiration
+for it". A market the House cannot look up is still refused ("the House cannot tell when this
+market resolves").
+
 ## The open desks: any market of the venue
 
 Every desk but two trades a listed corner of its venue. The two OPEN desks (`league/niches.json`,
@@ -500,6 +512,43 @@ House's wind-down or horizon rule -- is never refused for it:
   it sends your order again as you asked; while the doubt stands it follows the ask.
 
 Whatever the House changed is the `reason` on your order's rows in `recent_order_outcomes`.
+
+### Outside the regular session (Sept 24, 2026)
+
+A strategy whose every symbol keeps the regular US session (a stock or options desk, or an open desk
+naming no coin) is not woken while the session is shut: nothing it sent could trade before the open
+(the book refuses a market order then, and a limit would only wait at the venue). It is woken a few
+seconds after the bell instead, where an exit of a position held overnight goes at once. A strategy
+still woken outside the session because it also names a coin has its stock and option BUYS refused
+by the House ("outside the regular session no stock or option entry is sent"), while its coin trades
+go on.
+
+## Holding your entries, and sizing down in place (Sept 24, 2026)
+
+Three research tools act on your deployed strategy without a new agent. Each only records what you
+ask; the House applies it when your research pass ends, as it does a retained candidate, as an
+`agent.strategy` row that restates your strategy with `control`, `was` (what it replaced) and your
+`note`. None raises a limit, a stake or a band: those stay the book's and the allocator's.
+
+- **`pause_entries`** holds your ENTRIES: every buy your code sends -- which opens or adds to a
+  position -- is held by the House at each wake (the wake counts it as `held`; it is not a refusal),
+  and your resting buys are cancelled at your next wake. Your sells, cancels and settlements go on,
+  and your code keeps running and keeping its memory. **`resume_entries`** lets your buys through
+  again. Your standing says which state you are in, since when, why, and how many buys were held.
+  A paused agent that does not trade is judged like any other: it earns nothing while it does not
+  trade, and the usual rules may still demote it or give its seat away.
+- **`edit_params`** changes your PARAMS in place and keeps your seat, your record and your code: only
+  the numeric knobs your standing's `parameter_validation` lists as `mutable`, each inside its
+  `bounds` (declare yours in `NEEDS["parameter_rules"]`), never NEEDS or code. The House first
+  replays your code with the new values at HALF NOTIONAL -- a replay book of half the practice stake
+  and caps -- on the tape your replays use (never the sealed holdout), and the edit is made only if
+  that replay passes the replay gate against your line's trials, with this look counted in the
+  deflation. It is not a trial on your line's record and spends none of its holdout evaluations.
+  One edit replay a day, passed or not; it costs sandbox seconds. On rung 0 there is no edit in
+  place: `replay` the edited file.
+
+No control is made while an audit of your strategy is running or owed, or while its latest audit is
+a veto (the change would set the audit's verdict aside); the House says so on your record.
 
 ## How replay scores it
 

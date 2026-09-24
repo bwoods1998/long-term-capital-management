@@ -217,6 +217,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
     `indexed`: the tapes built in the last six hours that a restart remembers).
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
+  - `wakes_skipped` (Sept 24, 2026, the wake skip): the stock and option wakes not run while the
+    regular session was shut (`count`, `by_desk`, `since`, `last_at`; kept in `house.json`). Such an
+    agent is woken a few seconds after the bell instead; nothing it sent before then could trade.
+    In the 48 hours before T0 of the close-the-gaps run there were 2,891 of them (29% of all wakes).
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
     answer, by kind: `wakes` (an agent's box held by its research; woken on the next tick),
@@ -506,6 +510,33 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   times in a day). One info alert names what is held (`wind_down_held` in `house.json`), and the
   House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
   wind down at once.
+- **A living stock or options agent is not woken at night** (Sept 24, 2026, the wake skip): no
+  `agent.woke` row, no box run, no order between the close and the open, counted in `health.json`
+  `wakes_skipped`. A position it holds overnight is exited at its first wake a few seconds after the
+  bell. "market orders outside regular hours are not permitted" from a living agent now means an
+  open-desk agent that names a coin (still woken all night) sent a stock or option SELL at night;
+  its stock or option buys are refused by the House first ("outside the regular session no stock or
+  option entry is sent").
+- **An agent paused its own entries, or edited its parameters in place** (X1, Sept 24, 2026). Its
+  `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
+  and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
+  and any the House did not make (status `not_applied`, with the reason: an audit running or owed,
+  a standing veto, a strategy changed after its edit's replay, already paused). A paused agent's
+  wakes show `held` (buys the House held, never a refusal) and its resting buys are cancelled.
+  `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
+  `agent.research` rows with tool `edit_replay` (at half the practice stake and caps, no
+  `eval.trial`, never the holdout, one an agent a day). Nothing here moves a limit, a stake or a
+  band. A control row reads as new code to `allocator.audit_standing`, so an agent whose code was
+  approved is audited again before a first swing.
+- **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
+  expected to resolve in N hours, by its scheduled expiration (...)" or "..., by its close (...):
+  the venue lists no scheduled expiration for it". A Kalshi market is judged by the scheduled
+  (expected) expiration where the venue gives one and by its close otherwise, never by the latest
+  date it may expire (the daily diesel print was refused 71 times as "171-185 hours" out while it
+  stopped trading within a day). The House asks before the book; the book still judges every entry
+  after it, from the same answer. The book's own shorter text ("expected to resolve in N hours;
+  entries must resolve within 48", no basis) would now mean the two looks disagreed, at the
+  boundary a moment apart.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`
