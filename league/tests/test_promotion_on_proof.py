@@ -213,8 +213,12 @@ class MoneySet(unittest.TestCase):
     def test_a_family_is_proven_by_its_pooled_record(self):
         rule = self.r["family_proven"]
         self.assertEqual(rule, {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
-                                "confidence": "0.8"})
+                                "confidence": "0.8", "lopsided_gate": True})
         self.assertTrue(10 <= rule["min_independent_settlements"] <= 20)
+        # The lopsided gate is the one-sided 80% lower bound of a lopsided record computed honestly, at the
+        # ladder's own lopsided line (review of #224, adopted by the main session, Sept 24, 2026).
+        self.assertEqual(allocator._family_rule()["lopsided_gate"], True)
+        self.assertEqual(CONSTITUTION["ladder"]["lopsided_win_rate"], 0.80)
 
     def test_the_one_loss_trial_and_the_event_position_share(self):
         self.assertEqual(self.r["hysteresis_after_settled"], 3)
@@ -335,6 +339,12 @@ class FamilyRecord(FamilyCase):
         self.assertEqual((rec["proven"], rec["state"]), (False, "unproven"))
         with patch.dict(CONSTITUTION["ladder"], {"lopsided_win_rate": 1.01}):  # no record is lopsided: the t bound alone
             self.assertTrue(self.record()["proven"])
+        # The constitution's switch (`family_proven.lopsided_gate`, pinned by the money digest): false
+        # restores the t bound alone, and the record says no gate was read.
+        with patch.dict(CONSTITUTION["allocator"]["family_proven"], {"lopsided_gate": False}):
+            off = self.record()
+        self.assertEqual((off["proven"], off["state"], off["lopsided"], off["loss_gate"]), (True, "proven", None, None))
+        self.assertEqual(off["rule"]["lopsided_gate"], False)
 
     def test_stacked_strikes_are_one_observation_worth_their_sum(self):
         self.member("m1")
@@ -984,6 +994,19 @@ class RulesText(unittest.TestCase):
         self.assertIn("a position up to 20% of the stake on Kalshi, 50% at", text)
         without = {**CONSTITUTION, "allocator": {k: v for k, v in CONSTITUTION["allocator"].items() if k != "probe_bunt_usd"}}
         self.assertNotIn("PROBE (", rules_text(game, without))
+
+    def test_the_agents_are_told_a_run_of_small_wins_proves_nothing_yet(self):
+        """`family_proven.lopsided_gate` (Sept 24, 2026): the text says so while the gate is on, and not when
+        the constitution turns it off."""
+        import json
+        from league.rules import rules_text
+
+        with open("league/game.json") as f:
+            game = json.load(f)
+        self.assertIn("a favourites record also passes the loss-rate test: a run of small wins with no loss proves nothing yet",
+                      " ".join(rules_text(game).split()))
+        with patch.dict(CONSTITUTION["allocator"]["family_proven"], {"lopsided_gate": False}):
+            self.assertNotIn("loss-rate test", rules_text(game))
 
     def test_the_trial_does_not_promise_that_only_the_drawdown_can_send_a_probe_back(self):
         """Review of #224 (Sept 24, 2026): the trial holds the hysteresis exit only; drift (`ladder.drift`,

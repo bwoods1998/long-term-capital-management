@@ -345,8 +345,9 @@ CONSTITUTION: dict[str, Any] = {
         # again at 00:39:48Z Sept 24 "on 6 closed trades": two games (WSHDET and MINSF).
         "independent_settlements": "event",
         # `max_event_share` (row "allocator.max_event_share", 0.2-0.5): a real book's exposure to one
-        # event is at most this share of the agent's stake (`league/book.py` refuses the entry that
-        # would pass it). A quarter is under the 35% stay drawdown, so one upset cannot demote a bunt
+        # event -- holdings there at cost, working buys on every market of the event, and the new order
+        # -- is at most this share of the agent's EQUITY on that book (`league/book.py` refuses the entry
+        # that would pass it). A quarter is under the 35% stay drawdown, so one upset cannot demote a bunt
         # by itself; meriwether-h7d7702's MILPHI-6/-7/-8 were $17.36 of one game on a $200 purse.
         "max_event_share": "0.25",
         # `probe_bunt_usd` (row "allocator.probe_bunt_usd", Kalshi $5-15, Alpaca $20-25): an agent whose
@@ -364,8 +365,24 @@ CONSTITUTION: dict[str, Any] = {
         # observation, at `confidence` (Student's t on the effective count), is above zero. Proof at
         # the family level, money at the agent level: a mechanism is proven by its family's record,
         # never by one agent's three lucky settlements.
+        #
+        # `lopsided_gate` (the same row: its lower bound computed honestly; adopted by the main session
+        # on the review of #224, Sept 24, 2026): a LOPSIDED record -- `ladder.lopsided_win_rate` (80%) or
+        # more of its observations winning, as favourites win -- must also clear the House's exact
+        # loss-rate lower bound at the same confidence (`stats.lopsided_growth_lcb`: a Clopper-Pearson
+        # upper bound on the loss rate times the worst loss, the family's mean cash at risk an entry
+        # until a whole loss is seen), the lower bound `Evaluator._judge_family` and `judge` already hold
+        # such records to beside their t bounds. Until a loss is on the record a t bound is badly
+        # anti-conservative (`league/stats.py`). Evidence: simulated, an edgeless family buying 93c
+        # favourites passes the t bound alone at its 10th observation about 49% of the time (97c: about
+        # 74%), not 20%; crypto-15m-favorites was proven at 11:17Z Sept 20 on ten small wins and unproven
+        # by its eleventh, a loss (106 observations and a mean of -0.0021 at T0); at T0 weather-favorites
+        # (buys at 93c on average) has a t bound of +0.0033 and a loss-rate bound of -0.0125: 2 losses in
+        # 16 give an 80% upper bound of 25% on the loss rate, against a breakeven near 7% at 93c. False
+        # restores the t bound alone. `min_independent_settlements` stays 10: raising it does not change
+        # a symmetric record's false-positive rate at a look, and the gate is what fixes the lopsided one.
         "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
-                          "confidence": "0.8"},
+                          "confidence": "0.8", "lopsided_gate": True},
         # `hysteresis_after_settled` (row "allocator.hysteresis_after_settled", 0-5): the hysteresis
         # exit (E under `bunt_at` x `hysteresis`) sends an agent from real money back to practice only
         # once it has this many independent real closed results in its current stay (settled events on
@@ -432,4 +449,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '15ae031e178e365753ee484fe297354c982767ef55779ba5d6651cc4ee8349c6'
+PINNED_DIGEST = '8116302ee038c5ae7929b24c00486d6f675a99d3c1268329ce5497cd4157b034'

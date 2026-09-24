@@ -271,7 +271,10 @@ def _family_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any
     rule = dict(rules(constitution).get("family_proven") or {})
     return {"min_independent_settlements": int(rule.get("min_independent_settlements", 10)),
             "practice_weight": float(rule.get("practice_weight", 0.5)), "real_weight": float(rule.get("real_weight", 1)),
-            "confidence": float(rule.get("confidence", 0.8))}
+            "confidence": float(rule.get("confidence", 0.8)),
+            # The House's loss-rate bound for a lopsided record, beside the t bound (Sept 24, 2026; the
+            # constitution's comment has the evidence). Absent or false: the t bound alone.
+            "lopsided_gate": rule.get("lopsided_gate") is True}
 
 
 def _log1p(r: float) -> float:
@@ -422,7 +425,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 if book == REAL_BOOK[venue]:
                     real_keys.add(key)
     minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
-    win_rate = float(CONSTITUTION["ladder"]["lopsided_win_rate"])
+    win_rate = float(CONSTITUTION["ladder"]["lopsided_win_rate"]) if rule["lopsided_gate"] else None
     risk = math.fsum(risked) / len(risked) if risked else 1.0  # with no entry seen, all of it was at risk
 
     def side(liquidity: str | None) -> dict[str, Any]:

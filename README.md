@@ -115,7 +115,8 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   tier: pocket change for an unproven mechanism. A family is proven when its pooled forward record
   -- every member ever born, living or dead, one observation per independent event, practice at
   half weight and real money in full -- has at least 10 observations and a one-sided 80% lower bound
-  on mean log growth above zero; a probe becomes a bunt the pass after that, and a bunt a probe when
+  on mean log growth above zero (for a favourites record, one of mostly small wins, the House's exact
+  loss-rate bound as well: `family_proven.lopsided_gate`); a probe becomes a bunt the pass after that, and a bunt a probe when
   the bound falls. On Kalshi, closed trades and settlements count once per event, so strikes stacked
   on one game are one bet. The board labels each real agent probe or bunt, with its family's state,
   bound and count. An options agent's probe or bunt is one contract's premium, $80, because a
