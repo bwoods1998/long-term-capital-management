@@ -311,7 +311,6 @@ recorded for the next open; live verification uses the markets that trade around
   longshot or a crowded event); no band move. B-seats (#245) opened: S1-S4, L1 (its first pass
   supersedes meriwether-h2d625d, 34 of 34 entries takers), the dust wind-down, `_trading_pending`; its
   adversarial review launched.
-
 - 07:05Z — **Wave 1 reviews, B-loop (#236) and B-feeds (#234):** three defects fixed on
   `b-loop/review` (#247) and `b-feeds/review` (#250), each with a test that failed before: Deploy A's
   House kept no record of repeating warnings, so a warning firing every tick through Deploy B's restart
