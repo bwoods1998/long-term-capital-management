@@ -11,7 +11,7 @@ from league.tests.test_hypotheses import FoundryCase
 from league.tests.test_lab import KNOB, LabCase
 from league.tests.test_seat_capacity import NoFoundryCards
 from league.tests.test_seat_evidence import DESK, EvidenceCase
-from league.tests.test_seat_market import alerts
+from league.tests.test_seat_market import SeatCase, alerts
 
 
 class ReviewCase(EvidenceCase):
@@ -174,3 +174,67 @@ class GraduateWhoseWindowStopsLosing(LabCase):
         self.assertEqual([w["candidate"] for w in self.house.seat_waiters(fresh=True)["graduates"]], [ident],
                          "its window wins now: the lab will seat it, and the House counts it again")
         self.assertNotIn(f"graduates:{ident}", self.house._state["seat_expired"])
+
+
+class PopulationAtTheRunwayFloor(SeatCase):
+    """R2 (3) grows the league toward turbo.json's 128 while Sail's runway is over 1.5 days and holds it at 112 otherwise.
+    Measured on the 15:06Z snapshot (492 readings of the House's Sail meter, the builder's formula): the runway moves a
+    median 0.6% a reading, 2.6% at the 90th percentile and 7.9% at the 99th, and it ROSE with no top-up in 243 of 491
+    readings (a heavy hour leaving the trailing day's window lowers the burn). Near the floor the rule flipped with the
+    readings: an alert each time, and each ten-minute window over the floor seated newcomers that the next window never
+    removed, so the league crept toward 128 on a runway at the floor. And a meter that could not be read raised out of
+    the rule, which left turbo.json's 128 in place at startup and skipped the rule in the tick."""
+
+    def setUp(self):
+        super().setUp()
+        self.house._burst = {"id": "test-burst", "started": 0.0, "policy": {"minimum_research_passes": 2}}
+        self.house._population_ceiling = 128
+        self.rules.update(population_runway_days=1.5, max_population_short_runway=112, max_population=128)
+
+    def runway(self, days, *, spent=0.36, every=900):
+        """A day of the Sail meter's rows (league/budget.py `Budget.check`) whose runway over the $5 reserve is `days`
+        at `spent` a reading ($34.56 a day at $0.36 each fifteen minutes)."""
+        from league.ledger import now_iso
+
+        self.clock.advance(25 * 3600)  # yesterday's readings leave the trailing day
+        balance = 5 + days * spent * 86400 / every
+        end, n = self.clock(), int(86400 / every)
+        for i in range(n + 1):
+            at = end - (n - i) * every
+            self.house.ledger.append("ops.budget", {"what": "sail", "balance_usd": f"{balance + spent * (n - i):.2f}",
+                                                    "spent_usd": f"{spent:.2f}", "month_usd": "0", "cap_usd": "300", "mode": "open"},
+                                     at=now_iso(lambda at=at: at))
+        self.house._data_cache.pop("sail_runway", None)
+
+    def test_a_runway_hovering_at_the_floor_does_not_flip_the_population(self):
+        self.runway(1.45)
+        self.assertEqual(self.house._population_rule()["max_population"], 112)
+        self.runway(1.55)  # back over 1.5 with no top-up: a heavy hour left the window
+        self.assertEqual(self.house._population_rule()["max_population"], 112, "inside the band: still held")
+        self.rules["max_population"] = 128  # a restart: `game_for` sets turbo.json's ceiling again
+        self.runway(1.6)
+        self.assertEqual(self.house._population_rule()["max_population"], 112, "held across a restart (house.json)")
+        self.runway(1.8)
+        report = self.house._population_rule()
+        self.assertEqual(report["max_population"], 128, "clear of the band: it grows")
+        self.runway(1.6)
+        self.assertEqual(self.house._population_rule()["max_population"], 128, "growing: held only at the floor")
+        self.runway(1.45)
+        self.assertEqual(self.house._population_rule()["max_population"], 112)
+        self.assertEqual(len(alerts(self.house, "warning", "population is now 112")), 3, "held, held again at the restart, held")
+        self.assertEqual(len(alerts(self.house, "info", "population is now 128")), 1)
+
+    def test_a_meter_that_cannot_be_read_holds_the_population(self):
+        import sqlite3
+
+        with patch.object(self.house, "_sail_runway", side_effect=sqlite3.OperationalError("database is locked")):
+            report = self.house._population_rule()
+        self.assertEqual((report["max_population"], self.rules["max_population"]), (112, 112))
+        self.assertIn("database is locked", report["rule"])
+
+    def test_the_tick_applies_the_population_rule_when_the_caps_cannot_follow_the_search(self):
+        self.runway(1.0)
+        with patch.object(self.house, "_follow_the_search", side_effect=RuntimeError("a foundry that cannot be read")):
+            self.house.keep_population(refill=False)
+        self.assertEqual(self.rules["max_population"], 112)
+        self.assertEqual(len(alerts(self.house, "warning", "could not follow the search")), 1)

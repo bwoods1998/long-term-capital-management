@@ -217,6 +217,14 @@ SAIL_BURN_MIN_SPAN_SECONDS = 6 * 3600.0
 #: newcomer no seat -- and the pass asked for the desk's weakest resident and a mutation on every tick. An hour, because
 #: what reopens a mutation (a living twin's death, a new anchor) happens on the scale of the newcomer cadence, not ticks.
 PROVEN_UNBRED_RETRY_SECONDS = 3600.0
+#: Once the population rule holds the league (`_population_rule`), it grows again only when Sail's runway is over the
+#: floor (`economy.population_runway_days`) by this band (the review of #276, Sept 24, 2026). Measured on the 15:06Z
+#: snapshot's 492 Sail meter readings: the runway moves a median 0.6% a reading, 2.6% at the 90th percentile and 7.9% at
+#: the 99th, and it rose with no top-up in 243 of 491 readings, so a runway near 1.5 days crossed it back and forth. Each
+#: crossing was an alert, and each ten-minute window over the floor seated newcomers the next never removed: the league
+#: crept to its ceiling on a runway at the floor. A quarter day is 17% of the 1.5-day floor, over twice the 99th
+#: percentile's move, and six hours of the measured burn (about $8.70 at $34.88 a day); a top-up clears it at once.
+POPULATION_RUNWAY_BAND_DAYS = 0.25
 #: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
 HOUSE_CLOSING = "the House is closing"
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
@@ -5438,24 +5446,40 @@ class House:
         die. It sets the league's `max_population`, which every seat question reads (the lab's, the foundry's and the
         House's own), and says so once when it changes. Only under the owner's burst, where turbo.json sets the population;
         None otherwise. Sixteen more seats cost about $0.43 a day of Sail box time ($0.027 a box a day, measured Sept 23)
-        and their research is inside the $2 an hour Sail research cap; at 15:06Z the runway was 4.5 days."""
+        and their research is inside the $2 an hour Sail research cap; at 15:06Z the runway was 4.5 days.
+
+        Once held it grows again only over the floor by POPULATION_RUNWAY_BAND_DAYS (house.json `population_held`, so a
+        restart keeps it), and a meter that cannot be read holds it like an unread one (the review of #276, Sept 24,
+        2026): the runway moved 2.6% a reading at the 90th percentile and rose with no top-up in half the readings, so
+        at the floor the rule flipped with the readings, alerting each time, and every window over the floor seated
+        newcomers that no later window removed; an exception raised out of it and left turbo.json's 128 standing."""
         ceiling = getattr(self, "_population_ceiling", None)
         if not self._burst or ceiling is None:
             return None
         economy = self.game["economy"]
         held = min(int(ceiling), int(economy.get("max_population_short_runway", ceiling)))
         floor = float(economy.get("population_runway_days", 1.5))
-        sail = self._sail_runway()
+        unread = ""
+        try:
+            sail = self._sail_runway()
+        except Exception as exc:  # noqa: BLE001 - a meter that cannot be read grows nothing
+            sail, unread = None, f" ({type(exc).__name__}: {str(exc)[:120]})"
         days = None if sail is None else (math.inf if sail.get("unlimited") else sail.get("runway_days"))
-        grows = days is not None and days > floor
+        with self._state_lock:
+            was_held = bool(self._state.get("population_held"))
+        over = floor + POPULATION_RUNWAY_BAND_DAYS if was_held else floor
+        grows = days is not None and days > over
+        with self._state_lock:
+            self._state["population_held"] = not grows
         target = int(ceiling) if grows else held
         before = int(economy["max_population"])
         economy["max_population"] = target
-        shown = "unread" if days is None else ("unlimited" if math.isinf(days) else f"{days:.2f} days")
+        shown = f"unread{unread}" if days is None else ("unlimited" if math.isinf(days) else f"{days:.2f} days")
+        band = f" ({floor:g} and the {POPULATION_RUNWAY_BAND_DAYS:g}-day band a held league grows again over)" if was_held else ""
         report = {"max_population": target, "ceiling": int(ceiling), "held_at": held, "runway_floor_days": floor,
-                  "runway_days": None if days is None or math.isinf(days) else days, "sail": sail,
-                  "rule": (f"toward the ceiling {ceiling}: Sail's runway {shown} is over {floor:g} days" if grows else
-                           f"held at {held}: Sail's runway {shown} is not over {floor:g} days")}
+                  "grows_over_days": over, "runway_days": None if days is None or math.isinf(days) else days, "sail": sail,
+                  "rule": (f"toward the ceiling {ceiling}: Sail's runway {shown} is over {over:g} days{band}" if grows else
+                           f"held at {held}: Sail's runway {shown} is not over {over:g} days{band}")}
         if target != before:
             self.alert("info" if grows else "warning", f"the league's population is now {target} (was {before}): {report['rule']}",
                        population=target, runway_days=report["runway_days"])
@@ -7255,9 +7279,12 @@ class House:
         # given, by the House or by the lab's step and the foundry, which read the same caps. They spend nothing.
         try:
             self._follow_the_search()
-            self._population_rule()
         except Exception as exc:  # noqa: BLE001 - the caps stand as they are until the next tick
             self.alert("warning", f"the seat market's caps could not follow the search ({type(exc).__name__}: {str(exc)[:160]})")
+        try:
+            self._population_rule()  # apart: a search that cannot be read must not skip Sail's runway (review of #276)
+        except Exception as exc:  # noqa: BLE001 - the ceiling stands until the next tick
+            self.alert("warning", f"the population rule could not be applied ({type(exc).__name__}: {str(exc)[:160]})")
         if not refill or self._closing.is_set():
             return  # births buy sandbox work; culling above remains available after spending stops
         # Every birth reads its strategy's NEEDS in the probe box. The tick holds that box for the

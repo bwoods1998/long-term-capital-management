@@ -439,9 +439,12 @@ status is exposed in health and agent research context; qualification is distinc
    44 that remained at 15:06Z (see its note), and the league grows toward turbo.json
    `max_population` (128) only while Sail's runway -- the Sail meter's latest balance less
    `sail_reserve_usd` over the trailing day's falls (`_sail_runway`) -- is over
-   `economy.population_runway_days` (1.5); otherwise, or unread, it is held at
-   `economy.max_population_short_runway` (112), killing nobody (`_population_rule`, which sets the
-   league's `max_population` that the lab, the foundry and the House all read). **The invariant**: a
+   `economy.population_runway_days` (1.5); otherwise, or unread (a meter that cannot be read too), it is
+   held at `economy.max_population_short_runway` (112), killing nobody (`_population_rule`, which sets the
+   league's `max_population` that the lab, the foundry and the House all read). Once held it grows again
+   only over the floor by `POPULATION_RUNWAY_BAND_DAYS` (a quarter day, house.json `population_held`):
+   the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the readings,
+   so at the floor it flipped with the readings and the league crept up (the review of #276). **The invariant**: a
    newcomer waiting over `SEAT_WAIT_WARN_SECONDS` (two hours) is named once an hour a desk with the
    count, the longest wait and the rule that holds it (`_overdue`, `_held_by`: a free seat the birth
    passes have not reached, or the residents' protections counted by `_displaceable`'s `why`);
