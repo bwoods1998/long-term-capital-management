@@ -585,6 +585,22 @@ recorded for the next open; live verification uses the markets that trade around
   a loaded first payout; R6 hardens it). PR #272 opened 15:19:14Z; CI green on both Pythons at 15:28:09Z (run 36019308936); merged
   15:28:17Z (main `9807eec`); owner deploy from `~/Work/ltcm-deploy` at 15:28:31Z, release
   `20260924T152831Z-4c7a6f088c6d`.
+- 15:39:27Z — **Deploy C rolled back, by the practice-book freeze, not by its code.** The canary passed
+  (15:28:37-15:37:57Z, about 9 minutes on the busy box), the release was promoted at 15:37:57Z, and the
+  watch's reading 3 at 15:39:27Z failed on "the alpaca-paper book is frozen: cash differs by -0.0269": the
+  box went back to `main-0e1aec8b9e98`. The freeze began at 15:37:27Z in the OLD House's last tick, which
+  wrote its health (dated 15:35:14Z) after the reading taken before the promotion, so the watchdog's
+  inherited-freeze rule (Sept 19) did not see it; the new House had not finished a tick, and all three
+  readings (193-253 s old) read the old process's file. The in-box updater then refused `main-c7bee60611db`
+  (main after #272) at 15:41:21Z: protected files are the owner's deploy. The practice book froze again at
+  15:47:36Z (−$0.0328), about every ten minutes in the session.
+- 15:57Z — **Two fixes before the retry.** (1) `r1/watchdog-inherit` (`07d0761` 15:54:28Z, `94a01b8` 15:57:16Z; `watchdog.py`): the
+  watch counts a frozen book only in a `health.json` dated at or after the House's first `ops.started` since
+  the promotion; before it the freeze is `frozen_by_previous_process`; staleness, `restart_within`, a
+  canary's judgement and an undatable restart still count; five tests, three fail without the fix (90 in
+  the module pass). The OLD release's watchdog runs each deploy, so this protects the deploys after the one
+  that ships it. (2) R6's practice-dust fix first and alone (`r6/practice-dust`): the new House must not
+  freeze on a sub-dollar practice difference during its own watch. Deploy C is retried with both.
 
 ## The scoreboard at T0
 
