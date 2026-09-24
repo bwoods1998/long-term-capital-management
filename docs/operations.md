@@ -174,6 +174,20 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
     checkpoint's age and whether it carries the board.
+- **`python3 scripts/gap_scoreboard.py --snapshot DIR | --take DIR [--since ISO] [--baseline ISO]
+  [--json | --markdown]`** (Sept 24, 2026): the scoreboard of
+  [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z), read-only and standard
+  library only, from a snapshot of the House's stores rather than the live box. `--take` backs up
+  `ledger.sqlite`, `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp`
+  (sqlite's backup API, each source opened `mode=ro`), downloads them gzipped with `health.json`,
+  `house.json` and `allocator-board.json`, and deletes the box copies; `--snapshot` reads a directory
+  taken before. It prints the plan's seven metrics, each number with the function that computed it,
+  then each desk's evidence clock (hours from a member's first fill to its third independent
+  settlement), every family's pooled record (practice at weight 0.5, real at 1, one observation an
+  event, a one-sided 80% Student's t bound) and the weather favourites' capacity. Its clock is the
+  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window for deaths,
+  the lab and supersessions, and `--baseline` counts promotions only from a moment (Deploy A). Every
+  definition is in the script's docstring.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled).
@@ -524,5 +538,5 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `luna_fraction` | 0.95 | The share of agents whose research runs on GPT-6 Luna; the rest stay on Sail as the comparison (a Luna session cost about $0.011 against about $0.06 on Sail, Sept 23, 2026) |
 | `league/niches.json` | `max_members` | Kalshi: crypto strikes 4, crypto 15-minute 10, weather 14, sports 16, props 4, prices 8, attention 4. Alpaca: crypto majors and alts 12, index ETFs 14, megacaps 12, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`) |
 | | `open`, `asset_classes`, `exclude_patterns` | `kalshi-open` and `alpaca-open` (8 seats each); Alpaca `equity`, `crypto`; Kalshi `^KXMVE` | The open desks (Sept 23, 2026): a desk whose universe is every tradable market of its venue. `status: dormant` closes one. `niches.OPEN_DISCOVERY` (24) is the length of an open desk's discovery list, of which a strategy naming nothing it may trade is shown the first twelve (`MAX_UNIVERSE`); a Kalshi desk missing from the last survey is surveyed within the half hour, not at the next day's turn |
-| `gateway/wrangler.jsonc` | `FRONTIER_MONTH_USD`, `TYPESAFE_PILOT_USD` | $408, $42 | The OpenAI month and Jev's lifetime allowance, aligned on Sept 23, 2026 to metered plus the owner's funded balances ($374 and $20 before). Never above funded money. Deployed with `wrangler deploy`, not through the canary |
+| `gateway/wrangler.jsonc` | `FRONTIER_MONTH_USD` (and `FRONTIER_MONTH_MAX_USD`), `TYPESAFE_PILOT_USD` | $607, $42 | The OpenAI month and Jev's lifetime allowance, aligned to metered plus the owner's funded balances: the month on Sept 24, 2026 ($394.46 metered + $213 funded; $408 before), Jev on Sept 23. Never above funded money. Deployed with `wrangler deploy`, not through the canary |
 | | `COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`, `FRONTIER_MONTH_MAX_USD` | 0.3, $1,017.75, $408 | Compute follows profit (Sept 23, 2026, `gateway/lib/equity.mjs`): the month's cap is `FRONTIER_MONTH_USD` plus 0.3 of the real accounts' equity above the grant's capital, held to `FRONTIER_MONTH_MAX_USD`. That ceiling equals the funded month, so today profit is reported (`profit_index.earned_usd`) and buys nothing; raise it with each OpenAI top-up bought from profit. An unset share or baseline, or an unreadable or stale reading, gives exactly `FRONTIER_MONTH_USD`. The House's line mirrors the raise (`CampaignBudget.mirror_gateway_bonus`) |

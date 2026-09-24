@@ -539,6 +539,11 @@ class BoardTest(BoardCase):
             ({"decision": "promote", "from_rung": 1, "to_rung": 2, "reason": "it cleared the screen"}, f"{agent.id} climbs from rung 1 to rung 2: it cleared the screen."),
             ({"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "bunt", "reason": ""},
              f"{agent.id} climbs from Practice to Bunt: the allocator's evidence."),
+            # A probe (Sept 24, 2026): an unproven family's first real stake, and its climb to a bunt.
+            ({"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "probe", "stake_usd": "10", "via": "allocator",
+              "reason": "E 1.02 on 5 settlements."}, f"{agent.id} climbs from Practice to Probe with a $10.00 real stake: E 1.02 on 5 settlements."),
+            ({"decision": "size", "rung": 2, "band": "probe", "stake_usd": "10.4", "via": "allocator", "reason": "E 1.04"},
+             f"{agent.id}'s real stake is now $10.40 (Probe): E 1.04."),
         ]
         for payload, message in rows:
             entry = self.house.ledger.append("eval.verdict", payload, agent=agent.id)
@@ -603,6 +608,27 @@ class SiteAcceptsTheBoardTest(BoardCase):
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
 
+    def test_the_site_accepts_a_probe_on_the_board(self):
+        # Sept 24, 2026 (the close-the-gaps run, P1): an unproven family's first real stake is a
+        # probe. The publisher sends the band as the allocator names it, with its stake, and the
+        # site's validators (personal-site #6) accept it on the desk row, the counts and the moves.
+        agent = self.seated()
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        at = now_iso(self.clock)
+        board = self.board(agent, bands={"alpaca": {"probe": {"count": 1, "capital_usd": D("25")}}},
+                           moves=[{"id": "le-move-1", "at": at, "agent": agent.id, "venue": "alpaca", "from_band": "paper",
+                                   "to_band": "probe", "stake_usd": "25.00", "reason": "E 1.02 on 5 closed trades"}])
+        board["agents"][agent.id].update(band="probe", stake_usd=D("25"),
+                                         last_move={"at": at, "from_band": "paper", "to_band": "probe", "reason": "E 1.02 on 5 closed trades"})
+        self.house.allocator = FakeAllocator(board)
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        row = body["desks"][0]
+        self.assertEqual((row["band"], row["stake_usd"]), ("probe", "25.00"))
+        self.assertEqual(body["board"]["bands"], {"alpaca": {"probe": {"count": 1, "capital_usd": "25.00"}}})
+        self.assertEqual(body["board"]["moves"][0]["to_band"], "probe")
+        self.assertEqual(self.valid(body), "true")
+
     def test_the_site_accepts_the_real_allocators_board_before_and_after_its_first_pass(self):
         agent = self.seated()
         self.seated("other")
@@ -637,12 +663,14 @@ class SiteAcceptsTheBoardTest(BoardCase):
         rows = [{"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "bunt", "stake_usd": "10", "reason": "E 1.041"},
                 {"decision": "promote", "from_rung": 3, "to_rung": 3, "band_from": "swing", "band_to": "star", "stake_usd": "1240.5", "reason": "top P&L"},
                 {"decision": "demote", "from_rung": 3, "to_rung": 1, "band_from": "swing", "band_to": "paper", "reason": "a 35% drawdown"},
-                {"decision": "size", "rung": 2, "band": "bunt", "stake_usd": "14.2", "reason": "E 1.42"}]
+                {"decision": "size", "rung": 2, "band": "bunt", "stake_usd": "14.2", "reason": "E 1.42"},
+                {"decision": "promote", "from_rung": 1, "to_rung": 2, "band_from": "paper", "band_to": "probe", "stake_usd": "10", "reason": "E 1.02"}]
         events = [e for row in rows for e in to_events(self.house.ledger.append("eval.verdict", row, agent=agent.id))]
         script = ("import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => "
                   "console.log(JSON.stringify(JSON.parse(s).map(e => { const move = m.ladderMove(e); return move && [move.kind, move.fromBand, move.toBand, move.stake]; })))); })")
         out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(events), capture_output=True, text=True, timeout=60)
-        self.assertEqual(json.loads(out.stdout), [["up", "paper", "bunt", "10.00"], ["up", "swing", "star", "1240.50"], ["down", "swing", "paper", None], ["size", None, "bunt", "14.20"]])
+        self.assertEqual(json.loads(out.stdout), [["up", "paper", "bunt", "10.00"], ["up", "swing", "star", "1240.50"], ["down", "swing", "paper", None], ["size", None, "bunt", "14.20"],
+                                                    ["up", "paper", "probe", "10.00"]])
 
 
 if __name__ == "__main__":
