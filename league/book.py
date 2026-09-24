@@ -2948,7 +2948,11 @@ class Book:
     def _book_venue_fees(self, shortfall: Decimal) -> Decimal:
         """Book venue fee activities not yet on the ledger, oldest first, while they fit inside the
         shortfall (a fee from before the baseline is already in the baseline and explains nothing).
-        They are the House's cost: a day's fees are one rounded-up cent or two across every agent."""
+        They are the House's cost: a day's fees are one rounded-up cent or two across every agent.
+        An "OCC Clearing Fee" row is not booked where the option fill paid it (`Fees.option_clearing`,
+        a practice book): Alpaca's paper account takes it at the fill and lists it the next morning,
+        and booked again then it only ever explained some other shortfall (Sept 21-24, 2026: every
+        one of the 46 was booked a day late, against an unrelated shortfall)."""
         read = getattr(self.broker, "fee_activities", None)
         if read is None:
             return ZERO
@@ -2959,6 +2963,8 @@ class Book:
             return ZERO
         booked = ZERO
         for row in rows:
+            if self.fees.option_clearing and str(row.get("description") or "").lower().startswith("occ clearing fee"):
+                continue  # the option fill paid it, in the cash the venue took then
             fee = money(row["usd"])
             entry_id = f"venue-fee:{self.name}:{row['id']}"
             if fee <= 0 or self.ledger.get(entry_id) is not None or booked + fee > shortfall + DUST_USD:
@@ -3159,15 +3165,6 @@ class Book:
                         self._baseline_row(self.baseline_cash + paid, remaining, f"baseline position {key} settled")
             expected = self.baseline_cash + cash
             cash_diff = venue_cash - expected
-            if cash_diff <= -DUST_USD:
-                # The venue holds less than the book says. Alpaca passes on the regulators' fees
-                # (on equity sales and on every option contract) as one FEE activity at the end of
-                # the day, which no fill ever showed: book the ones that explain the shortfall.
-                booked = self._book_venue_fees(-cash_diff)
-                if booked:
-                    cash, positions, instruments = self._ledger_totals()
-                    expected = self.baseline_cash + cash
-                    cash_diff = venue_cash - expected
             diffs: dict[str, str] = {}
             for key in sorted(set(venue_positions) | set(positions) | set(self.baseline_positions)):
                 diff = venue_positions.get(key, ZERO) - positions.get(key, ZERO) - self.baseline_positions.get(key, ZERO)
@@ -3209,6 +3206,21 @@ class Book:
                 if key not in awaiting and key not in diffs:
                     del self._awaiting_settlement[key]
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
+            if cash_diff <= -DUST_USD and not diffs and not awaiting and not pending:
+                # The venue holds less than the book says. Alpaca passes on the regulators' fees
+                # (on equity sales and on every option contract) as one FEE activity at the end of
+                # the day, which no fill ever showed: book the ones that explain the shortfall.
+                # Never beside a position difference or an order in doubt: that shortfall is the
+                # price of units the ledger has not booked yet. Sept 24, 2026, 11:29:48Z: an
+                # in-flight BTC buy read "cash differs by -24.1299" with its coins at the venue, and
+                # $0.87 of the day before's fee rows -- their cash long gone, at their fills -- were
+                # booked against it; the fill landed seven seconds later and the book froze on
+                # +0.8700 for ten minutes, until it adopted the venue.
+                booked = self._book_venue_fees(-cash_diff)
+                if booked:
+                    cash, _, _ = self._ledger_totals()
+                    expected = self.baseline_cash + cash
+                    cash_diff = venue_cash - expected
             # A venue shows cash to the cent and rounds each fill's fee its own way: allow a cent
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
