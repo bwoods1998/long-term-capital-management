@@ -189,7 +189,9 @@ class HorizonBySchedule(unittest.TestCase):
     Measured on the T0 snapshot (ledger to 01:41Z Sept 24): 138 horizon refusals, 71 of them on the
     daily diesel print (KXDIESELD-26SEP21 34, -26SEP22 36, -26SEP23 1; hawkins-3 27, hawkins-9 16,
     hawkins-8 14, hawkins-2 14), each "expected to resolve in 171-185 hours" while the market stopped
-    trading a few hours later: the House read the latest date the market may expire, a week on."""
+    trading a few hours later. The venue schedules that print's expiration a week on (its expected
+    expiration equals its latest; review of #249), so it is refused still, now saying so; the close
+    stands in only for a market the venue gives no expected expiration, of which none was seen."""
 
     def setUp(self):
         from league.tapes import KalshiData
@@ -209,11 +211,11 @@ class HorizonBySchedule(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.clock = Clock(ScheduledExpirationTest.NOW)  # 03:18:43Z Sept 22: hawkins-8's refusal
         rows = ScheduledExpirationTest()
-        self.diesel = rows.diesel()                                                   # stops at 06:00Z, no schedule
+        self.diesel = rows.diesel()                                                   # stops at 05:59Z, scheduled a week on
         self.scheduled = rows.venue_row("KXDIESELD-26SEP24-T6.500", "2026-09-24T06:00:00Z",
                                         expected_expiration_time="2026-09-24T15:18:43Z")  # 60 hours out by its schedule
         self.unscheduled = rows.venue_row("KXDIESELD-26SEP24-T6.505", "2026-09-24T15:18:43Z",
-                                          expected_expiration_time=None, expiration_time="2026-10-01T07:30:00Z")  # closes 60 hours out
+                                          expected_expiration_time=None, expiration_time="2026-10-01T07:30:00Z")  # no schedule (none seen): its close, 60 hours out
         parsed = {row["ticker"]: KalshiMarketData.parse_market(row) for row in (self.diesel, self.scheduled, self.unscheduled)}
 
         class Venue(FakeMarketData):
@@ -249,12 +251,14 @@ class HorizonBySchedule(unittest.TestCase):
         return self.house._intents(self.agent, self.book, [{"market": ticker, "leg": "yes", "side": "buy", "quantity": 1, "type": "limit",
                                                             "limit_price": 0.96, "post_only": True, "reason": "test"}])
 
-    def test_a_daily_diesel_print_is_judged_by_its_close_and_entered(self):
+    def test_the_daily_diesel_print_is_refused_by_the_expiration_the_venue_schedules(self):
+        """Review of #249: X2 does not admit it. The strategy is shown the hours the rule judges."""
         self.house.tick()
-        self.assertEqual(self.refusals(), [])
+        self.assertEqual(self.refusals(), ["this market is expected to resolve in 172 hours, by its scheduled expiration "
+                                           "(2026-09-29T07:30:00Z); entries must resolve within 48"])
         orders = [e.payload for e in self.house.ledger.iter(kinds="book.order") if e.payload.get("instrument", {}).get("market_id") == self.diesel["ticker"]]
-        self.assertTrue(orders, "the bid reached the book")
-        self.assertEqual(self.house._state["memory"][self.agent.id]["hours"], {self.diesel["ticker"]: 2.6881})  # what the strategy was shown
+        self.assertEqual(orders, [])
+        self.assertEqual(self.house._state["memory"][self.agent.id]["hours"], {self.diesel["ticker"]: 172.1881})  # what the strategy was shown
 
     def test_a_market_scheduled_past_the_horizon_is_refused_and_the_refusal_says_by_its_schedule(self):
         intents, dropped = self.bid(self.scheduled["ticker"])

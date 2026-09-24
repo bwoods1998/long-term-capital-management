@@ -534,12 +534,13 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
   expected to resolve in N hours, by its scheduled expiration (...)" or "..., by its close (...):
   the venue lists no scheduled expiration for it". A Kalshi market is judged by the scheduled
-  (expected) expiration where the venue gives one and by its close otherwise, never by the latest
-  date it may expire (the daily diesel print was refused 71 times as "171-185 hours" out while it
-  stopped trading within a day). The House asks before the book; the book still judges every entry
-  after it, from the same answer. The book's own shorter text ("expected to resolve in N hours;
-  entries must resolve within 48", no basis) would now mean the two looks disagreed, at the
-  boundary a moment apart.
+  (expected) expiration where the venue gives one and by its close otherwise, never by the
+  deprecated latest date it may expire. The venue gives one for every market seen, and for the
+  diesel prints and the AI-token and AI-share weeklies it is a week after the close: their refusals
+  ("171-202 hours") continue and now say "by its scheduled expiration". The House asks before the
+  book; the book still judges every entry after it, from the same answer. The book's own shorter
+  text ("expected to resolve in N hours; entries must resolve within 48", no basis) would now mean
+  the two looks disagreed, at the boundary a moment apart.
 - **`ops.alert` warnings from the floor's invariants** (Sept 23, 2026; `House._floor_invariants`,
   every five minutes over the ledger rows since its saved cursor, `invariants` in `house.json`):
   `<desk>: offered markets on N wakes in the last hour ... and no agent of the desk wrote an intent`

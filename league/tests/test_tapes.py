@@ -471,11 +471,16 @@ class ScheduledExpirationTest(unittest.TestCase):
     """X2 (Sept 24, 2026): a Kalshi market is expected to pay at its SCHEDULED (expected) expiration
     when the venue gives one, and at its close otherwise -- never at the latest moment it may expire.
 
-    The shape is the T0 snapshot's: KXDIESELD-26SEP22-T6.510 was refused at 03:18:43Z on Sept 22 as
-    "expected to resolve in 172 hours" (71 refusals on the diesel dailies in all, 138 on the horizon
-    rule) while it stopped trading at about 06:00Z that morning. Kalshi lists no scheduled expiration
-    for the daily diesel print, and the parser took the deprecated `expiration_time` in its place:
-    the LATEST the market may expire, a week on."""
+    The venue gives one for every market seen (review of #249): all 993,336 settled rows of Sept 5-17
+    in the local history cache and all 368,425 open rows of the first run's Sept 15 cache carry
+    `expected_expiration_time`. For the daily diesel print it IS the week-out deadline, equal to the
+    latest expiration (KXDIESELD-26SEP13-T6.210 closed 05:59Z Sept 13, expected and latest 07:30Z Sept
+    20, paid 07:45Z Sept 13). So the T0 refusal of KXDIESELD-26SEP22-T6.510 at 03:18:43Z on Sept 22,
+    "expected to resolve in 172 hours", is this rule judging by the venue's own schedule: X2 does not
+    admit it. (And KXGOOGSHARE-26SEP21 was refused at 199 hours on Sept 19: only an OPEN row's expected
+    expiration, its close plus seven days, gives that; its deprecated `expiration_time` is its close.)
+    The close stands in only for a market the venue gives no expected expiration, of which none was
+    seen."""
 
     NOW = parse_time("2026-09-22T03:18:43Z")
 
@@ -489,7 +494,14 @@ class ScheduledExpirationTest(unittest.TestCase):
         return row
 
     def diesel(self):
-        return self.venue_row("KXDIESELD-26SEP22-T6.510", "2026-09-22T06:00:00Z", expected_expiration_time=None,
+        """The daily diesel print as the venue lists it (the shape of KXDIESELD-26SEP13-T6.210)."""
+        return self.venue_row("KXDIESELD-26SEP22-T6.510", "2026-09-22T05:59:00Z", can_close_early=True,
+                              expected_expiration_time="2026-09-29T07:30:00Z", expiration_time="2026-09-29T07:30:00Z",
+                              latest_expiration_time="2026-09-29T07:30:00Z")
+
+    def unscheduled(self):
+        """A market the venue gave no expected expiration: none was seen; the rule's fallback."""
+        return self.venue_row("KXDIESELD-26SEP22-T6.505", "2026-09-22T06:00:00Z", expected_expiration_time=None,
                               expiration_time="2026-09-29T07:30:00Z", latest_expiration_time="2026-09-29T07:30:00Z")
 
     def game(self):
@@ -514,14 +526,23 @@ class ScheduledExpirationTest(unittest.TestCase):
     def test_the_parser_keeps_the_scheduled_expiration_apart_from_the_latest(self):
         from ltcm.data.kalshi import KalshiMarketData
 
-        self.assertIsNone(KalshiMarketData.parse_market(self.diesel())["expected_expiration_time"])
+        self.assertEqual(KalshiMarketData.parse_market(self.diesel())["expected_expiration_time"], "2026-09-29T07:30:00Z")
         self.assertEqual(KalshiMarketData.parse_market(self.game())["expected_expiration_time"], "2026-09-22T06:30:00Z")
+        self.assertIsNone(KalshiMarketData.parse_market(self.unscheduled())["expected_expiration_time"])
+
+    def test_the_daily_diesel_print_is_judged_by_the_week_out_expiration_the_venue_schedules(self):
+        """Review of #249: X2 changes nothing here. The venue schedules the diesel print's expiration a
+        week out, so the rule still says what it said at T0: 172 hours."""
+        data = self.data(self.diesel())
+        due = parse_time("2026-09-29T07:30:00Z")
+        self.assertEqual(data.resolution_of("KXDIESELD-26SEP22-T6.510"), (due, "scheduled"))
+        self.assertEqual(round((data.resolves_at("KXDIESELD-26SEP22-T6.510") - self.NOW) / 3600), 172)
 
     def test_a_market_the_venue_gives_no_scheduled_expiration_is_judged_by_its_close(self):
-        data = self.data(self.diesel())
+        data = self.data(self.unscheduled())
         close = parse_time("2026-09-22T06:00:00Z")
-        self.assertEqual(data.resolution_of("KXDIESELD-26SEP22-T6.510"), (close, "close"))
-        self.assertEqual(data.resolves_at("KXDIESELD-26SEP22-T6.510"), close)  # 2.7 hours out, not 172
+        self.assertEqual(data.resolution_of("KXDIESELD-26SEP22-T6.505"), (close, "close"))
+        self.assertEqual(data.resolves_at("KXDIESELD-26SEP22-T6.505"), close)
 
     def test_a_scheduled_expiration_is_what_a_market_is_judged_by(self):
         data = self.data(self.game())
@@ -531,16 +552,17 @@ class ScheduledExpirationTest(unittest.TestCase):
         data = self.data(self.diesel(), self.game())
         rows = {row["market"]: row for row in data.markets(["KXDIESELD", "KXMLBGAME"], max_hours_to_close=24)}
         diesel, game = rows["KXDIESELD-26SEP22-T6.510"], rows["KXMLBGAME-26SEP22NYYBOS-NYY"]
-        self.assertEqual((diesel["hours_to_close"], diesel["hours_to_resolve"]), (2.6881, 2.6881))
+        self.assertEqual((diesel["hours_to_close"], diesel["hours_to_resolve"]), (2.6714, 172.1881))
         self.assertEqual((game["hours_to_close"], game["hours_to_resolve"]), (3.1881, 3.1881))
 
     def test_a_settled_market_on_a_replay_tape_is_judged_the_same_way(self):
         from ltcm.data.kalshi import KalshiMarketData
         from league.tapes import resolve_time
 
-        row = KalshiMarketData.parse_market({**self.diesel(), "status": "finalized", "result": "yes"})
-        close = parse_time(row["close_time"])
-        self.assertEqual(resolve_time(row, close), close)
+        for venue_row in (self.diesel(), self.unscheduled()):
+            live = self.data(venue_row).resolves_at(venue_row["ticker"])
+            row = KalshiMarketData.parse_market({**venue_row, "status": "finalized", "result": "yes"})
+            self.assertEqual(resolve_time(row, parse_time(row["close_time"])), live)
 
 
 class KalshiMarketsTest(unittest.TestCase):

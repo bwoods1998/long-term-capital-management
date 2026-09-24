@@ -524,13 +524,16 @@ def resolution(row: "dict[str, Any]", close_ts: float) -> "tuple[float, str]":
     is two days after kickoff and it really closes when a winner is declared, near its scheduled
     expiration; a weather market stops trading at `close_time` and is paid at its expiration.)
 
-    Never the LATEST moment the market may expire. Sept 24, 2026 (X2, the close-the-gaps run): the
-    parser's `expiration_time` falls back to Kalshi's deprecated field when the venue lists no
-    scheduled expiration, and that field is the latest expiration -- a week after a daily diesel
-    print. The horizon rule refused 71 entries on KXDIESELD dailies between Sept 20 and 22 as
-    "expected to resolve in 171-185 hours" while each stopped trading within a day (hawkins-3,
-    -8, -9, -2; the T0 snapshot's ledger). The live view, a replay tape and the book's horizon rule
-    all read this one function, so what a strategy is shown is what the House judges."""
+    Never the deprecated `expiration_time`, which the parser falls back to and which is the LATEST
+    moment the market may expire (Sept 24, 2026, X2). But the venue lists an expected expiration for
+    every market seen -- all 993,336 settled rows of Sept 5-17 in the local history cache and all
+    368,425 open rows of the first run's Sept 15 cache -- so the close is a fallback no market has
+    needed (review of #249). For the diesel prints (KXDIESELD, KXDIESELW), the AI-token and AI-share
+    weeklies (KXTOKENUSE, KXGOOGSHARE, ...) that expected expiration IS the week-out deadline, though
+    each paid within 12 hours of its close (diesel within 7.8): the 71 diesel refusals of Sept 20-22
+    ("171-185 hours", hawkins-3, -8, -9, -2) were this rule reading the venue's schedule, and still
+    are. The live view, a replay tape and the book's horizon rule all read this one function, so
+    what a strategy is shown is what the House judges."""
     try:
         value = parse_time(row.get("expected_expiration_time")) if row.get("expected_expiration_time") else None
     except TapeError:

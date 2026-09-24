@@ -398,12 +398,12 @@ hours out for an `hour` strategy or 48 for a `day` strategy, and closes any cryp
 longer than 48 hours. Equities are not bounded. Exits are never refused.
 
 "Expected to pay" is the market's SCHEDULED expiration where Kalshi gives one, and its close where
-it does not; never the latest date the market may expire (since Sept 24, 2026: the daily diesel
-print lists no scheduled expiration, and the House had read Kalshi's latest expiration, a week on,
-refusing 71 diesel entries as "expected to resolve in 171-185 hours" while each stopped trading
-within a day). `hours_to_resolve` is measured to that same moment, live and on a replay tape, so a
-strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule. A
-refusal says which it judged by: "this market is expected to resolve in 60 hours, by its
+it does not; never the deprecated latest date the market may expire (Sept 24, 2026). Kalshi gives
+one for every market seen. For the diesel prints and the AI-token and AI-share weeklies it is a
+week after the close, so those are still refused for a `day` strategy, though each has paid within
+12 hours of its close. `hours_to_resolve` is measured to that same moment, live and on a replay
+tape, so a strategy that keeps `hours_to_resolve` inside its horizon is never refused by the rule.
+A refusal says which it judged by: "this market is expected to resolve in 60 hours, by its
 scheduled expiration (...)" or "..., by its close (...): the venue lists no scheduled expiration
 for it". A market the House cannot look up is still refused ("the House cannot tell when this
 market resolves").
