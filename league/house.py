@@ -129,6 +129,9 @@ PROBE_BOX = "house-probe"
 ORDER_INVARIANTS_EVERY_SECONDS = 60.0
 ORDER_INVARIANTS_FIRST_ROWS = 2000
 QUIET_ROUND_THE_CLOCK_SECONDS = 1800.0
+#: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
+#: (Sept 24, 2026: 107 identical refusals of a 0.000000001 LINK/USD sale in 12 hours).
+WIND_DOWN_REFUSALS = 3
 
 
 @dataclass
@@ -3225,6 +3228,14 @@ class House:
             quantity = max(holding.quantity - reserved.get(holding.instrument.key, ZERO), ZERO)
             if quantity <= 0:
                 continue
+            dust = self._dust_reason(book, holding.instrument, quantity)
+            if dust is not None:
+                # A holding the venue will not trade is never sent (Sept 24, 2026: 107 refused sells of haghani-
+                # h426990's 0.000000001 LINK/USD in twelve hours): booked as dust, and the account can close.
+                self._book_dust(agent, book, holding.instrument, quantity, dust)
+                continue
+            if self._wind_down_stopped(agent, book, holding.instrument, quantity):
+                continue  # the venue refused this very sale `WIND_DOWN_REFUSALS` times in a row: told once, not retried
             if market_hours(holding.instrument, now) is False:
                 # A stock or an option sells only in the regular session: outside it the book refuses
                 # a market sell ("market orders outside regular hours are not permitted") and an
@@ -3264,9 +3275,89 @@ class House:
             exits.append(intent)
         self._note_held_wind_downs(agent, book, held_back)
         if exits:
-            book.submit(exits)
+            outcomes = book.submit(exits)
+            self._note_wind_down_refusals(agent, book, exits, outcomes)
             book.poll()
         self._sweep(agent.id, book)
+
+    def _dust_reason(self, book: Book, instrument: Instrument, quantity: Decimal) -> str | None:
+        """Why a holding is one the venue will not trade, or None: worth under a cent at its mark (the
+        reconciliation's own dust line, `book.DUST_USD`), or, where the venue's asset record states it
+        (`broker.asset`, a crypto pair), under the venue's minimal order quantity."""
+        from .book import DUST_USD
+
+        mark = book.marks.get(instrument.key)
+        if mark is None:
+            quote = book._quote(instrument)
+            mark = quote.bid if quote is not None and quote.bid else None
+        if mark is not None and mark > 0:
+            value = quantity * mark * Decimal(str(instrument.multiplier or 1))
+            if value < DUST_USD:
+                return f"worth ${value:.8f} at its mark, under a cent"
+        asset = getattr(book.broker, "asset", None)
+        if asset is not None and instrument.asset_class == "crypto":
+            try:
+                minimum = (asset(instrument.market_id or instrument.symbol) or {}).get("min_order_size")
+            except Exception:  # noqa: BLE001 - an unreadable record states no minimum
+                minimum = None
+            if minimum is not None and quantity < Decimal(str(minimum)):
+                return f"under the venue's minimal order quantity {minimum}"
+        return None
+
+    def _book_dust(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal, why: str) -> None:
+        """Book a holding the venue will not trade as dust (Sept 24, 2026), the way the reconciliation books a
+        sub-cent position difference (`Book._position_dust`): off the agent's account at no price, onto the
+        House row, which then holds the units the venue still shows, so the book still reconciles and the
+        account can close. Said once on the ledger: the two dust fills and one info alert."""
+        from .book import text
+
+        with book._lock:
+            entry = self.ledger.append("book.fill", {
+                "book": book.name, "source": "dust", "instrument": instrument.to_dict(), "side": "sell", "quantity": text(quantity),
+                "price": "0", "fee_usd": "0", "cash_delta": "0", "position_delta": text(-quantity), "real_money": book.real_money,
+                "reason": f"the House booked it as dust: {why}"}, agent=agent.id)
+            book._apply(entry.kind, agent.id, entry.payload, entry.at)
+            book._position_dust(instrument, quantity)
+        self.alert("info", f"{agent.id}: {book.name} booked {text(quantity)} {instrument.market_id or instrument.symbol} as dust "
+                           f"instead of selling it ({why}); the account can close")
+
+    def _wind_down_stopped(self, agent: Agent, book: Book, instrument: Instrument, quantity: Decimal) -> bool:
+        """Whether this sale was refused `WIND_DOWN_REFUSALS` times in a row, for this very quantity: then it
+        is not sent again until the holding changes (`_note_wind_down_refusals` keeps the count)."""
+        row = ((self._state.get("wind_down_refusals") or {}).get(agent.id) or {}).get(book.name, {}).get(instrument.key)
+        return bool(row and int(row.get("count") or 0) >= WIND_DOWN_REFUSALS and row.get("quantity") == format(quantity, "f"))
+
+    def _note_wind_down_refusals(self, agent: Agent, book: Book, exits: Sequence[Intent], outcomes: Sequence[Any]) -> None:
+        """The invariant for orders no agent sent at a wake (Sept 24, 2026): the same refusal of a House-sent
+        sale -- by the venue or the book -- `WIND_DOWN_REFUSALS` times in a row stops its retries, with ONE
+        warning naming the order. A sale that goes through, a different refusal or a changed quantity starts
+        the count again. Kept in house.json (`wind_down_refusals`), so a restart does not start it again."""
+        by_intent = {o.intent_id: o for o in outcomes}
+        with self._state_lock:
+            mine = self._state.setdefault("wind_down_refusals", {}).setdefault(agent.id, {}).setdefault(book.name, {})
+            told = []
+            for intent in exits:
+                outcome = by_intent.get(intent.id)
+                key = intent.instrument.key
+                if outcome is not None and outcome.status == "duplicate":
+                    continue  # the same intent twice in one second: no new answer from anyone
+                if outcome is None or outcome.status not in ("rejected", "refused"):
+                    mine.pop(key, None)
+                    continue
+                why = re.sub(r"\d+(?:\.\d+)?", "#", str(outcome.detail or ""))[:200]
+                quantity = format(intent.quantity, "f")
+                row = mine.get(key) or {}
+                count = int(row.get("count") or 0) + 1 if (row.get("why") == why and row.get("quantity") == quantity) else 1
+                mine[key] = {"why": why, "quantity": quantity, "count": count, "order": outcome.order_id,
+                             "detail": str(outcome.detail or "")[:300], "at": now_iso(self.clock)}
+                if count == WIND_DOWN_REFUSALS:
+                    told.append(mine[key] | {"symbol": intent.instrument.market_id or intent.instrument.symbol})
+            if not mine:
+                (self._state.get("wind_down_refusals") or {}).get(agent.id, {}).pop(book.name, None)
+        for row in told:
+            self.alert("warning", f"{agent.id}: the House's sale of {row['quantity']} {row['symbol']} on {book.name} was refused "
+                                  f"{WIND_DOWN_REFUSALS} times in a row ({row['detail']}; order {row['order']}): it is not sent again "
+                                  "until the holding changes", order=row["order"])
 
     def _note_held_wind_downs(self, agent: Agent, book: Book, held_back: Mapping[str, Decimal]) -> None:
         """Keep, in house.json, which of an abandoned account's positions wait for their market to
