@@ -1020,6 +1020,51 @@ class TrialOnTheFloor(KalshiHouse):
         alerts = [e.payload.get("message") or e.payload.get("text") or str(e.payload) for e in self.house.ledger.iter(kinds="ops.alert")]
         self.assertTrue(any("$10 probe could not be staked" in m for m in alerts), alerts[-3:])
 
+    def alerts(self, text):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if text in str(e.payload.get("text"))]
+
+    def test_a_family_record_that_cannot_be_read_never_stops_a_wake_or_the_pass(self):
+        """The main session's decision on the review of #224 (Sept 24, 2026): the family record is on every
+        wake's path (`House.wake` -> `seat` -> `Allocator.limits` -> `tier` -> `family`), on the book's
+        order path (`family_taker`) and in the pass. If it raised, a family's real agents could not be
+        woken -- no decision, no exit -- and the pass stopped. It counts as an UNPROVEN family's record
+        instead, with one alert per family and distinct error."""
+        a = self.seated_probe()
+        alloc = self.house.allocator
+        alloc._families.clear()  # a new pass: the record is computed afresh
+        with patch.object(allocator, "family_record", side_effect=KeyError("pnl")):
+            out = self.house.wake(self.house.registry.get(a.id))
+            self.assertEqual(out.get("agent"), a.id)
+            self.assertIn(out.get("skipped"), (None, "no data"))  # past its seat: the fake venue lists no market
+            self.assertEqual(self.house.books["kalshi"].limits[a.id].max_position_usd, D("2.00"))  # a probe's
+            self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
+                                                       "mean_log": 0.0, "bound": None})
+            with self.evidence_of({a.id: dict(self.READY, **self.SWING_READY)}):
+                summary = alloc.rebalance()
+                alloc.rebalance()
+                self.house.wake(self.house.registry.get(a.id))
+        self.assertIsInstance(summary, dict)
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)  # an unreadable family proves nothing: no swing
+        row = alloc.board()["agents"][a.id]
+        self.assertEqual((row["band"], row["family_state"], row["family_n"]), ("probe", "unproven", 0))
+        self.assertEqual(len(self.alerts("weather-favorites family's record at kalshi could not be read (KeyError: 'pnl')")), 1)
+        alloc._families.clear()
+        with patch.object(allocator, "family_record", side_effect=ValueError("a malformed row")):
+            self.house.wake(self.house.registry.get(a.id))
+            self.house.wake(self.house.registry.get(a.id))
+        self.assertEqual(len(self.alerts("weather-favorites family's record at kalshi could not be read (ValueError: a malformed row)")), 1)  # a new error: told once
+
+    def test_a_ledger_the_tape_cannot_read_does_not_stop_the_pass(self):
+        a = self.seated_probe()
+        alloc = self.house.allocator
+        with patch.object(alloc._tape, "refresh", side_effect=OSError("database is locked")):
+            with self.evidence_of({a.id: self.READY}):
+                summary = alloc.rebalance()
+                alloc.rebalance()
+        self.assertIsInstance(summary, dict)
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertEqual(len(self.alerts("the family records' tape could not be read (OSError: database is locked)")), 1)
+
     def test_the_throttle_never_halves_a_probe_under_a_tradable_stake(self):
         a = self.agent()
         alloc = self.house.allocator

@@ -690,6 +690,7 @@ class Allocator:
         self._tape = TradeTape()
         self._families: dict[tuple[str, str], dict[str, Any]] = {}
         self._through: int | None = None
+        self._family_alerted: set[tuple[str, str, str]] = set()  # (family, venue, error): each told once
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -820,16 +821,56 @@ class Allocator:
 
     # ------------------------------------------------------------ families
     def _begin_pass(self) -> None:
-        """A new pass reads every family afresh, once, through the ledger position it starts at."""
-        self._through = self._tape.refresh(self.house.ledger)
+        """A new pass reads every family afresh, once, through the ledger position it starts at. A ledger
+        that cannot be read now leaves the tape where it stood: the pass goes on (Sept 24, 2026)."""
+        try:
+            self._through = self._tape.refresh(self.house.ledger)
+        except Exception as exc:  # noqa: BLE001 - an unreadable ledger must not stop the pass or its exits
+            self._family_error("the family records' tape", "", exc)
+            self._through = self._tape.cursor
         self._families = {}
 
+    def _family_error(self, family: str, venue: str, exc: BaseException) -> None:
+        """One warning per family and distinct error, however many wakes and passes meet it."""
+        why = f"{type(exc).__name__}: {str(exc)[:160]}"
+        key = (family, venue, why)
+        if key in self._family_alerted:
+            return
+        self._family_alerted.add(key)
+        try:
+            self.house.alert("warning", f"allocator: {family}{' at ' + venue if venue else ''} could not be read ({why}); "
+                                        "until it can, its agents count as an unproven family's: probes, no swing, "
+                                        "post-only real entries")
+        except Exception:  # noqa: BLE001 - the alert is a courtesy; the fallback is the protection
+            pass
+
+    def _unreadable_family(self, family: str, venue: str, exc: BaseException) -> dict[str, Any]:
+        """What a family counts as while its record cannot be computed: unproven, with no taker record."""
+        self._family_error(f"the {family} family's record", venue, exc)
+        try:
+            rule = _family_rule()
+        except Exception:  # noqa: BLE001 - a malformed rule is no reason to raise into a wake
+            rule = {"min_independent_settlements": 10, "practice_weight": 0.5, "real_weight": 1.0, "confidence": 0.8,
+                    "lopsided_gate": True}
+        side = {"n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "positive": False, "members": 0}
+        return {"family": family, "venue": venue, "through": self._through, "members": 0, "members_counted": 0,
+                "n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "proven": False, "state": "unproven",
+                "real_n": 0, "lopsided": None, "loss_gate": None, "risk_per_entry": None,
+                "maker": dict(side), "taker": dict(side), "rule": rule,
+                "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
     def family(self, family: str, venue: str) -> dict[str, Any]:
-        """The family's pooled record (`family_record`), computed once a pass and kept until the next."""
+        """The family's pooled record (`family_record`), computed once a pass and kept until the next.
+        Never raises: it is on every wake's path (`limits` -> `seat_stake` -> `tier`), on the book's
+        order path (`family_taker`) and in the pass, and a record that cannot be computed is an
+        UNPROVEN family's until the next pass tries again (review of #224, Sept 24, 2026)."""
         key = (family, venue)
         record = self._families.get(key)
         if record is None:
-            record = family_record(self.house, family, venue, tape=self._tape, through=self._through)
+            try:
+                record = family_record(self.house, family, venue, tape=self._tape, through=self._through)
+            except Exception as exc:  # noqa: BLE001 - see the docstring: exits must run
+                record = self._unreadable_family(family, venue, exc)
             self._families[key] = record
         return record
 
