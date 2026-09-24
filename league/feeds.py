@@ -374,10 +374,14 @@ def _perps_key(raw: Any) -> str | None:
 
 def requested(value: Any) -> dict[str, list[str]]:
     """`NEEDS["feeds"]` held to what the House can record: known feed names only (`sports`,
-    `perps`, `vol`, `funding`), at most `MAX_KEYS` keys each in the order declared, league names in
-    lower case (`nfl`, or a Kalshi series such as `KXNFLGAME`, or an ESPN path) and coins in upper
-    case (`BTC`, `BTC/USD`, `XBT`). A league no Kalshi series maps, a coin no crypto desk trades and
-    a DVOL other than BTC's and ETH's are dropped, never guessed. Anything else yields {}."""
+    `perps`, `vol`, `funding`, and the recorders of Sept 24, 2026 in `RECORDERS`), at most
+    `MAX_KEYS` keys each in the order declared, league names in lower case (`nfl`, or a Kalshi
+    series such as `KXNFLGAME`, or an ESPN path) and coins in upper case (`BTC`, `BTC/USD`, `XBT`);
+    each recorder's own keys in its own spelling (`Source.key_of`: a settlement station `KNYC` from
+    `KXHIGHNY`, a ticker `AAPL`, a tenor `10Y` ...). A league no Kalshi series maps, a coin no crypto
+    desk trades, a DVOL other than BTC's and ETH's and a key a recorder does not know are dropped,
+    never guessed. Anything else yields {}. A keyed recorder's name is kept whether or not the owner
+    has placed its key: an absent key only means its rows are absent."""
     if not isinstance(value, Mapping):
         return {}
     out: dict[str, list[str]] = {}
@@ -393,7 +397,10 @@ def requested(value: Any) -> dict[str, list[str]]:
         for raw in keys:
             if len(kept) >= MAX_KEYS:
                 break
-            key = _sports_key(raw) if name == "sports" else _coin_key(raw, VOL_KEYS) if name == "vol" else _perps_key(raw)
+            if name in RECORDERS:
+                key = RECORDERS[name].key_of(raw)
+            else:
+                key = _sports_key(raw) if name == "sports" else _coin_key(raw, VOL_KEYS) if name == "vol" else _perps_key(raw)
             if key is not None and key not in kept:
                 kept.append(key)
     return {name: keys for name, keys in out.items() if keys}
@@ -423,8 +430,10 @@ def request_feed(name: Any) -> str | None:
     """The feed a `tool.request` name plainly asks for, or None. Conservative on purpose: the
     name (as `Commons.request_tool` stores it) must name live scores or a scoreboard with a sports
     word, perpetual funding or open interest with a derivatives word (a Kalshi market's open
-    interest is not a perp's), Deribit's DVOL or a crypto implied volatility (`vol`), or the
-    history of perpetual funding (`funding`: the only history, with DVOL's, the House holds)."""
+    interest is not a perp's), Deribit's DVOL or a crypto implied volatility (`vol`), the history of
+    perpetual funding (`funding`), or what a recorder of Sept 24, 2026 records, in its own words
+    (`Source.asks`: a weather ensemble, a forecast's history, an 8-K's acceptance, SOFR ...). A
+    request for the history of anything else is for something the House does not hold."""
     words = set(re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_").split("_")) - {""}
     if not words or words & (_NOT_FEEDS - _HISTORY):
         return None
@@ -432,6 +441,9 @@ def request_feed(name: Any) -> str | None:
         return "vol"
     if "funding" in words and words & _PERPS_CONTEXT:
         return "funding" if words & (_HISTORY | _SETTLED) else "perps"
+    for feed, source in RECORDERS.items():  # the recorders of Sept 24, 2026, each by its own words
+        if source.asks(words):
+            return feed
     if words & _HISTORY:
         return None
     if (("open" in words and "interest" in words) or "oi" in words) and words & _DERIVATIVES:
@@ -529,6 +541,8 @@ def _source(feed: str, key: str) -> str:
     """The endpoint a history feed's rows for `key` come from, as `backfills` records it."""
     from ltcm.data.derivs import DERIBIT_HOST, OKX_HOST
 
+    if feed in RECORDERS:
+        return RECORDERS[feed].endpoint(key)
     if feed == "vol":
         return f"{DERIBIT_HOST}/api/v2/public/get_volatility_index_data?currency={key}&resolution=3600"
     return f"{OKX_HOST}/api/v5/public/funding-rate-history?instId={key}-USDT-SWAP"
@@ -544,12 +558,15 @@ class FeedRecorder:
     feed's fetcher ({"sports": ..., "perps": ..., "vol": ..., "funding": ...}, or one object for all;
     tests give `ltcm.tests.fakes.FakeTransport`); None leaves each fetcher its own `HttpTransport`.
     `keys` overrides what is polled ({"sports": [...], "perps": [...], ...}). `sleep` is what pauses
-    between history pages (tests give one that does not), and `backfill_pages` caps a backfill pass."""
+    between history pages (tests give one that does not), and `backfill_pages` caps a backfill pass.
+    `environ` and `allowed_hosts` stand in for the House's environment and the allowlist the
+    repository records (`scripts/floor_box.py` LEAGUE_HOSTS), which switch the keyed recorders on."""
 
     def __init__(self, house: Any = None, path: str | Path | None = None, transports: Any = None, *,
                  clock: Callable[[], float] | None = None, ledger: Any = None, alert: Callable[[str, str], None] | None = None,
                  niches: Mapping[str, Any] | None = None, keys: Mapping[str, Sequence[str]] | None = None,
-                 sleep: Callable[[float], None] | None = None, backfill_pages: int = BACKFILL_PAGES):
+                 sleep: Callable[[float], None] | None = None, backfill_pages: int = BACKFILL_PAGES,
+                 environ: Mapping[str, str] | None = None, allowed_hosts: Sequence[str] | None = None):
         if path is None:
             if house is None:
                 raise ValueError("a feed store needs a path or a House")
@@ -576,6 +593,10 @@ class FeedRecorder:
         self._stats: dict[tuple[str, str], dict[str, Any]] | None = None
         self._history: dict[tuple[str, str], dict[str, Any]] | None = None  # the `backfills` rows, read once
         self._venues: dict[str, int] = {}  # perps: coins each venue answered for in the last pass
+        self._environ = environ
+        self._hosts = tuple(str(h).lower() for h in allowed_hosts) if allowed_hosts is not None else None
+        self._read: dict[str, tuple[float, Any]] = {}  # "env" / "hosts" -> (read at, what was read)
+        self._state: dict[str, dict[str, Any]] = {}  # a recorder of Sept 24, 2026 -> what it keeps between passes
         self._closed = False
         with self._lock:
             self.db.executescript(SCHEMA)
@@ -619,7 +640,10 @@ class FeedRecorder:
         return self._niches
 
     def keys(self, feed: str) -> list[str]:
-        """What this House polls for `feed` now (the survey moves the universes, so it is asked each time)."""
+        """What this House polls for `feed` now (the survey moves the universes, so it is asked each time).
+        A keyed recorder the owner has not switched on (`waiting_for`) polls nothing."""
+        if feed in RECORDERS and self.waiting_for(feed):
+            return []
         if self._keys is not None:
             return list(self._keys.get(feed) or [])
         if feed == "sports":
@@ -628,6 +652,12 @@ class FeedRecorder:
             return perp_coins(self.niches())
         if feed == "vol":
             return list(VOL_KEYS)
+        if feed in RECORDERS:
+            source = RECORDERS[feed]
+            try:
+                return list(source.keys(self))[:source.max_keys]
+            except Exception:  # noqa: BLE001 - a universe that cannot be read polls nothing this time
+                return []
         return []
 
     def unmapped(self) -> list[str]:
@@ -638,6 +668,12 @@ class FeedRecorder:
         for feed in ("perps", *HISTORY_FEEDS):
             if self.keys(feed):
                 plan.append((feed, "*"))
+        for feed, source in RECORDERS.items():  # the recorders of Sept 24, 2026 that are live
+            if source.history:
+                continue  # in HISTORY_FEEDS above
+            keys = self.keys(feed)
+            if keys:
+                plan.extend([(feed, "*")] if source.batch else [(feed, key) for key in keys])
         if self._backfill_pending():
             plan.append(("backfill", "*"))  # last: every live poll due goes first
         return plan
@@ -646,6 +682,10 @@ class FeedRecorder:
         fetcher = self._fetchers.get(feed)
         if fetcher is None:
             transport = self._transports.get(feed) if isinstance(self._transports, Mapping) else self._transports
+            if feed in RECORDERS:
+                fetcher = RECORDERS[feed].fetcher(transport, self.clock)
+                self._fetchers[feed] = fetcher
+                return fetcher
             if feed == "sports":
                 from ltcm.data.sports import Sports
 
@@ -699,8 +739,10 @@ class FeedRecorder:
                     self._poll_perps(out)
                 elif feed == "backfill":
                     self._backfill(out)
-                else:
+                elif feed in HISTORY_FEEDS:
                     self._poll_history(feed, out)
+                else:
+                    self._poll_source(feed, key, out)
             self._after_pass(out)
         except Exception as exc:  # noqa: BLE001 - the recorder must never take its lane or the tick down
             out["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
@@ -775,10 +817,11 @@ class FeedRecorder:
 
     # -- the history feeds: live polls ------------------------------------------------------------
     def _poll_history(self, feed: str, out: dict[str, Any]) -> None:
-        """One pass of `vol` or `funding`: for each key, every completed candle or settled rate newer
-        than the newest row held (`_fetch_head`), stamped when it became final. Scheduled 90 seconds
-        past the next hour (vol) or half hour (funding), or sooner when a key failed."""
-        every = VOL_SECONDS if feed == "vol" else FUNDING_SECONDS
+        """One pass of a history feed (`vol`, `funding`, and the history recorders of Sept 24, 2026):
+        for each key, every completed candle, settled rate or final row newer than the newest row
+        held (`_fetch_head`), stamped when it became final. Scheduled 90 seconds past the next hour
+        (vol) or half hour (funding), or at the recorder's own cadence, or sooner when a key failed."""
+        every, offset = _cadence(feed)
         started = self.clock()
         self._schedule(feed, "*", started + RETRY_SECONDS)  # due again soon in any case, pushed out below
         failed = False
@@ -801,10 +844,10 @@ class FeedRecorder:
             out["stored"] += stored
             if error:
                 out["failed"].append((feed, key, error))
-                failed = failed or UNLISTED not in error
+                failed = failed or not _unlisted(error)
         out["polled"].append(feed)
         finished = self.clock()
-        nxt = _aligned(finished, every)
+        nxt = _aligned(finished, every, offset)
         self._schedule(feed, "*", min(nxt, finished + RETRY_SECONDS) if failed else nxt)
 
     def _fetch_head(self, feed: str, key: str, now: float) -> int:
@@ -833,6 +876,8 @@ class FeedRecorder:
         `before` (None: at or before `now`) and at or after `floor`, as (stamp, payload) -- plus
         `reached` (the answer reaches down to `floor`) and `exhausted` (the venue has nothing older).
         Raises when the venue fails."""
+        if feed in RECORDERS:
+            return RECORDERS[feed].page(self._fetcher(feed), key, before=before, floor=floor, now=now, recorder=self)
         if feed == "vol":
             top = now if before is None else before - HOUR  # the last candle OPEN asked for
             end_ms = math.floor(top * 1000.0) - (0 if before is None else 1)
@@ -886,7 +931,8 @@ class FeedRecorder:
         return out
 
     def _wanted_target(self, feed: str, now: float) -> float:
-        return now - (self.backfill_days() + LOOKBACK_DAYS[feed]) * 86400.0
+        own = RECORDERS[feed].backfill_days if feed in RECORDERS else None
+        return now - ((own or self.backfill_days()) + LOOKBACK_DAYS.get(feed, 0)) * 86400.0
 
     def _history_state(self) -> dict[tuple[str, str], dict[str, Any]]:
         """The `backfills` rows by (feed, key), read from the store once and kept current here."""
@@ -934,10 +980,11 @@ class FeedRecorder:
             return float(row["target"])
 
     def _unlisted_now(self, feed: str, key: str, now: float) -> bool:
-        """Did OKX answer, less than `UNLISTED_SECONDS` ago, that it lists no such instrument?"""
+        """Did the source answer, less than `UNLISTED_SECONDS` ago, that it lists no such key (OKX:
+        no such instrument; a recorder of Sept 24, 2026: `NOT_LISTED`)?"""
         with self._lock:
             row = self._history_state().get((feed, key))
-        return bool(row) and UNLISTED in str(row.get("error") or "") and now - float(row.get("updated") or 0.0) < UNLISTED_SECONDS
+        return bool(row) and _unlisted(row.get("error")) and now - float(row.get("updated") or 0.0) < UNLISTED_SECONDS
 
     def _backfill_pending(self) -> bool:
         """Is any history key polled here still short of its target (and not unlisted)?"""
@@ -1032,6 +1079,151 @@ class FeedRecorder:
         if error:
             out["failed"].append((feed, key, error))
         return error is None
+
+    # -- the recorders of Sept 24, 2026: live polls ------------------------------------------------
+    def state(self, feed: str) -> dict[str, Any]:
+        """What a recorder keeps between its passes on this House (the runs it last saw ...)."""
+        with self._lock:
+            return self._state.setdefault(feed, {})
+
+    def _urgent_due(self) -> bool:
+        """Is a scoreboard or the perps pass due? A recorder of Sept 24, 2026 gives way to them
+        between its keys: the feeds lane has one slot, and a live game's minute matters more than a
+        forecast's."""
+        now = self.clock()
+        with self._lock:
+            upcoming = dict(self._next)
+        if any(upcoming.get(("sports", league), 0.0) <= now for league in self.keys("sports")):
+            return True
+        return bool(self.keys("perps")) and upcoming.get(("perps", "*"), 0.0) <= now
+
+    def _poll_source(self, feed: str, key: str, out: dict[str, Any]) -> bool:
+        """One live poll of a recorder of Sept 24, 2026 -- one key, or every key at once for a batch
+        source -- kept under the House's receive time (`record`): its content only when it changed, a
+        failed poll as a `polls` row with its error and nothing stored. A source may answer
+        `UNCHANGED` for a key whose content it has confirmed is still the newest (the weather
+        ensemble, when no newer model run exists): a successful poll that stores nothing. Returns
+        False, leaving the key due, when it gave way to a scoreboard or the perps pass."""
+        source = RECORDERS[feed]
+        if self._urgent_due():
+            return False
+        keys = self.keys(feed) if source.batch else [key]
+        started = self.clock()
+        self._schedule(feed, key, started + RETRY_SECONDS)  # due again soon in any case, pushed out below
+        try:
+            results = dict(source.poll(self._fetcher(feed), keys, self, started) or {})
+        except Exception as exc:  # noqa: BLE001 - a source that fails is a failed poll of every key asked
+            results = {k: exc for k in keys}
+        finished = self.clock()
+        clean = True
+        for name in keys:
+            result = results.get(name, LookupError(f"the source answered nothing for {name}"))
+            if result is UNCHANGED:
+                self._confirm(feed, name, started=started, finished=finished)
+                continue
+            if isinstance(result, BaseException):
+                error = source.redact(f"{type(result).__name__}: {str(result)[:300]}", self)
+                self.record(feed, name, started=started, finished=finished, error=error)
+                out["failed"].append((feed, name, error))
+                clean = clean and _unlisted(error)
+                continue
+            out["stored"] += int(self.record(feed, name, started=started, finished=finished, payload=result))
+        out["polled"].append(feed if source.batch else f"{feed}:{key}")
+        self._schedule(feed, key, finished + (source.every if clean else min(source.every, RETRY_SECONDS)))
+        return True
+
+    def _confirm(self, feed: str, key: str, *, started: float, finished: float) -> None:
+        """A successful poll that found the key's newest content unchanged without fetching it again
+        (`UNCHANGED`): its `polls` row, and nothing stored."""
+        if self._closed:
+            return
+        received = _received(finished)
+        with self._lock:
+            stats = self._load_stats()  # before this poll is written, or it would be counted twice
+            self.db.execute("INSERT INTO polls VALUES (?, ?, ?, ?, ?, ?, ?)", (feed, key, float(started), received, 1, 0, None))
+            self.db.commit()
+            row = stats.setdefault((feed, key), _empty_stats())
+            row["polls"] += 1
+            row["ok"] += 1
+            row["last_poll"] = row["last_ok"] = row["last_good"] = received
+            row["last_error"] = None
+
+    def failing(self, feed: str, key: str) -> bool:
+        """Did the key's last poll fail?"""
+        with self._lock:
+            return bool((self._load_stats().get((feed, key)) or {}).get("last_error"))
+
+    def waiting_for(self, feed: str) -> str | None:
+        """Why a keyed recorder (`Source.env`: The Odds API's, EIA's) polls nothing yet -- the owner
+        has not placed its key in the House's environment, or its host is not on the allowlist the
+        repository records -- or None when it may poll (and for every recorder that needs no key).
+        Waiting is not failing: nothing is polled and nothing is said to have failed."""
+        source = RECORDERS.get(feed)
+        if source is None or not source.env:
+            return None
+        if not self.owner_key(source.env):
+            return f"waiting for the owner's key: {source.env} in the House's .env (never in the repository)"
+        if source.host not in self._allowed_hosts():
+            return (f"waiting for the owner to allow {source.host}: scripts/floor_box.py hosts --add {source.host}, "
+                    "and the host in its LEAGUE_HOSTS")
+        return None
+
+    def owner_key(self, name: str) -> str:
+        """The owner's key `name` from the House's environment, or from its `.env` (`LEAGUE_ENV`, else
+        the repository's), read again every `ENV_SECONDS`: a key the owner places goes live without a
+        restart. Never logged, never stored (`Source.redact` takes it out of every error)."""
+        if self._environ is not None:
+            return str(self._environ.get(name) or "").strip()
+        import os
+
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+        now = time.monotonic()
+        with self._lock:
+            read = self._read.get("env")
+        if read is None or now - read[0] >= ENV_SECONDS:
+            found: dict[str, str] = {}
+            try:
+                path = Path(os.environ.get("LEAGUE_ENV") or REPO_ROOT / ".env")
+                if path.exists():
+                    for line in path.read_text(encoding="utf-8").splitlines():
+                        if "=" in line and not line.lstrip().startswith("#"):
+                            left, right = line.split("=", 1)
+                            found[left.strip()] = right.strip().strip('"').strip("'")
+            except Exception:  # noqa: BLE001 - an unreadable file is a key not placed
+                found = {}
+            read = (now, found)
+            with self._lock:
+                self._read["env"] = read
+        return str(read[1].get(name) or "").strip()
+
+    def _allowed_hosts(self) -> tuple[str, ...]:
+        """The hosts the House box may reach, as the repository records them (`scripts/floor_box.py`
+        LEAGUE_HOSTS, read without importing the deploy tool), re-read every `ENV_SECONDS`."""
+        if self._hosts is not None:
+            return self._hosts
+        now = time.monotonic()
+        with self._lock:
+            read = self._read.get("hosts")
+        if read is None or now - read[0] >= ENV_SECONDS:
+            read = (now, league_hosts())
+            with self._lock:
+                self._read["hosts"] = read
+        return read[1]
+
+    def _searched_seconds(self, feed: str, key: str, start: float, end: float, gap: float) -> float:
+        """A sparse history's coverage (8-Ks): the span its listing has been searched, from its
+        backfill's target -- or from the start of the source's history when the listing ended first
+        -- to its last good poll and `gap` more. Nothing until the backfill has searched back that far:
+        a quarter without an 8-K is only "no 8-K" once the listing has been read over it."""
+        with self._lock:
+            row = dict(self._history_state().get((feed, key)) or {})
+            last = (self._load_stats().get((feed, key)) or {}).get("last_good")
+        if not row.get("done") or last is None:
+            return 0.0
+        reach = float("-inf") if row.get("exhausted") else float(row["target"])
+        return max(0.0, min(end, float(last) + gap) - max(start, reach))
 
     # -- the store -------------------------------------------------------------------------------
     def record(self, feed: str, key: str, *, started: float, finished: float, payload: Any = None, error: str | None = None) -> bool:
@@ -1176,12 +1368,15 @@ class FeedRecorder:
         first = float(opening[0]) if opening else float(start)
         rows = [(float(at), json.loads(gzip.decompress(blob).decode("utf-8"))) for at, blob in db.execute(
             "SELECT received, payload FROM snapshots WHERE feed = ? AND key = ? AND received >= ? AND received <= ? ORDER BY received",
-            (feed, key, first - LOOKBACK_DAYS[feed] * 86400.0, end))]
+            (feed, key, first - LOOKBACK_DAYS.get(feed, 0) * 86400.0, end))]
         if not rows:
             return []
         with self._lock:
             since = (self._load_stats().get((feed, key)) or {}).get("first_ok")
-        derived = _vol_rows(rows) if feed == "vol" else _funding_rows(rows, since)
+        if feed in RECORDERS:
+            derived = RECORDERS[feed].derive(rows, since)
+        else:
+            derived = _vol_rows(rows) if feed == "vol" else _funding_rows(rows, since)
         return [(at, row) for at, row in derived if at >= first]
 
     # -- reads -----------------------------------------------------------------------------------
@@ -1286,6 +1481,8 @@ class FeedRecorder:
 
     def _covered_seconds(self, feed: str, key: str, start: float, end: float) -> float:
         gap = float(GAP_SECONDS.get(feed, SPORTS_QUIET_SECONDS))
+        if feed in RECORDERS and RECORDERS[feed].sparse:
+            return self._searched_seconds(feed, key, start, end, gap)
         if feed in HISTORY_FEEDS:  # the rows themselves, backfilled or polled: point-in-time history
             query = ("SELECT received FROM snapshots WHERE feed = ? AND key = ? AND received > ? AND received <= ? "
                      "ORDER BY received")
@@ -1346,6 +1543,14 @@ class FeedRecorder:
                                         if firsts else None,
                 "failing_now": [key for key, row in rows.items() if row["last_error"]],
             }
+            if feed in RECORDERS:
+                out[feed]["host"] = RECORDERS[feed].host
+                out[feed]["recorded"] = "at its final time (point-in-time history)" if feed in HISTORY_FEEDS else "live, at the House's receive time"
+                waiting = self.waiting_for(feed)
+                if waiting:
+                    out[feed]["waiting_for"] = waiting
+                if feed not in HISTORY_FEEDS:
+                    out[feed]["point_in_time"] = POINT_IN_TIME[feed]
             if feed in HISTORY_FEEDS:
                 provenance = {key: self._provenance(feed, key, polled=True) for key in keys}
                 replayable: dict[str, list[str]] = {"hour": [], "day": []}
@@ -1367,18 +1572,25 @@ class FeedRecorder:
                     "replayable_now": replayable,
                 })
         out["sports"]["unmapped_series"] = self.unmapped()[:40]
-        out["request"] = ("NEEDS['feeds'] = {'sports': ['nfl', 'mlb'], 'perps': ['BTC', 'ETH'], 'vol': ['BTC'], 'funding': ['BTC', 'SOL']} "
-                          "(known names only, at most six each; a Kalshi series such as KXNFLGAME names its league) adds "
-                          "ctx['feeds'][feed][key]: the latest row stamped at or before now -- sports and perps with when the House "
-                          "received them, vol and funding with when they became final (a candle's close, a rate's settlement). A key "
-                          "that is absent is unavailable; a strategy must also work when ctx['feeds'] is absent.")
-        out["replay"] = (f"Rows are replayed point in time by t. sports and perps are recorded live and nothing before recording "
-                         f"began exists: a strategy that declares them is replayed only once every declared key has {need} blocks of "
-                         f"its horizon recorded ({need} hours for an hour strategy, {need} days for a day strategy), and until then its "
-                         "replay is refused as unsupported input, which is not a trial. vol and funding are point-in-time history, "
-                         "backfilled from the venues' own history over the replay window and stamped when each value became final, "
-                         "so a strategy that declares them is replayed at once (see replayable_now). Live wakes are handed every "
-                         "feed at once.")
+        if "weather" in out:
+            out["weather"]["unmapped_series"] = weather_unmapped(self.niches())[:40]
+        out["request"] = ("NEEDS['feeds'] = {'sports': ['nfl', 'mlb'], 'perps': ['BTC', 'ETH'], 'vol': ['BTC'], 'funding': ['BTC', 'SOL'], "
+                          "'weather': ['KXHIGHNY'], 'forecast': ['KNYC'], 'nws': ['KNYC'], 'earnings': ['AAPL'], "
+                          "'earnings_date': ['AAPL'], 'rates': ['SOFR'], 'treasury': ['10Y'], 'odds': ['nfl'], 'tsa': ['checkpoint'], "
+                          "'oi': ['BTC']} (known names only, at most six keys each; a Kalshi series names its league or its "
+                          "settlement station) adds ctx['feeds'][feed][key]: the latest row stamped at or before now -- a live "
+                          "feed's with when the House received it, a history feed's with when it became final (a candle's close, a "
+                          "rate's settlement, an 8-K's acceptance, a forecast's issue plus its publication allowance). A key that is "
+                          "absent is unavailable; a strategy must also work when ctx['feeds'] is absent.")
+        live = ", ".join(feed for feed in FEEDS if feed not in HISTORY_FEEDS)
+        history = ", ".join(HISTORY_FEEDS)
+        out["replay"] = (f"Rows are replayed point in time by t. The live feeds ({live}) are recorded as received and nothing before "
+                         f"recording began exists: a strategy that declares them is replayed only once every declared key has {need} "
+                         f"blocks of its horizon recorded ({need} hours for an hour strategy, {need} days for a day strategy), and until "
+                         f"then its replay is refused as unsupported input, which is not a trial. The history feeds ({history}) are "
+                         "point-in-time history, backfilled from the sources' own history over the replay window and stamped when each "
+                         "value became final, so a strategy that declares them is replayed at once (see replayable_now). Live wakes "
+                         "are handed every feed at once.")
         return out
 
     def health(self) -> dict[str, Any]:
@@ -1402,6 +1614,11 @@ class FeedRecorder:
                              "polls": sum(row["polls"] for row in rows.values()),
                              "snapshots": sum(row["snapshots"] for row in rows.values()),
                              "next_due": stamp(min(due)) if due else None}
+                if feed in RECORDERS:
+                    out[feed]["host"] = RECORDERS[feed].host
+                    waiting = self.waiting_for(feed)
+                    if waiting:
+                        out[feed]["waiting_for"] = waiting
                 if feed in HISTORY_FEEDS:
                     provenance = {key: self._provenance(feed, key, polled=True) for key in keys}
                     out[feed]["backfill"] = {"complete": sum(1 for p in provenance.values() if p["complete"]),
@@ -1470,6 +1687,7 @@ class FeedRecorder:
             filling = [key for key, p in provenance.items() if p["pending"]]
             payload: dict[str, Any] = {
                 "asset": "feed", "feed": feed, "source": SOURCES[feed], "cadence": CADENCE[feed],
+                **({"host": RECORDERS[feed].host} if feed in RECORDERS else {}),
                 "status": "unavailable" if not firsts else "partial" if failing or filling else "current",
                 "start": stamp(min(firsts)) if firsts else None, "end": stamp(max(lasts)) if lasts else None,
                 "keys": {key: {"first": stamp(row["first_ok"]) if row["first_ok"] is not None else None,
@@ -1515,6 +1733,8 @@ class FeedRecorder:
         from .constitution import CONSTITUTION
 
         need = int(CONSTITUTION["ladder"]["replay"]["min_blocks"])
+        if feed in RECORDERS:
+            return RECORDERS[feed].outcome(self, need)
         described = self.describe()[feed]
         since = described["recording_since"]
         keys = ", ".join(described["recording"]) or "none yet"
@@ -1541,6 +1761,442 @@ class FeedRecorder:
                     "from its t on, and because the history is backfilled a strategy that declares it is replayed at once.")
         return (head + " Each row carries t, when the House received it; an absent key is unavailable. A replay shows the rows "
                 f"point in time and accepts a strategy that declares them once {need} blocks of its horizon are recorded.")
+
+
+# ------------------------------------------------------------------ the recorders of Sept 24, 2026
+#: A source's answer for a key whose newest content it has confirmed is still current without
+#: fetching it again (the weather ensemble, when no newer model run exists): a successful poll.
+UNCHANGED = object()
+#: How a recorder of Sept 24, 2026 says a key does not exist at its source (a ticker with no EDGAR
+#: filer, a coin OKX does not list): not a failure, and asked again after `UNLISTED_SECONDS`.
+NOT_LISTED = "not listed:"
+#: How often the House's `.env` and the allowlist the repository records are read again.
+ENV_SECONDS = 300.0
+REPO_ROOT = Path(__file__).resolve().parents[1]
+#: How often the weather ensemble asks Open-Meteo whether a newer model run exists.
+RUN_CHECK_SECONDS = 900.0
+_WEATHER_SERIES = re.compile(r"^KX(?:HIGH|LOW|RAIN|SNOW)[A-Z]*$")
+
+
+def _unlisted(error: Any) -> bool:
+    """Does a poll's error say the key does not exist at its source (not that the source failed)?"""
+    text = str(error or "")
+    return UNLISTED in text or NOT_LISTED in text
+
+
+def _cadence(feed: str) -> tuple[float, float]:
+    """(every, offset) of a history feed's passes (`_aligned`)."""
+    if feed in RECORDERS:
+        return float(RECORDERS[feed].every), float(RECORDERS[feed].offset)
+    return float(VOL_SECONDS if feed == "vol" else FUNDING_SECONDS), float(HISTORY_OFFSET)
+
+
+def league_hosts() -> tuple[str, ...]:
+    """The hosts the repository records on the House box's egress allowlist: `LEAGUE_HOSTS` in
+    `scripts/floor_box.py`, read with `ast` -- the deploy tool is never imported into the House. The
+    owner's `floor_box.py hosts --add` widens the live list; the tuple is its record."""
+    import ast
+
+    try:
+        tree = ast.parse((REPO_ROOT / "scripts" / "floor_box.py").read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return ()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "LEAGUE_HOSTS" for t in node.targets):
+            try:
+                return tuple(str(host).strip().lower() for host in ast.literal_eval(node.value))
+            except (ValueError, TypeError):
+                return ()
+    return ()
+
+
+def weather_stations(niches: Mapping[str, Any]) -> list[str]:
+    """The settlement stations of the Kalshi weather series the desks trade (the weather desk's
+    live and listed series first, then any other desk's), one each, in the order found."""
+    from ltcm.data.weather import city_for_series
+
+    out: list[str] = []
+    for niche in niches.values():
+        if getattr(niche, "venue", "") != "kalshi" or getattr(niche, "dormant", False):
+            continue
+        for series in getattr(niche, "universe", ()):
+            if not _WEATHER_SERIES.match(str(series).upper()):
+                continue
+            city = city_for_series(series)
+            if city is not None and city.station not in out:
+                out.append(city.station)
+    return out
+
+
+def weather_unmapped(niches: Mapping[str, Any]) -> list[str]:
+    """The weather series the desks trade that name no settlement station here (`KXRAIN`, a city
+    Kalshi added after `ltcm/data/weather.py`'s table): reported, never guessed."""
+    from ltcm.data.weather import city_for_series
+
+    out: list[str] = []
+    for niche in niches.values():
+        if getattr(niche, "venue", "") != "kalshi" or getattr(niche, "dormant", False):
+            continue
+        for series in getattr(niche, "universe", ()):
+            if _WEATHER_SERIES.match(str(series).upper()) and city_for_series(series) is None and series not in out:
+                out.append(series)
+    return out
+
+
+def _words(name: Any) -> set[str]:
+    return set(re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_").split("_")) - {""}
+
+
+class Source:
+    """One recorder of Sept 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): a feed
+    a strategy names in `NEEDS["feeds"]`, the host it reads, and how it is polled and stamped.
+
+    A live source (`history` False) keeps what a poll returned under the House's receive time and is
+    never backfilled: `poll(fetcher, keys, recorder, now)` answers each key's payload, `UNCHANGED`, or
+    the exception that made its poll fail. A history source keeps rows under the moment the SOURCE
+    says each became final -- an 8-K's acceptance, an interval's end, a forecast's issue plus its
+    publication allowance -- and is backfilled over the replay window: `page(...)` answers one
+    request of them, as `FeedRecorder._page` does for `vol` and `funding`. `sparse` history is a
+    list of events (8-Ks): its coverage is the span its listing has been searched, not how dense its
+    rows are. `env` names an owner's key the source needs: without it (and its host on the allowlist
+    the repository records) it polls nothing and says it is waiting, never that it failed."""
+
+    name = ""
+    host = ""
+    what = ""
+    source = ""
+    cadence = ""
+    point_in_time = ""
+    history = False
+    sparse = False
+    #: One request answers every key (a page of par yields, a table of rates) instead of one a key.
+    batch = False
+    every = 3600.0
+    offset = 0.0
+    #: Coverage: how long one good poll (a live source) or one row (a history source) counts.
+    gap = 3 * 3600.0
+    lookback_days = 0
+    #: How far back a history source is backfilled, in days; None: the House's replay window.
+    backfill_days: float | None = None
+    env: str | None = None
+    #: The most keys the House polls (what one strategy may DECLARE is `MAX_KEYS`).
+    max_keys = 64
+    timeout = TIMEOUT
+    #: A key a strategy might write, for the texts that say how to declare it.
+    example = ""
+    #: What a strategy reads beside each row, said once in the tool-request answer.
+    note = ""
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return []
+
+    def key_of(self, raw: Any) -> str | None:
+        return None
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        raise NotImplementedError
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        raise NotImplementedError
+
+    def page(self, fetcher: Any, key: str, *, before: float | None, floor: float, now: float, recorder: "FeedRecorder") -> dict[str, Any]:
+        raise NotImplementedError
+
+    def derive(self, rows: Sequence[tuple[float, Mapping[str, Any]]], since: float | None) -> list[tuple[float, dict[str, Any]]]:
+        """The fields a strategy reads beside each history row, from rows stamped at or before it."""
+        return [(at, dict(payload)) for at, payload in rows]
+
+    def endpoint(self, key: str) -> str:
+        return self.source
+
+    def redact(self, text: str, recorder: "FeedRecorder") -> str:
+        """An error with the owner's key taken out: a transport error names the whole URL, and a
+        keyed source's key rides in its query."""
+        if self.env:
+            secret = recorder.owner_key(self.env)
+            if secret:
+                text = text.replace(secret, "***")
+        return text
+
+    def asks(self, words: set[str]) -> bool:
+        """Does a tool request whose name has these words plainly ask for this feed?"""
+        return False
+
+    def outcome(self, recorder: "FeedRecorder", need: int) -> str:
+        """The answer a fulfilled tool request carries: what is recorded, how to declare and read it."""
+        described = recorder.describe().get(self.name) or {}
+        keys = ", ".join(described.get("recording") or []) or "none yet"
+        since = described.get("recording_since")
+        head = (f"Shipped (league/feeds.py): the House records {self.what}, for {keys}, {self.cadence}, since {since}. Declare "
+                f"NEEDS['feeds'] = {{'{self.name}': ['{self.example}']}} (at most six keys) and read "
+                f"ctx['feeds']['{self.name}'][key]. {self.note}".rstrip() + " ")
+        if self.history:
+            return head + ("Each row carries t, when it became final; a replay shows it from then on, and because the history is "
+                           "backfilled from the source's own record a strategy that declares it is replayed at once.")
+        return head + ("Each row carries t, when the House received it; an absent key is unavailable. A replay shows the rows point "
+                       f"in time and accepts a strategy that declares them once {need} blocks of its horizon are recorded.")
+
+
+class WeatherEnsemble(Source):
+    """Open-Meteo's GFS and ECMWF ensembles: the fair value of a Kalshi temperature bracket is the
+    share of members that land in it, and the weather desk is the one family with a proven real
+    record (Sept 24, 2026). Keyed by settlement station, polled only when a model has a newer run."""
+
+    name = "weather"
+    host = "ensemble-api.open-meteo.com"
+    source = ("open-meteo: ensemble-api.open-meteo.com/v1/ensemble (GFS 31 and ECMWF 51 members, hourly) per settlement station, "
+              "and each model run's start and availability from its meta.json")
+    cadence = "the model runs are checked every 15 minutes, and a station is fetched again only when Open-Meteo has a newer run"
+    what = ("per settlement station, the ensemble members' daily HIGH and LOW (F) and precipitation TOTAL (inches) for each of the "
+            "next three whole NWS climate days (midnight to midnight local STANDARD time: the day the CLI report, and every Kalshi "
+            "high, low and rain market, settles on), each {members, mean, sd, p10, p50, p90, min, max, n}, and runs: each model's "
+            "run start (init) and when Open-Meteo had it (available)")
+    point_in_time = ("each row is stamped with the House's receive time and shown only from then on, live and in replay; Open-Meteo "
+                     "keeps no archive of its ensembles, so nothing is backfilled (the forecast feed is the backfilled history)")
+    every = RUN_CHECK_SECONDS
+    gap = 3 * 3600.0
+    max_keys = 24
+    timeout = 30.0
+    example = "KXHIGHNY"
+    note = ("dates[day] = {high, low, precip_in}, the day a CLI date; runs[model] = {model, init, available, modified}. The "
+            "share of `members` inside a bracket is its ensemble probability (ltcm.data.openmeteo.bracket_probability rounds "
+            "half-up as the NWS does); members are hourly samples at the nearest model cell, a little cooler than a station's "
+            "maximum, which a strategy calibrates.")
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return weather_stations(recorder.niches())
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.weather import station_for
+
+        return station_for(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.openmeteo import OpenMeteo
+
+        return OpenMeteo(transport, timeout=self.timeout, clock=clock)
+
+    def runs(self, fetcher: Any, recorder: "FeedRecorder", now: float) -> dict[str, Any]:
+        """The newest run of each ensemble model, asked at most every `RUN_CHECK_SECONDS`."""
+        from ltcm.data.openmeteo import ENSEMBLE_HOST, ENSEMBLE_RUN_MODELS
+
+        state = recorder.state(self.name)
+        if state.get("runs") is None or now - float(state.get("checked") or 0.0) >= RUN_CHECK_SECONDS:
+            state["runs"] = {name: fetcher.run(model, ENSEMBLE_HOST) for name, model in ENSEMBLE_RUN_MODELS.items()}
+            state["checked"] = now
+        return state["runs"]
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data.weather import city_of_station, standard_offset_hours
+
+        runs = self.runs(fetcher, recorder, now)
+        seen = recorder.state(self.name).setdefault("seen", {})
+        out: dict[str, Any] = {}
+        for key in keys:
+            if seen.get(key) == runs and not recorder.failing(self.name, key):
+                out[key] = UNCHANGED  # its newest row came from these very runs
+                continue
+            try:
+                city = city_of_station(key)
+                data = fetcher.ensemble_days(city.latitude, city.longitude, standard_offset_hours(city))
+                out[key] = {"station": key, "city": city.name, "unit": "F", "precip_unit": "in", "runs": runs,
+                            "dates": {row["date"]: {name: row[name] for name in ("high", "low", "precip_in")} for row in data["days"][:3]}}
+                seen[key] = runs
+            except Exception as exc:  # noqa: BLE001 - one station that fails is a failed poll of that station
+                out[key] = exc
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        if words & {"history", "historical", "archive", "archived", "backfill", "observation", "observations", "observed"}:
+            return False
+        return bool(words & {"ensemble", "ensembles", "gefs", "ecmwf", "openmeteo"}) or (
+            bool(words & {"weather", "temperature", "temperatures"}) and bool(words & {"forecast", "forecasts", "model", "models"}))
+
+
+class NwsForecast(Source):
+    """The National Weather Service's own forecast for each settlement station, as issued: the NWS is
+    also the authority whose CLI report the markets settle on."""
+
+    name = "nws"
+    host = "api.weather.gov"
+    source = "nws: api.weather.gov /points/<lat,lon> -> /gridpoints/<office>/<x,y>/forecast and /forecast/hourly, per settlement station"
+    cadence = "hourly per station"
+    what = ("per settlement station, the National Weather Service forecast as issued: issued (its own updateTime), its 12-hour "
+            "periods (name, start, end, daytime, temperature F, pop %, short) and, for the next climate days, the hourly forecast's "
+            "max and min with the hours they cover")
+    point_in_time = ("each row is stamped with the House's receive time -- never before the issued time it carries -- and shown "
+                     "only from then on, live and in replay; the NWS keeps no archive of its forecasts, so nothing is backfilled")
+    every = 3600.0
+    gap = 3 * 3600.0
+    max_keys = 24
+    timeout = 20.0
+    example = "KNYC"
+    note = ("A daytime period's temperature is the NWS high and a night period's its low; days[i] = {date, hourly_max, "
+            "hourly_min, hours, pop_max} over the climate day (local standard time), with hours < 24 where the forecast "
+            "does not cover the day whole.")
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return weather_stations(recorder.niches())
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.weather import station_for
+
+        return station_for(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.weather import Weather
+
+        return Weather(transport, timeout=self.timeout, clock=clock)
+
+    def poll(self, fetcher: Any, keys: Sequence[str], recorder: "FeedRecorder", now: float) -> Mapping[str, Any]:
+        from ltcm.data.weather import city_of_station
+
+        out: dict[str, Any] = {}
+        for key in keys:
+            try:
+                out[key] = {name: value for name, value in fetcher.issued(city_of_station(key)).items() if name != "source"}
+            except Exception as exc:  # noqa: BLE001 - a station that fails is a failed poll of that station
+                out[key] = exc
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        return "nws" in words or {"national", "weather", "service"} <= words
+
+
+class ForecastHistory(Source):
+    """GFS's and ECMWF's deterministic forecasts at one, two and three days' lead, from Open-Meteo's
+    archive of them: a history a replay can use at once, where the ensemble can only be recorded.
+
+    The stamp is the whole of its honesty. Open-Meteo defines `<var>_previous_dayN` as the value
+    "predicted N x 24 hours before valid time" (https://open-meteo.com/en/docs/previous-runs-api),
+    so for climate day D at lead N every hourly value was predicted by D 23:00 local standard time
+    minus N days. A row for day X carries today X at lead 1, X+1 at lead 2 and X+2 at lead 3, all
+    predicted by X-1 23:00; it is stamped `ALLOWANCE_HOURS` later, X 11:00 local standard time, for
+    the run to have been published (Sept 23, 2026: Open-Meteo had GFS 0.13's run 5.6 hours after it
+    began, ECMWF IFS 0.25's 7.3). A live pass and the backfill stamp a row by the same rule, never
+    with when it was fetched. Day 0 is never asked for: it is the first hours of each run,
+    published after most of the hours it covers."""
+
+    name = "forecast"
+    host = "historical-forecast-api.open-meteo.com"
+    source = ("open-meteo: historical-forecast-api.open-meteo.com/v1/forecast temperature_2m_previous_day1..3 and "
+              "precipitation_previous_day1..3, models gfs_seamless and ecmwf_ifs025, per settlement station")
+    cadence = "a row a station a day, stamped 11:00 local standard time and polled hourly; backfilled over the replay window"
+    what = ("per settlement station, one row a day: GFS's and ECMWF's deterministic forecasts of the climate day's HIGH and LOW (F) "
+            "and precipitation TOTAL (inches) -- today at one day's lead, tomorrow at two, the day after at three -- as dates: "
+            "{day: {lead_days, models: {gfs_seamless: {high, low, precip_in}, ecmwf_ifs025: {...}}}}, with issued_by, the "
+            "latest any of them can have been made")
+    point_in_time = ("each row is stamped 11:00 local standard time: a lead-N value was predicted at most N days before its hour "
+                     "(Open-Meteo's definition), so everything in the row was made by 23:00 the evening before, and the stamp adds "
+                     "a 12-hour allowance for the run to be published (the runs of Sept 23 were published 5.6-7.3 hours after "
+                     "they began); backfilled rows are stamped by the same rule, never with when they were fetched, and day 0 -- "
+                     "forecasts published after the hours they cover -- is never used")
+    history = True
+    every = 3600.0
+    offset = 150.0
+    gap = 25 * 3600.0
+    max_keys = 24
+    timeout = 30.0
+    example = "KNYC"
+    note = ("dates[day] = {lead_days, models: {gfs_seamless: {high, low, precip_in}, ecmwf_ifs025: {...}}}; a model missing "
+            "an hour of a day at a lead is absent for it.")
+    ALLOWANCE_HOURS = 12
+    #: Days of rows one request asks for (a month of hourly lead values: about 60 KB).
+    PAGE_DAYS = 31
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return weather_stations(recorder.niches())
+
+    def key_of(self, raw: Any) -> str | None:
+        from ltcm.data.weather import station_for
+
+        return station_for(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.openmeteo import OpenMeteo
+
+        return OpenMeteo(transport, timeout=self.timeout, clock=clock)
+
+    def endpoint(self, key: str) -> str:
+        return f"https://historical-forecast-api.open-meteo.com/v1/forecast?station={key}&hourly=<var>_previous_day1..3"
+
+    def stamp_of(self, day: Any, offset_hours: float) -> float:
+        """The row of climate day `day`: its local standard midnight, plus `ALLOWANCE_HOURS` - 1."""
+        from datetime import date as date_type
+
+        start = datetime.combine(day if isinstance(day, date_type) else date_type.fromisoformat(str(day)[:10]),
+                                 datetime.min.time(), tzinfo=timezone.utc).timestamp() - float(offset_hours) * 3600.0
+        return start + (self.ALLOWANCE_HOURS - 1) * 3600.0
+
+    def day_at(self, moment: float, offset_hours: float) -> Any:
+        """The newest day whose row is stamped at or before `moment`."""
+        shifted = float(moment) + float(offset_hours) * 3600.0 - (self.ALLOWANCE_HOURS - 1) * 3600.0
+        return datetime.fromtimestamp(math.floor(shifted / 86400.0) * 86400.0, timezone.utc).date()
+
+    def page(self, fetcher: Any, key: str, *, before: float | None, floor: float, now: float, recorder: "FeedRecorder") -> dict[str, Any]:
+        """The rows of the days whose stamp lies in [floor, now] and before `before`, newest
+        `PAGE_DAYS` of them, from one request: each day X's leads 1-3 need climate days X to X+2,
+        which the UTC dates X to X+3 cover whole. A live pass (`before` None) that already holds
+        the newest row that can exist asks nothing."""
+        from datetime import timedelta
+
+        from ltcm.data.weather import city_of_station, standard_offset_hours
+
+        city = city_of_station(key)
+        offset = standard_offset_hours(city)
+        top = float(now) if before is None else min(float(now), float(before) - 0.001)
+        last = self.day_at(top, offset)
+        first = self.day_at(float(floor) - 0.001, offset) + timedelta(days=1)  # the first day stamped at or after floor
+        if before is None:
+            newest = (recorder._load_stats().get((self.name, key)) or {}).get("last_ok")
+            if newest is not None:
+                first = max(first, self.day_at(float(newest), offset) + timedelta(days=1))  # held already
+        if last < first:
+            return {"rows": [], "reached": True, "exhausted": False}
+        start = max(first, last - timedelta(days=self.PAGE_DAYS - 1))
+        answer = fetcher.previous_runs(city.latitude, city.longitude, start.isoformat(), (last + timedelta(days=3)).isoformat(), offset)
+        days = answer.get("days") or {}
+        rows = []
+        day = start
+        while day <= last:
+            dates = {}
+            for lead in (1, 2, 3):
+                target = (day + timedelta(days=lead - 1)).isoformat()
+                models = (days.get(target) or {}).get(lead)
+                if models:
+                    dates[target] = {"lead_days": lead, "models": models}
+            stamp_at = self.stamp_of(day, offset)
+            if dates and stamp_at <= now:
+                rows.append((stamp_at, {"station": key, "city": city.name, "unit": "F", "precip_unit": "in",
+                                        "issued_by": stamp(stamp_at - self.ALLOWANCE_HOURS * 3600.0),
+                                        "allowance_hours": self.ALLOWANCE_HOURS, "dates": dates}))
+            day += timedelta(days=1)
+        reached = start <= first
+        return {"rows": rows, "reached": reached, "exhausted": not rows and not reached}
+
+    def asks(self, words: set[str]) -> bool:
+        return bool(words & {"forecast", "forecasts"}) and bool(words & {"history", "historical", "archive", "archived", "backfill",
+                                                                         "lead", "leads", "previous"}) \
+            and not words & {"observation", "observations", "observed", "actual", "actuals"}
+
+
+def _register(*sources: Source) -> dict[str, Source]:
+    return {source.name: source for source in sources}
+
+
+#: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
+#: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
+RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory())
+FEEDS = FEEDS + tuple(RECORDERS)
+HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
+for _feed_name, _recorder in RECORDERS.items():
+    SOURCES[_feed_name] = _recorder.source
+    CADENCE[_feed_name] = _recorder.cadence
+    WHAT[_feed_name] = _recorder.what
+    POINT_IN_TIME[_feed_name] = _recorder.point_in_time
+    GAP_SECONDS[_feed_name] = _recorder.gap
+    LOOKBACK_DAYS[_feed_name] = _recorder.lookback_days
+del _feed_name, _recorder
 
 
 def _empty_stats() -> dict[str, Any]:

@@ -1,0 +1,454 @@
+"""The recorders of Sept 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7): the data
+hosts the owner allowed that morning, recorded for the strategies that asked for them.
+
+Gap 7's evidence: earnings calendars, settlement fixings, attention underlyings and weather ensembles
+were owner egress steps, the attention desk had no intent in 48 hours, and alpaca-crypto-majors was
+offered markets on 42-45 wakes an hour with no intent. These tests hold every new recorder to the
+three rules of `league/feeds.py` -- a row is visible only from the moment it became knowable, live
+and in replay; a failed poll stores nothing; unchanged content is stored once -- and to its own
+stamp: the House's receive time for what the source publishes without one, the source's own final
+time (an 8-K's acceptance, an interval's end, a forecast's issue plus its publication allowance)
+for what is backfilled.
+"""
+
+import json
+import math
+import tempfile
+import unittest
+import urllib.parse
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+from league import feeds, niches
+from league.commons import Commons
+from league.feeds import UNCHANGED, FeedRecorder, request_feed, requested
+from league.ledger import Ledger
+from league.replay import run_replay
+from league.tests.test_house import HouseCase
+from ltcm.data.openmeteo import ENSEMBLE_HOST, HISTORICAL_HOST
+from ltcm.tests.fakes import Clock, FakeTransport, TransportError
+
+
+def epoch(text: str) -> float:
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+
+def no_sleep(seconds):
+    return None
+
+
+def query(url: str) -> dict:
+    return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+
+
+class Meteo:
+    """An Open-Meteo that answers from synthetic weather, the way the recorded payloads are shaped
+    (ltcm/tests/fixtures/feeds): the ensemble for four UTC days from today, the archive of lead-N
+    forecasts for any UTC dates, and each run model's meta.json, whose run the test moves."""
+
+    MODELS = {"gfs_seamless": ("ncep_gefs_seamless", 3), "ecmwf_ifs025": ("ecmwf_ifs025_ensemble", 2)}
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.run_at = epoch("2026-09-23T12:00:00Z")  # the newest run's start; available six hours later
+        self.shift = 0.0  # what a newer run changes in every value
+        self.asked: list = []
+
+    @staticmethod
+    def temperature(valid: float, lead: int = 0, model: str = "gfs_seamless", member: int = 0) -> float:
+        hour = datetime.fromtimestamp(valid, timezone.utc).hour
+        return round(55.0 + hour * 0.5 + lead * 0.25 + (1.0 if model == "ecmwf_ifs025" else 0.0) + member * 0.1, 1)
+
+    def meta(self, run_model):
+        def answer(method, url, body):
+            self.asked.append(("meta", run_model))
+            return {"last_run_initialisation_time": self.run_at, "last_run_availability_time": self.run_at + 6 * 3600,
+                    "last_run_modification_time": self.run_at + 6 * 3600, "update_interval_seconds": 21600}
+        return answer
+
+    def ensemble(self, method, url, body):
+        self.asked.append(("ensemble", query(url)["latitude"]))
+        start = math.floor(self.clock() / 86400.0) * 86400.0
+        hours = [start + 3600 * i for i in range(24 * int(query(url)["forecast_days"]))]
+        hourly = {"time": [datetime.fromtimestamp(h, timezone.utc).strftime("%Y-%m-%dT%H:%M") for h in hours]}
+        for name, (suffix, count) in self.MODELS.items():
+            for member in range(count):
+                tag = f"_member{member:02d}" if member else ""
+                hourly[f"temperature_2m{tag}_{suffix}"] = [self.temperature(h, 0, name, member) + self.shift for h in hours]
+                hourly[f"precipitation{tag}_{suffix}"] = [0.01 if datetime.fromtimestamp(h, timezone.utc).hour == 12 else 0.0 for h in hours]
+        return {"latitude": 40.75, "longitude": -74.0, "utc_offset_seconds": 0, "timezone": "GMT", "hourly": hourly}
+
+    def archive(self, method, url, body):
+        q = query(url)
+        self.asked.append(("archive", q["start_date"], q["end_date"]))
+        first = epoch(q["start_date"] + "T00:00:00Z")
+        last = epoch(q["end_date"] + "T23:00:00Z")
+        hours = [first + 3600 * i for i in range(int((last - first) / 3600) + 1)]
+        hourly = {"time": [datetime.fromtimestamp(h, timezone.utc).strftime("%Y-%m-%dT%H:%M") for h in hours]}
+        for variable in q["hourly"].split(","):
+            lead = int(variable.rsplit("previous_day", 1)[1])
+            for model in q["models"].split(","):
+                if variable.startswith("temperature_2m"):
+                    hourly[f"{variable}_{model}"] = [self.temperature(h, lead, model) for h in hours]
+                else:
+                    hourly[f"{variable}_{model}"] = [0.02 * lead for h in hours]
+        return {"latitude": 40.79, "longitude": -73.97, "utc_offset_seconds": 0, "timezone": "GMT", "hourly": hourly}
+
+    def routes(self) -> dict:
+        return {ENSEMBLE_HOST + "/data/ncep_gefs025/static/meta.json": self.meta("ncep_gefs025"),
+                ENSEMBLE_HOST + "/data/ecmwf_ifs025_ensemble/static/meta.json": self.meta("ecmwf_ifs025_ensemble"),
+                ENSEMBLE_HOST + "/v1/ensemble?*": self.ensemble,
+                HISTORICAL_HOST + "/v1/forecast?*": self.archive}
+
+    def transport(self) -> FakeTransport:
+        return FakeTransport(self.routes())
+
+
+class RecorderCase(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.clock = Clock("2026-09-24T03:30:00Z")
+        self.alerts = []
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
+        self.addCleanup(self.ledger.close)
+
+    def recorder(self, keys, transports=None, **kw) -> FeedRecorder:
+        kw.setdefault("sleep", no_sleep)
+        recorder = FeedRecorder(path=Path(self.dir.name) / "feeds.sqlite", transports=transports, clock=self.clock, ledger=self.ledger,
+                                alert=lambda level, text: self.alerts.append((level, text)), keys=keys, **kw)
+        self.addCleanup(recorder.close)
+        return recorder
+
+    def stamps(self, store, feed, key) -> list:
+        return [at for (at,) in store.db.execute("SELECT received FROM snapshots WHERE feed = ? AND key = ? ORDER BY received", (feed, key))]
+
+
+# ---------------------------------------------------------------------------------- weather
+class Weather(RecorderCase):
+    def test_the_ensemble_is_recorded_per_station_with_its_runs_and_shown_only_from_receipt(self):
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC", "KLAX"]}, transports={"weather": meteo.transport()})
+        out = store.run()
+        self.assertEqual(out["failed"], [])
+        self.assertEqual(out["polled"], ["weather:KNYC", "weather:KLAX"])
+        row = store.latest({"weather": ["KNYC"]}, self.clock())["weather"]["KNYC"]
+        self.assertEqual(row["t"], "2026-09-24T03:30:00.000Z")  # received, never the run's own times
+        self.assertEqual(row["runs"]["gfs_seamless"], {"model": "ncep_gefs025", "init": "2026-09-23T12:00:00Z",
+                                                        "available": "2026-09-23T18:00:00Z", "modified": "2026-09-23T18:00:00Z"})
+        self.assertEqual(sorted(row["runs"]), ["ecmwf_ifs025", "gfs_seamless"])
+        # Three whole climate days (local STANDARD time: New York's Sept 24 runs 05:00Z to 04:00Z).
+        self.assertEqual(sorted(row["dates"]), ["2026-09-24", "2026-09-25", "2026-09-26"])
+        day = row["dates"]["2026-09-25"]
+        self.assertEqual(day["high"]["n"], 5)  # the control and two members of GEFS, the control and one of ECMWF
+        hours = [epoch("2026-09-25T05:00:00Z") + 3600 * i for i in range(24)]
+        self.assertEqual(day["high"]["max"], max(Meteo.temperature(h, 0, "ecmwf_ifs025", 1) for h in hours))
+        self.assertEqual(day["low"]["min"], min(Meteo.temperature(h, 0, "gfs_seamless", 0) for h in hours))
+        self.assertEqual(day["precip_in"]["mean"], 0.01)
+        # Los Angeles' climate day is eight hours behind UTC, all year.
+        self.assertEqual(sorted(store.latest({"weather": ["KLAX"]}, self.clock())["weather"]["KLAX"]["dates"]),
+                         ["2026-09-24", "2026-09-25", "2026-09-26"])
+        # Never before it was received, live or on a tape.
+        self.assertEqual(store.latest({"weather": ["KNYC"]}, self.clock() - 0.001), {})
+        self.assertEqual(store.series({"weather": ["KNYC"]}, self.clock() - 3600, self.clock() - 1, 300), {})
+        tape = store.series({"weather": ["KNYC"]}, self.clock() - 3600, self.clock() + 3600, 300)["weather"]["KNYC"]
+        self.assertEqual([r["t"] for r in tape], ["2026-09-24T03:30:00.000Z"])
+
+    def test_a_station_is_fetched_again_only_when_a_newer_run_exists(self):
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC"]}, transports={"weather": meteo.transport()})
+        store.run()
+        self.assertEqual([a[0] for a in meteo.asked], ["meta", "meta", "ensemble"])
+        self.clock.advance(899)
+        self.assertFalse(store.due())
+        self.clock.advance(1)
+        self.assertTrue(store.due())
+        store.run()  # the same runs: confirmed, not fetched
+        self.assertEqual([a[0] for a in meteo.asked], ["meta", "meta", "ensemble", "meta", "meta"])
+        entry = store.coverage({"weather": ["KNYC"]})["weather"]["KNYC"]
+        self.assertEqual((entry["polls"], entry["ok"], entry["snapshots"]), (2, 2, 1))
+        self.assertEqual(store.db.execute("SELECT changed FROM polls WHERE feed = 'weather' ORDER BY finished").fetchall(), [(1,), (0,)])
+        # A newer run: fetched, and a new row from the moment it was received.
+        meteo.run_at += 6 * 3600
+        meteo.shift = 1.5
+        self.clock.advance(900)
+        store.run()
+        self.assertEqual(meteo.asked[-1][0], "ensemble")
+        rows = store.series({"weather": ["KNYC"]}, self.clock() - 7200, self.clock(), 60)["weather"]["KNYC"]
+        self.assertEqual([r["runs"]["gfs_seamless"]["init"] for r in rows], ["2026-09-23T12:00:00Z", "2026-09-23T18:00:00Z"])
+        self.assertEqual(rows[-1]["t"], feeds.stamp(self.clock()))
+
+    def test_a_failed_poll_stores_nothing_and_is_fetched_again(self):
+        meteo = Meteo(self.clock)
+        routes = meteo.routes()
+        routes[ENSEMBLE_HOST + "/v1/ensemble?*"] = TransportError("the host is down")
+        store = self.recorder({"weather": ["KNYC"]}, transports={"weather": FakeTransport(routes)})
+        out = store.run()
+        self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("weather", "KNYC")])
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 0)
+        self.assertEqual(store.latest({"weather": ["KNYC"]}, self.clock()), {})  # absent: unavailable, never zero
+        self.assertEqual(store.db.execute("SELECT ok, error FROM polls").fetchall()[0][0], 0)
+        self.assertTrue(all(level == "warning" for level, _ in self.alerts))
+        store._fetchers.clear()
+        store._transports = {"weather": meteo.transport()}
+        self.clock.advance(300)  # a failed key is asked again in five minutes, not at the next quarter hour's check
+        self.assertTrue(store.due())
+        store.run()
+        self.assertEqual(meteo.asked[-1][0], "ensemble")  # the same runs, but its last poll failed: fetched
+        self.assertIn("KNYC", store.latest({"weather": ["KNYC"]}, self.clock())["weather"])
+        # Open-Meteo's meta.json down: every station's poll fails, and nothing is stored.
+        down = FakeTransport(default=TransportError("the host is down"))
+        other = FeedRecorder(path=Path(self.dir.name) / "other.sqlite", transports={"weather": down}, clock=self.clock, ledger=None,
+                             keys={"weather": ["KNYC", "KLAX"]})
+        self.addCleanup(other.close)
+        self.assertEqual(sorted(k for _, k, _ in other.run()["failed"]), ["KLAX", "KNYC"])
+        self.assertEqual(other.db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0], 0)
+
+    def test_the_nws_forecast_is_recorded_as_issued_and_unchanged_content_once(self):
+        from ltcm.tests.test_data_weather import POINTS, recorded
+
+        transport = FakeTransport({POINTS: recorded("nws_points_knyc.json"),
+                                   "https://api.weather.gov/gridpoints/OKX/34,45/forecast": recorded("nws_forecast_knyc.json"),
+                                   "https://api.weather.gov/gridpoints/OKX/34,45/forecast/hourly": recorded("nws_hourly_knyc.json")})
+        store = self.recorder({"nws": ["KNYC"]}, transports={"nws": transport})
+        store.run()
+        row = store.latest({"nws": ["KXHIGHNY"]}, self.clock())["nws"]["KNYC"]
+        self.assertEqual((row["t"], row["issued"], row["periods"][1]["temperature"]), ("2026-09-24T03:30:00.000Z", "2026-09-23T21:46:15Z", 68.0))
+        self.assertLessEqual(epoch(row["issued"]), epoch(row["t"]))
+        self.assertNotIn("source", row)
+        self.clock.advance(3600)
+        store.run()
+        entry = store.coverage({"nws": ["KNYC"]})["nws"]["KNYC"]
+        self.assertEqual((entry["polls"], entry["ok"], entry["snapshots"]), (2, 2, 1))  # the same forecast: stored once
+
+
+class ForecastHistory(RecorderCase):
+    def setUp(self):
+        super().setUp()
+        self.clock.set("2026-09-24T17:00:00Z")  # 12:00 EST: today's New York row (stamped 16:00Z) is out
+        self.meteo = Meteo(self.clock)
+
+    def test_every_row_is_stamped_by_the_rule_and_never_shown_before(self):
+        store = self.recorder({"forecast": ["KNYC"]}, transports={"forecast": self.meteo.transport()}, backfill_pages=10)
+        out = store.run()
+        self.assertEqual(out["failed"], [])
+        stamps = self.stamps(store, "forecast", "KNYC")
+        # One row a day at 11:00 New York standard time (16:00Z), never one stamped after now.
+        self.assertTrue(all(datetime.fromtimestamp(at, timezone.utc).strftime("%H:%M:%S") == "16:00:00" for at in stamps))
+        self.assertEqual(feeds.stamp(stamps[-1]), "2026-09-24T16:00:00.000Z")
+        self.assertEqual({b - a for a, b in zip(stamps, stamps[1:])}, {86400.0})
+        rows = store.db.execute("SELECT received, started FROM snapshots WHERE feed = 'forecast'").fetchall()
+        self.assertTrue(all(started >= received for received, started in rows))  # fetched after, stamped by the rule
+        row = store.latest({"forecast": ["KNYC"]}, self.clock())["forecast"]["KNYC"]
+        self.assertEqual(row["t"], "2026-09-24T16:00:00.000Z")
+        self.assertEqual(row["issued_by"], "2026-09-24T04:00:00.000Z")  # 23:00 EST the evening before
+        self.assertEqual({day: v["lead_days"] for day, v in row["dates"].items()}, {"2026-09-24": 1, "2026-09-25": 2, "2026-09-26": 3})
+        # Each value is the model's forecast at that lead over the whole climate day (05:00Z to 04:00Z).
+        hours = [epoch("2026-09-25T05:00:00Z") + 3600 * i for i in range(24)]
+        self.assertEqual(row["dates"]["2026-09-25"]["models"]["ecmwf_ifs025"]["high"], max(Meteo.temperature(h, 2, "ecmwf_ifs025") for h in hours))
+        self.assertEqual(row["dates"]["2026-09-26"]["models"]["gfs_seamless"]["low"], min(Meteo.temperature(h, 3, "gfs_seamless") for h in
+                                                                                        [epoch("2026-09-26T05:00:00Z") + 3600 * i for i in range(24)]))
+        self.assertEqual(row["dates"]["2026-09-24"]["models"]["gfs_seamless"]["precip_in"], round(24 * 0.02, 3))
+        # A millisecond before 16:00Z the day before's row is what a wake or a replay step sees.
+        before = store.latest({"forecast": ["KNYC"]}, epoch("2026-09-24T15:59:59.999Z"))["forecast"]["KNYC"]
+        self.assertEqual((before["t"], sorted(before["dates"])), ("2026-09-23T16:00:00.000Z", ["2026-09-23", "2026-09-24", "2026-09-25"]))
+        self.assertNotIn("previous_day0", json.dumps(self.meteo.asked))
+
+    def test_the_backfill_reaches_its_target_and_a_live_pass_asks_only_for_a_new_day(self):
+        store = self.recorder({"forecast": ["KNYC"]}, transports={"forecast": self.meteo.transport()}, backfill_pages=2)
+        store.run()  # the newest month, then two pages of backfill
+        for _ in range(10):
+            if not store._backfill_pending():
+                break
+            self.clock.advance(61)
+            store.run()
+        self.assertFalse(store._backfill_pending())
+        state = store.coverage({"forecast": ["KNYC"]})["forecast"]["KNYC"]
+        self.assertTrue(state["backfill"]["complete"], state)
+        stamps = self.stamps(store, "forecast", "KNYC")
+        target = epoch("2026-09-24T17:00:00Z") - 60 * 86400
+        self.assertTrue(0 <= stamps[0] - target < 86400)  # the first row at or after the target: 60 days back
+        self.assertEqual({b - a for a, b in zip(stamps, stamps[1:])}, {86400.0})  # no hole
+        asked = len(self.meteo.asked)
+        self.clock.set("2026-09-25T15:59:00Z")
+        store.run()
+        self.assertEqual(len(self.meteo.asked), asked)  # the newest row that can exist is held: nothing asked
+        self.clock.set("2026-09-25T16:05:00Z")
+        store.run()
+        self.assertEqual(len(self.meteo.asked), asked + 1)
+        self.assertEqual(self.meteo.asked[-1], ("archive", "2026-09-25", "2026-09-28"))
+        self.assertEqual(feeds.stamp(self.stamps(store, "forecast", "KNYC")[-1]), "2026-09-25T16:00:00.000Z")
+        # Covered over a Kalshi daily strategy's 49 days: the replay gate's 20 day-blocks and more.
+        now = self.clock()
+        window = store.coverage({"forecast": ["KNYC"]}, now - 49 * 86400, now)["forecast"]["KNYC"]
+        self.assertEqual(window["covered_seconds"], 49 * 86400.0)
+
+    def test_the_replay_shows_a_row_only_from_its_stamp(self):
+        store = self.recorder({"forecast": ["KNYC"]}, transports={"forecast": self.meteo.transport()}, backfill_pages=10)
+        store.run()
+        code = '''
+from datetime import datetime
+
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "t", "symbols": ["BTC/USD"], "bars": {"timeframe": "5Min", "limit": 5},
+         "feeds": {"forecast": ["KXHIGHNY"]}}
+PARAMS = {}
+
+def decide(ctx):
+    row = ((ctx.get("feeds") or {}).get("forecast") or {}).get("KNYC")
+    if row is not None and datetime.fromisoformat(row["t"].replace("Z", "+00:00")) > datetime.fromisoformat(ctx["now"].replace("Z", "+00:00")):
+        raise ValueError("a forecast from the future")
+    seen = list((ctx.get("memory") or {}).get("seen") or [])
+    seen.append([ctx["now"], row and row["t"]])
+    return {"intents": [], "memory": {"seen": seen}}
+'''
+        times = ["2026-09-23T15:59:59Z", "2026-09-23T16:00:00Z", "2026-09-24T15:59:59Z", "2026-09-24T16:00:00Z", "2026-09-24T17:00:00Z"]
+        wanted = requested({"forecast": ["KXHIGHNY"]})
+        self.assertEqual(wanted, {"forecast": ["KNYC"]})
+        tape = {"venue": "alpaca", "horizon": "hour", "step_seconds": 1,
+                "steps": [{"t": t, "bars": {"BTC/USD": {"o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0}}} for t in times],
+                "feeds": store.series(wanted, "2026-09-23T00:00:00Z", self.clock(), 1)}
+        result = run_replay(code, {}, tape, stake=100.0, audit=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual([seen[1] for seen in result["final_memory"]["seen"]],
+                         ["2026-09-22T16:00:00.000Z", "2026-09-23T16:00:00.000Z", "2026-09-23T16:00:00.000Z",
+                          "2026-09-24T16:00:00.000Z", "2026-09-24T16:00:00.000Z"])
+
+
+class WhatIsRecorded(RecorderCase):
+    def test_the_stations_follow_the_weather_desk(self):
+        desks = niches.load()
+        stations = feeds.weather_stations(desks)
+        self.assertEqual(len(stations), 20)
+        self.assertEqual(stations[:3], ["KLAX", "KMIA", "KNYC"])  # the desk's own order: KXRAIN names none
+        self.assertEqual(len(set(stations)), 20)
+        self.assertIn("KXRAIN", feeds.weather_unmapped(desks))
+
+    def test_needs_feeds_accept_the_weather_feeds_by_station_series_or_city(self):
+        self.assertEqual(requested({"weather": ["KXHIGHNY", "KXLOWTNYC", "nyc", "KXBTCD", "KLAX", "KXHIGHTPHX"],
+                                    "nws": ["new york"], "forecast": ["KXLOWTPHIL", "KXRAIN"], "fog": ["KNYC"]}),
+                         {"weather": ["KNYC", "KLAX", "KPHX"], "nws": ["KNYC"], "forecast": ["KPHL"]})
+        desk = niches.load()["kalshi-weather"]
+        out = niches.constrain({"venue": "kalshi", "horizon": "day", "series": ["KXHIGHNY"],
+                                "feeds": {"weather": ["KXHIGHNY"], "forecast": ["KNYC"], "perps": ["BTC"]}}, desk)
+        self.assertEqual(out["feeds"], {"weather": ["KNYC"], "forecast": ["KNYC"], "perps": ["BTC"]})
+
+    def test_describe_health_and_the_coverage_rows_name_the_host(self):
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC"], "forecast": ["KNYC"]}, transports=meteo.transport(), backfill_pages=10)
+        store.run()
+        described = store.describe()
+        self.assertEqual((described["weather"]["host"], described["forecast"]["host"]),
+                         ("ensemble-api.open-meteo.com", "historical-forecast-api.open-meteo.com"))
+        self.assertEqual(described["weather"]["recording"], ["KNYC"])
+        self.assertIn("receive time", described["weather"]["point_in_time"])
+        self.assertIn("11:00 local standard time", described["forecast"]["point_in_time"])
+        self.assertEqual(described["forecast"]["replayable_now"], {"hour": ["KNYC"], "day": ["KNYC"]})
+        self.assertNotIn("waiting_for", described["weather"])
+        health = store.health()
+        self.assertEqual((health["weather"]["host"], health["weather"]["recording"]), ("ensemble-api.open-meteo.com", 1))
+        rows = {e.payload["feed"]: e.payload for e in self.ledger.iter(kinds="data.coverage")}
+        self.assertEqual((rows["weather"]["host"], rows["weather"]["status"], rows["weather"]["asset"]),
+                         ("ensemble-api.open-meteo.com", "current", "feed"))
+        self.assertEqual(rows["forecast"]["backfill"]["KNYC"]["complete"], True)
+
+    def test_the_weather_recorders_give_way_to_a_live_board(self):
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC", "KLAX"], "sports": ["nfl"]}, transports=meteo.transport())
+        store._schedule("sports", "nfl", self.clock() + 10 ** 6)
+        store._next[("weather", "KLAX")] = 0.0
+        store._schedule("sports", "nfl", 0.0)  # a scoreboard is due: the weather pass waits for it
+        self.assertFalse(store._poll_source("weather", "KLAX", {"polled": [], "stored": 0, "failed": []}))
+        self.assertEqual(meteo.asked, [])
+        self.assertTrue(store.due())
+
+    def test_requests_for_weather_data_are_answered_once_it_is_recorded(self):
+        self.assertEqual({name: request_feed(name) for name in (
+            "weather_ensemble_forecasts", "gfs_ecmwf_ensemble_members", "nws_point_forecast", "historical_weather_forecasts",
+            "weather_forecast_history_backfill", "live_sports_scores", "weather_station_observations_history")},
+            {"weather_ensemble_forecasts": "weather", "gfs_ecmwf_ensemble_members": "weather", "nws_point_forecast": "nws",
+             "historical_weather_forecasts": "forecast", "weather_forecast_history_backfill": "forecast",
+             "live_sports_scores": "sports", "weather_station_observations_history": None})
+        commons = Commons(self.ledger, clock=self.clock)
+        asked = commons.request_tool("mullins-2", "weather_ensemble_forecasts", "the fair value of each bracket I bid on")["queued"]
+        store = self.recorder({"weather": ["KNYC"]}, transports=Meteo(self.clock).transport())
+        self.assertEqual(store.fulfil_requests(commons), [])
+        store.run()
+        self.assertEqual(store.fulfil_requests(commons), [asked])
+        answer = self.ledger.last("tool.fulfilled").payload["outcome"]
+        self.assertIn("NEEDS['feeds'] = {'weather': ['KXHIGHNY']}", answer)
+        self.assertIn("ctx['feeds']['weather'][key]", answer)
+        self.assertIn("KNYC", answer)
+
+
+# ------------------------------------------------------------------------------ in the House
+FORECAST_READER = '''
+from datetime import datetime
+
+NEEDS = {"venue": "alpaca", "horizon": "hour", "style": "forecast-reader", "symbols": ["BTC/USD"],
+         "bars": {"timeframe": "5Min", "limit": 10}, "wake_minutes": 5, "feeds": {"forecast": ["KXHIGHNY"]}}
+PARAMS = {}
+
+
+def decide(ctx):
+    memory = dict(ctx.get("memory") or {})
+    row = ((ctx.get("feeds") or {}).get("forecast") or {}).get("KNYC")
+    if row is not None:
+        if datetime.fromisoformat(row["t"].replace("Z", "+00:00")) > datetime.fromisoformat(ctx["now"].replace("Z", "+00:00")):
+            raise ValueError("a forecast from the future")
+        memory["seen"] = int(memory.get("seen") or 0) + 1
+    return {"intents": [], "memory": memory}
+'''
+
+
+class InTheHouse(HouseCase):
+    def test_a_strategy_declaring_the_forecast_history_replays_once_the_backfill_is_in(self):
+        self.clock.now = epoch("2026-09-24T17:00:00Z")
+        recorder = FeedRecorder(self.house, Path(self.dir.name) / "feeds.sqlite", Meteo(self.clock).transport(),
+                                keys={"forecast": ["KNYC"]}, sleep=no_sleep, backfill_pages=10)
+        self.house.feeds = recorder
+        self.addCleanup(recorder.close)
+        agent = self.house.spawn("reader", "test-family", FORECAST_READER, reason="test")
+        self.assertEqual(agent.needs["feeds"], {"forecast": ["KNYC"]})
+        with self.assertRaises(ValueError) as caught:
+            self.house._run_replay(agent, agent.code, agent.needs, agent.params)
+        self.assertTrue(str(caught.exception).startswith("unsupported input: feeds being backfilled: forecast KNYC"), str(caught.exception))
+        self.assertEqual(self.house._replay_own(agent), {"agent": agent.id, "skipped": "waiting for recorded feeds"})
+        self.assertEqual(recorder.run()["failed"], [])
+        key, tape = self.house.tape_for(agent.needs)
+        self.assertTrue(key.endswith(':feeds:{"forecast":["KNYC"]}:ready'), key)
+        result = run_replay(agent.code, {}, tape, stake=200.0, audit=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["errors"], 0)  # never a forecast from the future
+        self.assertGreater(result["final_memory"]["seen"], 0)
+        # A live wake is handed the newest row stamped by now.
+        seated = self.seated(name="live-reader", code=FORECAST_READER)
+        ctx = self.house.snapshot(seated, self.house.book_of(seated))
+        self.assertEqual(ctx["feeds"]["forecast"]["KNYC"]["t"], "2026-09-24T16:00:00.000Z")
+        described = self.house.research_capabilities(seated)["observations"]
+        self.assertEqual(described["replayable_history"]["forecast"]["replayable_now"], {"hour": ["KNYC"], "day": ["KNYC"]})
+
+    def test_a_kalshi_weather_tape_carries_the_ensemble_and_its_key_names_it(self):
+        recorder = FeedRecorder(self.house, Path(self.dir.name) / "feeds.sqlite", Meteo(self.clock).transport(), keys={"weather": ["KNYC"]})
+        self.house.feeds = recorder
+        self.addCleanup(recorder.close)
+        recorder.run()
+
+        class Kalshi:
+            def tape(self, series, **kw):
+                return {"venue": "kalshi", "horizon": kw["horizon"], "step_seconds": kw["step_seconds"], "steps": [], "results": {}}
+
+        self.house.kalshi_data = Kalshi()
+        needs = niches.constrain({"venue": "kalshi", "horizon": "day", "style": "w", "series": ["KXHIGHNY"],
+                                  "feeds": {"weather": ["KXHIGHNY", "KXLOWTPHIL"]}}, niches.load()["kalshi-weather"])
+        self.assertEqual(needs["feeds"], {"weather": ["KNYC", "KPHL"]})
+        key, tape = self.house.tape_for(needs)
+        self.assertTrue(key.endswith(':feeds:{"weather":["KNYC","KPHL"]}:short'), key)  # recorded live: twenty days to wait
+        self.assertEqual(list(tape["feeds"]["weather"]), ["KNYC"])  # nothing recorded for Philadelphia: absent
+        with self.assertRaises(ValueError) as caught:
+            self.house._require_feeds(needs, needs["feeds"], tape["feeds_coverage"])
+        self.assertTrue(str(caught.exception).startswith("unsupported input: feeds not recorded: weather KPHL"), str(caught.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()

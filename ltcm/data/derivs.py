@@ -54,13 +54,13 @@ import urllib.parse
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from . import DataError, HttpTransport, TransportError, iso, read_json, require
+from . import CONTACT_USER_AGENT, DataError, HttpTransport, TransportError, iso, read_json, require
 
 DERIBIT_HOST = "https://www.deribit.com"
 OKX_HOST = "https://www.okx.com"
 HYPERLIQUID_HOST = "https://api.hyperliquid.xyz"
 KRAKEN_HOST = "https://futures.kraken.com"
-USER_AGENT = "ltcm (agent@blakewoods.us)"
+USER_AGENT = CONTACT_USER_AGENT  # one constant for the whole package (ltcm/data/__init__.py)
 SOURCE = "derivs"
 
 #: Deribit allows 20 public requests a second unauthenticated; OKX 20 per 2 seconds. Ten a second
