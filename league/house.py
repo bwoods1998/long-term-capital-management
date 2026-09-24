@@ -3702,16 +3702,26 @@ class House:
         """Book a holding the venue will not trade as dust (Sept 24, 2026), the way the reconciliation books a
         sub-cent position difference (`Book._position_dust`): off the agent's account at no price, onto the
         House row, which then holds the units the venue still shows, so the book still reconciles and the
-        account can close. Said once on the ledger: the two dust fills and one info alert."""
+        account can close. Said once on the ledger: the two dust fills and one info alert.
+
+        The two fills are ONE ledger group (`Ledger.append_many`), applied to the book only once both are written:
+        as two appends, a crash or a failed write between them (a "database is locked" on a busy box) left the book
+        short of the venue by the holding -- under a cent the reconciliation re-books the crumb, but dust by the
+        venue's minimal quantity can be worth more, and that difference froze the book's entries, in the process
+        and after a restart (the review of #245, Sept 24, 2026)."""
         from .book import text
 
+        common = {"book": book.name, "source": "dust", "instrument": instrument.to_dict(), "quantity": text(quantity), "price": "0",
+                  "fee_usd": "0", "cash_delta": "0", "real_money": book.real_money}
         with book._lock:
-            entry = self.ledger.append("book.fill", {
-                "book": book.name, "source": "dust", "instrument": instrument.to_dict(), "side": "sell", "quantity": text(quantity),
-                "price": "0", "fee_usd": "0", "cash_delta": "0", "position_delta": text(-quantity), "real_money": book.real_money,
-                "reason": f"the House booked it as dust: {why}"}, agent=agent.id)
-            book._apply(entry.kind, agent.id, entry.payload, entry.at)
-            book._position_dust(instrument, quantity)
+            entries = self.ledger.append_many([
+                {"kind": "book.fill", "agent": agent.id, "payload": {**common, "side": "sell", "position_delta": text(-quantity),
+                                                                     "reason": f"the House booked it as dust: {why}"}},
+                # The House row, as `Book._position_dust` books a surplus: the units the venue still shows.
+                {"kind": "book.fill", "agent": HOUSE, "payload": {**common, "side": "buy", "position_delta": text(quantity)}},
+            ])
+            for entry in entries:
+                book._apply(entry.kind, entry.agent, entry.payload, entry.at)
         self.alert("info", f"{agent.id}: {book.name} booked {text(quantity)} {instrument.market_id or instrument.symbol} as dust "
                            f"instead of selling it ({why}); the account can close")
 

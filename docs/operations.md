@@ -526,7 +526,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   the venue will not trade -- worth under a cent even at the ask (a holding under a cent at its mark,
   the last bid, is quoted again: a stub bid on a thin book is not a price), or under the venue's
   minimal order quantity where the asset record states one -- and moved it off the account onto the House row, as
-  the reconciliation books position dust (two `book.fill` rows with `source: dust`); the account then
+  the reconciliation books position dust (two `book.fill` rows with `source: dust`, written as one
+  ledger group: a crash between them cannot leave the book short of the venue); the account then
   closes. Before, haghani-h426990's 0.000000001 LINK/USD was sent every five minutes and refused 107
   times ("order qty must be >= minimal qty of order 0.000000002").
 - **"the House's sale of ... was refused 3 times in a row"** (warning): the same refusal of a

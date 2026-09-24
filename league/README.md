@@ -359,7 +359,7 @@ status is exposed in health and agent research context; qualification is distinc
    cent even at the ask -- one under a cent at its mark, the last bid, is quoted again -- or under the
    venue's minimal order quantity where its asset record states one)
    is booked as dust (`_book_dust`: off the account, onto the House row, as `Book._position_dust`
-   books a reconciliation's crumbs) instead of sent, and the same refusal of a House-sent sale
+   books a reconciliation's crumbs, both rows one ledger group) instead of sent, and the same refusal of a House-sent sale
    `WIND_DOWN_REFUSALS` (3) times in a row stops its retries with one warning naming the order
    (`wind_down_refusals` in house.json), until the holding changes or a day has passed
    (`WIND_DOWN_RETRY_SECONDS`).
