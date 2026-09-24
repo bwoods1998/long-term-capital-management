@@ -120,16 +120,18 @@ observations winning, as favourites win) must also clear the House's exact loss-
 (`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. Since Deploy B (Sept 24,
 2026, `family_proven.unit: "at_risk"`) an event is measured by what it made per dollar its positions
 put at risk (ln(1 + 1% x r) / 1%, r never below -1: a contract that expires worthless counts -1.005,
-never an account's ruin), so a practice event and a real one of the same bet count alike and size
-cannot inflate a family's proof; `"account"` restores the member's account growth. An agent of a proven family is seated
+never an account's ruin), and weighs what it put at risk against its member's usual size on that book, so
+a practice event and a real one of the same bet count alike, scaling every bet up or down proves nothing
+faster, and a large losing bet counts for its dollars (the record is what the events made over what they
+put at risk); `"account"` restores the member's account growth. An agent of a proven family is seated
 as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
 ($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
 and a bunt a probe after the bound falls to zero or below; the stake moves toward the new target by
 free cash only, never by a forced sale. `research_context.qualification_policy.allocator.your_family`
 shows your family's state ("unproven", "proven" or "swing"), bound, count, capacity and what set a
-swing's stake. A family is the mechanism: the lab's graduates and the foundry's cards are born into
-families of their own; research children and parameter mutations stay in their parent's family, and
-its maker and taker entries are pooled apart. On Kalshi, closed trades and settlements count ONCE PER
+swing's stake. A family is the mechanism: every lab graduate (a lab nudge of a member's parameters
+included) and every foundry card is born into a family of its own; research children stay in their
+parent's family whatever they change, and its maker and taker entries are pooled apart. On Kalshi, closed trades and settlements count ONCE PER
 EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
 strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
 
@@ -139,12 +141,16 @@ t bound, and the loss-rate bound for a favourites record), and the frontier audi
 entry on that record (the family packet: every member's real closes, event by event, with the stake
 it would take), every member on real money is staked at the family's ramp: twice `bunt_usd` ($60 on
 Kalshi) when the family enters, doubled after every 10 further WINNING independent real settlements
-while the bound stays above zero, up to full Kelly on that bound against the venue's capital and 60%
-of the venue (both the FAMILY's, shared by its members on real money), held where the family's fill
+while the bound stays above zero, up to full Kelly on that bound against the venue's capital (capital
+at risk on one event: the stake is that over the 25% of it one Kalshi event may hold) and 60% of the
+venue (both the FAMILY's, shared by its members on real money, a member seated in the same pass
+included from its first dollar), held where the family's fill
 rate at the bigger size is under half its fill rate at the smaller one ("capacity" on the board), and
 never under the bunt. The envelope's headroom bounds every raise. A bound at zero or below returns the
-members to bunts (to probes if the pooled proof has gone too), by free cash only; an approval on
-record lets the family re-enter without a second audit. A swinging member's positions are the same
+members to bunts (to probes if the pooled proof has gone too), by free cash only, and so does a live
+grant that stops releasing stakes above the bunt (its rung 3); an approval on record lets the family
+re-enter without a second audit. The family's audit is the family's: it is never read as the verdict on
+the member it was written against, whose own promotions are audited as before. A swinging member's positions are the same
 share of its stake, and the book holds it to its daily-loss rule as it holds every swing.
 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):

@@ -116,7 +116,8 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   tier: pocket change for an unproven mechanism. A family is proven when its pooled forward record
   -- every member ever born, living or dead, one observation per independent event, practice at
   half weight and real money in full -- has at least 10 observations and a one-sided 80% lower bound
-  above zero on what its events made per dollar they put at risk (since Deploy B; for a favourites
+  above zero on what its events made per dollar they put at risk, each weighing what it put at risk
+  (since Deploy B; for a favourites
   record, one of mostly small wins, the House's exact loss-rate bound as well:
   `family_proven.lopsided_gate`); a probe becomes a bunt the pass after that, and a bunt a probe when
   the bound falls. On Kalshi, closed trades and settlements count once per event, so strikes stacked
