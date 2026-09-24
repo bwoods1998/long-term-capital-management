@@ -220,6 +220,15 @@ class HouseCaseReal(unittest.TestCase):
             broker.set_quote(instrument_for(broker.venue, {"symbol": "BTC/USD"}), f"{self.price - 2:.2f}", f"{self.price + 2:.2f}")
         self.data.price = self.price
 
+    def proven_family(self):
+        """Only a proven family's agent swings (the close-the-gaps run, Sept 24, 2026): a test of the swing
+        band's mechanics seats a proven family's agent."""
+        from league.tests.test_promotion_on_proof import canned
+
+        proven = patch.object(allocator, "family_record", return_value=canned("alloc-test", "alpaca", proven=True, n=12, bound=0.002))
+        proven.start()
+        self.addCleanup(proven.stop)
+
     def agent(self, name="climber", code=LADDER):
         agent = self.house.spawn(name, "alloc-test", code, reason="test", endowment="2.5")
         self.house.evaluator.seat(agent.id, 1, "test: straight to paper")
@@ -306,6 +315,7 @@ class Mechanics(HouseCaseReal):
         self.assertLessEqual(house.allocator.committed("alpaca"), house.allocator.capital("alpaca"))
 
     def test_the_first_swing_is_audited_and_its_stake_follows_the_evidence(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
@@ -339,6 +349,7 @@ class Mechanics(HouseCaseReal):
             self.assertEqual(house.books["alpaca"].account(a.id).staked, staked)
 
     def test_shrinking_never_forces_a_sale(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
@@ -727,6 +738,7 @@ class LifecycleRegressions(HouseCaseReal):
         self.assertEqual(allocator.audit_standing(house, a), "none")  # an error is not a verdict
 
     def test_a_drifting_swing_keeps_its_positions_and_is_not_swung_again_at_once(self):
+        self.proven_family()
         house = self.house
         with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"}):
             a = self.agent()
