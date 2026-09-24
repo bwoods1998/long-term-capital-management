@@ -76,6 +76,39 @@ class ContentTest(unittest.TestCase):
     def test_the_canned_tapes_are_deterministic(self):
         self.assertEqual(ci.regression_tape("alpaca", steps=50), ci.regression_tape("alpaca", steps=50))
         self.assertEqual(ci.regression_tape("kalshi"), ci.regression_tape("kalshi"))
+        watched = {"observe": {"symbols": ["BTC/USD"]}, "bars": {"timeframe": "5Min", "limit": 48}}
+        self.assertEqual(ci.regression_tape("kalshi", **watched), ci.regression_tape("kalshi", **watched))
+
+    # Sept 24, 2026 (the close-the-gaps run): Merton's repairs of Huang's BTC 15-minute strategy
+    # (PRs #217 and #208) failed this check with "required observed bars are missing" whatever they
+    # changed: the canned Kalshi tape carried no bars of the spot price a strike strategy watches.
+    OBSERVER = ('NEEDS = {"venue": "kalshi", "horizon": "hour", "style": "t", "series": ["KXBTC15M"], "max_hours_to_close": 1,\n'
+                '         "observe": {"symbols": ["BTC/USD"]}, "bars": {"timeframe": "5Min", "limit": 48}}\n'
+                'PARAMS = {}\n\n'
+                'def decide(ctx):\n'
+                '    bars = ctx["observed"]["bars"]["BTC/USD"]\n'
+                '    if len(bars) < 12 or any(b["c"] <= 0 for b in bars):\n'
+                '        raise ValueError("no usable observed bars")\n'
+                '    spot = bars[-1]["c"]\n'
+                '    return {"intents": [], "thought": "spot %.2f" % BODY}\n')
+
+    def test_a_strategy_that_watches_spot_bars_passes_on_a_clean_body(self):
+        self.strategy("watcher", self.OBSERVER.replace("BODY", "spot"))
+        self.assertEqual(ci.check_strategies(self.root), [])
+        tape = ci.regression_tape("kalshi", steps=240, observe={"symbols": ["BTC/USD"]}, bars={"timeframe": "5Min", "limit": 48})
+        self.assertEqual(tape["observed_timeframe"], "5Min")
+        first = tape["steps"][0]["t"]
+        self.assertGreaterEqual(sum(1 for b in tape["observed_bars"]["BTC/USD"] if b["t"] <= first), 48, "warm-up bars before the first step")
+        self.assertLessEqual(tape["observed_bars"]["BTC/USD"][-1]["t"], tape["steps"][-1]["t"])
+        self.assertNotIn("observed_bars", ci.regression_tape("kalshi", steps=240), "a strategy that watches nothing gets the tape it always had")
+
+    def test_and_still_fails_on_a_real_defect(self):
+        self.strategy("watcher", self.OBSERVER.replace("BODY", "spot / 0"))
+        problems = " ".join(ci.check_strategies(self.root))
+        self.assertIn("too many errors", problems)
+        self.assertNotIn("observed bars are missing", problems)
+        self.strategy("wrongframe", self.OBSERVER.replace("BODY", "spot").replace('"5Min"', '"7Min"'))
+        self.assertTrue(ci.check_strategies(self.root), "an undeclarable timeframe is still refused")
 
 
 class RepositoryTest(unittest.TestCase):
