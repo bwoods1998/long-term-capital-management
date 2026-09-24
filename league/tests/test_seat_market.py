@@ -128,6 +128,10 @@ class EvidencedNewcomers(SeatCase):
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, young.id)
         self.house.kill(young, "displaced", "test")
         self.clock.advance(float(self.house.settings.tick_seconds) + 1)  # one displacement a desk a tick
+        # Sept 24, 2026: a never-traded paper seat first has its fair chance (an hour on a desk with no clock) --
+        # after Deploy B evidenced waiters took each other's seats 33 s to 14 min after birth.
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "inside its fair chance")
+        self.clock.advance(3600)  # past it, still inside the plain grace
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, idle.id)
 
     def test_real_money_winners_traders_short_of_their_record_and_unopened_stock_desks_are_never_taken(self):
@@ -174,7 +178,7 @@ class MergedStrategies(SeatCase):
     def test_a_merged_strategy_takes_a_never_traded_seat_inside_the_grace(self):
         resident = self.seated("resident")
         self.rules["max_population"] = 1
-        self.clock.advance(600)
+        self.clock.advance(3601)  # past the seat's fair chance (an hour with no desk clock), inside the plain grace
         self.strategies([{"name": "btc-gap-fade", "family": "gap-fade", "why": "a test strategy", "code": BUYER}])
         born = self.house.enroll()
         self.assertEqual([a.founder for a in born], ["btc-gap-fade"])

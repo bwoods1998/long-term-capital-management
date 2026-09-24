@@ -187,6 +187,9 @@ EVIDENCE_CLOCK_SETTLEMENTS = 3
 #: A resident with this many fills of its own since its program's opportunity is displaced only by a
 #: newcomer whose forward score beats its own forward record (S1).
 FORWARD_RULE_FILLS = 3
+#: A never-traded paper seat's fair chance against an evidenced newcomer is at least this long (the fix of Sept 24, 2026,
+#: `House._fair_chance`): after Deploy B six newborns were displaced 33 s to 14 min after birth by the next waiter.
+FAIR_CHANCE_FLOOR_SECONDS = 3600.0
 #: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
 HOUSE_CLOSING = "the House is closing"
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
@@ -4712,10 +4715,13 @@ class House:
                 continue  # a trader short of its record is not taken by an evidenced newcomer either
             if standing.rung == 1 and agent_grace > 0 and agent.horizon == "day" and self._screen_pending(agent, opportunity_seq, now - opportunity):
                 continue
-            if evidenced and standing.rung == 1 and not traded and (not keeps_hours or session_time(opportunity, now)[1] >= 1):
+            if evidenced and standing.rung == 1 and not traded and (not keeps_hours or session_time(opportunity, now)[1] >= 1) \
+                    and now - opportunity >= self._fair_chance(clock, grace):
                 # A seat that has never traded since its program's opportunity: an evidenced
-                # newcomer need not wait out its grace. A desk that keeps hours is exempt until
-                # its first regular session has closed.
+                # newcomer need not wait out its grace -- once the seat has had a fair chance to
+                # trade (`_fair_chance`), so a newborn is never taken by the next waiter before it
+                # could trade, and an idle old seat still makes way at once. A desk that keeps
+                # hours is exempt until its first regular session has closed.
                 agent_grace = 0
             # A desk that keeps hours offers nothing between the close and the next open: its grace
             # is counted in regular-session time. The desk's evidence clock is wall-clock hours (S1).
@@ -4750,6 +4756,21 @@ class House:
         no evidence of trading, for displacement and the seat report alike (review of #249, P3)."""
         paused = self.registry.entries_paused(agent.id)
         return bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
+
+    @staticmethod
+    def _fair_chance(clock: float, grace: float) -> float:
+        """How long a paper seat that has never traded since its program's opportunity is kept from an evidenced
+        newcomer (seconds): its desk's evidence clock (`clock`, 0 where none is measured) capped at the plain grace
+        (`grace`), and never less than `FAIR_CHANCE_FLOOR_SECONDS`. After that, if it still has not traded, an
+        evidenced newcomer takes it at once; before the plain grace and the clock have run, no one else may.
+
+        S1's principle: evidence is measured before a seat is lost. After Deploy B (08:31Z Sept 24, 2026) a
+        never-traded paper seat had no grace at all against an evidenced newcomer, and a newcomer seated a minute
+        earlier has never traded, so evidenced waiters displaced each other: of the 12 deaths to 09:34Z (median
+        life 0.28 h), haghani-ld3630c lived 33 s, huang-h6d3302-3 2.3 min, haghani-ladcac2 3.8 min, huang-l5aa23e-3
+        5.6 min, haghani-64 11 min, haghani-lbf6075 14 min -- each taken by the next graduate or retained candidate
+        without a trade."""
+        return max(FAIR_CHANCE_FLOOR_SECONDS, min(float(clock or 0.0), float(grace)))
 
     def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
         """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its

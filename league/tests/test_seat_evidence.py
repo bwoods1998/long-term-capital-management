@@ -208,7 +208,7 @@ class TheEvidenceClock(EvidenceCase):
         idle = self.seated("idle")
         proven = Newcomer(family="test-family", venue="alpaca")
         with self.proven("test-family"):
-            self.clock.advance(600)
+            self.clock.advance(3601)  # past a never-traded seat's fair chance (an hour with no desk clock), inside the grace
             self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "a proven family's never-traded seat inside its grace")
             self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=proven).id, idle.id)
             self.clock.advance(self.grace)
@@ -233,6 +233,57 @@ class TheEvidenceClock(EvidenceCase):
         self.blocks(other, -0.005, 1)
         self.clock.advance(self.grace + 1)
         self.assertEqual(self.house._weakest(self.rules).id, loser.id, "its family's pooled record is negative after six blocks")
+
+
+class FairChance(EvidenceCase):
+    """After Deploy B (08:31Z Sept 24, 2026) a never-traded paper seat had no grace at all against an evidenced newcomer,
+    and a newcomer seated a minute earlier has never traded: of the 12 deaths to 09:34Z (median life 0.28 h), six were
+    newborns taken 33 s to 14 min after birth by the next graduate or retained candidate (haghani-ld3630c 33 s,
+    huang-h6d3302-3 2.3 min, haghani-ladcac2 3.8 min, huang-l5aa23e-3 5.6 min, haghani-64 11 min, haghani-lbf6075
+    14 min). The shortcut now waits for the seat's fair chance: its desk's evidence clock capped at the plain grace,
+    never under an hour. An idle old seat still makes way at once."""
+
+    def test_a_newborn_keeps_its_seat_against_an_evidenced_newcomer_for_its_fair_chance(self):
+        self.desk_clock(3.7)  # alpaca-crypto-alts' clock at T8
+        newborn = self.seated("graduate")
+        self.clock.advance(33)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "33 s old, as haghani-ld3630c")
+        self.clock.advance(3.7 * 3600 - 33 - 1)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "inside its desk's 3.7 h clock")
+        self.clock.advance(2)
+        self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, newborn.id, "never traded past its fair chance")
+        self.assertIsNone(self.house._weakest(self.rules), "the plain tournament still waits out the plain grace")
+
+    def test_the_fair_chance_is_the_desk_clock_capped_at_the_plain_grace_and_never_under_an_hour(self):
+        self.assertEqual(House._fair_chance(0.0, self.grace), 3600.0, "no clock measured")
+        self.assertEqual(House._fair_chance(0.5 * 3600, self.grace), 3600.0)
+        self.assertEqual(House._fair_chance(2.8 * 3600, self.grace), 2.8 * 3600, "kalshi-crypto-15m at T8")
+        self.assertEqual(House._fair_chance(36.5 * 3600, self.grace), self.grace, "kalshi-prices: capped at the plain grace")
+        newborn = self.seated("idle")  # this desk has no clock: an hour
+        self.clock.advance(3599)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True))
+        self.clock.advance(2)
+        self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, newborn.id)
+
+    def test_an_idle_old_seat_makes_way_and_the_newborn_seated_in_its_place_keeps_its_own(self):
+        idle = self.seated("idle")
+        self.clock.advance(2 * 3600)
+        newborn = self.seated("newborn")
+        self.clock.advance(60)
+        self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, idle.id, "never traded in two hours: at once")
+        self.house.kill(idle, "displaced", "test")
+        self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "the next waiter does not take the newborn")
+        self.buy(newborn)
+        self.clock.advance(3600)
+        self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "and once it trades, the fair chance is not the rule")
+        self.assertEqual(self.house.registry.get(newborn.id).alive, True)
+
+    def test_replay_only_code_still_makes_way_at_once(self):
+        """scholes-31 (rung 0, its replay failed at 08:21:52) was taken at 08:40:36: that rule is kept."""
+        young = self.house.spawn("mutation", "test-family", BUYER, reason="a House mutation")
+        self.clock.advance(60)
+        self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, young.id)
 
 
 class TradingPending(EvidenceCase):
@@ -416,6 +467,29 @@ class RetainedCandidates(EvidenceCase):
         self.clock.advance(601)
         child = self.house._refill(self.rules)
         self.assertEqual((child.parent, self.row("research:loser:1")["status"]), (loser.id, "admitted"), "and it is seated next")
+
+    def test_a_retained_candidate_does_not_take_the_seat_of_the_one_seated_before_it(self):
+        """The chain after Deploy B (Sept 24, 2026): haghani-64, the retained candidate of haghani-43 seated at 08:58:56,
+        was displaced at 09:10:03 by the retained candidate of haghani-50, having never had a chance to trade."""
+        first = self.seated("first")
+        self.queued(first, self.retained(BUYER + "\n# the first author's\n"), "research:first:1")
+        second = self.seated("second")
+        self.queued(second, self.retained(BUYER + "\n# the second author's\n"), "research:second:1")
+        self.house.kill(first, "displaced", "test")
+        self.house.kill(second, "displaced", "test")
+        self.house.niches[DESK].max_members = 1
+        self.rules.update(newcomer_seconds=600, max_population=10)
+        self.clock.advance(601)
+        seated = self.house._refill(self.rules)
+        self.assertEqual(seated.parent, first.id)
+        self.clock.advance(601)
+        self.assertIsNone(self.house._refill(self.rules), "the next retained candidate waits: the newborn keeps its seat")
+        self.assertTrue(self.house.registry.get(seated.id).alive)
+        self.assertEqual([w["author"] for w in self.house.seat_waiters(fresh=True)["retained"]], [second.id])
+        self.clock.advance(3600)  # its fair chance (an hour on a desk with no clock) has run without a trade
+        taken = self.house._refill(self.rules)
+        self.assertEqual(taken.parent, second.id)
+        self.assertFalse(self.house.registry.get(seated.id).alive)
 
     def test_a_candidate_nobody_can_make_room_for_waits_is_told_and_expires(self):
         author = self.seated("author")
