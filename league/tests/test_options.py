@@ -148,9 +148,10 @@ class BookRules(BookCase):
         self.assertEqual(len([e for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue-fee"]), 1)  # once
 
     def test_a_fee_larger_than_the_shortfall_explains_nothing_and_the_book_freezes(self):
+        # A dollar and more: under `PRACTICE_DUST_USD` a practice book books the cents as dust (Sept 24, 2026).
         self.buy()
         self.assertTrue(self.book.reconcile().ok)  # the baseline is fixed here: what follows is a real shortfall
-        self.broker.cash -= D("0.50")
+        self.broker.cash -= D("1.50")
         self.broker.fee_activities = lambda since=None: [{"id": "old", "usd": D("2.00"), "date": "2026-09-21", "description": "from before"}]
         result = self.book.reconcile()
         self.assertFalse(result.ok)
@@ -159,7 +160,7 @@ class BookRules(BookCase):
     def test_a_shortfall_no_fee_explains_still_freezes(self):
         self.buy()
         self.assertTrue(self.book.reconcile().ok)
-        self.broker.cash -= D("0.50")
+        self.broker.cash -= D("1.50")  # a dollar and more (`PRACTICE_DUST_USD`)
         self.broker.fee_activities = lambda since=None: []
         self.assertFalse(self.book.reconcile().ok)
 
