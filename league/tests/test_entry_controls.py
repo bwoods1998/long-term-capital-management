@@ -432,6 +432,21 @@ class ControlsAcrossAStop(ControlCase):
             house.research(agent)
         self.assertIsNotNone(house.registry.entries_paused(agent.id))
 
+    def test_a_pass_applied_late_still_finds_what_it_asked(self):
+        """The pass's requests and its edit's replay were sought in the agent's newest 400 research rows,
+        which a busy agent writes in under three hours; a pass resumed after a restart is applied late."""
+        agent = self.seated("sized", SIZED)
+        was = dict(agent.params)
+        params = {**was, "notional_usd": 20.0}
+        self.house.ledger.append("agent.research", {"tool": "edit_replay", "session": "s1", "passed": True, "reasons": [],
+                                                    "params": params, "was": was}, agent=agent.id)
+        self.request(agent, "edit_params", session="s1", n=0, params=params, was=was, code_sha256=agent.code_sha256)
+        self.request(agent, "pause_entries", session="s1", n=1)
+        for n in range(400):
+            self.house.ledger.append("agent.research", {"tool": "candidate_admission", "session": f"q{n}", "status": "deferred",
+                                                        "reason": f"waiting {n}"}, agent=agent.id)
+        self.assertEqual(self.house._apply_controls(agent.id, "s1"), ["edit_params", "pause_entries"])
+
     def test_a_restart_between_an_edit_and_a_pause_of_one_pass_makes_the_pause(self):
         from dataclasses import asdict
         from league.researcher import Pass, pass_state

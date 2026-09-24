@@ -4957,8 +4957,11 @@ class House:
         saying why. Both ids make a restart's second look a no-op. Neither touches a limit, a stake or a
         band: the book, the allocator and every rule above them still decide those."""
         applied: list[str] = []
-        rows = [e for e in self.ledger.read(kinds="agent.research", agent=agent_id, limit=400, newest=True)
-                if e.payload.get("tool") == "control" and e.payload.get("status") == "requested" and e.payload.get("session") == session]
+        # Read in full, never from a window of the newest rows (an agent writes up to 1,700 research rows a
+        # day, and a pass resumed after a restart is applied late: review of #249).
+        research = [e for e in self.ledger.iter(kinds="agent.research", agent=agent_id)
+                    if e.payload.get("session") == session and e.payload.get("tool") in ("control", "edit_replay")]
+        rows = [e for e in research if e.payload.get("tool") == "control" and e.payload.get("status") == "requested"]
         for entry in rows:
             key = entry.id.split("control-request:", 1)[1] if entry.id.startswith("control-request:") else f"{session}:{entry.seq}"
             if self.ledger.get(f"control:{key}") is not None or self.ledger.get(f"control-refused:{key}") is not None:
@@ -4976,10 +4979,9 @@ class House:
                 elif not refusal and control == "edit_params":
                     # Made only on the House's own record of a passing replay of exactly this edit in
                     # this pass (`_edit_replay`), never on the request's word alone.
-                    replayed = any(e.payload.get("tool") == "edit_replay" and e.payload.get("session") == session
-                                   and e.payload.get("passed") is True and e.payload.get("params") == p.get("params")
-                                   and e.payload.get("was") == p.get("was")
-                                   for e in self.ledger.read(kinds="agent.research", agent=agent_id, limit=400, newest=True))
+                    replayed = any(e.payload.get("tool") == "edit_replay" and e.payload.get("passed") is True
+                                   and e.payload.get("params") == p.get("params") and e.payload.get("was") == p.get("was")
+                                   for e in research)
                     if not replayed:
                         refusal = "no passing replay of this edit is on record for the pass: the edit is not made"
                     elif (agent.code_sha256, agent.params) != (p.get("code_sha256"), p.get("was")):
