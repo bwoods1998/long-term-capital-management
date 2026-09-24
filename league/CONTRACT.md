@@ -115,7 +115,9 @@ close-the-gaps run). A family is proven (`allocator.family_proven`) when its poo
 every member ever born into it, living or dead; one observation per independent event any member
 closed on practice or real money (per closed trade at Alpaca, a practice trade there less the practice
 haircut your E pays), practice at weight 0.5 and real at 1, members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
-lower bound (Student's t) on its mean log growth above zero. An agent of a proven family is seated
+lower bound (Student's t) on its mean log growth above zero; a lopsided record (80% or more of its
+observations winning, as favourites win) must also clear the House's exact loss-rate test at 80%
+(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. An agent of a proven family is seated
 as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
 ($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
 and a bunt a probe after the bound falls to zero or below; the stake moves toward the new target by

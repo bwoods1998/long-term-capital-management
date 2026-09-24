@@ -296,16 +296,19 @@ class FamilyRecord(FamilyCase):
         self.assertFalse(rec["proven"])  # 4 independent settlements, 10 needed
         self.assertEqual(rec["state"], "unproven")
 
-    def test_ten_independent_winning_events_prove_a_family_and_nine_do_not(self):
+    def test_ten_independent_events_prove_a_family_and_nine_do_not(self):
         self.member("m1")
         self.stake(200, agent="m1")
-        for day in range(1, 10):
-            self.settle(f"KXHIGHNY-26SEP{day:02d}-B72.5", str(1 + day / 10), agent="m1")
+        results = ["2.5", "2.5", "-1", "2.5", "2.5", "-1", "2.5", "2.5", "-1", "2.5"]  # 7 of 10 win: not lopsided
+        for day, pnl in enumerate(results[:9], start=1):
+            self.buy(f"KXHIGHNY-26SEP{day:02d}-B72.5", 10, "0.60", agent="m1")
+            self.settle(f"KXHIGHNY-26SEP{day:02d}-B72.5", pnl, agent="m1")
         rec = self.record()
-        self.assertEqual(rec["n"], 9)
+        self.assertEqual((rec["n"], rec["lopsided"]), (9, False))
         self.assertGreater(rec["bound"], 0)
         self.assertFalse(rec["proven"])
-        self.settle("KXHIGHNY-26SEP10-B72.5", "1.5", agent="m1")
+        self.buy("KXHIGHNY-26SEP10-B72.5", 10, "0.60", agent="m1")
+        self.settle("KXHIGHNY-26SEP10-B72.5", results[9], agent="m1")
         rec = self.record()
         self.assertEqual((rec["n"], rec["proven"], rec["state"]), (10, True, "proven"))
         # One big loss on the eleventh event takes the bound under zero: unproven again.
@@ -313,6 +316,25 @@ class FamilyRecord(FamilyCase):
         rec = self.record()
         self.assertLessEqual(rec["bound"], 0)
         self.assertFalse(rec["proven"])
+
+    def test_ten_small_wins_and_no_loss_do_not_prove_a_favourites_family(self):
+        """The House's own rule for a lopsided record (`stats.lopsided_growth_lcb`, beside the t bound,
+        as `Evaluator._judge_family` applies it): ten 95c favourites that all paid have a t bound above
+        zero, but at 80% one miss in seven cannot be ruled out, and one miss costs nineteen wins."""
+        self.member("m1")
+        self.stake(200, agent="m1")
+        for day in range(1, 11):
+            ticker = f"KXHIGHNY-26SEP{day:02d}-B72.5"
+            self.buy(ticker, 10, "0.95", agent="m1", liquidity="maker")
+            self.settle(ticker, "0.5", agent="m1")
+        rec = self.record()
+        self.assertEqual((rec["n"], rec["lopsided"]), (10, True))
+        self.assertGreater(rec["bound"], 0)             # the t bound alone would prove it
+        self.assertLess(rec["loss_gate"], 0)            # the loss-rate gate does not
+        self.assertAlmostEqual(rec["risk_per_entry"], 9.5 / 200, places=12)
+        self.assertEqual((rec["proven"], rec["state"]), (False, "unproven"))
+        with patch.dict(CONSTITUTION["ladder"], {"lopsided_win_rate": 1.01}):  # no record is lopsided: the t bound alone
+            self.assertTrue(self.record()["proven"])
 
     def test_stacked_strikes_are_one_observation_worth_their_sum(self):
         self.member("m1")
@@ -368,10 +390,11 @@ class FamilyRecord(FamilyCase):
         self.member("tk")
         for agent in ("mk", "tk"):
             self.stake(200, agent=agent)
+        made = {d: (2.5 + d / 100 if d % 3 else -1.0) for d in range(1, 11)}  # 7 of 10 win: not lopsided
         for day in range(1, 11):
             ticker = f"KXHIGHNY-26SEP{day:02d}-B72.5"
-            self.buy(ticker, 10, "0.95", agent="mk", liquidity="maker")
-            self.settle(ticker, str(0.4 + day / 100), agent="mk")
+            self.buy(ticker, 10, "0.60", agent="mk", liquidity="maker")
+            self.settle(ticker, str(made[day]), agent="mk")
             other = f"KXETH15M-26SEP{day:02d}1200-00"
             self.buy(other, 10, "0.50", agent="tk", liquidity="taker")
             self.settle(other, "-2" if day % 2 else "1.5", agent="tk")
@@ -380,7 +403,7 @@ class FamilyRecord(FamilyCase):
         self.assertTrue(rec["maker"]["positive"])
         self.assertFalse(rec["taker"]["positive"])
         self.assertEqual((rec["maker"]["members"], rec["taker"]["members"]), (1, 1))
-        m, _, _, bound = hand_pool([(math.log1p((0.4 + d / 100) / 200), 0.5) for d in range(1, 11)])
+        m, _, _, bound = hand_pool([(math.log1p(made[d] / 200), 0.5) for d in range(1, 11)])
         self.assertAlmostEqual(rec["maker"]["mean_log"], m, places=12)
         self.assertAlmostEqual(rec["maker"]["bound"], bound, places=12)
 

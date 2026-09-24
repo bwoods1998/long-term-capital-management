@@ -129,7 +129,8 @@ or never swings at all.
   Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
   settlements (one an event; practice at {float(proof.get('practice_weight', 0.5)):g} weight, real money at {float(proof.get('real_weight', 1)):g}) and the one-sided
-  {float(proof.get('confidence', 0.8)):.0%} lower bound on their mean log growth an event is above zero. A probe becomes a bunt the pass
+  {float(proof.get('confidence', 0.8)):.0%} lower bound on their mean log growth an event is above zero (a favourites record also
+  passes the loss-rate test: a run of small wins with no loss proves nothing yet). A probe becomes a bunt the pass
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
