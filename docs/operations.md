@@ -37,7 +37,9 @@ The work flows through these stages:
    off, the old ladder decides again: the screen, then the micro stake with the audit after it.
 5. **The Alpha Lab** (since Sept 23, 2026). Off the tick, the lab searches strategy programs in
    batches on its own box and sends the fittest of each cell through the House's replay and the
-   sealed holdout; survivors are born on paper.
+   sealed holdout; survivors are born on paper. Since Sept 24, 2026 (E1) half of each batch and
+   half of its tape builds go to the programs someone wrote, and a graduate needs a code change
+   beyond its parameters or a forward score above its desk's living median (see the lab below).
 6. **Feedback.** Results and repairs feed the next round.
 
 ## Pause, resume, stop
@@ -241,7 +243,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     and `born_total`. Since D1 (Sept 24, 2026): `failing_since` (null until five steps in a row
     have failed; then the first failure's time, until a step works again), `failures_in_a_row`,
     `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
-    `indexed`: the tapes built in the last six hours that a restart remembers).
+    `indexed`: the tapes built in the last six hours that a restart remembers). Since E1 (Sept 24,
+    2026): `held`, what the last graduation pass held back (`at`, `counts` by reason: `forward`, a
+    losing forward window, its own or, with none, its mechanism's on average; `idle`, a desk offered markets for 48 h with no intent and no feed it
+    asked for since; `nudge`, the same program beyond PARAMS as a living one on its desk without a
+    forward score above the desk's median), or null.
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
   - `wakes_skipped` (Sept 24, 2026, the wake skip): the stock and option wakes not run while the
     regular session was shut (`count`, `by_desk`, `since`, `last_at`; kept in `house.json`). Such an
@@ -412,7 +418,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     - `calls`: each Luna and Sol call's cost, programs written and programs refused;
     - `graduations`: each graduate's latest state (`refused`, `holdout_rationed`, `replay_failed`,
       `replay_unavailable`, `holdout_failed`, `passed`, `waiting_probe`, `waiting_seat`,
-      `refused_at_birth`, `born`), its line, family and agent;
+      `refused_at_birth`, `born`), its line, family and agent. Since Sept 24, 2026 (E1) also `held`:
+      a passer held before its birth, its `detail` starting `held:` with the reason; it is asked
+      again every ten minutes, scored in the forward windows as a waiting graduate is, and, not
+      being `passed`, reserves no seat in the House's seat market nor counts as a waiter on the
+      scoreboard. A program held before the House's replay has no row at all (it was not tried);
     - `forward` (S2, Sept 23, 2026): one row per candidate and forward-window run: `window_start`
       and `window_end` (epochs; the window starts at the hour after the program's code was frozen,
       so no search, replay or holdout saw a step of it), `blocks`, `active_blocks`, `log_growth`,
@@ -458,7 +468,23 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     last five minutes), no step runs and no `lab.stats` row is written: the rows stop, and
     `health.json` `lab` (`refusal`, `closed_since`, `closed_minutes`, `llm`, `waiting_seat` with
     up to eight graduates, each with its `forward` score for the seat market, `queued`,
-    `born_total`, `forward`) says why.
+    `born_total`, `forward`) says why. Since E1 (Sept 24, 2026) the rows also carry `reserved`
+    (`share`: the share of each batch and of the tape builds kept for the programs someone wrote,
+    `game.json` `lab.reserved_share` held to `lab_bounds`; `evaluated`: how many of theirs the hour
+    evaluated) and `held` (as in `health.json`). The batch turns (`batch_turn`): with the half,
+    queue order, written programs, largest group, written programs, and again; a step builds at
+    most `max_tapes_per_step` (4) tapes, one a turn. What the lab is searching for, and why it
+    graduates less than before, is in `held`: a desk with no ranked resident needs a graduate's own
+    winning forward window for a parameter nudge, and nudges wait for one.
+  - **The foundry's brief** (`foundry-2026-09-24.1`, E2): cards name the recorded feeds of their desk
+    and state their `fee` and `edge_needed` (a card without them is refused before its replay, and
+    says so in the call's `merton.pass` `refused`); `game.json` `hypotheses.fast_desks` is the
+    deep-market desks; `closed_desks` (kalshi-crypto-strikes, kalshi-crypto-15m) get no card until a
+    family there is positive over three active forward blocks on that desk (one block a block key,
+    however many of its members were active in it); the first transfer (`first_transfer`)
+    scales the weather favourites on the ensemble's fair value, once: its call's `merton.pass`
+    `allocation.transfer` carries `scale: true`. A family at its measured capacity gets no
+    evidence-driven House mutation (E3).
   - **`lab.graduate` rows**, one per candidate and outcome, carry the program's lineage, origin,
     author, parents, idea, fitness and cell. **`lab.royalty` rows** record each royalty charged to
     a graduate that earned a performance fee.

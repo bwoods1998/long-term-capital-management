@@ -77,11 +77,14 @@ class Batches(LabCase):
             out = self.lab.evaluate_batch()
             sizes.append(out["candidates"] if out else 0)
         self.assertEqual([self.candidate(c)["status"] for c in children], ["evaluated"] * 3, sizes)
-        # The seeds still had their turn, and the mutants ran with the children on the elite's tape.
-        self.assertIn(1, sizes)
-        self.assertGreaterEqual(max(sizes), 32)
+        self.assertGreaterEqual(max(sizes), 32)  # the mutants ran with the children on the elite's tape
+        # The seeds still have their turn, once the mutants left over have had the largest group's (since
+        # Sept 24, 2026 one batch in four is the queue's at the default share, E1: `batch_turn`).
+        self.lab._tapes_built = 0
+        self.assertEqual(self.lab.evaluate_batch()["candidates"], 1)
 
-    def test_a_third_of_a_batch_is_the_written_programs_and_the_rest_the_mutants(self):
+    def test_a_share_of_a_batch_is_the_written_programs_and_the_rest_the_mutants(self):
+        """A third until Sept 24, 2026; `reserved_share`, a half, since (E1, test_lab_search)."""
         self.house.game["lab"]["batch_size"] = 6
         elite = self.queue(KNOB)
         self.lab.evaluate_batch()
@@ -94,8 +97,8 @@ class Batches(LabCase):
         self.assertIsNotNone(picked)
         _, _, chosen = picked
         self.assertEqual(len(chosen), 6)
-        self.assertEqual([r["origin"] for r in chosen[:2]], ["luna", "luna"])  # a third of six, first
-        self.assertEqual({r["id"] for r in chosen[:3]}, set(children))  # and the third by queue order
+        self.assertEqual([r["origin"] for r in chosen[:3]], ["luna", "luna", "luna"])  # half of six, first
+        self.assertEqual({r["id"] for r in chosen[:3]}, set(children))
 
     def test_a_queue_admitted_at_the_old_priority_is_re_keyed_when_the_lab_opens(self):
         """The floor's lab.sqlite of Sept 23, 2026 held 394 Luna and Sol children queued at priority 2."""
