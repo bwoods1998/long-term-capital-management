@@ -773,6 +773,10 @@ recorded for the next open; live verification uses the markets that trade around
   limits) had no instance: no equity program writes a limit order. E2's cards in the session went to kalshi-open (8 on
   the new brief `foundry-2026-09-24.1`, 4 on the old) and kalshi-prices (4), besides the engineer's four repair cards;
   none to megacaps, ETFs or options, so E2's stock and options cards remain a check for the next session.
+- 20:20Z — **The wake skip verified** (Deploy C's X1 house work): from the 20:00Z close to 20:20Z the index-ETF, megacap
+  and options desks woke 0 times; alpaca-open, which also trades coins around the clock, ran 7 wakes (1 intent). On the
+  T0 snapshot 2,891 of 9,884 wakes in 48 hours (29%) had been stock or option agents outside the session. The open
+  wake at 13:30Z Sept 25 is the named window for its other half.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
