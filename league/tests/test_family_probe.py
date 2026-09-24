@@ -566,6 +566,26 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
         self.assertEqual(self.demotions(a)[-1]["rule"], "allocator.family_probe")
 
+    def test_a_probe_waiting_to_go_back_is_lent_nothing_while_the_gate_cannot_be_read(self):
+        """The R5 adversarial review (Sept 24, 2026): `_size` withheld a raise only while the gate read "losing"; at a pass where the
+        gate cannot be read it reads "unreadable", and a probe on a losing family waiting to be flat was lent up to its
+        target again. A gate that cannot be read lends a probe nothing more (free cash still comes back)."""
+        from league.book import Intent
+        from league.venues import instrument_for
+
+        a = self.seated()
+        book = self.house.books["alpaca"]
+        btc = instrument_for("alpaca", {"symbol": "BTC/USD"})
+        buy = Intent.new(agent=a.id, instrument=btc, side="buy", quantity=D("0.000125"), reason="test", created_at=now_iso(self.clock))
+        self.assertEqual(book.submit([buy])[0].status, "filled")
+        self.losing()
+        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.2, paper_trades=6)}  # its target rises to $30
+        with patch.object(allocator, "fold_demotions", side_effect=OSError("disk I/O error")), self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["probe_gate"], "unreadable")
+        self.assertEqual(book.account(a.id).staked, D("25"))
+
     def test_a_probe_holding_only_dust_goes_back_and_its_dust_is_booked_not_sold(self):
         """What the demotion path would not sell -- a holding under a cent, as the wind-down books it -- does not keep a
         probe on a losing family seated (haghani-h426990's 0.000000001 LINK/USD sat on a book for a day)."""

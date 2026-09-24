@@ -2076,9 +2076,10 @@ class Allocator:
             return None
         if delta > 0:
             gate = self.probe_gate(agent) if band == "bunt" else None
-            if gate is not None and gate["gate"] == "losing":
+            if gate is not None and gate["gate"] in ("losing", "unreadable"):
                 # R5 (Sept 24, 2026; the R5 review, Sept 24, 2026): a probe on a losing family waiting to go back to practice (on Alpaca,
-                # until it is flat) is lent nothing more; free cash still comes back.
+                # until it is flat) is lent nothing more; free cash still comes back. Nor is any probe while the gate cannot
+                # be read, which could not tell such a probe from another (the R5 adversarial review, Sept 24, 2026).
                 return None
             if band == "bunt" and p["bunt_growth"] == "w_real" and ev.w_real < 1.0:
                 # A losing bunt is not refilled (Sept 23, 2026): its stake shrinks by what it lost,
