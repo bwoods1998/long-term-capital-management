@@ -81,6 +81,13 @@ INVARIANTS_EVERY_SECONDS = 300.0
 INVARIANTS_FIRST_ROWS = 5000
 QUIET_DESK_SECONDS = 3600.0
 QUIET_DESK_WAKES = 3
+#: A desk whose agents offered markets are all day-horizon is quiet only after a day with no intent: a
+#: day program acts around its events, not every hour. Sept 24, 2026: kalshi-sports (16 members, all
+#: "day") wrote 2-7 intents an hour from 00Z to 07Z and none from 11Z to 14Z -- its favourites programs
+#: wait for game time -- while two of its agents made the floor's profit; the hourly rule called it
+#: quiet six times that day ("offered markets on 32 wakes in the last hour and no agent of the desk
+#: wrote an intent").
+QUIET_DESK_DAY_SECONDS = 24 * 3600.0
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
 #: Beside the House's state: when each deadline-type Kalshi series' markets paid after their close
@@ -2075,7 +2082,12 @@ class House:
           per that long. The stamps are `desk_woke` (set by `wake`); a pause, and the House's own
           start, reset the clock, since neither is a scheduler fault. A closed compute allowance
           stops wakes too (`_note_stopped` says so after three ticks): this says which markets it
-          is leaving unattended.
+          is leaving unattended. So does the birth of the desk's oldest living member (a desk with no
+          member has no one to wake), and a desk is late only at twice its briskest member's
+          `wake_minutes`. Sept 24, 2026: kalshi-open's first member ever was born at 14:12:14Z and the
+          desk was called unwoken "for 146 minutes" at 14:12:43Z (the House had started at 11:46Z);
+          kalshi-attention's one member woke every 30-31 minutes as scheduled and was called unwoken
+          twelve times that day, at 30 or 31 minutes each.
         """
         now = self.clock()
         with self._state_lock:
@@ -2115,8 +2127,9 @@ class House:
                 members = [a for a in living if a.specialty == niche_id]
                 if not members or all(niche.keeps_hours(a.needs) for a in members):
                     continue  # no one to wake, or a desk that keeps the session: its quiet nights are its own
-                last = max(float(woke.get(niche_id) or 0), paused_at, self._born_at)
-                if now - last < QUIET_ROUND_THE_CLOCK_SECONDS or now - float(told_quiet.get(niche_id) or float("-inf")) < QUIET_ROUND_THE_CLOCK_SECONDS:
+                last = max(float(woke.get(niche_id) or 0), paused_at, self._born_at, min(_epoch(a.born_at) for a in members))
+                late = max(QUIET_ROUND_THE_CLOCK_SECONDS, 2 * 60.0 * min(max(1, int(a.wake_minutes or 0)) for a in members))
+                if now - last < late or now - float(told_quiet.get(niche_id) or float("-inf")) < late:
                     continue
                 told_quiet[niche_id] = now
                 stopped = str((self._state.get("stopped") or {}).get("reason") or "")
@@ -2126,7 +2139,7 @@ class House:
         with self._state_lock:
             state.update(cursor=int(cursor), paused_at=paused_at,
                          dead_told={k: v for k, v in told_dead.items() if v >= today},
-                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_ROUND_THE_CLOCK_SECONDS})
+                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_DESK_DAY_SECONDS})
         for text in alerts:
             self.alert("warning", text)
 
@@ -2137,9 +2150,23 @@ class House:
         and doing nothing was the only right answer. A number above zero with nothing done means
         the strategy looked at a live market and its rules did not fire: that is the strategy's
         problem to solve, and the House should hand it a research pass rather than wake it into
-        the same wall for hours."""
+        the same wall for hours.
+
+        A Kalshi wake counts only the markets of the series its NEEDS names that resolve inside its
+        horizon (`horizon_hours`, what the book would admit). Sept 24, 2026: greenwich-h4cb387 (NFL
+        props closing within 6 hours; the next game was ten hours off) was shown 76, 70, 63 and 46
+        markets of its desk's busiest live series -- the fallback `snapshot` puts in front of a program
+        whose own series are dark (UEFA and DJI, its own research noted at 14:16Z) -- which its code
+        skips by series, and each wake was counted "barren": the desk was called quiet at 14:58Z, and
+        the barren run feeds the research gate and the "stuck" cull. Those wakes had nothing in its
+        window."""
         if family_of(agent.venue) == "kalshi":
-            return len(ctx.get("markets") or [])
+            own = {str(series).upper() for series in (agent.needs.get("series") or [])}
+            horizon = self.horizon_hours(agent)
+            return sum(1 for market in ctx.get("markets") or []
+                       if (not own or str(market.get("series") or "").upper() in own)
+                       and (horizon is None or market.get("hours_to_resolve") is None
+                            or float(market["hours_to_resolve"]) <= horizon))
         niche = self.niche_of(agent)
         if niche is not None and niche.keeps_hours(agent.needs) and not market_open_at(ctx["now"]):
             # A shut session offers only coins (an open desk may mix both; every other desk is one or the other).
@@ -3707,7 +3734,10 @@ class House:
           on `QUIET_DESK_WAKES` or more wakes of the desk's agents inside the trailing hour, the
           first of them most of an hour ago, and no intent from any agent of the desk in that hour
           (a wake's `intents` count, or an `agent.intent` row). Told once a desk an hour. Its rules
-          are not firing on what it is shown: that wants a research pass, not more wakes.
+          are not firing on what it is shown: that wants a research pass, not more wakes. A desk whose
+          offered agents are all day programs is told only after a day with no intent from any of its
+          agents (`QUIET_DESK_DAY_SECONDS`, measured from `quiet_since`, its first unanswered offer since
+          its last intent), once a day; an offer is only what matches the program (`_offered`).
         - A real-money bunt frozen by a daily-loss rule: a `book.refused` row on a real book whose
           reasons mention a daily loss, for an agent on rung 2. Told once an agent a day. The book's
           daily rule is meant not to apply to a bunt (the plan's U1); this says if it ever does.
@@ -3722,6 +3752,7 @@ class House:
             wakes: dict[str, list[list[Any]]] = {k: list(v) for k, v in (state.get("wakes") or {}).items()}
             told_quiet: dict[str, float] = dict(state.get("quiet_told") or {})
             told_frozen: dict[str, str] = dict(state.get("frozen_told") or {})
+            quiet_since: dict[str, float] = dict(state.get("quiet_since") or {})
         if cursor is None:
             head = self.ledger.read(limit=1, newest=True)
             cursor = max(0, (head[-1].seq if head else 0) - INVARIANTS_FIRST_ROWS)
@@ -3754,6 +3785,12 @@ class House:
                 wakes.setdefault(agent.specialty, []).append(
                     [at, row.agent, int(row.payload.get("offered") or 0),
                      int(row.payload.get("intents") or 0) + int(row.payload.get("held") or 0)])
+            else:
+                continue
+            if int(wakes[agent.specialty][-1][3]):
+                quiet_since.pop(agent.specialty, None)  # the desk acted: its quiet starts again at the next offer
+            elif int(wakes[agent.specialty][-1][2]):
+                quiet_since.setdefault(agent.specialty, at)
         for niche_id, rows in list(wakes.items()):
             rows = [r for r in rows if now - float(r[0]) <= QUIET_DESK_SECONDS][-400:]  # eight seats waking every five minutes is 96 an hour
             if not rows:
@@ -3761,19 +3798,24 @@ class House:
                 continue
             wakes[niche_id] = rows
             offered = [r for r in rows if int(r[2]) > 0]
-            if (len(offered) < QUIET_DESK_WAKES or any(int(r[3]) for r in rows)
-                    or now - float(offered[0][0]) < QUIET_DESK_SECONDS * 0.75
-                    or now - float(told_quiet.get(niche_id) or float("-inf")) < QUIET_DESK_SECONDS):
+            if len(offered) < QUIET_DESK_WAKES or any(int(r[3]) for r in rows):
+                continue
+            # Day programs act around their events: their desk is quiet after a day, not an hour.
+            day = all(getattr(self.registry.get(str(r[1])), "horizon", "") == "day" for r in offered)
+            window = QUIET_DESK_DAY_SECONDS if day else QUIET_DESK_SECONDS
+            start = float(quiet_since.get(niche_id, now)) if day else float(offered[0][0])
+            if now - start < window * 0.75 or now - float(told_quiet.get(niche_id) or float("-inf")) < window:
                 continue
             told_quiet[niche_id] = now
             agents = sorted({str(r[1]) for r in offered})
             alerts.append(f"{niche_id}: offered markets on {len(offered)} wakes in the last hour (offered "
-                          f"{', '.join(str(r[2]) for r in offered[-8:])}) and no agent of the desk wrote an intent "
-                          f"({', '.join(agents[:8])}). Its rules are not firing on what it is shown: a research pass, not more wakes.")
+                          f"{', '.join(str(r[2]) for r in offered[-8:])}) and no agent of the desk wrote an intent"
+                          + (f" for {int((now - start) // 3600)} hours (a desk of day programs)" if day else "")
+                          + f" ({', '.join(agents[:8])}). Its rules are not firing on what it is shown: a research pass, not more wakes.")
         today = time.strftime("%Y-%m-%d", time.gmtime(now))
         with self._state_lock:
-            state.update(cursor=int(cursor), wakes=wakes,
-                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_DESK_SECONDS},
+            state.update(cursor=int(cursor), wakes=wakes, quiet_since=quiet_since,
+                         quiet_told={k: v for k, v in told_quiet.items() if now - float(v) < QUIET_DESK_DAY_SECONDS},
                          frozen_told={k: v for k, v in told_frozen.items() if v >= today})
         for text in alerts:
             self.alert("warning", text)
@@ -6984,11 +7026,13 @@ class House:
                 result = reconcile_with_second_look(book)
                 summary["reconciled"][name] = result.ok
                 if not result.ok:
-                    # A few cents short on a PAPER book, with every position agreeing, is the venue's
-                    # end-of-day fee activity not posted yet (`Book._book_venue_fees` books it when it
-                    # is). Measured Sept 22, 2026: two paper option buys left the book $0.06 over the
-                    # venue for one mark pass, and an error then -- inside a deploy's watch -- rolls a
-                    # good release back. Real money, or any position difference, stays an error.
+                    # A few cents short on a PAPER book, with every position agreeing, are the venue's
+                    # option fees and rounding. Measured Sept 22, 2026: two paper option buys left the
+                    # book $0.06 over the venue for one mark pass, and an error then -- inside a deploy's
+                    # watch -- rolls a good release back. Since Sept 24, 2026 the book books such cents
+                    # as dust itself (`book.PRACTICE_DUST_USD`), so what still arrives here with cents is
+                    # a practice book with an order in doubt. Real money, or any position difference,
+                    # stays an error.
                     minor = (not book.real_money and not result.position_diffs
                              and abs(Decimal(result.cash_diff)) <= Decimal("1.00"))
                     # Only an order whose outcome the venue has not yet told (the book asks a second
