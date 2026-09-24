@@ -480,6 +480,21 @@ recorded for the next open; live verification uses the markets that trade around
   settlements. This closed a hole in the previous head: a file of negative lags read as 0 and admitted
   the diesel print. Tests: a hostile file leaves diesel refused at 172 h in the House and the book; an
   honest one admits it. The seat report counts a long-paused trader as holding no evidence.
+- 09:37Z — **A live defect in Deploy B's seat market: displacement chains.** Since 08:31Z, 6 of 12
+  deaths were newborns displaced 33 s to 14 minutes after birth by the next evidenced waiter (the
+  alpaca-crypto-alts chain haghani-ld3630c → haghani-lbf6075 → haghani-ladcac2 → haghani-64;
+  kalshi-crypto-15m huang-l5aa23e-3 and huang-h6d3302-3), each "traded 0 blocks forward". Cause: in
+  `House._displaceable`, an evidenced newcomer may take a never-traded rung-1 seat with NO grace (the
+  Sept 23 rule), and a graduate seated a minute earlier has never traded; Deploy B's 24 retained
+  candidates added evidenced waiters. The fix (`c-seats/fair-chance`, being built): the shortcut only
+  after a fair chance, the desk's evidence clock capped at the plain grace, never under an hour.
+- 09:56Z — **C-perf built** (#263, CI green; unprotected). `health.json` `tick_steps` books every moment of
+  the tick to a named step (last tick, the hour's eight slowest, each background lane's last job), and
+  `floor_watch.py` prints them. A fully settled Kalshi day is now read from History once per process
+  (a bounded LRU of the fields the tape reads, at most about 140 MB; the box has 4.0 of 5.8 GB free and
+  the House holds 1.65 GB): the second build of a 14-day four-series tape went from about 80 to 19.5
+  CPU-seconds (98.8M function calls to 29.8M; `parse_market` 294,864 calls to none), and History logs
+  only pages it fetched. Merged into `c/integration` with C-tools and the board's honest bound.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
