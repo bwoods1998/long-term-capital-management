@@ -819,6 +819,12 @@ recorded for the next open; live verification uses the markets that trade around
   (Merton's #290 is next on main). It rides the final PR (#289) at the end of the watch, not a redeploy now. The floor
   itself: grant active on `535a7f15`, no frozen book, 128 living, ticks 65.9-66.7 s at 22:11-22:42Z, real P&L +$10.65,
   no other error.
+- 23:15Z — **The watch, 23:12Z reading:** grant active on `535a7f15`, no frozen book, 127 living, tick 21.3 s, floor real
+  P&L +$11.15. The updater's release of Merton's #290 (`main-605ff8c3f7ed`, started 23:03:46Z) was rolled back by
+  23:08:38Z like #288's (8 more backup failures since 22:45Z; no other error). With crypto-alts-reversion's record above
+  zero, the allocator seated two more of its members as $25 probes at 23:11Z (haghani-59 E 1.0104 on 18 closed trades,
+  haghani-58 1.0101 on 15): five of the family's members and krasker-14 are Alpaca's six real agents ($205.94
+  committed), all probes, as the rules say for an unproven family whose record is not losing.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
