@@ -788,6 +788,18 @@ recorded for the next open; live verification uses the markets that trade around
   promoted 20:42:18Z, watch passed; money digest `535a7f15`, no ratify. First reading under it (20:49:42Z, 128 living,
   the population at its ceiling): a 90.6 s mark tick (research 19.4 s, population 18.1, poll:kalshi-shadow 9.2); the
   hour's slowest publish 10.1 s (it was 87.7 s under C′). **The three-hour watch runs from 20:42:18Z.**
+- 21:15Z — **The watch, first readings under Deploy F** (20:56Z and 21:10Z): grant active on `535a7f15`, no book frozen,
+  128 living, ticks 34.6-45.3 s after the first catch-up tick of 90.6 s, 24-28 lab batches every 15 minutes, no
+  repeating warning and no health failure; the floor's real P&L +$10.36 to +$11.04. The proven bunt settled +$4.81 at
+  20:51:28Z (real n 6; the board's swing clock: 9 to the look at 15, 3.6 a day, 2.5 days); the family has 4 living
+  members (meriwether-h2d625d and three House births, -3 and -5 on replay, -4 on practice; -2, the moneyline file, is
+  gone). R2's two-hour warnings name their desks ("3 newcomers have waited over 2 hours for a seat on
+  alpaca-crypto-alts ..."). **R5's gate flips on a zero-edge family:** crypto-alts-reversion read −0.0202 over 360
+  blocks at the 18:47Z drain and +0.0113 over 375 at 21:01Z (+0.0315 over the 15 blocks since the demotions), so its
+  three $25 probes (haghani-62, -63, -r42c38c) were seated again at 21:01:06-14Z, as the rule says (its pooled bound is
+  −0.00223 on 263 events). The line is a sign test; a bound would hold such a family out. An owner call, recorded.
+  L3 (warnings escalate) has had no live instance since Deploy B: no warning repeated 10 times in 30 minutes (0
+  escalations on the ledger).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
