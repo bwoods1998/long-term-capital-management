@@ -1804,13 +1804,22 @@ class Book:
         for the whole intent."""
         if cleared.left <= 0:
             return Outcome(intent.id, intent.agent, "crossed", cleared.detail, None, cleared.crossed)
-        rest, note = self._exit_past_the_house(dataclasses.replace(intent, quantity=cleared.left), quote, cleared.doubt)
+        asked = dataclasses.replace(intent, quantity=cleared.left)
+        rest, note = self._exit_past_the_house(asked, quote, cleared.doubt)
         if rest is None:
             refused = self._refuse(intent, [note])
             return Outcome(intent.id, intent.agent, "partial" if cleared.crossed > 0 else "refused",
                            "; ".join(part for part in (cleared.detail, refused.detail) if part), None, cleared.crossed)
         market = rest.order_type == "market"
-        sent = self._send(rest, cleared.left, now, quote, reference_price=quote.bid if (market and quote is not None) else None, note=note)
+        if self._over_cap(rest, cleared.left, quote):
+            # Over the cap it is an exit plan, and the plan keeps the AGENT'S intent: each slice is cleared of the
+            # House's orders as they stand when it goes (`_advance_plan`), so once the House's bid is gone the rest
+            # of a market exit is a market order again. Started with `rest`, every later slice kept the first
+            # slice's floor and flags, the market fell under it, and the stop rested for the plan's hour (review
+            # of #226, Sept 24, 2026).
+            sent = self._start_exit_plan(asked, cleared.left, now, quote, note=note)
+        else:
+            sent = self._route([rest], [cleared.left], now, reference_price=quote.bid if (market and quote is not None) else None, note=note)
         filled = cleared.crossed + sent.filled
         if cleared.crossed <= 0:
             status = sent.status
@@ -2440,11 +2449,12 @@ class Book:
         to the next. `checked` is for the pass inside `submit`, where the whole intent has just
         passed `check`; on every later pass each slice is checked again, as a new order would be.
 
-        A later slice that would meet the House's own resting order is not refused for it (D3): the
+        A slice that would meet the House's own resting order is not refused for it (D3): the
         seller's own crossing order is cancelled, and a slice that would meet another agent's goes one
         step above the House's bid, or post-only to the ask on doubt (`_clear_the_way` with
         `cross=False`, `_exit_past_the_house`): a plan is never crossed inside the House, whose fills
-        would share the intent's one cross id."""
+        would share the intent's one cross id. That holds for every slice, the first pass's included,
+        each against the House's orders as they stand when it goes (review of #226)."""
         sent: list[str] = []
         intent = plan.intent
         key = intent.instrument.key
@@ -2501,12 +2511,15 @@ class Book:
                 if reasons:
                     self._refuse_slice(plan, index, reasons)
                     break
-                cleared = self._clear_the_way(part, fresh, now, cross=False)
-                if cleared is not None:
-                    part, told = self._exit_past_the_house(part, fresh, cleared.doubt)
-                    if part is None:
-                        self._refuse_slice(plan, index, [told])
-                        break
+            # Every slice, the first pass's too, is cleared of the House's orders as they stand when it goes: the
+            # plan holds the agent's own intent (`_finish_clearing`), never a price the House chose for an earlier
+            # slice. With nothing of the House's in the way this changes nothing (review of #226).
+            cleared = self._clear_the_way(part, fresh, now, cross=False)
+            if cleared is not None:
+                part, told = self._exit_past_the_house(part, fresh, cleared.doubt)
+                if part is None:
+                    self._refuse_slice(plan, index, [told])
+                    break
             outcome = self._route([part], [size], now, reference_price=fresh.bid if (part.order_type == "market" and fresh is not None) else None,
                                   slice_of=(plan.plan_id, index), note=told)
             if outcome.order_id:

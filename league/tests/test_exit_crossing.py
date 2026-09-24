@@ -374,6 +374,40 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertLessEqual(sold + offered, held)
         self.assertEqual(self.broker.submitted[-1].limit_price, D("12.18"))  # one step above the House's bid
 
+    def test_a_sliced_exit_keeps_the_agents_own_order_not_the_first_slices_floor(self):
+        """Review of #226: an exit over the cap that D3 re-priced was started as a plan whose intent WAS the
+        House's re-price (a limit at 12.11, one step above a peer's bid at 12.10). Once that bid was gone and the
+        market had fallen to 11.90, the next slice of the agent's MARKET exit still went out at 12.11 and rested
+        for the plan's hour. The plan keeps the agent's own order; each slice is cleared as it goes."""
+        self.broker.set_quote(self.inst, "12.18", "12.19")
+        self.seat("seller", usd="200", position="200", order="75")
+        for _ in range(2):
+            self.assertEqual(self.book.submit([self.intent("seller", self.inst, "buy", "4")])[0].status, "filled")
+        held = self.book.account("seller").holdings[self.inst.key].quantity
+        bid = self.rest_bid("peer", self.inst, "1", "12.10")  # under the touch: the exit is floored above it
+        submit, calls = self.broker.submit, []
+
+        def second_slice_refused(order_intent):
+            calls.append(order_intent)
+            if len(calls) == 2:
+                raise RejectedOrder("the venue refused this slice")
+            return submit(order_intent)
+
+        with patch.object(self.broker, "submit", side_effect=second_slice_refused):
+            self.book.submit([self.intent("seller", self.inst, "sell", held)])
+        (plan,) = self.book.exit_plans.values()
+        self.assertEqual((plan.intent.order_type, plan.intent.limit_price), ("market", None))  # the agent's own order
+        for sliced in calls:  # both slices of the first pass: floored one step above the peer's bid
+            self.assertEqual((sliced.order_type, sliced.limit_price), ("limit", D("12.11")))
+        self.book.cancel("peer", bid)  # the House's bid goes away
+        self.broker.set_quote(self.inst, "11.90", "11.92")  # and the market falls under the old floor
+        self.clock.advance(60)
+        self.book.poll()
+        last = self.broker.submitted[-1]
+        self.assertEqual((last.side, last.order_type, last.limit_price), ("sell", "market", None))
+        self.assertEqual(self.book.account("seller").holdings, {})
+        self.assertTrue(self.book.reconcile().ok)
+
     def test_a_bid_that_filled_before_the_exit_is_booked_and_not_crossed(self):
         held = self.hold("seller", self.inst, "1.62")
         bid = self.rest_bid("buyer", self.inst, "3", "12.17")
