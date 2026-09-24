@@ -325,6 +325,21 @@ class ResearchGateTest(GateCase):
         self.assertEqual(out["skipped_sessions"], 1)
         self.assertEqual(Decimal(out["estimated_savings_usd"]), Decimal("0.016"))
 
+    def test_a_pause_after_a_sampled_session_is_no_miss(self):
+        """Review of #249: an agent's own pause row (X1) was read as a strategy the sampled session adopted."""
+        agent = self.ready(rng=SimpleNamespace(random=lambda: 0.05))
+        summary(self.house.ledger, agent.id)
+        summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent))
+        self.assertEqual(self.gates()[-1]["decision"], "sample")
+        current = self.house.registry.get(agent.id)
+        self.house.ledger.append("agent.strategy", {"code_sha256": current.code_sha256, "params": current.params, "needs": current.needs,
+                                                    "_code": current.code, "control": "pause_entries", "entries": "paused"}, agent=agent.id)
+        summary(self.house.ledger, agent.id)
+        self.assertEqual(report(self.house.ledger)["sampled_misses"], 0)
+
     def test_jev_relevance_runs_on_uncertain_and_falls_back_when_down(self):
         agent = self.ready(p=0.5)
         summary(self.house.ledger, agent.id)

@@ -18,7 +18,8 @@ Three kinds of work, and what "never acted on" means for each:
   under the same normalized name was answered by a real `tool.fulfilled` (the toolsmith's legacy
   "cannot be a pure tool" answers are blocks, as `Commons._requests` reads them);
 - **a code fix** (a defect named in the answer, or a replacement file Merton wrote): acted on when
-  the agent adopted a strategy afterwards (`agent.strategy`), or replayed or submitted a candidate
+  the agent adopted a strategy afterwards (`agent.strategy`; its own pause, resume or in-place edit
+  of PARAMS adopts no file and is not one), or replayed or submitted a candidate
   later in the same research session. Merton's file text is not on the ledger (`merton.pass`
   keeps only `wrote_code`), so a report says so: the fix must be re-asked or rebuilt from the
   answer;
@@ -199,7 +200,10 @@ def scan(rows: Iterable[Mapping[str, Any]], *, now: float | None = None, settle_
     for row in rows:
         kind, p, agent = row["kind"], row["payload"], row["agent"]
         if kind == "agent.strategy":
-            strategies.setdefault(agent, []).append(row["seq"])
+            # Its own entry control (X1: a pause, a resume, an in-place edit of its PARAMS) is not the
+            # code fix a consult named: it adopts no file (review of #249: a pause hid the defect).
+            if not p.get("control"):
+                strategies.setdefault(agent, []).append(row["seq"])
         elif kind == "agent.died":
             died.setdefault(agent, row["seq"])
         elif kind == "agent.research" and p.get("tool") in TESTED_TOOLS and p.get("session"):

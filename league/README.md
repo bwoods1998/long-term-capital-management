@@ -180,6 +180,43 @@ status is exposed in health and agent research context; qualification is distinc
    reported; a failed wake is an alert, never a failed tick. Since Sept 23, 2026 a wake whose box
    background work holds (its research replaying a candidate there) waits at most 2 s, then is
    skipped and due again on the next tick (`deferred` `wakes`).
+   **The wake skip (Sept 24, 2026).** An agent everything of which keeps the regular US session (a
+   stock or option desk, an open desk naming no coin) is not woken while the session is shut
+   (`_shut_session`): no snapshot, no box, no order, no `agent.woke` row. Its cadence and its idle
+   bookkeeping stand (`_note_wake`, so research is paced as before), `_next_wake` wakes it a few
+   seconds after the bell, where a held position's exit goes at once, and `health.json`
+   `wakes_skipped` counts the skips by desk. In the 48 hours to T0 of the close-the-gaps run 2,891 of
+   9,884 wakes were such wakes (9,424 billed box seconds, 75 refused market orders, 21 research
+   sessions pulled forward by those refusals). An agent still woken outside the session (an open
+   desk naming a coin) has its stock or option entries refused by the House with a reason it reads.
+   **Paused entries (X1, Sept 24, 2026).** An agent that paused its entries (`pause_entries`,
+   `Registry.entries_paused`) has every buy its code sends held before sizing: counted as `held` on
+   `agent.woke`, never a `book.refused` row (which would pull a research pass forward each wake),
+   and its resting buys that are its alone are cancelled when the pause is made and at each wake
+   (`_cancel_paused_entries`). Its sells, cancels and settlements go on. Held buys are not activity
+   (review of #249, P3): the wake counts it barren when it is shown live markets (the stuck rule
+   and research's idle cadence read that), `_displaceable` takes a resident paused past the grace
+   like one that never traded, and the seat report counts it as holding none (`_paused_past`,
+   `_seats_holding_none`). The allocator promotes a paused agent to no real band (its
+   status says "paused"), and after `allocator.PAUSED_STAKE_AFTER_SECONDS` (24 h) holds a paused
+   real agent's stake to the probe by free cash only (P2; the board row's `entries_paused_since`).
+   **The horizon's basis (X2, Sept 24, 2026).** `resolution.resolution(row, close)` is when a Kalshi
+   market is expected to pay and what that is judged by: its scheduled (expected) expiration where
+   the venue gives one, its close otherwise, never the deprecated latest date it may expire
+   (`ltcm/data/kalshi.py` keeps `expected_expiration_time` apart). The venue gives one for every
+   market seen (1.36 million cached rows, review of #249), but where it lies two days or more after
+   the close it is a deadline (the diesel prints, the AI-share weeklies), and the market is judged
+   by its close plus its series' measured settle lag (`resolution.SettleLags`: the p95 of the last
+   40 of its settled markets before the day, at least 20; fed by every Kalshi tape's settled
+   markets and kept in `settle_lags.json` beside the House's state; review of #249, P1), or by the
+   deadline while that cannot be measured. `league/resolution.py` is a money judge
+   (`ci.FORBIDDEN`: an updater release cannot change what the book admits), and it reads
+   `settle_lags.json` as untrusted data: an entry that settled before its close or is not three
+   finite times with a real deadline is ignored, each lag is clamped to [0, its deadline], and a
+   series needs 20 good settlements. The live view's `hours_to_resolve`, a replay tape's and the
+   book's horizon rule (`KalshiData.resolves_at`, `resolution_of`) read it alike. A Kalshi entry past the horizon is refused by the House before
+   the book (`_horizon_refusal`), saying which it was judged by; what it cannot look up it leaves
+   to the book.
 4. **Submit one batch per book**, so opposite market orders on one instrument net inside the House.
 5. **Every `mark_every_seconds` (300), per book:** poll, mark every account, reconcile to the venue
    (a mismatch is an error alert and freezes new entries). Then judge each living agent on that
@@ -235,6 +272,27 @@ status is exposed in health and agent research context; qualification is distinc
    fork. A failed candidate that at least trades can replace an empty paper strategy after ten
    barren wakes. A later failed replay does not discard an earlier passing candidate. Research
    that finishes after retirement or a code change is recorded without changing that agent.
+   **Entry controls (X1, Sept 24, 2026).** The researcher's `pause_entries`, `resume_entries` and
+   `edit_params` only record a request (`agent.research`, tool `control`, status `requested`, id
+   `control-request:<session>:<n>`); `edit_params` first has the House replay the edit
+   (`_edit_replay`: numeric PARAMS `parameters.inspect` lists as mutable, inside their bounds, on a
+   book of half the practice stake and caps, judged by the replay gate with this look and every
+   earlier edit look of the line in the deflation, no `eval.trial`, never the holdout, one a day
+   passed or not, read in full by `_edit_looks`; an `edit_replay` row).
+   After any candidate and before the job is done, the pass's entry controls are applied
+   (`_apply_controls`; a restart resumes an unfinished job and applies them): each an
+   `agent.strategy` row restating the strategy in force with `control`
+   (`pause_entries`, `resume_entries` or `edit_params`), `was`, the agent's `note` and the
+   `reason` carried from the row before (so `hypotheses._mechanism` still reads the strategy's).
+   A pause or resume row adopts nothing: `allocator.adopted_strategy` passes over it, so it moves
+   no generation (an audit in flight, a promotion, a death and a waiting candidate's admission are
+   keyed to it) and sets no audit verdict aside, and a buy decided before a pause is held at
+   `_submit_wakes`. An edit is a new strategy: none is made while an audit of the agent runs or is
+   owed, or while its latest audit is a veto (the generation moves, which drops an audit in flight,
+   and `allocator.audit_standing` reads no verdict from before it), nor on rung 2 or above while an
+   audit's approval of the strategy as it runs stands (nothing audits a seated swing again). What
+   cannot be made is a `not_applied` status row saying why; ids make a restart's second look a
+   no-op.
    Selected candidates are saved privately as soon as replay selects them, including candidates
    whose later fork is deferred or fails. That journal preserves work; it does not automatically
    retry admission or resume an interrupted provider conversation.

@@ -50,6 +50,9 @@ class OrderFitting(HouseCase):
         return book, broker
 
     def test_an_option_asked_for_at_market_becomes_a_limit_at_the_touch_and_the_book_takes_it(self):
+        # In the regular session: outside it no option entry is sent (the wake skip, Sept 24, 2026).
+        self.clock.now = 1789000000.0 + 13.6 * 3600  # 2026-09-10 14:02Z, 10:02 in New York
+        self.broker.clock_iso = iso(self.clock)
         agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
         self.house.seat(agent)
         book = self.house.books["alpaca-paper"]

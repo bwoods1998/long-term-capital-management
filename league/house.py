@@ -82,6 +82,14 @@ QUIET_DESK_SECONDS = 3600.0
 QUIET_DESK_WAKES = 3
 #: The books that hold real money, by name (`Book.real_money`), for a refusal on a book that is not mounted.
 REAL_BOOKS = ("kalshi", "alpaca")
+#: Beside the House's state: when each deadline-type Kalshi series' markets paid after their close
+#: (`resolution.SettleLags`, which reads it as untrusted data), which the horizon rule judges such a market by.
+SETTLE_LAGS_FILE = "settle_lags.json"
+#: X1 (Sept 24, 2026): an in-place parameter edit is replayed first on a book this share of the
+#: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
+#: passed or not, so it cannot search its parameters in place for a lucky look that is no trial.
+EDIT_REPLAY_NOTIONAL = 0.5
+EDIT_REPLAY_EVERY_SECONDS = 24 * 3600.0
 #: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
 #: called a mismatch (`reconcile_with_second_look`).
 SECOND_LOOK_SECONDS = 3.0
@@ -485,6 +493,13 @@ class House:
 
         self.holdout_window: tuple[str, str] = HOLDOUT  # the sealed window (tests shorten it)
         self.kalshi_data = kalshi_data
+        if kalshi_data is not None and hasattr(kalshi_data, "settle_lags") and getattr(kalshi_data, "settle_lags", None) is None:
+            # When each deadline-type series' markets pay after their close, measured on the settled
+            # markets its replay tapes read, and kept beside the House's state (`resolution.SettleLags`):
+            # what the horizon rule judges such a market by (review of #249, P1).
+            from .resolution import SettleLags  # the protected answer (`ci.FORBIDDEN`) reads its own file
+
+            kalshi_data.settle_lags = SettleLags(self.root / SETTLE_LAGS_FILE)
         self.provider = provider
         self.auditor = auditor
         self.publisher = publisher
@@ -601,6 +616,7 @@ class House:
         if self.researcher is not None:
             self.researcher.frontier_tier = self.frontier_tier
             self.researcher.trades = lambda agent_id: self._recent_trades(agent_id, limit=200)
+            self.researcher.edit_replay = self._edit_replay  # `edit_params` (X1, Sept 24, 2026)
         self._born_at = self.clock()
         self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
         # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it
@@ -701,6 +717,51 @@ class House:
         if self.kalshi_data is None:
             return None
         return self.kalshi_data.resolves_at(instrument.market_id or instrument.symbol)
+
+    def _horizon_refusal(self, agent: Agent, book: Book, instrument: Instrument) -> str:
+        """The horizon rule's refusal of a Kalshi entry, saying what the House judged it by, or "".
+
+        X2 (Sept 24, 2026, the close-the-gaps run): the book refuses an entry expected to pay past the
+        agent's horizon ("this market is expected to resolve in N hours"), and its refusal cannot say
+        what N was measured to (`league/resolution.py`, a money judge in `ci.FORBIDDEN`): the market's
+        scheduled expiration; its close plus
+        its series' measured settle lag, where the venue's "expected" expiration is a deadline days
+        after the close; that deadline, where the lag cannot be measured yet; or its close, where the
+        venue lists none. The House asks the book's own question of the book's own answer
+        (`_resolves_at` reads the same `KalshiData.resolution_of`, the same seat limit) before the
+        book does, and says which. Whatever it cannot tell it leaves to the book, which refuses it
+        ("cannot tell when this market resolves"): this never admits an entry the book would refuse."""
+        if instrument.asset_class != "event" or self.kalshi_data is None:
+            return ""
+        limits = book.limits.get(agent.id)
+        horizon = getattr(limits, "max_hours_to_resolve", None)
+        lookup = getattr(self.kalshi_data, "resolution_of", None)
+        if horizon is None or not callable(lookup):
+            return ""
+        try:
+            found = lookup(instrument.market_id or instrument.symbol)
+            hours = None if found is None else (float(found.due) - self.clock()) / 3600.0
+        except Exception:  # noqa: BLE001 - not knowing is the book's to refuse
+            return ""
+        if hours is None or hours <= float(horizon):
+            return ""
+        from .resolution import CLOSE, DEADLINE, SCHEDULED, SETTLE_LAG, SETTLE_LAG_MIN_MARKETS
+        from .tapes import iso as tape_iso
+
+        if found.basis == SCHEDULED:
+            judged = f"by its scheduled expiration ({tape_iso(found.due)})"
+        elif found.basis == SETTLE_LAG:
+            judged = (f"by its close plus its series' measured settle lag ({tape_iso(found.due)}: {found.lag_hours:g} hours after the "
+                      f"close, the 95th percentile of its last {found.markets} settled markets; its expected expiration, "
+                      f"{tape_iso(found.deadline)}, is a deadline, not a schedule)")
+        elif found.basis == DEADLINE:
+            judged = (f"by its expected expiration ({tape_iso(found.due)}), a deadline days after its close: its series has fewer than "
+                      f"{SETTLE_LAG_MIN_MARKETS} settled markets on record to measure when it pays")
+        elif found.basis == CLOSE:
+            judged = f"by its close ({tape_iso(found.due)}): the venue lists no scheduled expiration for it"
+        else:
+            judged = f"({tape_iso(found.due)})"
+        return f"this market is expected to resolve in {hours:.0f} hours, {judged}; entries must resolve within {float(horizon):g}"
 
     # ------------------------------------------------------------------ state
     def _load_state(self) -> dict[str, Any]:
@@ -1760,13 +1821,54 @@ class House:
             return due
         return at_open if at_open is not None and at_open < due else due
 
+    def _shut_session(self, agent: Agent) -> str:
+        """Why this agent's wake is not run now, or "": everything it may trade keeps the regular US
+        session (a stock or option desk; an open desk naming no coin) and the session is shut.
+
+        The wake skip (Sept 24, 2026, the close-the-gaps run). Outside the session nothing such an
+        agent decides can trade: an entry waits for the open, a market exit is refused by the book
+        ("market orders outside regular hours are not permitted"), and the strategy reads a shut
+        market's stale quotes. Measured on the T0 snapshot, the 48 hours to 01:41Z Sept 24: 2,891 of
+        9,884 wakes (29%) were stock or option agents outside the session, billed 9,424 box seconds,
+        and sent 79 intents, 75 of them refused as market orders outside regular hours (scholes-
+        h7dd043-2 and scholes-25 exiting, 10-14 an hour all night). Such a wake is not run: no
+        snapshot, no box, no order, no `agent.woke` row. Its cadence and its idle bookkeeping stand
+        (`wake`), and `_next_wake` already wakes the desk a few seconds after the bell, where a held
+        position's exit goes at once. A House wind-down's held sells wait for the open as before
+        (`_release_wind_downs`). An open desk naming a coin is woken all night for the coin; its stock
+        or option entries wait instead (`_intents`)."""
+        niche = self.niche_of(agent)
+        if niche is None or not niche.keeps_hours(agent.needs):
+            return ""
+        if niche.open and any(not niche.keeps_hours({"symbols": [symbol]}) for symbol in agent.needs.get("symbols") or []):
+            return ""  # it names a coin, which trades all night
+        try:
+            if market_open_at(now_iso(self.clock)):
+                return ""
+        except Exception:  # noqa: BLE001 - a moment outside the computed calendar: wake as before
+            return ""
+        return ("the regular session is shut: a stock or option desk is not woken until the open, "
+                "a few seconds after the bell (nothing it sends before then can trade)")
+
+    def _count_skipped_wake(self, agent: Agent) -> None:
+        """health.json `wakes_skipped`: how many wakes the skip saved since it was first counted, by desk."""
+        with self._state_lock:
+            skips = self._state.setdefault("wakes_skipped", {"since": now_iso(self.clock), "count": 0, "by_desk": {}})
+            skips["count"] = int(skips.get("count") or 0) + 1
+            desk = agent.specialty or agent.niche
+            skips.setdefault("by_desk", {})[desk] = int(skips["by_desk"].get(desk) or 0) + 1
+            skips["last_at"] = now_iso(self.clock)
+
     def _generation(self, agent_id: str) -> tuple[str, str, int, int] | None:
-        """Identity of the strategy and rung stay, read while holding the lifecycle lock."""
+        """Identity of the strategy and rung stay, read while holding the lifecycle lock. An agent's
+        own pause or resume of its entries (X1) restates its strategy and does not move it
+        (`allocator.adopted_strategy`): an audit, a candidate's admission, a promotion or a death
+        keyed to the generation stands. A buy decided before a pause is held at `_submit_wakes`."""
         agent = self.registry.get(agent_id)
         if agent is None or not agent.alive:
             return None
         strategy = json.dumps([agent.params, agent.needs], sort_keys=True, separators=(",", ":"))
-        last_strategy = self.ledger.last("agent.strategy", agent=agent_id)
+        last_strategy = allocator_module.adopted_strategy(self.ledger, agent_id)
         return agent.code_sha256, strategy, last_strategy.seq if last_strategy else 0, self.evaluator._rung_entered(agent_id)
 
     def wake(self, agent: Agent) -> dict[str, Any]:
@@ -1796,6 +1898,13 @@ class House:
             self.seat(agent)
             if book.account(agent.id).cash <= 0 and not book.account(agent.id).holdings:
                 return {"agent": agent.id, "skipped": "no stake on its book yet"}
+            shut = self._shut_session(agent)
+            if shut:
+                # The wake skip: no snapshot, no box, no order. Only the bookkeeping a shut wake always
+                # did, so research is paced exactly as before (`idle_reason`'s bench time).
+                self._note_wake(agent, acted=bool(book.account(agent.id).holdings or book.open_orders(agent.id)), offered=0)
+                self._count_skipped_wake(agent)
+                return {"agent": agent.id, "skipped": shut}
         try:
             ctx = self.snapshot(agent, book)
         except Exception as exc:  # noqa: BLE001 - a data outage skips a wake, it does not stop the floor
@@ -1820,7 +1929,16 @@ class House:
         # The decision's cancels are applied below, after sizing, but the book judges its new orders
         # after them: the real-money trim must not count a bid this decision withdraws (`_fit_real_entry`).
         cancelling = frozenset(c for c in (result.get("cancels") or ()) if isinstance(c, str)) if result.get("ok") else frozenset()
-        intents, dropped = (self._intents(agent, book, result.get("intents") or [], adjusted=adjusted, cancelling=cancelling)
+        asked = list(result.get("intents") or []) if result.get("ok") else []
+        # X1 (Sept 24, 2026): an agent that paused its entries (`pause_entries`) has every buy held here,
+        # counted on the wake and never refused (a refusal row would buy it a research pass each wake);
+        # its sells go on. A pause made after this read holds the buys at the batch (`_submit_wakes`).
+        paused = self.registry.entries_paused(agent.id)
+        held = 0
+        if paused:
+            kept = [row for row in asked if not (isinstance(row, Mapping) and str(row.get("side") or "").lower() == "buy")]
+            held, asked = len(asked) - len(kept), kept
+        intents, dropped = (self._intents(agent, book, asked, adjusted=adjusted, cancelling=cancelling)
                             if result.get("ok") else ([], []))
         offered = self._offered(agent, ctx)
         with self._lifecycle_lock:
@@ -1834,16 +1952,31 @@ class House:
             if thought:
                 self.ledger.append("agent.thought", {"text": thought, "phase": "decide", "book": book.name}, agent=agent.id)
             cancelled = [book.cancel(agent.id, order_id).status for order_id in result.get("cancels") or []]
+            if paused:
+                cancelled += self._cancel_paused_entries(agent, book)
+            # Held buys are not activity (review of #249, P3): a paused agent that holds nothing and is shown
+            # live markets is barren, for the stuck rule and research's idle cadence alike (`_note_wake`).
             idle = self._note_wake(agent, acted=bool(intents or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
             self.ledger.append(
                 "agent.woke",
                 {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
                  "offered": offered, **({"barren": idle["barren"]} if idle["barren"] else {}), **({"shut": idle["shut"]} if idle["shut"] else {}),
-                 **({"adjusted": adjusted[:16]} if adjusted else {})},
+                 **({"adjusted": adjusted[:16]} if adjusted else {}), **({"held": held} if held else {})},
                 agent=agent.id,
             )
         return {"agent": agent.id, "book": book.name, "intents": intents, "dropped": dropped, "offered": offered,
                 "_generation": generation}
+
+    def _cancel_paused_entries(self, agent: Agent, book: Book) -> list[str]:
+        """Cancel a paused agent's resting buys (X1): a bid left resting would fill after the agent
+        asked for no more entries. Only orders that are its alone: a share of another agent's order is
+        that agent's to manage. Exits are never touched. Returns the cancels' statuses."""
+        out = []
+        for working in book.open_orders(agent.id):
+            if working.side == "buy" and all(share.agent == agent.id for share in working.shares):
+                out.append(book.cancel(agent.id, working.order_id,
+                                       why="its own pause_entries: its entries are held until it resumes them").status)
+        return out
 
     def _submit_wakes(self, book_name: str, outcomes: Sequence[Mapping[str, Any]]) -> list[Any]:
         """Validate again at the batched order boundary: a wake may have waited for other boxes."""
@@ -1868,6 +2001,10 @@ class House:
                     # 22; this is the same guard on the agents' side of the path).
                     self._note_unseated(agent, book_name, len(rows))
                     continue
+                if self.registry.entries_paused(agent.id):
+                    # Its own pause, made after this wake decided (X1): a pause moves no generation
+                    # (`_generation`), so its buys are held here. Its sells go on.
+                    rows = [intent for intent in rows if intent.side != 'buy']
                 if self.paused() and any(intent.side == 'buy' for intent in rows):
                     self.ledger.append('book.refused', {'book': book_name,
                         'reasons': ['the House is paused for maintenance: exits and cancels only']}, agent=agent.id)
@@ -2068,7 +2205,14 @@ class House:
                 if quantity <= 0:
                     raise ValueError("the size rounds down to nothing")
                 minimum = min_order_usd(instrument) if side == "buy" else None
-                refusal = ""
+                # A Kalshi entry past the horizon is refused here, saying what it was judged by (X2).
+                refusal = self._horizon_refusal(agent, book, instrument) if side == "buy" else ""
+                if not refusal and side == "buy" and market_hours(instrument, now) is False:
+                    # The wake skip's other half (Sept 24, 2026): an agent still woken outside the session
+                    # (an open desk naming a coin) sends no stock or option entry. A market buy would be
+                    # refused by the book, and a limit would only wait at the venue for the open.
+                    refusal = ("outside the regular session no stock or option entry is sent: it could not trade before "
+                               "the open. The House wakes a desk that keeps hours a few seconds after the bell; decide it then")
                 if minimum is not None:
                     if price is None:
                         try:  # a market buy sized in units: the ask it will pay
@@ -2708,7 +2852,10 @@ class House:
             return {}
         return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
-    def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+    def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
+                    scale: float = 1.0) -> tuple[dict[str, Any], str]:
+        """`scale` sizes the replay's book: the practice rung's stake and caps times it (an in-place edit
+        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's)."""
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
@@ -2735,8 +2882,8 @@ class House:
             if missing:
                 raise ValueError("unsupported input: no options-feature history for " + ", ".join(map(str, missing)))
         row = CONSTITUTION["rungs"]["1"]
-        stake = float(row["stake_usd"])
-        limits = {"max_position_usd": float(row["max_position_usd"]), "max_order_usd": float(row["max_order_usd"])}
+        stake = float(row["stake_usd"]) * scale
+        limits = {"max_position_usd": float(row["max_position_usd"]) * scale, "max_order_usd": float(row["max_order_usd"]) * scale}
         attempt = self.experiments.begin(agent=agent.id, family=agent.family,
             lineage=self.registry.lineage(agent.id), code=code, params=params, needs=needs,
             tape=tape, query=tape_id, stake=stake, limits=limits)
@@ -2976,6 +3123,96 @@ class House:
             out["walk_forward"] = result.get("walk_forward") or []
             out["note"] = "replayed on the development window before the sealed holdout; promotion also needs the holdout"
         return out
+
+    def _edit_replay(self, agent: Agent, changes: Mapping[str, Any], *, session: str = "") -> dict[str, Any]:
+        """The researcher's `edit_params` (X1, Sept 24, 2026): replay an in-place parameter edit.
+
+        The agent keeps its seat, its record and its code; only numeric PARAMS that `parameters.inspect`
+        lists as mutable change, each inside its bounds. The House replays the code with the edited
+        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`), on the
+        tape its replays use -- the development window, never the sealed holdout -- and judges it by
+        the replay gate against the line's trials with this look, and every earlier edit look of the
+        line, counted in the deflation (`evaluator.replay_gate`, counted=False, `looks`). It records no
+        `eval.trial` and spends none of the line's holdout evaluations. One such replay an agent a day
+        (`EDIT_REPLAY_EVERY_SECONDS`), passed or not, recorded as an `agent.research` row (tool
+        "edit_replay", read in full by `_edit_looks`), so the look that is no trial cannot be
+        repeated into a lucky one. A passing edit is applied when the pass ends (`_apply_controls`);
+        this changes nothing itself.
+
+        Returns {"passed", "reasons", "params", "was", "code_sha256", "numbers"}, or {"error"} for an
+        edit refused before any replay (or a replay that could not run, which is no look)."""
+        with self._lifecycle_lock:
+            current = self.registry.get(agent.id)
+            if current is None or not current.alive:
+                return {"error": "the agent is no longer alive"}
+            if (current.code_sha256, current.params, current.needs) != (agent.code_sha256, agent.params, agent.needs):
+                return {"error": "your strategy changed during this pass: look at it again before you edit it"}
+            if self.evaluator.rung(current.id) < 1:
+                return {"error": "on rung 0 a replay is the way up: submit the edited file with `replay` (a counted trial)"}
+            refusal = self._control_refusal(current, "edit_params")
+            if refusal:
+                return {"error": refusal}
+            current = deepcopy(current)
+        lineage = self.registry.lineage(current.id)
+        looks = self._edit_looks(lineage)
+        last = next((e for e in reversed(looks) if e.agent == current.id), None)
+        if last is not None and self.clock() - _epoch(last.at) < EDIT_REPLAY_EVERY_SECONDS:
+            return {"error": f"one in-place edit replay a day, passed or not: your last was at {last.at}; "
+                             f"the next may run from {now_iso(lambda: _epoch(last.at) + EDIT_REPLAY_EVERY_SECONDS)}"}
+        rules = parameters.inspect(current.params, current.needs)
+        errors, edited = [], dict(current.params)
+        for key, value in dict(changes).items():
+            if key not in current.params:
+                errors.append(f"{key} is not one of your PARAMS")
+            elif key not in rules["mutable"]:
+                errors.append(f"{key} is not a bounded, unfrozen numeric knob (parameter_validation.mutable lists those)")
+            elif type(value) not in (int, float) or not math.isfinite(value):
+                errors.append(f"{key} must be a number")
+            elif type(current.params[key]) is int and float(value) != int(value):
+                errors.append(f"{key} is a whole number")
+            else:
+                edited[key] = int(value) if type(current.params[key]) is int else float(value)
+        if errors:
+            return {"error": "; ".join(errors)}
+        if edited == current.params:
+            return {"error": "nothing changed: give the knobs you change and their new values"}
+        checked = parameters.inspect(edited, current.needs)
+        if not checked["valid"]:
+            return {"error": "invalid parameters: " + "; ".join(checked["errors"])}
+        niche = self.niche_of(current)
+        if niche is not None and not self._replayable(niche, current.needs):
+            return {"error": "this specialty has no replay to judge an edit by: an edit here waits for one"}
+        try:
+            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=EDIT_REPLAY_NOTIONAL)
+        except Exception as exc:  # noqa: BLE001 - a replay that cannot run is no look, and changes nothing
+            return {"error": f"the edit's replay could not run (not a look; nothing changed): {type(exc).__name__}: {str(exc)[:200]}"}
+        crash = self._crashed(result)
+        if crash:
+            return {"error": f"the edit's replay was not run (not a look; nothing changed): {crash[:160]}"}
+        # This look, and every earlier edit look of the line (no `eval.trial` records them), are tries in
+        # the deflation: one look a day, but not each one judged as if it were the first.
+        passed, reasons, growth, sharpe, deflated, trials, oos = self.evaluator._replay_reasons(
+            current.family, result, lineage, counted=False, looks=[e.payload.get("sharpe") for e in looks])
+        numbers = {"trades": int(result.get("trades") or 0), "blocks": len(growth), "sharpe": sharpe, "trials": len(trials),
+                   "deflated_sharpe": None if deflated is None else deflated["dsr"], "return_pct": result.get("return_pct"),
+                   "max_drawdown": result.get("max_drawdown"), "oos_mean_log_growth": oos.get("mean_log_growth"),
+                   "fees_usd": result.get("fees_usd"), "tape": tape_id, "tape_source": result.get("tape_source"),
+                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * EDIT_REPLAY_NOTIONAL}
+        self.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": passed, "reasons": reasons,
+                                              "params": edited, "was": dict(current.params), **numbers}, agent=current.id)
+        return {"passed": passed, "reasons": reasons, "params": edited, "was": dict(current.params),
+                "code_sha256": current.code_sha256, "numbers": numbers}
+
+    def _edit_looks(self, agent_ids: Sequence[str]) -> list[Any]:
+        """Every in-place edit replay (`edit_replay` rows) of these agents, oldest first: the one-a-day
+        rule and the deflation read them. Read in full, never from a window of the newest rows: an
+        agent writes up to 1,700 `agent.research` rows a day, and on the T0 snapshot of the close-the-
+        gaps run 26 of 487 agents wrote 400 inside a day (meriwether-37 in 2.8 hours), so a window of
+        400 lost the day's look and let a second one run (review of #249). The busiest agent's whole
+        research record decodes in about 20 ms."""
+        looks = [entry for agent_id in dict.fromkeys(agent_ids) for entry in self.ledger.iter(kinds="agent.research", agent=agent_id)
+                 if entry.payload.get("tool") == "edit_replay"]
+        return sorted(looks, key=lambda entry: entry.seq)
 
     # ----------------------------------------------------------------- judging
     def judge(self, agent: Agent) -> Verdict | None:
@@ -3325,6 +3562,13 @@ class House:
             if self._generation(agent_id) != generation:
                 return
             agent = self.registry.get(agent_id)
+            paused = self.registry.entries_paused(agent_id)
+            if paused:
+                # It paused its entries while it was audited (X1): a paused agent is promoted to no real
+                # band (review of #249, P2); the allocator weighs it again once it resumes.
+                self._promotion_status(agent, verdict, 'paused', f"its entries were paused (since {paused.get('since')}) when "
+                                                                 "the audit finished: a paused agent is not promoted")
+                return
             source_book = self.book_of(agent)
             if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
                 self._promotion_status(agent, verdict, 'accounting_integrity',
@@ -3473,8 +3717,10 @@ class House:
             if row.kind == "agent.intent":
                 wakes.setdefault(agent.specialty, []).append([at, row.agent, 0, 1])
             elif row.payload.get("ok"):
+                # A buy its own pause held (X1, `held`) is its rules firing, not a desk gone quiet.
                 wakes.setdefault(agent.specialty, []).append(
-                    [at, row.agent, int(row.payload.get("offered") or 0), int(row.payload.get("intents") or 0)])
+                    [at, row.agent, int(row.payload.get("offered") or 0),
+                     int(row.payload.get("intents") or 0) + int(row.payload.get("held") or 0)])
         for niche_id, rows in list(wakes.items()):
             rows = [r for r in rows if now - float(r[0]) <= QUIET_DESK_SECONDS][-400:]  # eight seats waking every five minutes is 96 an hour
             if not rows:
@@ -4198,7 +4444,8 @@ class House:
             return True
         since = now_iso(lambda: last)
         for kind in ("book.fill", "book.settle", "eval.verdict", "agent.strategy"):
-            row = self.ledger.last(kind, agent=agent.id)
+            # A pause or resume of its entries restates its strategy (X1): not a new one.
+            row = allocator_module.adopted_strategy(self.ledger, agent.id) if kind == "agent.strategy" else self.ledger.last(kind, agent=agent.id)
             if row is not None and row.at > since:
                 self._gate_note(agent, "run", f"new {kind} since the last pass", streak, last)
                 return True
@@ -4398,8 +4645,14 @@ class House:
                         if self.research_jobs.active(agent.id):
                             continue
                         agent_grace = 0
+            # Its own pause (X1; review of #249, P3): held buys are not activity, and a resident paused past
+            # the grace is displaceable like one that never traded -- no trader's, screen's or grace's
+            # wait, ranked with the idle. A winner and real money stay protected, as for everyone.
+            idle_pause = standing.rung == 1 and self._paused_past(agent, max(grace, clock), now)
+            if idle_pause:
+                agent_grace = 0
             traded = False
-            if standing.rung == 1 and (keeps_hours or evidenced):
+            if standing.rung == 1 and (keeps_hours or evidenced) and not idle_pause:
                 # Has it traded since its current program's opportunity? Read for every desk when an
                 # evidenced newcomer asks (a never-traded seat is what it may take); the plain
                 # tournament reads it only where the session rules below need it.
@@ -4437,11 +4690,11 @@ class House:
             # A desk that keeps hours offers nothing between the close and the next open: its grace
             # is counted in regular-session time. The desk's evidence clock is wall-clock hours (S1).
             seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
-            past_grace = seated >= grace and now - opportunity >= clock
+            past_grace = (seated >= grace and now - opportunity >= clock) or idle_pause
             if agent_grace > 0 and not past_grace:
                 continue
-            fills = self._own_fills(agent.id, after=opportunity_seq) if standing.rung == 1 else 0
-            has_traded = standing.active_blocks > 0 or traded or fills > 0
+            fills = self._own_fills(agent.id, after=opportunity_seq) if standing.rung == 1 and not idle_pause else 0
+            has_traded = not idle_pause and (standing.active_blocks > 0 or traded or fills > 0)
             if not newcomer_proven and (has_traded or not past_grace) and self._family_proven(agent.family, agent.venue):
                 continue  # S1: a proven family's resident is never displaced by an unproven newcomer
             if fills >= FORWARD_RULE_FILLS:
@@ -4461,9 +4714,17 @@ class House:
         rank.sort(key=lambda row: row[:6])
         return rank
 
+    def _paused_past(self, agent: Agent, grace: float, now: float) -> bool:
+        """Whether the agent has held its own entries (X1, `pause_entries`) for `grace` seconds or more:
+        a resident paused past its resident grace (the plain grace and its desk's evidence clock) holds
+        no evidence of trading, for displacement and the seat report alike (review of #249, P3)."""
+        paused = self.registry.entries_paused(agent.id)
+        return bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
+
     def _program_opportunity(self, agent: Agent, *, keeps_hours: bool = False) -> tuple[float, int]:
         """(when, ledger position) a rung-1 agent's current program was given its chance: its birth, its
-        latest new program (`agent.strategy` with other code, parameters or NEEDS), or its latest seat on
+        latest new program (`agent.strategy` with other code, parameters or NEEDS; never one of its own
+        entry controls, which keep the seat and the record: X1, review of #249), or its latest seat on
         rung 1, whichever is last.
 
         A late replay pass or a new empty-record strategy has not had the old program's trading
@@ -4483,6 +4744,12 @@ class House:
         signature = None
         for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
             p = entry.payload
+            if entry.kind == "agent.strategy" and p.get("control"):
+                # Its own entry control (X1): a pause or resume restates the program, and an in-place edit
+                # keeps its seat and its record, so neither is a new opportunity. Read as one, an edit bought
+                # a fresh grace and cleared "traded since", which let an evidenced newcomer take a trader's
+                # seat at once (review of #249).
+                continue
             if entry.kind in ("agent.born", "agent.strategy"):
                 current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
                 if current != signature:
@@ -4805,7 +5072,9 @@ class House:
         """S4 (Sept 24, 2026): the living residents off real money whose seat holds none of a program with a
         forward score (`Lab.resident_forward`, ranked), a fill of its own since its program's opportunity, or
         a grace still running (the plain grace, or its desk's evidence clock, in wall-clock hours from that
-        opportunity), oldest first. The population stays 112; these are the seats that carry no evidence."""
+        opportunity), oldest first -- and every resident that has held its own entries for longer than that
+        grace (`_paused_past`), as displacement counts it. The population stays 112; these are the seats
+        that carry no evidence."""
         grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
         clocks = self._desk_clocks()
         now = self.clock()
@@ -4818,6 +5087,11 @@ class House:
                 continue
             opportunity, seq = self._program_opportunity(agent) if rung == 1 else (_epoch(agent.born_at), 0)
             clock = clocks.get(agent.specialty or "", 0.0) if rung == 1 else 0.0
+            if rung == 1 and self._paused_past(agent, max(grace, clock), now):
+                # Its own pause, past its grace: held buys are not trading, and its fills and forward score
+                # are its record, not evidence that it trades now (review of #249, P3; the seat report).
+                out.append((opportunity, agent.id))
+                continue
             if now - opportunity < max(grace, clock):
                 continue
             if self._own_fills(agent.id, after=seq, enough=1):
@@ -5290,6 +5564,8 @@ class House:
                         'The original lineage and every trial remain counted.'},
             'parameter_validation': parameters.inspect(agent.params, agent.needs),
             'idle': {**self.idle_run(agent), 'why_now': self.idle_reason(agent)},
+            # X1 (Sept 24, 2026): whether its entries are paused, since when and why, and its last edit replay.
+            'entries': self._entries_standing(agent),
             'rewrites_in_place': rung == 0 or (rung == 1 and self.record_is_empty(agent)),
             'runtime_capabilities': self.research_capabilities(agent),
             'qualification_policy': {
@@ -5346,11 +5622,17 @@ class House:
                     'session': session, 'reason': 'restart during candidate commit; not repeated',
                     '_candidate': (job['outcome'] or {}).get('candidate')}, agent=agent.id,
                     id=f'research-commit-unconfirmed:{session}')
+                self._apply_controls(agent.id, session)  # its ids make a second application a no-op (X1)
                 self.research_jobs.finish(session, 'candidate commit unconfirmed; evidence retained')
                 return None
             with self._lifecycle_lock:
                 current = self._generation(agent.id)
                 if current is None or list(current[:-1]) != job['generation'][:-1]:
+                    if job['status'] == 'ready':
+                        # Its pass had ended: what it asked of its entries is still its to have, or is
+                        # refused on the record (an edit of a strategy that changed, a dead agent). A stop
+                        # between an edit and a pause of one pass moved the generation (X1).
+                        self._apply_controls(agent.id, session)
                     self.research_jobs.finish(session, 'retired or changed before resume', cancelled=True)
                     return None
                 generation = tuple(job['generation'])
@@ -5382,6 +5664,11 @@ class House:
                 if candidate:
                     self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
+            # After any candidate (an edit is a new strategy, which moves the generation), and BEFORE the
+            # job is done: a restart resumes an unfinished job and applies them (ids make it a no-op the
+            # second time), but never a finished one (review of #249: a stop between the two lost the pause).
+            # What a pass the provider broke had already asked is the agent's still (X1).
+            self._apply_controls(agent.id, session)
             # Sept 24, 2026 (L2): a session the provider broke (a 5xx; `research_gate.provider_fault`) was
             # refunded by the researcher and is not a completed pass: its job is closed as cancelled, so
             # it does not restart the research clock, and the agent may research again in
@@ -5815,6 +6102,137 @@ class House:
             else:
                 return candidate
         return None
+
+    def _control_refusal(self, agent: Agent, control: str) -> str:
+        """Why this control (X1) may not be recorded for this agent now, or "".
+
+        A pause or resume restates the strategy in force: it moves no generation and sets no audit
+        verdict aside (`allocator.adopted_strategy`), so it is always made -- a vetoed or audited agent
+        on real money can hold its own entries (review of #249).
+
+        An edit is a new strategy (its PARAMS), and two readers take it as one: an audit in flight is
+        dropped as stale when the generation moves (a veto of an agent already on real money would
+        then never be acted on), and `allocator.audit_standing` reads no verdict from before it (a veto
+        would be set aside before its cooldown). So none is made while an audit of the agent runs or
+        is owed, or while its latest audit is a veto. Nor while an audit's approval of the strategy as
+        it runs stands and the agent is on real money (rung 2 or above: a swing's first entry is
+        audited, a known defect's bunt is audited, and the auditor reads the PARAMS): the edit would
+        trade PARAMS the auditor never saw, and nothing audits a seated swing again (review of #249:
+        a swing raised its notional 30 -> 37 in place and kept the band). Called under the lifecycle
+        lock, as audits are started under it."""
+        if control != "edit_params":
+            return ""
+        with self._state_lock:
+            auditing = agent.id in (self._state.get(self.AUDITS) or {})
+        if auditing or self._audit_owed(agent) is not None:
+            return "an audit of your strategy is under way or owed; a change recorded now would set its verdict aside. Ask again after it"
+        standing = allocator_module.audit_standing(self, agent)
+        if standing == "vetoed":
+            return ("the latest audit of your strategy vetoed it; a change recorded now would read as new code to the audit check, "
+                    "so none is made while the veto stands")
+        if standing == "approved" and self.evaluator.rung(agent.id) >= 2:
+            return ("an audit approved your strategy as it runs and you stand on real money: an edit in place would trade PARAMS "
+                    "that audit never saw. Pause your entries, or replay the changed file for a new agent")
+        return ""
+
+    def _apply_controls(self, agent_id: str, session: str) -> list[str]:
+        """Apply what a finished research pass asked of the agent's own deployed strategy (X1, Sept 24,
+        2026): the `agent.research` rows `Researcher._request_control` wrote (tool "control", status
+        "requested"), oldest first. Returns the controls applied.
+
+        Each is one `agent.strategy` row (id `control:<session>:<n>`) restating the strategy in force,
+        with `control`, `was` (the state before) and the agent's `note`, so the ledger shows it and the
+        registry folds it: `pause_entries` (entries "paused"), `resume_entries` (entries "open"), or
+        `edit_params` (the replayed PARAMS). Its `reason` is carried from the row before, so a reader
+        that asks why this strategy (`hypotheses._mechanism`) still gets the strategy's answer. One
+        that cannot be made is a status row (`control-refused:<session>:<n>`, status "not_applied")
+        saying why. Both ids make a restart's second look a no-op. Neither touches a limit, a stake or a
+        band: the book, the allocator and every rule above them still decide those."""
+        applied: list[str] = []
+        # Read in full, never from a window of the newest rows (an agent writes up to 1,700 research rows a
+        # day, and a pass resumed after a restart is applied late: review of #249).
+        research = [e for e in self.ledger.iter(kinds="agent.research", agent=agent_id)
+                    if e.payload.get("session") == session and e.payload.get("tool") in ("control", "edit_replay")]
+        rows = [e for e in research if e.payload.get("tool") == "control" and e.payload.get("status") == "requested"]
+        for entry in rows:
+            key = entry.id.split("control-request:", 1)[1] if entry.id.startswith("control-request:") else f"{session}:{entry.seq}"
+            if self.ledger.get(f"control:{key}") is not None or self.ledger.get(f"control-refused:{key}") is not None:
+                continue
+            p, control = entry.payload, str(entry.payload.get("control") or "")
+            with self._lifecycle_lock:
+                agent = self.registry.get(agent_id)
+                refusal = "" if agent is not None and agent.alive else "the agent is no longer alive"
+                refusal = refusal or self._control_refusal(agent, control)
+                paused = self.registry.entries_paused(agent_id)
+                if not refusal and control == "pause_entries" and paused:
+                    refusal = f"its entries were already paused (since {paused.get('since')})"
+                elif not refusal and control == "resume_entries" and not paused:
+                    refusal = "its entries were not paused"
+                elif not refusal and control == "edit_params":
+                    # Made only on the House's own record of a passing replay of exactly this edit in
+                    # this pass (`_edit_replay`), never on the request's word alone.
+                    replayed = any(e.payload.get("tool") == "edit_replay" and e.payload.get("passed") is True
+                                   and e.payload.get("params") == p.get("params") and e.payload.get("was") == p.get("was")
+                                   for e in research)
+                    if not replayed:
+                        refusal = "no passing replay of this edit is on record for the pass: the edit is not made"
+                    elif (agent.code_sha256, agent.params) != (p.get("code_sha256"), p.get("was")):
+                        refusal = "its strategy changed after the edit was replayed: the edit is not made"
+                    elif not isinstance(p.get("params"), Mapping) or not parameters.inspect(dict(p["params"]), agent.needs)["valid"]:
+                        refusal = "the edited parameters are not valid for its NEEDS"
+                elif not refusal and control not in ("pause_entries", "resume_entries", "edit_params"):
+                    refusal = f"no such control {control!r}"
+                if refusal:
+                    self.ledger.append("agent.research", {"tool": "control", "status": "not_applied", "control": control,
+                                                          "session": session, "reason": refusal}, agent=agent_id, id=f"control-refused:{key}")
+                    continue
+                prior = self.ledger.last("agent.strategy", agent=agent_id)
+                carried = str((prior.payload if prior is not None else {}).get("reason") or "")
+                row: dict[str, Any] = {"code_sha256": agent.code_sha256, "params": dict(agent.params), "needs": dict(agent.needs),
+                                       "wake_minutes": agent.wake_minutes, "_code": agent.code, "control": control,
+                                       "note": str(p.get("note") or "")[:600], "session": session, **({"reason": carried} if carried else {})}
+                if control == "pause_entries":
+                    row.update(entries="paused", was={"entries": "open"})
+                elif control == "resume_entries":
+                    row.update(entries="open", was={"entries": "paused", "since": paused.get("since")})
+                else:
+                    row.update(params=dict(p["params"]), was={"params": dict(agent.params)}, replay=p.get("replay"))
+                self.ledger.append("agent.strategy", row, agent=agent_id, id=f"control:{key}")
+                self.registry.refresh()
+                if control == "pause_entries":
+                    # Its resting buys go now, not at its next wake, `wake_minutes` away (up to a day):
+                    # a bid left resting filled after the agent asked for no more entries (review of
+                    # #249). A cancel the venue refuses is asked again at each wake.
+                    book = self.book_of(agent)
+                    if book is not None:
+                        try:
+                            self._cancel_paused_entries(agent, book)
+                        except Exception as exc:  # noqa: BLE001 - the pause stands; its next wake cancels again
+                            self.alert("warning", f"{agent_id}: its resting buys could not be cancelled at its pause "
+                                                  f"({type(exc).__name__}: {str(exc)[:160]}); its next wake asks again")
+                if control == "edit_params":
+                    with self._state_lock:
+                        self._state["idle"].pop(agent_id, None)  # new parameters, a fresh count of the wakes they sit out
+                applied.append(control)
+        return applied
+
+    def _entries_standing(self, agent: Agent) -> dict[str, Any]:
+        """What a research pass is shown of its entry controls (X1): paused or open, since when, why, and
+        how many buys the House has held since; and its last in-place edit replay."""
+        paused = self.registry.entries_paused(agent.id)
+        out: dict[str, Any] = {"state": "paused" if paused else "open",
+                               "tools": "pause_entries / resume_entries hold and release your buys (your sells always go on); edit_params "
+                                        "changes your PARAMS in place once its replay at half notional passes"}
+        if paused:
+            since = str(paused.get("since") or "")
+            held = sum(int(e.payload.get("held") or 0) for e in self.ledger.read(kinds="agent.woke", agent=agent.id, limit=2000, newest=True)
+                       if e.at >= since)
+            out.update(since=since, note=paused.get("note"), held_since_pause=held)
+        last = next(reversed(self._edit_looks([agent.id])), None)
+        if last is not None:
+            out["last_edit_replay"] = {"at": last.at, "passed": last.payload.get("passed"), "reasons": last.payload.get("reasons"),
+                                       "next_allowed_at": now_iso(lambda: _epoch(last.at) + EDIT_REPLAY_EVERY_SECONDS)}
+        return out
 
     def record_is_empty(self, agent: Agent) -> bool:
         """True when nothing this agent has done could be evidence and nothing is in its hands: no
@@ -6627,6 +7045,8 @@ class House:
                            for name, book in self.books.items() if name.startswith('alpaca')},
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
+            # The wake skip (Sept 24, 2026): stock and option wakes not run into a shut session (`_shut_session`).
+            "wakes_skipped": dict(self._state.get("wakes_skipped") or {}),
             "background_jobs": jobs,
             "invalid_parameters": {a.id: report['errors'] for a in self.registry.living()
                                    if not (report := parameters.inspect(a.params, a.needs))['valid']},

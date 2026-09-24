@@ -164,10 +164,11 @@ class Seasons(unittest.TestCase):
                 return {"markets": self.pages[index], "cursor": str(index + 1) if index + 1 < len(self.pages) else ""}
 
         game = dict(can_close_early=True)
+        # A game's row as the parser gives it: its scheduled expiration apart (X2, Sept 24, 2026).
         listing = Listing([
-            [{"ticker": "KXNBAGAME-A-X", "event_ticker": "KXNBAGAME-A", "close_time": self.iso(60), "expiration_time": self.iso(5), "volume_24h": 900, **game},
-             {"ticker": "KXNBAGAME-A-Y", "event_ticker": "KXNBAGAME-A", "close_time": self.iso(60), "expiration_time": self.iso(5), "volume_24h": 100, **game}],
-            [{"ticker": "KXNBAGAME-B-X", "event_ticker": "KXNBAGAME-B", "close_time": self.iso(110), "expiration_time": self.iso(70), "volume_24h": 5000, **game},  # next week's
+            [{"ticker": "KXNBAGAME-A-X", "event_ticker": "KXNBAGAME-A", "close_time": self.iso(60), "expected_expiration_time": self.iso(5), "volume_24h": 900, **game},
+             {"ticker": "KXNBAGAME-A-Y", "event_ticker": "KXNBAGAME-A", "close_time": self.iso(60), "expected_expiration_time": self.iso(5), "volume_24h": 100, **game}],
+            [{"ticker": "KXNBAGAME-B-X", "event_ticker": "KXNBAGAME-B", "close_time": self.iso(110), "expected_expiration_time": self.iso(70), "volume_24h": 5000, **game},  # next week's
              {"ticker": "KXHIGHNY-1", "event_ticker": "KXHIGHNY-26", "close_time": self.iso(20), "expiration_time": self.iso(34), "volume_24h": 50},
              {"ticker": "BAD", "event_ticker": "KXBAD-1", "close_time": "never", "volume_24h": 1}],
         ])

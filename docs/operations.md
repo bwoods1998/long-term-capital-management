@@ -240,6 +240,10 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
     `indexed`: the tapes built in the last six hours that a restart remembers).
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
+  - `wakes_skipped` (Sept 24, 2026, the wake skip): the stock and option wakes not run while the
+    regular session was shut (`count`, `by_desk`, `since`, `last_at`; kept in `house.json`). Such an
+    agent is woken a few seconds after the bell instead; nothing it sent before then could trade.
+    In the 48 hours before T0 of the close-the-gaps run there were 2,891 of them (29% of all wakes).
   - `feeds` (`league/feeds.py`): per feed its `keys`, how many are `recording`, `since`, `last_ok`,
     `failing` keys, `polls`, `snapshots` and `next_due`; for a history feed its `backfill`
     (`complete`, `in_progress`, `unlisted`); `store_mb`. Since Sept 24, 2026 the recorders of the
@@ -609,6 +613,49 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   times in a day). One info alert names what is held (`wind_down_held` in `house.json`), and the
   House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
   wind down at once.
+- **A living stock or options agent is not woken at night** (Sept 24, 2026, the wake skip): no
+  `agent.woke` row, no box run, no order between the close and the open, counted in `health.json`
+  `wakes_skipped`. It is woken a few seconds after the bell, and its own exit of a position held
+  overnight goes then, if its strategy sends one: the skip itself sells nothing (a dead agent's
+  held wind-down still sells at the bell). "market orders outside regular hours are not permitted"
+  from a living agent now means an open-desk agent that names a coin (still woken all night) sent a
+  stock or option SELL at night; its stock or option buys are refused by the House first ("outside
+  the regular session no stock or option entry is sent").
+- **An agent paused its own entries, or edited its parameters in place** (X1, Sept 24, 2026). Its
+  `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
+  and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
+  and any the House did not make (status `not_applied`, with the reason: for an edit, an audit
+  running or owed, a standing veto, an approval standing on real money or a strategy changed after
+  its replay; already paused). A paused agent's wakes show `held` (buys the House held, never a
+  refusal) and its resting buys are cancelled. Held buys are not activity: its wakes count barren,
+  the stuck rule applies, and a practice resident paused past the grace is displaceable like an idle
+  one, and the seat report (`seats_holding_none`, the watch's seat line) counts it as holding none.
+  The allocator promotes no paused agent (a `progress` status with stage `paused`), and after
+  24 hours paused holds a real agent's stake to its probe by free cash only (a `size` verdict whose
+  reason says "held to the probe"; the board row's `entries_paused_since`).
+  `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
+  `agent.research` rows with tool `edit_replay` (at half the practice stake and caps, no
+  `eval.trial`, never the holdout, one an agent a day). Nothing here moves a limit, a stake or a
+  band. A pause or resume row adopts nothing (`allocator.adopted_strategy`): it moves no generation
+  and sets no audit verdict aside. An edit is a new strategy to `allocator.audit_standing`, so an
+  agent whose code was approved is audited again before a first swing.
+- **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
+  expected to resolve in N hours, by its scheduled expiration (...)", "..., by its close plus its
+  series' measured settle lag (...)", "..., by its expected expiration (...), a deadline days
+  after its close: its series has fewer than 20 settled markets on record ..." or "..., by its
+  close (...): the venue lists no scheduled expiration for it". An expected expiration two days
+  or more after the close is a deadline (the diesel prints, the AI-share weeklies); such a market
+  is judged by its close plus the p95 settle lag of its series' last 40 settled markets on record
+  (at least 20), which `settle_lags.json` beside the House's state keeps (fed by every Kalshi
+  tape's settled markets; recomputed once a day; delete it to measure afresh). The answer is
+  `league/resolution.py`, a money judge in `ci.FORBIDDEN` (an owner deploy changes it, never the
+  updater), and it reads that file as untrusted data: an entry that settled before its close, or is
+  not three finite times with a real deadline, is ignored; each lag is clamped to [0, its
+  deadline]; a series needs 20 good settlements. A series stuck on "fewer than 20 settled markets"
+  is one no tape has replayed enough of yet. The House asks before
+  the book; the book still judges every entry after it, from the same answer. The book's own shorter
+  text ("expected to resolve in N hours; entries must resolve within 48", no basis) would now mean
+  the two looks disagreed, at the boundary a moment apart.
 - **"booked ... as dust instead of selling it"** (info, Sept 24, 2026): a wind-down found a holding
   the venue will not trade -- worth under a cent even at the ask (a holding under a cent at its mark,
   the last bid, is quoted again: a stub bid on a thin book is not a price), or under the venue's
