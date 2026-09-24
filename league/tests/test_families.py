@@ -347,11 +347,18 @@ class SwingRules(unittest.TestCase):
 
     def test_kelly_on_the_bound_caps_a_thin_record(self):
         """Full Kelly (rung 3's fraction) on the REAL record's honest bound: 0.02 over a variance of 0.5 puts 4% of
-        the venue at risk an event, a stake of 4% / 20% (Kalshi's position share) of $517.75 = $103.55."""
+        the venue at risk an event, a stake of 4% / 25% (the most of a stake one Kalshi event may hold, the book's
+        `max_event_share`) of $517.75 = $82.84. Review of #242: over the position's 20% ($103.55) a member could put 25%
+        of its stake on one event's strikes, 1.25 x Kelly on the bound."""
         closes = [(i + 1, 0.05) for i in range(15)] + [(100 + i, 0.05) for i in range(10)]  # the ramp at $120
         row = self.target(real_record(closes=closes, bound=0.02, variance=0.5))
-        self.assertEqual((row["stake_usd"], row["limit"], row["kelly_usd"]), (D("103.55"), "kelly", D("103.55")))
+        self.assertEqual((row["stake_usd"], row["limit"], row["kelly_usd"]), (D("82.84"), "kelly", D("82.84")))
         self.assertAlmostEqual(row["kelly_fraction_at_risk"], 0.04, places=12)
+        # The most the book lets one event hold at that stake is Kelly's capital at risk an event, never more.
+        event = D(str(CONSTITUTION["allocator"]["max_event_share"])) * row["stake_usd"]
+        self.assertLessEqual(event, D("0.04") * D("517.75"))
+        self.assertEqual(families.event_share("kalshi"), 0.25)
+        self.assertEqual(families.event_share("alpaca"), float(CONSTITUTION["allocator"]["position_share"]))  # a trade is an event
         thin = self.target(real_record(bound=0.001, variance=0.5))  # Kelly under the bunt: a proven family keeps its bunt
         self.assertEqual((thin["stake_usd"], thin["limit"]), (D("30"), "bunt"))
         crowded = self.target(real_record(bound=1.0), members=12)  # 310.65 / 12 = 25.88, under the bunt
@@ -489,7 +496,8 @@ class FamilySwingOnTheFloor(KalshiHouse):
         agents, book = self.swinging()
         entered = self.house.allocator.state["families"]["weather-favorites@kalshi"]["entered_seq"]
         closes = [(i + 1, 0.05) for i in range(15)] + [(entered + 1 + i, 0.05) for i in range(10)]
-        self.families["weather-favorites"] = real_record(n=25, bound=0.05, closes=closes)
+        # Kelly above the ramp's $120 (0.08 / 0.5 of $500 at risk an event, over a 25% event share: $160 a member).
+        self.families["weather-favorites"] = real_record(n=25, bound=0.08, closes=closes)
         self.rebalance()
         self.assertEqual([book.account(x.id).staked for x in agents], [D("120.00")] * 2)
         swing = self.house.allocator.family("weather-favorites", "kalshi")["swing"]

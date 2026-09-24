@@ -278,6 +278,19 @@ def position_share(venue: str, constitution: Mapping[str, Any] | None = None) ->
     return float(allocator.get("position_share", 0.5))
 
 
+def event_share(venue: str, constitution: Mapping[str, Any] | None = None) -> float:
+    """The most of a real stake one EVENT may put at risk at `venue`: on an event book the larger of a position's share
+    and the real book's `max_event_share` (the book lets several strikes of one event hold that much of the equity
+    together, and the at-risk unit measures an event, not a position), elsewhere a position's share (an Alpaca trade is
+    its own event). Kelly's fraction of capital at risk an event becomes a stake through it (review of #242, Sept 24,
+    2026: through the position's 20% a Kelly-capped member could put 25% of its stake, 1.25 x Kelly, on one event)."""
+    allocator = (constitution or CONSTITUTION).get("allocator") or {}
+    share = position_share(venue, constitution)
+    if REAL_BOOK.get(venue) == "kalshi":
+        share = max(share, float(allocator.get("max_event_share") or 0.0))
+    return share
+
+
 # ----------------------------------------------------------------------------------- statistics
 def log1p(r: float) -> float:
     """ln(1 + r), a whole loss or worse floored at `stats.RUIN` as `stats.log_growth` floors it; a
@@ -679,8 +692,9 @@ def swing_target(record: Mapping[str, Any], *, rule: Mapping[str, Any], venue: s
       `capacity_fill_ratio` of the rate at the size before);
     - family caps: full Kelly (`kelly_fraction`) on the REAL record's honest lower bound against the
       venue's capital, and `max_share_of_venue` of that capital. In the at-risk unit Kelly's fraction is
-      the capital to put AT RISK an event, so the family's stake is that over the venue's position share
-      (a member's position is at most that share of its stake); in the account unit it is the stake;
+      the capital to put AT RISK an event, so the family's stake is that over the most of a stake one event
+      may hold (`event_share`: `max_event_share` on Kalshi, where strikes of one event hold it together);
+      in the account unit it is the stake;
     - `limit`: which of "ramp", "capacity", "kelly" or "venue_share" set the stake ("bunt" when the caps
       are below the bunt, which a proven family's member always keeps)."""
     c = constitution or CONSTITUTION
@@ -701,7 +715,7 @@ def swing_target(record: Mapping[str, Any], *, rule: Mapping[str, Any], venue: s
     ramp = steps[held]
     fraction = stats.quarter_kelly(float(real.get("honest_bound") or 0.0), float(real.get("variance") or 0.0),
                                    fraction=float(rule["kelly_fraction"]), cap=1e9)
-    unit_scale = share_position if str(record.get("unit")) == "at_risk" else 1.0
+    unit_scale = event_share(venue, c) if str(record.get("unit")) == "at_risk" else 1.0
     kelly = Decimal(str(round(fraction / unit_scale, 9))) * capital if fraction > 0 else Decimal(0)
     venue_share = capital * Decimal(str(rule["max_share_of_venue"]))
     members = max(int(members_real), 1)
