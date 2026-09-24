@@ -61,7 +61,7 @@ ledger, the lab store and the board. The run is judged on the movement.
 | 4 | Median agent life (h); deaths before 3 fills (share) | 14.3 h; 68% | ≥ 24 h on day-horizon desks; < 30% |
 | 5 | Lab batches an hour; LLM-children share of graduates; waiters and the longest wait; parents superseded by corrected children | 0; 2 of 18; 30 at 11 h; 0 | ≥ 30; ≥ 50%; 0 over 2 h; every corrected real-money parent |
 | 6 | Self-cross exit refusals (6 h); promotions on stacked positions | about 85; 1 | 0; 0 |
-| 7 | Feeds live; desks with markets offered and no intent for 48 h | 13 hosts; 3 desks | recorders ready for every host the owner allows; 0 desks |
+| 7 | Recorders live on the allowed data hosts; desks with markets offered and no intent for 48 h | 0 of 12 allowed hosts recorded; 3 desks | a recorder live for every allowed host a desk needs; 0 desks |
 
 ## Where the floor stands at plan time (Sept 24, 00:50Z)
 
@@ -150,10 +150,12 @@ the clock. The final watch starts no later than T+9:00.
   session, so D2 can be checked against it; top up if wanted (the month resets Oct 1). The run
   aligns `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` and the House line up to funded money,
   never above.
-- **Egress hosts** (workstream I names what each unblocks): `api.open-meteo.com`, `www.sec.gov`
-  or `api.nasdaq.com`, `api.eia.gov`, `www.tsa.gov`, `www.realclearpolling.com`,
-  `markets.newyorkfed.org`, `home.treasury.gov`, and, as a paid decision, `api.the-odds-api.com`.
-  The recorders are built behind a host check and go live when a host is allowed.
+- **Egress hosts.** The key-free hosts of workstream I were allowed by the owner on Sept 24,
+  2026 at about 01:55Z (`scripts/floor_box.py hosts --add`; 39 hosts on the live allowlist, and
+  `LEAGUE_HOSTS` records them), so their recorders go live in Wave 1 without asking. Still the
+  owner's: the keyed hosts, `api.eia.gov` (a free key) and `api.the-odds-api.com` (paid), with
+  their keys placed in the box's `.env` by the owner, or by the run under an explicit line in the
+  /goal message; and the contact address that SEC and NWS ask for in a User-Agent header.
 - **Level-3 options:** a second Alpaca practice account with its keys in the gateway (workstream O).
 
 **Budget.**
@@ -481,14 +483,16 @@ digest moves and the grant is re-ratified.
 
 ### I. Inputs (owner egress; House recorders in Wave 1, live when allowed)
 
-| Host | Desk it unblocks | What the recorder stores (receive-time stamped, point in time) |
-|---|---|---|
-| `api.open-meteo.com` | kalshi-weather (the proven desk; a fair value makes it scalable to more series and to rain and low-temperature markets) | ensemble member forecasts per city and date, with the forecast's issue time; the historical forecast API for backfill |
-| `www.sec.gov` (EDGAR 8-K index) or `api.nasdaq.com` | alpaca-megacaps, alpaca-options | earnings announcement times as first known |
-| `api.eia.gov` | kalshi-prices | WTI and gasoline fixings as published |
-| `www.tsa.gov`, `www.realclearpolling.com` | kalshi-attention | passenger volumes, polling averages, as published |
-| `markets.newyorkfed.org`, `home.treasury.gov` | kalshi-open (rates series) | SOFR, par yields |
-| `api.the-odds-api.com` (paid, the owner's decision) | kalshi-sports | consensus win probabilities |
+| Host | State | Desk it unblocks | What the recorder stores (receive-time stamped, point in time) |
+|---|---|---|---|
+| `api.open-meteo.com`, `ensemble-api.open-meteo.com`, `historical-forecast-api.open-meteo.com` | allowed | kalshi-weather (the proven desk; a fair value makes it scalable to more series and to rain and low-temperature markets) | ensemble member forecasts per city and date with the forecast's issue time; the historical-forecast API for backfill |
+| `api.weather.gov` | allowed; User-Agent with a contact address | kalshi-weather | the NWS forecast for each settlement station, as issued |
+| `www.sec.gov`, `efts.sec.gov`, `api.nasdaq.com` | allowed; SEC asks for a User-Agent with a contact address | alpaca-megacaps, alpaca-options | earnings announcement times as first known (8-K acceptance times; the calendar for the days ahead) |
+| `sports.core.api.espn.com` | allowed | kalshi-sports | pre-game odds and win probabilities as shown, per event |
+| `markets.newyorkfed.org`, `home.treasury.gov` | allowed | kalshi-open (rates series) | SOFR, par yields |
+| `www.tsa.gov`, `www.realclearpolling.com` | allowed; HTML pages, fragile | kalshi-attention | passenger volumes, polling averages, as published |
+| `api.eia.gov` | owner's step: a free key | kalshi-prices | WTI and gasoline fixings as published |
+| `api.the-odds-api.com` | owner's step: paid, with a key | kalshi-sports | consensus win probabilities across books |
 
 - Also, with hosts already allowed: a Kalshi candlestick recorder (`feeds.py`, Kalshi's own API)
   for price-versus-outcome tapes; perps OI backfill where OKX offers history.
