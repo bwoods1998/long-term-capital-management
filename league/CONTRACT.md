@@ -115,23 +115,46 @@ close-the-gaps run). A family is proven (`allocator.family_proven`) when its poo
 every member ever born into it, living or dead; one observation per independent event any member
 closed on practice or real money (per closed trade at Alpaca, a practice trade there less the practice
 haircut your E pays), practice at weight 0.5 and real at 1, members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
-lower bound (Student's t) on its mean log growth above zero; a lopsided record (80% or more of its
+lower bound (Student's t) on its mean above zero; a lopsided record (80% or more of its
 observations winning, as favourites win) must also clear the House's exact loss-rate test at 80%
-(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. An agent of a proven family is seated
+(`stats.lopsided_growth_lcb`): ten small wins with no loss prove nothing yet. Since Deploy B (Sept 24,
+2026, `family_proven.unit: "at_risk"`) an event is measured by what it made per dollar its positions
+put at risk (ln(1 + 1% x r) / 1%, r never below -1: a contract that expires worthless counts -1.005,
+never an account's ruin), so a practice event and a real one of the same bet count alike and size
+cannot inflate a family's proof; `"account"` restores the member's account growth. An agent of a proven family is seated
 as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
 ($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
 and a bunt a probe after the bound falls to zero or below; the stake moves toward the new target by
 free cash only, never by a forced sale. `research_context.qualification_policy.allocator.your_family`
-shows your family's state, bound and count. On Kalshi, closed trades and settlements count ONCE PER
+shows your family's state ("unproven", "proven" or "swing"), bound, count, capacity and what set a
+swing's stake. A family is the mechanism: the lab's graduates and the foundry's cards are born into
+families of their own; research children and parameter mutations stay in their parent's family, and
+its maker and taker entries are pooled apart. On Kalshi, closed trades and settlements count ONCE PER
 EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
 strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
+
+THE FAMILY SWING (since Deploy B, Sept 24, 2026, `allocator.family_swing`). When your family's REAL
+record alone has 15 or more independent settlements and its honest lower bound is above zero (the
+t bound, and the loss-rate bound for a favourites record), and the frontier auditor approves its first
+entry on that record (the family packet: every member's real closes, event by event, with the stake
+it would take), every member on real money is staked at the family's ramp: twice `bunt_usd` ($60 on
+Kalshi) when the family enters, doubled after every 10 further WINNING independent real settlements
+while the bound stays above zero, up to full Kelly on that bound against the venue's capital and 60%
+of the venue (both the FAMILY's, shared by its members on real money), held where the family's fill
+rate at the bigger size is under half its fill rate at the smaller one ("capacity" on the board), and
+never under the bunt. The envelope's headroom bounds every raise. A bound at zero or below returns the
+members to bunts (to probes if the pooled proof has gone too), by free cash only; an approval on
+record lets the family re-enter without a second audit. A swinging member's positions are the same
+share of its stake, and the book holds it to its daily-loss rule as it holds every swing.
 
 A bunt keeps what it makes (since Sept 23, 2026 ~16:00 UTC, constitution `allocator.bunt_growth`):
 its stake is `bunt_usd` x your real wealth multiple, from 1 up to the swing line (1.25), so a $30
 Kalshi bunt that is up 20% on real money carries $36 and is not swept back to $30; above 1.25 x the
-rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue. Only a
-PROVEN family's member swings (since Sept 24, 2026): a probe stays a probe until its family is proven,
-and a swing whose family stops being proven drops back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
+rest is swept as before. A swing's stake is `bunt_usd` x E^2 (`kappa` 2), up to 60% of the venue (never
+less than the family swing's stake when your family swings). Only a PROVEN (or swinging) family's member
+takes this agent-level swing (since Sept 24, 2026; `allocator.swing_requires_proven_family` since Deploy
+B): a probe stays a probe until its family is proven, and a swing whose family stops being proven drops
+back to a probe. What you lose comes off your stake and is not topped back up: a bunt below
 where it started is never refilled. A bunt that was LENT less than today's base -- seated before the
 base was raised, or halved while the floor throttle was on -- is lent up to it once, net of everything
 it has been lent: seated at $10 under a $30 base it gets up to $20 more; lent the base and down to $27
@@ -146,7 +169,7 @@ since Sept 24, 2026: settled events on Kalshi, closed trades at Alpaca). Before 
 no demotion by the exit line, though the stay drawdown and drift (the evaluator's watch on an edge that
 falls far below the record that earned the seat) still apply; the bunt line in your standing says
 `exit_line_applies_after_real_settlements` and `real_settlements_this_stay`. A swing keeps the
-book's 10% rule, and so does every practice book. The real book's daily halt (`allocator.real_halt`)
+book's 10% rule -- a swinging family's member on rung 2 too -- and so does every practice book. The real book's daily halt (`allocator.real_halt`)
 is 8% of that venue's grant capital a day ($41.42 on Kalshi, $40.00 on Alpaca), after which only
 risk-reducing orders go through on that venue until the next day. Both lines read the day from your
 opening equity at the first check of the UTC day, and since Sept 23, 2026 that opening survives a
