@@ -505,6 +505,19 @@ recorded for the next open; live verification uses the markets that trade around
   family sports-central-run-under: bound +0.204, capacity $56.93 a day, stake $30, one real member;
   47 unproven), `board.lab` (715 tested in the last hour, 15 graduates waiting) and the family state on
   all 112 desks; blakewoods.us/capital shows them.
+- 10:12Z — **The seat fix built** (#265, CI green): the evidenced shortcut waits for a fair chance since
+  the seat's program's opportunity (its desk's evidence clock capped at the plain grace, never under an
+  hour: 3.7 h crypto-alts, 2.8 h crypto-15m, 12 h prices/sports/weather, 1 h without a clock). Measured
+  on the T+8 snapshot: 9 of the 12 deaths since Deploy B prevented (every never-traded paper seat taken);
+  3 of those newcomers would have taken idle seats past their chance (alpaca-open and crypto-majors
+  coin programs never traded in 1.9-7.1 h), 6 would have waited; the two L1 supersessions and a
+  replay-only seat whose replay had failed are unchanged. Merged into `c/integration` (composed with
+  C-tools' rule that a long pause counts as idle).
+- 10:20Z — **A flaky CI test was a real race** (`c-fix/dispatcher-stop`, a0d6c0e): the strategy
+  dispatcher's `stop_dispatcher` joined its loop thread but not the runs it had handed to the pool, so a
+  run kept writing the store after stop; in CI that raced `DispatcherTests`' temporary directory three
+  times today ("Directory not empty"). Stop now waits, bounded at 5 s, for the runs in flight and
+  leaves their results for the next tick. A test fails without it; the module passed three runs in a row.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
