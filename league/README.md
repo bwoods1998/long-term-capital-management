@@ -351,7 +351,9 @@ status is exposed in health and agent research context; qualification is distinc
    code, or the parent's research candidate made while it ran that code -- never the child's fix of
    its own earlier file, which is how meriwether-h2d625d-2's maker rewrite read at T0), borne out by the
    programs (`_entry_fills`: a taker parent, and `posts_maker_entries`: a child whose entries rest
-   post-only, for a liquidity or fee defect) -- demoted from real money through the evaluator first; the child
+   post-only, for a liquidity or fee defect), and never a parent whose family's pooled TAKER record is
+   proven positive (`_taker_proven`: `Allocator.family_taker`, the record the real book's X0 rule reads to
+   let the family take; the skip is told once, `supersede_skipped`) -- demoted from real money through the evaluator first; the child
    enters real money on its own evidence. A pair it found nothing in is looked at again hourly.
    **Dust and refused wind-downs** (Sept 24, 2026): a holding the venue will not trade (worth under a
    cent even at the ask -- one under a cent at its mark, the last bid, is quoted again -- or under the

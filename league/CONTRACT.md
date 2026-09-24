@@ -611,7 +611,9 @@ your fills, your blocks, your forward record, your family's record and your rung
   it pays, the side it buys -- borne out by the parent's own entry fills, retires the parent at once
   (from real money, through a demotion first). The account must be of the program your parent runs
   now: your fix of your own earlier program is not your parent's defect. A liquidity or fee fix is a
-  program that rests its entries post-only. The child enters real money on its own evidence.
+  program that rests its entries post-only, and it is no fix at all where your family's pooled taker
+  record is proven positive (then taking is what your family has proven). The child enters real money
+  on its own evidence.
 
 **Forward windows** (since Sept 23, 2026). Once an hour the lab replays its archived programs, its
 graduates waiting for seats and (since Sept 24, 2026) every living agent's current program on the

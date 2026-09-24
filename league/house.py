@@ -1067,8 +1067,16 @@ class House:
         if kind is None:
             return None
         taker, maker = self._entry_fills(parent)
-        if kind in ("liquidity", "fee") and not (taker and taker >= maker and posts_maker_entries(child.code)):
-            return None
+        if kind in ("liquidity", "fee"):
+            if not (taker and taker >= maker and posts_maker_entries(child.code)):
+                return None
+            proven = self._taker_proven(parent)
+            if proven is not None:
+                # A maker "fix" of a mechanism whose family's pooled TAKER record is proven positive -- the record the
+                # real book's X0 rule reads to let that family take -- is not a defect fix (the main session's
+                # decision on the review of #245, Sept 24, 2026). Told once, as L1 tells its supersessions.
+                self._note_supersede_skipped(parent, child, kind, proven)
+                return None
         if kind == "side" and not (taker or maker):
             return None
         return (f"{kind}: its account names the parent's entry as the defect, and {taker} of the parent's "
@@ -1108,6 +1116,41 @@ class House:
         if fork is None or self._code_at(parent, fork.seq) != parent.code_sha256:
             return None
         return reason
+
+    def _taker_proven(self, agent: Agent) -> dict[str, Any] | None:
+        """The agent's family's pooled TAKER record when it is proven positive, else None: read from the one source the
+        real book's `real_entry_liquidity` rule (X0) reads to let the family take -- `Allocator.family_taker`, which
+        the book is handed as `family_taker` -- never recomputed. None while the allocator is off, as the book reads it,
+        and when the record cannot be read (the book then treats the family as unproven too)."""
+        reader = getattr(getattr(self, "allocator", None), "family_taker", None)
+        if reader is None:
+            return None
+        try:
+            record = reader(agent.id)
+        except Exception:  # noqa: BLE001 - `Allocator.family_taker` never raises; an unreadable record proves nothing
+            return None
+        return dict(record) if isinstance(record, Mapping) and record.get("positive") is True else None
+
+    def _note_supersede_skipped(self, parent: Agent, child: Agent, kind: str, taker: Mapping[str, Any]) -> None:
+        """Tell once a pair (house.json `supersede_skipped`, so a restart does not tell it again) that L1 left a parent
+        in place because its family's taker record is proven: an info alert with the record, beside the alerts that
+        tell L1's supersessions."""
+        key = f"{parent.id}|{parent.code_sha256[:16]}|{child.id}|{child.code_sha256[:16]}"
+        with self._state_lock:
+            told = self._state.setdefault("supersede_skipped", {})
+            if key in told:
+                return
+            told[key] = now_iso(self.clock)
+            while len(told) > 200:
+                told.pop(next(iter(told)))
+        bound = taker.get("bound")
+        measured = f"{int(taker.get('n') or 0)} taker settlements" + ("" if bound is None else f", bound {float(bound):+.4g}")
+        self.alert("info", f"{parent.id} is not superseded by its research child {child.id}: the child's account names a {kind} "
+                           f"defect of the parent's taker entry, but the family {parent.family}'s pooled taker record is proven "
+                           f"positive ({measured}), which is what lets the family take on the real book: a maker fix of a "
+                           "proven taker mechanism is not a defect fix (allocator.corrected_child_supersedes)",
+                   parent=parent.id, child=child.id, family=parent.family, defect=kind, taker=dict(taker),
+                   rule="allocator.corrected_child_supersedes")
 
     def _code_at(self, agent: Agent, seq: int) -> str | None:
         """The code an agent ran at a ledger position: its birth's, or its latest `agent.strategy` row's before it."""

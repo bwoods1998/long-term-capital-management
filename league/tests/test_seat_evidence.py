@@ -594,6 +594,29 @@ class CorrectedChildren(EvidenceCase):
             self.assertEqual(self.house._supersede_by_research(), 0)
         self.assertEqual(self.house.evaluator.rung(parent.id), 2)
 
+    def test_a_parent_whose_familys_taker_record_is_proven_is_not_superseded_for_a_maker_fix(self):
+        """The main session's decision on the review of #245 (Sept 24, 2026): a liquidity or fee "fix" of a mechanism
+        whose family's pooled TAKER record is proven positive -- the record the real book's X0 rule reads to let that
+        family take (`Allocator.family_taker`) -- is not a defect fix. The skip is told once, with its reason."""
+        parent = self.parent()
+        child = self.house.spawn(parent.line or parent.name, parent.family, parent.code, parent=parent.id,
+                                 params={"notional": 15.0}, reason="a parameter mutation of its parent")
+        self.house.evaluator.seat(child.id, 1, "test")
+        self.rewrite(child, MAKER, TAKER_FIX)
+        proven = {"family": parent.family, "positive": True, "n": 12, "mean_log": 0.021, "bound": 0.0043}
+        with self.supersedes(), patch.object(self.house.allocator, "family_taker", return_value=proven) as read:
+            self.assertEqual(self.house._supersede_by_research(), 0)
+            self.clock.advance(self.house.SUPERSEDE_RECHECK_SECONDS + 1)
+            self.assertEqual(self.house._supersede_by_research(), 0)
+        read.assert_called_with(parent.id)
+        self.assertEqual(self.house.evaluator.rung(parent.id), 2)
+        told = alerts(self.house, "info", "is not superseded", child.id, "taker record")
+        self.assertEqual(len(told), 1, "told once")
+        self.assertIn("12 taker settlements", told[0])
+        with self.supersedes(), patch.object(self.house.allocator, "family_taker", return_value={**proven, "positive": False}):
+            self.clock.advance(self.house.SUPERSEDE_RECHECK_SECONDS + 1)
+            self.assertEqual(self.house._supersede_by_research(), 1, "once the taker record is no longer proven, the fix supersedes")
+
 if __name__ == "__main__":
     import unittest
 
