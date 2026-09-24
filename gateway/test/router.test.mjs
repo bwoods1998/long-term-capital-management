@@ -571,6 +571,67 @@ test('a tiny Luna call does not manufacture a budget breach by rounding its rece
     'a sub-cent reservation must cover the same amount reported to the campaign');
 });
 
+test('a provider capacity refusal bills nothing; a server error, an edge error or a cut-off answer keeps its worst case', async () => {
+  const settings = {
+    OPENAI_SECRET_KEY: 'test-key', FRONTIER_MONTH_USD: '10',
+    FRONTIER_MODELS: JSON.stringify({ 'frontier-test': { input: 10, cached: 1, output: 50 } }),
+  };
+  const gate = gateFor(settings);
+  const body = { model: 'frontier-test', input: 'Audit this candidate.', max_output_tokens: 1000 };
+  const answer = (status, text, type = 'application/json') => async () => new Response(text, { status, headers: { 'Content-Type': type } });
+  const month = async () => (await gate.status()).frontier;
+  const micro = usd => BigInt(Math.round(Number(usd) * 1e6));
+
+  // Sept 22, 2026: OpenAI answered two calls "server_is_overloaded" and the month kept each one's
+  // whole worst case ($2.02 for one), for requests the provider says it lacked the capacity to process.
+  const overloaded = JSON.stringify({ error: { message: 'Our servers are currently overloaded. Please try again later.',
+    type: 'service_unavailable_error', param: null, code: 'server_is_overloaded' } });
+  const refused = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher: answer(503, overloaded) });
+  assert.equal(refused.response.status, 503);
+  assert.equal(refused.response.headers.get('X-LTCM-Cost-USD'), '0.000000');
+  let now = await month();
+  assert.deepEqual([now.spent_usd, now.settled_usd, now.inflight_usd, now.calls], ['0.00', '0.000000', '0.000000', 1]);
+
+  // A server error can come after the model has worked; an edge's 502 or 503 is not the provider's answer.
+  for (const [status, text, type] of [
+    [500, JSON.stringify({ error: { message: 'The server had an error while processing your request.', type: 'server_error' } }), 'application/json'],
+    [503, '<html><body>503 Service Temporarily Unavailable</body></html>', 'text/html'],
+    [502, '<html><body>502 Bad Gateway</body></html>', 'text/html'],
+    [503, JSON.stringify({ error: { message: 'Upstream failure', type: 'server_error' } }), 'application/json'],
+  ]) {
+    const before = micro((await month()).settled_usd);
+    const kept = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher: answer(status, text, type) });
+    assert.equal(kept.response.status, status);
+    const cost = kept.response.headers.get('X-LTCM-Cost-USD');
+    assert.notEqual(cost, '0.000000', `${status} ${text} keeps its worst case`);
+    now = await month();
+    assert.equal(micro(now.settled_usd) - before, micro(cost), 'and it is settled, not left in flight');
+    assert.equal(now.inflight_usd, '0.000000');
+  }
+
+  // An answer cut off while its body was read: until Sept 24, 2026 the exception escaped before the
+  // settle ("error code: 1101") and the hold was left in flight for the rest of the month.
+  const cut = async () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{"id":"r1",')); controller.error(new Error('reset')); },
+  }), { status: 200 });
+  const before = micro((await month()).settled_usd);
+  const broken = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate, fetcher: cut });
+  assert.equal(broken.response.status, 502);
+  now = await month();
+  assert.equal(now.inflight_usd, '0.000000', 'settled at its worst case, not left in flight');
+  assert.ok(micro(now.settled_usd) > before);
+  assert.equal(now.calls, 6, 'the refusal, the four kept and the cut-off one are all counted');
+
+  // An answered call leaves nothing in flight, and what it cost is what is settled.
+  const usage = { input_tokens: 100, output_tokens: 10 };
+  const good = await call(ask('POST', '/v1/frontier/responses', { body }), { settings, gate,
+    fetcher: async () => new Response(JSON.stringify({ model: body.model, usage }), { status: 200 }) });
+  assert.equal(good.response.status, 200);
+  const after = await month();
+  assert.equal(micro(after.settled_usd) - micro(now.settled_usd), micro(good.response.headers.get('X-LTCM-Cost-USD')));
+  assert.equal(after.inflight_usd, '0.000000');
+});
+
 test('cache hints reach OpenAI byte for byte and a cache read settles cheaper than a write', async () => {
   const settings = {
     OPENAI_SECRET_KEY: 'test-key', FRONTIER_MONTH_USD: '1',

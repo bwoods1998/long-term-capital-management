@@ -312,7 +312,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if not canary:
         from .frontier import FrontierMonth
 
-        house.frontier_month = FrontierMonth(gateway_url, token)
+        # The gateway's month is also OpenAI's meter: each reading feeds the campaign (Sept 24, 2026).
+        house.frontier_month = FrontierMonth(gateway_url, token, meter=campaigns)
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
