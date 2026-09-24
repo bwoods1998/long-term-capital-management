@@ -172,6 +172,20 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
     checkpoint's age and whether it carries the board.
+- **`python3 scripts/gap_scoreboard.py --snapshot DIR | --take DIR [--since ISO] [--baseline ISO]
+  [--json | --markdown]`** (Sept 24, 2026): the scoreboard of
+  [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z), read-only and standard
+  library only, from a snapshot of the House's stores rather than the live box. `--take` backs up
+  `ledger.sqlite`, `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp`
+  (sqlite's backup API, each source opened `mode=ro`), downloads them gzipped with `health.json`,
+  `house.json` and `allocator-board.json`, and deletes the box copies; `--snapshot` reads a directory
+  taken before. It prints the plan's seven metrics, each number with the function that computed it,
+  then each desk's evidence clock (hours from a member's first fill to its third independent
+  settlement), every family's pooled record (practice at weight 0.5, real at 1, one observation an
+  event, a one-sided 80% Student's t bound) and the weather favourites' capacity. Its clock is the
+  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window for deaths,
+  the lab and supersessions, and `--baseline` counts promotions only from a moment (Deploy A). Every
+  definition is in the script's docstring.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled).
