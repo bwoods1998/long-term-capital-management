@@ -1,0 +1,8 @@
+{
+  "family": "index-etfs-morning-range-stops",
+  "name": "scholes_momentum_session_child",
+  "repair": {
+    "key": "bug_report:alpaca-index-etfs:6bd149cc96"
+  },
+  "why": "Corrected child of scholes-h7dd043-2: gate market orders to weekday 09:30 inclusive through 16:00 exclusive America/New_York, preventing repeated overnight date-rollover sell requests. Preserve the overdue exit for the regular open and leave the parent's specialty, signals, sizing and scheduled exit unchanged. Born on rung 0 with no record; must qualify independently."
+}
