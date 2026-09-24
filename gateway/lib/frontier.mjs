@@ -75,6 +75,29 @@ export function actualCost(price, usage) {
     + output * (long ? price.long_output ?? price.output : price.output)) / 1e6);
 }
 
+/**
+ * True for the one 5xx that is settled at zero: the provider's own capacity refusal, a 503 whose
+ * body is OpenAI's error object of type `service_unavailable_error` ("the requested model does not
+ * have enough capacity to process your request at the moment", developers.openai.com/api/docs/
+ * guides/error-codes, read Sept 24, 2026). The request was turned away before any work, so there is
+ * nothing to bill. Measured Sept 22, 2026: two such answers ("server_is_overloaded") each kept its
+ * whole worst case on the month, $2.02 for one.
+ *
+ * Every other 5xx keeps its worst case, because unknown is not free: a 500 `server_error` can
+ * come after the model has worked, and the same documentation says nothing of whether it bills;
+ * a 502, a 504 or a 503 without that body is an edge or proxy answering for a call the provider
+ * may still have received and billed.
+ */
+export function unprocessed(status, text) {
+  if (status !== 503) return false;
+  try {
+    const error = JSON.parse(text)?.error;
+    return !!error && typeof error === 'object' && !Array.isArray(error) && error.type === 'service_unavailable_error';
+  } catch {
+    return false;
+  }
+}
+
 /** The prompt-cache hints OpenAI documents for the Responses API, and nothing else. */
 const CACHE_KEY = /^[A-Za-z0-9._:-]{1,64}$/;
 const RETENTION = new Set(['in_memory', '24h']);
