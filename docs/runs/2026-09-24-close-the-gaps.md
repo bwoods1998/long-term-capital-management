@@ -369,6 +369,25 @@ recorded for the next open; live verification uses the markets that trade around
   digest for Deploy B: `c02ed852` (constitution `915c978e`, the pinned one). On the T0 snapshot:
   sports-central-run-under proven (+0.1423), weather-favorites unproven (loss-rate bound -0.2112),
   nothing swings and no family has reached its first look (every real count under 15).
+- 07:55Z — **The tick's cause found and fixed (#257).** The box's tick had slowed from 30-40 s at
+  plan time to about 60 s. `auditor.order_outcomes`, called for every wake's snapshot, each research
+  standing and each audit packet, re-read every `book.order` and `book.refused` row on the ledger:
+  18,641 rows at T+4, 9.8 s a call through the `Ledger` on the owner's machine (first noticed by the
+  C-tools builder). An index per House ledger folds the rows once and then only the new ones with the
+  same rule: about 1 ms a call, 0 of 24 answers different from the full read on the T+4 snapshot;
+  tests hold the index equal to the full read on random interleavings, and each of three sabotaged
+  rules fails them. Protected (`auditor.py`): rides Deploy B. The scoreboard gained the House's own
+  family record (it had called four families proven where the allocator proved one), the deaths of
+  agents that held a practice seat (row 4), and the evidence clock without the House's closing sales.
+- 08:16Z — **Deploy B integrated** (`b/integration`, PR #260): #246, `b-feeds/review`, `b-loop/review`,
+  `b-seats/review` (with the four follow-ups: L1 skips a parent whose family's taker record is proven,
+  the evidence clock without the House's closing sales, the dust rows written as one group,
+  `floor_watch.py` showing the seat market), `b-families/review` (`761e267`), #257, the scoreboard
+  and main. Money digest `c02ed852` (constitution `915c978e`, pinned). The first full local run, before
+  the last merges: league 2,884 tests with one module over its 20-minute limit (`test_ladder`, a
+  simulated House over hours; it timed out the same way before Deploy A and passes in CI), ltcm 1,852,
+  no failure. C-tools (#249) stays out: its review was still running at the cut; it rides Deploy C.
+  Wave 2 (C-search, C-site) was started at 07:50Z from the integration branch, so it builds on Deploy B.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
