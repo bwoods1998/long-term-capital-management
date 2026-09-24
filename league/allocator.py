@@ -213,8 +213,8 @@ def closed_trades(house: Any, agent: str, book_name: str, *, since_seq: int = 0)
 #: What the family record folds from the ledger (`TradeTape`): every agent's fills, settlements and
 #: stakes, and the two kinds that move an agent's evidence cutoff (`accounting.evidence_cutoffs`).
 TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline")
-_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd")
-_TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event")
+_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price")
+_TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event", "multiplier", "asset_class")
 
 
 class TapeRow(NamedTuple):
@@ -309,6 +309,26 @@ def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidenc
     return out
 
 
+def _practice_charges(rows: list[TapeRow], book: str, bps: Any) -> dict[str, list[tuple[int, float]]]:
+    """The execution haircut of each venue or cross fill of one member on `book`, in dollars, by the
+    instrument key a closed trade carries (`evaluator.closed_trade_rows`): `bps` (a number, or a table
+    by asset class: `_haircut_rate`) of the fill's notional, as `_paper_haircut` charges the paper
+    record the allocator's E reads."""
+    charges: dict[str, list[tuple[int, float]]] = {}
+    for r in rows:
+        p = r.payload
+        if r.kind != "book.fill" or p.get("book") != book or p.get("source") not in ("venue", "cross"):
+            continue
+        inst = p.get("instrument") or {}
+        try:
+            notional = abs(float(p["quantity"]) * float(p["price"]) * float(inst.get("multiplier") or 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
+        charges.setdefault(key, []).append((r.seq, notional * _haircut_rate(bps, inst.get("asset_class")) / 10_000.0))
+    return charges
+
+
 def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None = None,
                   through: int | None = None) -> dict[str, Any]:
     """A family's pooled forward record (P1, the close-the-gaps run, Sept 24, 2026): the proof that
@@ -328,7 +348,12 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     - pooled: mean, sd, n_eff and the one-sided `confidence` lower bound; `proven` with at least
       `min_independent_settlements` observations and the bound above zero;
     - the maker and taker records apart: a member's observation is "taker" when its first entry fill
-      on that event (on that trade, on Alpaca) was a taker fill (`book.fill` `liquidity`).
+      on that event (on that trade, on Alpaca) was a taker fill (`book.fill` `liquidity`);
+    - an Alpaca PRACTICE trade pays the execution haircut the allocator's E takes off the same fills
+      (`evidence.alpaca_paper_haircut_bps` on each entry and exit fill's notional, `_paper_haircut`):
+      practice fills there look optimistic, and the proof that moves real money must not read them
+      rawer than E does (review of #224, Sept 24, 2026). Kalshi's practice book fills conservatively
+      and, like every real book, is not haircut.
     """
     from .evaluator import closed_trade_rows, event_key, per_event, staked_base
 
@@ -338,6 +363,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     through = head if through is None else min(int(through), head)
     rule = _family_rule()
     books = {PAPER_BOOK[venue]: rule["practice_weight"], REAL_BOOK[venue]: rule["real_weight"]}
+    haircut = (rules().get("evidence") or {}).get("alpaca_paper_haircut_bps", 0)
     registry = house.registry
     with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
         members = sorted(a.id for a in list(registry.agents.values()) if a.family == family and a.venue == venue)
@@ -353,6 +379,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
             closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book,
                                           since_seq=cutoffs.get(book, 0), until_seq=through)
             by_event = per_event(book)
+            charges = _practice_charges(rows, book, haircut) if book == "alpaca-paper" else {}
             mine: dict[str, list[Any]] = {}  # observation -> [sum of log growths, (first entry seq, its liquidity)]
             for row in closed:
                 lent = staked_base(stakes, row["seq"])  # `trade_returns` read through this trade's position
@@ -360,7 +387,9 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                     continue
                 key = (event_key(row["instrument"]) if by_event else None) or f"{book}:{member}:{row['seq']}"
                 unit = mine.setdefault(key, [0.0, (math.inf, "taker")])
-                unit[0] += _log1p(row["made"] / lent)
+                opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
+                paid = math.fsum(c for seq, c in charges.get(row["key"], ()) if opened <= seq <= row["seq"])
+                unit[0] += _log1p((row["made"] - paid) / lent)
                 entry = (row["entry_seq"] if row["entry_seq"] is not None else row["seq"], row["liquidity"])
                 if entry[0] < unit[1][0]:
                     unit[1] = entry

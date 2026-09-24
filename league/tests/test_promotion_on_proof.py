@@ -392,7 +392,28 @@ class FamilyRecord(FamilyCase):
             self.sell("BTC/USD", "1.00", agent=agent, book="alpaca-paper")
         rec = self.record("crypto-alts-reversion", "alpaca")
         self.assertEqual(rec["n"], 2)
-        self.assertAlmostEqual(rec["mean_log"], math.log(1.005), places=12)
+        # $1.00 made on $200 less the practice haircut on the $80 entry and the $1 exit (crypto, 4 bps a side)
+        self.assertAlmostEqual(rec["mean_log"], math.log1p((1.00 - 81 * 4 / 10_000) / 200), places=12)
+
+    def test_an_alpaca_practice_trade_pays_the_haircut_e_takes(self):
+        """Review of #224 (Sept 24, 2026): the allocator's E takes `evidence.alpaca_paper_haircut_bps` off
+        every alpaca-paper fill (Alpaca's practice fills look optimistic), but the family's proof read the
+        same fills raw. A practice trade now pays it on its entry and exit notional; a real trade does not."""
+        self.member("a1", family="crypto-alts-reversion", venue="alpaca")
+        self.stake(200, agent="a1", book="alpaca-paper")
+        self.stake(25, agent="a1", book="alpaca")
+        self.buy("ETH/USD", "0.02", "2500", agent="a1", book="alpaca-paper")  # a $50 entry
+        self.sell("ETH/USD", "0.40", agent="a1", book="alpaca-paper")       # the helper's exit: $1 of notional
+        self.buy("SOL/USD", "0.1", "150", agent="a1", book="alpaca")         # a $15 real entry
+        self.sell("SOL/USD", "0.30", agent="a1", book="alpaca")
+        bps = CONSTITUTION["allocator"]["evidence"]["alpaca_paper_haircut_bps"]["crypto"]
+        real = math.log1p(0.30 / 25)
+        rec = self.record("crypto-alts-reversion", "alpaca")
+        self.assertEqual(rec["n"], 2)
+        self.assertAlmostEqual(rec["mean_log"], hand_pool([(math.log1p((0.40 - 51 * bps / 10_000) / 200), 0.5), (real, 1.0)])[0], places=12)
+        with patch.dict(CONSTITUTION["allocator"]["evidence"], {"alpaca_paper_haircut_bps": 0}):  # the rule off: raw fills
+            raw = self.record("crypto-alts-reversion", "alpaca")
+        self.assertAlmostEqual(raw["mean_log"], hand_pool([(math.log1p(0.40 / 200), 0.5), (real, 1.0)])[0], places=12)
 
     def test_the_rows_are_the_evaluators_trade_returns(self):
         """One definition: a member's log growths are ln(1 + r) of `Evaluator.trade_returns` read

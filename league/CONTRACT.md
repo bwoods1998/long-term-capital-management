@@ -113,8 +113,8 @@ be closed; you send one intent.
 Your first real stake is a PROBE or a BUNT, by your FAMILY's proof (since Sept 24, 2026, the
 close-the-gaps run). A family is proven (`allocator.family_proven`) when its pooled forward record --
 every member ever born into it, living or dead; one observation per independent event any member
-closed on practice or real money (per closed trade at Alpaca), practice at weight 0.5 and real at 1,
-members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
+closed on practice or real money (per closed trade at Alpaca, a practice trade there less the practice
+haircut your E pays), practice at weight 0.5 and real at 1, members of one event pooled into one observation -- has at least 10 observations and a one-sided 80%
 lower bound (Student's t) on its mean log growth above zero. An agent of a proven family is seated
 as a bunt at `bunt_usd` ($30 Kalshi, $25 Alpaca); any other as a probe at `allocator.probe_bunt_usd`
 ($10 Kalshi, $25 Alpaca). A probe becomes a bunt at the first mark pass after its family is proven,
