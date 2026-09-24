@@ -761,10 +761,12 @@ class Allocator:
         self._families[key] = record
 
     def _decorate(self, record: Mapping[str, Any], *, advance: bool) -> dict[str, Any]:
-        """The record with the mechanism ledger's state: "swing" while the REAL record qualifies and the entry was
-        approved (the first entry is audited: `_request_family_audit`), "proven" on the pooled proof (or the real
-        record alone), else "unproven"; its `since`; and for a swinging family the member's stake
-        (`families.swing_target`) and the capacity at that stake."""
+        """The record with the mechanism ledger's state (`families.next_state`): "proven" on the POOLED record alone;
+        "swing" for a proven family whose entry look passes at its checkpoint (`families.entry_look`, at
+        `entry_confidence`) and whose entry's audit approved it (`_request_family_audit`), kept while its real record
+        holds at the table's 80% (`families.swing_ready`); else "unproven"; its `since`; and for a swinging family the
+        member's stake (`families.swing_target`) and the capacity at that stake. Leaving the swing, or a member's new
+        program after the approval, lapses the approval (`_lapse_approval`)."""
         family, venue = record["family"], record["venue"]
         key = families.key_of(family, venue)
         with self._lock:
@@ -773,10 +775,13 @@ class Allocator:
         # A swing is a stake above the bunt, which the live grant releases with rung 3 (`allows_live(3)`, its `max_rung`):
         # the family swing holds only while it does, not only at its first audit (review of #242, Sept 24, 2026: with an
         # approval on record nothing else read the grant, and a grant narrowed to rung 2 left the swing staked).
-        ready = families.swing_ready(record, rule) and self._swing_released()
+        released = self._swing_released()
+        entry = released and families.entry_ready(record, rule)
+        hold = released and families.swing_ready(record, rule)
         proven = bool(record.get("proven"))
         before = previous.get("state") if previous.get("state") in families.STATES else ("proven" if proven else "unproven")
-        state = families.next_state(before, proven=proven, ready=ready, approved=self._swing_approved(key))
+        approved, lapse = self._swing_approval(key, family, venue)
+        state = families.next_state(before, proven=proven, entry=entry, hold=hold, approved=approved)
         stamp = now_iso(self.house.clock)
         since = previous.get("since") if state == before and previous.get("since") else stamp
         entered = previous.get("entered_seq") if before == "swing" else self._through
@@ -809,7 +814,13 @@ class Allocator:
                 new["entered_at"] = previous.get("entered_at") if before == "swing" else stamp
             with self._lock:
                 self.state.setdefault("families", {})[key] = new
-            if ready and state != "swing":
+            # An approval licenses an entry: it lapses when the family leaves the swing, or when a member's program
+            # changed after the audit looked (the main session's decision on the review of #242, Sept 24, 2026).
+            if before == "swing" and state != "swing":
+                self._lapse_approval(key, f"the family left the swing ({state})")
+            elif lapse:
+                self._lapse_approval(key, lapse)
+            if proven and entry and state != "swing":
                 try:
                     self._request_family_audit(key, out, members_real)
                 except Exception as exc:  # noqa: BLE001 - asking for the audit is not the record (review of #242)
@@ -867,7 +878,7 @@ class Allocator:
                 "unit": r.get("unit"), "n": r["n"], "n_eff": r["n_eff"], "mean_log": r["mean_log"],
                 "sd": r["sd"], "bound": r["bound"], "loss_gate": r.get("loss_gate"), "real_n": r["real_n"], "members": r["members"],
                 "members_counted": r["members_counted"], "through": r["through"],
-                "real": {k: real.get(k) for k in ("n", "mean_log", "bound", "loss_gate", "honest_bound")},
+                "real": {**{k: real.get(k) for k in ("n", "mean_log", "bound", "loss_gate", "honest_bound")}, "entry": real.get("entry")},
                 "swing": None if not swing else {k: (str(v) if isinstance(v, Decimal) else v) for k, v in swing.items()},
                 "maker": {k: r["maker"].get(k) for k in split}, "taker": {k: r["taker"].get(k) for k in split}, "rule": r["rule"]}
 
@@ -905,13 +916,36 @@ class Allocator:
         except Exception:  # noqa: BLE001 - an unreadable grant releases nothing above the bunt
             return False
 
-    def _swing_approved(self, key: str) -> bool:
-        """An approved family-swing audit on record (C2, Sept 24, 2026): the first entry into the family swing is
-        audited on the family's REAL record; as on the agent-level route, an approval on record lets the family
-        re-enter after its bound fell, and a veto waits out the audit cooldown before it is asked again."""
+    def _swing_approval(self, key: str, family: str, venue: str) -> tuple[bool, str | None]:
+        """(whether an approved audit licenses the family's entry into the swing now, why an approval on record no
+        longer does). The entry is audited on the family's REAL record (C2, Sept 24, 2026), and an approval licenses
+        entries until it lapses (the main session's decision on the review of #242): when the family leaves the swing
+        (`_decorate` lapses it), or when a member of the family takes a new program (`agent.strategy`) after the audit
+        looked at the family (its `started_seq`), as the agent-level route voids an approval on new code. A veto waits
+        out the audit cooldown before it is asked again."""
         with self._lock:
-            audit = (self.state.get("family_audits") or {}).get(key) or {}
-        return audit.get("status") == "done" and audit.get("approve") is True
+            audit = dict((self.state.get("family_audits") or {}).get(key) or {})
+        if audit.get("status") != "done" or audit.get("approve") is not True:
+            return False, None
+        since = int(audit.get("started_seq") or 0)
+        changed = sorted(a.id for a in self._members(family, venue) if self._tape.programs.get(a.id, 0) > since)
+        if changed:
+            return False, f"{', '.join(changed[:3])}{' and others' if len(changed) > 3 else ''} took a new program after the audit"
+        return True, None
+
+    def _lapse_approval(self, key: str, why: str) -> None:
+        """An approval that no longer licenses an entry: the next entry asks for a new audit, with no cooldown to wait."""
+        with self._lock:
+            audits = self.state.setdefault("family_audits", {})
+            was = dict(audits.get(key) or {})
+            if was.get("status") != "done" or was.get("approve") is not True:
+                return
+            audits[key] = {"status": "lapsed", "why": why, "agent": was.get("agent"), "approved_at": was.get("at"),
+                           "started_seq": was.get("started_seq"), "at": now_iso(self.house.clock), "at_epoch": self.house.clock()}
+        try:
+            self.house.alert("info", f"allocator: the {key} family swing's approval lapsed ({why}); its next entry is audited again")
+        except Exception:  # noqa: BLE001 - a courtesy
+            pass
 
     def _audit_hours(self, error: bool) -> float:
         rules_ = (getattr(self.house, "game", None) or {}).get("audit") or {}
@@ -989,10 +1023,13 @@ class Allocator:
                 "error": bool(result.get("error")), "summary": str(result.get("summary") or result.get("error") or "")[:300],
                 "at": now_iso(house.clock), "at_epoch": house.clock()}
         with self._lock:
-            self.state.setdefault("family_audits", {})[key] = done
+            audits = self.state.setdefault("family_audits", {})
+            # Where the audit looked at the family: a member's program changed after it lapses the approval.
+            done["started_seq"] = (audits.get(key) or {}).get("started_seq")
+            audits[key] = done
         try:
             house.alert("info", f"allocator: the {key} family swing's audit {'approved' if done['approve'] else 'did not approve'} "
-                                f"its first entry ({done['summary'][:160]})")
+                                f"its entry ({done['summary'][:160]})")
         except Exception:  # noqa: BLE001 - a courtesy
             pass
 
@@ -1009,7 +1046,7 @@ class Allocator:
                 parsed = instant(entry.at)
                 return {"status": "done", "agent": agent, "approve": p.get("approve") is True and not p.get("error"),
                         "error": bool(p.get("error")), "summary": str(p.get("summary") or "")[:300], "at": entry.at,
-                        "at_epoch": parsed.timestamp() if parsed else self.house.clock()}
+                        "at_epoch": parsed.timestamp() if parsed else self.house.clock(), "started_seq": audit.get("started_seq")}
         return None
 
     def _family_swing_verdict(self, agent: Any, record: Mapping[str, Any], key: str, members_real: int) -> Any:
@@ -1029,8 +1066,11 @@ class Allocator:
                                       venue_capital=self.capital(venue), members_real=max(members_real, 1),
                                       entered_seq=None, rates=rates)
         real = record.get("real") or {}
-        why = (f"the {family} family's REAL record qualifies for the family swing: {real.get('n')} independent real settlements, "
-               f"honest lower bound {float(real.get('honest_bound') or 0):+.5f} a dollar at risk")
+        look = real.get("entry") or {}
+        why = (f"the {family} family is proven and its REAL record qualifies for the family swing: its first {look.get('checkpoint')} "
+               f"of {real.get('n')} independent real settlements clear the entry's {float(look.get('confidence') or 0):.0%} lower bound "
+               f"({float(look.get('honest_bound') or 0):+.5f} a dollar at risk; the whole record's bound at "
+               f"{float((record.get('rule') or {}).get('confidence') or 0.8):.0%} is {float(real.get('honest_bound') or 0):+.5f})")
         numbers = {"via": "family_swing", "book": REAL_BOOK[venue], "evidence": ev.row(), "E": ev.e, "band_to": "swing",
                    "family_swing": key, "family_packet": self._family_packet(record),
                    "allocation_context": self._family_swing_context(agent, ev, record, entry, members_real)}
@@ -1063,6 +1103,8 @@ class Allocator:
                                  if record.get("unit") == "at_risk" else "each value is the member's account growth on the event"),
                 "proof_rule": record.get("rule"), "swing_rule": families.swing_rule(),
                 "real_record": {k: real.get(k) for k in keys},
+                # The entry look that qualified it: the first `checkpoint` real events at `entry_confidence`.
+                "entry_look": real.get("entry"),
                 "pooled_record": {k: record.get(k) for k in ("n", "n_eff", "mean_log", "sd", "bound", "loss_gate", "proven", "edge_per_dollar")},
                 "maker": {k: (record.get("maker") or {}).get(k) for k in ("n", "mean_log", "bound", "positive")},
                 "taker": {k: (record.get("taker") or {}).get(k) for k in ("n", "mean_log", "bound", "positive")},

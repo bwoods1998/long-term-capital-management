@@ -292,12 +292,17 @@ class Capacity(AtRiskCase):
         self.assertIn("no bid", cap["why"])
 
 
-def real_record(n=15, bound=0.02, variance=0.5, closes=None, unit="at_risk", proven=True, family="weather-favorites"):
-    """A family record whose REAL record is set by the test: `closes` are (first close seq, value)."""
+def real_record(n=15, bound=0.02, variance=0.5, closes=None, unit="at_risk", proven=True, family="weather-favorites", entry=None):
+    """A family record whose REAL record is set by the test: `closes` are (first close seq, value). Its entry look
+    (`families.entry_look`) stands at its real count's checkpoint and passes with a positive bound unless `entry` says."""
     rec = families.empty_record(family, "kalshi")
     rec.update(unit=unit, n=max(n, 10), proven=proven, state="proven" if proven else "unproven", bound=0.01 if proven else -0.01,
                real_n=n, members=2, members_living=2, members_counted=2)
-    rec["real"] = {**rec["real"], "n": n, "bound": bound, "honest_bound": bound, "variance": variance,
+    rule = families.swing_rule()
+    checkpoint = families.entry_checkpoint(n, rule) if rule else None
+    look = {"checkpoint": checkpoint, "next_checkpoint": None, "confidence": (rule or {}).get("entry_confidence"),
+            "honest_bound": bound, "ready": (checkpoint is not None and bound is not None and bound > 0) if entry is None else entry}
+    rec["real"] = {**rec["real"], "n": n, "bound": bound, "honest_bound": bound, "variance": variance, "entry": look,
                    "first_closes": closes if closes is not None else [(i + 1, 0.05) for i in range(n)]}
     return rec
 
@@ -409,15 +414,125 @@ class SwingRules(unittest.TestCase):
         self.assertEqual((row["stake_usd"], row["limit"]), (D("103.55"), "kelly"))
 
     def test_the_states(self):
+        """"proven" follows the pooled record alone; a proven family ENTERS on its entry look and an approved audit, and
+        STAYS while its real record holds at 80%; leaving returns it to bunts (probes when the proof went too)."""
         s = families.next_state
-        self.assertEqual(s("unproven", proven=False, ready=False, approved=False), "unproven")
-        self.assertEqual(s("unproven", proven=True, ready=False, approved=False), "proven")
-        self.assertEqual(s("proven", proven=True, ready=True, approved=False), "proven")  # the first entry waits for its audit
-        self.assertEqual(s("proven", proven=True, ready=True, approved=True), "swing")
-        self.assertEqual(s("swing", proven=True, ready=True, approved=False), "swing")
-        self.assertEqual(s("swing", proven=True, ready=False, approved=True), "proven")  # the bound fell: bunts
-        self.assertEqual(s("swing", proven=False, ready=False, approved=True), "unproven")  # and the proof too: probes
-        self.assertEqual(s("unproven", proven=False, ready=True, approved=False), "proven")  # the real record alone proves
+        self.assertEqual(s("unproven", proven=False, entry=False, hold=False, approved=False), "unproven")
+        self.assertEqual(s("unproven", proven=True, entry=False, hold=False, approved=False), "proven")
+        self.assertEqual(s("proven", proven=True, entry=True, hold=True, approved=False), "proven")  # the entry waits for its audit
+        self.assertEqual(s("proven", proven=True, entry=True, hold=True, approved=True), "swing")
+        self.assertEqual(s("proven", proven=True, entry=False, hold=True, approved=True), "proven")  # no passing look, no entry
+        self.assertEqual(s("swing", proven=True, entry=False, hold=True, approved=False), "swing")  # staying needs the hold only
+        self.assertEqual(s("swing", proven=True, entry=True, hold=False, approved=True), "proven")  # the bound fell: bunts
+        self.assertEqual(s("swing", proven=False, entry=True, hold=True, approved=True), "unproven")  # the proof went: probes
+        # The main session's decision on the review of #242: the real record alone neither proves nor swings a family.
+        self.assertEqual(s("unproven", proven=False, entry=True, hold=True, approved=True), "unproven")
+        self.assertEqual(s("proven", proven=False, entry=True, hold=True, approved=True), "unproven")
+
+
+GATE = dict(win_rate=0.8, risk=F, scale=F)  # the loss-rate gate's reading of an at-risk record (`family_record`)
+WIN, LOSS = v(0.5), v(-0.5)
+#: Fifteen events whose honest bound is above zero at 80% and below it at 90% (10 wins and 5 losses, not lopsided).
+FIFTEEN = [WIN, WIN, LOSS] * 5
+
+
+def events(values):
+    """Real events as `pool` observes them: (first close, value, weight)."""
+    return [(i + 1, value, 1.0) for i, value in enumerate(values)]
+
+
+class EntryLooks(unittest.TestCase):
+    """Finding 10 of the review of #242, the main session's decision (Sept 24, 2026): the swing's ENTRY is judged only at
+    `min_real_settlements` real settlements and every `entry_every` more, on the first that many real events, at
+    `entry_confidence` for the t bound and the loss-rate bound alike; staying (and the ramp's doubling) is the whole real
+    record at the table's 80% at every pass. An edgeless family re-read at every settlement at 80% entered 37% of the time
+    by 30 real settlements and 44% by 50; at every 5th at 90%, 19% and 22%."""
+
+    def setUp(self):
+        self.rule = families.swing_rule()
+
+    def test_the_constitutions_entry_rule(self):
+        self.assertEqual((self.rule["entry_every"], self.rule["entry_confidence"]), (5, 0.9))
+        with patch.dict(CONSTITUTION["allocator"]["family_swing"]):
+            del CONSTITUTION["allocator"]["family_swing"]["entry_every"]
+            del CONSTITUTION["allocator"]["family_swing"]["entry_confidence"]
+            self.assertEqual((families.swing_rule()["entry_every"], families.swing_rule()["entry_confidence"]), (1, 0.8))  # #242's
+
+    def test_the_checkpoints_are_15_then_every_5(self):
+        c = lambda n: families.entry_checkpoint(n, self.rule)  # noqa: E731
+        self.assertEqual([c(n) for n in (0, 14, 15, 16, 19, 20, 24, 25, 41)], [None, None, 15, 15, 15, 20, 20, 25, 40])
+
+    def test_the_entry_is_the_first_checkpoint_events_at_90_percent(self):
+        look = families.entry_look(events(FIFTEEN), self.rule, gate=GATE)
+        self.assertEqual((look["checkpoint"], look["next_checkpoint"], look["confidence"]), (15, 20, 0.9))
+        self.assertLess(look["honest_bound"], 0)
+        self.assertFalse(look["ready"])
+        at_80 = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(FIFTEEN)}, 10, 0.8, **GATE)
+        self.assertGreater(at_80["honest_bound"], 0)  # the look #242 took, at every settlement, would have entered here
+
+    def test_a_failed_look_waits_for_the_next_checkpoint(self):
+        """Four more wins make the 19 events' 90% bound positive, but 19 is no checkpoint: the look at 15 stands. The
+        twentieth settlement is the next look, on the first 20."""
+        nineteen = FIFTEEN + [WIN] * 4
+        all_19 = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(nineteen)}, 10, 0.9, **GATE)
+        self.assertGreater(all_19["honest_bound"], 0)
+        look = families.entry_look(events(nineteen), self.rule, gate=GATE)
+        self.assertEqual((look["checkpoint"], look["ready"]), (15, False))
+        self.assertEqual(look["honest_bound"], families.entry_look(events(FIFTEEN), self.rule, gate=GATE)["honest_bound"])
+        look = families.entry_look(events(nineteen + [WIN]), self.rule, gate=GATE)
+        self.assertEqual((look["checkpoint"], look["ready"]), (20, True))
+
+    def test_a_favourites_entry_needs_its_loss_rate_bound_at_90_percent(self):
+        """Clean 93c favourites: the loss-rate bound clears zero after 23 at 80% and after 32 at 90%: the look at 30 fails
+        and the look at 35 passes, while staying at 80% already holds at 30."""
+        win = v(0.07 / 0.93)
+        look = families.entry_look(events([win] * 30), self.rule, gate=GATE)
+        self.assertEqual((look["checkpoint"], look["ready"]), (30, False))
+        self.assertLess(look["loss_gate"], 0)
+        self.assertGreater(look["bound"], 0)  # the t bound alone would have let it in
+        hold = families.pool({str(i): [(win, 1.0)] for i in range(30)}, 10, 0.8, **GATE)
+        self.assertTrue(families.swing_ready({"real": hold}, self.rule))
+        look = families.entry_look(events([win] * 35), self.rule, gate=GATE)
+        self.assertEqual((look["checkpoint"], look["ready"]), (35, True))
+
+    def test_staying_is_the_whole_record_at_80_percent_at_every_pass(self):
+        """The exit side needs no correction: a swinging family stays while its whole record's 80% bound holds, at any
+        count, a count between checkpoints included."""
+        for n in (15, 17, 23):
+            values = (FIFTEEN + [WIN] * 10)[:n]
+            hold = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(values)}, 10, 0.8, **GATE)
+            self.assertTrue(families.swing_ready({"real": hold}, self.rule), n)
+        lost = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(FIFTEEN + [LOSS] * 3)}, 10, 0.8, **GATE)
+        self.assertFalse(families.swing_ready({"real": lost}, self.rule))
+
+
+class EntryLookOnTheLedger(AtRiskCase):
+    """`family_record` carries the entry look, from the ledger alone: a restart looks at exactly the same events."""
+
+    def settle_real(self, values):
+        start = getattr(self, "settled", 0)
+        self.settled = start + len(values)
+        for i, won in enumerate(values, start):
+            ticker = f"KXHIGHNY-26SEP{i % 28 + 1:02d}{i // 28:02d}-B72.5"  # one event each
+            self.buy(ticker, 10, "0.50", agent="m1", book="kalshi", liquidity="maker")  # $5 at risk
+            self.settle(ticker, "2.5" if won else "-2.5", agent="m1", book="kalshi")  # +50% or -50% of it
+
+    def test_the_record_carries_the_look_at_its_checkpoint(self):
+        self.member("m1")
+        self.stake(30, agent="m1", book="kalshi")
+        pattern = [True, True, False] * 5
+        self.settle_real(pattern + [True] * 2)  # 17 real events: the look is still the one at 15
+        record = self.record()
+        self.assertEqual(record["real"]["n"], 17)
+        self.assertEqual((record["real"]["entry"]["checkpoint"], record["real"]["entry"]["ready"]), (15, False))
+        self.assertTrue(families.swing_ready(record, families.swing_rule()))  # it would stay, were it in
+        self.assertFalse(families.entry_ready(record, families.swing_rule()))
+        again = families.family_record(self.house, "weather-favorites", "kalshi", tape=families.TradeTape())  # a restart
+        self.assertEqual(again["real"]["entry"], record["real"]["entry"])
+        self.settle_real([True] * 3)  # the twentieth settlement: the next look, on the first 20
+        record = self.record()
+        self.assertEqual((record["real"]["entry"]["checkpoint"], record["real"]["entry"]["ready"]), (20, True))
+        self.assertTrue(families.entry_ready(record, families.swing_rule()))
 
 
 class FamilySwingOnTheFloor(KalshiHouse):
@@ -540,11 +655,16 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
         self.assertEqual(alloc.board()["agents"][agents[0].id]["band"], "bunt")
         self.assertEqual(alloc.state["families"]["weather-favorites@kalshi"]["was"], "swing")
-        # Its approval stays on record: the bound back above zero, the family re-enters without a second audit.
+        # Leaving the swing lapsed its approval (the main session's decision on the review of #242): the bound back above
+        # zero, the family asks for a new audit and re-enters on that one.
+        self.assertEqual(alloc.state["family_audits"]["weather-favorites@kalshi"]["status"], "lapsed")
         self.families["weather-favorites"] = real_record(n=17, bound=0.05)
         self.rebalance()
+        self.assertEqual(alloc.family_state(agents[0]), "proven")
+        self.house.wait(5)
+        self.rebalance()
         self.assertEqual(alloc.family_state(agents[0]), "swing")
-        self.assertEqual(len(self.verdicts), 1)
+        self.assertEqual(len(self.verdicts), 2)
 
     def test_newcomers_share_a_swinging_familys_caps_from_their_first_dollar(self):
         """Review of #242: the pass's record shared the family's caps among the members it counted on real money when the
@@ -580,9 +700,12 @@ class FamilySwingOnTheFloor(KalshiHouse):
             self.rebalance()
             self.assertEqual(alloc.family_state(agents[0]), "proven")
             self.assertEqual([book.account(x.id).staked for x in agents], [D("30.00")] * 2)  # free cash back to the bunts
+        self.rebalance()  # released again: leaving lapsed its approval, so a new audit is asked before it re-enters
+        self.assertEqual(alloc.family_state(agents[0]), "proven")
+        self.house.wait(5)
         self.rebalance()
-        self.assertEqual(alloc.family_state(agents[0]), "swing")  # released again: back in on the approval on record
-        self.assertEqual(len(self.verdicts), 1)
+        self.assertEqual(alloc.family_state(agents[0]), "swing")
+        self.assertEqual(len(self.verdicts), 2)
 
     def started_not_finished(self):
         """The family's first audit is asked for and the House stops before it runs (its job never starts here)."""
@@ -654,6 +777,58 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.families["weather-favorites"] = real_record(n=12, bound=-0.5, proven=False)
         self.rebalance()
         self.assertEqual(alloc.state["families"]["weather-favorites@kalshi"]["state"], "unproven")
+
+    def test_a_real_record_alone_neither_proves_nor_swings_a_family(self):
+        """Finding 11 of the review of #242, the main session's decision: the table has one proof, the POOLED record. A
+        family whose REAL record clears the swing's entry and hold while its pooled record is not proven (a practice record
+        that contradicts it) is unproven: probes, no audit asked, no swing. #242 called it proven and swung it."""
+        (a, b), book = self.seated_bunts()
+        alloc = self.house.allocator
+        self.families["weather-favorites"] = real_record(n=20, bound=0.05, proven=False)
+        self.rebalance(); self.house.wait(5); self.rebalance()
+        self.assertEqual(alloc.family_state(a), "unproven")
+        self.assertEqual(self.verdicts, [])  # never audited for a swing it cannot take
+        self.assertEqual([book.account(x.id).staked for x in (a, b)], [D("10")] * 2)  # probes, by free cash
+
+    def test_the_entry_waits_for_a_passing_look(self):
+        """Finding 10, the main session's decision: a proven family whose whole real record holds at 80% but whose entry
+        look at its checkpoint fails (at 90%, on its first 15) is not audited and does not swing until a look passes."""
+        (a, b), book = self.seated_bunts()
+        alloc = self.house.allocator
+        self.families["weather-favorites"] = real_record(n=17, bound=0.05, entry=False)
+        self.rebalance(); self.house.wait(5); self.rebalance()
+        self.assertEqual((alloc.family_state(a), self.verdicts), ("proven", []))
+        self.assertEqual([book.account(x.id).staked for x in (a, b)], [D("30")] * 2)
+        self.families["weather-favorites"] = real_record(n=20, bound=0.05)  # the look at 20 passes
+        self.rebalance(); self.house.wait(5); self.rebalance()
+        self.assertEqual(alloc.family_state(a), "swing")
+
+    def test_an_approval_lapses_when_a_members_program_changes(self):
+        """Finding 12, the main session's decision: an approval licenses an entry until a member of the family takes a new
+        program after the audit looked (as the agent-level route voids an approval on new code); the entry then asks for a
+        new audit."""
+        (a, b), book = self.seated_bunts()
+        alloc = self.house.allocator
+        practice = self.agent("kay9")  # a practice member of the family
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        with patch.object(self.house, "_background", return_value=True):
+            self.rebalance()  # the entry's audit is asked for; it runs in a moment (below), as it would on the audit lane
+        key = "weather-favorites@kalshi"
+        running = dict(alloc.state["family_audits"][key])
+        alloc._run_family_audit(key, running["agent"], self.house.allocator._family_swing_verdict(
+            self.house.registry.get(running["agent"]), alloc.family("weather-favorites", "kalshi"), key, 2))
+        self.assertEqual((alloc.state["family_audits"][key]["status"], alloc.state["family_audits"][key]["approve"]), ("done", True))
+        member = self.house.registry.get(practice.id)  # it takes a new program before the family enters
+        self.house.ledger.append("agent.strategy", {"code_sha256": member.code_sha256, "params": member.params, "needs": member.needs,
+                                                    "reason": "test: a new program", "_code": member.code}, agent=practice.id)
+        before = len(self.verdicts)
+        self.rebalance()
+        self.assertEqual(alloc.family_state(a), "proven")  # no entry on the lapsed approval
+        self.house.wait(5)
+        self.assertEqual(len(self.verdicts), before + 1)  # a new audit was asked for
+        self.rebalance()
+        self.assertEqual(alloc.family_state(a), "swing")
+        self.assertEqual([book.account(x.id).staked for x in (a, b)], [D("60.00")] * 2)
 
     def test_the_family_swings_audit_is_not_its_members_own(self):
         """Review of #242: the family's verdict is written against one member (the one with the most real trades), but it
@@ -883,7 +1058,8 @@ class Protected(unittest.TestCase):
         import copy
 
         for path in (("family_swing",), ("corrected_child_supersedes",), ("swing_requires_proven_family",),
-                     ("family_proven", "unit"), ("family_proven", "reference_share")):
+                     ("family_proven", "unit"), ("family_proven", "reference_share"),
+                     ("family_swing", "entry_every"), ("family_swing", "entry_confidence")):
             changed = copy.deepcopy(CONSTITUTION)
             node = changed["allocator"]
             for key in path[:-1]:
@@ -900,6 +1076,8 @@ class Protected(unittest.TestCase):
         self.assertTrue(2 <= row["start_multiple"] <= 4)
         self.assertEqual(row["doubling_every"], 10)
         self.assertEqual(D(row["capacity_fill_ratio"]), D("0.5"))
+        # The entry's looks (the main session's decision on the review of #242): at 15 and every 5 more, at 90%.
+        self.assertEqual((row["entry_every"], D(row["entry_confidence"])), (5, D("0.9")))
         self.assertEqual(CONSTITUTION["allocator"]["max_share_of_venue"], 0.6)  # unchanged
         self.assertEqual(CONSTITUTION["rungs"]["3"]["kelly_fraction"], 1.0)  # unchanged
 
@@ -926,10 +1104,14 @@ class RulesText(unittest.TestCase):
         self.assertIn("weighs what it put at risk against your usual size on that book: scaling every bet up or down proves "
                       "nothing faster, a big losing bet counts for its dollars", text)
         self.assertIn("What proves (or disproves) a family faster is MORE independent events", text)
-        self.assertIn("THE FAMILY SWING. When your family's REAL-money record alone has 15 or more independent settlements", text)
-        self.assertIn("2x the bunt ($60 at Kalshi), doubled after every 10 further WINNING real settlements", text)
+        self.assertIn("THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches 15 independent settlements, "
+                      "its entry is judged there and at every 5 more (15, 20, 25, ...): on those first settlements, with their "
+                      "lower bound at 90% above zero", text)
+        self.assertIn("2x the bunt ($60 at Kalshi), doubled after every 10 further WINNING real settlements while the whole "
+                      "real record's lower bound at 80% stays above zero", text)
         self.assertIn("60% of the venue for the whole family (shared by its members on real money)", text)
         self.assertIn("fall under 50% of its fills at the smaller one", text)
+        self.assertIn("its next entry is audited again, as it is when a member of the family takes a new program", text)
         start, end = text.index("- YOUR FAMILY'S RECORD"), text.index("- REAL MONEY AT KALSHI")
         self.assertNotIn("paper", text[start:end].lower())  # the copy rule: practice, never paper
 

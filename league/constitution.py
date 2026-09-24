@@ -405,10 +405,22 @@ CONSTITUTION: dict[str, Any] = {
         "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
                           "confidence": "0.8", "lopsided_gate": True, "unit": "at_risk", "reference_share": "0.01"},
         # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a
-        # family whose REAL record has `min_real_settlements` or more independent settlements and whose
-        # honest lower bound on it is above zero (the one-sided bound of `family_proven`, at its confidence,
-        # and the loss-rate bound for a lopsided record: favourites must earn it with losses on the record)
-        # SWINGS once the frontier auditor approves its first entry on that real record: every member on
+        # PROVEN family (`family_proven`, the pooled record: the table's one proof) whose REAL record has
+        # `min_real_settlements` or more independent settlements and whose honest lower bound on it is above
+        # zero (the one-sided t bound, and the loss-rate bound for a lopsided record: favourites must earn it
+        # with losses on the record) SWINGS once the frontier auditor approves its entry on that real record.
+        # The ENTRY is judged only at `min_real_settlements` real settlements and every `entry_every` more (15,
+        # 20, 25, ...), on the first that many real events, with both bounds at `entry_confidence`; the family
+        # STAYS, and its ramp doubles, while the whole real record's honest bound at `family_proven.confidence`
+        # (80%) holds at every pass. Why (the review of #242 and the main session's decision, Sept 24, 2026): a
+        # one-sided 80% bound re-read at every settlement is crossed by an EDGELESS family far more often than one
+        # time in five. The main session's simulation (scratchpad/rev-bfam/sim_rules2.py, 500 runs a case, the
+        # review's arithmetic) of the entry alone: at every settlement at 80% an edgeless even-money family enters
+        # by 30 / 50 / 200 real settlements 37% / 44% / 61% of the time (a +14%/$ edge's median entry at 20); at
+        # every 5th settlement at 90% it is 19% / 22% / 37% -- near the table's 20% over the 30-50 settlements that
+        # matter -- while a +14%/$ edge still enters at a median 30, +8%/$ at 40, and a +1.8%/$ favourites edge at
+        # 80 (an edgeless favourites family 9% by 50, 24% by 200). Leaving the swing, or a member's new program
+        # after the audit, lapses the approval: re-entry is audited again. Every member on
         # real money is staked at the ramp -- `start_multiple` x `bunt_usd` ($60 at Kalshi) when the family
         # enters, doubling after every `doubling_every` further POSITIVE independent real settlements while
         # the bound stays above zero -- up to the FAMILY's caps shared by its members on real money: full
@@ -417,11 +429,13 @@ CONSTITUTION: dict[str, Any] = {
         # measured fill rate at the next size (over `capacity_days`, on `capacity_min_markets` markets at
         # each size) is under `capacity_fill_ratio` of the rate at the size before. The envelope's headroom
         # bounds every increase; a bound at or below zero returns the members to bunts, by free cash only.
-        # Values inside the table (15-40 settlements, 2-4x the bunt, doubling every 10). Measured at T0: no
-        # family's real record qualifies (weather-favorites 5 real events, all won: its loss-rate bound is
-        # negative until about 25-30 clean real events at 93c).
+        # Values inside the table (15-40 settlements, 2-4x the bunt, doubling every 10; the entry's 90% is the
+        # table's 80% bound computed honestly under repeated looks, as the loss-rate gate computed it honestly for
+        # favourites at 04:15Z). Measured at T0: no family's real record qualifies (weather-favorites 5 real
+        # events, all won: at 93c its loss-rate bound needs 23 clean real events at 80% and 32 at 90%, a look at 35).
         "family_swing": {"min_real_settlements": 15, "start_multiple": 2, "doubling_every": 10,
-                         "capacity_fill_ratio": "0.5", "capacity_min_markets": 5, "capacity_days": 7},
+                         "capacity_fill_ratio": "0.5", "capacity_min_markets": 5, "capacity_days": 7,
+                         "entry_every": 5, "entry_confidence": "0.9"},
         # `swing_requires_proven_family` (the main session's decision on the review of #224, Sept 24, 2026,
         # carried here so the ratified digest records it): only a proven (or swinging) family's agent takes
         # the agent-level swing (`swing_at`), an unproven family's agent at the swing line stays a probe, and
@@ -502,4 +516,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'b7a740743fd4bf8e58a792df05fed6bba2582e09be37cbe194df11adbed27e86'
+PINNED_DIGEST = '915c978e2fff394d69e503fe582112a33d9f95ba7da3bbf431fa4c649badc2d8'

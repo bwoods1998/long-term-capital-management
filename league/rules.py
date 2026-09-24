@@ -150,16 +150,24 @@ or never swings at all.
         if swing_rule:
             start = float(swing_rule.get("start_multiple", 2))
             favourites = " (the loss-rate test too, for favourites)" if proof.get("lopsided_gate") is True else ""
+            # The entry's looks and the approval's lapse (the main session's decisions on the review of #242).
+            first, every = int(swing_rule.get("min_real_settlements", 15)), int(swing_rule.get("entry_every", 1))
+            entry_at = float(swing_rule.get("entry_confidence", proof.get("confidence", 0.8)))
+            looks = (f"there and at every {every} more ({first}, {first + every}, {first + 2 * every}, ...)" if every > 1
+                     else "there and at every settlement after it")
             family_swing_text = (
-                f"- THE FAMILY SWING. When your family's REAL-money record alone has {swing_rule.get('min_real_settlements', 15)} or more independent\n"
-                f"  settlements and its lower bound is above zero{favourites}, and the frontier\n"
-                "  auditor approves its first entry on that record, the family SWINGS: every member on real money is staked\n"
+                f"- THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches {first} independent\n"
+                f"  settlements, its entry is judged {looks}: on those first settlements,\n"
+                f"  with their lower bound at {entry_at:.0%} above zero{favourites}. If a look passes and the frontier\n"
+                "  auditor approves the entry on that record, the family SWINGS: every member on real money is staked\n"
                 f"  {start:g}x the bunt (${start * float(bunt['kalshi']):.0f} at Kalshi), doubled after every {swing_rule.get('doubling_every', 10)} further WINNING real\n"
-                f"  settlements while the bound stays above zero, up to Kelly on that bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the\n"
-                "  whole family (shared by its members on real money), and held where the family's fills at the bigger\n"
-                f"  size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one. The bound at zero or below: back to\n"
-                "  bunts, by free cash only. A swinging member's positions are the same share of its stake, and the real\n"
-                "  book holds it to its daily-loss line as it holds every swing.\n")
+                f"  settlements while the whole real record's lower bound at {float(proof.get('confidence', 0.8)):.0%} stays above zero, up to Kelly on that\n"
+                f"  bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the whole family (shared by its members on real money), and held\n"
+                f"  where the family's fills at the bigger size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one.\n"
+                "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
+                "  and its next entry is audited again, as it is when a member of the family takes a new program. A\n"
+                "  swinging member's positions are the same share of its stake, and the real book holds it to its\n"
+                "  daily-loss line as it holds every swing.\n")
         proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
   Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent

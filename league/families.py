@@ -35,12 +35,16 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
   (2 losses in 16; its practice losers carried 2.4 times its winners' dollars), sports-central-
   run-under proven (+0.1423 at risk: 6 of 11 practice events won at about even money, and its
   winners carried twice its losers' dollars), every other family unproven.
-- **The states** (`FamilyBook`): "unproven"; "proven" (`allocator.family_proven`: probes become
-  bunts); "swing" (`allocator.family_swing`: the REAL record has `min_real_settlements` or more
-  independent settlements and its honest lower bound -- the t bound, and the loss-rate bound for a
-  lopsided record -- is above zero, and the family's first entry has an approved audit). Each
-  state carries its `since`; `family.record` ledger rows carry the ledger at most every five
-  minutes, a row for each family whose record changed.
+- **The states** (`next_state`): "unproven"; "proven" (`allocator.family_proven`, the POOLED record,
+  the table's one proof: probes become bunts); "swing" (`allocator.family_swing`): a proven family
+  ENTERS when its entry look passes -- judged only at `min_real_settlements` real settlements and
+  every `entry_every` more, on the first that many real events, with the honest lower bound (the t
+  bound, and the loss-rate bound for a lopsided record) at `entry_confidence` above zero
+  (`entry_look`) -- and that entry's audit approves it; it STAYS while its whole real record's honest
+  bound at the table's 80% holds at every pass (`swing_ready`) and it is still proven. Leaving the
+  swing, or a member's new program after the approval, lapses the approval: re-entry is audited
+  again. Each state carries its `since`; `family.record` ledger rows carry the ledger at most every
+  five minutes, a row for each family whose record changed.
 - **The family swing's stake** (`swing_target`): per member on real money, min(the ramp, the
   family's caps / its members on real money), never under the bunt. The ramp starts at
   `start_multiple` x `bunt_usd` when the family enters the swing and doubles after every
@@ -77,8 +81,10 @@ REAL_BOOKS = tuple(REAL_BOOK.values())
 STATES = ("unproven", "proven", "swing")
 #: What the tape folds from the ledger: every agent's fills, settlements and stakes, the two kinds that
 #: move an agent's evidence cutoff (`accounting.evidence_cutoffs`), the House's orders (the buys a family
-#: placed: its capacity) and the evaluator's blocks (every member's active blocks).
-TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline", "book.order", "eval.block")
+#: placed: its capacity), the evaluator's blocks (every member's active blocks) and every agent's program
+#: changes (`agent.strategy`: a family swing's approval lapses when a member's program changes after it).
+TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline", "book.order", "eval.block",
+              "agent.strategy")
 _TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price", "order_id")
 _TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event", "multiplier", "asset_class")
 #: Bid-size buckets for fill rates, the scoreboard's (`scripts/gap_scoreboard.py`): the weather favourites
@@ -141,6 +147,7 @@ class TradeTape:
         self.blocks: dict[str, list[tuple[int, str, bool, float]]] = {}  # (seq, book, active, log growth)
         self.filled: dict[str, float] = {}  # order id -> when a buy fill named it
         self.last_seq: dict[str, int] = {}  # agent -> the newest row folded for it: a family's version
+        self.programs: dict[str, int] = {}  # agent -> the ledger position of its last program change (`agent.strategy`)
         self.newest_at = 0.0
         self._orders: dict[str, float] = {}  # order ids already folded (an order has several rows)
         self._lock = threading.Lock()
@@ -176,6 +183,9 @@ class TradeTape:
                     self._cut(repair.get("agent"), p.get("book"), entry.seq)
         elif entry.kind == "book.order":
             self._fold_order(entry, p, at)
+        elif entry.kind == "agent.strategy":
+            if entry.agent != HOUSE:
+                self.programs[str(entry.agent)] = max(self.programs.get(str(entry.agent), 0), entry.seq)
         elif entry.kind == "eval.block":
             if entry.agent != HOUSE:
                 with contextlib.suppress(TypeError, ValueError):
@@ -267,6 +277,11 @@ def swing_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] 
             "capacity_fill_ratio": float(rule.get("capacity_fill_ratio", 0.5)),
             "capacity_min_markets": int(rule.get("capacity_min_markets", 5)),
             "capacity_days": float(rule.get("capacity_days", 7)),
+            # The ENTRY is judged at `min_real_settlements` real settlements and every `entry_every` more, at
+            # `entry_confidence` (the main session's decision on the review of #242, Sept 24, 2026). Without the keys:
+            # every settlement, at the proof's own confidence (the rule as #242 had it).
+            "entry_every": max(1, int(rule.get("entry_every", 1))),
+            "entry_confidence": float(rule.get("entry_confidence", proof_rule(c)["confidence"])),
             # Full Kelly on the lower bound, as the constitution's scaled rung (`rungs.3.kelly_fraction`).
             "kelly_fraction": float((c.get("rungs") or {}).get("3", {}).get("kelly_fraction", 1.0)),
             "max_share_of_venue": float(allocator.get("max_share_of_venue", 0.6))}
@@ -625,11 +640,16 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
 
     whole = side(None)
     real = pool(real_units, minimum, confidence, **gate)
-    # Each real event's first close and its value (the mean of its real members' values, as `pool` takes
-    # it): the ramp counts the positive ones that closed after the family entered the swing.
-    real["first_closes"] = sorted((real_first[k], math.fsum(v * w for v, w in group) / math.fsum(w for _, w in group))
-                                  for k, group in real_units.items() if group)
+    # Each real event as `pool` observes it -- its first close, its value (the weighted mean of its real members'
+    # values) and its weight (the largest of theirs) -- in the order of the first closes: the ramp counts the positive
+    # ones that closed after the family entered the swing, and the swing's entry is judged on the first ones.
+    events = sorted((real_first[k], math.fsum(v * w for v, w in group) / math.fsum(w for _, w in group), max(w for _, w in group))
+                    for k, group in real_units.items() if group)
+    real["first_closes"] = [(seq, value) for seq, value, _ in events]
     real["closed_at"] = sorted(real_at.values())
+    swing = swing_rule(c)
+    # The family swing's ENTRY look (`entry_look`): at the real count's checkpoint, on its first events.
+    real["entry"] = entry_look(events, swing, gate=gate) if swing else None
     weight_sum = math.fsum(max(w for _, w in group) for group in edges.values())
     edge = (math.fsum(max(w for _, w in group) * math.fsum(r * w for r, w in group) / math.fsum(w for _, w in group)
                       for group in edges.values()) / weight_sum) if weight_sum > 0 else None
@@ -646,7 +666,6 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
               "lopsided": whole.get("lopsided"), "loss_gate": whole.get("loss_gate"), "honest_bound": whole["honest_bound"],
               "risk_per_entry": risk_per_entry, "rows_without_risk": without_risk, "edge_per_dollar": edge,
               "maker": side("maker"), "taker": side("taker"), "real": real, "blocks": blocks, "rule": rule}
-    swing = swing_rule(c)
     if now is not None and stake_usd is not None:
         record["capacity"] = capacity(tape, members, venue, now=float(now), days=(swing or {}).get("capacity_days", 7.0),
                                       stake_usd=float(stake_usd), edge=edge, real_events=real["closed_at"],
@@ -667,7 +686,8 @@ def empty_record(family: str, venue: str, *, through: int | None = None, error: 
            "members_counted": 0, "n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "proven": False,
            "state": "unproven", "real_n": 0, "lopsided": None, "loss_gate": None, "honest_bound": None, "risk_per_entry": None,
            "rows_without_risk": 0, "edge_per_dollar": None, "maker": dict(side), "taker": dict(side),
-           "real": {**side, "first_closes": [], "closed_at": []}, "blocks": {"practice": 0, "real": 0, "growth": 0.0}, "rule": rule}
+           "real": {**side, "first_closes": [], "closed_at": [], "entry": None}, "blocks": {"practice": 0, "real": 0, "growth": 0.0},
+           "rule": rule}
     if error is not None:
         out["error"] = error
     return out
@@ -675,13 +695,62 @@ def empty_record(family: str, venue: str, *, through: int | None = None, error: 
 
 # ---------------------------------------------------------------------------------- the swing
 def swing_ready(record: Mapping[str, Any], rule: Mapping[str, Any] | None) -> bool:
-    """The REAL record qualifies the family for the swing: `min_real_settlements` independent real settlements
-    and the honest lower bound (the t bound, and the loss-rate gate for a lopsided record) above zero."""
+    """The swing's HOLD: the whole REAL record has `min_real_settlements` independent real settlements and its
+    honest lower bound at the table's confidence (`family_proven.confidence`, 0.8: the t bound, and the loss-rate
+    gate for a lopsided record) is above zero. Read at every pass: a swinging family stays, and its ramp doubles,
+    only while it holds (the exit side needs no correction for repeated looks). The ENTRY is `entry_ready`."""
     if rule is None:
         return False
     real = record.get("real") or {}
     bound = real.get("honest_bound")
     return int(real.get("n") or 0) >= int(rule["min_real_settlements"]) and bound is not None and bound > 0
+
+
+def entry_checkpoint(n: int, rule: Mapping[str, Any]) -> int | None:
+    """The real count the swing's entry is judged at for a REAL record of `n` independent settlements: the last of
+    `min_real_settlements`, then every `entry_every` more (15, 20, 25, ...) that `n` has reached, or None below the
+    first. Derived from the count alone, so a restart looks at exactly what the pass before it looked at."""
+    first, every = int(rule["min_real_settlements"]), max(1, int(rule.get("entry_every", 1)))
+    if n < first:
+        return None
+    return first + every * ((n - first) // every)
+
+
+def entry_look(events: Sequence[tuple[int, float, float]], rule: Mapping[str, Any] | None, *,
+               gate: Mapping[str, Any]) -> dict[str, Any]:
+    """The family swing's ENTRY look (C2; the main session's decision on the review of #242, Sept 24, 2026). A
+    one-sided 80% bound re-read at every settlement is crossed by an edgeless family far more often than one time in
+    five (37% by 30 real settlements and 44% by 50 in the main session's simulation, 61% by 200; and eventually always).
+    So the entry is judged only at `entry_checkpoint` -- `min_real_settlements` real settlements and every `entry_every`
+    more -- on the FIRST that many real events (`events`: (first close, value, weight) as `pool` observes each), with the
+    honest bound at `entry_confidence`: the t bound AND, for a lopsided record, the loss-rate bound (`gate`), both at
+    that confidence (19% and 22% by 30 and 50 at every 5th settlement at 90%). Between checkpoints the look stands:
+    a failed look waits for the next checkpoint, and a restart looks at the same events. Staying in the swing and each
+    doubling are `swing_ready`, at the table's 80% at every pass."""
+    confidence = float((rule or {}).get("entry_confidence", 0.8))
+    ordered = sorted(events)
+    out: dict[str, Any] = {"checkpoint": None, "next_checkpoint": None, "confidence": confidence, "n": len(ordered),
+                           "bound": None, "loss_gate": None, "honest_bound": None, "ready": False}
+    if rule is None:
+        return out
+    checkpoint = entry_checkpoint(len(ordered), rule)
+    first = int(rule["min_real_settlements"])
+    out["next_checkpoint"] = first if checkpoint is None else checkpoint + max(1, int(rule.get("entry_every", 1)))
+    if checkpoint is None:
+        return out
+    looked = pool({str(i): [(value, weight)] for i, (_, value, weight) in enumerate(ordered[:checkpoint])}, checkpoint,
+                  confidence, **gate)
+    honest = looked["honest_bound"]
+    out.update(checkpoint=checkpoint, bound=looked["bound"], loss_gate=looked.get("loss_gate"), honest_bound=honest,
+               ready=honest is not None and honest > 0)
+    return out
+
+
+def entry_ready(record: Mapping[str, Any], rule: Mapping[str, Any] | None) -> bool:
+    """The swing's ENTRY passes at the family's current checkpoint (`entry_look`, computed with its record)."""
+    if rule is None:
+        return False
+    return bool(((record.get("real") or {}).get("entry") or {}).get("ready"))
 
 
 def positive_since(record: Mapping[str, Any], entered_seq: int | None) -> int:
@@ -751,15 +820,19 @@ def swing_target(record: Mapping[str, Any], *, rule: Mapping[str, Any], venue: s
 
 
 # ------------------------------------------------------------------------------ the states, the rows
-def next_state(previous: str, *, proven: bool, ready: bool, approved: bool) -> str:
-    """The family's state after a pass: "swing" while its real record qualifies and its entry was approved
-    (the first entry is audited), else "proven" when the pooled record is proven or the real record alone
-    qualifies (15 real settlements with a positive honest bound are stronger proof than 10 pooled), else
-    "unproven". A swing whose bound falls to zero or below returns its members to bunts, or to probes when
-    the pooled record is no longer proven either (free cash only: no position is sold for it)."""
-    if ready and (previous == "swing" or approved):
-        return "swing"
-    return "proven" if (proven or ready) else "unproven"
+def next_state(previous: str, *, proven: bool, entry: bool, hold: bool, approved: bool) -> str:
+    """The family's state after a pass (C2; the main session's decisions on the review of #242, Sept 24, 2026).
+    "proven" follows the POOLED record alone (`family_proven`, the table's one proof: a real record strong enough to
+    swing on proves the pooled record too, unless the practice record contradicts it, and then it must not swing).
+    A proven family ENTERS the swing when its entry look passes at its checkpoint (`entry`) and that entry's audit
+    approved it; a swinging family STAYS while its real record holds at the table's 80% (`hold`) and it is still
+    proven. Otherwise "proven", or "unproven" without the pooled proof. Leaving the swing returns the members to bunts
+    (probes when the proof has gone too), by free cash only, and lapses the approval: re-entry is audited again."""
+    if not proven:
+        return "unproven"
+    if previous == "swing":
+        return "swing" if hold else "proven"
+    return "swing" if (entry and approved) else "proven"
 
 
 def row_of(record: Mapping[str, Any], state: Mapping[str, Any], *, swing: Mapping[str, Any] | None,
@@ -770,13 +843,18 @@ def row_of(record: Mapping[str, Any], state: Mapping[str, Any], *, swing: Mappin
         return None if value is None else round(float(value), digits)
 
     real = record.get("real") or {}
+    entry = real.get("entry") or {}
     cap = record.get("capacity") or {}
     return {"family": record["family"], "venue": record["venue"], "unit": record.get("unit"), "state": state.get("state", "unproven"),
             "since": state.get("since"), "n": int(record.get("n") or 0), "n_eff": r(record.get("n_eff"), 3),
             "mean_log": r(record.get("mean_log")), "bound": r(record.get("bound")), "loss_gate": r(record.get("loss_gate")),
             "proven": bool(record.get("proven")), "edge_per_dollar": r(record.get("edge_per_dollar")),
             "real": {"n": int(real.get("n") or 0), "mean_log": r(real.get("mean_log")), "bound": r(real.get("bound")),
-                     "loss_gate": r(real.get("loss_gate")), "honest_bound": r(real.get("honest_bound"))},
+                     "loss_gate": r(real.get("loss_gate")), "honest_bound": r(real.get("honest_bound")),
+                     # The swing's entry look at the real count's checkpoint, and the count that looks next.
+                     "entry": {"checkpoint": entry.get("checkpoint"), "next_checkpoint": entry.get("next_checkpoint"),
+                               "confidence": entry.get("confidence"), "honest_bound": r(entry.get("honest_bound")),
+                               "ready": bool(entry.get("ready"))} if entry else None},
             "maker": {"n": int((record.get("maker") or {}).get("n") or 0), "bound": r((record.get("maker") or {}).get("bound")),
                       "positive": bool((record.get("maker") or {}).get("positive"))},
             "taker": {"n": int((record.get("taker") or {}).get("n") or 0), "bound": r((record.get("taker") or {}).get("bound")),
