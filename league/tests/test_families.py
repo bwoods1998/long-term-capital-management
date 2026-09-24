@@ -564,6 +564,81 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.assertEqual([book.account(x.id).staked for x in (a, *news)], [D("30.00")] * 3)
         record = alloc.family("weather-favorites", "kalshi")
         self.assertEqual((record["members_real"], record["swing"]["members_real"]), (3, 3))
+        for n in news:  # each lent its share from its first dollar (and the envelope checked that), never swept back to it
+            lent = [D(e.payload["usd"]) for e in self.house.ledger.iter(kinds="book.stake", agent=n.id) if e.payload.get("book") == "kalshi"]
+            self.assertEqual(lent, [D("30.00")])
+
+    def test_the_swing_holds_only_while_the_grant_releases_stakes_above_the_bunt(self):
+        """Review of #242: the grant's rung-3 release (`allows_live(3)`, its `max_rung`) was read only when the first audit
+        was asked for; with an approval on record, a grant narrowed to rung 2 left the family staked above the bunt."""
+        agents, book = self.swinging()
+        alloc = self.house.allocator
+        with patch.object(self.house, "campaigns", SimpleNamespace(allows_live=lambda rung: rung <= 2)):
+            alloc._released = None
+            self.assertFalse(alloc._swing_released())
+        with patch.object(allocator.Allocator, "_swing_released", return_value=False):
+            self.rebalance()
+            self.assertEqual(alloc.family_state(agents[0]), "proven")
+            self.assertEqual([book.account(x.id).staked for x in agents], [D("30.00")] * 2)  # free cash back to the bunts
+        self.rebalance()
+        self.assertEqual(alloc.family_state(agents[0]), "swing")  # released again: back in on the approval on record
+        self.assertEqual(len(self.verdicts), 1)
+
+    def started_not_finished(self):
+        """The family's first audit is asked for and the House stops before it runs (its job never starts here)."""
+        agents, book = self.seated_bunts()
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        with patch.object(self.house, "_background", return_value=True):
+            self.rebalance()
+        alloc = self.house.allocator
+        running = dict(alloc.state["family_audits"]["weather-favorites@kalshi"])
+        self.assertEqual(running["status"], "running")
+        alloc._save()
+        return agents, running
+
+    def restart(self):
+        self.house.allocator = allocator.Allocator(self.house, self.house.allocator.path.parent)
+        return self.house.allocator
+
+    def test_a_family_audit_that_finished_before_a_restart_is_read_back_not_asked_again(self):
+        agents, running = self.started_not_finished()
+        key = "weather-favorites@kalshi"
+        # The audit wrote its verdict (as the auditor does, naming the family) and the House restarted before the
+        # allocator recorded it.
+        self.house.ledger.append("audit.verdict", {"approve": True, "summary": "test", "family_swing": key}, agent=running["agent"])
+        alloc = self.restart()
+        self.assertEqual(alloc.state["family_audits"][key]["status"], "running")
+        self.rebalance()
+        self.assertEqual((alloc.state["family_audits"][key]["status"], alloc.state["family_audits"][key]["approve"]), ("done", True))
+        self.rebalance()
+        self.assertEqual(alloc.family_state(agents[0]), "swing")
+        self.assertEqual(self.verdicts, [])  # the auditor was never asked twice
+
+    def test_a_family_audit_that_never_finished_is_asked_again_after_a_restart(self):
+        agents, _ = self.started_not_finished()
+        self.restart()
+        self.rebalance()
+        self.house.wait(5)
+        self.assertEqual([v.numbers.get("family_swing") for v in self.verdicts], ["weather-favorites@kalshi"])
+        self.rebalance()
+        self.assertEqual(self.house.allocator.family_state(agents[0]), "swing")
+
+    def test_without_an_auditor_there_is_no_family_swing(self):
+        """A gate that fails open is not a gate: no auditor, no first entry."""
+        agents, book = self.seated_bunts()
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        with patch.object(self.house, "auditor", None):
+            self.rebalance(); self.house.wait(5); self.rebalance()
+            self.assertEqual(self.house.allocator.family_state(agents[0]), "proven")
+        self.assertEqual([book.account(x.id).staked for x in agents], [D("30")] * 2)
+
+    def test_a_proven_family_whose_last_member_died_is_followed_until_it_falls(self):
+        (a,), _ = self.seated_bunts(1)
+        alloc = self.house.allocator
+        self.house.kill(a, "evidence", "test")
+        self.families["weather-favorites"] = real_record(n=12, bound=-0.5, proven=False)
+        self.rebalance()
+        self.assertEqual(alloc.state["families"]["weather-favorites@kalshi"]["state"], "unproven")
 
     def test_the_family_swings_audit_is_not_its_members_own(self):
         """Review of #242: the family's verdict is written against one member (the one with the most real trades), but it

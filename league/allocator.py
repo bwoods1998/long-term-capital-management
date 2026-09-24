@@ -492,6 +492,7 @@ class Allocator:
         self._through: int | None = None
         self._family_alerted: set[tuple[str, str, str]] = set()  # (family, venue, error): each told once
         self._rungs: dict[str, int] | None = None  # the pass's rungs while `_begin_pass` reads the families
+        self._released: bool | None = None  # whether the live grant releases rung 3, read once a pass (`_swing_released`)
         if self.state.get("families") is None:
             # A first start under the mechanism ledger: the states the ledger's last `family.record` rows say.
             self.state["families"] = families.restore_states(getattr(house, "ledger", None))
@@ -644,6 +645,8 @@ class Allocator:
             self._family_error("the family records' tape", "", exc)
             self._through = self._tape.cursor
         self._families = {}
+        self._released = None
+        self._released = self._swing_released()  # the grant's rung-3 release, read once a pass
         try:
             # Each living agent's rung read once for the families' members on real money (a ledger read an agent).
             self._rungs = {a.id: self.house.evaluator.rung(a.id) for a in list(self.house.registry.living())}
@@ -766,7 +769,10 @@ class Allocator:
         with self._lock:
             previous = dict((self.state.get("families") or {}).get(key) or {})
         rule = families.swing_rule()
-        ready = families.swing_ready(record, rule)
+        # A swing is a stake above the bunt, which the live grant releases with rung 3 (`allows_live(3)`, its `max_rung`):
+        # the family swing holds only while it does, not only at its first audit (review of #242, Sept 24, 2026: with an
+        # approval on record nothing else read the grant, and a grant narrowed to rung 2 left the swing staked).
+        ready = families.swing_ready(record, rule) and self._swing_released()
         proven = bool(record.get("proven"))
         before = previous.get("state") if previous.get("state") in families.STATES else ("proven" if proven else "unproven")
         state = families.next_state(before, proven=proven, ready=ready, approved=self._swing_approved(key))
@@ -877,6 +883,20 @@ class Allocator:
                 f"proven at {r['rule']['min_independent_settlements']} with the bound above zero)")
 
     # ------------------------------------------------ the family swing's audit
+    def _swing_released(self) -> bool:
+        """Whether the live grant releases stakes above the bunt (`allows_live(3)`), read once a pass (`_begin_pass`); a
+        grant that cannot be read releases nothing above the bunt."""
+        released = getattr(self, "_released", None)
+        if released is not None:
+            return released
+        guard = getattr(self.house, "campaigns", None)
+        if guard is None:
+            return True
+        try:
+            return bool(guard.allows_live(3))
+        except Exception:  # noqa: BLE001 - an unreadable grant releases nothing above the bunt
+            return False
+
     def _swing_approved(self, key: str) -> bool:
         """An approved family-swing audit on record (C2, Sept 24, 2026): the first entry into the family swing is
         audited on the family's REAL record; as on the agent-level route, an approval on record lets the family
