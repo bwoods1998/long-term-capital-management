@@ -122,7 +122,11 @@ watch.
     the campaign meter, the agent-box seal and the workflows.
 
   A protected change is refused with the warning "this one is the owner's deploy". Merton's
-  merged pull requests (strategies, tools, lessons, dials) arrive this way.
+  merged pull requests (strategies, tools, lessons, dials) arrive this way. The Checks workflow's
+  tests job has 20 minutes (Sept 24, 2026: the 3.14 job hit a 10-minute limit twice in a row, and
+  took 9-14 minutes on the day's later heads); a change to `.github/workflows/` re-pins
+  `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` in the same commit (a test fails otherwise) and
+  reaches the box only by the owner's deploy, after which the updater trusts the new workflow.
 - **The owner's deploy.** `python3 scripts/floor_box.py deploy` sends the working tree.
   - Use it for protected changes.
   - Only one deploy runs at a time. If you see `REFUSED: another deploy or rollback is running
