@@ -141,6 +141,31 @@ recorded for the next open; live verification uses the markets that trade around
    - With them: the scoreboard analyst Z (`ltcm-z`, `scripts/gap_scoreboard.py`) and the cleanup
      agent H. Money PRs get the three-lens adversarial review before Deploy A.
 
+## Log
+
+- 01:34:02Z — T0; run worktree `~/Work/ltcm-gaps-run`, branch `run/close-the-gaps-2026-09-24`.
+- 01:35Z — the ratify check (decision 1). 01:36:00Z — the top-up recorded. 01:36Z — gateway
+  `8d4e1a47` (month $607). 01:37:56Z — tier "all".
+- 01:38-01:42Z — the T0 snapshot (read-only sqlite backups on the box, downloaded to the session
+  scratchpad).
+- 01:41Z — PR #219 merged (the plan without a deadline, the allowed data hosts in `LEAGUE_HOSTS`):
+  main `35d6c1b`; the in-box updater ships it as a release (unprotected).
+- 01:4xZ — the watch loop (`floor_watch.py` every 15 minutes) and the events loop (real fills, band
+  moves, audits, error alerts, deaths every 5 minutes) started, into the session scratchpad.
+- 01:50Z — Merton's #221 merged by its workflow (main `0d1dd47`). PR #220 (the gateway month)
+  merged: main `563314e`.
+- 01:54Z — site PR #6 (personal-site): the House's `probe` band is Level 2, accepted by the schema on
+  desks, the board and moves; deployed 01:55Z (`npm run build && wrangler deploy`, 78 tests green),
+  version `47d752a3`, before any floor publishes the band. The checkpoint kept publishing (01:54:33Z,
+  120 desks).
+- 01:56Z — **Wave 0 launched together:** A-money (D4, P1-P3's keys), A-book (D3, X0), A-lab (D1),
+  A-holds (D2), the scoreboard analyst Z and the cleanup agent H, from `0d1dd47`.
+- 01:58Z — the events loop: huang-hd8ff7c-3 demoted (E 0.7749) after a −$4.29 settlement,
+  huang-h427345-2 −$1.36: the 15-minute crypto taker bunts losing, as the gap review measured.
+- 01:57Z — OpenAI since the tier reopened: the gateway month $402.96 → $405.45 in 20 minutes (235
+  calls in the hour: the research backlog and the six Merton roles that were overdue; $2.52 settled,
+  $8.59 of in-flight holds). Watched hourly; L2 pauses the unproductive roles in Wave 1.
+
 ## Progress notes
 
 ⟨every four hours from T0⟩
