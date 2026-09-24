@@ -127,6 +127,19 @@ risk-reducing orders go through on that venue until the next day. Both lines rea
 opening equity at the first check of the UTC day, and since Sept 23, 2026 that opening survives a
 House restart: a restart mid-day does not give a day's loss back.
 
+**Real-money entries on Kalshi (since Sept 24, 2026, each while the constitution carries its key).**
+Practice books are not held to these, and no sell ever is:
+
+- `allocator.longshot_floor_real` (30 cents): no real entry priced under it; practice keeps 15 cents.
+- `allocator.real_entry_liquidity`: a real entry must be a post-only limit (`"type": "limit"`,
+  `"post_only": True`, which rests or is refused) until your family's pooled record of TAKER trades
+  is positive. The refusal names your family, its taker settlements and the record's lower bound; a
+  family with no taker record measured is not yet proven.
+- `allocator.max_event_share` (25%): what you hold on one event at cost, your working buys on any of
+  its markets and the new order together are at most a quarter of your equity on the book. An event
+  is a market's ticker less its last segment: every strike of one game's total, every band of one
+  city's high on one day.
+
 Your practice evidence on Alpaca is haircut for execution: every practice fill's notional is charged
 a few bps a side, by its asset class, at what that class's practice fills were measured to flatter
 against the quote when the intent was made (since Sept 23, 2026, constitution
@@ -426,6 +439,32 @@ Each is done once, on the quote of that moment, and said on your wake record (`a
   before the venue has the order, the venue's rejection stands and its reason is on the order row
   (`recent_order_outcomes`). A limit that is not post-only is never re-priced: crossing is what a
   marketable limit means.
+
+### A sell is never refused for meeting the House's own order (Sept 24, 2026)
+
+Every agent on a venue shares one account, so two of the House's own orders never trade with each
+other at the venue. A BUY that could meet one of the House's resting orders is still refused ("could
+trade against the House's own resting order"): re-price it or wait. A SELL -- your exit, a stop, the
+House's wind-down or horizon rule -- is never refused for it:
+
+- **Your own resting bid** on the instrument that the sell could meet is cancelled first (its row
+  says why), and the sell goes on.
+- **Another agent's resting bid at or above the market's bid**, where a sell at the venue would
+  really meet it, is cancelled at the venue and, once the venue has confirmed the cancel and what
+  had filled, your sell is crossed with it inside the House at that bid's price: you sell as a taker
+  and pay the taker's fee, the bidder buys at its own limit as a maker and pays the maker's. Both are
+  `cross` fills (yours names the bids in `resting_orders`); nothing reaches the venue. What the
+  bidder's order had left is not re-placed: its cancelled row and its fill say so, and it bids again
+  at its next wake if it still wants to.
+- **The House's bids under the market's bid** are left alone: your sell goes to the venue as a limit
+  one price step above the best of them, so it takes the market's better bids and never the House's.
+  A `post_only` sell is never crossed either (it asked never to take): it rests, still post-only, one
+  step above the House's best bid.
+- **When the House cannot tell where one of its orders stands** (a cancel the venue has not
+  confirmed, an order the venue has not acknowledged), what is left of your sell rests as a post-only
+  limit at the ask instead.
+
+Whatever the House changed is the `reason` on your order's rows in `recent_order_outcomes`.
 
 ## How replay scores it
 
