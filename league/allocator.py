@@ -738,12 +738,15 @@ class Allocator:
     def _begin_pass(self) -> None:
         """A new pass reads every family afresh, once, through the ledger position it starts at, and moves
         the mechanism ledger's states (C1, Sept 24, 2026: `families.next_state`). A ledger that cannot be
-        read now leaves the tape where it stood: the pass goes on (Sept 24, 2026)."""
+        read now leaves the tape where it stood: the pass goes on (Sept 24, 2026), and the probe gate, which would read the
+        last pass's forward records from it, is closed for the pass (the R5 adversarial review, Sept 24, 2026)."""
+        tape_fault = None
         try:
             self._through = self._tape.refresh(self.house.ledger)
         except Exception as exc:  # noqa: BLE001 - an unreadable ledger must not stop the pass or its exits
             self._family_error("the family records' tape", "", exc)
             self._through = self._tape.cursor
+            tape_fault = f"the family records' tape ({type(exc).__name__})"
         self._families = {}
         self._released = None
         self._released = self._swing_released()  # the grant's rung-3 release, read once a pass
@@ -760,7 +763,7 @@ class Allocator:
         # probe demotions the ledger gained since the last pass (the House's drift and audit vetoes demote between passes).
         # A gate that cannot be read seats no probe this pass and demotes nobody for it (the R5 review, Sept 24, 2026): it fails closed.
         self._since = {}
-        self._gate_fault = None
+        self._gate_fault = tape_fault  # a tape that could not be read holds the last pass's records: the gate is closed
         try:
             self._forward = self.family_forward()
         except Exception as exc:  # noqa: BLE001 - a fault here never stops the pass or its exits
@@ -2175,14 +2178,18 @@ class Allocator:
             capacity = record.get("capacity") or {}
             usd = capacity.get("usd_per_day")
             since = self.paused_since(agent.id)
-            blocks, growth = self.forward(agent.family) if agent.family else (0, 0.0)
+            try:
+                blocks, growth = self.forward(agent.family) if agent.family else (0, 0.0)
+                forward = {"blocks": int(blocks), "growth": round(float(growth), 6)}
+            except Exception:  # noqa: BLE001 - a display number never costs the pass its board; the gate reads "unreadable"
+                forward = None
             # R3 and R5 (Sept 24, 2026), for the watch and the owner, never the site (`league/publish.py` copies the fields the
             # site's schema knows, by name): `stake_usd` is the net loan -- what was lent less the profit swept back -- and
             # `equity_usd` what the account is worth (at the resume the notes read meriwether-h2d625d's $20.06 stake as short
             # of its $37.50 target while its equity was $41.67); the family's pooled forward record and the probe gate.
             agents[agent.id] = {"band": band, "stake_usd": stake, "equity_usd": equity, "target_usd": target,
                                 "evidence": ev.row() if ev else None,
-                                "family_forward": {"blocks": int(blocks), "growth": round(float(growth), 6)},
+                                "family_forward": forward,
                                 "probe_gate": self.gate_words(self.probe_gate(agent)) if rung in (1, 2) else None,
                                 "venue": agent.venue, "last_move": None, "family": agent.family,
                                 # The HONEST bound (the t bound, and the loss-rate gate for a lopsided record): the one

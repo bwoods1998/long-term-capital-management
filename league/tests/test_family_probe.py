@@ -473,6 +473,36 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()  # read again: the losing family's probe goes back, the other family's newcomer is seated
         self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (1, 2))
 
+    def test_a_tape_that_cannot_be_read_seats_no_probe_on_its_old_reading(self):
+        """The R5 adversarial review (Sept 24, 2026): the pass reads the ledger into its tape first, and a read that fails
+        leaves the tape where it stood, so the forward records it gives are the last pass's: a family that turned losing
+        since reads as it was. The gate fails closed on that too (`family_unreadable`), as it does on a failed fold."""
+        b = self.agent("hawk")
+        with self.evidence_of({b.id: dict(READY, e=1.0)}):
+            self.tick()  # under the bunt line: the pass reads the family's record, seats nobody
+        self.blocks("weather-favorites", *[-0.05] * 6)  # the family turns losing...
+        with patch.object(allocator.TradeTape, "refresh", side_effect=OSError("database is locked")), \
+                self.evidence_of({b.id: READY}):
+            self.tick()  # ...and this pass cannot read the ledger: its tape still holds no block of it
+        self.assertEqual(self.house.evaluator.rung(b.id), 1)
+        self.assertEqual(self.status(b)["stage"], "family_unreadable")
+        with self.evidence_of({b.id: READY}):
+            self.tick()  # read again: losing
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_losing"))
+
+    def test_a_forward_record_that_cannot_be_read_never_costs_the_pass_its_board(self):
+        """The R5 adversarial review (Sept 24, 2026): the gate closes when the families' forward records cannot be read, but the
+        board read them again for its rows without a guard, and the whole pass failed there -- no board, no
+        allocator.json -- at every pass the read kept failing."""
+        b = self.agent("hawk")
+        with patch.object(allocator.Allocator, "family_forward", side_effect=RuntimeError("the tape is torn")), \
+                self.evidence_of({b.id: READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 1)
+        row = self.house.allocator.board()["agents"][b.id]
+        self.assertEqual((row["probe_gate"], row["family_forward"]), ("unreadable", None))
+        self.assertFalse([e for e in self.house.ledger.iter(kinds="ops.alert") if "allocator's pass failed" in str(e.payload.get("text"))])
+
     def test_an_audit_that_approves_a_seat_meets_the_gate_again(self):
         """The R5 review (Sept 24, 2026): a known defect is audited off the tick before its seat, and its family may turn losing meanwhile.
         `House._commit_promotion` asks the gate again (`Allocator.refuses_probe`)."""
