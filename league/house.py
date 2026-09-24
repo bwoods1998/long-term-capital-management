@@ -4022,7 +4022,11 @@ class House:
         campaign -- which books every call at the House's ceiling prices, about twice the gateway's --
         had $139 left against the gateway's $166 while committing about $17 an hour: it would have
         refused every call, audits included, while the tier still said "all". None when neither line
-        can be read; the campaign counts only beside a month reader, as in production."""
+        can be read; the campaign counts only beside a month reader, as in production.
+
+        Reading the month also reads OpenAI's meter (Sept 24, 2026): `FrontierMonth` feeds each
+        reading to `CampaignBudget.observe_month`, and the tick calls this every time so the meter
+        stays fresh and the stale OpenAI holds can be absorbed against it (`_absorb_stale_holds`)."""
         month = self.frontier_month
         remaining = month.remaining() if month is not None else None
         campaigns = self.campaigns if month is not None else None
@@ -5067,23 +5071,35 @@ class House:
     # -------------------------------------------------------------------- tick
     #: A Sail hold older than this has had its charge (if any) reach the balance meter.
     STALE_HOLD_SECONDS = 3600
+    #: An OpenAI hold older than this belongs to a call that ended long before (the House reads for
+    #: 600 s, the gateway waits 570 s), and the gateway's month already counts it (Sept 24, 2026).
+    STALE_OPENAI_HOLD_SECONDS = 6 * 3600
 
-    def _absorb_stale_holds(self) -> None:
-        """Every ten minutes, release Sail holds older than the meter's lag into the balance meter
-        that already counts their charge (`CampaignBudget.absorb_stale`), and say so on the ledger."""
-        if self.clock() - float(self._state.get("holds_absorbed_at") or 0) < 600:
-            return
-        self._state["holds_absorbed_at"] = self.clock()
+    def _absorb_stale_holds(self, *, sail: bool = True) -> None:
+        """Every ten minutes, release each metered provider's holds older than its meter's lag into
+        the meter that already counts their charge (`CampaignBudget.absorb_stale`), and say so on
+        the ledger: Sail's once its balance was read this tick (`sail`), OpenAI's against the
+        gateway's frontier month, which the tick reads first (Sept 24, 2026). A try that had nothing
+        yet to check the month against (`retry`) is made again on the next tick, not in ten minutes."""
         absorb = getattr(self.campaigns, "absorb_stale", None)
-        if absorb is None or "sail" not in (getattr(self.campaigns, "policy", {}) or {}).get("meter_required", []):
+        required = (getattr(self.campaigns, "policy", {}) or {}).get("meter_required", [])
+        if absorb is None:
             return
-        try:
-            out = absorb("sail", older_than_seconds=self.STALE_HOLD_SECONDS, evidence={"by": "house", "release": Path(__file__).resolve().parents[1].name})
-        except Exception as exc:  # noqa: BLE001 - a reconciliation that fails leaves the holds counted
-            self.alert("warning", f"stale Sail holds could not be absorbed ({type(exc).__name__}: {str(exc)[:160]})")
-            return
-        if out.get("absorbed"):
-            self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": "sail", **out})
+        for kind, age, key, read in (("sail", self.STALE_HOLD_SECONDS, "holds_absorbed_at", sail),
+                                     ("openai", self.STALE_OPENAI_HOLD_SECONDS, "openai_holds_absorbed_at", True)):
+            if kind not in required or not read or self.clock() - float(self._state.get(key) or 0) < 600:
+                continue
+            self._state[key] = self.clock()
+            try:
+                out = absorb(kind, older_than_seconds=age, evidence={"by": "house", "release": Path(__file__).resolve().parents[1].name})
+            except Exception as exc:  # noqa: BLE001 - a reconciliation that fails leaves the holds counted
+                self.alert("warning", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds could not be absorbed "
+                                      f"({type(exc).__name__}: {str(exc)[:160]})")
+                continue
+            if out.get("retry"):
+                self._state[key] = 0
+            if out.get("absorbed"):
+                self.ledger.append("ops.budget", {"what": "holds absorbed", "kind": kind, **out})
 
     def tick(self) -> dict[str, Any]:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
@@ -5157,8 +5173,14 @@ class House:
         if self.campaigns:
             meter = getattr(self.provider, "transport", None)
             metered = bool(meter and hasattr(meter, "refresh") and meter.refresh())
-            if metered:
-                self._absorb_stale_holds()
+            # OpenAI's meter is the gateway's frontier month (`FrontierMonth`, fed to the campaign):
+            # read here on every tick, at most once a minute, so it is fresh for every OpenAI
+            # reservation, and an unreadable gateway stops only paid OpenAI work (Sept 24, 2026).
+            try:
+                self.frontier_remaining()
+            except Exception as exc:  # noqa: BLE001 - an unread month is an unread meter, never a failed tick
+                self.alert("warning", f"the gateway's frontier month could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+            self._absorb_stale_holds(sail=metered)
             allowed = self.pacer.may_spend("sail")
             if open_for_business and not metered:
                 stopped_because = "the campaign's Sail meter is unread or failed (meter_health in campaigns.sqlite)"

@@ -3,8 +3,10 @@
 Reservations survive timeouts, process restarts and the end of the phase. Unknown charges are
 never converted to zero or expired by a timer -- with one exception, on a provider with an account
 meter: a hold older than the meter's lag is absorbed into the meter, which already counts whatever
-the vendor charged (`absorb_stale`). The policy is outside every model role's write paths.
-External development/infrastructure reserves are commitments, not claimed invoice costs.
+the vendor charged (`absorb_stale`). Sail's meter is its account balance (`observe_balance`);
+OpenAI's, since Sept 24, 2026, is the gateway's frontier month (`observe_month`). The policy is
+outside every model role's write paths. External development/infrastructure reserves are
+commitments, not claimed invoice costs.
 """
 from __future__ import annotations
 
@@ -13,15 +15,23 @@ from decimal import Decimal, ROUND_UP
 import json
 import math
 from pathlib import Path
+import re
 import sqlite3
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .ledger import canonical
 from .pacer import Pacer
 
 UNIT = Decimal("1000000")
+#: A provider's billing month as the gateway names it (`/v1/health` `frontier.month`).
+MONTH = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+
+
+def month_start(month: str) -> float:
+    """The first instant of a UTC calendar month "YYYY-MM", in epoch seconds."""
+    return datetime(int(month[:4]), int(month[5:7]), 1, tzinfo=timezone.utc).timestamp()
 
 
 class CampaignClosed(ValueError):
@@ -44,9 +54,23 @@ def load_policy() -> dict[str, Any]:
 
 
 class CampaignBudget:
+    #: The commitments each provider's account meter records, by identity prefix (Sept 24, 2026).
+    #: Sail's balance falls for every Sail charge, sandboxes and hosting included: all of them.
+    #: OpenAI's meter is the gateway's frontier month, which counts only the calls made through
+    #: `POST /v1/frontier/responses`; the House files those as `frontier:<hex>` (league/frontier.py).
+    #: Jev's retained backing (`external-pilot:typesafe:*`, $20 on Sept 24) is OpenAI-kind money the
+    #: gateway reports apart (`/v1/health` `typesafe`): it is never absorbed into the month, and a
+    #: cost settled on it is added to the line beside the meter, never hidden inside
+    #: `max(settled, measured)`.
+    METER_COVERS = {"sail": "", "openai": "frontier:"}
+    #: A reservation asks a registered reader (`meter_reader`) for a new reading once the last one is
+    #: this old, so a reading is never 180 s stale (`ready`) merely because a tick ran long.
+    METER_READ_SECONDS = 60
+
     def __init__(self, path: str | Path, policy: Mapping[str, Any] | None = None, *, clock=time.time):
         self.policy = dict(policy or load_policy())
         self.clock, self.lock = clock, threading.RLock()
+        self._readers: dict[str, Callable[[], Any]] = {}
         duration = float(self.policy["duration_hours"])
         if not math.isfinite(duration) or duration <= 0 or not self.policy["phase"]:
             raise ValueError("invalid phase duration or identity")
@@ -89,14 +113,54 @@ class CampaignBudget:
             CREATE TABLE IF NOT EXISTS cost_reconciliations(id TEXT PRIMARY KEY, commitment TEXT NOT NULL,
                 evidence TEXT NOT NULL, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS gateway_bonus(id TEXT PRIMARY KEY, amount INTEGER NOT NULL, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS meter_month(id TEXT PRIMARY KEY, month TEXT NOT NULL, high INTEGER NOT NULL,
+                carried INTEGER NOT NULL, settled_high INTEGER, settled_carried INTEGER NOT NULL,
+                covers_from REAL NOT NULL, anchor_at REAL, anchor_row INTEGER, anchor_settled INTEGER, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS phase_amendments(id TEXT NOT NULL, at REAL NOT NULL, old_policy TEXT NOT NULL,
+                new_policy TEXT NOT NULL, why TEXT NOT NULL);
         """)
         encoded = canonical(self.policy)
         self.db.execute("INSERT OR IGNORE INTO phase VALUES(?,?,?)", (self.policy["phase"], encoded, clock()))
         phase = self.db.execute("SELECT * FROM phase WHERE id=?", (self.policy["phase"],)).fetchone()
-        if phase["policy"] != encoded or self.db.execute("SELECT COUNT(*) FROM phase").fetchone()[0] != 1:
+        if self.db.execute("SELECT COUNT(*) FROM phase").fetchone()[0] != 1:
             raise CampaignClosed("campaign policy changed; explicit migration is required")
+        if phase["policy"] != encoded:
+            self._amend(phase["policy"], encoded)
         self.started = phase["started"]
         self.ends = self.started + float(self.policy["duration_hours"]) * 3600
+
+    def _amend(self, pinned: str, encoded: str) -> None:
+        """The one policy change a deploy may make to a running phase without the owner: a provider
+        becomes metered (`meter_required` gains a kind, nothing else changes). That only adds a rule
+        -- the kind's reservations then need a fresh meter reading, and its holds older than the
+        meter's lag may be absorbed into it (`absorb_stale`). The phase keeps its pinned policy, so a
+        rollback to the release before still opens it; the amendment is recorded once in
+        `phase_amendments`, the pinned policy and the running one side by side. Every other change
+        still refuses.
+
+        Sept 24, 2026: OpenAI joined Sail, metered by the gateway's frontier month. Without this, the
+        new `campaigns.json` would have refused to open the live phase and the House would not start;
+        rewriting the pinned policy instead would have done the same to a rollback."""
+        old, new = json.loads(pinned), json.loads(encoded)
+        before, after = list(old.get("meter_required") or []), list(new.get("meter_required") or [])
+        added = [kind for kind in after if kind not in before]
+        rest = lambda policy: canonical({k: v for k, v in policy.items() if k != "meter_required"})  # noqa: E731
+        if (rest(old) != rest(new) or not added or any(kind not in after for kind in before)
+                or any(kind not in new.get("caps_usd", {}) for kind in added)):
+            raise CampaignClosed("campaign policy changed; explicit migration is required")
+        why = (f"metered: {', '.join(added)}. Its reservations need a fresh meter reading and its holds older "
+               f"than the meter's lag may be absorbed into it; nothing else in the policy changed.")
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                if not self.db.execute("SELECT 1 FROM phase_amendments WHERE id=? AND new_policy=?",
+                                       (new["phase"], encoded)).fetchone():
+                    self.db.execute("INSERT INTO phase_amendments VALUES(?,?,?,?,?)",
+                                    (new["phase"], self.clock(), pinned, encoded, why))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     def running(self) -> bool:
         live = self.live_trading()
@@ -292,13 +356,53 @@ class CampaignBudget:
                 raise
         return self.burst()
 
+    def _sums(self, kind: str, after_row: int = 0) -> tuple[int, int, int, int]:
+        """Over the commitments after `after_row`: (the settled costs `kind`'s meter records too,
+        the settled costs of calls it would record but made before it covers (`covers_from`),
+        the settled costs it never records, the holds still pending).
+
+        A line is max(the first, measured) + the other three. Only the first may hide inside the
+        meter: `max(settled, measured)` counts a cost once only if the meter counts every call in
+        `settled`, and a monthly meter whose coverage began after some of them (its first month
+        after the burst's calls, or a month it could not close) does not."""
+        prefix = self.METER_COVERS.get(kind, "")
+        month = self.db.execute("SELECT covers_from FROM meter_month WHERE id=?", (kind,)).fetchone()
+        since = float(month[0]) if month else 0.0  # every `created` is epoch seconds (-inf scans 2.4x slower)
+        inside, before, other, pending = self.db.execute(
+            "SELECT COALESCE(SUM(CASE WHEN substr(id,1,?)=? AND created>=? THEN cost END),0),"
+            "COALESCE(SUM(CASE WHEN substr(id,1,?)=? AND created<? THEN cost END),0),"
+            "COALESCE(SUM(CASE WHEN substr(id,1,?)=? THEN NULL ELSE cost END),0),"
+            "COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) "
+            "FROM commitments WHERE kind=? AND rowid>?",
+            (len(prefix), prefix, since, len(prefix), prefix, since, len(prefix), prefix, kind, after_row)).fetchone()
+        return int(inside), int(before), int(other), int(pending)
+
+    def _measured(self, kind: str, burst: Mapping[str, Any]) -> int:
+        """What `kind`'s meter has counted since the burst's baseline. Sail's baseline is its reading
+        at the burst's activation. OpenAI had no meter then (Sept 21, 2026): its baseline is the
+        meter's own, the zero of the first gateway month it read (`observe_month`), which began
+        before every burst call that month covers. It counts that month's calls made before the
+        burst too, so it can only overcount; a meter with neither counts nothing."""
+        row = self.db.execute('SELECT baseline, latest FROM meter WHERE id=?', (kind,)).fetchone()
+        if row is None:
+            return 0
+        baseline = burst['meters'].get(kind)
+        if baseline is None:
+            monthly = self.db.execute('SELECT 1 FROM meter_month WHERE id=?', (kind,)).fetchone()
+            baseline = row['baseline'] if monthly else row['latest']
+        return max(0, int(row['latest']) - int(baseline))
+
+    def _line(self, kind: str, burst: Mapping[str, Any]) -> dict[str, int]:
+        """`kind`'s burst line in micro-dollars: its cap, its parts (`_sums`, `_measured`) and what they
+        use, max(settled, measured) + before + unmetered + pending. One scan of the commitments."""
+        inside, before, other, pending = self._sums(kind, burst['first_row'])
+        measured = self._measured(kind, burst)
+        return {'cap': micro(burst['policy']['caps_usd'].get(kind, '0')), 'settled': inside, 'measured': measured,
+                'before': before, 'unmetered': other, 'pending': pending,
+                'used': max(inside, measured) + before + other + pending}
+
     def _burst_used(self, kind: str, burst: Mapping[str, Any]) -> int:
-        settled, pending = self.db.execute('SELECT COALESCE(SUM(cost),0),'
-            'COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) '
-            'FROM commitments WHERE kind=? AND rowid>?', (kind, burst['first_row'])).fetchone()
-        latest = self.db.execute('SELECT latest FROM meter WHERE id=?', (kind,)).fetchone()
-        measured = max(0, latest[0] - burst['meters'].get(kind, latest[0])) if latest else 0
-        return max(settled, measured) + pending
+        return self._line(kind, burst)['used']
 
     def live_pilot(self) -> dict[str, Any] | None:
         with self.lock:
@@ -374,11 +478,13 @@ class CampaignBudget:
             return bool(row and not row[1] and 0 <= self.clock() - row[0] <= 180)
 
     def _used(self, kind: str) -> int:
-        settled, pending = self.db.execute("SELECT COALESCE(SUM(cost),0),COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) FROM commitments WHERE kind=?", (kind,)).fetchone()
+        settled, before, other, pending = self._sums(kind)
         measured = self.db.execute("SELECT MAX(latest-baseline) FROM meter WHERE id=?", (kind,)).fetchone()[0] or 0
         # Account meter already includes settled model costs. Do not add them twice. Including
         # unresolved holds again is intentionally conservative when vendor billing arrives first.
-        return self.external.get(kind, 0) + max(settled, measured) + pending
+        # A settled cost the meter does not record (Jev's beside OpenAI's month, or a call made
+        # before a monthly meter covers) is added apart (`_sums`).
+        return self.external.get(kind, 0) + max(settled, measured) + before + other + pending
 
     def remaining(self, kind: str) -> Decimal:
         with self.lock:
@@ -388,10 +494,33 @@ class CampaignBudget:
                 return Decimal(max(0, cap - self._burst_used(kind, burst))) / UNIT if self.running() else Decimal(0)
             return Decimal(max(0, self.caps[kind] - self._used(kind))) / UNIT
 
+    def meter_reader(self, kind: str, read: Callable[[], Any]) -> None:
+        """How `kind`'s meter is read, for a reservation that finds the last reading a minute old.
+
+        The House reads OpenAI's meter, the gateway's frontier month, on every tick (`FrontierMonth`,
+        league/frontier.py). A reservation made by a background job while one tick runs long would
+        otherwise meet a reading over 180 s old and be refused (`ready`); Sail's transport reads its
+        own balance before each reservation for the same reason (league/funded.py)."""
+        self._readers[kind] = read
+
+    def _freshen(self, kind: str) -> None:
+        read = self._readers.get(kind)
+        if read is None:
+            return
+        with self.lock:
+            row = self.db.execute("SELECT checked FROM meter_health WHERE id=?", (kind,)).fetchone()
+        if row is not None and 0 <= self.clock() - float(row[0]) < self.METER_READ_SECONDS:
+            return
+        try:
+            read()  # outside the lock: it may wait on the network, and it feeds this object
+        except Exception:  # noqa: BLE001 - an unread meter refuses below, as it would have anyway
+            pass
+
     def reserve(self, ident: str, campaign: str, amount: Any) -> bool:
         held = micro(amount)
         rule = self.policy["campaigns"][campaign]
         kind = rule["kind"]
+        self._freshen(kind)
         with self.lock:
             self.db.execute("BEGIN IMMEDIATE")
             try:
@@ -505,6 +634,153 @@ class CampaignBudget:
                 raise
         return Decimal(added) / UNIT
 
+    def observe_month(self, kind: str, month: str, spent: Any, *, settled: Any = None,
+                      previous: Mapping[str, Any] | None = None, evidence: Mapping[str, Any] | None = None) -> bool:
+        """One reading of a provider's MONTHLY meter, the gateway's frontier month for OpenAI
+        (`/v1/health` `frontier`: `month`, `spent_usd`, `settled_usd`, `previous`). Sept 24, 2026.
+
+        The month's `spent_usd` is not monotone: a call is reserved at its worst case and settled at
+        what it cost, so the month falls whenever a call settles below its worst case, and it starts
+        at zero on the 1st. Fed to `observe_spend` it would latch the meter failed within a minute.
+        So the meter is fed a cumulative figure that never falls: the month's highest reading plus
+        the finals of the months before it (`carried`). A final is the gateway's own (`previous`),
+        or, when the gateway cannot report it, the House's last reading of that month -- and then the
+        charges of that month's last minutes are unknown, so the months before stop being covered
+        (`covers_from` moves to the new month) and the check below starts again. A highest reading
+        can include calls in flight at their worst case, so the figure can only overcount.
+
+        The meter's baseline is zero at the start of the first month read (`covers_from`): every
+        gateway call since then is inside the figure, including every hold the House made that
+        month, so a hold may be absorbed into it (`absorb_stale`) only if it was made since then.
+        That month began before the burst's calls it covers, so it also counts that month's earlier
+        calls: again only an overcount.
+
+        "The meter must dominate the settled sum" is checked from an ANCHOR, not from the burst's
+        start: the House booked OpenAI calls at its ceiling prices until Sept 23, 2026, so its
+        settled sum since the burst ($495.35 on Sept 24) was above the gateway's whole September
+        ($402.96) and could never be dominated. At the first reading that carries the gateway's
+        `settled_usd` (spent less the holds of calls still unanswered), the anchor records that figure
+        and the last commitment's row; after it, the House settles every answered call at the
+        gateway's own metered cost, so the gateway's settled figure must grow by at least what the
+        House settles on rows after the anchor. The anchor is taken again in each new month.
+        `meter_reconciliations` keeps the meter's start, its anchors and every month it closes.
+
+        Returns False, changing nothing, for a reading of a month older than one already read. A
+        reading the meter cannot take raises ValueError. Neither refreshes `meter_health`, so a
+        gateway that cannot be read stops the kind's reservations after 180 s (`ready`); nothing
+        here latches."""
+        if not isinstance(month, str) or not MONTH.fullmatch(month):
+            raise ValueError("a meter month is YYYY-MM")
+        try:
+            high_now = micro(spent)
+            settled_now = None if settled is None else micro(settled)
+            final = None
+            if previous:
+                name = previous.get("month")
+                if not isinstance(name, str) or not MONTH.fullmatch(name) or name >= month:
+                    raise ValueError("the previous month must be an earlier YYYY-MM")
+                final = (name, micro(previous.get("spent_usd")),
+                         None if previous.get("settled_usd") is None else micro(previous.get("settled_usd")))
+        except (ArithmeticError, TypeError, AttributeError) as exc:
+            raise ValueError(f"an unreadable meter reading ({type(exc).__name__})") from None
+        now = self.clock()
+        extra = dict(evidence or {})
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                row = self.db.execute("SELECT * FROM meter_month WHERE id=?", (kind,)).fetchone()
+                notes: list[tuple[str, dict[str, Any]]] = []
+                if row is None:
+                    if self.db.execute("SELECT 1 FROM meter WHERE id=?", (kind,)).fetchone():
+                        raise ValueError(f"{kind} already has an account meter; a monthly one cannot replace it")
+                    state = {"month": month, "high": high_now, "carried": 0, "settled_high": settled_now,
+                             "settled_carried": 0, "covers_from": month_start(month),
+                             "anchor_at": None, "anchor_row": None, "anchor_settled": None}
+                    self.db.execute("INSERT INTO meter VALUES(?,?,?)", (kind, 0, high_now))
+                    burst = self.burst()
+                    inside, before, other, pending = self._sums(kind, int(burst["first_row"]) if burst else 0)
+                    notes.append(("month-meter", {
+                        "cause": "the provider is metered by the gateway's month from here on; the meter counts from the month's start",
+                        "month": month, "spent_micro_usd": high_now, "settled_micro_usd": settled_now,
+                        "covers_from": state["covers_from"], "house_burst_settled_micro_usd": inside + before,
+                        "house_burst_unmetered_settled_micro_usd": other, "house_burst_pending_micro_usd": pending, **extra}))
+                elif month < row["month"]:
+                    self.db.execute("COMMIT")
+                    return False
+                elif month == row["month"]:
+                    state = dict(row)
+                    state["high"] = max(int(row["high"]), high_now)
+                    if settled_now is not None:
+                        state["settled_high"] = max(int(row["settled_high"] or 0), settled_now)
+                else:
+                    state = dict(row)
+                    closed = final is not None and final[0] == row["month"]
+                    old_high = max(int(row["high"]), final[1]) if closed else int(row["high"])
+                    old_settled = int(row["settled_high"] or 0)
+                    if closed and final[2] is not None:
+                        old_settled = max(old_settled, final[2])
+                    state["carried"] = int(row["carried"]) + old_high
+                    state["settled_carried"] = int(row["settled_carried"]) + old_settled
+                    if final is not None and row["month"] < final[0]:
+                        # A month the House never read: its final is counted, the months between are not.
+                        state["carried"] += final[1]
+                        state["settled_carried"] += final[2] or 0
+                    if not closed:
+                        state["covers_from"] = month_start(month)
+                    # The check starts again in every new month: a call in flight across midnight is
+                    # refused its settle by the gateway (its month has ended) while the House may still
+                    # settle it, which would set the two sides apart for good.
+                    state["anchor_at"] = state["anchor_row"] = state["anchor_settled"] = None
+                    state.update(month=month, high=high_now, settled_high=settled_now)
+                    notes.append((f"rollover:{row['month']}:{month}", {
+                        "cause": "a new month: the last one's final is carried", "from": row["month"], "to": month,
+                        "high_micro_usd": int(row["high"]), "final_reported": closed,
+                        "final_micro_usd": old_high, "carried_micro_usd": state["carried"],
+                        "covers_from": state["covers_from"]}))
+                if state["anchor_at"] is None and state["settled_high"] is not None:
+                    state["anchor_at"] = now
+                    state["anchor_row"] = int(self.db.execute("SELECT COALESCE(MAX(rowid),0) FROM commitments").fetchone()[0])
+                    state["anchor_settled"] = int(state["settled_carried"]) + int(state["settled_high"])
+                    inside, before, other, pending = self._sums(kind)
+                    notes.append(("anchor", {
+                        "cause": "from here the gateway's settled figure must grow by at least what the House settles on later rows",
+                        "month": month, "row": state["anchor_row"], "gateway_settled_micro_usd": state["anchor_settled"],
+                        "house_settled_micro_usd": inside + before, "house_unmetered_settled_micro_usd": other,
+                        "house_pending_micro_usd": pending}))
+                self.db.execute(
+                    "INSERT INTO meter_month VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                    "month=excluded.month, high=excluded.high, carried=excluded.carried, settled_high=excluded.settled_high, "
+                    "settled_carried=excluded.settled_carried, covers_from=excluded.covers_from, anchor_at=excluded.anchor_at, "
+                    "anchor_row=excluded.anchor_row, anchor_settled=excluded.anchor_settled, at=excluded.at",
+                    (kind, state["month"], state["high"], state["carried"], state["settled_high"], state["settled_carried"],
+                     state["covers_from"], state["anchor_at"], state["anchor_row"], state["anchor_settled"], now))
+                self.db.execute("UPDATE meter SET latest=MAX(latest, ?) WHERE id=?", (int(state["carried"]) + int(state["high"]), kind))
+                self.db.execute("INSERT INTO meter_health VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET checked=excluded.checked",
+                                (kind, now))
+                for name, record in notes:
+                    self.db.execute("INSERT OR IGNORE INTO meter_reconciliations VALUES(?,?,?,?)",
+                                    (f"{kind}:{name}:{int(now)}", kind, now, canonical(record)))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+        return True
+
+    def month_meter(self, kind: str) -> dict[str, Any] | None:
+        """The monthly meter's state (`observe_month`), in dollars; None when `kind` has none."""
+        with self.lock:
+            row = self.db.execute("SELECT * FROM meter_month WHERE id=?", (kind,)).fetchone()
+        if row is None:
+            return None
+        settled = None if row["settled_high"] is None and not row["settled_carried"] else \
+            int(row["settled_carried"]) + int(row["settled_high"] or 0)
+        return {"month": row["month"], "high_usd": usd(row["high"]), "carried_usd": usd(row["carried"]),
+                "total_usd": usd(int(row["carried"]) + int(row["high"])),
+                "settled_total_usd": None if settled is None else usd(settled),
+                "covers_from": row["covers_from"], "read_at": row["at"],
+                "anchor": None if row["anchor_at"] is None else
+                {"at": row["anchor_at"], "row": row["anchor_row"], "settled_usd": usd(row["anchor_settled"])}}
+
     def absorb_stale(self, kind: str, *, older_than_seconds: float, evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Release the holds of a METERED provider that are older than the meter's lag, and settle
         them against the meter: their charge, if the vendor made one, is already inside the account
@@ -516,13 +792,20 @@ class CampaignBudget:
         none with a linked response -- requests whose POST was never confirmed (restarts, timeouts).
         The balance meter had measured $59.65 of Sail spend against $55.14 settled, so every real
         charge was already counted once, and the holds counted it again: the campaign read $54.76
-        left while the account held $116."""
+        left while the account held $116.
+
+        OpenAI's holds (Sept 24, 2026) are absorbed into the gateway's month instead, by
+        `_absorb_into_month`: only the calls that month records (`METER_COVERS`), only those made
+        since the meter covers (`covers_from`), and only while the gateway's settled figure has grown
+        by at least what the House settled since the meter's anchor (`observe_month`)."""
         if kind not in self.policy.get("meter_required", []):
             raise ValueError(f"{kind} has no account meter to absorb holds into")
         cutoff = self.clock() - float(older_than_seconds)
         with self.lock:
             if not self.ready(kind):
                 return {"absorbed": 0, "usd": "0", "why": "the meter is not healthy"}
+            if self.db.execute("SELECT 1 FROM meter_month WHERE id=?", (kind,)).fetchone():
+                return self._absorb_into_month(kind, cutoff, dict(evidence or {}))
             self.db.execute("BEGIN IMMEDIATE")
             try:
                 burst = self.burst()
@@ -548,6 +831,69 @@ class CampaignBudget:
                 self.db.execute("ROLLBACK")
                 raise
         return {"absorbed": len(rows), "usd": usd(sum(int(r[1]) for r in rows)), "measured_usd": usd(measured), "settled_usd": usd(settled)}
+
+    def _absorb_into_month(self, kind: str, cutoff: float, evidence: dict[str, Any]) -> dict[str, Any]:
+        """Release OpenAI holds into the gateway's month (Sept 24, 2026); the caller holds the lock.
+
+        Why their charge is already counted: the House reserves a call's worst case here, then asks
+        the gateway, which reserves the same worst case on its month before it calls the provider
+        and settles there at what the provider reports -- or keeps the whole worst case when the
+        call timed out, failed or came back unreadable, or when the gateway itself died mid-call.
+        When the House's own request dies (its 600 s read, a restart, a dropped connection) nothing
+        settles the hold here, but the month has already counted the call. A call that never reached
+        the gateway was never billed. So a hold made while the month covers, older than any call's
+        life, counts its call a second time; absorbing it leaves the month (`_measured`) counting it
+        once. The check before any release -- the gateway's settled figure has grown by at least
+        what the House settled on rows after the anchor, and something has settled since -- is
+        what shows the month is still counting the House's calls."""
+        now = self.clock()
+        prefix = self.METER_COVERS.get(kind, "")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            month = self.db.execute("SELECT * FROM meter_month WHERE id=?", (kind,)).fetchone()
+            if month["anchor_at"] is None:
+                self.db.execute("COMMIT")
+                return {"absorbed": 0, "usd": "0", "retry": True,
+                        "why": "the gateway reports no settled figure to check its month against yet"}
+            since = int(self.db.execute(
+                "SELECT COALESCE(SUM(cost),0) FROM commitments WHERE kind=? AND rowid>? AND substr(id,1,?)=? AND cost IS NOT NULL",
+                (kind, int(month["anchor_row"]), len(prefix), prefix)).fetchone()[0])
+            growth = int(month["settled_carried"]) + int(month["settled_high"] or 0) - int(month["anchor_settled"])
+            check = {"anchor_at": month["anchor_at"], "anchor_row": int(month["anchor_row"]),
+                     "house_settled_since_micro_usd": since, "gateway_settled_growth_micro_usd": growth}
+            shown = {"since_anchor_usd": usd(since), "gateway_growth_usd": usd(max(growth, 0)), "anchor_at": month["anchor_at"]}
+            if since <= 0:
+                self.db.execute("COMMIT")
+                return {"absorbed": 0, "usd": "0", "retry": True, "check": shown,
+                        "why": "no call has settled since the meter's anchor, so there is nothing yet to check the month against"}
+            if growth < since:
+                self.db.execute("COMMIT")
+                return {"absorbed": 0, "usd": "0", "check": shown,
+                        "why": "the gateway's settled figure has grown less than what the House settled since the anchor"}
+            burst = self.burst()
+            covered, before, other, pending = self._sums(kind, int(burst["first_row"]) if burst else 0)
+            measured = self._measured(kind, burst) if burst else 0
+            rows = self.db.execute(
+                "SELECT c.id, c.reserved, c.created FROM commitments c LEFT JOIN responses r ON r.commitment = c.id "
+                "WHERE c.kind=? AND c.cost IS NULL AND c.created < ? AND c.created >= ? AND substr(c.id,1,?)=? AND r.id IS NULL",
+                (kind, cutoff, float(month["covers_from"]), len(prefix), prefix)).fetchall()
+            record = {"cause": "a hold with no answer, older than any call's life, whose call the gateway's month already counts",
+                      "meter": "the gateway's frontier month", "month": month["month"],
+                      "meter_total_micro_usd": int(month["carried"]) + int(month["high"]),
+                      "covers_from": float(month["covers_from"]), "measured_micro_usd": measured,
+                      "settled_micro_usd": covered, "settled_before_meter_micro_usd": before,
+                      "unmetered_settled_micro_usd": other, "check": check, **evidence}
+            for ident, reserved, created in rows:
+                self.db.execute("UPDATE commitments SET cost=0 WHERE id=? AND cost IS NULL", (ident,))
+                self.db.execute("INSERT OR IGNORE INTO cost_reconciliations VALUES(?,?,?,?)",
+                                (f"absorbed:{ident}", ident,
+                                 canonical({**record, "reserved_micro_usd": int(reserved), "created": float(created)}), now))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+        return {"absorbed": len(rows), "usd": usd(sum(int(r[1]) for r in rows)), "measured_usd": usd(measured),
+                "settled_usd": usd(covered), "check": shown}
 
     def today(self, kind: str) -> Decimal:
         midnight = int(self.clock() // 86400) * 86400
@@ -576,6 +922,10 @@ class CampaignBudget:
         with self.lock:
             burst = self.burst()
             extra = burst['policy']['caps_usd'] if burst else {}
+            # Each burst line once (one scan a kind), shared by the accounts, the burst and the meters.
+            lines = {k: self._line(k, burst) for k in extra} if burst else {}
+            running = self.running()
+            left = {k: str(Decimal(max(0, v['cap'] - v['used'])) / UNIT if running else Decimal(0)) for k, v in lines.items()}
             return {"phase": self.policy["phase"], "started": self.started, "ends": self.ends,
                 "running": self.running(), "cap_usd": usd(micro(self.policy['total_cap_usd']) + sum(micro(v) for v in extra.values())),
                 "foundation_cap_usd": self.policy['total_cap_usd'],
@@ -585,17 +935,37 @@ class CampaignBudget:
                 "effective_research_deadline": (None if self.live_trading() and self.live_trading()['active']
                                                 else min(self.ends, burst['ends']) if burst else self.ends),
                 "accounts": {kind: {"cap_usd": usd(cap + micro(extra.get(kind, '0'))), "committed_usd": usd(self._used(kind)),
-                    "external_reserve_usd": usd(self.external.get(kind, 0)), "remaining_usd": str(self.remaining(kind))}
+                    "external_reserve_usd": usd(self.external.get(kind, 0)),
+                    "remaining_usd": left[kind] if kind in left else str(self.remaining(kind))}
                     for kind, cap in self.caps.items()},
                 "meters_ready": {kind: self.ready(kind) for kind in self.caps},
+                "meters": {kind: self._meter_report(kind, lines.get(kind), left.get(kind))
+                           for kind in self.policy.get("meter_required", [])},
                 "pending_calls": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost IS NULL").fetchone()[0],
                 "reservation_breaches": self.db.execute("SELECT COUNT(*) FROM commitments WHERE cost>reserved").fetchone()[0],
                 "burst": ({'id': burst['id'], 'started': burst['started'], 'ends': burst['ends'],
                     'running': burst['started'] <= self.clock() < min(self.ends, burst['ends']), 'caps_usd': burst['policy']['caps_usd'],
-                    'committed_usd': {k: usd(self._burst_used(k, burst)) for k in burst['policy']['caps_usd']},
-                    'remaining_usd': {k: str(self.remaining(k)) for k in burst['policy']['caps_usd']},
+                    'committed_usd': {k: usd(v['used']) for k, v in lines.items()},
+                    'remaining_usd': left,
                     'note': 'Additional owner research allowance. Original phase and commitments are retained; expiry closes new paid work.'} if burst else None),
                 "note": "Commitments include unresolved calls and external reserves; this is not a vendor invoice."}
+
+    def _meter_report(self, kind: str, line: Mapping[str, int] | None, left: str | None) -> dict[str, Any]:
+        """One metered provider in `health.json` `campaign.meters`: whether its meter is fresh, and
+        the arithmetic of its burst line, remaining = cap - max(settled, measured) - before_meter -
+        unmetered settled - pending (`_sums`; Sept 24, 2026)."""
+        health = self.db.execute("SELECT checked, failed FROM meter_health WHERE id=?", (kind,)).fetchone()
+        out: dict[str, Any] = {"ready": self.ready(kind), "checked_at": health["checked"] if health else None,
+                               "failed": bool(health["failed"]) if health else False}
+        if line is not None:
+            out["line"] = {"cap_usd": usd(line["cap"]), "settled_usd": usd(line["settled"]),
+                           "measured_usd": usd(line["measured"]), "before_meter_usd": usd(line["before"]),
+                           "unmetered_settled_usd": usd(line["unmetered"]), "pending_usd": usd(line["pending"]),
+                           "remaining_usd": left}
+        month = self.month_meter(kind)
+        if month is not None:
+            out["month"] = month
+        return out
 
     def close(self) -> None:
         with self.lock:

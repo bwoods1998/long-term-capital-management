@@ -196,9 +196,18 @@ class FrontierMonth:
     worst case there. On Sept 21, 2026 the campaign believed $77 remained while the gateway had $40,
     so cheap research would have spent the last of the month and left nothing for the audits that
     promotion to real money requires. `remaining()` is None when the gateway cannot be read; the
-    callers then leave spending alone, and the gateway's own 402 is still the backstop."""
+    callers then leave spending alone, and the gateway's own 402 is still the backstop.
 
-    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, opener: Any = None, ttl: float = 60.0, clock: Any = None):
+    Since Sept 24, 2026 this month is also OpenAI's METER. Given the campaign (`meter`), every
+    reading is fed to `CampaignBudget.observe_month`, which turns the month's spend into a figure
+    that never falls, and the reader registers itself so that a reservation finding the last
+    reading a minute old reads again first (`CampaignBudget.meter_reader`). The House reads it on
+    every tick; a gateway that cannot be read leaves the meter unread, and after 180 s the campaign
+    refuses OpenAI reservations -- paid OpenAI work stops, nothing else does."""
+
+    def __init__(self, gateway_url: str, token_source: Callable[[], str], *, opener: Any = None, ttl: float = 60.0, clock: Any = None,
+                 meter: Any = None):
+        import threading
         import time as _time
 
         self.url = gateway_url.rstrip("/") + "/v1/health"
@@ -209,27 +218,52 @@ class FrontierMonth:
         self._at = float("-inf")
         self._value: Decimal | None = None
         self._bonus: Decimal | None = None
+        self._lock = threading.Lock()  # one reading at a time: the tick and a reservation may both ask
+        self.meter = meter
+        if meter is not None:
+            meter.meter_reader("openai", self.refresh)
 
     def remaining(self) -> Decimal | None:
-        now = self.clock()
-        if now - self._at < self.ttl:
+        with self._lock:
+            now = self.clock()
+            if now - self._at < self.ttl:
+                return self._value
+            self._at = now
+            reading = None
+            try:
+                request = urllib.request.Request(self.url, headers={"Authorization": "Bearer " + self.token_source(), "User-Agent": "ltcm-floor/1.0"})
+                with self.opener(request, timeout=20) as response:
+                    month = json.load(response).get("frontier") or {}
+                value = Decimal(str(month["cap_usd"])) - Decimal(str(month["spent_usd"]))
+                self._value = value if value.is_finite() else None
+                self._bonus = None
+                if month.get("base_cap_usd") is not None and self._value is not None:
+                    # The cap in force less the configured month: what profit on the real accounts
+                    # added (gateway/lib/equity.mjs). Absent from a gateway that does not index.
+                    bonus = Decimal(str(month["cap_usd"])) - Decimal(str(month["base_cap_usd"]))
+                    self._bonus = max(bonus, Decimal(0)) if bonus.is_finite() else None
+                reading = month if self._value is not None else None
+            except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
+                self._value = self._bonus = None
+            if reading is not None and self.meter is not None:
+                self._feed(reading)
             return self._value
-        self._at = now
+
+    def _feed(self, month: dict[str, Any]) -> None:
+        """One reading to OpenAI's meter. A reading the meter refuses leaves it unread (and OpenAI's
+        reservations refused after 180 s); it never makes the month itself unreadable here."""
         try:
-            request = urllib.request.Request(self.url, headers={"Authorization": "Bearer " + self.token_source(), "User-Agent": "ltcm-floor/1.0"})
-            with self.opener(request, timeout=20) as response:
-                month = json.load(response).get("frontier") or {}
-            value = Decimal(str(month["cap_usd"])) - Decimal(str(month["spent_usd"]))
-            self._value = value if value.is_finite() else None
-            self._bonus = None
-            if month.get("base_cap_usd") is not None and self._value is not None:
-                # The cap in force less the configured month: what profit on the real accounts
-                # added (gateway/lib/equity.mjs). Absent from a gateway that does not index.
-                bonus = Decimal(str(month["cap_usd"])) - Decimal(str(month["base_cap_usd"]))
-                self._bonus = max(bonus, Decimal(0)) if bonus.is_finite() else None
-        except Exception:  # noqa: BLE001 - unreadable is unknown, never a number
-            self._value = self._bonus = None
-        return self._value
+            self.meter.observe_month("openai", str(month.get("month") or ""), month["spent_usd"],
+                                     settled=month.get("settled_usd"), previous=month.get("previous"),
+                                     evidence={k: month.get(k) for k in ("cap_usd", "calls", "inflight_usd")})
+        except Exception:  # noqa: BLE001 - see above
+            pass
+
+    def refresh(self) -> bool:
+        """Read the month again if the last reading is older than the TTL. True when OpenAI's meter
+        is fresh afterwards (or, with no meter, when the month could be read)."""
+        self.remaining()
+        return bool(self.meter.ready("openai")) if self.meter is not None else self._value is not None
 
     def profit_bonus(self) -> Decimal | None:
         """What the gateway's profit indexing adds to the month's cap, from the same reading as

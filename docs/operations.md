@@ -145,7 +145,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   `profit_index` (`equity_usd` against `baseline_usd`, `earned_usd`, `bonus_usd`, `read_ok`,
   `reason`). Since Sept 23, 2026 `/v1/health` reports the stored equity reading and never reads
   the venues itself, because the House reads its kill switch there on the order path. The first
-  frontier call more than ten minutes after the last reading takes a new one.
+  frontier call more than ten minutes after the last reading takes a new one. Since Sept 24, 2026
+  it also reports `settled_usd` (the month's spend less the holds of calls still unanswered, to the
+  microdollar), `inflight_usd` (those holds) and `previous` (the month that ended, with its
+  `spent_usd` and `settled_usd`). The House's OpenAI meter reads all three, so deploy the gateway
+  before a House release that reads them (below, **The OpenAI meter**).
 - **Checkpoint the box before risky work:**
   `python3 scripts/floor_box.py checkpoint --name why --ttl-days 30`.
   - It contains the box's credentials.
@@ -174,7 +178,12 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     checkpoint's age and whether it carries the board.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
-    not yet settled).
+    not yet settled). `meters` (Sept 24, 2026) has one entry per metered provider (`sail`,
+    `openai`): `ready` (read in the last 180 s), `checked_at`, and `line`, the burst line's
+    arithmetic: `remaining_usd` = `cap_usd` - max(`settled_usd`, `measured_usd`) -
+    `before_meter_usd` - `unmetered_settled_usd` - `pending_usd`. OpenAI's entry also has `month`:
+    the gateway month last read, its highest reading (`high_usd`), the finals carried from earlier
+    months (`carried_usd`), `settled_total_usd`, `covers_from` and the check's `anchor`.
   - `hypotheses`: cards, pending evaluations, the foundry's `refusal` reason and its window spend.
   - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
     (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
@@ -243,9 +252,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `agent.died` has two new causes, `superseded` (a born corrected child replaces its code) and
     `redundant` (the holdout would not evaluate its passing replay, and the same program already
     holds a paper seat);
-  - `ops.budget` with `what: "holds absorbed"`: the Sail holds released into the meter, with
-    `absorbed`, `usd`, `measured_usd` and `settled_usd`. Each hold's evidence is in
-    `campaigns.sqlite` `cost_reconciliations`, under `absorbed:<commitment>`.
+  - `ops.budget` with `what: "holds absorbed"`: holds released into their provider's meter, with
+    `kind` (`sail`, or `openai` since Sept 24, 2026), `absorbed`, `usd`, `measured_usd` and
+    `settled_usd`; an OpenAI row also has `check` (`since_anchor_usd`, `gateway_growth_usd`,
+    `anchor_at`). Each hold's evidence is in `campaigns.sqlite` `cost_reconciliations`, under
+    `absorbed:<commitment>`.
 - **`/workspace/state/repairs.json`:** the repair queue by state, its top jobs and the engineer's
   last step.
 - **Read-only reports, on the box.** Every database is opened `mode=ro`.
@@ -353,12 +364,44 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     settled since the burst began. Measured before the fix (Sept 22, 23:50Z): 329 holds ($60.59)
     made the campaign read $54.76 left while the account held $116.
   - **OpenAI.** A verified frontier call settles at the gateway's metered cost, and a refused one
-    (HTTP 4xx) at $0. Before, every call was booked at the long-context ceiling when that was
-    higher, and the House's line closed at about half the owner's real spend.
-  - **What stays held.** A frontier call that never answered (5xx, a timeout, a dropped
-    connection) keeps its worst case, because the gateway keeps its worst case on the month too,
-    so there is no measured cost to settle it at. The Jev earmark's holds stay until that route
-    is closed and billed. Releasing either needs vendor receipts.
+    (HTTP 4xx) at $0. Before Sept 23, every call was booked at the long-context ceiling when that
+    was higher, and the House's line closed at about half the owner's real spend. A call with no
+    answer (a 5xx, a timeout, the House's own restart) keeps its hold, and since Sept 24, 2026
+    that hold is absorbed into OpenAI's meter, the gateway's frontier month (**The OpenAI meter**,
+    below), once it is six hours old. Measured before the fix (Sept 24, 01:34Z): 49 such holds
+    ($98.36, 28 of them over a day old) made the House's line read $7.94 while the gateway's month
+    had $13.54 left, and the frontier tier fell to "audits".
+  - **What stays held.** Jev's backing (`external-pilot:typesafe:*`, $20) stays until that route
+    is closed and billed: the gateway's frontier month never sees it, so releasing it would drop
+    Jev's spend. An OpenAI hold younger than six hours, or made before the meter's `covers_from`,
+    stays too.
+- **The OpenAI meter** (Sept 24, 2026). OpenAI is metered like Sail (`campaigns.json`
+  `meter_required`), and its meter is the gateway's frontier month, read on every tick
+  (`league/frontier.py` `FrontierMonth` into `CampaignBudget.observe_month`).
+  - **It never runs backwards.** The month falls whenever a call settles below its worst case and
+    starts at zero on the 1st, so the meter keeps the month's highest reading plus the finals of
+    earlier months (the gateway's `previous`). It counts from the start of the first month it read
+    (`covers_from`); a month the gateway could not close moves `covers_from` forward.
+  - **What is released.** Every ten minutes, a `frontier:` hold with no answer, older than six
+    hours and made since `covers_from`, is absorbed: the gateway reserved that call's worst case
+    on its month before it called OpenAI, and settled it at the metered cost or kept the worst
+    case, so the month already counts it once.
+  - **The check.** Nothing is released until a call has settled since the meter's anchor (its first
+    reading with `settled_usd`, taken again each month), and nothing while the gateway's settled
+    figure has grown less than what the House settled since then. The anchor is not the burst's
+    start because the House booked calls at its ceiling prices until Sept 23: its settled sum
+    since the burst ($495.35) was above the gateway's whole September ($402.96).
+  - **What the owner reads.** `health.json` `campaign.meters.openai` (the line's arithmetic and
+    the month), the `ops.budget` "holds absorbed" rows with `kind: "openai"`, and
+    `meter_reconciliations` in `campaigns.sqlite` (the meter's start, its anchors and every month
+    it closed). The tier still reads the nearer of the House line and the gateway's month.
+  - **An unread gateway.** Three minutes without a reading and OpenAI reservations are refused:
+    Merton, audits and the lab's Luna and Sol calls wait. Sail work, trading and exits go on. A
+    reservation that finds the reading a minute old reads the gateway again first.
+  - **The first deploy** records the policy change in `phase_amendments` beside the phase's pinned
+    policy, which is never rewritten, so a rollback to the release before still opens the phase.
+    Only a new meter may be added this way; any other change to `campaigns.json` still refuses to
+    open the phase.
 - **Wakes or births keep being deferred.** Since Sept 23, 2026 the tick never waits on a box that
   background work holds, so a hung Sail call shows up as `deferred` in `health.json` (above), not as
   a stale health file. Background Sail calls give up on their own: a resume, a checkpoint or a
@@ -440,7 +483,9 @@ egress, funds itself or changes a venue account.
   fell under the $20 "earned" reserve at about 20:50Z Sept 23; the month resets Oct 1) and Sail
   auto-recharge (about 2.6 days of runway at $32 a day on Sept 23). After a top-up, align
   `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` (`gateway/wrangler.jsonc`) and the House line
-  (`scripts/campaign_topup.py`) up to the funded balance, never above.
+  (`scripts/campaign_topup.py`) up to the funded balance, never above. Since Sept 24, 2026 the
+  House line no longer counts holds with no answer (**The OpenAI meter**), so read its arithmetic
+  in `health.json` `campaign.meters.openai.line` before aligning it.
 - **Level-3 options:** a second Alpaca practice account that no House reconciles, with its keys in
   the gateway, to settle the multi-leg unknowns before any spread trades (the design is
   `docs/design/2026-09-24-level-3-debit-verticals.md` on its draft branch).
