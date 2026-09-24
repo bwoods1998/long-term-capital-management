@@ -58,7 +58,7 @@ recorded for the next open; live verification uses the markets that trade around
 | I | Feed recorders on the allowed hosts | live 08:31Z (Deploy B, #250); EIA and Odds wait for the owner's keys; to verify: `data.coverage` rows |
 | X1/X2 | Pause and size-down tools; the horizon rule | reviewed (#258: 11 of 12 fixed; X2 by measured settle lag in progress); rides Deploy C |
 | Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | done: promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`, watch passed 08:41:13Z |
-| E | The lab as a search; the foundry brief; capacity | building since 07:50Z (C-search) |
+| E | The lab as a search; the foundry brief; capacity | built (#262, 08:58Z), in review; rides Deploy C |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
 | W | The site's mechanism ledger | site deployed 08:55Z (`a4d25790`); publisher #261 merged, shipping through the updater; to verify on the checkpoint |
 | Deploy C | Wave 2 | ⟨pending⟩ |
@@ -445,6 +445,20 @@ recorded for the next open; live verification uses the markets that trade around
   checkpoint of 08:55:30Z still accepted; then #261 merged (main `3ceb5d6`), unprotected, so the in-box
   updater ships it once main's CI passes on a quiet head. To verify when it ships: `board.families`,
   `board.lab` and the desks' family fields in `/api/capital/checkpoint`, the checkpoint staying fresh.
+- 08:58Z — **C-search built** (E1-E3, C3's line; PR #262, CI green; `lab.py` protected, no digest
+  change). Measured on snapshot copies, first 15 steps after a restart: T4 89 candidates (1.48 a batch)
+  before, 444 (6.83 a batch) after; T0 80 (1.33) before, 464 (7.03) after. Graduation now needs a
+  mechanism change beyond PARAMS or a forward score above the desk's living median (a winning own
+  window where no resident has a ranked score: 2 of 112 residents had one at T4); a desk idle 48 h
+  graduates nothing until a feed it asked for arrives; breeding weighs the parent's forward window;
+  no search on a family at capacity; cards must state their fee and the edge they need; no card for
+  crypto-strikes or crypto-15m until a family there is positive over 3 forward blocks; the weather
+  favourites' ensemble transfer. At T4 the waiting list of 8 becomes 5 graduating, 2 held as nudges,
+  1 held on a losing window. Options: no replay on that desk, so no card can be admitted there (a
+  House admission-rule change, not built). Its adversarial review started 08:59Z.
+- 08:57Z — **The board shows the honest bound** (`c-board/honest-bound`, 82855e9; C-site's finding):
+  `family_bound` was the t bound alone (weather favourites +0.0033 against its proof's -0.2112); a
+  test fails without the fix. `allocator.py`: rides Deploy C.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
