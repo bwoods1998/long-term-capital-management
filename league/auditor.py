@@ -60,6 +60,13 @@ max_position_usd and max_order_usd) or an agent's FIRST SWING (a stake sized by 
 live grant for that venue (allocation_context.venue_capital_usd, venue_headroom_usd, fits). Judge capacity against
 that envelope, not against the legacy $50 / four-agent tuition or the $60 micro_real_limits, which apply only when
 no allocation_context is given. A real drawdown, hysteresis and a cooldown send a losing bunt back to paper.
+When allocation_context.family_swing is true (since Sept 24, 2026), the experiment is a FAMILY SWING: every member
+of the agent's family on real money is staked above the bunt (allocation_context.stake_usd each, ramp and caps in
+allocation_context.ramp), because the family's pooled REAL record qualified. Judge that record in family_packet:
+its independent events (one per event, whatever the strikes), the honest lower bound (for a favourites record the
+loss-rate bound, not only the t bound), whether a few events or one member carry it, whether the fills behind it
+would survive the larger size (family_packet.capacity), and whether the strategy code can behave in ways the
+record has not shown. The agent's own record (paper_fills, from its real book here) is one member's part of it.
 Answer with ONE JSON object and nothing else:
 {"approve": true|false, "confidence": 0.0-1.0, "summary": "two or three plain sentences",
  "findings": [{"severity": "blocker"|"concern"|"note", "issue": "...", "evidence": "what in the packet shows it"}]}
@@ -155,11 +162,13 @@ class Auditor:
             "strategy_code": agent.code,
             "params": agent.params,
             "needs": agent.needs,
-            "test_passed": verdict.numbers,
+            "test_passed": {k: v for k, v in verdict.numbers.items() if k != "family_packet"},  # the packet goes once, below
             "promotion_context": {"from_rung": verdict.rung, "to_rung": verdict.rung + 1,
                                   "paper_gate": CONSTITUTION["ladder"]["paper"],
                                   "completed_exposure_gate": CONSTITUTION['ladder'].get('completed_exposures'),
-                                  "purpose": ("the allocator's " + str((verdict.numbers.get('allocation_context') or {}).get('band_to') or 'bunt')
+                                  "purpose": (str((verdict.numbers.get('allocation_context') or {}).get('purpose'))
+                                              if (verdict.numbers.get('allocation_context') or {}).get('family_swing')
+                                              else "the allocator's " + str((verdict.numbers.get('allocation_context') or {}).get('band_to') or 'bunt')
                                               + ": a small real stake sized inside the owner's per-venue grant"
                                               if (verdict.numbers.get('allocation_context') or {}).get('allocator')
                                               else "bounded micro-real experiment"),
@@ -180,6 +189,10 @@ class Auditor:
                                   if (verdict.numbers.get('allocation_context') or {}).get('allocator') else CONSTITUTION["rungs"]["2"]),
             "execution_policy": dict(EXECUTION_POLICY),
             "audit_policy_digest": self.policy_digest,
+            # The family swing's first entry (C2, Sept 24, 2026) is audited on the family's REAL record: every
+            # member's real closes, event by event, the pooled numbers and the capacity measured
+            # (`Allocator._family_packet`). None for an agent's own promotion.
+            "family_packet": verdict.numbers.get("family_packet"),
         }
 
     # ------------------------------------------------------------------ audit
@@ -224,6 +237,9 @@ class Auditor:
             "model": answer.model,
             "book": packet["test_passed"].get("book"),
             "blocks_at_audit": len(packet["paper_blocks"]),
+            # Whose verdict this is when it judged a family swing (Sept 24, 2026): the allocator reads it back
+            # after a restart (`Allocator._family_verdict_on_ledger`).
+            **({"family_swing": packet["test_passed"]["family_swing"]} if packet["test_passed"].get("family_swing") else {}),
         }
         self.ledger.append("audit.verdict", row, agent=agent.id)
         return row
