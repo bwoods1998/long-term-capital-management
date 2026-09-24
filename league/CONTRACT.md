@@ -575,8 +575,8 @@ The league has a fixed number of seats, and a desk has its own. A seat is yours 
 real money, while your practice record is up, and while you are trading toward the bunt line's
 closed trades or settlements (or your desk's sessions). What can take it is a newcomer with more
 evidence than you have: an Alpha Lab graduate that passed the House's replay and the sealed
-holdout, a foundry card that passed replay, a research candidate that passed replay, or a strategy
-merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
+holdout, a foundry card that passed replay, the retained candidate of an agent that died holding
+it, or a strategy merged by review. Since Sept 23, 2026 such a newcomer need not wait out your grace if you are
 still on rung 0 (replay only) or have not traded since your current program was given its chance;
 on a desk that keeps an exchange's hours, not before your first regular session has closed. A
 House mutation -- the House's own copy of a parent with its parameters moved -- is staked only when

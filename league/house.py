@@ -3950,11 +3950,11 @@ class House:
 
         `evidenced` (Sept 23, 2026): the newcomer has forward evidence of its own -- an Alpha Lab
         graduate that passed the House's replay and the sealed holdout, a replay-passed foundry card,
-        a merged strategy, a research candidate that passed replay -- and may take a seat inside its
-        holder's grace when the holder is replay-only code (rung 0) or has never traded since its
-        current program's opportunity. The Alpha Lab (`Lab._seat_for`, `_finish_birth`), the foundry
-        (`Foundry._admit`), `enroll` and the research admissions pass it; the House's own mutation
-        refill never does.
+        a merged strategy, and since Sept 24, 2026 a dead author's retained research candidate -- and
+        may take a seat inside its holder's grace when the holder is replay-only code (rung 0) or has
+        never traded since its current program's opportunity. The Alpha Lab (`Lab._seat_for`,
+        `_finish_birth`), the foundry (`Foundry._admit`), `enroll` and `_admit_orphan` pass it; the
+        House's own mutation refill and a living author's research admission never do.
 
         `newcomer` (S1, Sept 24, 2026): who asks, for the rules that compare it with the resident -- its
         family's proof and its forward score (`Newcomer`). None: an unproven newcomer with no forward score."""
@@ -5063,9 +5063,9 @@ class House:
         loser = None
         if niche_full or full:
             if displace:
-                # A candidate that passed the House's replay is evidenced like a card (Sept 24, 2026, S3), and
-                # asks as its parent's family (S1).
-                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,), evidenced=True,
+                # It asks as its parent's family (S1, Sept 24, 2026). A living author's candidate waits out a new
+                # paper seat's grace, as before; a dead author's retained one is evidenced (`_admit_orphan`).
+                loser = self._weakest(rules, specialty=niche.id if niche_full else None, exclude=(parent.id,),
                                       newcomer=Newcomer(family=parent.family, venue=parent.venue, what=f"{parent.id}'s research candidate"))
             if loser is None:
                 queue.record(row, 'deferred', 'niche is full; waiting for an eligible seat' if niche_full else 'population is full; waiting for an eligible seat')

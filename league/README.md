@@ -326,9 +326,10 @@ status is exposed in health and agent research context; qualification is distinc
    (`Lab.resident_forward`; none of its own, and it stays); a proven family's resident
    (`Allocator.family`) goes to no unproven newcomer unless it never traded and its grace has run;
    never-traded residents past their grace go first, then a losing family's members. The lab's
-   graduates (`Lab._newcomer`), merged strategies and research candidates (now evidenced) ask as
-   themselves; the House's mutation refill and the foundry's card pass ask as nobody in particular (no
-   proof, no forward score). `_trading_pending` reads the bunt line's settled route on an event book.
+   graduates (`Lab._newcomer`), merged strategies and research candidates (as their parent's family)
+   ask as themselves; the House's mutation refill and the foundry's card pass ask as nobody in
+   particular (no proof, no forward score). A dead author's retained candidate is evidenced, a living
+   author's is not (a new paper seat keeps its grace against it, as before). `_trading_pending` reads the bunt line's settled route on an event book.
    **Retained candidates** (S3): `kill` hands a dying resident's latest replay-passed research
    candidate to the seat queue (`_hand_off_retained`: its admission goes `orphaned`, a `retained`
    waiter in house.json), and the admission pass of `_refill` adopts, once an author, the candidates
