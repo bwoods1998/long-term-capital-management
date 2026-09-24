@@ -501,6 +501,11 @@ class LabTest(ScoreboardCase):
         five = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["5"]
         self.assertEqual((five["graduates_waiting"], five["graduates_left_the_queue"], five["cards_waiting"]), (1, 1, 1))
         self.assertEqual(five["waiters"], 2)
+        # The review of #276: the House lets a waiter back once its reason is gone (the search reopened its desk) and
+        # clears it from house.json `seat_expired`; its ledger row stays. The House's state decides.
+        f.write_json("house.json", {"seat_expired": {"cards:c2": {"rule": "closed"}}})
+        five = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["metrics"]["5"]
+        self.assertEqual((five["graduates_waiting"], five["graduates_left_the_queue"], five["cards_waiting"]), (2, 0, 1))
 
 
 # --------------------------------------------------------------------------------- metric 6

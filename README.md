@@ -501,8 +501,8 @@ graduates, replay-passed foundry cards, the retained candidates of residents tha
 merged strategies -- take every freed seat before any House mutation, and since R3 a proven family's
 program comes before all of them on its desk: the House breeds mutations of the program that proved
 the family until four living members run it, so more members build the practice records that take
-them to real money. A waiter the search has closed leaves the queue with its reason, never counted
-again: at 15:06Z, 82 newcomers waited in a league of 112 of 112, 20 of them for the 15-minute crypto
+them to real money. A waiter the search has closed leaves the queue with its reason, not counted
+while the search keeps it closed (and a waiter again when its desk reopens): at 15:06Z, 82 newcomers waited in a league of 112 of 112, 20 of them for the 15-minute crypto
 desk the search had closed and one with a losing forward window. A waiter with a winning forward
 window may take the seat of a practice resident whose desk's evidence clock has run with no positive
 record of its own. Desk caps follow the waiters that remain, and the league grows toward 128 only

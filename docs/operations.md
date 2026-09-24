@@ -375,12 +375,15 @@ watch.
       forward window loses (`Lab.forward_score` at or below zero) leaves the queue once, with a
       `route.decision` row `seat-expired:<class>:<id>` (route `expired`, the reason and the rule), a
       house.json `seat_expired` entry kept a week, and one info alert a desk an hour ("N waiters for
-      <desk> left the seat queue"). It is never counted again: not in `waiters`, the refusals, the
-      reserved desks or the scoreboard's metric 5. An expired retained candidate's admission row is
-      `dropped` with the reason, an expired merged strategy is not enrolled, no card is admitted onto
-      a closed desk, and no seat is made there for a graduate (`_displaceable` gives an evidenced
-      newcomer no seat on a desk the search closes, and the House holds that desk's cap at its
-      members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
+      <desk> left the seat queue"). It is not counted while its reason holds: not in `waiters`, the
+      refusals, the reserved desks or the scoreboard's metric 5 (which reads house.json `seat_expired`).
+      It is asked again each pass, and is a waiter again once the reason is gone -- its desk reopened,
+      its window no longer loses (the review of #276: the foundry reopens a desk on one family's record
+      there, read through a ten-minute cache). An expired retained candidate is held, never seated,
+      until its desk reopens or its 72-hour TTL drops it, an expired merged strategy is not enrolled,
+      no card is admitted onto a closed desk, and no seat is made there for a graduate (`_displaceable`
+      gives an evidenced newcomer no seat on a desk the search closes, and the House holds that desk's
+      cap at its members until it reopens: `_follow_the_search`). A merged corrected child whose defect a living
       resident still runs is not expired: it takes that resident's seat. At 15:06Z 21 would have left
       (the 20 of kalshi-crypto-15m: 3 graduates, 6 cards, 4 retained candidates, 7 corrected children
       of dead parents; and a megacaps graduate whose window lost -0.000142 a block), and Deploy C's
@@ -403,8 +406,10 @@ watch.
       the `rule`): the league grows toward turbo.json `max_population` (128) only while Sail's runway
       -- the latest balance less `sail_reserve_usd` over the trailing day's falls, from the Sail
       meter's `ops.budget` "sail" rows -- is over `economy.population_runway_days` (1.5); otherwise,
-      or unread, it is held at `economy.max_population_short_runway` (112), killing nobody (an info
-      or warning alert when it moves). At 15:06Z: $162.30 against $34.88 a day, 4.51 days.
+      or unread (or unreadable), it is held at `economy.max_population_short_runway` (112), killing
+      nobody (an info or warning alert when it moves). Once held it grows again only over the floor
+      by `POPULATION_RUNWAY_BAND_DAYS` (0.25 d; house.json `population_held`, `grows_over_days`), so a
+      runway hovering at the floor does not flip it. At 15:06Z: $162.30 against $34.88 a day, 4.51 days.
     - S3 in `displaceable`: a waiter with a winning forward window takes the seat of a practice
       resident whose desk evidence clock has run (its seat older than the clock -- the plain 12-hour
       grace where none is measured -- and its fair chance; on a desk that keeps hours, a session
@@ -416,16 +421,23 @@ watch.
       crypto majors, 2 sports, 2 sports props, 1 attention); one waiter had a winning window
       (a megacaps graduate, +0.000102 a block over 3 active blocks).
     - R3: a proven family's program (its anchor: the living member on the highest rung with fills of
-      its own; its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
+      its own that runs the markets and style of the family's founding program, `_family_program`;
+      its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
       on its desk, a House mutation of the anchor's PARAMS inside their bounds at the newcomer cadence
       (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
-      living members run it; while it is owed, its desk gives a newcomer of another family no seat
-      and is reserved from cards and merged strategies. Not at the family's measured capacity (E3),
-      not for a losing family. A member that inherited the family's name with other code is not its
-      program (meriwether-h2d625d-2). Since the same day a research fork or a retained candidate whose
-      NEEDS name other markets or another style than its parent's program is born into its own family
-      (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its parent as before); a fix
-      of the same program keeps the family. Agents born before keep their family on the ledger.
+      living members run it; while it is owed, no newcomer of another family may displace a resident of
+      its desk, and the desk is reserved from cards (and, in a full league, from merged strategies); a
+      free seat there is not held: the lab's graduates, retained candidates and merged strategies take one
+      without asking. Not at the family's measured capacity (E3), not for a losing family, and not for an
+      hour after its program had no distinct valid PARAMS mutation left (then nothing is owed and its desk
+      is not held). A member that inherited the family's name with other code is not its program
+      (meriwether-h2d625d-2). Since the same day a research fork or a retained candidate whose NEEDS name
+      other markets or another style than its parent's program is born into its own family
+      (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its parent as before); a fix of
+      the same program keeps the family -- a proven family's name only when that program is the family's
+      founding one (its first member's NEEDS at birth, `_family_program`), so a member carrying the name
+      with another program cannot pass the proof to its forks, and never anchors R3 (the review of #276).
+      Agents born before keep their family on the ledger.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -860,7 +872,7 @@ watch.
   foundry's closed desk, or the lab's idle desk) or, a graduate, whose own forward window loses, left
   the queue with their reason (`route.decision` `seat-expired:<class>:<id>`). Nothing to do: they are
   not seated and not counted. A desk that should be open again reopens when a family there is
-  positive over `hypotheses.closed_reopen_blocks` active blocks on it.
+  positive over `hypotheses.closed_reopen_blocks` active blocks on it, and its waiters are waiters again.
 - **"N newcomers have waited over 2 hours for a seat on <desk> (the longest ..): <rule>"** (warning,
   once an hour a desk; R2, Sept 24, 2026): the two-hour invariant. The rule says what holds them: a
   free seat the birth passes have not reached yet (the lab's six births an hour, the refill's one a
@@ -871,8 +883,9 @@ watch.
 - **"the league's population is now N (was M): ..."** (info when it grows, warning when it is held;
   R2, Sept 24, 2026): Sail's runway crossed `economy.population_runway_days` (1.5 days) or its meter
   went unread; the league grows toward turbo.json `max_population` only while the runway holds, and is
-  held at `economy.max_population_short_runway` (112) otherwise. Nobody is killed: a held league
-  stops growing.
+  held at `economy.max_population_short_runway` (112) otherwise; once held, it grows again only over
+  1.75 days (the quarter-day band), and a restart that finds it held says so once. Nobody is killed: a
+  held league stops growing.
 - **"K proven family's births wait for a seat: <family> on <desk>: ..."** (warning, once an hour; R3):
   the proven family's program is owed births and its desk (or the full league) has no resident a
   proven family's newcomer may displace.
@@ -992,6 +1005,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `SEAT_WAIT_WARN_SECONDS`, `SEARCH_CLOSED_TTL_SECONDS`, `SEAT_EXPIRED_KEEP_SECONDS`, `SAIL_BURN_WINDOW_SECONDS`, `SAIL_BURN_MIN_SPAN_SECONDS` | 2 h, 10 min, 7 d, 1 d, 6 h | The seat market's capacity (R2, Sept 24, 2026): how long a newcomer waits before one warning a desk an hour names its desk, count and rule; how often the search's closed desks are read (the foundry's rule reads every block of every agent that lived on them); how long an expired waiter is remembered; and Sail's burn for the population rule (the falls of the Sail meter's readings over the trailing day, scaled to a day, none measured under six hours of readings). Constants in `league/house.py` |
+| | `POPULATION_RUNWAY_BAND_DAYS`, `PROVEN_UNBRED_RETRY_SECONDS` | 0.25 d, 1 h | The review of #276 (Sept 24, 2026): once the population rule holds the league it grows again only over the runway floor by this band (the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the 15:06Z snapshot's readings, so at the floor it flipped and the league crept up); and a proven family's program with no distinct valid PARAMS mutation left is held, its desk not kept from other families, this long before it is asked again. Constants in `league/house.py` |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
 | `league/tapes.py` | `SETTLED_MEMO_ROWS` (`KalshiData.settled_memo_rows`) | 400,000 rows | A Kalshi series' day whose every market has settled is read from `ltcm.history` once a process and kept in memory: only the fields the tape reads (`SETTLED_FIELDS`, times as epoch seconds), the least recently used day out first (Sept 24, 2026). Measured on the real listings: 240-245 bytes a row held for KXBTC, KXBTCD, KXETH and KXETHD (3,350-3,470 as History parses it), 347 for the other series, so at most about 140 MB; a 14-day tape of those four is 293,888 rows. A second such tape costs about a quarter of what it did (on the developer machine: about 58 s every time before, 10-12 s once held; interleaved on a varying clock, a median 80 against 19.5 CPU-seconds). 0: every read is History's, as before. A day still settling keeps `settled_listing_ttl` (600 s) |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |

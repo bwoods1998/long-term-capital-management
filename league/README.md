@@ -426,14 +426,17 @@ status is exposed in health and agent research context; qualification is distinc
    foundry's rule (`Foundry._closed_desks`, E2: `hypotheses.closed_desks` until a family there is
    positive over `closed_reopen_blocks` active blocks on that desk) or the lab's idle rule
    (`Lab._idle_desk`, E1), both read through `_search_closed_desks` every ten minutes, or -- a lab
-   graduate -- its own forward window loses (`Lab.forward_score`). It leaves once, with its reason: a
-   `route.decision` row `seat-expired:<class>:<id>`, house.json `seat_expired` (a week), an info alert
-   at most once an hour a desk; an expired retained candidate's admission is `dropped`, an expired
+   graduate -- its own forward window loses (`Lab.forward_score`). It leaves with its reason: a
+   `route.decision` row `seat-expired:<class>:<id>` (once), house.json `seat_expired` (a week), an info
+   alert at most once an hour a desk; it is asked again each pass and is a waiter again once its reason
+   is gone (its desk reopened, its window no longer loses: the review of #276). An expired retained
+   candidate is held, never seated, until its desk reopens or its 72-hour TTL drops it, an expired
    merged strategy is not enrolled (one whose defect a living resident still runs is never expired: it
    takes that resident's seat), no card is admitted onto a closed desk (`_refill` passes the closed
    desks to the foundry as reserved), and an evidenced newcomer is given no seat on a desk the search
    closes (`_displaceable`). While the foundry closes a desk the House holds its cap at its members
-   (`_follow_the_search`); it gets its niches.json cap back when it reopens. Graduates wait from the
+   (`_follow_the_search`, read in each tick before the foundry's and the lab's steps, so the first tick
+   after a restart never shows them niches.json's cap); it gets its niches.json cap back when it reopens. Graduates wait from the
    ledger's `lab.graduate:<id>:passed` row, cards from their passing evaluation, merged strategies
    from when the House first saw them (their desk read from their literal NEEDS). **S3, a stale seat**
    (`_stale_seat`): a newcomer with a winning forward window takes the seat of a practice resident
@@ -446,9 +449,12 @@ status is exposed in health and agent research context; qualification is distinc
    44 that remained at 15:06Z (see its note), and the league grows toward turbo.json
    `max_population` (128) only while Sail's runway -- the Sail meter's latest balance less
    `sail_reserve_usd` over the trailing day's falls (`_sail_runway`) -- is over
-   `economy.population_runway_days` (1.5); otherwise, or unread, it is held at
-   `economy.max_population_short_runway` (112), killing nobody (`_population_rule`, which sets the
-   league's `max_population` that the lab, the foundry and the House all read). **The invariant**: a
+   `economy.population_runway_days` (1.5); otherwise, or unread (a meter that cannot be read too), it is
+   held at `economy.max_population_short_runway` (112), killing nobody (`_population_rule`, which sets the
+   league's `max_population` that the lab, the foundry and the House all read). Once held it grows again
+   only over the floor by `POPULATION_RUNWAY_BAND_DAYS` (a quarter day, house.json `population_held`):
+   the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the readings,
+   so at the floor it flipped with the readings and the league crept up (the review of #276). **The invariant**: a
    newcomer waiting over `SEAT_WAIT_WARN_SECONDS` (two hours) is named once an hour a desk with the
    count, the longest wait and the rule that holds it (`_overdue`, `_held_by`: a free seat the birth
    passes have not reached, or the residents' protections counted by `_displaceable`'s `why`);
@@ -456,20 +462,29 @@ status is exposed in health and agent research context; qualification is distinc
    and the watch prints them. **R3, births into the proven family** (`_proven_births`, first in
    `_births`; `SEAT_WAITERS` class `proven`, ahead of every other): a proven family's program -- its
    anchor's code beyond PARAMS (`lab.mechanism_digest`; the anchor is the living member on the
-   highest rung with fills of its own) -- is bred by the path the House already uses for a program
+   highest rung with fills of its own that runs the markets and style of the family's founding
+   program, `_family_program`) -- is bred by the path the House already uses for a program
    (a House-staked mutation of the anchor's PARAMS inside their bounds, `_mutated_params`, on its line,
    code and family), one birth a tick at the newcomer cadence a family, until
    `economy.proven_family_members` (4) living members run it; the child is replayed like any
-   mutation and reaches real money through the bunt line on its own record. While births are owed its
-   desk gives a newcomer of another family no seat and is reserved from cards and merged strategies.
-   No birth for a family at its measured capacity (E3) or a losing one. A member that inherited the
+   mutation and reaches real money through the bunt line on its own record. While births are owed no
+   newcomer of another family may displace a resident of its desk, and the desk is reserved from cards
+   (and, in a full league, from merged strategies); a free seat there is not held (the lab seats a
+   graduate, the admission pass a retained candidate and `enroll` a merged strategy into a free seat
+   without asking).
+   No birth for a family at its measured capacity (E3) or a losing one, nor for an hour for one whose
+   program has no distinct valid PARAMS mutation left (`PROVEN_UNBRED_RETRY_SECONDS`: nothing is owed,
+   so its desk is not held from other families meanwhile). A member that inherited the
    family's name with other code is not its program (meriwether-h2d625d-2). **A new program, a new
    family** (Sept 24, 2026): a research fork (`fork` with code) or a retained candidate
    (`_admit_orphan`) whose NEEDS name other markets (venue, series, symbols) or another style than its
    parent's program now is born into a family of its own (`_program_family`: `<desk>-<style>-<6 hex>`,
    rooted in the parent's family; the parent stays on its birth row), so a different mechanism never
    inherits a family's proof; a fix of the same program (the same markets and style) keeps the family,
-   whose record already splits maker and taker. On the 15:06Z snapshot 98 children had been born into
+   whose record already splits maker and taker -- and a PROVEN family only when that program is the
+   family's founding one (`_family_program`: its first member's NEEDS at birth), so a member that
+   carries the name with another program (meriwether-h2d625d-2) cannot pass the proof to its forks
+   (the review of #276). On the 15:06Z snapshot 98 children had been born into
    their parent's family with other code beyond PARAMS (39 living); 71 (28 living) named other markets
    or another style and would have had their own. Agents already born keep their ledger's family.
    **Corrected children supersede** (L1, gated by

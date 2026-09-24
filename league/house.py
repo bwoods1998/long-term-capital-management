@@ -217,6 +217,21 @@ SEAT_EXPIRED_KEEP_SECONDS = 7 * 86400.0
 #: $34.88 a day (the owner's $100 top-up is a rise, never a fall), against a $162.30 balance: 4.5 days over the $5 reserve.
 SAIL_BURN_WINDOW_SECONDS = 86400.0
 SAIL_BURN_MIN_SPAN_SECONDS = 6 * 3600.0
+#: A proven family's program that has no distinct valid PARAMS mutation left (`_mutated_params`: no declared or standard
+#: knob, the anchor's PARAMS outside its own rules, or 64 proposals that all repeat a living twin) is held this long
+#: before it is asked again (`_proven_births`, the review of #276, Sept 24, 2026): while held nothing is owed and its desk
+#: is not kept from other families' newcomers. Before, it stayed owed for good -- its desk gave every other family's
+#: newcomer no seat -- and the pass asked for the desk's weakest resident and a mutation on every tick. An hour, because
+#: what reopens a mutation (a living twin's death, a new anchor) happens on the scale of the newcomer cadence, not ticks.
+PROVEN_UNBRED_RETRY_SECONDS = 3600.0
+#: Once the population rule holds the league (`_population_rule`), it grows again only when Sail's runway is over the
+#: floor (`economy.population_runway_days`) by this band (the review of #276, Sept 24, 2026). Measured on the 15:06Z
+#: snapshot's 492 Sail meter readings: the runway moves a median 0.6% a reading, 2.6% at the 90th percentile and 7.9% at
+#: the 99th, and it rose with no top-up in 243 of 491 readings, so a runway near 1.5 days crossed it back and forth. Each
+#: crossing was an alert, and each ten-minute window over the floor seated newcomers the next never removed: the league
+#: crept to its ceiling on a runway at the floor. A quarter day is 17% of the 1.5-day floor, over twice the 99th
+#: percentile's move, and six hours of the measured burn (about $8.70 at $34.88 a day); a top-up clears it at once.
+POPULATION_RUNWAY_BAND_DAYS = 0.25
 #: How the House's own closing sales read on a fill: the House's, never the agent's evidence.
 HOUSE_CLOSING = "the House is closing"
 #: The same refusal of a House-sent order (a wind-down) this many times in a row stops its retries
@@ -1498,12 +1513,32 @@ class House:
         KXMLBTOTAL run-unders' proven family (sports-central-run-under) -- and 27 were fixes of the same program."""
         mine, theirs = self._markets_and_style(needs), self._markets_and_style(parent.needs or {})
         if mine == theirs:
-            return family
+            # A PROVEN family's name stays with the program that proved it (the review of #276): a parent that carries
+            # the name with another program (meriwether-h2d625d-2, born into sports-central-run-under with a moneyline
+            # file) passes the test above with a fix of its own file, and its forks would carry the proof on.
+            founding = self._family_program(family, parent.venue) if self._family_proven(family, parent.venue) else None
+            if founding is None or founding == mine:
+                return family
         style = mine[3] or "program"
         desk = niche.id.split("-", 1)[-1] if niche is not None else (mine[0] or "desk")
         base = style if style.startswith(desk) else f"{desk}-{style}"
         root = hashlib.sha256(f"{parent.family}|{style}".encode("utf-8")).hexdigest()[:6]
         return f"{base[:33].rstrip('-')}-{root}"
+
+    def _family_program(self, family: str, venue: str) -> tuple[str, frozenset[str], frozenset[str], str] | None:
+        """The markets and style (`_markets_and_style`) of a family's founding program: the NEEDS its first member (the
+        earliest born on `venue`, living or dead: a card, a graduate, a seed or a merged strategy -- whatever named the
+        family) was born with, read from its `agent.born` row (its current NEEDS when the row carries none). None for a
+        family with no member. The review of #276, Sept 24, 2026: sports-central-run-under's is meriwether-h2d625d's
+        KXMLBTOTAL run-unders; meriwether-h2d625d-2, born into it later with a CFB and soccer moneyline file, is not."""
+        with (getattr(self.registry, "_lock", None) or nullcontext()):
+            members = [a for a in self.registry.agents.values() if a.family == family and a.venue == venue]
+        if not members:
+            return None
+        first = min(members, key=lambda a: (a.born_at, a.id))
+        born = self.ledger.get(f"born:{first.id}")
+        needs = (born.payload.get("needs") if born is not None else None) or first.needs or {}
+        return self._markets_and_style(needs if isinstance(needs, Mapping) else {})
 
     def _candidate_family(self, parent: Agent, candidate: Mapping[str, Any], niche: Any) -> str:
         """The family a research candidate of `parent` will be born into (`_program_family`), read from the NEEDS it was
@@ -4775,9 +4810,11 @@ class House:
             if evidenced and specialty in self._search_closed_desks((specialty,)):
                 kept("the search closes the desk")
                 return []  # R2: no seat is made on a desk the search closes; its waiters have left the queue
-            owed = {str(w.get("niche")): str(w.get("family")) for w in self.seat_waiters().get("proven") or ()}
-            if specialty in owed and newcomer.family != owed[specialty]:
-                kept(f"held for the proven family {owed[specialty]}'s births")
+            owed: dict[str, set[str]] = {}
+            for w in self.seat_waiters().get("proven") or ():
+                owed.setdefault(str(w.get("niche")), set()).add(str(w.get("family")))  # every owed family: the review of #276
+            if specialty in owed and newcomer.family not in owed[specialty]:
+                kept(f"held for the proven famil{'y' if len(owed[specialty]) == 1 else 'ies'} {', '.join(sorted(owed[specialty]))}'s births")
                 return []  # R3: the desk's next seat is the proven family's program's
         newcomer_proven = self._family_proven(newcomer.family, newcomer.venue)
         # S3 (R2): a newcomer with a winning forward window may take a stale seat (`_stale_seat`).
@@ -5250,7 +5287,7 @@ class House:
         hit = self._data_cache.get("seat_waiters")
         if hit and not fresh and self.clock() - hit[0] < 60:
             return hit[1]
-        raw = {"proven": self._waiting_proven(), "graduates": self._waiting_graduates(), "retained": self._retained_waiting(),
+        raw = {"proven": self._waiting_proven(), "graduates": self._waiting_graduates(), "retained": self._retained_waiting(left=True),
                "cards": self._waiting_cards(), "strategies": self._waiting_strategies()}
         value = self._expire_waiters(raw)
         self._data_cache["seat_waiters"] = (self.clock(), value)
@@ -5333,15 +5370,24 @@ class House:
         """The waiters that remain once those the search has closed have left (R2 (1), Sept 24, 2026). A waiter
         leaves once, with its reason: house.json `seat_expired` (kept SEAT_EXPIRED_KEEP_SECONDS), one
         `route.decision` row (`seat-expired:<class>:<id>`, route "expired"), and an info alert at most once an hour
-        a desk. An expired retained candidate's admission row is dropped by the admission pass (`_admit_orphan`),
-        an expired merged strategy is not enrolled (`enroll`), an expired card's desk is kept from the foundry's
-        admission (`_refill`), and no seat is made for an expired graduate on a closed desk (`_displaceable`,
-        `_follow_the_search`). None is ever counted as waiting again: not in health.json, not in the refusals, not
-        in the desks the waiters reserve.
+        a desk. An expired retained candidate is held by the admission pass, never seated, until its desk reopens or
+        its TTL drops it (`_admit_orphan`), an expired merged strategy is not enrolled (`enroll`), an expired card's
+        desk is kept from the foundry's admission (`_refill`), and no seat is made for an expired graduate on a
+        closed desk (`_displaceable`, `_follow_the_search`). None is counted as waiting while its reason holds: not in
+        health.json, not in the refusals, not in the desks the waiters reserve.
 
         Measured at 15:06Z: 21 of the 82 waiters would have left -- the 20 of kalshi-crypto-15m (3 graduates, 6
         cards, 4 retained candidates, 7 merged corrected children whose defective code no living agent runs) and
-        a megacaps graduate whose window lost -0.000142 a block over 4 active blocks."""
+        a megacaps graduate whose window lost -0.000142 a block over 4 active blocks.
+
+        A waiter that left is asked again each pass, and is a waiter again once its reason is gone -- its desk
+        reopened, its forward window no longer loses (the review of #276, Sept 24, 2026). Before, it stayed out for
+        SEAT_EXPIRED_KEEP_SECONDS whatever happened: the foundry reopens a closed desk on one family's pooled record
+        there (kalshi-crypto-strikes at 15:06Z, on +0.234 over 17 active blocks and +0.026 over 7) and the House
+        reads that through a ten-minute cache, so the waiters of a desk that reopened stayed uncounted for a week
+        while the lab and the foundry, which never read the House's expiry, seated them there, and a retained
+        candidate was dropped for good by the next admission pass. Its ledger row stays (the first reason stands);
+        a second departure is kept in house.json and told as the first was."""
         desks = {str(w.get("niche") or "") for rows in raw.values() for w in rows}
         closed = self._search_closed_desks(desks)
         scores = self._waiter_forward() if raw.get("graduates") else {}
@@ -5353,18 +5399,23 @@ class House:
             known = set(expired)
         out: dict[str, list[dict[str, Any]]] = {}
         leaving: list[tuple[str, Mapping[str, Any], str, tuple[str, str]]] = []
+        back: list[str] = []
         for cls in self.SEAT_WAITERS:
             kept = []
             for waiter in raw.get(cls) or ():
                 key = self._waiter_key(cls, waiter)
-                if key in known:
-                    continue
                 why = self._expiry(cls, waiter, closed, scores)
                 if why is None:
                     kept.append(dict(waiter))
-                else:
+                    if key in known:
+                        back.append(key)  # its desk reopened, or its window no longer loses: a waiter again
+                elif key not in known:
                     leaving.append((cls, waiter, key, why))
             out[cls] = kept
+        if back:
+            with self._state_lock:
+                for key in back:
+                    self._state["seat_expired"].pop(key, None)
         if leaving:
             self._record_expired(leaving)
         return out
@@ -5405,9 +5456,12 @@ class House:
     def _follow_the_search(self) -> dict[str, dict[str, int]]:
         """R2 (3), Sept 24, 2026: fewer seats where the search is closed. While the foundry closes a desk
         (`Foundry._closed_desks`, `_search_closed_desks`), its cap is held at its living members, never above its
-        niches.json cap: no newcomer is born there -- not the lab's graduates that passed before the rule, not a
-        card, not a House mutation -- and nobody is displaced for it; it shrinks as its members die. The niches.json
-        cap comes back when the desk reopens. Returns desk -> {"cap", "base", "members"} for the desks held.
+        niches.json cap: no newcomer from outside is born there -- not the lab's graduates that passed before the
+        rule, not a card, not a House mutation -- and no evidenced newcomer is given a seat there (`_displaceable`); it
+        shrinks as its members die. Two ways still end one for one there, never growing it: a resident's own research
+        candidate (`_admission_gate`, the plain tournament: a resident past its grace makes way), and a merged corrected
+        child whose defect a resident still runs (`enroll`, which then retires the defect). The niches.json cap comes
+        back when the desk reopens. Returns desk -> {"cap", "base", "members"} for the desks held.
         At 15:06Z: kalshi-crypto-15m, 10 members, closed (and cut to 8 in niches.json: see its note)."""
         closed = self._search_closed_desks()
         base = getattr(self, "_base_caps", None)
@@ -5463,24 +5517,40 @@ class House:
         die. It sets the league's `max_population`, which every seat question reads (the lab's, the foundry's and the
         House's own), and says so once when it changes. Only under the owner's burst, where turbo.json sets the population;
         None otherwise. Sixteen more seats cost about $0.43 a day of Sail box time ($0.027 a box a day, measured Sept 23)
-        and their research is inside the $2 an hour Sail research cap; at 15:06Z the runway was 4.5 days."""
+        and their research is inside the $2 an hour Sail research cap; at 15:06Z the runway was 4.5 days.
+
+        Once held it grows again only over the floor by POPULATION_RUNWAY_BAND_DAYS (house.json `population_held`, so a
+        restart keeps it), and a meter that cannot be read holds it like an unread one (the review of #276, Sept 24,
+        2026): the runway moved 2.6% a reading at the 90th percentile and rose with no top-up in half the readings, so
+        at the floor the rule flipped with the readings, alerting each time, and every window over the floor seated
+        newcomers that no later window removed; an exception raised out of it and left turbo.json's 128 standing."""
         ceiling = getattr(self, "_population_ceiling", None)
         if not self._burst or ceiling is None:
             return None
         economy = self.game["economy"]
         held = min(int(ceiling), int(economy.get("max_population_short_runway", ceiling)))
         floor = float(economy.get("population_runway_days", 1.5))
-        sail = self._sail_runway()
+        unread = ""
+        try:
+            sail = self._sail_runway()
+        except Exception as exc:  # noqa: BLE001 - a meter that cannot be read grows nothing
+            sail, unread = None, f" ({type(exc).__name__}: {str(exc)[:120]})"
         days = None if sail is None else (math.inf if sail.get("unlimited") else sail.get("runway_days"))
-        grows = days is not None and days > floor
+        with self._state_lock:
+            was_held = bool(self._state.get("population_held"))
+        over = floor + POPULATION_RUNWAY_BAND_DAYS if was_held else floor
+        grows = days is not None and days > over
+        with self._state_lock:
+            self._state["population_held"] = not grows
         target = int(ceiling) if grows else held
         before = int(economy["max_population"])
         economy["max_population"] = target
-        shown = "unread" if days is None else ("unlimited" if math.isinf(days) else f"{days:.2f} days")
+        shown = f"unread{unread}" if days is None else ("unlimited" if math.isinf(days) else f"{days:.2f} days")
+        band = f" ({floor:g} and the {POPULATION_RUNWAY_BAND_DAYS:g}-day band a held league grows again over)" if was_held else ""
         report = {"max_population": target, "ceiling": int(ceiling), "held_at": held, "runway_floor_days": floor,
-                  "runway_days": None if days is None or math.isinf(days) else days, "sail": sail,
-                  "rule": (f"toward the ceiling {ceiling}: Sail's runway {shown} is over {floor:g} days" if grows else
-                           f"held at {held}: Sail's runway {shown} is not over {floor:g} days")}
+                  "grows_over_days": over, "runway_days": None if days is None or math.isinf(days) else days, "sail": sail,
+                  "rule": (f"toward the ceiling {ceiling}: Sail's runway {shown} is over {over:g} days{band}" if grows else
+                           f"held at {held}: Sail's runway {shown} is not over {over:g} days{band}")}
         if target != before:
             self.alert("info" if grows else "warning", f"the league's population is now {target} (was {before}): {report['rule']}",
                        population=target, runway_days=report["runway_days"])
@@ -5534,7 +5604,12 @@ class House:
             if not self._family_proven(family, venue):
                 continue
             ranked = sorted(members, key=lambda a: (-self.evaluator.rung(a.id), a.born_at, a.id))
-            anchor = next((a for a in ranked if self.evaluator.rung(a.id) >= 1 and self._own_fills(a.id, enough=1)), None)
+            # Only a member running the family's founding program's markets and style may anchor it (the review of #276):
+            # ranked by rung and birth alone, meriwether-h2d625d-2's moneyline file would be bred as the run-unders'
+            # program the day meriwether-h2d625d died and -2 had a fill.
+            founding = self._family_program(family, venue)
+            anchor = next((a for a in ranked if self.evaluator.rung(a.id) >= 1 and self._own_fills(a.id, enough=1)
+                           and (founding is None or self._markets_and_style(a.needs or {}) == founding)), None)
             if anchor is None:
                 continue
             mine = digest(anchor)
@@ -5546,15 +5621,39 @@ class House:
             except Exception:  # noqa: BLE001 - `Allocator.family` never raises; an unread record breeds nothing
                 record = {}
             held = ""
+            unbred = (self._state.get("proven_unbred") or {}).get(family) or {}
             if family_at_capacity(record, swing_rule()):
                 held = "the family is at its measured capacity (E3): more members find no more room in its markets"
             elif self._losing_family(family):
                 held = "its pooled forward record is negative"
             elif self._holdout_spent(anchor):
                 held = "its line has spent its sealed-holdout ration"
+            elif unbred.get("program") == [anchor.id, anchor.code_sha256, json.dumps(anchor.params or {}, sort_keys=True)] \
+                    and self.clock() - float(unbred.get("epoch") or 0) < PROVEN_UNBRED_RETRY_SECONDS:
+                held = (f"no distinct valid mutation of {anchor.id}'s PARAMS was left at {unbred.get('at')} (`_mutated_params`); "
+                        f"asked again {PROVEN_UNBRED_RETRY_SECONDS / 3600:g} h on")
             out.append({"family": family, "venue": venue, "niche": anchor.specialty, "anchor": anchor, "running": running,
                         "wanted": max(0, target - len(running)), "held": held, "record": record})
         return out
+
+    def _read_proven(self) -> list[dict[str, Any]]:
+        """`_proven_programs`, or [] with a warning at most once an hour when it cannot be read (the review of #276,
+        Sept 24, 2026). It reads the allocator's family records, every living member's rung and fills, and the lab's
+        mechanism digests; unguarded, one exception there stopped every seat question (`seat_waiters` is on the lab's
+        step, `_displaceable` for a desk, `enroll`, `_refill`) and every birth pass, failing the tick until it cleared,
+        where every other waiter source is read again on the next tick."""
+        try:
+            return self._proven_programs()
+        except Exception as exc:  # noqa: BLE001 - no birth is owed and no desk held until it can be read
+            now = self.clock()
+            with self._state_lock:
+                tell = now - float(self._state.get("proven_read_told") or 0) >= 3600
+                if tell:
+                    self._state["proven_read_told"] = now
+            if tell:
+                self.alert("warning", f"the proven families' programs could not be read ({type(exc).__name__}: {str(exc)[:160]}): "
+                                      "no birth is owed and no desk is held for them until they can")
+            return []
 
     def _waiting_proven(self) -> list[dict[str, Any]]:
         """R3: a proven family's program that runs on fewer than `economy.proven_family_members` living members waits
@@ -5562,7 +5661,7 @@ class House:
         the House first saw it short (house.json `seat_seen`)."""
         now = self.clock()
         out = []
-        for row in self._proven_programs():
+        for row in self._read_proven():
             if row["wanted"] <= 0 or row["held"]:
                 continue
             with self._state_lock:
@@ -5596,7 +5695,7 @@ class House:
         proven family (sports-central-run-under: pooled n 19, bound +0.204, real n 5), one member running its program
         (meriwether-h2d625d, on real money), so three births are owed at the default four."""
         now = self.clock()
-        for row in self._proven_programs():
+        for row in self._read_proven():
             if row["wanted"] <= 0 or row["held"]:
                 continue
             family, anchor = row["family"], row["anchor"]
@@ -5607,6 +5706,20 @@ class House:
             niche = self.niches.get(anchor.specialty or "")
             if niche is None or niche.dormant:
                 continue
+            # The mutation first: with none left there is nothing to seat, and the family is held (not owed) for
+            # PROVEN_UNBRED_RETRY_SECONDS, so its desk is not kept from other families meanwhile (review of #276).
+            params = self._mutated_params(anchor, seed=f"proven:{family}:{len(self.registry.agents)}")
+            with self._state_lock:
+                unbred = self._state.setdefault("proven_unbred", {})
+                if params is None:
+                    self._state.setdefault("proven_births", {})[family] = now
+                    unbred[family] = {"at": now_iso(self.clock), "epoch": now,
+                                      "program": [anchor.id, anchor.code_sha256, json.dumps(anchor.params or {}, sort_keys=True)]}
+                else:
+                    unbred.pop(family, None)
+            if params is None:
+                self._data_cache.pop("seat_waiters", None)
+                continue  # no valid mutation left inside its bounds (recorded by `_mutated_params`)
             keep = [a.id for a in row["running"]]
             newcomer = Newcomer(family=family, venue=anchor.venue, what=f"a birth of the proven family {family}'s program")
             loser = None
@@ -5620,9 +5733,6 @@ class House:
                 self._refuse_birth("proven", row["wanted"], f"{family} on {niche.id}: its desk (or the league) is full of residents that "
                                                             "may not be displaced, even by a proven family's newcomer")
                 continue
-            params = self._mutated_params(anchor, seed=f"proven:{family}:{len(self.registry.agents)}")
-            if params is None:
-                continue  # no valid mutation left inside its bounds (recorded by `_mutated_params`)
             with self._state_lock:
                 self._state.setdefault("proven_births", {})[family] = now
             record = row["record"] or {}
@@ -6722,17 +6832,19 @@ class House:
                                                             "author's lineage (picked up after the author's death)")
         return len(latest)
 
-    def _retained_waiting(self, *, expired: bool = False) -> list[dict[str, Any]]:
+    def _retained_waiting(self, *, expired: bool = False, left: bool = False) -> list[dict[str, Any]]:
         """The retained candidates waiting for a seat (house.json `retained`) in the order the admission
         pass seats them: a proven family's first -- the seat follows proof at the family level (at T0 only
         mullins-14's weather-favorites was proven among fourteen authors that had died holding candidates
         that day, and it had died after ten of them) -- then the longest wait. Those past
         `RETAINED_TTL_SECONDS`, and those that left the seat queue (R2, `_expire_waiters`), only with `expired`
-        (the admission pass drops them)."""
+        (the admission pass drops the first and holds the second); those that left the seat queue also with
+        `left` (`seat_waiters`, which asks each pass whether their reason is gone: the review of #276)."""
         now = self.clock()
         gone = self._state.get("seat_expired") or {}
         rows = [dict(r) for r in (self._state.get("retained") or {}).values()
-                if expired or (now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS and f"retained:{r.get('session')}" not in gone)]
+                if expired or (now - float(r.get("since") or 0) <= self.RETAINED_TTL_SECONDS
+                               and (left or f"retained:{r.get('session')}" not in gone))]
         return sorted(rows, key=lambda r: (not self._family_proven(r.get("family"), r.get("venue")),
                                            float(r.get("since") or 0), str(r.get("session"))))
 
@@ -6744,7 +6856,8 @@ class House:
         (`_weakest`, evidenced). A file that would displace a resident is read in the probe box first, as
         `_admit_candidate` reads one; one that cannot be born, or that a living agent already runs, is
         dropped; one past `RETAINED_TTL_SECONDS` is dropped as too old, and one that left the seat queue
-        because the search closed its desk (R2, `_expire_waiters`) is dropped with that reason."""
+        because the search closed its desk (R2, `_expire_waiters`) is held, never seated, until the desk reopens
+        or that TTL drops it."""
         queue = Admissions(self.ledger)
         session = str(entry.get("session"))
         row = next((r for r in rows if r.get("session") == session), None)
@@ -6758,15 +6871,15 @@ class House:
         if row is None or author is None or row.get("status") != "orphaned":
             forget()  # seated, dropped or left unconfirmed by an earlier pass
             return None
-        gone = (self._state.get("seat_expired") or {}).get(f"retained:{session}")
-        if gone:
-            queue.record(row, "dropped", f"it left the seat queue: {str(gone.get('why') or gone.get('rule'))[:240]}")
-            forget()
-            return None
         if self.clock() - float(entry.get("since") or 0) > self.RETAINED_TTL_SECONDS:
             queue.record(row, "dropped", f"no seat within {self.RETAINED_TTL_SECONDS / 3600:g} hours of its author's death: "
                                          "its replay is too old to seat")
             forget()
+            return None
+        if (self._state.get("seat_expired") or {}).get(f"retained:{session}"):
+            # It left the seat queue while the search closes its desk (R2, `_expire_waiters`): never counted, never
+            # seated there, and back in the queue if the desk reopens inside its TTL. Dropped here, a desk closed for
+            # one pass lost a replay-passed program for good (the review of #276).
             return None
         candidate = row["_candidate"]
         living = self.registry.living()
@@ -7261,9 +7374,12 @@ class House:
         # given, by the House or by the lab's step and the foundry, which read the same caps. They spend nothing.
         try:
             self._follow_the_search()
-            self._population_rule()
         except Exception as exc:  # noqa: BLE001 - the caps stand as they are until the next tick
             self.alert("warning", f"the seat market's caps could not follow the search ({type(exc).__name__}: {str(exc)[:160]})")
+        try:
+            self._population_rule()  # apart: a search that cannot be read must not skip Sail's runway (review of #276)
+        except Exception as exc:  # noqa: BLE001 - the ceiling stands until the next tick
+            self.alert("warning", f"the population rule could not be applied ({type(exc).__name__}: {str(exc)[:160]})")
         if not refill or self._closing.is_set():
             return  # births buy sandbox work; culling above remains available after spending stops
         # Every birth reads its strategy's NEEDS in the probe box. The tick holds that box for the
@@ -7852,6 +7968,13 @@ class House:
             # step, each against its own per-job ceiling and the day's frontier allowance.
             self._background("engineer", self.engineer.step)
         lap("merton")
+        # R2: a desk the search closes is held at its members BEFORE the foundry's and the lab's steps, which seat
+        # newcomers by the desks' caps (the lab's on its own thread); read only in the population step below, the first
+        # tick after a restart showed them a closed desk's niches.json cap (the review of #276). Cached: cheap twice.
+        try:
+            self._follow_the_search()
+        except Exception:  # noqa: BLE001 - the caps stand as they are; the population step tries again and says so
+            pass  # (once a tick: two warnings of one text a tick would reach the repeat escalation twice as fast)
         if self.hypotheses is not None:
             self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
         lap("hypotheses")
