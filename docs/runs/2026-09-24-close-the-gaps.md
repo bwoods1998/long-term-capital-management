@@ -637,6 +637,12 @@ recorded for the next open; live verification uses the markets that trade around
   rewrote itself at 16:36:40Z. One death: krasker-6 (options-pullback, 12 fills, forward −0.0726) displaced by
   krasker-3's retained candidate (S3). The three cards at 16:35:19Z are the engineer's repair cards for three
   real-money agents' refusals, not foundry search cards. `settle_lags.json` holds 2 series, no diesel yet.
+- 16:47:37Z — **The first Alpaca options agent on real money is a probe on a losing family.** The allocator seated
+  krasker-14 (alpaca-options, options-pullback; E 1.0238 on 5 closed trades) as an $80 probe (an options probe is
+  held up to `option_bunt_usd`). The family's record at 16:53:40Z: 19 active practice blocks, growth −0.383
+  (losing by `families.losing`), bound −0.109, n 28. It is inside the envelope and has sent no real order yet;
+  R5 refuses exactly this, and its builder has the case (a demoted options probe must never be sold at market or
+  outside the session). Alpaca real agents: 4 (three crypto-alts probes, all on a losing family, and this one).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
