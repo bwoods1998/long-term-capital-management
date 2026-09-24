@@ -91,7 +91,13 @@ The alternatives:
 
 There are two paths to the box, and both go through the in-box watchdog. The watchdog runs 3
 canary ticks on a simulated venue, promotes, then watches the House for 10 minutes. A stale
-`health.json` or any error-level alert during the watch rolls back.
+`health.json` or any error-level alert during the watch rolls back, and so does a health failure
+(`health.json` `failures`) -- except a condition that began before the promotion (L3, Sept 24,
+2026): a failure whose `since`, or an error whose `began_at` (a warning that had been repeating, a
+health failure the House announced), is earlier than the reading taken just before the promotion is
+inherited, reported in the deploy's detail and never a rollback. The lab's idle hour therefore never
+rolls a release back (it cannot begin inside a ten-minute watch); a canary inherits nothing and
+refuses on any of them, though a canary runs no lab; `league.watchdog status` shows them all.
 
 - **The updater (automatic).** Every 30 minutes the House reads `main`'s head and deploys it by
   itself. It does so only if both of these hold:
@@ -172,8 +178,19 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     and from `health.json` whether its step is failing (`failing_since`, `failures_in_a_row`,
     `error`; D1, Sept 24, 2026);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
-    `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
-    checkpoint's age and whether it carries the board.
+    `profit_index` (E1: equity, baseline, bonus and why) and, since Deploy A, `settled_usd`,
+    `inflight_usd` and the `previous` month, refusals, alerts, and the site checkpoint's age and
+    whether it carries the board;
+  - the newest hourly yield row (spend, evidence and `usd_per` by line, and `by_profile`: research
+    candidates per dollar by model profile). Until Sept 24, 2026 the watch looked for `"what":
+    "yield"` with a space, which the ledger's canonical JSON never writes, and printed none;
+  - `repeating_warnings`, the health `failures` and the `research_economy` block (L3 and L2, Sept 24,
+    2026; below).
+
+  `--since` takes any ISO time and is rewritten as `YYYY-MM-DDTHH:MM:SS` UTC before it is compared
+  with the ledger's `at`; anything else is refused. Sept 24, 2026: sqlite's `datetime('now', ...)`
+  writes a space where the ledger writes `T`, a space sorts before `T`, and that form admitted the
+  whole day.
 - **`python3 scripts/gap_scoreboard.py --snapshot DIR | --take DIR [--since ISO] [--baseline ISO]
   [--json | --markdown]`** (Sept 24, 2026): the scoreboard of
   [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z), read-only and standard
@@ -221,6 +238,22 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `insufficient_shard_balance` is a warning alert naming the agent, market and shard, and the
     next pass runs at once. `scripts/kalshi_shard.py balance` reads the same breakdown by hand,
     and `transfer` still moves collateral by hand when the funder is blocked.
+  - `repeating_warnings` (L3, Sept 24, 2026): each warning text (numbers and ids folded,
+    `house.alert_key`) that came `REPEAT_WARNINGS` (10) times inside 30 minutes, with its last `text`,
+    the folded `key`, the `count` of the run, `first_seen`, `last_seen` and `escalated_at`, until it
+    has been quiet for 30 minutes. The runs live in `house.json`, so a restart keeps them. Over the
+    T0 snapshot this rule escalates three texts: the lab's IndexError (at 23:44:48Z Sept 23),
+    "publishing failed (... HTTP 400 Invalid checkpoint)" and "alpaca-paper: could not poll or settle
+    (... timed out)".
+  - `failures` (L3, Sept 24, 2026): the health failures the in-box watchdog reads, each `{check,
+    text, since}`. Today one: `lab_evaluates`, the Alpha Lab evaluated nothing for an hour since the
+    later of its last batch and its oldest queued candidate while candidates are queued (the text
+    names the queue, the last batch, a refusal and the step's error). At T0 of the close-the-gaps run
+    the last batch was 23:37:17Z with 618 queued.
+  - `research_economy` (L2, Sept 24, 2026): `sail_cap` (`cap_usd`, `last_hour_usd` settled on Sail
+    research in the last hour, `calls`, `inflight_calls` and their `inflight_reserved_usd`, and
+    `capped`) and `merton` (the roles of `paused_until_profit`, those `paused` now, and the
+    `real_pnl_24h_usd` and `settlements` they wait on).
   - `seats` (Sept 23, 2026, the seat market): `waiters` by class (`graduates`, `cards`,
     `strategies`) and `waiters_by_desk`; `reserved_desks` (desks a waiting graduate or card has
     first claim on); from the hourly watch, `displaceable` (residents a newcomer with forward
@@ -422,6 +455,16 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   Alpha Lab's step works again after N failures in a row since <time>" (an info) clears it. The
   count is in `lab.sqlite` `meta`, so a restart does not reset it. Like every error alert, the
   watchdog reads it: inside a release's ten-minute watch after promotion it rolls the release back.
+- **"a warning repeated N times in 30 minutes: <text>"** (an error, once per run of repeats; L3,
+  Sept 24, 2026). The same warning text, numbers and ids folded, came `REPEAT_WARNINGS` (10) times
+  inside 30 minutes. It carries the last warning's payload, its `_traceback` when the caller sent
+  one, `repeated` (the folded text, the count, first and last seen) and `began_at`; `health.json`
+  `repeating_warnings` lists it until it stops for 30 minutes, and a new run after that escalates
+  again. The watchdog counts it like any error, unless it began before a promotion it is watching.
+- **"health failure: the lab evaluated nothing in the last hour while N candidates are queued
+  (...)"** (an error, once when it begins, with `failure: lab_evaluates` and `began_at`; L3), and
+  **"the lab evaluates again"** (an info) when a batch runs. Read the lab's `refusal`,
+  `failing_since` and `error` in `health.json` `lab` for why.
 - **"the lab could not evaluate N queued candidate(s) and blocked them (<error>)"** (a warning,
   at most one a step; D1). A row's NEEDS, tape or result raised something the lab has no refusal
   for; `candidates` names the rows, each now `blocked` with its error, and `_traceback` is the
@@ -431,6 +474,21 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
   once means many restarts.
+- **Research ends with `provider: provider_http_502` (or 500, 503, 504, 529).** The vendor failed
+  the session (L2, Sept 24, 2026: 13 sessions ended in a 502 and 13 in a 504 in the day before T0).
+  What its model turns were charged comes back in one `credit.grant` (id
+  `research-refund:<session>`; the summary row says `refunded_usd`), the session is no completed
+  pass (`research_gate.completed_pass`: no streak moves, displacement does not count it), its job is
+  closed as cancelled so the research clock does not restart, and the agent may research again in
+  15 minutes. A session its own model ended (`provider: max_output_tokens`) or a cap stopped is not
+  refunded.
+- **A replay or a lab row says "unsupported input: the history store holds no <symbol> <timeframe>
+  bars in <window> (its first is <day>)".** The history store fetched that window and the venue had
+  nothing: the symbol did not trade yet (ADA/USD trades on Alpaca from 2026-02-01, so an hourly
+  development window of 2025 holds none). Since Sept 24, 2026 the House refuses such a development
+  tape where it builds it (`House._deep_tape`, `history.series_without_bars`), so it is not a trial,
+  the lab blocks the row, and the sealed holdout is refused before its seal is opened, spending no
+  evaluation of the lineage's ration. A window never fetched still falls back to the live tape.
 - **Durable research older than six hours expires** after a long pause
   ("session expired after six hours").
 - **A dead agent's exits are refused as "has no seat on the book."** This is fixed by #106:
@@ -528,6 +586,9 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.failures_alert_after`, `row_errors_per_step` | 5, 8 | `DEFAULTS` only (D1, Sept 24, 2026): failed steps in a row before the one error alert and `health.json` `lab.failing_since`; queued rows a step may block for an error of the lab's own before the step fails instead |
 | | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour. But `forward_box_seconds` is the run's own time and the tapes it builds fill it: on Sept 23 (22:11Z, 23:14Z) a run scored 4 and 5 of its 48 due and skipped the rest, so 25 graduates waiting for seats need several hourly runs. Since D1 a waiting graduate's first window comes before an elite's |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
+| | `research.gate.abstain_lock_profile` | `flash_asap` | L2, Sept 24, 2026: an agent under the abstention lock runs its next session on this profile (`TaskRouter.research_settings`, from `ResearchGate.lock_profile`), whatever its cohort; a cheaper Sail profile it already runs on is kept. flash_asap cost $0.0027 a call against Luna's $0.0080 and pro_asap's $0.0299 on the Sept 22 routing packets, and spends Sail, not the gateway month. Bounds: a Sail profile `ltcm/provider.py` prices. `""` turns it off |
+| | `merton.paused_until_profit` | architect, toolsmith, operator, designer | L2, Sept 24, 2026: these roles do not sit down while the floor's 24-hour REAL P&L -- the realized result of the real books' settlements and closing fills over the last 24 hours (`merton.RealPnl`; not the allocator's `floor_pnl`, a level with no window that forgets swept accounts) -- is not positive; one `ops.budget` "merton pause" row when a role pauses or resumes. Lifetime to Sept 24 those roles and the teacher had spent about $120 for about one positive forward record. Bounds: any subset of `merton_bounds.paused_until_profit` (Merton's five roles). The auditor, the consultant and the engineer are not scheduled here |
+| | `merton.schedule_hours.teacher` | 12 | The teacher's cadence (6 until Sept 24, 2026), bounded 6-24 h by `merton_bounds` (`economy.check_bounds`, so `league.ci`). The burst no longer accelerates it |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
 | `league/constitution.py` | `allocator.enabled` | on | Capital is the ladder (Sept 23, 2026, `league/allocator.py`): bands and stakes follow evidence at every mark pass. Off: the screen, the micro bound, `micro_demotion` and Kelly sizing below decide again (the rollback). A money rule: re-ratify after either change |
@@ -556,13 +617,14 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `ladder.replay.min_oos_growth` | -0.0005 | Out-of-sample growth need only clear -0.05% a block for a paper seat (above zero before), and one out-of-sample block must be active. Risk-free: the live grant's money digest does not include it. When it loosens, the House brings back once, on its line, the code of rung-0 deaths of the last two days whose replay failed only on out-of-sample growth now admitted (`House._revive_near_misses`: at most 12, never more than half the free seats) |
 | | `ladder.paper.audit` | `after` | A screen-passer takes the micro stake at once and is audited there; a veto demotes it. An agent with a known defect is still audited first. `before`: the audit precedes promotion, as before Sept 23, 2026 |
 | `league/engineer.json` | `enabled`, `max_attempts`, `max_job_usd` | on, 3, $5 | The repair engineer. No Merton role may write this file. Since Sept 23, 2026 its paid queue is ordered by priority times the forward record of the job's agents (x3 on real money or earning, x0.5 when all are dead or on replay; `league/service.py` `evidence_weight_of`); requested jobs stay first. A `strategy_defect` is bought only for a parent that is alive and has a fill of its own (16 repair children had 0 forward blocks, $0.70 each): a dead parent's defect is `rejected`, a living untraded parent's waits at no cost. A merged corrected child is replayed before any seat (`Foundry.takes_strategy`, from `House.enroll`; the card carries `strategy` and `author: engineer`) and born only on a pass; one that fails never displaces anyone and its job goes `dormant` with the replay's reasons |
-| (none) | the hourly yield row | every hour | `league/yield_ledger.py` writes one `ops.budget` row (`what: "yield"`) an hour, on the foundry's bookkeeping tick: spend by line (research tokens, each of Merton's roles, audits) and the evidence each line produced (sessions, abstentions, candidates, replay passes, active and positive forward blocks, cards, proposals, lessons, consult answers and failures), with `usd_per` unit. Read it with `sqlite3 ... "select payload from ledger where kind='ops.budget' and payload like '%\"yield\"%' order by seq desc limit 3"` or from `scripts/floor_watch.py` once it shows it |
+| (none) | the hourly yield row | every hour | `league/yield_ledger.py` writes one `ops.budget` row (`what: "yield"`) an hour, on the foundry's bookkeeping tick: spend by line (research tokens, each of Merton's roles, audits) and the evidence each line produced (sessions, abstentions, candidates, replay passes, active and positive forward blocks, cards, proposals, lessons, consult answers and failures), with `usd_per` unit, and since Sept 24, 2026 `by_profile`: research sessions, candidates, provider failures, token dollars and `candidates_per_usd` for each model profile. Read it with `sqlite3 ... "select payload from ledger where kind='ops.budget' and payload like '%\"what\":\"yield\"%' order by seq desc limit 3"` or from `scripts/floor_watch.py` |
 | `league/research_routes.json` | `cache.layout`, `cache.explicit_hints` | `messages`, on | The Luna cache layout; `packet` is the old layout |
 | | `routing.sail_by_evidence` | off | Let measured evidence move new Sail sessions to a cheaper tier |
 | `league/turbo.json` | `research_minutes`, `research_workers`, `replay_workers` | 15, 16, 12 | The funded burst's research interval and workers (5, 32 and 8 until Sept 23, 2026). In force while the burst is, which it is while the live grant is active |
 | | `max_population`, `newcomer_seconds`, `endowment_usd` | 112, 600 s, $8 | The burst's population ceiling (64 until Sept 23, 2026, when foundry cards that passed replay waited for seats; 96 until the seat market of Sept 23, when 20 lab graduates, 6 replay-passed cards and 6 merged strategies waited: 16 more boxes cost about $0.43 a day of Sail, 2.9 days of runway), the House mutation cadence (120 s until then; no mutation is staked while any waiter waits) and House endowment |
 | | `fork_threshold_usd` | $10 | The credits an agent needs before it may fork a parameter copy of itself. Above the endowment, so only an agent that has earned payouts forks. Until Sept 23, 2026 the burst forced $2, every newborn forked at once (22 copies in 40 minutes), and the foundry's replay-passing cards waited for seats on full desks |
-| | `merton_schedule_hours` | operator 48, designer 96, toolsmith 12, architect 12, teacher 4 | Merton's burst cadence, set by each role's measured yield (operator 4, designer 12, toolsmith 3, architect 2, teacher 1 until Sept 23, 2026) |
+| | `merton_schedule_hours` | operator 48, designer 96, toolsmith 48, architect 24, teacher 12 | Merton's burst cadence, set by each role's measured yield. Until Sept 24, 2026 `load_turbo` dropped this key, so it never reached the House and the burst's own defaults ran (operator 0.25 h, toolsmith and architect 0.5 h, teacher and designer 1 h, stretched by backoff): the ledger shows the teacher about hourly and the architect every 30-60 minutes on Sept 23. The teacher is bounded 6-24 h (`TURBO_MERTON_HOURS`) |
+| | `sail_research_usd_per_hour` | $2 | L2, Sept 24, 2026: no NEW research session starts on Sail while the settled cost of the Sail commitments created in the last hour (`campaigns.sqlite`; every Sail call is research) has reached it; a session under way resumes and Luna is not capped. A call in flight counts once it settles, so the hour can overshoot by what is in flight. One `ops.budget` "sail research cap" row when it closes or opens; `health.json` `research_economy.sail_cap` shows it. Bounds $1-4 (`TURBO_RANGES`). Sail settled $5-6.5 an hour on Sept 23 at 19-23Z and $1.27 in the hour before T0 |
 | | `luna_fraction` | 0.95 | The share of agents whose research runs on GPT-6 Luna; the rest stay on Sail as the comparison (a Luna session cost about $0.011 against about $0.06 on Sail, Sept 23, 2026) |
 | `league/niches.json` | `max_members` | Kalshi: crypto strikes 4, crypto 15-minute 10, weather 14, sports 16, props 4, prices 8, attention 4. Alpaca: crypto majors and alts 12, index ETFs 14, megacaps 12, options 8 | How many agents a desk may hold. Set Sept 23, 2026 so seats follow evidence: up where lab graduates wait (weather, the one desk with a positive forward record, sports, index ETFs, 15-minute crypto), down on the graveyards (strikes: 40 born, 2 passed replay; props 34 and 5; attention 34 and 2). Every desk keeps one seat for a member that trades (`House._mutation_room`) |
 | | `open`, `asset_classes`, `exclude_patterns` | `kalshi-open` and `alpaca-open` (8 seats each); Alpaca `equity`, `crypto`; Kalshi `^KXMVE` | The open desks (Sept 23, 2026): a desk whose universe is every tradable market of its venue. `status: dormant` closes one. `niches.OPEN_DISCOVERY` (24) is the length of an open desk's discovery list, of which a strategy naming nothing it may trade is shown the first twelve (`MAX_UNIVERSE`); a Kalshi desk missing from the last survey is surveyed within the half hour, not at the next day's turn |
