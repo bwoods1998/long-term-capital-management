@@ -45,9 +45,9 @@ recorded for the next open; live verification uses the markets that trade around
 | 0.8 | First-hour decision 4: Deploy A's money set | done 01:55Z |
 | 0.9 | First-hour decision 5: file owners per wave | done 01:55Z |
 | Z | The scoreboard (`scripts/gap_scoreboard.py`) | T0 reading done (PR #223, below) |
-| D1 | The lab's step | live 05:37Z (Deploy A); batches resumed (4 by 05:46Z); the hour's rate and the poison row's block to verify |
+| D1 | The lab's step | **verified** 06:40Z: 63 batches (84 candidates) in the first hour after Deploy A (target ≥ 30), no failed step, the ADA/USD row blocked "the House's tape for these NEEDS has no steps" |
 | D2 | Phantom OpenAI holds | live 05:37Z; gateway `44edfee6` 05:26Z; the meter anchored 05:38:57Z; the release to verify |
-| D3 | Exits walled off by the self-cross rule | live 05:37Z; 0 self-cross refusals of sells to 05:46Z; to verify over hours |
+| D3 | Exits walled off by the self-cross rule | live 05:37Z; **0 self-cross refusals** in the first hour (26 in the 6 h before T0); no exit has yet met a House bid (0 crosses, 0 re-prices) |
 | D4 | Independent settlements | live 05:37Z (money digest `521c4586`) |
 | P | Promotion on proof (probes, the one-loss trial, maker unless proven) | live 05:37Z; 05:44Z board: 1 proven-family bunt, 7 probes; lopsided gate adopted (04:15Z) |
 | X0 | Book rules through constitution keys | live 05:37Z |
@@ -305,6 +305,12 @@ recorded for the next open; live verification uses the markets that trade around
   about even money after a 7% fee); weather-favorites' loss-rate bound is −0.21. The first family swing
   is about 19 days away at weather's real pace, if it never loses. Reviews launched: #242
   (adversarial), #236 + #234 (watchdog, point-in-time honesty, compute).
+
+- 06:40Z — **Deploy A's first hour:** the lab ran 63 batches (84 candidates), the poison row is blocked,
+  no step failed; 0 self-cross refusals and 0 X0 refusals (no real entry tried a market order, a
+  longshot or a crowded event); no band move. B-seats (#245) opened: S1-S4, L1 (its first pass
+  supersedes meriwether-h2d625d, 34 of 34 entries takers), the dust wind-down, `_trading_pending`; its
+  adversarial review launched.
 
 ## The scoreboard at T0
 
