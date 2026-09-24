@@ -525,6 +525,11 @@ def family_at_capacity(record: Mapping[str, Any] | None, rule: Mapping[str, Any]
                           min_markets=int(rule.get("capacity_min_markets", 5)))
 
 
+#: The candidates' columns graduation reads for every gate-passing program of a pass (`Lab._graduation_order`):
+#: all but the code.
+GRADUATION_COLUMNS = ("id, code_sha256, params, needs, niche, venue, horizon, origin, author, lineage, parents, idea, priority,"
+                      " created, status, evaluated, tape_id, error, eligible, gate, fitness, trades, trades_per_day, corr, cell, summary")
+
 #: A parent's own forward window in its breeding weight (`Lab._pick_parent`, E1, Sept 24, 2026): a window
 #: that wins doubles it, one that loses quarters it, none leaves it; within the lineage weight's bounds.
 FORWARD_BREEDING = (2.0, 0.25)
@@ -2177,7 +2182,7 @@ class Lab:
             if row["id"] in tried or not row["gate"]:
                 continue
             budget -= 1
-            out.append(self._graduate_one(row))
+            out.append(self._graduate_one(self._q("SELECT * FROM candidates WHERE id=?", (row["id"],))[0]))
         self._held = {"at": now_iso(self.house.clock), "counts": held}
         return out
 
@@ -2199,7 +2204,10 @@ class Lab:
             return (0 if forward > 0 else 2), -forward
 
         cells: dict[str, list[sqlite3.Row]] = {}
-        for row in self._q("SELECT * FROM candidates WHERE gate=1 AND status='evaluated' AND cell IS NOT NULL AND origin!='seed'"):
+        # Without the code (thousands of files a pass): `_twins` reads a program's digest by its hash, and
+        # `graduate` reads the whole row of the one it tries.
+        for row in self._q(f"SELECT {GRADUATION_COLUMNS} FROM candidates WHERE gate=1 AND status='evaluated' AND cell IS NOT NULL"
+                           " AND origin!='seed'"):
             cells.setdefault(row["cell"], []).append(row)
         out: list[sqlite3.Row] = []
         for elite in self.elites():
@@ -2251,19 +2259,26 @@ class Lab:
                         f"and has {mine}")
         return None
 
-    def _mechanism(self, code: str) -> str | None:
-        key = hashlib.sha256(str(code).encode("utf-8")).hexdigest()
+    def _mechanism(self, code: str | None, key: str | None = None, ident: str | None = None) -> str | None:
+        """`mechanism_digest` of a program, remembered by its code's SHA-256 (`key`, the candidates' own
+        `code_sha256`, or hashed here); a candidate row read without its code is read by `ident` once."""
+        key = key or hashlib.sha256(str(code or "").encode("utf-8")).hexdigest()
         if key not in self._digests:
-            if len(self._digests) >= 4096:
+            if code is None and ident is not None:
+                found = self._q("SELECT code FROM candidates WHERE id=?", (ident,))
+                code = found[0]["code"] if found else None
+            if len(self._digests) >= 16384:
                 self._digests.clear()
-            self._digests[key] = mechanism_digest(code)
+            self._digests[key] = mechanism_digest(code) if code is not None else None
         return self._digests[key]
 
     def _twins(self, row: Mapping[str, Any], cache: dict[str, Any] | None = None) -> list[str]:
         """The living agents of the candidate's desk whose current program is the candidate's beyond its
         parameters (`mechanism_digest`), its lineage's first: the programs it would only nudge. The desk's
         programs are read once a graduation pass (`cache`)."""
-        digest = self._mechanism(row["code"])
+        keys = row.keys() if hasattr(row, "keys") else ()
+        digest = self._mechanism(row["code"] if "code" in keys else None, key=row["code_sha256"] if "code_sha256" in keys else None,
+                                 ident=str(row["id"]))
         if digest is None:
             return []
         cache = {} if cache is None else cache
