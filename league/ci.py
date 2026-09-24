@@ -59,6 +59,8 @@ FORBIDDEN: tuple[str, ...] = (
     "league/history.py", "league/deep_replay.py",
     # The allocator decides who holds real money and how much (Sept 23, 2026): a money judge.
     "league/allocator.py",
+    # The mechanism ledger (Sept 24, 2026): the family records that decide probe, bunt and family swing.
+    "league/families.py",
     # The Kalshi shard funder moves the owner's collateral between exchange shards (Sept 23, 2026):
     # the one funds move the gateway allows, so a money mover.
     "league/shards.py",

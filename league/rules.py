@@ -122,20 +122,66 @@ or never swings at all.
         per_event = str(alloc.get("independent_settlements") or "trade") == "event"
         after = int(alloc.get("hysteresis_after_settled") or 0)
         event_share = float(alloc.get("position_share_event") or alloc["position_share"])
-        # Promotion on proof (the close-the-gaps run, Sept 24, 2026): what the agents read about it.
+        # Promotion on proof (the close-the-gaps run, Sept 24, 2026): what the agents read about it. The agent-level
+        # swing is a proven family's member's while `swing_requires_proven_family` says so (Deploy B's key).
+        swing_gate = (", for a PROVEN family's member only (a probe stays a probe\n  until its family is proven)"
+                      if alloc.get("swing_requires_proven_family") else "")
         counted = (" On Kalshi trades and settlements count ONCE PER EVENT: strikes stacked on one game are one\n"
                    "  bet, not three, and move you no faster." if per_event else "")
         lopsided = (" (a favourites record also\n  passes the loss-rate test: a run of small wins with no loss proves nothing yet)"
                     if proof.get("lopsided_gate") is True else "")
+        # The mechanism ledger (C1, Deploy B, Sept 24, 2026; league/families.py): what an event is worth, what a
+        # family is, what sizing on practice buys, and the family swing's numbers, all read from the constitution.
+        at_risk = str(proof.get("unit") or "account") == "at_risk"
+        measured = "what their events made per dollar put at risk" if at_risk else "their mean log growth an event"
+        if at_risk:
+            # Each event weighs what it put at risk against the member's mean on that book (review of #242).
+            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE. An event is measured per dollar it put at risk\n"
+                      "  and weighs what it put at risk against your usual size on that book: scaling every bet up or down\n"
+                      "  proves nothing faster, a big losing bet counts for its dollars, and a token size measures fees and fills\n"
+                      "  you will never pay trading real money: size a practice position the way your code would size it with\n"
+                      "  real money. What proves (or disproves) a family faster is MORE independent events. This is\n"
+                      "  information, never an order: your size is your code's.\n")
+        else:
+            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE: a conviction-sized practice record proves (or\n"
+                      "  disproves) your family faster than a token one. Information, never an order: your size is your code's.\n")
+        swing_rule = alloc.get("family_swing") if isinstance(alloc.get("family_swing"), dict) else None
+        family_swing_text = ""
+        if swing_rule:
+            start = float(swing_rule.get("start_multiple", 2))
+            favourites = " (the loss-rate test too, for favourites)" if proof.get("lopsided_gate") is True else ""
+            # The entry's looks and the approval's lapse (the main session's decisions on the review of #242).
+            first, every = int(swing_rule.get("min_real_settlements", 15)), int(swing_rule.get("entry_every", 1))
+            entry_at = float(swing_rule.get("entry_confidence", proof.get("confidence", 0.8)))
+            looks = (f"there and at every {every} more ({first}, {first + every}, {first + 2 * every}, ...)" if every > 1
+                     else "there and at every settlement after it")
+            family_swing_text = (
+                f"- THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches {first} independent\n"
+                f"  settlements, its entry is judged {looks}: on those first settlements,\n"
+                f"  with their lower bound at {entry_at:.0%} above zero{favourites}. If a look passes and the frontier\n"
+                "  auditor approves the entry on that record, the family SWINGS: every member on real money is staked\n"
+                f"  {start:g}x the bunt (${start * float(bunt['kalshi']):.0f} at Kalshi), doubled after every {swing_rule.get('doubling_every', 10)} further WINNING real\n"
+                f"  settlements while the whole real record's lower bound at {float(proof.get('confidence', 0.8)):.0%} stays above zero, up to Kelly on that\n"
+                f"  bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the whole family (shared by its members on real money), and held\n"
+                f"  where the family's fills at the bigger size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one.\n"
+                "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
+                "  and its next entry is audited again, as it is when a member of the family takes a new program. A\n"
+                "  swinging member's positions are the same share of its stake, and the real book holds it to its\n"
+                "  daily-loss line as it holds every swing.\n")
         proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
   Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
   settlements (one an event; practice at {float(proof.get('practice_weight', 0.5)):g} weight, real money at {float(proof.get('real_weight', 1)):g}) and the one-sided
-  {float(proof.get('confidence', 0.8)):.0%} lower bound on their mean log growth an event is above zero{lopsided}. A probe becomes a bunt the pass
+  {float(proof.get('confidence', 0.8)):.0%} lower bound on {measured} is above zero{lopsided}. A probe becomes a bunt the pass
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
-""" if alloc.get("probe_bunt_usd") else "")
+  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
+  foundry card starts a family of its own and proves itself from zero; your research children stay in
+  your family, whatever they change, and their trades add to its record (its maker and taker entries are
+  pooled apart: a child that makes the market where you took it builds the maker record, and the taker
+  record decides whether a real entry may take).
+{sizing}{family_swing_text}""" if alloc.get("probe_bunt_usd") else "")
         # The real book's entry rules and exits (Deploy A, Sept 24, 2026: X0 and D3 in league/book.py,
         # read through the constitution's allocator keys): what an agent on real money must know before
         # it sends an order, so a refusal is never a surprise.
@@ -180,8 +226,7 @@ or never swings at all.
 - The bands. PAPER (rung 1): trade forward on paper. BUNT (rung 2): E >= {alloc['bunt_at']} (paper up about
   {need - 1:.1%} on the whole purse) with {alloc['bunt_min_trades']} closed trades (or {alloc['bunt_min_settled']} settlements on Kalshi) puts you on REAL
   money at once, as a probe or a bunt (below): a position up to {event_share:.0%} of the stake on Kalshi, {float(alloc['position_share']):.0%} at
-  Alpaca.{counted} SWING (rung 3), for a PROVEN family's member only (a probe stays a probe
-  until its family is proven): E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
+  Alpaca.{counted} SWING (rung 3){swing_gate}: E >= {alloc['swing_at']}, W_real >= {alloc['swing_min_w_real']} and {alloc['swing_min_real_trades']} REAL closed trades; your first swing is audited by the
   frontier model; your stake is the bunt x min(E, {alloc['e_cap']})^{alloc['kappa']}, up to {float(alloc['max_share_of_venue']):.0%} of the venue, so it
   DOUBLES when your evidence doubles. STAR: the top {alloc['stars']} swings by real profit with W_real >= {alloc['star_min_w_real']}.
 {proof_text}{real_book_text}- Down is as fast as up. A bunt leaves below {float(alloc['bunt_at']) * float(alloc['hysteresis']):.4f}, a swing below {float(alloc['swing_at']) * float(alloc['hysteresis']):.4f} or W_real under

@@ -3096,7 +3096,10 @@ class House:
         if list(record.get("generation") or []) != list(generation):
             self._drop_audit(agent_id)
             return None
-        verdicts = list(self.ledger.iter(kinds="audit.verdict", agent=agent_id, after=int(record.get("since_seq") or 0)))
+        # A family swing's verdict (`family_swing`) is written against one member but is the family's, never this
+        # agent's own audit (review of #242, Sept 24, 2026).
+        verdicts = [e for e in self.ledger.iter(kinds="audit.verdict", agent=agent_id, after=int(record.get("since_seq") or 0))
+                    if not e.payload.get("family_swing")]
         if not verdicts:
             self._drop_audit(agent_id)
             return None
@@ -3134,7 +3137,8 @@ class House:
                           if e.seq == entered), None)
         if promotion is None or promotion.payload.get("decision") != "promote" or promotion.payload.get("audit_timing") != "after":
             return None
-        if any(not e.payload.get("error") for e in self.ledger.iter(kinds="audit.verdict", agent=agent.id, after=entered)):
+        if any(not e.payload.get("error") and not e.payload.get("family_swing")
+               for e in self.ledger.iter(kinds="audit.verdict", agent=agent.id, after=entered)):
             return None
         return dict(promotion.payload)
 
@@ -3283,8 +3287,9 @@ class House:
             if rung >= 1 and self.campaigns and not self.campaigns.allows_live(rung + 1):
                 self._promotion_status(agent, verdict, 'campaign', 'the live allocation window closed during the audit')
                 return
-            if rung == 2 and allocator_module.enabled() and self.allocator.tier(agent) != "bunt":
-                # Only a proven family's agent swings (Sept 24, 2026): a swing audit that finishes after its
+            if rung == 2 and allocator_module.enabled() and not self.allocator.swing_allowed(agent):
+                # Only a proven family's agent swings (Sept 24, 2026; the constitution's
+                # `allocator.swing_requires_proven_family` since Deploy B): a swing audit that finishes after its
                 # family's record stopped being proven does not commit (`Allocator.family` never raises).
                 self._promotion_status(agent, verdict, 'family', "its family's pooled record is not proven: "
                                                                   "only a proven family's agent swings")
@@ -3663,7 +3668,10 @@ class House:
         rules = self.game.get("audit") or {}
         if self._audit_charges_agent() and self.economy.balance(agent.id) < Decimal(str(rules.get("min_credits_usd", "0.60"))):
             return {'stage': 'audit_credits', 'reason': 'the agent cannot cover its audit and operating credit floor'}
-        last = self.ledger.last("audit.verdict", agent=agent.id)
+        # The agent's own last verdict: a family swing's (`family_swing`, Deploy B) is written against one member of
+        # the family but judged the family's stake, and never starts this agent's cooldown (review of #242).
+        last = next((e for e in reversed(self.ledger.read(kinds="audit.verdict", agent=agent.id, limit=200, newest=True))
+                     if not e.payload.get("family_swing")), None)
         if last is None:
             return None
         current = getattr(self.auditor, 'policy_digest', None)
@@ -5252,7 +5260,7 @@ class House:
                                # P1 (Sept 24, 2026): your family's pooled record decides whether real money
                                # starts as a probe or a bunt (`allocator.family_proven`).
                                'your_family': {k: (self.allocator.board().get('agents') or {}).get(agent.id, {}).get(k)
-                                               for k in ('family', 'family_state', 'family_bound', 'family_n')},
+                                               for k in ('family', 'family_state', 'family_bound', 'family_n', 'capacity', 'stake_limit')},
                                'note': 'While enabled, the paper screen and the micro bound above no longer promote: bands and '
                                        'stakes follow E = W_paper^paper_weight x W_real at every mark pass.'}
                               if allocator_module.enabled() else None),
