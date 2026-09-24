@@ -459,6 +459,19 @@ recorded for the next open; live verification uses the markets that trade around
 - 08:57Z — **The board shows the honest bound** (`c-board/honest-bound`, 82855e9; C-site's finding):
   `family_bound` was the t bound alone (weather favourites +0.0033 against its proof's -0.2112); a
   test fails without the fix. `allocator.py`: rides Deploy C.
+- 09:08Z — **C-tools follow-ups done** on #258 (`a8e8178`, CI green on the first attempt; merged with
+  Deploy B's main). X2 by the measured settle lag: a market whose expected expiration lies 48 h or more
+  after its close is judged by its close plus its series' p95 settle lag (last 40 settled markets, 20
+  needed, only settlements known before the day: no look-ahead in replay), never before the close nor
+  after the deadline; one function for the book, the House, the live view and replay. Measured: diesel
+  daily p95 5.86 h over 347 settlements, weekly 7.79 h over 51: all 71 diesel refusals of the T0 window
+  and the 8 diesel-weekly ones would have been admitted (7-40 h out instead of 171-202 h); the share and
+  token weeklies (7-9 settlements) stay refused; 74 of 1,683 cached series change answer. The box's
+  lags start empty, so diesel stays refused until its tapes record 20 settled markets. Pauses: no
+  promotion while paused; after 24 h paused a real stake falls toward the probe by free cash; held buys
+  are not activity; a resident paused past its grace is displaceable. Asked next: the horizon's answer
+  moves into a protected module (the book is protected but read `tapes.py`, which an updater release
+  could change), and the seat report counts a long pause as holding no evidence.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
