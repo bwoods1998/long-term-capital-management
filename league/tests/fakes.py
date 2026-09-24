@@ -174,6 +174,23 @@ class FakeBroker:
         return []
 
 
+#: The real book's entry rules (X0, Sept 24, 2026), constitution keys the money owner adds.
+REAL_ENTRY_KEYS = ("longshot_floor_real", "real_entry_liquidity", "max_event_share")
+
+
+def without_real_entry_rules():
+    """The allocator's constitution without the real book's entry rules (X0: a real Kalshi entry
+    post-only unless its family's taker record is positive, a 30-cent longshot floor, 25% of a stake
+    in one event), for a test about something else that enters a real Kalshi position at market, or
+    below 30 cents, or on a small stake. `league/tests/test_real_entry_rules.py` patches them in."""
+    from unittest.mock import patch
+
+    from league.constitution import CONSTITUTION
+
+    kept = {key: value for key, value in CONSTITUTION["allocator"].items() if key not in REAL_ENTRY_KEYS}
+    return patch.dict(CONSTITUTION["allocator"], kept, clear=True)
+
+
 def old_ladder():
     """The ladder as it stood before capital was the ladder (Sept 23, 2026): the allocator switched
     off, exactly as its rollback (`allocator.enabled: False`) would. For the tests of the old rungs'

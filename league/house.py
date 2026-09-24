@@ -290,6 +290,10 @@ class House:
                 # books, so a real book reads them lazily.
                 band_of=(lambda agent_id: self.allocator.band_of(agent_id)) if real else None,
                 halt_basis_usd=(lambda venue=family_of(name): self.allocator.halt_basis_usd(venue)) if real else None,
+                # X0 (Sept 24, 2026): `allocator.real_entry_liquidity` holds a real event entry to a post-only
+                # limit unless the agent's family's pooled taker record is positive; the allocator keeps that
+                # record (`Allocator.family_taker`). An allocator without it answers None: not measured.
+                family_taker=(lambda agent_id: getattr(self.allocator, "family_taker", lambda _agent: None)(agent_id)) if real else None,
             )
         self._state_path = self.root / "house.json"
         self._state = self._load_state()

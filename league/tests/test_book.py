@@ -10,7 +10,7 @@ from league.book import Book, BookError, Intent, Limits, allocate, market_key, y
 from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.ledger import HOUSE, Ledger
-from league.tests.fakes import Clock, FakeBroker, iso
+from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
 
 D = Decimal
 BTC = Instrument("crypto", "BTC-USD", "alpaca-paper", market_id="BTC/USD")
@@ -28,6 +28,11 @@ class BookCase(unittest.TestCase):
     cash = "100000"
 
     def setUp(self):
+        # These tests are about the book, not the real book's entry rules (X0), which a test opts into.
+        # Undone by tearDown, which the cases built by hand call, and by a cleanup should setUp fail.
+        self._entry_rules = without_real_entry_rules()
+        self._entry_rules.start()
+        self.addCleanup(self._restore_entry_rules)
         self.dir = tempfile.TemporaryDirectory()
         self.clock = Clock()
         self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
@@ -38,6 +43,12 @@ class BookCase(unittest.TestCase):
     def tearDown(self):
         self.ledger.close()
         self.dir.cleanup()
+        self._restore_entry_rules()
+
+    def _restore_entry_rules(self):
+        patcher, self._entry_rules = getattr(self, "_entry_rules", None), None
+        if patcher is not None:
+            patcher.stop()
 
     def new_book(self):
         return Book(self.venue, self.broker, self.ledger, fees=Fees(self.family), real_money=self.real, clock=self.clock)
@@ -288,17 +299,33 @@ class PaperBookTest(BookCase):
         self.broker.set_quote(BTC, "80000", "80010")
         self.assertNotIn("day order", " ".join(self.book.check(crypto, self.broker.quote(BTC), iso(self.clock))))
 
-    def test_a_resting_order_blocks_an_order_that_would_hit_it(self):
+    def test_a_resting_order_blocks_an_entry_that_would_hit_it(self):
+        self.seat("maker")
+        self.seat("taker")
+        self.broker.set_quote(SPY, "50.00", "50.02")
+        self.book.submit([self.intent("maker", SPY, "buy", "1")])
+        self.assertEqual(self.book.submit([self.intent("maker", SPY, "sell", "1", order_type="limit", limit_price="50.02")])[0].status, "resting")
+        hit = self.book.submit([self.intent("taker", SPY, "buy", "1")])[0]
+        self.assertEqual(hit.status, "refused")
+        self.assertIn("own resting order", hit.detail)
+        below = self.book.submit([self.intent("taker", SPY, "buy", "1", order_type="limit", limit_price="49.99")])[0]
+        self.assertEqual(below.status, "resting")
+
+    def test_an_exit_that_would_hit_a_resting_bid_is_crossed_inside_the_house(self):
+        """D3 (Sept 24, 2026): this sell was refused ("own resting order") and its holder waited; the
+        bid is now cancelled at the venue and the two are crossed at its price (test_exit_crossing)."""
+        self.book.reconcile()
         self.seat("maker")
         self.seat("taker")
         self.broker.set_quote(SPY, "50.00", "50.02")
         self.book.submit([self.intent("taker", SPY, "buy", "1")])
         self.assertEqual(self.book.submit([self.intent("maker", SPY, "buy", "1", order_type="limit", limit_price="50.00")])[0].status, "resting")
         hit = self.book.submit([self.intent("taker", SPY, "sell", "1")])[0]
-        self.assertEqual(hit.status, "refused")
-        self.assertIn("own resting order", hit.detail)
-        above = self.book.submit([self.intent("taker", SPY, "sell", "1", order_type="limit", limit_price="50.05")])[0]
-        self.assertEqual(above.status, "resting")
+        self.assertEqual(hit.status, "crossed", hit.detail)
+        self.assertEqual(self.book.account("taker").holdings, {})
+        self.assertEqual(self.book.account("maker").holdings[SPY.key].quantity, D("1"))
+        self.assertEqual(self.book.account("maker").cash, D("150"))
+        self.assertTrue(self.book.reconcile().ok)
 
     def test_a_resting_fill_arrives_on_a_later_poll_as_a_maker(self):
         self.book.reconcile()  # the House opens every book's baseline before anything trades
