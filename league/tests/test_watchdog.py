@@ -908,6 +908,81 @@ class InheritedFreeze(ReadHealthTest):
         self.assertTrue(watch().ok)
 
 
+class FrozenByThePreviousProcess(ReadHealthTest):
+    """Sept 24, 2026, 15:37-15:39Z: Deploy C was rolled back on a freeze the OLD House recorded in its
+    last tick, 30 s before the promotion, in a health.json the new House had not yet replaced. The watch
+    after a promotion counts a frozen book only in a health.json dated at or after the House's first
+    `ops.started` since the promotion; a canary and `status` still count every freeze."""
+
+    def test_a_freeze_the_old_process_wrote_before_the_house_restarted_is_not_the_releases(self):
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269", age=190)
+        promoted = self.clock() - 30
+        waiting = self.read(since_seq=since, inherited_before=promoted)
+        self.assertTrue(waiting.ok, waiting.reasons)  # no ops.started yet: the old process's file
+        self.assertEqual(waiting.detail["frozen_by_previous_process"], ["alpaca-paper"])
+        ledger.append("ops.started", {"books": []})  # the new House starts; its first tick is not done
+        started = self.read(since_seq=since, inherited_before=promoted)
+        self.assertTrue(started.ok, started.reasons)
+        self.assertEqual(started.detail["frozen_by_previous_process"], ["alpaca-paper"])
+
+    def test_a_freeze_in_a_health_file_the_new_house_wrote_is_the_releases(self):
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        ledger.append("ops.started", {"books": []})
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269")  # dated now: after the start
+        health = self.read(since_seq=since, inherited_before=self.clock() - 60)
+        self.assertEqual(health.reasons, ("the alpaca-paper book is frozen: cash differs by -0.0269",))
+        self.assertNotIn("frozen_by_previous_process", health.detail)
+
+    def test_a_canary_and_a_reading_without_the_ledger_still_count_it(self):
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269", age=190)
+        self.assertFalse(self.read().ok)  # a canary: no promotion, nothing inherited
+        self.assertFalse(self.read(since_seq=0, inherited_before=self.clock() - 30).ok)  # no ledger: nobody can say whose file it is
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        self.assertFalse(self.read(since_seq=since).ok)  # `status`: no promotion to measure from
+
+    def test_the_old_file_still_goes_stale(self):
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        ledger.append("ops.started", {"books": []})
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269", age=400)
+        health = self.read(since_seq=since, inherited_before=self.clock() - 30, max_age_seconds=300)
+        self.assertFalse(health.ok)
+        self.assertEqual(len(health.reasons), 1)
+        self.assertIn("health.json is 400s old", health.reasons[0])
+
+    def test_the_watch_replays_the_rollback_of_deploy_c(self):
+        from league.watchdog import HouseHealth
+
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})  # the old House, long before
+        self.clock.advance(3600)
+        write_health(self.root, self.clock, frozen=None, seq=ledger.head()[0], age=160)
+        watch = HouseHealth(self.root, clock=self.clock, max_age_seconds=300, stall_seconds=450, restart_within=None)
+        self.assertTrue(watch().ok)  # the reading before the promotion: nothing frozen, nothing inherited
+        self.assertEqual(watch.inherited_frozen, ())
+        # The old House's last tick, begun before the promotion, froze the practice book and wrote its file.
+        write_health(self.root, self.clock, frozen="cash differs by -0.0269", seq=ledger.head()[0], age=160)
+        self.clock.advance(30)
+        first = watch()
+        self.assertTrue(first.ok, first.reasons)
+        self.assertEqual(first.detail["frozen_by_previous_process"], ["alpaca-paper"])
+        ledger.append("ops.started", {"books": []})  # the new House starts; its first tick is not done
+        self.clock.advance(30)
+        self.assertTrue(watch().ok, "still the old process's file")
+        self.clock.advance(30)
+        write_health(self.root, self.clock, frozen=None, seq=ledger.head()[0])  # the new House's first tick
+        self.assertTrue(watch().ok)
+        self.clock.advance(30)
+        write_health(self.root, self.clock, frozen="cash differs by -0.0328", seq=ledger.head()[0] + 1)
+        bad = watch()
+        self.assertFalse(bad.ok, "a freeze under the new release is its own")
+        self.assertEqual(bad.reasons, ("the alpaca-paper book is frozen: cash differs by -0.0328",))
+
+
 class HealthFailuresAndInheritedConditions(ReadHealthTest):
     """L3 (Sept 24, 2026). health.json `failures` (today: "the lab evaluated nothing in the last hour
     while its queue is not empty") is a bad reading, and so is an escalated warning. What the

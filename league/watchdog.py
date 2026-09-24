@@ -197,6 +197,9 @@ def read_health(  # noqa: PLR0913 - one reading, one place
     """
     root = Path(root)
     reasons: list[str] = []
+    frozen_books: list[tuple[str, str]] = []  # (book, reason), placed at `frozen_at` below
+    frozen_at = 0
+    restarted_at: float | None = None  # the first `ops.started` after `since_seq`, when the ledger has one
     stopped = (root / "STOP").exists()
     detail: dict[str, Any] = {"root": str(root), "read_at": now, "stopped": stopped}
 
@@ -237,6 +240,7 @@ def read_health(  # noqa: PLR0913 - one reading, one place
         # watch after a promotion inherits anything; a canary runs a House of its own, so every
         # book it freezes is its own doing and `inherited_frozen` is left None.
         inherited = set(inherited_frozen or ())
+        frozen_at = len(reasons)  # where the freezes go once the ledger says whose process wrote them
         for name, book in sorted(books.items()):
             frozen = book.get("frozen") if isinstance(book, dict) else None
             if not frozen:
@@ -244,7 +248,7 @@ def read_health(  # noqa: PLR0913 - one reading, one place
             if name in inherited:
                 detail.setdefault("frozen_before", []).append(str(name))
             else:
-                reasons.append(f"the {name} book is frozen: {str(frozen)[:200]}")
+                frozen_books.append((str(name), f"the {name} book is frozen: {str(frozen)[:200]}"))
         failures = raw.get("failures") if isinstance(raw.get("failures"), list) else []
         for failure in failures:
             if not isinstance(failure, dict):
@@ -283,6 +287,9 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                 if since_seq is not None:
                     detail["since_seq"] = int(since_seq)
                     detail["started_since"] = int(db.execute("SELECT COUNT(*) FROM ledger WHERE kind = 'ops.started' AND seq > ?", (int(since_seq),)).fetchone()[0])
+                    first_start = db.execute("SELECT at FROM ledger WHERE kind = 'ops.started' AND seq > ? ORDER BY seq ASC LIMIT 1",
+                                             (int(since_seq),)).fetchone()
+                    restarted_at = epoch(first_start[0]) if first_start else None
                     errors, inherited_alerts = [], 0
                     for row_seq, payload in db.execute("SELECT seq, payload FROM ledger WHERE kind = 'ops.alert' AND seq > ? ORDER BY seq ASC", (int(since_seq),)):
                         try:
@@ -321,6 +328,27 @@ def read_health(  # noqa: PLR0913 - one reading, one place
             reasons.append(f"the ledger cannot be read ({type(exc).__name__}: {str(exc)[:160]})")
     elif verify:
         reasons.append("there is no ledger to verify")
+    if frozen_books:
+        # A freeze in a health.json the PREVIOUS process wrote is not the release's doing either
+        # (Sept 24, 2026, 15:37-15:39Z): Deploy C was promoted at 15:37:57Z and rolled back at
+        # 15:39:27Z on "reading 3: the alpaca-paper book is frozen: cash differs by -0.0269". The
+        # freeze began at 15:37:27Z in the OLD House's last tick, which wrote its health (dated
+        # 15:35:14Z, the tick's start) after the reading taken before the promotion; the new House
+        # had not finished a tick, so all three readings read the old process's file (193-253 s
+        # old) and judged the new release on it. The watch after a promotion (`inherited_before`
+        # set, the ledger read from `since_seq`) therefore counts a frozen book only in a
+        # health.json dated at or after the House's first `ops.started` since the promotion: before
+        # it, the file is the old process's, reported in `frozen_by_previous_process`. Nothing else
+        # softens: a House that never restarts is caught by `HouseHealth.restart_within`, a file
+        # that goes on being the old one by `max_age_seconds`, and a ledger that cannot say when the
+        # House started leaves the freeze counted.
+        health_at = epoch(raw.get("at")) if isinstance(raw, dict) else None
+        previous_process = (inherited_before is not None and since_seq is not None and health_at is not None
+                            and "started_since" in detail and (restarted_at is None or health_at < restarted_at))
+        if previous_process:
+            detail["frozen_by_previous_process"] = [name for name, _ in frozen_books]
+        else:
+            reasons[frozen_at:frozen_at] = [reason for _, reason in frozen_books]
     return Health(not reasons, tuple(reasons), detail)
 
 
