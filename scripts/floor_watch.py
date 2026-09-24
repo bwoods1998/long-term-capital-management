@@ -169,6 +169,15 @@ if seats:
     seat_block['seats_holding_none'] = {'count': none.get('count'), 'ids': (none.get('ids') or [])[:12]} if none else None
     seat_block['evidence_clocks'] = (seats.get('evidence_clocks') or {}).get('hours')
     seat_block['refused'] = {c: str((r or {}).get('why') or '')[:100] for c, r in (seats.get('last_refused_birth') or {}).items()} or None
+    # R2 (Sept 24, 2026): the longest wait and the rule that holds it, the desks where newcomers wait over two hours,
+    # the waiters that left the queue in the last day (the search closed their desk, or their forward window lost),
+    # and the population the league may grow to on Sail's runway.
+    seat_block['longest_wait'] = seats.get('longest_wait')
+    seat_block['over_two_hours'] = {d: {k: r.get(k) for k in ('count', 'longest_hours', 'rule')}
+                                    for d, r in (seats.get('over_two_hours') or {}).items()} or None
+    seat_block['expired'] = seats.get('expired')
+    pop = seats.get('population') or {}
+    seat_block['population'] = {k: pop.get(k) for k in ('max_population', 'ceiling', 'runway_days', 'rule')} if pop else None
 # The House-sent sales the venue or the book refused three times in a row (`WIND_DOWN_REFUSALS`): not sent again
 # until the holding changes or a day has passed (house.json `wind_down_refusals`).
 stopped = []
@@ -283,6 +292,17 @@ def render(box: dict, site: dict, gateway: dict) -> str:
         lines.append(f"## seats waiters {seats.get('waiters')}  displaceable {seats.get('displaceable')}  holding none "
                      f"{none.get('count', '-')} {none.get('ids') or ''}  clocks {seats.get('evidence_clocks')}"
                      f"  refused {seats.get('refused') or '-'}")
+        # R2 (Sept 24, 2026): no newcomer waits over two hours, or the watch says where and why.
+        longest = seats.get("longest_wait") or {}
+        if longest:
+            lines.append(f"   longest wait {longest.get('hours')} h: {longest.get('class')} {longest.get('id')} for {longest.get('desk') or '?'}"
+                         f" -- {longest.get('reason') or 'under two hours or not yet read by the hourly watch'}")
+        for desk, row in (seats.get("over_two_hours") or {}).items():
+            lines.append(f"   over 2 h on {desk}: {row.get('count')} (longest {row.get('longest_hours')} h): {row.get('rule')}")
+        expired, pop = seats.get("expired") or {}, seats.get("population") or {}
+        if expired or pop:
+            lines.append(f"   left the queue in a day {expired.get('last_day', 0)} {expired.get('by_rule') or ''}"
+                         f"  population {pop.get('max_population', '-')} of {pop.get('ceiling', '-')}: {pop.get('rule') or '-'}")
     for row in (box.get("blocks") or {}).get("wind_down_stopped") or []:
         lines.append("  wind-down stopped " + row)
     if box.get("blocks"):
