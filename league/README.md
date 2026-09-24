@@ -101,7 +101,7 @@ status is exposed in health and agent research context; qualification is distinc
 | `feeds.py` | `FeedRecorder`: the live feeds the House records for its strategies -- ESPN scoreboards of the leagues the sports desks trade (every 60 s while a game is on or about to start, else every 15 minutes, never a past date) and perpetual funding and open interest for the crypto desks' coins (every 5 minutes) -- in `feeds.sqlite` with the House's receive time: unchanged content stored once, a failure a failed poll, a `data.coverage` row (`asset: feed`) an hour. `NEEDS["feeds"]` puts the latest rows in `ctx["feeds"]`; a replay shows them point in time and is refused as unsupported input (not a trial) until they span the replay gate's `min_blocks`. |
 | `history.py` | The deep-history store (`<root>/history/history.sqlite`) and `python -m league.history ingest|coverage`: Alpaca bars since 2016 (raw and adjusted), quote probes and trade windows, fetched in resumable chunks through the gateway; unavailable (the venue had nothing) is kept apart from unfetched (a gap in the store). Each finished run becomes a `data.coverage` ledger row. |
 | `deep_replay.py` | Tapes from the history store, built by the same `AlpacaData` code as live ones; the development window before the sealed holdout; `HoldoutSeal` (one evaluation per version, a budget per line, `holdout.access` rows, coarse numbers only). |
-| `tapes.py` | `AlpacaData` and `KalshiData`: recorded tapes for replay and live snapshots of the same shape. A bar is stamped with the moment it closed; a Kalshi row carries only what was on the screen; a capped board is a seeded draw that never looks at volume or results. `resolution(row, close)` is when a Kalshi market is expected to pay and what that is judged by: its scheduled (expected) expiration where the venue gives one, its close otherwise, never the latest date it may expire (X2, Sept 24, 2026: the daily diesel print lists no scheduled expiration, and the parser's fallback to Kalshi's deprecated `expiration_time`, a week on, refused 71 entries as "expected to resolve in 171-185 hours"). The live view's `hours_to_resolve`, a replay tape's and the book's horizon rule (`KalshiData.resolves_at`, `resolution_of`) read it alike; `ltcm/data/kalshi.py` keeps `expected_expiration_time` apart for it. |
+| `tapes.py` | `AlpacaData` and `KalshiData`: recorded tapes for replay and live snapshots of the same shape. A bar is stamped with the moment it closed; a Kalshi row carries only what was on the screen; a capped board is a seeded draw that never looks at volume or results. |
 | `paper.py` | `KalshiShadowBroker`: a simulated Kalshi account over live quotes. Holds no credential and sends nothing. State in `kalshi-shadow.json`. |
 | `sim.py` | `SimBroker`: a simulated Alpaca account that behaves as the paper venue was measured to. A canary House trades on it, never on the shared paper account. |
 | `economy.py` | `Economy`: balances folded from `credit.*` rows; `grant`, `charge` (never refused: the compute is already spent), `transfer`, `shares`/`payout` (a quarter as niche floors, three quarters won on growth SQUARED x root active blocks x the rung's weight; before anyone is profitable the won share goes to the least-bad TRADER, never split evenly), `can_fork`, `box_cost`. `load_game` and `check_bounds` read `game.json`. |
@@ -112,7 +112,7 @@ status is exposed in health and agent research context; qualification is distinc
 | `runner.py` | Runs one `decide` (or reads `NEEDS`) inside the box: 5 second limit, strategy prints discarded, one `DECIDE-RESULT <token>` line, then `os._exit`. |
 | `safety.py` | `check_code`: the import whitelist and the banned constructs (no underscore attributes, no attribute assignment, no `eval`/`exec`/`open`/`getattr`). Ported from the first run's Foundry, where it was hardened against real attempts. Imports nothing from the league. |
 | `commons.py` | `Commons`: web search (Sail's search API, Google News RSS as fallback, $0.01 charged per query), the research library, the tool-request queue (ordered by demand; unresolved and blocked engineering requests remain visible until explicitly resolved), the playbook. All of it is ledger rows. |
-| `researcher.py` | `Researcher`: a cheap model's tool loop for one agent (a Sail model, or GPT-6 Luna through the gateway for the share of sessions `fast_research.ResearchRouter` sends there), every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. Since Sept 24, 2026 (X1) an agent can hold and size down its deployed strategy without a new agent: `pause_entries`, `resume_entries` and `edit_params` only record a request (`agent.research`, tool `control`, status `requested`, id `control-request:<session>:<n>`); `edit_params` first has the House replay the edit (`House._edit_replay`: numeric PARAMS `parameters.inspect` lists as mutable, inside their bounds, on a book of half the practice stake and caps, judged by the replay gate with the look in the deflation, no `eval.trial`, never the holdout, one a day passed or not). The House applies the requests when the pass ends (`House._apply_controls`). |
+| `researcher.py` | `Researcher`: a cheap model's tool loop for one agent (a Sail model, or GPT-6 Luna through the gateway for the share of sessions `fast_research.ResearchRouter` sends there), every token and tool call charged to that agent. Its `replay` tool is a counted trial. A passing candidate is adopted on rung 0 and forked above it. |
 | `rules.py` | `rules_text(game)`: what every agent is told, generated from the constitution and `game.json` so it cannot drift from what is enforced. |
 | `jev.py` | `Sensor`: Jev (TypeSafe jev-1.13.0 through the gateway) as a cheap yes/no sensor. Answers are cached by the caller's key, batched 16 questions a request, capped per UTC day (dollars, calls, calls per purpose) before any call, and an unconfirmed call is counted at the worst case. After a failure a breaker opens and callers decide without it. Labels carry no order, promotion, spending or merge authority. |
 | `sensors.py` | `JevFloor`, the House's one hook for the Jev work below (`config.json` `jev`): `research_due` (from `House._gate`), `tick` (inactivity sweep; triage, links and exposure as background jobs while open for business) and `health` (`health.json` `jev`). |
@@ -192,8 +192,17 @@ status is exposed in health and agent research context; qualification is distinc
    `Registry.entries_paused`) has every buy its code sends held before sizing: counted as `held` on
    `agent.woke`, never a `book.refused` row (which would pull a research pass forward each wake),
    and its resting buys that are its alone are cancelled (`_cancel_paused_entries`). Its sells,
-   cancels and settlements go on. A Kalshi entry past the horizon is refused by the House before the
-   book, saying whether it was judged by the market's scheduled expiration or its close (X2).
+   cancels and settlements go on.
+   **The horizon's basis (X2, Sept 24, 2026).** `tapes.resolution(row, close)` is when a Kalshi
+   market is expected to pay and what that is judged by: its scheduled (expected) expiration where
+   the venue gives one, its close otherwise, never the latest date it may expire (the daily diesel
+   print lists no scheduled expiration, and the parser's fallback to Kalshi's deprecated
+   `expiration_time`, a week on, refused 71 entries as "expected to resolve in 171-185 hours";
+   `ltcm/data/kalshi.py` now keeps `expected_expiration_time` apart). The live view's
+   `hours_to_resolve`, a replay tape's and the book's horizon rule (`KalshiData.resolves_at`,
+   `resolution_of`) read it alike. A Kalshi entry past the horizon is refused by the House before
+   the book (`_horizon_refusal`), saying which it was judged by; what it cannot look up it leaves
+   to the book.
 4. **Submit one batch per book**, so opposite market orders on one instrument net inside the House.
 5. **Every `mark_every_seconds` (300), per book:** poll, mark every account, reconcile to the venue
    (a mismatch is an error alert and freezes new entries). Then judge each living agent on that
@@ -245,8 +254,14 @@ status is exposed in health and agent research context; qualification is distinc
    fork. A failed candidate that at least trades can replace an empty paper strategy after ten
    barren wakes. A later failed replay does not discard an earlier passing candidate. Research
    that finishes after retirement or a code change is recorded without changing that agent.
-   After any candidate, the pass's entry controls are applied (`_apply_controls`, X1, Sept 24,
-   2026): each an `agent.strategy` row restating the strategy in force with `control`
+   **Entry controls (X1, Sept 24, 2026).** The researcher's `pause_entries`, `resume_entries` and
+   `edit_params` only record a request (`agent.research`, tool `control`, status `requested`, id
+   `control-request:<session>:<n>`); `edit_params` first has the House replay the edit
+   (`_edit_replay`: numeric PARAMS `parameters.inspect` lists as mutable, inside their bounds, on a
+   book of half the practice stake and caps, judged by the replay gate with the look in the
+   deflation, no `eval.trial`, never the holdout, one a day passed or not; an `edit_replay` row).
+   After any candidate, the pass's entry controls are applied (`_apply_controls`): each an
+   `agent.strategy` row restating the strategy in force with `control`
    (`pause_entries`, `resume_entries` or `edit_params`), `was`, the agent's `note` and the
    `reason` carried from the row before (so `hypotheses._mechanism` still reads the strategy's).
    None is made while an audit of the agent runs or is owed, or while its latest audit is a veto:
