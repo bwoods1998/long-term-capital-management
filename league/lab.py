@@ -994,7 +994,14 @@ class Lab:
         """(lab tape id, search tape) for these NEEDS: the House's own tape for them, with the same
         input checks its replay makes, never one that reaches the sealed holdout, cut to its first
         `search_fraction`. Keyed by `tape_key` (Sept 23, 2026): a Luna child that differs from its
-        parent only in `style` or `parameter_rules` is the parent's tape, not a build of its own."""
+        parent only in `style` or `parameter_rules` is the parent's tape, not a build of its own.
+
+        A tape with no steps is unsupported input (D1, Sept 24, 2026), kept for the hour like any
+        tape that failed: nothing was recorded in its window, so there is nothing to search. The
+        history store holds ADA/USD only from 2026-02-01, so an hourly development window
+        (2025-09-12..2025-11-14) of ADA/USD alone is fetched and empty; this function read the
+        cut's first step outside its guard, and one queued Luna child asking for ADA/USD alone
+        failed every step for over two hours with an IndexError."""
         key = tape_key(needs)
         hit = self._tapes.get(key)
         if hit is not None and self._now() - hit[0] < 6 * 3600:  # the House rebuilds its own tapes daily
@@ -1032,6 +1039,14 @@ class Lab:
             message = f"{type(exc).__name__}: {str(exc)[:200]}"
             self._tape_errors[key] = (self._now(), message)
             raise LabError(message) from None
+        if not tape.get("steps"):
+            message = (f"unsupported input: the House's tape for these NEEDS has no steps ({str(tape_id)[:120]}): "
+                       "nothing was recorded in its window")
+            self._tape_errors[key] = (self._now(), message)
+            if tape_id not in cached:
+                with house._tape_lock:
+                    house._tapes.pop(tape_id, None)
+            raise LabError(message)
         cut = search_tape(tape, float(self.settings["search_fraction"]))
         if tape_id not in cached:
             # A tape only the lab asked for is not kept in the House's own cache (which keeps one
