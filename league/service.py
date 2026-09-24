@@ -325,7 +325,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         pace = house.game.get("merton") or {}
         house.merton = Merton(frontier, GatewayForge(gateway_url, token), house.ledger, evidence=evidence_from(house),
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
-                            pace=house.frontier_pace, backoff_max=pace.get("backoff_max"))
+                            pace=house.frontier_pace, backoff_max=pace.get("backoff_max"),
+                            # Sept 24, 2026 (L2): these roles wait while the floor's 24-hour real P&L is not positive.
+                            paused_until_profit=pace.get("paused_until_profit"))
     if house.merton is not None:
         # Always built with Merton: switched off in league/engineer.json it still reports (free),
         # and buys nothing.
