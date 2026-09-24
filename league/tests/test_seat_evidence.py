@@ -171,13 +171,18 @@ class TheEvidenceClock(EvidenceCase):
             self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=Newcomer(forward=0.0005)),
                               "a trader short of its record keeps its seat against an evidenced newcomer (`_trading_pending` stands)")
         with patch.object(self.house, "_resident_forward", return_value=None):
-            self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)),
-                              "no forward record of its own yet: nothing to compare, so it keeps its seat")
+            with patch.object(self.house, "_forward_scorable", return_value=True):
+                self.assertIsNone(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)),
+                                  "no forward record of its own YET: nothing to compare, so it keeps its seat")
+            with patch.object(self.house, "_forward_scorable", return_value=False):
+                self.assertEqual(self.house._weakest(self.rules, newcomer=Newcomer(forward=0.01)).id, trader.id,
+                                 "no record it could ever have (the lab never scores it): judged as before, never kept for good")
         two = self.seated("two")
         self.buy(two)
         self.buy(two)
         self.clock.advance(self.grace + 1)
-        self.assertEqual(self.house._weakest(self.rules).id, two.id, "two fills: the forward rule does not apply")
+        with patch.object(self.house, "_forward_scorable", return_value=True):  # the trader waits for its record
+            self.assertEqual(self.house._weakest(self.rules).id, two.id, "two fills: the forward rule does not apply")
 
     def test_a_proven_familys_resident_is_never_displaced_by_an_unproven_newcomer(self):
         trader = self.seated("trader")

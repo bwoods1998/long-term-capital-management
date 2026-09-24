@@ -4047,7 +4047,9 @@ class House:
         - a resident with `FORWARD_RULE_FILLS` (3) fills of its own since its program's opportunity is
           displaced only by a newcomer whose forward score beats the resident's own forward record
           (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
-          own there is nothing to compare, and it keeps its seat;
+          own YET there is nothing to compare, and it keeps its seat -- but a trader the lab can never
+          score (`Lab.can_score`: an options or unreplayed desk, a blocked program) is judged as before,
+          or its desk's waiters would starve for good (the review of #245);
         - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
           displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
         - never-traded residents past their grace still go first, then the members of a family whose
@@ -4193,9 +4195,13 @@ class House:
             if not newcomer_proven and (has_traded or not past_grace) and self._family_proven(agent.family, agent.venue):
                 continue  # S1: a proven family's resident is never displaced by an unproven newcomer
             if fills >= FORWARD_RULE_FILLS:
-                # S1: a trader is displaced only by a newcomer whose forward score beats its own record.
+                # S1: a trader is displaced only by a newcomer whose forward score beats its own record -- while it
+                # has one, or the lab can still give it one (`_forward_scorable`). A trader the lab never scores (an
+                # options or unreplayed desk, a blocked program) is judged as before: no record could ever be
+                # compared, and keeping its seat for that would starve its desk's waiters for good (review of #245).
                 mine = self._resident_forward(agent)
-                if newcomer.forward is None or mine is None or not newcomer.forward > mine:
+                if (mine is not None or self._forward_scorable(agent)) \
+                        and (newcomer.forward is None or mine is None or not newcomer.forward > mine):
                     continue
             blocks, growth = pooled.get(agent.family, (0, 0.0))
             losing = blocks >= losing_blocks and growth <= -1e-9  # `_losing_family`'s line, read without its alert
@@ -4278,6 +4284,17 @@ class House:
             return reader(agent, ranked=ranked)
         except Exception:  # noqa: BLE001 - the lab's store is its own; no record is no record
             return None
+
+    def _forward_scorable(self, agent: Agent) -> bool:
+        """Whether the lab's forward windows can ever give a resident's current program a record (`Lab.can_score`).
+        False with no lab. A read that fails counts as scorable: nobody loses a seat because a read failed."""
+        reader = getattr(getattr(self, "lab", None), "can_score", None)
+        if reader is None:
+            return False
+        try:
+            return bool(reader(agent))
+        except Exception:  # noqa: BLE001 - the lab's store is its own
+            return True
 
     def evidence_clocks(self, *, fresh: bool = False) -> dict[str, Any]:
         """The desks' evidence clocks (S1, Sept 24, 2026; `measure_evidence_clocks`), kept in house.json

@@ -323,7 +323,9 @@ status is exposed in health and agent research context; qualification is distinc
    median never reached leaves the plain grace. `_displaceable` takes a `Newcomer` (family, venue,
    forward score): a resident with `FORWARD_RULE_FILLS` (3) fills since its program's opportunity
    goes only to a newcomer whose forward score beats the resident's own forward record
-   (`Lab.resident_forward`; none of its own, and it stays); a proven family's resident
+   (`Lab.resident_forward`; none of its own yet, and it stays -- unless the lab can never score it,
+   `Lab.can_score`: an options or unreplayed desk, a blocked program, where the plain tournament
+   judges it as before); a proven family's resident
    (`Allocator.family`) goes to no unproven newcomer unless it never traded and its grace has run;
    never-traded residents past their grace go first, then a losing family's members. The lab's
    graduates (`Lab._newcomer`), merged strategies and research candidates (as their parent's family)

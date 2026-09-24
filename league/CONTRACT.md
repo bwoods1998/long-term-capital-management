@@ -594,7 +594,9 @@ your fills, your blocks, your forward record, your family's record and your rung
 - **Once you have three fills of your own on your current program**, you are displaced only by a
   newcomer whose forward score beats your own forward record: the lab replays your program too,
   every hour, on the data that came after it was frozen. Until you have such a record, no newcomer
-  can take a trading seat from you by that route.
+  can take a trading seat from you by that route -- unless the lab can never score your program (a
+  desk it does not search, such as options, or a program it blocked): then the plain grace and
+  your record are what keep your seat.
 - **If your family is proven** (its pooled record over independent settlements, on the allocator's
   board), no newcomer of an unproven family takes your seat -- unless you never traded and your
   grace has run.

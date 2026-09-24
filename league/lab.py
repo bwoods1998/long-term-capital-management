@@ -2424,6 +2424,21 @@ class Lab:
             return None
         return float(row["mean_log_growth"])
 
+    def can_score(self, agent: Any) -> bool:
+        """Whether a forward window can ever give this living agent's current program a record (the House's
+        seat market keeps a trader's seat while it waits for one): its desk is one the lab searches (`_desk`:
+        never a dormant, unreplayed or options desk), its file has a single literal PARAMS
+        (`resident_candidate`), and the lab has not blocked that program. The review of #245 (Sept 24, 2026):
+        alpaca-options is never searched, so krasker-6, -10, -11 and -14 (3-8 fills at T0) could never have a
+        record, and the forward rule kept their seats against every newcomer for good."""
+        if self._desk(getattr(agent, "specialty", None) or "") is None:
+            return False
+        ident = self.resident_candidate(agent)
+        if not ident:
+            return False
+        rows = self._q("SELECT status FROM candidates WHERE id=?", (ident,))
+        return not rows or rows[0]["status"] != "blocked"
+
     def _frozen_at(self, row: Mapping[str, Any]) -> float:
         """When this candidate's code was frozen: its evaluation, or its graduation's pass (the
         House's replay, whose tape ended no later) when it has one. Nothing after it was seen."""

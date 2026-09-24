@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from unittest.mock import patch
 
-from league.house import _epoch
+from league.house import Newcomer, _epoch
 from league.tests.test_lab import DESK, KNOB, LOSER, SPARSE
 from league.tests.test_lab_forward import ForwardCase
 
@@ -42,6 +42,28 @@ class ResidentWindows(ForwardCase):
         kinds = {e.kind for e in self.house.ledger.iter(after=head)}
         self.assertFalse(kinds & {"eval.trial", "eval.verdict", "eval.block", "holdout.access", "agent.born", "lab.graduate"}, kinds)
         self.assertEqual(self.house.evaluator.rung(resident.id), 1)
+
+    def test_a_trader_the_lab_never_scores_is_not_kept_for_good(self):
+        """The review of #245 (Sept 24, 2026): the lab never searches alpaca-options (`replay` false, options), so
+        krasker-6, -10, -11 and -14 (3-8 fills at T0) could never have a forward record, and the forward rule kept
+        their seats against every newcomer for good. While the lab CAN score a trader, it keeps its seat until
+        it has a record; where it never can, the tournament judges it as before."""
+        rules = self.house.game["economy"]
+        trader = self.resident()
+        for _ in range(3):
+            self.house.ledger.append("book.fill", {"book": "alpaca-paper", "symbol": "BTC/USD", "side": "buy", "quantity": "0.001",
+                                                   "price": "60000", "source": "venue", "liquidity": "taker"}, agent=trader.id)
+        self.clock.advance(float(rules["epoch_seconds"]) * float(rules["displace_after_epochs"]) * 10)
+        newcomer = Newcomer(forward=0.05)
+        self.assertTrue(self.lab.can_score(trader))
+        self.assertIsNone(self.house._weakest(rules, newcomer=newcomer), "not scored yet: it keeps its seat until it has a record")
+        self.niche.replay = False  # as alpaca-options: a desk the lab never searches
+        self.assertFalse(self.lab.can_score(trader))
+        self.assertEqual(self.house._weakest(rules, newcomer=newcomer).id, trader.id)
+        self.niche.replay = True
+        self.lab.seed(force=True)
+        self.lab._x("UPDATE candidates SET status='blocked' WHERE id=?", (self.lab.resident_candidate(trader),))
+        self.assertFalse(self.lab.can_score(trader), "a program the lab has blocked is never scored either")
 
     def test_a_rewritten_programs_window_starts_after_the_rewrite(self):
         resident = self.resident()
