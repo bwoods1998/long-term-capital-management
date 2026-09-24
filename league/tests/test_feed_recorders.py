@@ -661,6 +661,67 @@ class Attention(RecorderCase):
         self.assertEqual((store.keys("tsa"), store.keys("polls")), (["checkpoint"], ["trump_approval"]))
 
 
+# ------------------------------------------------------------------------------ open interest
+class OkxOi:
+    """OKX's open-interest history for BTC and ETH from `since`, answered newest first a page at a
+    time with `end` exclusive, as recorded on Sept 24, 2026; the hour still running moves with the clock."""
+
+    def __init__(self, clock, since="2026-09-01T00:00:00Z"):
+        self.clock, self.since = clock, epoch(since)
+        self.asked: list = []
+
+    @staticmethod
+    def usd(start: float) -> float:
+        return 2.4e9 + (int(start) // 3600 % 50) * 1e6
+
+    def answer(self, method, url, body):
+        q = query(url)
+        coin = q["instId"].split("-")[0]
+        if coin not in ("BTC", "ETH"):
+            return {"code": "51001", "data": [], "msg": "Instrument ID doesn't exist."}
+        self.asked.append(q.get("end"))
+        now = self.clock()
+        top = math.floor(now / 3600) * 3600  # the running hour's start
+        if "end" in q:
+            top = min(top, math.ceil(int(q["end"]) / 1000 / 3600) * 3600 - 3600)
+        rows, at = [], top
+        while at >= self.since and len(rows) < int(q.get("limit") or 100):
+            usd = self.usd(at) + (now - at if at + 3600 > now else 0)  # the running hour's value keeps moving
+            rows.append([str(int(at * 1000)), "100", "1", str(usd)])
+            at -= 3600
+        return {"code": "0", "data": rows, "msg": ""}
+
+    def transport(self) -> FakeTransport:
+        from ltcm.data.derivs import OKX_HOST
+
+        return FakeTransport({OKX_HOST + "/api/v5/rubik/stat/contracts/open-interest-history": self.answer})
+
+
+class OpenInterest(RecorderCase):
+    def test_an_hour_is_stored_only_once_it_has_ended_and_stamped_then(self):
+        okx = OkxOi(self.clock)
+        store = self.recorder({"oi": ["BTC", "DOGE"]}, transports={"oi": okx.transport()}, backfill_pages=40)
+        out = store.run()
+        self.assertEqual([(k, "51001" in e) for _, k, e in out["failed"]], [("DOGE", True)])  # not listed: absent, not waited for
+        stamps = self.stamps(store, "oi", "BTC")
+        self.assertEqual(feeds.stamp(stamps[-1]), "2026-09-24T03:00:00.000Z")  # the 02:00 hour, closed; 03:00's is still running
+        self.assertEqual(feeds.stamp(stamps[0]), "2026-09-01T01:00:00.000Z")  # OKX's history ends here: the backfill stops
+        self.assertEqual({b - a for a, b in zip(stamps, stamps[1:])}, {3600.0})
+        row = store.latest({"oi": ["btc"]}, self.clock())["oi"]["BTC"]
+        self.assertEqual((row["t"], row["oi_usd"], row["hours"]), ("2026-09-24T03:00:00.000Z", OkxOi.usd(epoch("2026-09-24T02:00:00Z")), 1))
+        day_before = OkxOi.usd(epoch("2026-09-23T02:00:00Z"))
+        self.assertEqual(row["change_24h_pct"], round((row["oi_usd"] - day_before) / day_before * 100, 4))
+        self.assertEqual(store.latest({"oi": ["BTC"]}, epoch("2026-09-24T02:59:59.999Z"))["oi"]["BTC"]["t"], "2026-09-24T02:00:00.000Z")
+        state = store.coverage({"oi": ["BTC"]})["oi"]["BTC"]["backfill"]
+        self.assertTrue(state["complete"] and state["exhausted"], state)
+        self.clock.set("2026-09-24T04:02:30Z")
+        store.run()
+        self.assertEqual(feeds.stamp(self.stamps(store, "oi", "BTC")[-1]), "2026-09-24T04:00:00.000Z")
+        self.assertEqual({name: request_feed(name) for name in ("perp_open_interest_history", "kalshi_open_interest_history",
+                                                                "perpetual_open_interest")},
+                         {"perp_open_interest_history": "oi", "kalshi_open_interest_history": None, "perpetual_open_interest": "perps"})
+
+
 # ------------------------------------------------------------------------------ in the House
 FORECAST_READER = '''
 from datetime import datetime

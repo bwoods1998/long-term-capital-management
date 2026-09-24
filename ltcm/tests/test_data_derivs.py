@@ -221,3 +221,31 @@ class SnapshotTests(DerivativesCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ------------------------------------------------------- open interest history, Sept 24, 2026
+import json as _json  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+OKX_OI_HISTORY = OKX_HOST + "/api/v5/rubik/stat/contracts/open-interest-history"
+
+
+def recorded_oi():
+    """okx open-interest-history for BTC-USDT-SWAP, 1H, recorded Sept 24, 2026 at 03:16Z."""
+    return _json.loads((_Path(__file__).parent / "fixtures" / "feeds" / "okx_open_interest_history_btc.json").read_text(encoding="utf-8"))
+
+
+class OpenInterestHistory(unittest.TestCase):
+    def test_the_recorded_page_newest_first_and_paged_by_end(self):
+        transport = FakeTransport({OKX_OI_HISTORY: recorded_oi()})
+        rows = Derivatives(transport).okx_open_interest_history("btc", end_ms=1790222400000)
+        self.assertEqual(rows[0], {"ts_ms": 1790218800000, "oi_contracts": 2948889.56000001215, "oi_coin": 29486.1667000001212,
+                                   "oi_usd": 2484132880.44159021078488})
+        self.assertEqual([r["ts_ms"] for r in rows], sorted((r["ts_ms"] for r in rows), reverse=True))
+        self.assertEqual(transport.last["query"], {"instId": "BTC-USDT-SWAP", "period": "1H", "limit": "100", "end": "1790222400000"})
+
+    def test_an_instrument_okx_does_not_list_says_so(self):
+        transport = FakeTransport({OKX_OI_HISTORY: {"code": "51001", "data": [], "msg": "Instrument ID doesn't exist."}})
+        with self.assertRaises(DataError) as caught:
+            Derivatives(transport).okx_open_interest_history("ZZZ")
+        self.assertIn("okx code 51001", str(caught.exception))

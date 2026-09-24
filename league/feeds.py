@@ -832,8 +832,8 @@ class FeedRecorder:
             began = self.clock()
             if self._unlisted_now(feed, key, began):
                 continue
-            if asked and feed == "funding":
-                self._sleep(OKX_PAUSE)
+            if asked and (feed == "funding" or (feed in RECORDERS and RECORDERS[feed].pause)):
+                self._sleep(OKX_PAUSE if feed == "funding" else RECORDERS[feed].pause)
             asked += 1
             stored, error = 0, None
             try:
@@ -1887,6 +1887,9 @@ class Source:
     #: The most keys the House polls (what one strategy may DECLARE is `MAX_KEYS`).
     max_keys = 64
     timeout = TIMEOUT
+    #: Seconds between a history source's keys in a live pass (OKX's statistics allow five requests
+    #: in two seconds).
+    pause = 0.0
     #: A key a strategy might write, for the texts that say how to declare it.
     example = ""
     #: What a strategy reads beside each row, said once in the tool-request answer.
@@ -2659,6 +2662,79 @@ class ApprovalPolls(Source):
         return "approval" in words and bool(words & {"poll", "polls", "polling", "average", "rating", "rcp", "trump"})
 
 
+class OpenInterestHistory(Source):
+    """OKX's hourly open interest of the perpetuals the crypto desks' coins have, as history: the
+    `perps` feed records it live only, and 32 agents had asked for positioning by Sept 22, 2026. An
+    hour's point is final when the hour ends (its value moves while the hour runs), so it is stamped
+    then -- backfilled rows the same way -- and the hour still running is never stored."""
+
+    name = "oi"
+    host = "www.okx.com"
+    source = "okx: www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=<COIN>-USDT-SWAP&period=1H"
+    cadence = "hourly, two and a half minutes after the hour; backfilled over the replay window"
+    what = ("per coin, OKX's open interest in its USDT perpetual for each completed hour: {oi_usd, oi_coin, oi_contracts, hours: "
+            "1, change_24h_pct (against the hour that ended 24 hours earlier, None when not held)}")
+    point_in_time = ("each row is an hour's open interest stamped when the hour ENDED and shown only from then on, live and in "
+                     "replay; the history is backfilled from OKX's own and stamped the same way, never with when it was fetched, "
+                     "and the hour still running is never stored")
+    history = True
+    every = 3600.0
+    offset = 150.0
+    gap = 2 * 3600.0
+    lookback_days = 1
+    max_keys = 24
+    example = "BTC"
+    pause = 0.5
+    note = "change_24h_pct reads only rows at or before its own."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        return recorder.keys("perps")
+
+    def key_of(self, raw: Any) -> str | None:
+        return _perps_key(raw)
+
+    def fetcher(self, transport: Any, clock: Callable[[], float]) -> Any:
+        from ltcm.data.derivs import Derivatives
+
+        return Derivatives(transport, timeout=self.timeout, clock=clock)
+
+    def endpoint(self, key: str) -> str:
+        return f"https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId={key}-USDT-SWAP&period=1H"
+
+    def page(self, fetcher: Any, key: str, *, before: float | None, floor: float, now: float, recorder: "FeedRecorder") -> dict[str, Any]:
+        """The hours that ENDED in [floor, now] (and before `before`), one page of OKX's newest-first
+        answer: an hour starting at ts is final at ts + 1 h."""
+        end_ms = None if before is None else int(round((float(before) - HOUR) * 1000.0))  # hours that started before the held one
+        answer = fetcher.okx_open_interest_history(key, end_ms=end_ms, limit=100)
+        rows = []
+        for point in answer:
+            closed = point["ts_ms"] / 1000.0 + HOUR
+            if closed > now or (before is not None and closed >= before):
+                continue  # still running, or held already
+            if closed < floor:
+                continue
+            rows.append((closed, {"oi_usd": point["oi_usd"], "oi_coin": point["oi_coin"], "oi_contracts": point["oi_contracts"], "hours": 1}))
+        oldest = min((p["ts_ms"] / 1000.0 + HOUR for p in answer), default=None)
+        reached = oldest is not None and oldest <= floor
+        return {"rows": rows, "reached": reached, "exhausted": not answer}
+
+    def derive(self, rows: Sequence[tuple[float, Mapping[str, Any]]], since: float | None) -> list[tuple[float, dict[str, Any]]]:
+        held: dict[int, float] = {}
+        out = []
+        for at, payload in rows:
+            usd = _num(payload.get("oi_usd"))
+            prior = held.get(int(round(at)) - 86400)
+            change = round((usd - prior) / prior * 100.0, 4) if usd is not None and prior else None
+            out.append((at, {**payload, "change_24h_pct": change}))
+            if usd is not None:
+                held[int(round(at))] = usd
+        return out
+
+    def asks(self, words: set[str]) -> bool:
+        interest = ("open" in words and "interest" in words) or "oi" in words or "positioning" in words
+        return interest and bool(words & _DERIVATIVES | (words & {"crypto", "btc", "eth", "okx"})) and bool(words & (_HISTORY | {"point"}))
+
+
 def _register(*sources: Source) -> dict[str, Source]:
     return {source.name: source for source in sources}
 
@@ -2666,7 +2742,8 @@ def _register(*sources: Source) -> dict[str, Source]:
 #: The recorders of Sept 24, 2026, in the brief's order of priority (weather first: it is the input
 #: of the one proven family). What a strategy may declare in `NEEDS["feeds"]` beside the first four.
 RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
-                                         ReferenceRates(), ParYields(), SportsOdds(), TsaVolumes(), ApprovalPolls())
+                                         ReferenceRates(), ParYields(), SportsOdds(), TsaVolumes(), ApprovalPolls(),
+                                         OpenInterestHistory())
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():
