@@ -136,6 +136,21 @@ parent's family whatever they change, and its maker and taker entries are pooled
 EVENT toward the bunt line and the swing's real trades (`allocator.independent_settlements`): three
 strikes of one game that settle are one settlement. Your wealth multiples count every dollar as before.
 
+NO PROBE ON A LOSING FAMILY (since Sept 24, 2026, `allocator.family_probe`). Your family's forward
+record is the active blocks of every member ever born, living or dead, and their summed log growth (the
+line on which the House stops breeding a family). When it is at or below zero after 6 active blocks, the
+family is LOSING: no probe is seated from it (your promotion waits with the stage `family_losing` and the
+family's numbers), and a probe seated on it goes back to practice at the next pass. On Kalshi that
+demotion sells nothing (a contract is held to settlement); on Alpaca, where the demotion would sell what
+the account holds, a probe keeps its seat until it holds nothing the demotion would sell (dust is
+booked, not sold) and has no working order -- your own exits go on, and nothing is sold for you. A probe that goes back to practice from real money for ANY
+reason (hysteresis, the stay drawdown, displacement, drift, an audit's veto, this rule) HOLDS its family:
+no probe from it is seated until the family's forward record SINCE that demotion is positive over 6
+active blocks (stage `family_held`, with when the hold began). A newcomer never displaces a probe of its
+own family (that would hold the family, and it, at once). A proven or swinging family's members are
+bunts and are never held. Measured on Sept 24, 2026: 11 of the allocator's 21 promotions since Sept 23
+went onto losing families and lost $8.12 on 22 closes, no stay ending positive; the other 10 made $28.96.
+
 THE FAMILY SWING (since Deploy B, Sept 24, 2026, `allocator.family_swing`). Only a PROVEN family
 swings (its pooled record: a real record alone neither proves nor swings a family). Its entry is judged
 when its REAL record reaches 15 independent settlements and at every 5 more (15, 20, 25, ...), on those
