@@ -56,7 +56,7 @@ recorded for the next open; live verification uses the markets that trade around
 | S | The evidence clock and the seat market | live 08:31Z (Deploy B, #254); window 2 h: waiters toward 0, no displacement by a worse forward record |
 | L | The loop's joints | live 08:31Z (Deploy B, #247 + L1 in #254); hourly: Sail research <= $2/h, Merton pauses, repeated warnings escalated |
 | I | Feed recorders on the allowed hosts | live 08:31Z (Deploy B, #250); EIA and Odds wait for the owner's keys; to verify: `data.coverage` rows |
-| X1/X2 | Pause and size-down tools; the horizon rule | reviewed (#258: 11 of 12 fixed; X2 by measured settle lag in progress); rides Deploy C |
+| X1/X2 | Pause and size-down tools; the horizon rule | reviewed and final (#258 `37b2ae8`: 11 of 12 fixed, X2 by the measured settle lag in the protected `resolution.py`); rides Deploy C |
 | Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | done: promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`, watch passed 08:41:13Z |
 | E | The lab as a search; the foundry brief; capacity | built (#262, 08:58Z), in review; rides Deploy C |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
@@ -472,6 +472,14 @@ recorded for the next open; live verification uses the markets that trade around
   are not activity; a resident paused past its grace is displaceable. Asked next: the horizon's answer
   moves into a protected module (the book is protected but read `tapes.py`, which an updater release
   could change), and the seat report counts a long pause as holding no evidence.
+- 09:27Z — **C-tools final** (#258 at `37b2ae8`, CI green first time): the horizon's answer lives in
+  `league/resolution.py`, added to `ci.FORBIDDEN` (the book is protected; the module it reads now is
+  too, so an updater release cannot change what the book admits). `settle_lags.json` stays House-written
+  data read as untrusted: entries that are not three finite times, settled before their close or
+  without a real deadline are ignored, each lag is clamped to [0, its deadline], a series needs 20 good
+  settlements. This closed a hole in the previous head: a file of negative lags read as 0 and admitted
+  the diesel print. Tests: a hostile file leaves diesel refused at 172 h in the House and the book; an
+  honest one admits it. The seat report counts a long-paused trader as holding no evidence.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
