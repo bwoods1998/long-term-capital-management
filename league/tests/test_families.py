@@ -830,6 +830,53 @@ class FamilySwingOnTheFloor(KalshiHouse):
         self.assertEqual(alloc.family_state(a), "swing")
         self.assertEqual([book.account(x.id).staked for x in (a, b)], [D("60.00")] * 2)
 
+    def approved_not_entered(self):
+        """Two seated bunts of a proven family whose entry's audit has approved it, the family not yet in the swing (the
+        grant holds rung 3 back at these passes)."""
+        agents, book = self.seated_bunts()
+        alloc = self.house.allocator
+        key = "weather-favorites@kalshi"
+        self.families["weather-favorites"] = real_record(n=15, bound=0.05)
+        with patch.object(self.house, "_background", return_value=True):
+            self.rebalance()  # the entry's audit is asked for; it runs in a moment (below), as on the audit lane
+        running = dict(alloc.state["family_audits"][key])
+        alloc._run_family_audit(key, running["agent"], alloc._family_swing_verdict(
+            self.house.registry.get(running["agent"]), alloc.family("weather-favorites", "kalshi"), key, 2))
+        self.assertEqual(alloc.state["family_audits"][key]["status"], "done")
+        return agents, book, key
+
+    def test_a_member_born_into_the_family_lapses_its_approval(self):
+        """The main session's decision (Sept 24, 2026): a member BORN into the family after the audit started -- a research
+        child, which is how a real-money line changes its code (it forks; it never adopts in place) -- lapses the approval
+        as a member's new program does, and the entry asks for a new audit. A birth into another family changes nothing."""
+        (a, b), book, key = self.approved_not_entered()
+        alloc = self.house.allocator
+        with patch.object(allocator.Allocator, "_swing_released", return_value=False):
+            self.agent("hawk", family="kalshi-favorites")  # another family's newborn
+            self.rebalance()
+            self.assertEqual(alloc.state["family_audits"][key]["status"], "done")
+            self.agent("kay-child")  # born into this family
+            self.rebalance()
+            self.assertEqual(alloc.state["family_audits"][key]["status"], "lapsed")
+            self.assertIn("kay-child was born into the family after the audit", alloc.state["family_audits"][key]["why"])
+        before = len(self.verdicts)
+        self.rebalance()  # released: no entry on the lapsed approval, a new audit is asked for
+        self.assertEqual(alloc.family_state(a), "proven")
+        self.house.wait(5)
+        self.assertEqual(len(self.verdicts), before + 1)
+        self.rebalance()
+        self.assertEqual(alloc.family_state(a), "swing")
+
+    def test_a_birth_leaves_a_running_swing_alone_and_audits_its_next_entry(self):
+        agents, book = self.swinging()
+        alloc = self.house.allocator
+        key = "weather-favorites@kalshi"
+        self.agent("kay-child")
+        self.rebalance()
+        self.assertEqual(alloc.family_state(agents[0]), "swing")  # untouched: it stays while its 80% bound holds
+        self.assertEqual([book.account(x.id).staked for x in agents], [D("60.00")] * 2)
+        self.assertEqual(alloc.state["family_audits"][key]["status"], "lapsed")  # its next entry is audited again
+
     def test_the_family_swings_audit_is_not_its_members_own(self):
         """Review of #242: the family's verdict is written against one member (the one with the most real trades), but it
         judged the FAMILY's stake. Read as that member's own, its approval let the member take the agent-level swing (rung
@@ -1111,7 +1158,8 @@ class RulesText(unittest.TestCase):
                       "real record's lower bound at 80% stays above zero", text)
         self.assertIn("60% of the venue for the whole family (shared by its members on real money)", text)
         self.assertIn("fall under 50% of its fills at the smaller one", text)
-        self.assertIn("its next entry is audited again, as it is when a member of the family takes a new program", text)
+        self.assertIn("its next entry is audited again, as it is when a member of the family takes a new program or a new "
+                      "member is born into it", text)
         start, end = text.index("- YOUR FAMILY'S RECORD"), text.index("- REAL MONEY AT KALSHI")
         self.assertNotIn("paper", text[start:end].lower())  # the copy rule: practice, never paper
 

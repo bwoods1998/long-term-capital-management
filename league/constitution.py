@@ -419,8 +419,9 @@ CONSTITUTION: dict[str, Any] = {
         # by 30 / 50 / 200 real settlements 37% / 44% / 61% of the time (a +14%/$ edge's median entry at 20); at
         # every 5th settlement at 90% it is 19% / 22% / 37% -- near the table's 20% over the 30-50 settlements that
         # matter -- while a +14%/$ edge still enters at a median 30, +8%/$ at 40, and a +1.8%/$ favourites edge at
-        # 80 (an edgeless favourites family 9% by 50, 24% by 200). Leaving the swing, or a member's new program
-        # after the audit, lapses the approval: re-entry is audited again. Every member on
+        # 80 (an edgeless favourites family 9% by 50, 24% by 200). Leaving the swing, a member's new program or a
+        # member born into the family after the audit lapses the approval: the next entry is audited again (a
+        # swing already running is untouched). Every member on
         # real money is staked at the ramp -- `start_multiple` x `bunt_usd` ($60 at Kalshi) when the family
         # enters, doubling after every `doubling_every` further POSITIVE independent real settlements while
         # the bound stays above zero -- up to the FAMILY's caps shared by its members on real money: full

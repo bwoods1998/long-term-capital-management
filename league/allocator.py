@@ -765,8 +765,8 @@ class Allocator:
         "swing" for a proven family whose entry look passes at its checkpoint (`families.entry_look`, at
         `entry_confidence`) and whose entry's audit approved it (`_request_family_audit`), kept while its real record
         holds at the table's 80% (`families.swing_ready`); else "unproven"; its `since`; and for a swinging family the
-        member's stake (`families.swing_target`) and the capacity at that stake. Leaving the swing, or a member's new
-        program after the approval, lapses the approval (`_lapse_approval`)."""
+        member's stake (`families.swing_target`) and the capacity at that stake. Leaving the swing, a member's new program
+        or a member born into the family after the audit looked lapses the approval (`_lapse_approval`)."""
         family, venue = record["family"], record["venue"]
         key = families.key_of(family, venue)
         with self._lock:
@@ -815,7 +815,8 @@ class Allocator:
             with self._lock:
                 self.state.setdefault("families", {})[key] = new
             # An approval licenses an entry: it lapses when the family leaves the swing, or when a member's program
-            # changed after the audit looked (the main session's decision on the review of #242, Sept 24, 2026).
+            # changed, or a member was born into the family, after the audit looked (the main session's decisions on
+            # the review of #242, Sept 24, 2026). A swing already running is untouched: its next entry is audited again.
             if before == "swing" and state != "swing":
                 self._lapse_approval(key, f"the family left the swing ({state})")
             elif lapse:
@@ -920,17 +921,26 @@ class Allocator:
         """(whether an approved audit licenses the family's entry into the swing now, why an approval on record no
         longer does). The entry is audited on the family's REAL record (C2, Sept 24, 2026), and an approval licenses
         entries until it lapses (the main session's decision on the review of #242): when the family leaves the swing
-        (`_decorate` lapses it), or when a member of the family takes a new program (`agent.strategy`) after the audit
-        looked at the family (its `started_seq`), as the agent-level route voids an approval on new code. A veto waits
-        out the audit cooldown before it is asked again."""
+        (`_decorate` lapses it), or when a member of the family takes a new program (`agent.strategy`) or is BORN into it
+        (`agent.born`: a research child is how a real-money line changes its code) after the audit looked at the family
+        (its `started_seq`), as the agent-level route voids an approval on new code. A swing already running is untouched:
+        the lapse makes its next entry ask for a new audit. A veto waits out the audit cooldown before it is asked again."""
         with self._lock:
             audit = dict((self.state.get("family_audits") or {}).get(key) or {})
         if audit.get("status") != "done" or audit.get("approve") is not True:
             return False, None
         since = int(audit.get("started_seq") or 0)
-        changed = sorted(a.id for a in self._members(family, venue) if self._tape.programs.get(a.id, 0) > since)
+        members = self._members(family, venue)
+        changed = sorted(a.id for a in members if self._tape.programs.get(a.id, 0) > since)
+        born = sorted(a.id for a in members if self._tape.born.get(a.id, 0) > since)
+
+        def named(ids: list[str]) -> str:
+            return ", ".join(ids[:3]) + (" and others" if len(ids) > 3 else "")
+
         if changed:
-            return False, f"{', '.join(changed[:3])}{' and others' if len(changed) > 3 else ''} took a new program after the audit"
+            return False, f"{named(changed)} took a new program after the audit"
+        if born:
+            return False, f"{named(born)} {'was' if len(born) == 1 else 'were'} born into the family after the audit"
         return True, None
 
     def _lapse_approval(self, key: str, why: str) -> None:

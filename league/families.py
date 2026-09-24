@@ -42,8 +42,8 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
   bound, and the loss-rate bound for a lopsided record) at `entry_confidence` above zero
   (`entry_look`) -- and that entry's audit approves it; it STAYS while its whole real record's honest
   bound at the table's 80% holds at every pass (`swing_ready`) and it is still proven. Leaving the
-  swing, or a member's new program after the approval, lapses the approval: re-entry is audited
-  again. Each state carries its `since`; `family.record` ledger rows carry the ledger at most every
+  swing, a member's new program, or a member born into the family after the audit looked lapses the
+  approval: the next entry is audited again (a swing already running is untouched). Each state carries its `since`; `family.record` ledger rows carry the ledger at most every
   five minutes, a row for each family whose record changed.
 - **The family swing's stake** (`swing_target`): per member on real money, min(the ramp, the
   family's caps / its members on real money), never under the bunt. The ramp starts at
@@ -81,10 +81,11 @@ REAL_BOOKS = tuple(REAL_BOOK.values())
 STATES = ("unproven", "proven", "swing")
 #: What the tape folds from the ledger: every agent's fills, settlements and stakes, the two kinds that
 #: move an agent's evidence cutoff (`accounting.evidence_cutoffs`), the House's orders (the buys a family
-#: placed: its capacity), the evaluator's blocks (every member's active blocks) and every agent's program
-#: changes (`agent.strategy`: a family swing's approval lapses when a member's program changes after it).
+#: placed: its capacity), the evaluator's blocks (every member's active blocks), every agent's program
+#: changes (`agent.strategy`) and births (`agent.born`): a family swing's approval lapses when a member's
+#: program changes, or a member is born into the family, after the audit looked.
 TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline", "book.order", "eval.block",
-              "agent.strategy")
+              "agent.strategy", "agent.born")
 _TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd", "quantity", "price", "order_id")
 _TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event", "multiplier", "asset_class")
 #: Bid-size buckets for fill rates, the scoreboard's (`scripts/gap_scoreboard.py`): the weather favourites
@@ -148,6 +149,7 @@ class TradeTape:
         self.filled: dict[str, float] = {}  # order id -> when a buy fill named it
         self.last_seq: dict[str, int] = {}  # agent -> the newest row folded for it: a family's version
         self.programs: dict[str, int] = {}  # agent -> the ledger position of its last program change (`agent.strategy`)
+        self.born: dict[str, int] = {}  # agent -> the ledger position of its birth (`agent.born`)
         self.newest_at = 0.0
         self._orders: dict[str, float] = {}  # order ids already folded (an order has several rows)
         self._lock = threading.Lock()
@@ -186,6 +188,9 @@ class TradeTape:
         elif entry.kind == "agent.strategy":
             if entry.agent != HOUSE:
                 self.programs[str(entry.agent)] = max(self.programs.get(str(entry.agent), 0), entry.seq)
+        elif entry.kind == "agent.born":
+            if entry.agent != HOUSE:
+                self.born[str(entry.agent)] = entry.seq
         elif entry.kind == "eval.block":
             if entry.agent != HOUSE:
                 with contextlib.suppress(TypeError, ValueError):

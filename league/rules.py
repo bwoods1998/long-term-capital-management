@@ -165,9 +165,9 @@ or never swings at all.
                 f"  bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the whole family (shared by its members on real money), and held\n"
                 f"  where the family's fills at the bigger size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one.\n"
                 "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
-                "  and its next entry is audited again, as it is when a member of the family takes a new program. A\n"
-                "  swinging member's positions are the same share of its stake, and the real book holds it to its\n"
-                "  daily-loss line as it holds every swing.\n")
+                "  and its next entry is audited again, as it is when a member of the family takes a new program or\n"
+                "  a new member is born into it. A swinging member's positions are the same share of its stake, and the\n"
+                "  real book holds it to its daily-loss line as it holds every swing.\n")
         proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
   Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
