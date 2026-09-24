@@ -441,3 +441,21 @@ class TwoProvenFamiliesOnOneDesk(ReviewCase):
                 self.assertEqual(pick.id if pick else None, idle.id, f"{family}'s birth may take the seat")
             self.assertIsNone(self.house._weakest(self.rules, specialty=DESK, evidenced=True,
                                                   newcomer=Newcomer(family="another", venue="alpaca")))
+
+
+class CorrectedChildOnAClosedDesk(ReviewCase):
+    """A pin, not a fix: a merged corrected child whose defect a living resident still runs is never expired by a closed
+    desk (it takes that resident's seat, `enroll`), and leaves the queue once no living agent runs the defect."""
+
+    def test_a_corrected_child_waits_while_its_defect_runs_and_leaves_once_it_is_gone(self):
+        parent = self.resident("defective")  # rung 1, running the code the repair corrects
+        row = {"name": "a-corrected-child", "family": "another-family", "why": "a repair", "code": BUYER + "\n# the fix\n",
+               "repair": {"key": f"strategy_defect:{parent.id}:{parent.code_sha256[:12]}", "parent": parent.id}}
+        self.house.hypotheses = NoFoundryCards({DESK: f"no family on {DESK} has a positive forward record over 3 active blocks there"})
+        self.house._data_cache.pop("search_closed", None)
+        with patch("league.strategies.all_strategies", return_value=[row]):
+            waiting = self.house.seat_waiters(fresh=True)["strategies"]
+            self.assertEqual([(w["strategy"], w["niche"], w["replaces"]) for w in waiting], [("a-corrected-child", DESK, True)])
+            self.house.kill(parent, "evidence", "a test death")
+            self.assertEqual(self.house.seat_waiters(fresh=True)["strategies"], [], "no living agent runs its defect: it leaves")
+            self.assertEqual(self.house._state["seat_expired"]["strategies:a-corrected-child"]["rule"], "closed")
