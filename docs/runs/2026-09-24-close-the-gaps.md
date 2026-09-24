@@ -9,6 +9,8 @@ recorded for the next open; live verification uses the markets that trade around
 ## The clock
 
 - **T0:** 2026-09-24T01:34:02Z (the first action of the session, `date -u`).
+- **T0':** 2026-09-24T15:04:54Z, the resumed run's first action (`date -u`), executing the plan's
+  "Wave 3: the resume's order of work" (R0-R7) under the owner's /goal of the resume.
 - **No deadline.** The run ends when the plan's Done list holds. A context reset does not end it.
 - **Progress notes:** a scoreboard reading and a short state note every four hours from T0
   (05:34Z, 09:34Z, 13:34Z, ... Sept 24), in the "Progress notes" section below.
@@ -30,6 +32,17 @@ recorded for the next open; live verification uses the markets that trade around
   the plan's "Not authorized" list.
 - Never wait on the owner: one notification per owner step, everything else proceeds, the exact
   commands in the report. Fix every bug observed and add an invariant for it.
+
+## The owner's message at the resume (Sept 24, 2026, T0')
+
+- Resume the plan from origin/main, executing its "Wave 3" section (R0-R7), with no deadline, in
+  the open US session (R4 uses it). Order: R0 re-baseline; R1 Deploy C first and verified in its
+  first hour; R2 the seat market's capacity; R3 more real members of the proven family; R4 the stock
+  and options session every 30 minutes; R6 the bugs seen at the resume, including the practice book
+  freezing on a 3-cent difference; then the watch, docs, cleanup and the report.
+- Authority: the plan's "Authorized" list and money-rule table, **plus one further money-digest
+  change with a ratify of `earned-live-20260921` for R5** (no probe on a family whose pooled forward
+  record is negative), if the evidence in this record supports it. "Not authorized" stays off-limits.
 
 ## Checklist
 
@@ -62,6 +75,13 @@ recorded for the next open; live verification uses the markets that trade around
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
 | W | The site's mechanism ledger | **verified** 10:14Z: site `a4d25790` (08:55Z), publisher shipped by the updater 09:35:40Z; the checkpoint carries families, the lab line and every desk's family state |
 | Deploy C | Wave 2 | ⟨pending⟩ |
+| R0 | Re-baseline at T0' (scoreboard, watch loop, events feed) | ⟨pending⟩ |
+| R1 | Deploy C (`c/integration` + `c-search/review`), verified in its first hour | ⟨pending⟩ |
+| R2 | The seat market's capacity | ⟨pending⟩ |
+| R3 | More real members of the proven family | ⟨pending⟩ |
+| R4 | The stock and options session, every 30 minutes | ⟨pending⟩ |
+| R5 | The probe drain (the owner's third digest change, on evidence) | ⟨pending⟩ |
+| R6 | Bugs seen at the resume (practice-book 3-cent freeze, earnings polls, kalshi-open, kalshi-sports) | ⟨pending⟩ |
 | Watch | At least three hours after the last deploy | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
 | H | Cleanup: worktrees, branches, PRs, dead docs | ⟨pending⟩ |
