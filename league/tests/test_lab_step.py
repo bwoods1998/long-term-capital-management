@@ -79,10 +79,11 @@ class TheFailingRow(StepCase):
     def test_the_failing_row_is_blocked_and_the_batches_behind_it_run(self):
         """The regression, from the failing state: the row's own NEEDS, the history store as it stood."""
         self.history(["ADA/USD"], "15Min", "2025-08-01", "2025-11-14", listed={"ADA/USD": "2026-02-01T00:00:00Z"})
-        tape_id, tape = self.house.tape_for(ADA_NEEDS)
-        self.assertEqual(tape["source"]["window"], ["2025-09-12", "2025-11-14"])
-        self.assertEqual(tape["steps"], [])  # fetched and empty: not a gap in the store, so no TapeError either
-        self.house._tapes.clear()
+        # Fetched and empty: not a gap in the store, so no TapeError, and since Sept 24, 2026 (B-loop) the
+        # House refuses the tape where it builds it instead of handing out one with no steps.
+        with self.assertRaisesRegex(ValueError, r"unsupported input: the history store holds no ADA/USD 15Min bars in 2025-09-12\.\.2025-11-14"):
+            self.house.tape_for(ADA_NEEDS)
+        self.assertFalse(any(key.startswith("deep:") for key in self.house._tapes))
         self.insert(ADA_ROW, ADA_NEEDS)
         behind = self.queue(KNOB)
         out = self.lab.step()
@@ -91,10 +92,10 @@ class TheFailingRow(StepCase):
         row = self.candidate(ADA_ROW)
         self.assertEqual(row["status"], "blocked")
         self.assertIn("unsupported input", row["error"])
-        self.assertIn("no steps", row["error"])
+        self.assertIn("no ADA/USD 15Min bars", row["error"])
         self.assertEqual(self.candidate(behind)["status"], "evaluated")
         self.assertGreaterEqual(out["batches"], 1)
-        self.assertNotIn(tape_id, self.house._tapes)  # the House still keeps no tape only the lab asked for
+        self.assertFalse(any(key.startswith("deep:") for key in self.house._tapes))  # no empty tape is kept
 
     def test_a_tape_with_no_steps_is_unsupported_input_and_one_step_is_searched(self):
         needs = static_literal(KNOB, "NEEDS")

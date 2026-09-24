@@ -57,9 +57,16 @@ def line_of(founder: Any, born_reason: Any = "", repair: bool = False) -> str:
 
 
 def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[str, bool] | None = None) -> dict[str, Any]:
-    """The spend and evidence of every line between two ledger stamps (ISO, inclusive of `since`)."""
+    """The spend and evidence of every line between two ledger stamps (ISO, inclusive of `since`).
+
+    `by_profile` (Sept 24, 2026, L2): research by the model profile each session ran on (its summary
+    row's `profile`: Sail's `pro_asap`, `flash_asap` ..., `openai_luna`): sessions, candidates,
+    provider failures, the dollars its research tokens were charged (every turn of the session, even
+    one charged before the window began) and candidates per dollar."""
     spend: Counter = Counter()
     evidence: dict[str, Counter] = {}
+    tokens: dict[str, Decimal] = {}  # session -> its research-token charges, wherever they fall
+    profiles: dict[str, Counter] = {}
 
     def count(line: str, unit: str, n: int = 1) -> None:
         evidence.setdefault(line, Counter())[unit] += n
@@ -74,9 +81,13 @@ def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[
 
     for entry in ledger.iter(kinds=("credit.charge", "merton.pass", "audit.verdict", "agent.research", "eval.trial", "eval.block",
                                     "hypothesis.card", "playbook.entry", "lab.graduate")):
+        p = entry.payload
+        if entry.kind == "credit.charge" and p.get("what") == "research tokens" and isinstance(p.get("detail"), Mapping):
+            session = str(p["detail"].get("session") or "")
+            if session:
+                tokens[session] = tokens.get(session, Decimal(0)) + _money(p.get("usd"))
         if not window(entry):
             continue
-        p = entry.payload
         kind = entry.kind
         if kind == "credit.charge":
             if p.get("what") == "research tokens":
@@ -101,6 +112,11 @@ def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[
                     count("research", "candidates")
                 elif int(p.get("trials") or 0) == 0 and not str(p.get("reason") or "").startswith("provider"):
                     count("research", "abstentions")
+                row = profiles.setdefault(str(p.get("profile") or "unknown"), Counter())
+                row["sessions"] += 1
+                row["candidates"] += bool(p.get("candidate"))
+                row["provider_failures"] += str(p.get("reason") or "").startswith("provider")
+                row["micro_usd"] += int(tokens.get(str(p.get("session") or ""), Decimal(0)) * 1_000_000)
             elif p.get("tool") == "merton":
                 count("consultant", "answers" if not p.get("error") else "failed")
         elif kind == "eval.trial":
@@ -123,7 +139,13 @@ def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[
         units = evidence.get(line) or {}
         usd_per[line] = {unit: format(dollars / n, ".4f") for unit, n in sorted(units.items())
                          if n > 0 and unit in ("candidates", "replay_passes", "positive_blocks", "cards", "proposals", "answers", "approvals", "lessons")}
-    return {"what": WHAT, "since": since, "until": until,
+    by_profile = {}
+    for name, row in sorted(profiles.items()):
+        dollars = Decimal(row["micro_usd"]) / 1_000_000
+        by_profile[name] = {"sessions": row["sessions"], "candidates": row["candidates"], "provider_failures": row["provider_failures"],
+                            "usd": format(dollars, ".4f"),
+                            "candidates_per_usd": round(float(row["candidates"] / dollars), 2) if dollars > 0 else None}
+    return {"what": WHAT, "since": since, "until": until, "by_profile": by_profile,
             "spend_usd": {line: format(dollars, ".4f") for line, dollars in sorted(spend.items())},
             "evidence": {line: dict(sorted(units.items())) for line, units in sorted(evidence.items())},
             "usd_per": usd_per, "total_usd": format(sum(spend.values(), Decimal(0)), ".4f")}

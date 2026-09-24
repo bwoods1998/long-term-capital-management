@@ -43,7 +43,11 @@ def validate(p):
 
 TURBO_RANGES = {'research_minutes': (3, 180), 'research_workers': (1, 32), 'replay_workers': (1, 12),
                 'newcomer_seconds': (60, 3600), 'max_population': (12, 128), 'luna_fraction': (0, 1),
-                'endowment_usd': (0.25, 10), 'fork_threshold_usd': (1.5, 10)}
+                'endowment_usd': (0.25, 10), 'fork_threshold_usd': (1.5, 10),
+                # Sept 24, 2026 (L2): the Sail research cap, dollars an hour (`House._sail_research_capped`).
+                'sail_research_usd_per_hour': (1, 4)}
+#: The hours a Merton role may be scheduled at in turbo.json, by role (others: any positive number).
+TURBO_MERTON_HOURS = {'teacher': (6, 24)}
 
 
 def load_turbo():
@@ -63,6 +67,20 @@ def load_turbo():
         if value['sail_profile'] not in ('pro_flex', 'pro_asap'):
             raise ValueError('invalid turbo sail_profile')
         out['sail_profile'] = value['sail_profile']
+    if 'merton_schedule_hours' in value:
+        # Until Sept 24, 2026 this key was never copied, so turbo.json's re-allocation of Merton's
+        # cadence (Sept 22-23) never reached `game_for` and the burst defaults ran instead.
+        from .merton import ROLES
+
+        hours = value['merton_schedule_hours']
+        if not isinstance(hours, dict):
+            raise ValueError('invalid turbo merton_schedule_hours')
+        for role, v in hours.items():
+            low, high = TURBO_MERTON_HOURS.get(role, (0, math.inf))
+            if (role not in ROLES or type(v) not in (int, float) or not math.isfinite(v) or v <= 0
+                    or not low <= v <= high):
+                raise ValueError('invalid turbo merton_schedule_hours ' + str(role))
+        out['merton_schedule_hours'] = dict(hours)
     return out
 
 
@@ -109,7 +127,9 @@ def game_for(base, burst):
     if load_turbo().get('sail_profile'):
         research['profile'] = load_turbo()['sail_profile']
     research.setdefault('idle', {})['min_hours_between'] = p['research_minutes'] / 60
-    game['merton']['schedule_hours'].update(operator=.25, toolsmith=.5, architect=.5, teacher=1, designer=1)
+    # The burst's own acceleration of Merton. Not the teacher since Sept 24, 2026: its cadence is a
+    # bounded dial (game.json merton_bounds, 6-24 h), which turbo may move inside the same bounds.
+    game['merton']['schedule_hours'].update(operator=.25, toolsmith=.5, architect=.5, designer=1)
     # The owner's turbo layer may re-allocate frontier attention by measured yield (Sept 22, 2026):
     # the same dollars moved from roles that rarely change anything to the foundry and the engineer.
     game['merton']['schedule_hours'].update({role: float(hours) for role, hours in

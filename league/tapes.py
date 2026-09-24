@@ -75,6 +75,9 @@ MAX_MARKET_PAGES = 10
 #: One-minute candles are read from this long before a tape starts, so the first step has a
 #: touch to carry forward and `volume_24h` has its day.
 CANDLE_WARMUP_SECONDS = DAY
+#: A settled listing can still grow for this long after its markets close (a weather market is
+#: paid the next morning): `ltcm.history.LISTING_SETTLE_SECONDS`, the line past which it caches.
+LISTING_SETTLE_SECONDS = 12 * 3600
 
 _SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9./]{0,19}$")
 _SERIES = re.compile(r"^[A-Z0-9][A-Z0-9._]{0,39}$")
@@ -571,6 +574,11 @@ class KalshiData:
         self._listing_locks: dict[str, threading.Lock] = {}
         self._pace = threading.Lock()
         self._last_call = 0.0
+        #: How long the settled listing of a day still settling is served from memory before the part
+        #: of it that can still change is read again (`_settled_day`).
+        self.settled_listing_ttl = 600.0
+        self._settling: dict[tuple[str, int], tuple[float, float, dict[str, Any]]] = {}  # (series, day) -> (read at, settled by, rows)
+        self._settling_lock = threading.Lock()
 
     def _paced(self, **query: Any) -> Any:
         """One venue read: never sooner than `min_interval` after the last, and a rate-limit
@@ -809,16 +817,58 @@ class KalshiData:
     def _hash(self, text: str) -> bytes:
         return hashlib.sha256(f"{self.seed}|{text}".encode("utf-8")).digest()
 
+    def _settled_day(self, name: str, day: int) -> "list[Any]":
+        """The settled markets of one series closing on one whole UTC day, read only where the House
+        does not already hold them.
+
+        A day whose every market had settled (it ended `LISTING_SETTLE_SECONDS` ago) is asked for
+        on the same whole-day URL every time, which `ltcm.history`'s disk cache answers after the
+        first read, restarts included. A day still settling is served from memory for
+        `settled_listing_ttl` seconds; after that only the markets closing since the line that was
+        settled at the last read are asked for again, because only those can have changed.
+
+        Sept 24, 2026 (L4): a tape's first window began at the tape's own start, which moves with
+        the clock, so that URL never repeated and the cache never answered it, and the day still
+        settling was read whole every time: KXETHD's listing was read again, seven pages at a time,
+        for every Kalshi tape the House built (2,183 `[history] kalshi settled` lines in the log)."""
+        now = float(self.clock())
+        last = day + DAY - 1
+        settled_by = now - LISTING_SETTLE_SECONDS
+        if last <= settled_by:
+            with self._settling_lock:
+                self._settling.pop((name, day), None)
+            return list(self.history.kalshi_settled(name, start_ts=day, end_ts=last) or [])
+        with self._settling_lock:
+            held = self._settling.get((name, day))
+        if held is not None and now - held[0] < self.settled_listing_ttl:
+            return list(held[2].values())
+        lo = day if held is None else max(day, int(held[1]))
+        fresh = self.history.kalshi_settled(name, start_ts=lo, end_ts=last) or []
+        rows: dict[str, Any] = {}
+        for ticker, row in (held[2].items() if held is not None else ()):
+            try:
+                if parse_time(row.get("close_time")) < lo:
+                    rows[ticker] = row  # settled when it was read: the new read cannot change it
+            except TapeError:
+                continue
+        for row in fresh:
+            if isinstance(row, dict) and row.get("ticker"):
+                rows[str(row["ticker"]).upper()] = row
+        with self._settling_lock:
+            self._settling[(name, day)] = (now, settled_by, rows)
+        return list(rows.values())
+
     def _settled_events(self, names: "list[str]", start_ts: float, end_ts: float) -> "tuple[dict[str, list[dict[str, Any]]], int]":
-        """The settled yes/no markets closing in [start, end], grouped by event, and their count."""
+        """The settled yes/no markets closing in [start, end], grouped by event, and their count.
+        The listing is read a whole UTC day at a time (`_settled_day`) and cut to the window here."""
         seen: set[str] = set()
         events: dict[str, list[dict[str, Any]]] = {}
         for name in names:
-            for lo, hi in _day_windows(start_ts, end_ts):
+            for day in range(int(start_ts) // DAY * DAY, int(end_ts) + 1, DAY):
                 try:
-                    rows = self.history.kalshi_settled(name, start_ts=lo, end_ts=hi)
+                    rows = self._settled_day(name, day)
                 except Exception as exc:
-                    raise TapeError(f"kalshi settled {name} {iso(lo)}..{iso(hi)}: {type(exc).__name__}: {exc}") from exc
+                    raise TapeError(f"kalshi settled {name} {iso(day)}..{iso(day + DAY - 1)}: {type(exc).__name__}: {exc}") from exc
                 for row in rows or []:
                     if not isinstance(row, dict):
                         continue
