@@ -2127,8 +2127,9 @@ class House:
                 members = [a for a in living if a.specialty == niche_id]
                 if not members or all(niche.keeps_hours(a.needs) for a in members):
                     continue  # no one to wake, or a desk that keeps the session: its quiet nights are its own
-                last = max(float(woke.get(niche_id) or 0), paused_at, self._born_at, min(_epoch(a.born_at) for a in members))
-                late = max(QUIET_ROUND_THE_CLOCK_SECONDS, 2 * 60.0 * min(max(1, int(a.wake_minutes or 0)) for a in members))
+                awake = [a for a in members if not niche.keeps_hours(a.needs)]  # the members a night wakes
+                last = max(float(woke.get(niche_id) or 0), paused_at, self._born_at, min(_epoch(a.born_at) for a in awake))
+                late = max(QUIET_ROUND_THE_CLOCK_SECONDS, 2 * 60.0 * min(max(1, int(a.wake_minutes or 0)) for a in awake))
                 if now - last < late or now - float(told_quiet.get(niche_id) or float("-inf")) < late:
                     continue
                 told_quiet[niche_id] = now
