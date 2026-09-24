@@ -11,10 +11,11 @@ from ltcm.broker import Balance
 
 from league import publish
 from league.publish import Publisher, clean, clean_text, event_id, money, to_events
-from league.ledger import now_iso
+from league.ledger import HOUSE, now_iso
 from league.pacer import Pacer
 from league.tests.fakes import Clock
 from league.tests.test_house import BUYER, HouseCase
+from league.tests.test_lab import KNOB, LOSER, LabCase
 
 D = Decimal
 
@@ -584,11 +585,208 @@ class BoardTest(BoardCase):
             publish.MAX_CHECKPOINT_BYTES = old
 
 
+class FamiliesCase(BoardCase):
+    """The mechanism ledger on the board (C1 and C4, the close-the-gaps run, Sept 24, 2026): the House's
+    `families` block (per venue, per family: `families.row_of`) and each agent row's family fields."""
+
+    def family_row(self, state="proven", **overrides):
+        at = now_iso(self.clock)
+        row = {"unit": "at_risk", "state": state, "since": at, "n": 11, "n_eff": 9.9, "mean_log": 0.2371, "bound": 0.1423, "loss_gate": None,
+               "proven": state != "unproven", "edge_per_dollar": 0.2104,
+               "real": {"n": 2, "mean_log": 0.31, "bound": None, "loss_gate": None, "honest_bound": None,
+                        "entry": {"checkpoint": None, "next_checkpoint": 15, "confidence": 0.9, "honest_bound": None, "ready": False}},
+               "maker": {"n": 0, "bound": None, "positive": False}, "taker": {"n": 11, "bound": 0.0981, "positive": True},
+               "blocks": {"practice": 6, "real": 2, "growth": 0.0123}, "members": 3, "members_living": 2, "members_real": 1, "stake_usd": "30",
+               "capacity": {"usd_per_day": 56.6512, "markets_per_day": 12.31, "fill_rate_at_size": 0.6, "size_usd": 6.0, "settlements_per_day": 5.1,
+                            "binds": False},
+               "swing": None}
+        row.update(overrides)
+        return row
+
+    def families(self):
+        swing = self.family_row("swing", n=40, bound=0.031, real={"n": 32, "honest_bound": 0.02}, stake_usd="120.00", members_real=2,
+                                capacity={"usd_per_day": 14.2, "binds": True},
+                                swing={"stake_usd": Decimal("120.00"), "limit": "capacity", "level": 1, "entered_seq": 88})
+        return {"kalshi": {"sports-central-run-under": self.family_row(), "weather-favorites": swing,
+                           "crypto-15m-favorites": self.family_row("unproven", n=106, bound=-0.0064, stake_usd="10")},
+                "alpaca": {"crypto-alts-reversion": self.family_row("unproven", n=156, bound=-0.0016, stake_usd="25"),
+                           "equity-trend": self.family_row("unproven", n=0, bound=None)}}
+
+    def ledger_board(self, agent, **overrides):
+        board = self.board(agent, **{"families": self.families(), **overrides})
+        board["agents"][agent.id].update(family="sports-central-run-under", family_state="proven", family_bound=0.1423, family_n=11,
+                                         capacity={"usd_per_day": 56.6512, "binds": False}, stake_limit=None)
+        return board
+
+    def lab_stats(self, **overrides):
+        """A `lab.stats` row as `Lab.publish` writes it (`Lab.stats`: the last hour's batches, what they evaluated, the
+        graduates waiting for a seat), with the fields the site reads and a few it does not."""
+        stats = {"window_seconds": 3600.0, "batches": 63, "evaluated": 84, "per_hour": 84.0, "queued": 12, "born_total": 20,
+                 "waiting_seat": {"count": 3, "longest_hours": 1.5}, "failing_since": None, "failures_in_a_row": 0, "error": None}
+        stats.update(overrides)
+        return self.house.ledger.append("lab.stats", stats, agent=HOUSE)
+
+
+class FamiliesTest(FamiliesCase):
+    def test_a_desk_carries_its_familys_state_and_settlements_and_nothing_else_of_its_record(self):
+        agent = self.seated()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        self.clock.advance(5)
+        row = self.publisher().checkpoint(self.house)["desks"][0]
+        self.assertEqual((row["family_state"], row["family_n"]), ("proven", 11))
+        for key in ("family_bound", "capacity", "stake_limit", "target_usd"):
+            self.assertNotIn(key, row, "the family's bound and capacity ride the board's families, once a family")
+        self.assertEqual(row["family"], "test-family", "the desk's own family field is unchanged")
+
+    def test_a_family_field_the_site_would_refuse_is_left_out_with_its_pair(self):
+        agent = self.seated()
+        for state, n in (("lucky", 11), ("Proven", 11), (None, 11), ("proven", -1), ("proven", 1.5), ("proven", True), ("proven", None), ("proven", "x")):
+            board = self.ledger_board(agent)
+            board["agents"][agent.id].update(family_state=state, family_n=n)
+            self.house.allocator = FakeAllocator(board)
+            self.clock.advance(5)
+            row = self.publisher().checkpoint(self.house)["desks"][0]
+            self.assertNotIn("family_state", row, (state, n))
+            self.assertNotIn("family_n", row, (state, n))
+            self.assertEqual(row["band"], "bunt", "the rest of the row stands")
+        board = self.ledger_board(agent)
+        board["agents"][agent.id].update(family_state="swing", family_n=10 ** 12)
+        self.house.allocator = FakeAllocator(board)
+        self.clock.advance(5)
+        row = self.publisher().checkpoint(self.house)["desks"][0]
+        self.assertEqual((row["family_state"], row["family_n"]), ("swing", publish.MAX_SETTLEMENTS), "the site's bound on a count")
+        # Without the allocator, or an agent it does not list: no family is claimed.
+        self.house.allocator = None
+        self.clock.advance(5)
+        self.assertNotIn("family_state", self.publisher().checkpoint(self.house)["desks"][0])
+
+    def test_the_board_carries_the_proven_families_strongest_first_and_the_unproven_count(self):
+        agent = self.seated()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        self.clock.advance(5)
+        families = self.publisher().checkpoint(self.house)["board"]["families"]
+        self.assertEqual(families, {"unproven": 3, "rows": [
+            {"family": "weather-favorites", "venue": "kalshi", "state": "swing", "n": 40, "real_n": 32, "bound": "0.031000", "stake_usd": "120.00",
+             "members_real": 2, "capacity_usd_per_day": "14.20"},
+            {"family": "sports-central-run-under", "venue": "kalshi", "state": "proven", "n": 11, "real_n": 2, "bound": "0.142300", "stake_usd": "30.00",
+             "members_real": 1, "capacity_usd_per_day": "56.65"},
+        ]})
+
+    def test_a_proven_familys_bound_is_its_honest_one(self):
+        # A lopsided record (favourites) is also held to the House's loss-rate bound: the proof is the smaller of the two.
+        self.assertEqual(publish.honest_bound({"bound": 0.05, "loss_gate": 0.012}), Decimal("0.012"))
+        self.assertEqual(publish.honest_bound({"bound": 0.05, "loss_gate": None}), Decimal("0.05"))
+        self.assertIsNone(publish.honest_bound({"bound": None, "loss_gate": 0.3}))
+        families = {"kalshi": {"weather-favorites": self.family_row(bound=0.05, loss_gate=0.012)}}
+        self.assertEqual(publish.site_families(families)["rows"][0]["bound"], "0.012000")
+
+    def test_whatever_the_families_block_holds_the_site_gets_only_what_it_accepts(self):
+        row = self.family_row
+        eight = {f"family-{n}": row(n=20 + n) for n in range(10)}
+        raw = {
+            "kalshi": {
+                **eight,
+                "Sports Central!": row(n=5),                                   # normalised as a desk's family is
+                "sports-central": row(n=4),                                    # ... and then the same name: one row
+                "no-bound": row(bound=None),                                   # proven with no bound: not a proof to show
+                "nan-bound": row(bound=float("nan")),
+                "no-count": row(n="many"),
+                "lucky": row("lucky"),                                         # a state the site does not know: neither row nor count
+                "huge": row(n=10 ** 9, real={"n": 10 ** 9}, bound=1e12, stake_usd="1e3", members_real=10 ** 6,
+                            capacity={"usd_per_day": 1e30}),
+                "odd": row(real="nope", stake_usd="thirty", members_real=-2, capacity="none"),
+                "not-a-row": "proven",
+            },
+            "BTC/USD": {"x": row()},                                           # not a venue
+            "alpaca": "not a mapping",
+            "coinbase": {"u": row("unproven"), "v": row("unproven")},
+        }
+        out = publish.site_families(raw)
+        self.assertEqual(out["unproven"], 2)
+        self.assertEqual(len(out["rows"]), publish.MAX_FAMILY_ROWS)
+        self.assertEqual(len({(r["venue"], r["family"]) for r in out["rows"]}), len(out["rows"]))
+        self.assertEqual([r["n"] for r in out["rows"]][:2], [publish.MAX_SETTLEMENTS, 29], "the most settlements first, counts bounded")
+        huge = out["rows"][0]
+        self.assertEqual((huge["family"], huge["real_n"], huge["bound"], huge["stake_usd"], huge["members_real"], huge["capacity_usd_per_day"]),
+                         ("huge", publish.MAX_SETTLEMENTS, "999999.000000", "1000.00", publish.MAX_DESKS, "999999999.00"))
+        everything = publish.site_families({"kalshi": {k: v for k, v in raw["kalshi"].items() if k not in eight}})
+        names = [r["family"] for r in everything["rows"]]
+        self.assertEqual(names.count("sports-central"), 1)
+        for gone in ("no-bound", "nan-bound", "no-count", "lucky", "not-a-row"):
+            self.assertNotIn(gone, names)
+        odd = next(r for r in everything["rows"] if r["family"] == "odd")
+        self.assertEqual((odd["real_n"], odd["stake_usd"], odd["members_real"], odd["capacity_usd_per_day"]), (0, None, 0, None))
+        for bad in (None, "families", [row()], {}):
+            self.assertEqual(publish.site_families(bad), None if bad != {} else {"unproven": 0, "rows": []})
+
+    def test_the_lab_reading_is_the_labs_own_hourly_stats_while_it_is_fresh(self):
+        agent = self.seated()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        publisher = self.publisher()
+        self.clock.advance(5)
+        self.assertNotIn("lab", publisher.checkpoint(self.house)["board"], "no reading yet: no line")
+        entry = self.lab_stats()
+        self.clock.advance(60)
+        board = publisher.checkpoint(self.house)["board"]
+        self.assertEqual(board["lab"], {"at": entry.at, "tested_last_hour": 84, "graduates_waiting": 3})
+        self.clock.advance(publish.LAB_READING_MAX_AGE)
+        self.assertNotIn("lab", publisher.checkpoint(self.house)["board"], "a reading older than half an hour says nothing of the last hour")
+        # The newest reading is the one read, and one the site would refuse is not sent.
+        for stats, expected in (({}, {"tested_last_hour": 84, "graduates_waiting": 3}),
+                                ({"evaluated": 0, "waiting_seat": {"count": 0}}, {"tested_last_hour": 0, "graduates_waiting": 0}),
+                                ({"evaluated": 10 ** 9}, {"tested_last_hour": publish.MAX_TESTED, "graduates_waiting": 3}),
+                                ({"window_seconds": 600.0}, None), ({"evaluated": -1}, None), ({"evaluated": 1.5}, None),
+                                ({"waiting_seat": None}, None), ({"waiting_seat": {"count": "3"}}, {"tested_last_hour": 84, "graduates_waiting": 3}),
+                                ({"evaluated": None}, None)):
+            entry = self.lab_stats(**stats)
+            self.clock.advance(5)
+            lab = publisher.checkpoint(self.house)["board"].get("lab")
+            self.assertEqual(lab, None if expected is None else {"at": entry.at, **expected}, stats)
+
+    def test_the_lab_line_needs_no_allocator(self):
+        self.seated()
+        self.house.allocator = None
+        entry = self.lab_stats()
+        self.clock.advance(5)
+        board = self.publisher().checkpoint(self.house)["board"]
+        self.assertEqual(board["enabled"], False)
+        self.assertEqual(board["lab"], {"at": entry.at, "tested_last_hour": 84, "graduates_waiting": 3})
+        self.assertNotIn("families", board, "the families come with the allocator's board only")
+
+    def test_a_lab_reading_that_cannot_be_read_costs_the_checkpoint_nothing(self):
+        from unittest.mock import patch
+
+        agent = self.seated()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        self.lab_stats()
+        self.clock.advance(5)
+        with patch.object(self.house.ledger, "last", side_effect=RuntimeError("the ledger is busy")):
+            body = self.publisher().checkpoint(self.house)
+        self.assertNotIn("lab", body["board"])
+        self.assertIn("families", body["board"])
+
+
+class LabLineTest(LabCase):
+    """The board's lab line reads what the lab itself writes (`Lab.publish`), not a copy of its shape."""
+
+    def test_the_lab_line_is_the_labs_own_last_hour(self):
+        self.queue(KNOB)
+        self.queue(LOSER)
+        self.lab.evaluate_batch()
+        self.lab.publish(force=True)
+        row = self.house.ledger.last("lab.stats")
+        publisher = Publisher("https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / "publish.json", tape="test", opener=FakeSite(),
+                              clock=self.clock)
+        self.assertEqual(publisher.lab_reading(self.house), {"at": row.at, "tested_last_hour": 2, "graduates_waiting": 0})
+        self.clock.advance(publish.LAB_READING_MAX_AGE + 1)
+        self.assertIsNone(publisher.lab_reading(self.house), "the lab has not written a reading in half an hour")
+
+
 SITE = Path(os.environ.get("LTCM_SITE") or Path(__file__).resolve().parents[3] / "personal-site")
 
 
 @unittest.skipUnless(shutil.which("node") and (SITE / "capital" / "schema.js").exists(), "the site's validators are not checked out beside this repository (set LTCM_SITE)")
-class SiteAcceptsTheBoardTest(BoardCase):
+class SiteAcceptsTheBoardTest(FamiliesCase):
     """The site's own validators (personal-site/capital/schema.js), run on what this publisher posts."""
 
     def valid(self, body):
@@ -654,6 +852,91 @@ class SiteAcceptsTheBoardTest(BoardCase):
         self.house.allocator = None
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+
+    def page(self, body):
+        """What the site's page (capital/capital.js `boardSnapshot`) reads from a checkpoint: the proven families
+        and their words, the lab's line, and each agent's family."""
+        script = ("import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { "
+                  "const body = JSON.parse(s); const model = m.boardSnapshot(body, [], Date.parse(body.published_at)); "
+                  "console.log(JSON.stringify({ rows: model.families && model.families.rows.map(m.familyWords), "
+                  "unproven: model.families && m.unprovenWords(model.families), lab: model.lab && m.labWords(model.lab), "
+                  "agents: model.agents.map(a => [a.id, a.familyState, a.familyN]) })); }); })")
+        out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(body), capture_output=True, text=True, timeout=60)
+        return json.loads(out.stdout)
+
+    def test_the_site_accepts_the_mechanism_ledger_and_its_page_draws_it(self):
+        # Sept 24, 2026 (C4, the close-the-gaps run): each desk's family, the proven families and the lab's hourly
+        # reading, published in the site's shapes, pass its validators (personal-site's schema after this run's site
+        # change: deployed before the floor publishes them) and read on its page in its own words.
+        agent = self.seated()
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        self.lab_stats()
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(self.valid(body), "true")
+        self.assertEqual(self.page(body), {
+            "rows": ["compounding · 40 settlements, 32 real · lower bound +3.1% · 2 agents at $120 · capacity $14/day",
+                     "proven · 11 settlements, 2 real · lower bound +14.2% · 1 agent at $30 · capacity $57/day"],
+            "unproven": "3 strategies still unproven", "lab": "84 strategies tested in the last hour · 3 graduates waiting for a seat",
+            "agents": [[agent.id, "proven", 11]]})
+        # Nothing proven, a lab that tested nothing: still what the site accepts, in its words.
+        board = self.ledger_board(agent, families={"kalshi": {"weather-favorites": self.family_row("unproven", bound=-0.2112)}})
+        self.house.allocator = FakeAllocator(board)
+        self.lab_stats(evaluated=0, waiting_seat={"count": 0})
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["board"]["families"], {"unproven": 1, "rows": []})
+        self.assertEqual(self.valid(body), "true")
+        page = self.page(body)
+        self.assertEqual((page["rows"], page["unproven"], page["lab"]), ([], "No proven edge yet · 1 strategy unproven", "No strategy tested in the last hour"))
+        # The most the publisher sends of everything is still what the site accepts.
+        many = {"kalshi": {f"family-{n}": self.family_row("swing" if n % 2 else "proven", n=10 ** 9, real={"n": 10 ** 9}, bound=1e12,
+                                                          stake_usd="1e20", members_real=10 ** 6, capacity={"usd_per_day": -1e30})
+                           for n in range(12)}}
+        self.house.allocator = FakeAllocator(self.ledger_board(agent, families=many))
+        self.lab_stats(evaluated=10 ** 12, waiting_seat={"count": 10 ** 12})
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(len(body["board"]["families"]["rows"]), publish.MAX_FAMILY_ROWS)
+        self.assertEqual(self.valid(body), "true")
+
+    def test_the_site_accepts_the_real_allocators_mechanism_ledger(self):
+        # The House's own allocator (Deploy B): its board's families and each agent's family fields, as it draws them.
+        agent = self.seated()
+        self.seated("other")
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        self.house.allocator.rebalance()
+        self.assertIn("families", self.house.allocator.board())
+        self.lab_stats()
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["board"]["families"], {"unproven": 1, "rows": []})
+        self.assertEqual({(d["id"], d["family_state"], d["family_n"]) for d in body["desks"]}, {(agent.id, "unproven", 0), ("other", "unproven", 0)})
+        self.assertEqual(self.valid(body), "true")
+
+    def test_the_page_says_why_each_agent_was_born_and_retired(self):
+        # Sept 24, 2026: the House's birth reasons and causes of death (league/house.py `kill`), as its ledger rows
+        # reach the tape, read on the page in its own fixed words: a cause renamed on the House side says nothing
+        # there, and this test says so first.
+        parent = self.seated()
+        needs = {"venue": "alpaca", "horizon": "hour", "style": "test"}
+        births = [("an Alpha Lab graduate (param, by house, lineage agent:buyer): a parameter mutation of 0a77b052", "lab graduate"),
+                  ("a parameter mutation of its parent", "tweak of Buyer"), ("Test a narrower entry window.", "child of Buyer")]
+        rows = [self.house.registry.born(name=f"child-{n}", family="test-family", code=BUYER, needs=needs, parent=parent.id, reason=reason)
+                for n, (reason, _) in enumerate(births)]
+        causes = [("displaced", "lost its seat"), ("evidence", "lost too much"), ("superseded", "replaced by its fix"), ("redundant", "a duplicate"),
+                  ("credits", "out of credits"), ("never qualified", "never passed its history test"), ("stuck", "idle too long")]
+        for (cause, _), child in zip(causes, rows + [self.seated(f"gone-{n}") for n in range(len(causes) - len(rows))]):
+            self.house.kill(child, cause, f"{child.id} died of {cause} in a test")
+        events = [e for entry in self.house.ledger.read(kinds=("agent.born", "agent.died"), limit=100) for e in to_events(entry)
+                  if entry.kind == "agent.died" or entry.agent.startswith("child-")]
+        script = ("import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => "
+                  "console.log(JSON.stringify(JSON.parse(s).map(e => { const move = m.ladderMove(e); return move && [move.kind, m.reasonWords(move)]; })))); })")
+        out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(events), capture_output=True, text=True, timeout=60)
+        said = json.loads(out.stdout)
+        self.assertEqual([w for kind, w in said if kind == "born"], [words for _, words in births])
+        self.assertEqual(sorted(w for kind, w in said if kind == "out"), sorted(words for _, words in causes))
 
     def test_the_page_reads_every_band_move_the_tape_carries(self):
         agent = self.seated()
