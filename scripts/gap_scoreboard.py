@@ -997,9 +997,12 @@ def waiting_cards(snap: Snapshot, agents: Mapping[str, Agent]) -> list[dict[str,
             born.add(founder[5:])
         elif founder in by_strategy:
             born.add(by_strategy[founder])
+    # A card that left the House's seat queue (R2, Sept 24, 2026: its desk closed by the search) waits no more:
+    # the House's `seat-expired:cards:<id>` row says so (`House._expire_waiters`).
     return [{"card": c, "niche": cards[c].get("niche"), "since": passed_at,
              "created": float(cards[c].get("created_epoch") or cards[c]["_t"])}
-            for c, (outcome, passed_at) in outcomes.items() if outcome == "passed" and c in cards and c not in born]
+            for c, (outcome, passed_at) in outcomes.items() if outcome == "passed" and c in cards and c not in born
+            and snap.at_of(f"seat-expired:cards:{c}") is None]
 
 
 def research_children(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs) -> list[dict[str, Any]]:
@@ -1041,6 +1044,7 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
         born = Counter()
         born_window = Counter()
         waiting = []
+        expired = 0
         for candidate, state, origin, at in snap.lab.execute(
                 "SELECT g.candidate, g.state, c.origin, g.at FROM graduations g LEFT JOIN candidates c ON c.id = g.candidate"):
             origin = str(origin or "unknown")
@@ -1049,6 +1053,9 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
                 if float(at) >= since:
                     born_window[origin] += 1
             elif state == "passed":
+                if snap.at_of(f"seat-expired:graduates:{candidate}") is not None:
+                    expired += 1  # left the House's seat queue (R2, Sept 24, 2026): never counted as waiting
+                    continue
                 # From the ledger's `lab.graduate:<id>:passed` row, written once, as `Lab.waiting`
                 # counts it: the table's `at` moves at every retry.
                 passed = snap.at_of(f"lab.graduate:{candidate}:passed")
@@ -1060,6 +1067,7 @@ def lab_loop(snap: Snapshot, agents: Mapping[str, Agent], rungs: Rungs, since: f
         out["born_graduates_by_origin"] = dict(born)
         out["born_graduates_in_window_by_origin"] = dict(born_window)
         out["graduates_waiting"] = len(waiting)
+        out["graduates_left_the_queue"] = expired
         out["graduates_longest_wait_h"] = _r((now - min(waiting)) / HOUR, 2) if waiting else None
     cards = waiting_cards(snap, agents)
     out["cards_waiting"] = len(cards)
