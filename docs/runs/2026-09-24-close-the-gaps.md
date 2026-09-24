@@ -653,6 +653,24 @@ recorded for the next open; live verification uses the markets that trade around
   family-probe modules ran in 26 s with `TMPDIR` on `/tmp`, against about 11 tests a minute with it on `~/Work`'s disk
   (the builders' full suites crawled for 45 minutes and were stopped). The sqlite-heavy tests pay the disk's fsync; the
   tmpfs is small (3.8 GB), so one suite at a time.
+- 18:21Z — **R2's review** (`r2/review`, 13 commits on #276, league suite 3,107 OK) fixed:
+  - a desk held forever for a proven family whose program had no mutation left;
+  - waiters expired for a week after the search reopened their desk (an expiry now lifts once its reason is gone,
+    and retained candidates are held, not dropped);
+  - the population rule flipping at Sail's 1.5-day floor (it grows again only above 1.75 days, and an unreadable
+    meter holds it);
+  - closed-desk caps applied after the lab and foundry seated anyone;
+  - an unguarded waiter source on every seat question;
+  - two proven families on one desk;
+  - a proven family's name kept by a child of meriwether-h2d625d-2: a proven family's name and R3's anchor now
+    require the family's founding program.
+
+  One finding left open is fixed on `d/deploy` (7b69e2c): S3 no longer takes a practice resident holding an event
+  contract still to settle, whose wind-down would sell the settlements its desk's clock waits for; the test fails
+  without the guard. Accepted as they are:
+  - proven-family births may take replay-pending seats (bounded at the owed births);
+  - at most one overdue warning a desk an hour;
+  - `enroll` ignores desk caps (pre-existing).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
