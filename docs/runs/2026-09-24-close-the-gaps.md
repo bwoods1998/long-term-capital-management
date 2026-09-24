@@ -810,6 +810,15 @@ recorded for the next open; live verification uses the markets that trade around
   on this branch (e04a36c): a failed try waits 30 minutes, doubling up to six hours; the error alert carries `began_at`
   (the first failure of the run) so the watchdog inherits an outage that began before a promotion; the House test fails
   without it. It ships with the final PR (an updater release), not as a redeploy: not a money-path defect.
+- 22:45Z — **The watch: the backup defect now blocks releases.** Sail's checkpoint service has answered 503 since
+  21:31:55Z (7 more failures 22:15-22:45Z, every 3-4 minutes, each an error alert). The in-box updater's release of
+  Merton's #288 (`main-55bb1bdc83ff`, promoted 22:22:43Z) was rolled back at 22:27:14Z on "reading 9: 1 error alert(s)
+  since seq 594745 ... The daily backup of the House box failed (SailboxError: sailbox api 503 ...)": exactly the hazard
+  e04a36c closes (a failure backs off; the new House reads the run of failures from the ledger and does not retry inside
+  its own watch; its alerts carry `began_at`). Until it lands, every release's watch can meet one of these errors
+  (Merton's #290 is next on main). It rides the final PR (#289) at the end of the watch, not a redeploy now. The floor
+  itself: grant active on `535a7f15`, no frozen book, 128 living, ticks 65.9-66.7 s at 22:11-22:42Z, real P&L +$10.65,
+  no other error.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
