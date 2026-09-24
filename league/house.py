@@ -1276,6 +1276,44 @@ class House:
             return due
         return at_open if at_open is not None and at_open < due else due
 
+    def _shut_session(self, agent: Agent) -> str:
+        """Why this agent's wake is not run now, or "": everything it may trade keeps the regular US
+        session (a stock or option desk; an open desk naming no coin) and the session is shut.
+
+        The wake skip (Sept 24, 2026, the close-the-gaps run). Outside the session nothing such an
+        agent decides can trade: an entry waits for the open, a market exit is refused by the book
+        ("market orders outside regular hours are not permitted"), and the strategy reads a shut
+        market's stale quotes. Measured on the T0 snapshot, the 48 hours to 01:41Z Sept 24: 2,891 of
+        9,884 wakes (29%) were stock or option agents outside the session, billed 9,424 box seconds,
+        and sent 79 intents, 75 of them refused as market orders outside regular hours (scholes-
+        h7dd043-2 and scholes-25 exiting, 10-14 an hour all night). Such a wake is not run: no
+        snapshot, no box, no order, no `agent.woke` row. Its cadence and its idle bookkeeping stand
+        (`wake`), and `_next_wake` already wakes the desk a few seconds after the bell, where a held
+        position's exit goes at once. A House wind-down's held sells wait for the open as before
+        (`_release_wind_downs`). An open desk naming a coin is woken all night for the coin; its stock
+        or option entries wait instead (`_intents`)."""
+        niche = self.niche_of(agent)
+        if niche is None or not niche.keeps_hours(agent.needs):
+            return ""
+        if niche.open and any(not niche.keeps_hours({"symbols": [symbol]}) for symbol in agent.needs.get("symbols") or []):
+            return ""  # it names a coin, which trades all night
+        try:
+            if market_open_at(now_iso(self.clock)):
+                return ""
+        except Exception:  # noqa: BLE001 - a moment outside the computed calendar: wake as before
+            return ""
+        return ("the regular session is shut: a stock or option desk is not woken until the open, "
+                "a few seconds after the bell (nothing it sends before then can trade)")
+
+    def _count_skipped_wake(self, agent: Agent) -> None:
+        """health.json `wakes_skipped`: how many wakes the skip saved since it was first counted, by desk."""
+        with self._state_lock:
+            skips = self._state.setdefault("wakes_skipped", {"since": now_iso(self.clock), "count": 0, "by_desk": {}})
+            skips["count"] = int(skips.get("count") or 0) + 1
+            desk = agent.specialty or agent.niche
+            skips.setdefault("by_desk", {})[desk] = int(skips["by_desk"].get(desk) or 0) + 1
+            skips["last_at"] = now_iso(self.clock)
+
     def _generation(self, agent_id: str) -> tuple[str, str, int, int] | None:
         """Identity of the strategy and rung stay, read while holding the lifecycle lock."""
         agent = self.registry.get(agent_id)
@@ -1312,6 +1350,13 @@ class House:
             self.seat(agent)
             if book.account(agent.id).cash <= 0 and not book.account(agent.id).holdings:
                 return {"agent": agent.id, "skipped": "no stake on its book yet"}
+            shut = self._shut_session(agent)
+            if shut:
+                # The wake skip: no snapshot, no box, no order. Only the bookkeeping a shut wake always
+                # did, so research is paced exactly as before (`idle_reason`'s bench time).
+                self._note_wake(agent, acted=bool(book.account(agent.id).holdings or book.open_orders(agent.id)), offered=0)
+                self._count_skipped_wake(agent)
+                return {"agent": agent.id, "skipped": shut}
         try:
             ctx = self.snapshot(agent, book)
         except Exception as exc:  # noqa: BLE001 - a data outage skips a wake, it does not stop the floor
@@ -1586,6 +1631,12 @@ class House:
                 minimum = min_order_usd(instrument) if side == "buy" else None
                 # A Kalshi entry past the horizon is refused here, saying what it was judged by (X2).
                 refusal = self._horizon_refusal(agent, book, instrument) if side == "buy" else ""
+                if not refusal and side == "buy" and market_hours(instrument, now) is False:
+                    # The wake skip's other half (Sept 24, 2026): an agent still woken outside the session
+                    # (an open desk naming a coin) sends no stock or option entry. A market buy would be
+                    # refused by the book, and a limit would only wait at the venue for the open.
+                    refusal = ("outside the regular session no stock or option entry is sent: it could not trade before "
+                               "the open. The House wakes a desk that keeps hours a few seconds after the bell; decide it then")
                 if minimum is not None:
                     if price is None:
                         try:  # a market buy sized in units: the ask it will pay
@@ -5462,6 +5513,8 @@ class House:
                            for name, book in self.books.items() if name.startswith('alpaca')},
             "release": Path(__file__).resolve().parents[1].name,
             "tick_duration_seconds": round(max(now - _epoch(summary["at"]), 0), 3),
+            # The wake skip (Sept 24, 2026): stock and option wakes not run into a shut session (`_shut_session`).
+            "wakes_skipped": dict(self._state.get("wakes_skipped") or {}),
             "background_jobs": jobs,
             "invalid_parameters": {a.id: report['errors'] for a in self.registry.living()
                                    if not (report := parameters.inspect(a.params, a.needs))['valid']},
