@@ -597,6 +597,17 @@ class ProbesAndBunts(KalshiHouse):
         self.assertGreaterEqual(book.equity(a.id), D("9.99"))  # to the probe's $10, its position kept
         self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
 
+    def test_a_probe_keeps_what_it_makes_on_its_own_base(self):
+        """`bunt_growth: "w_real"` applies to both tiers, each on its own base, up to the swing line."""
+        a = self.agent()
+        alloc = self.house.allocator
+        self.assertEqual(alloc.target_stake(a, "bunt", ev(agent=a.id, rung=2, w_real=1.2)), D("12.00"))
+        self.assertEqual(alloc.target_stake(a, "bunt", ev(agent=a.id, rung=2, w_real=2.0)), D("12.50"))  # 10 x 1.25
+        self.assertEqual(alloc.target_stake(a, "bunt", ev(agent=a.id, rung=2, w_real=0.8)), D("10"))
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.001)
+        alloc._begin_pass()
+        self.assertEqual(alloc.target_stake(a, "bunt", ev(agent=a.id, rung=2, w_real=1.2)), D("36.00"))
+
     def test_the_family_is_read_once_a_pass(self):
         agents = [self.agent(f"kay{i}") for i in range(3)]
         table = {a.id: dict(e=1.0, w_paper=1.0, paper_trades=1) for a in agents}

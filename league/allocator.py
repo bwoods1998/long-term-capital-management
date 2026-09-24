@@ -480,7 +480,8 @@ def _params() -> dict[str, Any]:
         "bunt_usd": {k: _d(v) for k, v in (r.get("bunt_usd") or {"kalshi": "10", "alpaca": "15"}).items()},
         # The close-the-gaps run (Sept 24, 2026): an unproven family's first real stake is a probe, the
         # hysteresis exit waits for a few real settlements, and an event book's position is a fifth.
-        # Without the keys every bunt is `bunt_usd`, the exit applies at once and the share is one.
+        # Without the keys every bunt is `bunt_usd`, the exit applies at once, and a Kalshi position's
+        # share is `position_share`, as on every other book.
         "probe_bunt_usd": {k: _d(v) for k, v in (r.get("probe_bunt_usd") or r.get("bunt_usd") or {"kalshi": "10", "alpaca": "15"}).items()},
         "hysteresis_after_settled": int(r.get("hysteresis_after_settled") or 0),
         "position_share_event": float(r.get("position_share_event") or r.get("position_share", 0.5)),
