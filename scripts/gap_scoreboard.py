@@ -1240,8 +1240,8 @@ def kaplan_meier_median(times: Sequence[tuple[float, bool]]) -> float | None:
 def evidence_clocks(snap: Snapshot, agents: Mapping[str, Agent], trades: Sequence[Trade], fills: Mapping[str, Sequence[Row]],
                     days: float = EVIDENCE_CLOCK_DAYS) -> dict[str, Any]:
     """Per desk: hours from a member's first own fill to its third independent settlement (distinct
-    events on Kalshi, closed trades on Alpaca, any book), for members whose first fill is in the
-    last `days`."""
+    events on Kalshi, closed trades on Alpaca, any book; the House's closing sales left out), for
+    members whose first fill is in the last `days`."""
     start = snap.now - days * DAY
     by_agent: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
@@ -1255,7 +1255,9 @@ def evidence_clocks(snap: Snapshot, agents: Mapping[str, Agent], trades: Sequenc
         seen: set[str] = set()
         third = None
         for trade in sorted(by_agent.get(agent.id, []), key=lambda t: t.close_seq):
-            if trade.close_t < first:
+            # The House's sale of a dead member's holdings is the House's close, not the member's
+            # (the House's own clock, `House._evidence_clocks`, leaves it out since the B-seats review).
+            if trade.close_t < first or trade.closing:
                 continue
             seen.add(trade.event)
             if len(seen) == 3:
