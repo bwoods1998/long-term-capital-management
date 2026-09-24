@@ -106,23 +106,33 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   |---|---|---|---|
   | Replay | 0 | new code | none |
   | Paper | 1 | passed replay | the $200 purse |
-  | Bunt | 2 | E ≥ 1.01 and 5 closed paper trades, or 3 settlements on Kalshi | $10 at Kalshi, $25 at Alpaca |
-  | Swing | 3 | E ≥ 1.5, W_real ≥ 1 and 8 real closed trades; the first swing is audited | the bunt × min(E, 20), up to 60% of the venue |
+  | Probe | 2 | E ≥ 1.01 and 5 closed practice trades, or 3 settlements on Kalshi, when the agent's family is not proven | $10 at Kalshi, $25 at Alpaca |
+  | Bunt | 2 | the same line, when the agent's family's pooled record is proven | $30 at Kalshi, $25 at Alpaca, × W_real up to 1.25 |
+  | Swing | 3 | E ≥ 1.25, W_real ≥ 1 and 8 real closed trades; the first swing is audited | the bunt × min(E, 20)², up to 60% of the venue |
   | Star | 3 | the top 3 swings by real P&L with W_real ≥ 1.25 | the swing stake |
 
-  An options agent's bunt is one contract's premium, $40, because a contract cannot be cut
-  smaller. A position is capped at half the stake, never under the venue's minimum order × 1.2 ($1
-  at Kalshi, $10 at Alpaca). Every order stays within the gateway's $75 cap, and an Alpaca order
-  within $68.18, because the gateway prices an Alpaca market order at the ask plus 10%.
+  **Promotion on proof** (Sept 24, 2026, the close-the-gaps run). A probe is the bunt band's first
+  tier: pocket change for an unproven mechanism. A family is proven when its pooled forward record
+  -- every member ever born, living or dead, one observation per independent event, practice at
+  half weight and real money in full -- has at least 10 observations and a one-sided 80% lower bound
+  on mean log growth above zero; a probe becomes a bunt the pass after that, and a bunt a probe when
+  the bound falls. On Kalshi, closed trades and settlements count once per event, so strikes stacked
+  on one game are one bet. The board labels each real agent probe or bunt, with its family's state,
+  bound and count. An options agent's probe or bunt is one contract's premium, $80, because a
+  contract cannot be cut smaller. A position is capped at a fifth of the stake on Kalshi and half at
+  Alpaca, never under the venue's minimum order × 1.2 ($1 at Kalshi, $10 at Alpaca). Every order
+  stays within the gateway's $75 cap, and an Alpaca order within $68.18, because the gateway prices
+  an Alpaca market order at the ask plus 10%.
 - **Exits are sliced** (Sept 23, 2026, `league/book.py`). A sell worth more than the order cap is
   sent as slices, each its own venue order of at most the cap, and every slice's fills are
   attributed to the one intent. The book reconciles after each slice. A refused or partly filled
   slice leaves the rest to the next poll, and a restart resumes the plan without sending a slice
   twice. Before this a position could only be as large as one order could close, so positions
   were held to $60.
-- **Down.** Hysteresis: a bunt leaves below E 0.8585 and a swing below 1.275 or W_real 0.9. A 35%
-  real drawdown from the high-water mark of the current real stay sends an agent back to paper at
-  once. An agent sent back waits an hour before it may bunt again (`reentry_cooldown_hours`), so a
+- **Down.** Hysteresis: a bunt leaves below E 0.8585 once it has 3 independent real results in its
+  stay (since Sept 24, 2026: one early loss is not a demotion), and a swing drops to a bunt below
+  1.0625 or W_real 0.9. A 35% real drawdown from the high-water mark of the current real stay sends
+  an agent back to paper at once, trial or not. An agent sent back waits an hour before it may bunt again (`reentry_cooldown_hours`), so a
   record near a line cannot flap between books. W_paper under 0.80 after 10 closed trades is death.
   Paper death, statistical death and drift still apply.
 - **The envelope.** Per venue, it is the grant's capital plus realized profit there, so stars
@@ -274,7 +284,7 @@ constitution's **tuition**: at most 4 agents hold real money on rung 2 at once; 
 only while the net loss of every real-money account that has not earned rung 3, plus what the seated
 agents could still lose, reserving each **full $60 stake**, fits under **$50**. **While the owner's
 live grant is active, its envelope replaces those two numbers** (`House.tuition`): 16 agents (the
-allocation divided by the micro stake; 101, over the $10 bunt, while the allocator is enabled), a
+allocation divided by the micro stake; 101, over the $10 Kalshi probe, while the allocator is enabled), a
 $1,017.75 loss line, and a line for each venue at its
 allocation, $500 on Alpaca and $517.75 on Kalshi. Under the grant every real-money account
 counts, scaled ones included. A drawdown stop cannot guarantee an exit price.
@@ -599,7 +609,7 @@ What no model and no code path on Sail may change, and where each item is enforc
 | OpenAI budget | $408 for the month (`FRONTIER_MONTH_USD`: raised from $174 to $374 on Sept 21, 2026, when the owner added $200 of credit, and on Sept 23 to metered + the owner's funded ~$100). Since Sept 23 it also rises by 0.3 of the real accounts' equity above $1,017.75 (`COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`), held to `FRONTIER_MONTH_MAX_USD`, which is the funded $408, so profit buys nothing above funded money yet. The House's campaign allowance is a further line | in the gateway, which reads the equity itself: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`9fa83727…` since the allocator of Sept 23, 2026; `64a206c6…` under swing-and-bunt earlier that day), and the House writes the digest to the ledger every time it starts |
-| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since Deploy A of Sept 23 it counts 40 agents: the allocation over a $25 stake line, the smallest bunt (101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
+| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the close-the-gaps run's Deploy A (Sept 24, 2026) it counts 101 agents: the allocation over the smallest real stake, the $10 Kalshi probe (40 over the $25 bunt line from Deploy A of Sept 23; 101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, the campaign, live-trading and experiment-record files, the agent-box seal (`sandbox.py`), the history a strategy is judged on (`history.py`, `deep_replay.py`), `gateway/`, `.github/` (`ci.FORBIDDEN` has the full list) | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 

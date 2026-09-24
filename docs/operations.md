@@ -30,7 +30,9 @@ The work flows through these stages:
    - Kalshi programs on recorded markets.
 4. **Bands of capital** (since Sept 23, 2026). At every mark pass the allocator
    (`league/allocator.py`) reads each agent's evidence (its wealth multiple) and moves it between
-   Paper, Bunt and Swing, sizing its real stake inside the live grant's envelope. The first swing is
+   Paper, Bunt and Swing, sizing its real stake inside the live grant's envelope. Since Sept 24, 2026
+   (promotion on proof) a bunt is a PROBE ($10 Kalshi, $25 Alpaca) unless the agent's family's pooled
+   record is proven, and counts on Kalshi are once per event. The first swing is
    audited, and an agent with a known defect is audited before its bunt. With `allocator.enabled`
    off, the old ladder decides again: the screen, then the micro stake with the audit after it.
 5. **The Alpha Lab** (since Sept 23, 2026). Off the tick, the lab searches strategy programs in
@@ -230,7 +232,7 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `audit_cooldown`, `tuition`, `campaign`, `live_book`, `accounting_integrity`, `paused` and
     `evidence` say what else holds it. `audit_credits` appears only when `audit.house_pays` is off.
   - Under the allocator (Sept 23, 2026) only the allocator writes these for moves up: `promoted`
-    ("the allocator seated it as a bunt", or moved it to the swing band), `auditing` (a known
+    ("the allocator seated it as a probe" or "as a bunt", or moved it to the swing band), `auditing` (a known
     defect before the bunt, or the first swing), `envelope` (the venue's envelope cannot seat
     another bunt and no weaker flat bunt can be displaced; with `capital_usd` and `headroom_usd`),
     `venue_cash` (the account's free cash cannot take the stake now), `campaign` (the grant has not
@@ -430,12 +432,10 @@ egress, funds itself or changes a venue account.
     intents in 67 wakes over 48 hours);
   - `api.eia.gov` or `www.eia.gov` (WTI daily spot): the fixings the `kalshi-prices` desk's contracts
     settle on.
-- **A decision on the one-loss trial** (the study's blocker 1): with W_real at 1, one lost position
-  over about 15% of a fresh bunt's stake drops E under `bunt_at × hysteresis` and sends it back to
-  practice (huang-h427345 on $2.55 at 14:57Z; the lab graduate huang-l23cdb7 on $7.32 and $7.84 at
-  $30 stakes on Sept 23 evening). The fix is outside the run's money table: either the hysteresis
-  exit applies only after `bunt_min_settled` real settlements (the 35% stay drawdown still binds),
-  or `position_share` 0.15 on event books. Either needs the owner's word, a deploy and a ratify.
+- **The one-loss trial** (the study's blocker 1) was decided in the close-the-gaps run (Sept 24,
+  2026, inside its money table): the hysteresis exit applies only after
+  `allocator.hysteresis_after_settled` (3) independent real results in the stay, and a Kalshi position
+  is `allocator.position_share_event` (0.2) of the stake. See Switches.
 - **Compute:** an OpenAI top-up (the September gateway month is funded at $408 and the House line
   fell under the $20 "earned" reserve at about 20:50Z Sept 23; the month resets Oct 1) and Sail
   auto-recharge (about 2.6 days of runway at $32 a day on Sept 23). After a top-up, align
@@ -487,13 +487,18 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
 | | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5; crypto 4, equity 2, option 24 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional at the rate of the fill's asset class (A8, Sept 23, 2026 ~22:00 UTC: each class's practice optimism against the order's reference at intent time, the larger of the notional-weighted mean and the round-trip reading, rounded up, never below 2; `docs/research/queries/2026-09-23/A8-haircut.py`). Options tightened from 10, crypto and stocks loosened to what was measured. A plain number charges every class (the rollback); a class not named pays the table's largest rate |
 | | `allocator` `bunt_at`, `bunt_min_trades`, `bunt_min_settled` | 1.01, 5, 3 | Paper → bunt: E at the line and 5 closed paper trades, or 3 settlements on Kalshi (plan default 1.03; set from the Sept 23 06:45 UTC distribution, bounds 1.0-1.25) |
-| | `allocator.bunt_usd` | Kalshi $30, Alpaca $25 | A bunt's real stake (plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum). Kalshi $10 → $30 on Sept 23, 2026 ~17:00 UTC: a $10 bunt was a one-loss trial (any lost $5 position over $1.54 crossed the hysteresis line); the grant's seats follow the smallest bunt, floor($1,017.75 / $25) = 40 |
+| | `allocator.bunt_usd` | Kalshi $30, Alpaca $25 | A PROVEN family's bunt (since Sept 24, 2026; plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum). Kalshi $10 → $30 on Sept 23, 2026 ~17:00 UTC: a $10 bunt was a one-loss trial (any lost $5 position over $1.54 crossed the hysteresis line) |
+| | `allocator.probe_bunt_usd` | Kalshi $10, Alpaca $25 | An UNPROVEN family's first real stake (P1, Sept 24, 2026; table Kalshi $5-15, Alpaca $20-25): the nine promotions of Sept 23-24 all ran unproven mechanisms and settled -$18.62. A probe becomes a bunt the pass after its family is proven and back when the bound falls (free cash only). An options probe is still $80. The grant's seats follow the smallest real stake: floor($1,017.75 / $10) = 101 (40 at $25) |
+| | `allocator.family_proven` | 10 independent settlements, practice 0.5, real 1, 80% | The proof (P1): a family's pooled forward record (`allocator.family_record`: every member ever born, living or dead; one observation per event, members of one event pooled at the largest weight) with a one-sided 80% lower bound (Student's t on n_eff - 1) above zero. The board shows `family`, `family_state`, `family_bound`, `family_n`; `tiers` counts probes and bunts |
+| | `allocator.independent_settlements` | `event` | Closed trades and settlements on the Kalshi books count once per event (D4, Sept 24, 2026; `evaluator.event_key`) for the bunt line, the swing's real trades, the one-loss trial and the family record: meriwether-h7d7702 was promoted "on 6 closed trades" that were two games. W is unchanged. `trade`: every settlement counts |
+| | `allocator` `hysteresis_after_settled`, `position_share_event` | 3, 0.2 | The one-loss trial (P2, Sept 24, 2026): the hysteresis exit waits for 3 independent real results in the stay (the 35% stay drawdown always applies); a Kalshi position is a fifth of the stake ($6 of $30, $2 of a $10 probe). 4 of the nine promotions were demoted after one loss |
+| | `allocator` `max_event_share`, `longshot_floor_real`, `real_entry_liquidity` | 0.25, 0.30, `maker_unless_family_taker_positive` | Book rules (`league/book.py` reads them; P3 and D4, Sept 24, 2026): a real book's exposure to one event is at most a quarter of the stake; no real opening buy under 30 cents; a real entry on an event book is post-only unless the family's pooled taker record is positive (`Allocator.family_taker`) |
 | | `allocator.bunt_growth` | `w_real` | A bunt keeps what it makes (Sept 23, 2026 ~16:00 UTC, the learn-and-unblock run): its target is `bunt_usd` × clamp(W_real, 1, `swing_at`), profit inside the headroom is not swept, and a bunt with W_real under 1 is never topped back up. `flat`: the flat `bunt_usd`, swept above 10%, as before |
 | | `allocator.option_bunt_usd` | $80 | An options bunt's stake (was max(`bunt_usd`, `rungs.2.option_max_position_usd`) = $40, which the book's 50%-of-equity rules cut to a $20 contract): one $40 contract fits under half of $80 |
 | | `allocator.bunt_daily_loss` | `stay_drawdown` | A real-money bunt is not frozen by the book's per-desk daily-loss rule (`book.DEFAULT_RULES` `max_daily_loss_pct` 0.10, unchanged); its stay drawdown (`real_drawdown_demote`) and hysteresis govern. Swings and practice books keep the book's rule. `book`: the book's rule for bunts too |
 | | `allocator.real_halt` | `venue_grant_capital`, 0.08 | The real book's daily-loss halt is 8% of that venue's grant capital ($41.42 Kalshi, $40.00 Alpaca), per venue, never the combined envelope on one venue and never the staked accounts' sum (one $25 bunt made that a $2.00 halt). Practice books keep the staked-sum basis; `staked` restores it on real books. Since Sept 23, 2026 ~22:00 UTC the day's opening equity survives a House restart (`day_open.<book>.json` in the House root, see below), so a restart mid-day no longer gives either daily-loss line back |
 | | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.25, 8, 1.0, 0.9 | Bunt → swing (audited the first time); a swing leaves under 1.25 × hysteresis or W_real 0.9. 1.5 → 1.25 on Sept 23, 2026 ~17:00 UTC: the only two earners needed 2.8 and 5.6 days at their rates to reach 1.5 |
-| | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake (never under the venue minimum × 1.2) |
+| | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake at Alpaca (`position_share_event` on Kalshi), never under the venue minimum × 1.2 |
 | | `allocator` `stars`, `star_min_w_real` | 3, 1.25 | The site's top lane: the best swings by real P&L |
 | | `allocator` `hysteresis`, `real_drawdown_demote`, `die_below`, `die_min_trades` | 0.85, 0.35, 0.80, 10 | Down as fast as up: band exits, a 35% real drawdown (of the current real stay) back to paper, paper-wealth death |
 | | `allocator.reentry_cooldown_hours` | 1.0 | An agent sent back to paper from real money waits an hour before it may bunt again, so a record near a line cannot flap between books at every mark pass |
