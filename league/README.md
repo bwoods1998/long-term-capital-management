@@ -453,7 +453,8 @@ status is exposed in health and agent research context; qualification is distinc
    and the watch prints them. **R3, births into the proven family** (`_proven_births`, first in
    `_births`; `SEAT_WAITERS` class `proven`, ahead of every other): a proven family's program -- its
    anchor's code beyond PARAMS (`lab.mechanism_digest`; the anchor is the living member on the
-   highest rung with fills of its own) -- is bred by the path the House already uses for a program
+   highest rung with fills of its own that runs the markets and style of the family's founding
+   program, `_family_program`) -- is bred by the path the House already uses for a program
    (a House-staked mutation of the anchor's PARAMS inside their bounds, `_mutated_params`, on its line,
    code and family), one birth a tick at the newcomer cadence a family, until
    `economy.proven_family_members` (4) living members run it; the child is replayed like any
@@ -466,7 +467,10 @@ status is exposed in health and agent research context; qualification is distinc
    parent's program now is born into a family of its own (`_program_family`: `<desk>-<style>-<6 hex>`,
    rooted in the parent's family; the parent stays on its birth row), so a different mechanism never
    inherits a family's proof; a fix of the same program (the same markets and style) keeps the family,
-   whose record already splits maker and taker. On the 15:06Z snapshot 98 children had been born into
+   whose record already splits maker and taker -- and a PROVEN family only when that program is the
+   family's founding one (`_family_program`: its first member's NEEDS at birth), so a member that
+   carries the name with another program (meriwether-h2d625d-2) cannot pass the proof to its forks
+   (the review of #276). On the 15:06Z snapshot 98 children had been born into
    their parent's family with other code beyond PARAMS (39 living); 71 (28 living) named other markets
    or another style and would have had their own. Agents already born keep their ledger's family.
    **Corrected children supersede** (L1, gated by

@@ -282,3 +282,75 @@ class ProvenRecordThatCannotBeRead(ReviewCase):
             self.house._births(self.rules)  # the rest of the birth pass runs
             self.house.seat_waiters(fresh=True)
         self.assertEqual(len(alerts(self.house, "warning", "proven famil", "KeyError")), 1, "told once an hour")
+
+
+class AProvenFamilysNameFollowsItsProgram(ReviewCase):
+    """The new-family rule (`_program_family`, the builder's follow-up commit) compares a child's markets and style with
+    its PARENT's program now. A member that already carries a proven family's name with another program -- meriwether-
+    h2d625d-2: sports-central-run-under's name on a CFB and soccer moneyline-favourites file, rung 1 at 15:06Z, no fill
+    yet, its markets on the weekend's slate -- passes that test with a fix of its own moneyline file, so its research
+    forks would carry the run-unders' proof into moneylines: shielded as a proven family's members from unproven
+    newcomers, staked on the proven family's bunt tier at the bunt line, their settlements pooled into the record the
+    family swing reads. And R3's anchor was the living member on the highest rung with a fill, the earliest born first:
+    with meriwether-h2d625d dead and -2 trading, the House would breed -2's moneyline program as the proven family's."""
+
+    def setUp(self):
+        super().setUp()
+        self.house.close(wait=None)  # a House with a Kalshi practice book too (test_seat_capacity's NewCodeFamilies)
+        from pathlib import Path
+
+        from league.economy import load_game
+        from league.house import House, Settings
+        from league.sandbox import LocalSandbox
+        from league.tests.fakes import FakeBroker
+
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        self.house = House(Path(self.dir.name) / "house-review", brokers={"alpaca-paper": self.broker,
+                                                                           "kalshi-shadow": FakeBroker("kalshi-shadow", family="kalshi")},
+                           sandbox=LocalSandbox(Path(self.dir.name) / "boxes-review"), alpaca_data=self.data, clock=self.clock,
+                           settings=Settings(mark_every_seconds=0, research=False), game=game)
+        self.rules = self.house.game["economy"]
+
+    def sports(self, code, *, parent=None):
+        agent = self.house.spawn("meriwether", "sports-central-run-under", code, parent=parent, reason="a test agent")
+        self.house.evaluator.seat(agent.id, 1, "test")
+        self.house.economy.grant(agent.id, "100", "test: an agent that can fork")
+        return agent
+
+    def test_a_fork_of_a_member_running_another_program_leaves_a_proven_familys_name(self):
+        import hashlib
+
+        from league.tests.test_seat_capacity import MONEYLINE_FAVOURITES, RUN_UNDER, RUN_UNDER_MAKER_FIX
+
+        anchor = self.sports(RUN_UNDER)
+        misfiled = self.sports(MONEYLINE_FAVOURITES, parent=anchor.id)  # born before the rule: the family's name, other code
+        self.assertEqual(misfiled.family, "sports-central-run-under")
+        with self.proven("sports-central-run-under"):
+            fix = self.house.fork(misfiled, code=MONEYLINE_FAVOURITES.replace("buy a deep favourite", "rest a bid on a deep favourite"),
+                                  reason="a maker fix of its own moneyline file", passed_replay=True)
+            root = hashlib.sha256("sports-central-run-under|sports-moneyline-deep-favourites".encode()).hexdigest()[:6]
+            self.assertEqual(fix.family, f"sports-moneyline-deep-favourites-{root}",
+                             "the proven family's name stays with the program that proved it")
+            same = self.house.fork(anchor, code=RUN_UNDER_MAKER_FIX, reason="a maker fix of the run-unders", passed_replay=True)
+            self.assertEqual(same.family, "sports-central-run-under", "a fix of the family's own program keeps it")
+        unproven = self.house.fork(misfiled, code=MONEYLINE_FAVOURITES.replace("buy a deep favourite", "buy a deeper favourite"),
+                                   reason="another fix", passed_replay=True)
+        self.assertEqual(unproven.family, "sports-central-run-under", "an unproven family keeps the rule as it was")
+
+    def test_a_member_running_another_program_never_becomes_the_proven_familys_anchor(self):
+        from league.tests.test_seat_capacity import MONEYLINE_FAVOURITES, RUN_UNDER
+        from league.tests.test_seat_evidence import BTC
+
+        self.rules.update(newcomer_seconds=600, proven_family_members=4)
+        anchor = self.sports(RUN_UNDER)
+        self.house.evaluator.promote(anchor.id, 2, "test: a bunt on real money")
+        misfiled = self.sports(MONEYLINE_FAVOURITES, parent=anchor.id)
+        for agent in (anchor, misfiled):
+            self.buy(agent, book="kalshi-shadow", instrument=BTC)  # a fill of its own
+        with self.proven("sports-central-run-under"):
+            self.assertEqual([r["anchor"].id for r in self.house._proven_programs()], [anchor.id])
+            self.house.kill(anchor, "evidence", "a test death")
+            self.assertEqual(self.house._proven_programs(), [], "no member runs the program that proved the family")
+            self.assertIsNone(self.house._proven_births(self.rules))

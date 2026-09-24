@@ -1504,12 +1504,32 @@ class House:
         KXMLBTOTAL run-unders' proven family (sports-central-run-under) -- and 27 were fixes of the same program."""
         mine, theirs = self._markets_and_style(needs), self._markets_and_style(parent.needs or {})
         if mine == theirs:
-            return family
+            # A PROVEN family's name stays with the program that proved it (the review of #276): a parent that carries
+            # the name with another program (meriwether-h2d625d-2, born into sports-central-run-under with a moneyline
+            # file) passes the test above with a fix of its own file, and its forks would carry the proof on.
+            founding = self._family_program(family, parent.venue) if self._family_proven(family, parent.venue) else None
+            if founding is None or founding == mine:
+                return family
         style = mine[3] or "program"
         desk = niche.id.split("-", 1)[-1] if niche is not None else (mine[0] or "desk")
         base = style if style.startswith(desk) else f"{desk}-{style}"
         root = hashlib.sha256(f"{parent.family}|{style}".encode("utf-8")).hexdigest()[:6]
         return f"{base[:33].rstrip('-')}-{root}"
+
+    def _family_program(self, family: str, venue: str) -> tuple[str, frozenset[str], frozenset[str], str] | None:
+        """The markets and style (`_markets_and_style`) of a family's founding program: the NEEDS its first member (the
+        earliest born on `venue`, living or dead: a card, a graduate, a seed or a merged strategy -- whatever named the
+        family) was born with, read from its `agent.born` row (its current NEEDS when the row carries none). None for a
+        family with no member. The review of #276, Sept 24, 2026: sports-central-run-under's is meriwether-h2d625d's
+        KXMLBTOTAL run-unders; meriwether-h2d625d-2, born into it later with a CFB and soccer moneyline file, is not."""
+        with (getattr(self.registry, "_lock", None) or nullcontext()):
+            members = [a for a in self.registry.agents.values() if a.family == family and a.venue == venue]
+        if not members:
+            return None
+        first = min(members, key=lambda a: (a.born_at, a.id))
+        born = self.ledger.get(f"born:{first.id}")
+        needs = (born.payload.get("needs") if born is not None else None) or first.needs or {}
+        return self._markets_and_style(needs if isinstance(needs, Mapping) else {})
 
     def _candidate_family(self, parent: Agent, candidate: Mapping[str, Any], niche: Any) -> str:
         """The family a research candidate of `parent` will be born into (`_program_family`), read from the NEEDS it was
@@ -5533,7 +5553,12 @@ class House:
             if not self._family_proven(family, venue):
                 continue
             ranked = sorted(members, key=lambda a: (-self.evaluator.rung(a.id), a.born_at, a.id))
-            anchor = next((a for a in ranked if self.evaluator.rung(a.id) >= 1 and self._own_fills(a.id, enough=1)), None)
+            # Only a member running the family's founding program's markets and style may anchor it (the review of #276):
+            # ranked by rung and birth alone, meriwether-h2d625d-2's moneyline file would be bred as the run-unders'
+            # program the day meriwether-h2d625d died and -2 had a fill.
+            founding = self._family_program(family, venue)
+            anchor = next((a for a in ranked if self.evaluator.rung(a.id) >= 1 and self._own_fills(a.id, enough=1)
+                           and (founding is None or self._markets_and_style(a.needs or {}) == founding)), None)
             if anchor is None:
                 continue
             mine = digest(anchor)

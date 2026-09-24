@@ -408,7 +408,8 @@ watch.
       crypto majors, 2 sports, 2 sports props, 1 attention); one waiter had a winning window
       (a megacaps graduate, +0.000102 a block over 3 active blocks).
     - R3: a proven family's program (its anchor: the living member on the highest rung with fills of
-      its own; its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
+      its own that runs the markets and style of the family's founding program, `_family_program`;
+      its program is the anchor's code beyond PARAMS, `lab.mechanism_digest`) is born first
       on its desk, a House mutation of the anchor's PARAMS inside their bounds at the newcomer cadence
       (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
       living members run it; while it is owed, its desk gives a newcomer of another family no seat
