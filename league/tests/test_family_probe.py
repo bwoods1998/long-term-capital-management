@@ -43,10 +43,15 @@ class ForwardBlocks:
             ghosts[key] = agent
         return ghosts[key]
 
-    def blocks(self, family, *growths, book="kalshi-shadow", code=KALSHI_IDLE, active=True):
+    def blocks(self, family, *growths, book="kalshi-shadow", code=KALSHI_IDLE, active=True, began=None):
+        """`began`: the ledger position of each block's first mark (`first_mark_seq`), where the evaluator's blocks say
+        when they began; without it a block began where it was written, as these rows always did."""
         ghost = self.ghost(family, code)
         for growth in growths:
-            self.house.ledger.append("eval.block", {"book": book, "active": active, "log_growth": growth, "key": "k"}, agent=ghost.id)
+            row = {"book": book, "active": active, "log_growth": growth, "key": "k"}
+            if began is not None:
+                row["first_mark_seq"] = began
+            self.house.ledger.append("eval.block", row, agent=ghost.id)
 
     def status(self, agent):
         return self.house._state["promotion_status"].get(agent.id) or {}
@@ -386,6 +391,51 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(b.id), 2)
 
+    def test_a_block_in_progress_at_the_demotion_is_not_its_record_since(self):
+        """The R5 adversarial review (Sept 24, 2026): a block is written when it CLOSES, so every member's block in
+        progress at a demotion is written after it, though it began before. The record since a demotion is the blocks
+        that BEGAN after it (`first_mark_seq`), as `Evaluator.blocks(since_seq=...)` reads a record since a ledger
+        position. Measured on the 15:06Z snapshot: haghani-56's drift demotion at 13:06:12Z (crypto-alts-reversion)
+        turned at 14:02:40Z on six blocks, +0.0385, that had all begun before it (nine such blocks carried +0.0504 of
+        the +0.0534 counted since); by when the blocks began, it turns at 15:03:44Z, on +0.0030."""
+        a = self.seated()
+        began = self.house.ledger.head()[0]  # a mark before the demotion: the hour's blocks began here
+        self.drawdown(a)
+        b = self.agent("hawk")
+        table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
+        self.blocks("weather-favorites", *[0.02] * 6, began=began)  # closed after the demotion, begun before it
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
+        self.assertIn("(it is +0.0000 over 0;", self.status(b)["reason"])
+        self.blocks("weather-favorites", *[0.01] * 6)  # the next hour's: begun after the demotion, +0.06 over 6
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 2)
+
+    def test_a_turn_is_read_on_the_record_as_a_pass_finds_it(self):
+        """The R5 adversarial review (Sept 24, 2026): the blocks of one hour close together and one pass reads them all,
+        so a prefix of them is a record the family never stood at. A turn is for good, so it is read on the record since
+        as the pass finds it, never block by block inside what one pass reads. Measured on the 15:06Z snapshot: the holds
+        of huang-hd8ff7c-4 and -3 (crypto-15m-spot-impulse-lag, demoted at 01:01:35Z and 01:44:20Z) would have ended at
+        04:02:35Z on the first six of that pass's blocks (+0.0340), while their family's record since was at or below
+        zero at every pass through the snapshot; 3 of the 12 demotions from rung 2 turned earlier block by block."""
+        self.blocks("weather-favorites", *[0.10] * 6)  # +0.60 before: the whole record never loses in this test
+        a = self.seated()
+        self.drawdown(a)
+        b = self.agent("hawk")
+        table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
+        self.blocks("weather-favorites", *[0.01] * 6, -0.10)  # one pass: seven blocks since, -0.04 (its first six +0.06)
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
+        self.assertIn("(it is -0.0400 over 7;", self.status(b)["reason"])
+        self.assertIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.blocks("weather-favorites", 0.05)  # +0.01 over eight: turned
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 2)
+
     def test_a_family_whose_record_cannot_be_read_demotes_nobody(self):
         """The R5 review (Sept 24, 2026): an unreadable record counts a family's agents as probes for money; the losing line must not then
         send a proven family's bunt back to practice for a read that failed. No probe is seated from it either."""
@@ -422,6 +472,36 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         with self.evidence_of(table):
             self.tick()  # read again: the losing family's probe goes back, the other family's newcomer is seated
         self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (1, 2))
+
+    def test_a_tape_that_cannot_be_read_seats_no_probe_on_its_old_reading(self):
+        """The R5 adversarial review (Sept 24, 2026): the pass reads the ledger into its tape first, and a read that fails
+        leaves the tape where it stood, so the forward records it gives are the last pass's: a family that turned losing
+        since reads as it was. The gate fails closed on that too (`family_unreadable`), as it does on a failed fold."""
+        b = self.agent("hawk")
+        with self.evidence_of({b.id: dict(READY, e=1.0)}):
+            self.tick()  # under the bunt line: the pass reads the family's record, seats nobody
+        self.blocks("weather-favorites", *[-0.05] * 6)  # the family turns losing...
+        with patch.object(allocator.TradeTape, "refresh", side_effect=OSError("database is locked")), \
+                self.evidence_of({b.id: READY}):
+            self.tick()  # ...and this pass cannot read the ledger: its tape still holds no block of it
+        self.assertEqual(self.house.evaluator.rung(b.id), 1)
+        self.assertEqual(self.status(b)["stage"], "family_unreadable")
+        with self.evidence_of({b.id: READY}):
+            self.tick()  # read again: losing
+        self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_losing"))
+
+    def test_a_forward_record_that_cannot_be_read_never_costs_the_pass_its_board(self):
+        """The R5 adversarial review (Sept 24, 2026): the gate closes when the families' forward records cannot be read, but the
+        board read them again for its rows without a guard, and the whole pass failed there -- no board, no
+        allocator.json -- at every pass the read kept failing."""
+        b = self.agent("hawk")
+        with patch.object(allocator.Allocator, "family_forward", side_effect=RuntimeError("the tape is torn")), \
+                self.evidence_of({b.id: READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 1)
+        row = self.house.allocator.board()["agents"][b.id]
+        self.assertEqual((row["probe_gate"], row["family_forward"]), ("unreadable", None))
+        self.assertFalse([e for e in self.house.ledger.iter(kinds="ops.alert") if "allocator's pass failed" in str(e.payload.get("text"))])
 
     def test_an_audit_that_approves_a_seat_meets_the_gate_again(self):
         """The R5 review (Sept 24, 2026): a known defect is audited off the tick before its seat, and its family may turn losing meanwhile.
@@ -485,6 +565,26 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
         self.assertEqual(self.demotions(a)[-1]["rule"], "allocator.family_probe")
+
+    def test_a_probe_waiting_to_go_back_is_lent_nothing_while_the_gate_cannot_be_read(self):
+        """The R5 adversarial review (Sept 24, 2026): `_size` withheld a raise only while the gate read "losing"; at a pass where the
+        gate cannot be read it reads "unreadable", and a probe on a losing family waiting to be flat was lent up to its
+        target again. A gate that cannot be read lends a probe nothing more (free cash still comes back)."""
+        from league.book import Intent
+        from league.venues import instrument_for
+
+        a = self.seated()
+        book = self.house.books["alpaca"]
+        btc = instrument_for("alpaca", {"symbol": "BTC/USD"})
+        buy = Intent.new(agent=a.id, instrument=btc, side="buy", quantity=D("0.000125"), reason="test", created_at=now_iso(self.clock))
+        self.assertEqual(book.submit([buy])[0].status, "filled")
+        self.losing()
+        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.2, paper_trades=6)}  # its target rises to $30
+        with patch.object(allocator, "fold_demotions", side_effect=OSError("disk I/O error")), self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["probe_gate"], "unreadable")
+        self.assertEqual(book.account(a.id).staked, D("25"))
 
     def test_a_probe_holding_only_dust_goes_back_and_its_dust_is_booked_not_sold(self):
         """What the demotion path would not sell -- a holding under a cent, as the wind-down books it -- does not keep a
@@ -557,6 +657,34 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         self.assertEqual(self.house.evaluator.rung(a.id), 2)
         self.assertGreater(book.account(a.id).holdings[btc.key].quantity, 0)  # the fill, less the venue's fee in the coin
         self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
+
+    def test_a_cancel_the_venue_does_not_answer_never_stops_the_pass(self):
+        """The R5 adversarial review (Sept 24, 2026): `HttpTransport` raises `TransportError` -- not a `BrokerError` -- when the
+        gateway does not answer, and `Book.cancel` lets it through, so the drain's cancel stopped the whole pass (no
+        promotion, no stake, no board, no allocator.json, an error alert) at every pass the gateway stayed silent while a
+        probe on a losing family rested a bid. The probe waits -- a cancel that got no answer may yet have been taken,
+        and a fill may yet come -- and the pass goes on."""
+        from ltcm.data import TransportError
+
+        a = self.seated()
+        book, _, order_id = self.resting_bid(a)
+        self.losing()
+        other = self.house.spawn("mullins", "alloc-other", IDLE, reason="test", endowment="2.5")
+        self.house.evaluator.seat(other.id, 1, "test: straight to practice")
+        self.house._state["tried"][other.id] = other.code_sha256
+        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6), other.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}
+        silent = TransportError("DELETE https://gateway/v2/orders/x failed: timed out")
+        with patch.object(self.real, "cancel", side_effect=silent), self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)  # it waits: its bid stands
+        self.assertTrue(book.open_orders(a.id))
+        self.assertEqual(self.house.evaluator.rung(other.id), 2)  # the pass went on: another family's newcomer is seated
+        failed = [e for e in self.house.ledger.iter(kinds="ops.alert") if "allocator's pass failed" in str(e.payload.get("text"))]
+        self.assertEqual(failed, [])
+        with self.evidence_of(table):
+            self.tick()  # the gateway answers again: the bid is cancelled, and flat, it goes back to practice
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.assertIn(order_id, self.real.cancelled)
 
     def test_a_buy_the_book_still_asks_the_venue_about_keeps_the_probe_seated(self):
         """A buy closed as never arrived may be revived with its fill for a quarter of an hour (`Book._reserved_cash`): its

@@ -61,9 +61,10 @@ promotion waits, its status naming the numbers), and a probe seated on it goes b
 next pass by `_move_down`, which holds a Kalshi contract to settlement; on Alpaca, where that path sells
 what the account holds, only once the probe is flat (`_unflat`; its working bids are cancelled first,
 as the path itself does): no sale is ever forced. Each probe demoted from real money, for any reason,
-HOLDS its family until the family's record since that demotion turns -- is positive over as many blocks
-(`probe_hold`, read from the ledger's `eval.verdict` rows, `fold_demotions`). A gate that cannot be read
-seats no probe and demotes nobody. A proven or swinging family's agents are bunts, never gated.
+HOLDS its family until the family's record since that demotion -- the blocks that began after it -- turns:
+is positive over as many blocks at a pass (`probe_hold`, read from the ledger's `eval.verdict` rows,
+`fold_demotions`). A gate that cannot be read seats no probe, lends no probe more and demotes nobody. A
+proven or swinging family's agents are bunts, never gated.
 Measured on the 15:06Z snapshot: 11 of the allocator's 21 promotions since Sept 23 went onto such
 families and realized -$8.12 on 22 closes, no stay positive; the other 10 made +$28.96.
 
@@ -738,12 +739,15 @@ class Allocator:
     def _begin_pass(self) -> None:
         """A new pass reads every family afresh, once, through the ledger position it starts at, and moves
         the mechanism ledger's states (C1, Sept 24, 2026: `families.next_state`). A ledger that cannot be
-        read now leaves the tape where it stood: the pass goes on (Sept 24, 2026)."""
+        read now leaves the tape where it stood: the pass goes on (Sept 24, 2026), and the probe gate, which would read the
+        last pass's forward records from it, is closed for the pass (the R5 adversarial review, Sept 24, 2026)."""
+        tape_fault = None
         try:
             self._through = self._tape.refresh(self.house.ledger)
         except Exception as exc:  # noqa: BLE001 - an unreadable ledger must not stop the pass or its exits
             self._family_error("the family records' tape", "", exc)
             self._through = self._tape.cursor
+            tape_fault = f"the family records' tape ({type(exc).__name__})"
         self._families = {}
         self._released = None
         self._released = self._swing_released()  # the grant's rung-3 release, read once a pass
@@ -760,7 +764,7 @@ class Allocator:
         # probe demotions the ledger gained since the last pass (the House's drift and audit vetoes demote between passes).
         # A gate that cannot be read seats no probe this pass and demotes nobody for it (the R5 review, Sept 24, 2026): it fails closed.
         self._since = {}
-        self._gate_fault = None
+        self._gate_fault = tape_fault  # a tape that could not be read holds the last pass's records: the gate is closed
         try:
             self._forward = self.family_forward()
         except Exception as exc:  # noqa: BLE001 - a fault here never stops the pass or its exits
@@ -1337,7 +1341,7 @@ class Allocator:
             if not family:
                 continue
             row = out.setdefault(family, [0, 0.0])
-            for _, _, active, growth in blocks:
+            for _, _, active, growth, _ in blocks:
                 if active:
                     row[0] += 1
                     row[1] += growth
@@ -1368,11 +1372,19 @@ class Allocator:
 
     def _turned(self, family: str, seq: int, minimum: int) -> tuple[bool, int, float]:
         """(whether the family's record since ledger position `seq` has TURNED, its active blocks since, their summed log
-        growth). The record since is every active block the ledger wrote after `seq`, for every agent ever born into the
-        family (the rows and members `family_forward` reads, from the pass's tape); it has turned once it was positive over
-        `minimum` or more active blocks at any block since, read block by block in ledger order (`families.gaining`): the
-        brief's "until the family's record turns" is a moment, and a hold ends there for good (the R5 review, Sept 24, 2026). Derived from
-        the ledger alone, so a restart finds the same turn. Once a pass a demotion."""
+        growth). The record since is every active block that BEGAN after `seq` (its first mark, `first_mark_seq`), for
+        every agent ever born into the family (the rows and members `family_forward` reads, from the pass's tape): a block
+        is written when it closes, so the block each member had in progress at a demotion is written after it though it
+        began before, and `Evaluator.blocks(since_seq=...)` reads a record since a ledger position the same way. It has
+        turned when that record, as the pass finds it, is positive over `minimum` or more active blocks
+        (`families.gaining`); the hold then ends for good (the R5 review, Sept 24, 2026: `_prune_holds` drops it at that
+        pass). Never block by block inside what one pass reads: the blocks of an hour close together, so a prefix of them
+        is a record the family never stood at. The R5 adversarial review (Sept 24, 2026) measured both on the 15:06Z
+        snapshot: haghani-56's hold (13:06:12Z) turned at 14:02:40Z on six blocks that had all begun before its demotion,
+        and of the 12 demotions from rung 2, 3 turned earlier block by block, 2 of them (huang-hd8ff7c-3 and -4) at
+        04:02:35Z on a prefix while their record since was at or below zero at every pass. A House that lost
+        `allocator.json` reads each hold again at its first pass on the record as it then stands: a hold that had ended
+        and whose record since has fallen back holds again, the safe side. Once a pass a demotion."""
         key = (family, int(seq))
         cached = self._since.get(key)
         if cached is not None:
@@ -1380,14 +1392,10 @@ class Allocator:
         registry = self.house.registry
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
             members = [a.id for a in list(registry.agents.values()) if a.family == family]
-        rows = sorted((written, value) for member in members for written, _, active, value in self._tape.blocks.get(member) or ()
-                      if active and written > seq)
-        blocks, growth, turned = 0, 0.0, False
-        for _, value in rows:
-            blocks += 1
-            growth += value
-            turned = turned or families.gaining(blocks, growth, minimum)
-        self._since[key] = (turned, blocks, growth)
+        values = [value for member in members for _, _, active, value, began in self._tape.blocks.get(member) or ()
+                  if active and began > seq]
+        blocks, growth = len(values), math.fsum(values)
+        self._since[key] = (families.gaining(blocks, growth, minimum), blocks, growth)
         return self._since[key]
 
     def _fold_demotions(self) -> None:
@@ -1416,7 +1424,7 @@ class Allocator:
     def _prune_holds(self) -> None:
         """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
         never comes back, and the state keeps only the holds still in force (a restart that folds the whole ledger again
-        prunes to the same)."""
+        prunes on the record as it then stands, the safe side: `_turned`)."""
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return
@@ -1574,7 +1582,16 @@ class Allocator:
             book = self.house.books.get(REAL_BOOK[agent.venue])
             for working in book.open_orders(agent.id):
                 if working.side == "buy" and working.instrument.asset_class != "event":
-                    book.cancel(agent.id, working.order_id, why=f"the allocator: {why}")
+                    try:
+                        book.cancel(agent.id, working.order_id, why=f"the allocator: {why}")
+                    except Exception as exc:  # noqa: BLE001 - a venue that does not answer never stops the pass
+                        # `HttpTransport` raises `TransportError`, not a `BrokerError`, when the gateway does not answer, and
+                        # `Book.cancel` lets it through: the whole pass stopped here at every pass it stayed silent (the R5
+                        # adversarial review, Sept 24, 2026). The bid stands on the book until a read says otherwise, so
+                        # the probe waits ("working") and the cancel is asked again at the next pass.
+                        self._family_error(f"{agent.id}'s cancel of {working.order_id}", agent.venue, exc,
+                                           then="the probe keeps its seat until the venue answers; the cancel is asked again "
+                                                "at the next pass")
             obstacle = self._unflat(agent)
         if obstacle is not None:
             summary.setdefault("probes_waiting_flat", []).append(agent.id)
@@ -2060,9 +2077,10 @@ class Allocator:
             return None
         if delta > 0:
             gate = self.probe_gate(agent) if band == "bunt" else None
-            if gate is not None and gate["gate"] == "losing":
+            if gate is not None and gate["gate"] in ("losing", "unreadable"):
                 # R5 (Sept 24, 2026; the R5 review, Sept 24, 2026): a probe on a losing family waiting to go back to practice (on Alpaca,
-                # until it is flat) is lent nothing more; free cash still comes back.
+                # until it is flat) is lent nothing more; free cash still comes back. Nor is any probe while the gate cannot
+                # be read, which could not tell such a probe from another (the R5 adversarial review, Sept 24, 2026).
                 return None
             if band == "bunt" and p["bunt_growth"] == "w_real" and ev.w_real < 1.0:
                 # A losing bunt is not refilled (Sept 23, 2026): its stake shrinks by what it lost,
@@ -2171,14 +2189,18 @@ class Allocator:
             capacity = record.get("capacity") or {}
             usd = capacity.get("usd_per_day")
             since = self.paused_since(agent.id)
-            blocks, growth = self.forward(agent.family) if agent.family else (0, 0.0)
+            try:
+                blocks, growth = self.forward(agent.family) if agent.family else (0, 0.0)
+                forward = {"blocks": int(blocks), "growth": round(float(growth), 6)}
+            except Exception:  # noqa: BLE001 - a display number never costs the pass its board; the gate reads "unreadable"
+                forward = None
             # R3 and R5 (Sept 24, 2026), for the watch and the owner, never the site (`league/publish.py` copies the fields the
             # site's schema knows, by name): `stake_usd` is the net loan -- what was lent less the profit swept back -- and
             # `equity_usd` what the account is worth (at the resume the notes read meriwether-h2d625d's $20.06 stake as short
             # of its $37.50 target while its equity was $41.67); the family's pooled forward record and the probe gate.
             agents[agent.id] = {"band": band, "stake_usd": stake, "equity_usd": equity, "target_usd": target,
                                 "evidence": ev.row() if ev else None,
-                                "family_forward": {"blocks": int(blocks), "growth": round(float(growth), 6)},
+                                "family_forward": forward,
                                 "probe_gate": self.gate_words(self.probe_gate(agent)) if rung in (1, 2) else None,
                                 "venue": agent.venue, "last_move": None, "family": agent.family,
                                 # The HONEST bound (the t bound, and the loss-rate gate for a lopsided record): the one
