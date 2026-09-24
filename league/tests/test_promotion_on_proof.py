@@ -197,6 +197,14 @@ class MoneySet(unittest.TestCase):
         self.assertEqual(self.r["max_event_share"], "0.25")
         self.assertTrue(D("0.2") <= D(self.r["max_event_share"]) <= D("0.5"))
 
+    def test_the_event_share_is_said_of_equity_as_the_book_measures_it(self):
+        """`league/book.py` measures one event's exposure against the agent's EQUITY on the book (A-book's
+        `_real_entry_reasons`); the constitution's comment said "stake" (the main session, Sept 24, 2026)."""
+        source = Path(__file__).resolve().parents[1].joinpath("constitution.py").read_text(encoding="utf-8")
+        comment = source[source.index("# `max_event_share`"):source.index('"max_event_share":')]
+        self.assertIn("EQUITY on that book", comment)
+        self.assertNotIn("of the agent's stake", comment)
+
     def test_an_unproven_familys_first_real_stake_is_a_probe(self):
         probe, bunt = self.r["probe_bunt_usd"], self.r["bunt_usd"]
         self.assertEqual(probe, {"kalshi": "10", "alpaca": "25"})
