@@ -14,8 +14,11 @@ the micro-real stake, next to what the approved agents really made.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import threading
+import weakref
 from decimal import Decimal
 from typing import Any, Mapping
 
@@ -73,35 +76,100 @@ EXECUTION_POLICY = {
     "interpretation": "A profitable holding may be sold above the $10 entry cap. These controls do not guarantee a fill, a price, a profitable edge or continuous venue availability."}
 
 
-def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
-    """Include refusals before submission as well as House orders attributed by their shares."""
+_OUTCOME_KINDS = ('book.order', 'book.refused')
+
+
+def _fold_outcome(orders: dict, entry: Any) -> None:
+    """One order or refusal row into one agent's outcomes on one book (keyed, in the order they last
+    moved): a refusal before submission by its intent id, a House order the agent has a share of by
+    its venue order id, a submission error carried to the order's later rows."""
+    p = entry.payload
+    if entry.kind == 'book.refused':
+        key = ('intent', p.get('intent_id') or entry.id)
+        orders.pop(key, None)
+        orders[key] = {'at': entry.at, **{k: p[k] for k in ('intent_id', 'instrument') if p.get(k) is not None},
+                       'status': 'refused',
+                       'reason': '; '.join(str(reason) for reason in p.get('reasons') or []),
+                       'submitted_to_venue': False}
+        return
+    key = ('order', p.get('order_id'))
+    previous = orders.pop(key, {})
+    row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
+    if p.get('status') == 'unknown' and p.get('reason'):
+        row['submission_error'] = p['reason']
+    elif previous.get('submission_error'):
+        row['submission_error'] = previous['submission_error']
+    orders[key] = row
+
+
+def _scan_outcomes(ledger: Any, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """`order_outcomes` read the whole way through the ledger: the reference `_OutcomeIndex` must equal,
+    and the path for anything that is not a House ledger (a test's fake)."""
     if limit <= 0:
         return []
-    orders = {}
-    for entry in ledger.iter(kinds=('book.order', 'book.refused')):
+    orders: dict = {}
+    for entry in ledger.iter(kinds=_OUTCOME_KINDS):
         p = entry.payload
         if p.get('book') != book:
             continue
         if entry.kind == 'book.refused':
             if entry.agent == agent:
-                key = ('intent', p.get('intent_id') or entry.id)
-                orders.pop(key, None)
-                orders[key] = {'at': entry.at, **{k: p[k] for k in ('intent_id', 'instrument') if p.get(k) is not None},
-                               'status': 'refused',
-                               'reason': '; '.join(str(reason) for reason in p.get('reasons') or []),
-                               'submitted_to_venue': False}
+                _fold_outcome(orders, entry)
             continue
-        if not any(s.get('agent') == agent for s in p.get('shares') or []):
-            continue
-        key = ('order', p.get('order_id'))
-        previous = orders.pop(key, {})
-        row = {'at': entry.at, **{k: p.get(k) for k in ('order_id', 'instrument', 'side', 'quantity', 'status', 'reason')}}
-        if p.get('status') == 'unknown' and p.get('reason'):
-            row['submission_error'] = p['reason']
-        elif previous.get('submission_error'):
-            row['submission_error'] = previous['submission_error']
-        orders[key] = row
+        if any(isinstance(s, Mapping) and s.get('agent') == agent for s in p.get('shares') or []):
+            _fold_outcome(orders, entry)
     return list(orders.values())[-limit:]
+
+
+class _OutcomeIndex:
+    """Every agent's order outcomes on every book, folded from one ledger once and afterwards only from
+    the rows appended since. Sept 24, 2026: `order_outcomes` read every order and refusal row on the
+    ledger again for every wake's snapshot (`House.snapshot`), for research and for each audit packet --
+    18,641 rows at 05:28Z, 4.5 s a read on the owner's machine -- while the 1-vCPU box's tick had
+    slowed to 60 s. The same rule (`_fold_outcome`) over the same rows in the same order, so the answer
+    is `_scan_outcomes`'s exactly (`test_auditor.OrderOutcomesIndex` holds the two equal); each answer
+    is a deep copy, so no caller can change what the next one reads."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.books: dict[tuple[Any, Any], dict] = {}
+        self.lock = threading.Lock()
+
+    def outcomes(self, ledger: Ledger, agent: str, book: str, limit: int) -> list[dict[str, Any]]:
+        with self.lock:
+            for entry in ledger.iter(kinds=_OUTCOME_KINDS, after=self.cursor):
+                self._fold(entry)
+                self.cursor = entry.seq
+            orders = self.books.get((agent, book)) or {}
+            return copy.deepcopy(list(orders.values())[-limit:])
+
+    def _fold(self, entry: Any) -> None:
+        p = entry.payload
+        if entry.kind == 'book.refused':
+            _fold_outcome(self.books.setdefault((entry.agent, p.get('book')), {}), entry)
+            return
+        # Each agent with a share once, as `_scan_outcomes` asks "has this agent any share".
+        for agent in dict.fromkeys(s.get('agent') for s in p.get('shares') or [] if isinstance(s, Mapping)):
+            _fold_outcome(self.books.setdefault((agent, p.get('book')), {}), entry)
+
+
+_INDEXES: "weakref.WeakKeyDictionary[Ledger, _OutcomeIndex]" = weakref.WeakKeyDictionary()
+_INDEXES_LOCK = threading.Lock()
+
+
+def order_outcomes(ledger: Ledger, agent: str, book: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """Include refusals before submission as well as House orders attributed by their shares: the
+    agent's last `limit` outcomes on `book`, oldest first. A House ledger keeps an index of them
+    (`_OutcomeIndex`); anything else is read the whole way through (`_scan_outcomes`)."""
+    if limit <= 0:
+        return []
+    if not isinstance(ledger, Ledger):
+        return _scan_outcomes(ledger, agent, book, limit=limit)
+    with _INDEXES_LOCK:
+        index = _INDEXES.get(ledger)
+        if index is None:
+            index = _INDEXES[ledger] = _OutcomeIndex()
+    return index.outcomes(ledger, agent, book, limit)
 
 
 class Auditor:
