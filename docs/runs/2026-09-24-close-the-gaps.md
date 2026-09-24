@@ -495,6 +495,11 @@ recorded for the next open; live verification uses the markets that trade around
   the House holds 1.65 GB): the second build of a 14-day four-series tape went from about 80 to 19.5
   CPU-seconds (98.8M function calls to 29.8M; `parse_market` 294,864 calls to none), and History logs
   only pages it fetched. Merged into `c/integration` with C-tools and the board's honest bound.
+- 09:45Z-10:14Z — **Merton's two stuck repairs merged** (#217 the longshot guard, #208 refusal memory for
+  Huang's BTC 15-minute child). They had failed CI since Sept 23 on the CI tape's missing
+  `observed_bars`, fixed in Deploy B's `league/ci.py`. A close-and-reopen first re-ran CI on a stale
+  merge ref; the judge job runs `league.ci` from the PR branch's own checkout, so `gh pr update-branch`
+  gave it the fixed CI code; Merton's judge then passed both and merged them itself.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
