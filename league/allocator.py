@@ -59,10 +59,11 @@ summed log growth over every member ever born -- is at or below zero after `losi
 blocks is LOSING by the House's own breeding line (`families.losing`): no probe is seated from it (the
 promotion waits, its status naming the numbers), and a probe seated on it goes back to practice at the
 next pass by `_move_down`, which holds a Kalshi contract to settlement; on Alpaca, where that path sells
-what the account holds, only once the probe is flat (`_sale_free`): no sale is ever forced. A probe
-demoted from real money for any reason HOLDS its family: no probe from it is seated until the family's
-record since that demotion is positive over as many blocks (`probe_hold`, read from the ledger's
-`eval.verdict` rows, `fold_demotions`). A proven or swinging family's agents are bunts, never gated.
+what the account holds, only once the probe is flat (`_unflat`; its working bids are cancelled first,
+as the path itself does): no sale is ever forced. Each probe demoted from real money, for any reason,
+HOLDS its family until the family's record since that demotion turns -- is positive over as many blocks
+(`probe_hold`, read from the ledger's `eval.verdict` rows, `fold_demotions`). A gate that cannot be read
+seats no probe and demotes nobody. A proven or swinging family's agents are bunts, never gated.
 Measured on the 15:06Z snapshot: 11 of the allocator's 21 promotions since Sept 23 went onto such
 families and realized -$8.12 on 22 closes, no stay positive; the other 10 made +$28.96.
 
@@ -291,15 +292,18 @@ def left_real_at(house: Any, agent: str) -> float | None:
 def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[str, str],
                    family_of: Callable[[str], tuple[str, str] | None]) -> int | None:
     """Fold `eval.verdict` and `family.record` rows, oldest first, into the probe gate's holds (R5, Sept 24, 2026):
-    each family's LATEST demotion of a probe from real money, {"seq", "at", "agent", "why"}, whatever the reason --
-    hysteresis, the stay drawdown, displacement, drift, an audit's veto, the losing line itself -- except a seat whose
-    stake never landed (`unfunded`: no real dollar, nothing learned about the family). A demotion is a PROBE's when the
-    row's `band_from` says "probe"; a row that names no band (the House's drift, audit-veto and tuition demotions write
-    none) is a probe's when the mechanism ledger's last `family.record` row for the agent's family before it said
-    "unproven" (`states`, folded here from the same rows), and not otherwise: the ledger holds no record of a family's
-    state before the mechanism ledger's first rows (Deploy B, 08:31Z Sept 24, 2026), and the allocator's rows before
-    Deploy A (05:37Z) name every rung-2 agent a bunt. Pure over its inputs, so a restart that lost `allocator.json`
-    folds the ledger again to the same holds. Returns the last ledger position folded, or None."""
+    EVERY demotion of a probe from real money, by family, in ledger order ({"seq", "at", "agent", "why"}), whatever the
+    reason -- hysteresis, the stay drawdown, displacement, drift, an audit's veto, the losing line itself -- except a
+    seat whose stake never landed (`unfunded`: no real dollar, nothing learned about the family). Each demotion holds
+    its family until the family's record SINCE it turns (`Allocator.probe_hold`): two probes of one family demoted an
+    hour apart are two holds, and the later one turning does not release the earlier (review of #276). A demotion is a
+    PROBE's when the row's `band_from` says "probe"; a row that names no band (the House's drift, audit-veto and tuition
+    demotions write none) is a probe's when the mechanism ledger's last `family.record` row for the agent's family before
+    it said "unproven" (`states`, folded here from the same rows), and not otherwise: the ledger holds no record of a
+    family's state before the mechanism ledger's first rows (Deploy B, 08:31Z Sept 24, 2026), and the allocator's rows
+    before Deploy A (05:37Z) name every rung-2 agent a bunt. Pure over its inputs, and a row folded twice is kept once,
+    so a restart that lost `allocator.json` folds the ledger again to the same holds. Returns the last ledger position
+    folded, or None."""
     last = None
     for entry in entries:
         last = entry.seq
@@ -316,7 +320,11 @@ def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[s
         family, venue = known
         band = p.get("band_from")
         if (band == "probe") if band else states.get(families.key_of(family, venue)) == "unproven":
-            holds[family] = {"seq": int(entry.seq), "at": entry.at, "agent": entry.agent, "why": str(p.get("reason") or "")[:200]}
+            kept = holds.get(family)
+            kept = [kept] if isinstance(kept, Mapping) else list(kept or [])
+            if all(int(d.get("seq") or 0) != int(entry.seq) for d in kept):
+                kept.append({"seq": int(entry.seq), "at": entry.at, "agent": entry.agent, "why": str(p.get("reason") or "")[:200]})
+            holds[family] = sorted(kept, key=lambda d: int(d.get("seq") or 0))
     return last
 
 
@@ -574,10 +582,13 @@ class Allocator:
         self._rungs: dict[str, int] | None = None  # the pass's rungs while `_begin_pass` reads the families
         self._released: bool | None = None  # whether the live grant releases rung 3, read once a pass (`_swing_released`)
         #: The probe gate's reading of this pass (R5, Sept 24, 2026): every family's pooled forward record (`family_forward`,
-        #: from the pass's tape) and each held family's record since the demotion that holds it ({family: (seq, blocks, growth)}).
+        #: from the pass's tape), each demotion's record since it ({(family, seq): (turned, blocks, growth)}), and why the
+        #: gate could not be read this pass (a failed fold or forward read: no probe is seated until it can be).
         self._forward: dict[str, tuple[int, float]] | None = None
-        self._since: dict[str, tuple[int, int, float]] = {}
+        self._since: dict[tuple[str, int], tuple[bool, int, float]] = {}
+        self._gate_fault: str | None = None
         self._waiting_flat: set[str] = set()  # probes on a losing family told once that they go back once flat
+        self._first_real: dict[tuple[str, str], float] = {}  # a family's first real dollar, once found (R3's clock)
         if self.state.get("families") is None:
             # A first start under the mechanism ledger: the states the ledger's last `family.record` rows say.
             self.state["families"] = families.restore_states(getattr(house, "ledger", None))
@@ -747,15 +758,19 @@ class Allocator:
             self._rungs = None  # after the families, rungs move with the pass: read afresh
         # The probe gate (R5, Sept 24, 2026): every family's forward record once a pass, from the tape just read, and the
         # probe demotions the ledger gained since the last pass (the House's drift and audit vetoes demote between passes).
+        # A gate that cannot be read seats no probe this pass and demotes nobody for it (review of #276): it fails closed.
         self._since = {}
+        self._gate_fault = None
         try:
             self._forward = self.family_forward()
-        except Exception as exc:  # noqa: BLE001 - the last pass's reading stands; a fault here never stops the pass
-            self._family_error("the families' forward records", "", exc, then="the probe gate reads the last pass's records")
+        except Exception as exc:  # noqa: BLE001 - a fault here never stops the pass or its exits
+            self._gate_fault = f"the families' forward records ({type(exc).__name__})"
+            self._family_error("the families' forward records", "", exc, then="no probe is seated until they can be read")
+        self._refold()
         try:
-            self._fold_demotions()
-        except Exception as exc:  # noqa: BLE001 - the holds already folded stand
-            self._family_error("the probe demotions on the ledger", "", exc, then="the probe gate keeps the holds it had")
+            self._prune_holds()
+        except Exception as exc:  # noqa: BLE001 - a hold kept one pass longer is the safe side
+            self._family_error("the probe holds' records", "", exc, then="the holds stand until they can be read")
 
     def _family_keys(self) -> list[tuple[str, str]]:
         """The families the ledger follows at a pass: every living agent's, and every family whose state is not
@@ -1296,8 +1311,13 @@ class Allocator:
             row.pop("family", None)
             row.pop("venue", None)
             try:
-                first = families.first_real_at(self._tape, [a.id for a in self._members(family, venue)], venue)
-                row["swing_clock"] = families.swing_clock(record, rule, first_real=first, now=now)
+                first = self._first_real.get((family, venue))
+                if first is None:  # found once, it never moves: no member born later lent a dollar earlier
+                    first = families.first_real_at(self._tape, [a.id for a in self._members(family, venue)], venue)
+                    if first is not None:
+                        self._first_real[(family, venue)] = first
+                row["swing_clock"] = families.swing_clock(record, rule, first_real=first, now=now,
+                                                          released=self._swing_released())
             except Exception:  # noqa: BLE001 - a display number never costs the pass its board
                 row["swing_clock"] = None
             out.setdefault(venue, {})[family] = row
@@ -1346,23 +1366,29 @@ class Allocator:
             self._forward = self.family_forward()
         return self._forward.get(family, (0, 0.0))
 
-    def _forward_since(self, family: str, seq: int) -> tuple[int, float]:
-        """The family's pooled forward record over the active blocks the ledger wrote after position `seq`, from the
-        pass's tape (the same rows and members as `family_forward`), computed once a pass a family."""
-        cached = self._since.get(family)
-        if cached is not None and cached[0] == seq:
-            return cached[1], cached[2]
+    def _turned(self, family: str, seq: int, minimum: int) -> tuple[bool, int, float]:
+        """(whether the family's record since ledger position `seq` has TURNED, its active blocks since, their summed log
+        growth). The record since is every active block the ledger wrote after `seq`, for every agent ever born into the
+        family (the rows and members `family_forward` reads, from the pass's tape); it has turned once it was positive over
+        `minimum` or more active blocks at any block since, read block by block in ledger order (`families.gaining`): the
+        brief's "until the family's record turns" is a moment, and a hold ends there for good (review of #276). Derived from
+        the ledger alone, so a restart finds the same turn. Once a pass a demotion."""
+        key = (family, int(seq))
+        cached = self._since.get(key)
+        if cached is not None:
+            return cached
         registry = self.house.registry
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
             members = [a.id for a in list(registry.agents.values()) if a.family == family]
-        blocks, growth = 0, 0.0
-        for member in members:
-            for written, _, active, value in self._tape.blocks.get(member) or ():
-                if active and written > seq:
-                    blocks += 1
-                    growth += value
-        self._since[family] = (seq, blocks, growth)
-        return blocks, growth
+        rows = sorted((written, value) for member in members for written, _, active, value in self._tape.blocks.get(member) or ()
+                      if active and written > seq)
+        blocks, growth, turned = 0, 0.0, False
+        for _, value in rows:
+            blocks += 1
+            growth += value
+            turned = turned or families.gaining(blocks, growth, minimum)
+        self._since[key] = (turned, blocks, growth)
+        return self._since[key]
 
     def _fold_demotions(self) -> None:
         """Fold the ledger's probe demotions since the last fold into `state["probe_holds"]` (`fold_demotions`); the first
@@ -1372,7 +1398,8 @@ class Allocator:
             return
         with self._lock:
             kept = dict(self.state.get("probe_holds") or {})
-        holds, states = dict(kept.get("families") or {}), dict(kept.get("states") or {})
+        holds = {family: (list(v) if isinstance(v, list) else [dict(v)]) for family, v in (kept.get("families") or {}).items() if v}
+        states = dict(kept.get("states") or {})
         registry = self.house.registry
 
         def family_of(agent_id: str) -> tuple[str, str] | None:
@@ -1386,46 +1413,80 @@ class Allocator:
         with self._lock:
             self.state["probe_holds"] = {"cursor": last, "families": holds, "states": states}
 
+    def _prune_holds(self) -> None:
+        """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
+        never comes back, and the state keeps only the holds still in force (a restart that folds the whole ledger again
+        prunes to the same)."""
+        rule = families.probe_rule()
+        if rule is None or not rule["hold"]:
+            return
+        with self._lock:
+            holds = dict(((self.state.get("probe_holds") or {}).get("families")) or {})
+        kept = {}
+        for family, demotions in holds.items():
+            pending = [d for d in (demotions if isinstance(demotions, list) else [demotions])
+                       if not self._turned(family, int(d["seq"]), rule["losing_min_blocks"])[0]]
+            if pending:
+                kept[family] = pending
+        if kept != holds:
+            with self._lock:
+                self.state.setdefault("probe_holds", {})["families"] = kept
+
     def probe_hold(self, family: str) -> dict[str, Any] | None:
-        """The hold on `family` (R5, Sept 24, 2026), or None: its latest probe demotion from real money
-        ({"seq", "at", "agent", "why"}) with the family's record since ({"blocks", "growth"}), while that record is not
-        yet positive over `losing_min_blocks` active blocks (`families.gaining`). Read at every pass, as the losing line
-        is: a record that turned and then fell back to zero or below holds the family again."""
+        """The hold on `family` (R5, Sept 24, 2026), or None: the EARLIEST of its probe demotions from real money whose
+        family record since has not yet turned (`_turned`), {"seq", "at", "agent", "why", "blocks", "growth", "pending"}:
+        the hold in force since then, the family's record since it, and how many demotions still hold the family. Each
+        demotion holds until the family's record since IT turns, so a later demotion's turn never releases an earlier
+        one (review of #276: two probes of one family demoted apart)."""
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return None
         with self._lock:
-            hold = dict(((self.state.get("probe_holds") or {}).get("families") or {}).get(family) or {})
-        if not hold:
+            demotions = ((self.state.get("probe_holds") or {}).get("families") or {}).get(family) or []
+            demotions = [dict(d) for d in (demotions if isinstance(demotions, list) else [demotions])]
+        pending = []
+        for demotion in demotions:
+            turned, blocks, growth = self._turned(family, int(demotion["seq"]), rule["losing_min_blocks"])
+            if not turned:
+                pending.append({**demotion, "blocks": blocks, "growth": growth})
+        if not pending:
             return None
-        blocks, growth = self._forward_since(family, int(hold["seq"]))
-        if families.gaining(blocks, growth, rule["losing_min_blocks"]):
-            return None
-        return {**hold, "blocks": blocks, "growth": growth}
+        return {**pending[0], "pending": len(pending)}
 
     def probe_gate(self, agent: Any) -> dict[str, Any] | None:
         """Why no PROBE may be seated from the agent's family now, or None (R5, Sept 24, 2026; `allocator.family_probe`):
         {"gate": "losing", "blocks", "growth"} when the family's pooled forward record is at or below zero after
         `losing_min_blocks` active blocks (`families.losing`, the House's breeding line), else {"gate": "held", "at",
-        "agent", "why", "blocks", "growth"} while a probe demotion holds it (`probe_hold`). A proven or swinging family's
-        agent is a bunt, never a probe: None."""
+        "agent", "why", "blocks", "growth", "pending"} while a probe demotion holds it (`probe_hold`), and
+        {"gate": "unreadable", "why"} while the gate cannot be read this pass (it fails closed: no probe is seated, nobody is
+        demoted for it). A proven or swinging family's agent is a bunt, never a probe: None."""
         rule = families.probe_rule()
         if rule is None or agent is None or self.tier(agent) != "probe":
             return None
-        blocks, growth = self.forward(agent.family)
-        if families.losing(blocks, growth, rule["losing_min_blocks"]):
-            return {"gate": "losing", "blocks": blocks, "growth": growth, "minimum": rule["losing_min_blocks"]}
+        minimum = rule["losing_min_blocks"]
+        if self._gate_fault is None:
+            try:
+                blocks, growth = self.forward(agent.family)
+            except Exception as exc:  # noqa: BLE001 - the gate closes; the pass goes on
+                self._gate_fault = f"the families' forward records ({type(exc).__name__})"
+                self._family_error("the families' forward records", "", exc, then="no probe is seated until they can be read")
+        if self._gate_fault is not None:
+            return {"gate": "unreadable", "why": self._gate_fault, "blocks": 0, "growth": 0.0, "minimum": minimum}
+        if families.losing(blocks, growth, minimum):
+            return {"gate": "losing", "blocks": blocks, "growth": growth, "minimum": minimum}
         hold = self.probe_hold(agent.family)
         if hold is not None:
-            return {"gate": "held", **hold, "minimum": rule["losing_min_blocks"]}
+            return {"gate": "held", **hold, "minimum": minimum}
         return None
 
     @staticmethod
     def gate_words(gate: Mapping[str, Any] | None) -> str | None:
-        """The board's `probe_gate`: None, "losing", or "held since <the demotion's time>"."""
+        """The board's `probe_gate`: None, "losing", "held since <the demotion's time>", or "unreadable"."""
         if not gate:
             return None
-        return "losing" if gate["gate"] == "losing" else f"held since {gate['at']}"
+        if gate["gate"] == "held":
+            return f"held since {gate['at']}"
+        return str(gate["gate"])
 
     def gate_status(self, agent: Any, gate: Mapping[str, Any]) -> tuple[str, str]:
         """(stage, reason) of a promotion the probe gate holds: the reason names the family's blocks and growth, which move
@@ -1434,22 +1495,48 @@ class Allocator:
             return "family_losing", (f"its family {agent.family}'s pooled forward record is {gate['growth']:+.4f} over "
                                      f"{gate['blocks']} active blocks: no probe is seated from a family at or below zero after "
                                      f"{gate['minimum']} (allocator.family_probe)")
+        if gate["gate"] == "unreadable":
+            return "family_unreadable", (f"the probe gate could not be read this pass ({gate['why']}): no probe is seated "
+                                         "until it can be (allocator.family_probe)")
         return "family_held", (f"{gate['agent']}, a probe of its family {agent.family}, went back to practice at {gate['at']}: "
                                f"no probe is seated from the family until its pooled forward record since then is positive over "
                                f"{gate['minimum']} active blocks (it is {gate['growth']:+.4f} over {gate['blocks']}; "
                                "allocator.family_probe)")
 
-    def _sale_free(self, agent: Any) -> bool:
-        """Whether sending the agent back to practice by the demotion path sells nothing. That path (`_move_down` ->
-        `House._move_books` -> `_wind_down`) holds an event contract to settlement, books a holding the venue will not
-        trade as dust (`House._dust_reason`: under a cent, or under the venue's minimal quantity), and SELLS every other
-        holding at the market (a stock or an option at the next open); it cancels working buys, whose fill racing the
-        cancel is a holding it would sell. So: no holding it would sell, and no working order but on event contracts --
-        the test displacement already uses (`_weakest_bunt`: "displacing never forces a sale"). A Kalshi account always
-        passes; a holding whose dust test cannot be read counts as one it would sell."""
+    def refuses_probe(self, agent: Any, verdict: Any) -> bool:
+        """The probe gate again when an audit approves a known defect's seat (`House._commit_promotion`): the audit ran off
+        the tick, and the family may have turned losing, or a probe of it gone back to practice, meanwhile (review of #276).
+        True, with the promotion status written, when the seat is refused."""
+        if not enabled() or agent is None:
+            return False
+        try:  # the ledger as it stands now, not as the last pass read it: blocks closed while the audit ran
+            self._tape.refresh(self.house.ledger)
+            self._forward = self.family_forward()
+        except Exception as exc:  # noqa: BLE001 - the gate closes until the next pass reads it
+            self._gate_fault = f"the families' forward records ({type(exc).__name__})"
+        self._refold()
+        gate = self.probe_gate(agent)
+        if gate is None:
+            return False
+        stage, reason = self.gate_status(agent, gate)
+        detail = {"family_forward": {"blocks": gate["blocks"], "growth": round(gate["growth"], 6)}}
+        if gate["gate"] == "held":
+            detail["held_since"] = gate["at"]
+        self.house._promotion_status(agent, verdict, stage, reason, **detail)
+        return True
+
+    def _unflat(self, agent: Any) -> str | None:
+        """Why sending the agent back to practice by the demotion path would sell something, or None when it would sell
+        nothing. That path (`_move_down` -> `House._move_books` -> `_wind_down`) holds an event contract to settlement,
+        books a holding the venue will not trade as dust (`House._dust_reason`: under a cent, or under the venue's minimal
+        quantity), and SELLS every other holding at the market (a stock or an option at the next open): "holding". It
+        cancels working buys, whose fill racing the cancel it would sell: "working". And a buy the book closed as never
+        arrived may still be revived with its fill for a quarter of an hour (`Book._reserved_cash`): "reserved" (review of
+        #276). None of this on an event book, where every holding is held to settlement; a holding whose dust test cannot
+        be read counts as one it would sell."""
         book = self.house.books.get(REAL_BOOK.get(agent.venue, ""))
         if book is None or agent.id not in book.accounts:
-            return True
+            return None
         dust = getattr(self.house, "_dust_reason", None)
 
         def sold(holding: Any) -> bool:
@@ -1460,28 +1547,42 @@ class Allocator:
             except Exception:  # noqa: BLE001 - unknown is not dust: wait
                 return True
 
-        held = any(sold(h) for h in list(book.account(agent.id).holdings.values()))
-        working = any(w.instrument.asset_class != "event" for w in book.open_orders(agent.id))
-        return not held and not working
+        if any(sold(h) for h in list(book.account(agent.id).holdings.values())):
+            return "holding"
+        if any(w.instrument.asset_class != "event" for w in book.open_orders(agent.id)):
+            return "working"
+        if book.name not in EVENT_BOOKS and book._reserved_cash(agent.id) > 0:
+            return "reserved"
+        return None
 
     def _drain_probe(self, agent: Any, ev: Evidence, summary: dict[str, Any]) -> None:
         """R5 (2): a PROBE seated on a losing family goes back to practice at this pass, by the path every demotion takes
-        (`_move_down` to practice), when that path sells nothing (`_sale_free`); on Alpaca a probe that holds a position
-        or a working order keeps its seat until it is flat -- its own exits, and the stay drawdown, hysteresis and drift,
-        go on -- and is told once."""
+        (`_move_down` to practice), when that path sells nothing (`_unflat`). A probe whose only obstacle is its working
+        buys has them cancelled first -- the demotion path's own first step, which sells nothing -- and goes back if that
+        leaves it flat; a fill that raced the cancel is a position, and it waits (review of #276: an Alpaca probe that always
+        rests a bid was never flat). One that holds a position keeps its seat until it is flat -- its own exits, and the stay
+        drawdown, hysteresis and drift, go on; it is lent nothing more (`_size`) -- and is told once. A family whose record
+        cannot be read demotes nobody (review of #276: a read fault counts a proven family's bunts as probes)."""
         gate = self.probe_gate(agent)
-        if gate is None or gate["gate"] != "losing":
+        if gate is None or gate["gate"] != "losing" or self.family(agent.family, agent.venue).get("error"):
             self._waiting_flat.discard(agent.id)
             return
         why = (f"its family {agent.family}'s pooled forward record is {gate['growth']:+.4f} over {gate['blocks']} active blocks: "
                f"a probe is not kept on a family at or below zero after {gate['minimum']} (allocator.family_probe)")
-        if not self._sale_free(agent):
+        obstacle = self._unflat(agent)
+        if obstacle == "working":
+            book = self.house.books.get(REAL_BOOK[agent.venue])
+            for working in book.open_orders(agent.id):
+                if working.side == "buy" and working.instrument.asset_class != "event":
+                    book.cancel(agent.id, working.order_id, why=f"the allocator: {why}")
+            obstacle = self._unflat(agent)
+        if obstacle is not None:
             summary.setdefault("probes_waiting_flat", []).append(agent.id)
             if agent.id not in self._waiting_flat:
                 self._waiting_flat.add(agent.id)
                 with contextlib.suppress(Exception):  # a courtesy: the board's `probe_gate` says it too
                     self.house.alert("info", f"allocator: {agent.id} is a probe on a losing family ({why}); it goes back to "
-                                             "practice once it holds nothing and has no working order: no sale is forced")
+                                             f"practice once the demotion would sell nothing (now: {obstacle}): no sale is forced")
             return
         self._waiting_flat.discard(agent.id)
         self._move_down(agent, ev, "paper", why, summary,
@@ -1730,11 +1831,14 @@ class Allocator:
         return summary
 
     def _refold(self) -> None:
-        """Fold the demotions this pass wrote (`_fold_demotions`) and read the holds afresh."""
+        """Fold the demotions the ledger gained (`_fold_demotions`: the House's between passes, this pass's own) and read
+        the holds afresh. A fold that fails leaves the gate unreadable for the rest of the pass: no probe is seated on
+        holds that may be missing a demotion (review of #276)."""
         try:
             self._fold_demotions()
-        except Exception as exc:  # noqa: BLE001 - the holds already folded stand
-            self._family_error("the probe demotions on the ledger", "", exc, then="the probe gate keeps the holds it had")
+        except Exception as exc:  # noqa: BLE001 - the holds already folded stand, and the gate closes
+            self._gate_fault = f"the probe demotions on the ledger ({type(exc).__name__})"
+            self._family_error("the probe demotions on the ledger", "", exc, then="no probe is seated until they can be read")
         self._since = {}
 
     def _live_open(self, venue: str) -> bool:
@@ -1955,6 +2059,11 @@ class Allocator:
         if abs(delta) < max(equity, Decimal(1)) * _d(p["min_stake_change"]):
             return None
         if delta > 0:
+            gate = self.probe_gate(agent) if band == "bunt" else None
+            if gate is not None and gate["gate"] == "losing":
+                # R5 (Sept 24, 2026; review of #276): a probe on a losing family waiting to go back to practice (on Alpaca,
+                # until it is flat) is lent nothing more; free cash still comes back.
+                return None
             if band == "bunt" and p["bunt_growth"] == "w_real" and ev.w_real < 1.0:
                 # A losing bunt is not refilled (Sept 23, 2026): its stake shrinks by what it lost,
                 # and the stay drawdown, hysteresis and death decide the rest. Under the flat rule a

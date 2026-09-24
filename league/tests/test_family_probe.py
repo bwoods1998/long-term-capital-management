@@ -20,7 +20,9 @@ from unittest.mock import patch
 from league import allocator, families
 from league.constitution import CONSTITUTION, digest, money_digest
 from league.ledger import now_iso
+from league import seeds
 from league.tests.test_allocator import IDLE, HouseCaseReal
+from league.venues import instrument_for
 from league.tests.test_families import real_record
 from league.tests.test_promotion_on_proof import KALSHI_IDLE, KalshiHouse, canned
 
@@ -109,14 +111,14 @@ class TheRule(unittest.TestCase):
         holds, states = {}, {}
         self.assertEqual(allocator.fold_demotions(rows, holds, states, family_of), n[0])
         self.assertEqual(sorted(holds), ["fam-a", "fam-d"])
-        self.assertEqual((holds["fam-a"]["seq"], holds["fam-a"]["agent"], holds["fam-a"]["why"]), (1, "a", "drawdown"))
-        self.assertEqual(holds["fam-d"]["at"], "2026-09-24T13:06:00.000Z")
+        self.assertEqual([(d["seq"], d["agent"], d["why"]) for d in holds["fam-a"]], [(1, "a", "drawdown")])
+        self.assertEqual(holds["fam-d"][0]["at"], "2026-09-24T13:06:00.000Z")
         self.assertEqual(states, {"fam-d@kalshi": "unproven", "fam-e@kalshi": "proven"})
-        # The latest demotion is the one that holds; folding in two parts is folding once.
+        # Every demotion is kept, each its own hold, in ledger order; a row folded twice is kept once.
         later = [SimpleNamespace(seq=50, kind="eval.verdict", agent="a", at="2026-09-24T14:00:00.000Z",
                                  payload={"decision": "demote", "from_rung": 2, "to_rung": 1, "band_from": "probe", "reason": "again"})]
-        self.assertEqual(allocator.fold_demotions(later, holds, states, family_of), 50)
-        self.assertEqual(holds["fam-a"]["seq"], 50)
+        self.assertEqual(allocator.fold_demotions(later + later, holds, states, family_of), 50)
+        self.assertEqual([d["seq"] for d in holds["fam-a"]], [1, 50])
         self.assertIsNone(allocator.fold_demotions([], holds, states, family_of))
 
 
@@ -222,7 +224,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.blocks("weather-favorites", *[0.01] * 6)
         a = self.seated()
         self.drawdown(a)
-        demoted_at = self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]["at"]
+        demoted_at = self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["at"]
         b = self.agent("hawk")
         table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
         self.blocks("weather-favorites", *[0.01] * 5)  # five positive blocks since: not yet
@@ -263,7 +265,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         with self.evidence_of(table):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]["agent"], a.id)
+        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_a_demotion_that_names_no_band_holds_an_unproven_family_by_the_mechanism_ledger(self):
         """The House's drift demotion writes no `band_from`: the family's state in its last `family.record` row decides."""
@@ -279,7 +281,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
         self.assertNotIn("band_from", self.demotions(a)[-1])
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]["agent"], a.id)
+        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_a_stake_that_was_never_lent_holds_nothing(self):
         from league.book import Book, BookError
@@ -321,7 +323,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         with self.evidence_of(table):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(c.id)), (1, 2))
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]["agent"], a.id)
+        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_the_gate_reads_the_houses_own_forward_record(self):
         """`House.family_forward` is the definition; the allocator reads the same rows from its tape."""
@@ -332,6 +334,109 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.house._data_cache.pop("family_forward", None)
         self.assertEqual(self.house.allocator.forward("weather-favorites"), self.house.family_forward()["weather-favorites"])
         self.assertIsNotNone(self.house._losing_family("weather-favorites"))  # the House breeds no more of it either
+
+
+    def test_each_demotion_holds_until_the_record_since_it_turns(self):
+        """Review of #276: two probes of one family demoted apart are two holds; the later one's turn does not release the
+        earlier, whose record since includes the family's losses in between."""
+        self.blocks("weather-favorites", *[0.05] * 6)  # +0.30 before: the whole record never loses in this test
+        a, b = self.seated("kay"), self.seated("hawk")
+        drawdown = dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36)
+        table = {a.id: drawdown, b.id: dict(READY, w_real=1.0)}
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.blocks("weather-favorites", *[-0.05] * 3)  # the family loses -0.15 while b trades on
+        table[b.id] = drawdown
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 1)
+        self.blocks("weather-favorites", *[0.01] * 6)  # since b: +0.06 over 6, turned; since a: -0.09 over 9, not
+        c = self.agent("huang")
+        table[c.id] = READY
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(c.id), 1)
+        status = self.status(c)
+        self.assertEqual(status["stage"], "family_held")
+        self.assertTrue(status["reason"].startswith(f"{a.id}, a probe of its family weather-favorites"), status["reason"])
+        self.assertIn("(it is -0.0900 over 9;", status["reason"])
+        self.assertEqual([d["agent"] for d in self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]], [a.id])
+        self.blocks("weather-favorites", 0.10)  # since a: +0.01 over 10: turned
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(c.id), 2)
+        self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+
+    def test_a_turn_is_for_good(self):
+        """"Until the family's record turns" (review of #276): once the record since a demotion has turned, the hold is over,
+        even if the record since then falls back; the whole record's losing line still stands guard."""
+        self.blocks("weather-favorites", *[0.10] * 6)  # +0.60 before the demotion
+        a = self.seated()
+        self.drawdown(a)
+        self.blocks("weather-favorites", *[0.01] * 6)  # turned
+        b = self.agent("hawk")
+        table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36)}
+        with self.evidence_of(table):
+            self.tick()
+        self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.blocks("weather-favorites", -0.50)  # the record since the demotion is -0.44 now; the whole record +0.16
+        table[b.id] = READY
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(b.id), 2)
+
+    def test_a_family_whose_record_cannot_be_read_demotes_nobody(self):
+        """Review of #276: an unreadable record counts a family's agents as probes for money; the losing line must not then
+        send a proven family's bunt back to practice for a read that failed. No probe is seated from it either."""
+        a = self.seated()
+        self.blocks("weather-favorites", *[-0.05] * 6)
+        b = self.agent("hawk")
+
+        def unreadable(house, family, venue, **kw):
+            if family == "weather-favorites":
+                raise RuntimeError("the tape could not be read")
+            return self._record(house, family, venue, **kw)
+
+        self.records.stop()
+        try:
+            with patch.object(allocator, "family_record", side_effect=unreadable), \
+                    self.evidence_of({a.id: dict(READY, w_real=1.0), b.id: READY}):
+                self.tick()
+        finally:
+            self.records.start()
+        self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (2, 1))
+        self.assertEqual(self.demotions(a), [])
+        self.assertEqual(self.status(b)["stage"], "family_losing")
+
+    def test_a_gate_that_cannot_be_read_seats_no_probe_and_demotes_nobody(self):
+        a = self.seated()
+        self.blocks("weather-favorites", *[-0.05] * 6)
+        b = self.agent("hawk", family="kalshi-favorites")
+        table = {a.id: dict(READY, w_real=1.0), b.id: READY}
+        with patch.object(allocator, "fold_demotions", side_effect=OSError("disk I/O error")), self.evidence_of(table):
+            self.tick()
+        self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (2, 1))
+        self.assertEqual(self.status(b)["stage"], "family_unreadable")
+        self.assertEqual(self.house.allocator.board()["agents"][b.id]["probe_gate"], "unreadable")
+        with self.evidence_of(table):
+            self.tick()  # read again: the losing family's probe goes back, the other family's newcomer is seated
+        self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(b.id)), (1, 2))
+
+    def test_an_audit_that_approves_a_seat_meets_the_gate_again(self):
+        """Review of #276: a known defect is audited off the tick before its seat, and its family may turn losing meanwhile.
+        `House._commit_promotion` asks the gate again (`Allocator.refuses_probe`)."""
+        from league.evaluator import Verdict
+
+        a = self.agent()
+        with self.evidence_of({a.id: dict(READY, e=1.0)}):
+            self.tick()  # below the bunt line: nothing to gate yet
+        self.blocks("weather-favorites", *[-0.05] * 6)
+        verdict = Verdict(a.id, 1, "eligible", "a known defect's seat, approved by its audit", {"via": "allocator", "book": "kalshi-shadow"})
+        self.house._commit_promotion(a.id, verdict, 1, self.house._generation(a.id))
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.assertEqual(self.status(a)["stage"], "family_losing")
+        self.assertIn("-0.3000 over 6 active blocks", self.status(a)["reason"])
 
 
 class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
@@ -359,16 +464,19 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         held = {k: h.quantity for k, h in book.account(a.id).holdings.items()}
         self.assertTrue(held)
         self.losing()
-        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}
+        # W_real 1.2: its target rises to $30 (a bunt keeps what it makes), but a probe on a losing family waiting to go
+        # back is lent nothing more (review of #276).
+        table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.2, paper_trades=6)}
         submitted = len(self.real.submitted)
         with self.evidence_of(table):
             self.tick(2)
         self.assertEqual(self.house.evaluator.rung(a.id), 2)
         self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
         self.assertEqual({k: h.quantity for k, h in book.account(a.id).holdings.items()}, held)
+        self.assertEqual(book.account(a.id).staked, D("25"))
         self.assertEqual(self.house.allocator.board()["agents"][a.id]["probe_gate"], "losing")
         told = [e.payload["text"] for e in self.house.ledger.iter(kinds="ops.alert") if a.id in str(e.payload.get("text"))
-                and "once it holds nothing" in str(e.payload.get("text"))]
+                and "once the demotion would sell nothing (now: holding)" in str(e.payload.get("text"))]
         self.assertEqual(len(told), 1)  # told once, not at every pass
         # Its own exit: flat, it goes back to practice at the next pass.
         sell = Intent.new(agent=a.id, instrument=btc, side="sell", quantity=held[btc.key], reason="its own exit", created_at=now_iso(self.clock))
@@ -402,27 +510,151 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
         self.assertEqual(book.account(a.id).holdings, {})  # booked as dust by the wind-down
 
-    def test_a_probe_with_a_working_order_waits_for_it(self):
+    def resting_bid(self, a):
         from league.book import Intent
         from league.venues import instrument_for
 
-        a = self.seated()
         book = self.house.books["alpaca"]
         btc = instrument_for("alpaca", {"symbol": "BTC/USD"})
         bid = Intent.new(agent=a.id, instrument=btc, side="buy", quantity=D("0.000125"), order_type="limit", limit_price=D("79000"),
                          reason="test", created_at=now_iso(self.clock))
         outcome = book.submit([bid])[0]
         self.assertTrue(book.open_orders(a.id))
+        return book, btc, outcome.order_id
+
+    def test_a_probe_resting_only_a_bid_has_it_cancelled_and_goes_back_in_one_pass(self):
+        """The demotion path's own first step, cancelling working buys, sells nothing (review of #276: haghani-r42c38c
+        only rested bids, re-posted every wake, and would never have been flat between them)."""
+        a = self.seated()
+        book, _, order_id = self.resting_bid(a)
         self.losing()
+        submitted = len(self.real.submitted)
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.assertIn(order_id, self.real.cancelled)
+        self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
+        self.assertEqual(book.account(a.id).holdings, {})
+
+    def test_a_bid_that_fills_as_it_is_cancelled_is_a_position_and_the_probe_waits(self):
+        """A fill racing the cancel is booked by the cancel's own read: the probe now holds a position, and waits for its own
+        exit rather than have it sold."""
+        a = self.seated()
+        book, btc, order_id = self.resting_bid(a)
+        self.losing()
+        real, cancel = self.real, self.real.cancel
+
+        def filled_first(reference):  # the venue fills the bid a moment before it takes the cancel
+            order = real.get_order(reference)
+            if not order.terminal:
+                real.fill_resting(next(key for key, o in real.orders.items() if o is order), "0.000125")
+            return cancel(reference)
+
+        submitted = len(self.real.submitted)
+        with patch.object(self.real, "cancel", side_effect=filled_first), \
+                self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertGreater(book.account(a.id).holdings[btc.key].quantity, 0)  # the fill, less the venue's fee in the coin
+        self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
+
+    def test_a_buy_the_book_still_asks_the_venue_about_keeps_the_probe_seated(self):
+        """A buy closed as never arrived may be revived with its fill for a quarter of an hour (`Book._reserved_cash`): its
+        fill after a demotion would be sold by the wind-down's retry (review of #276)."""
+        a = self.seated()
+        self.losing()
+        book = self.house.books["alpaca"]
+        with patch.object(type(book), "_reserved_cash", return_value=D("10")), \
+                self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}):
+            self.tick()
+            self.assertEqual(self.house.allocator._unflat(self.house.registry.get(a.id)), "reserved")
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+
+
+class ProbeGateOnOptions(ForwardBlocks, HouseCaseReal):
+    """An options probe (the coordinator's case, Sept 24, 2026): krasker-14 (alpaca-options, family options-pullback) was
+    seated at 16:47:37Z as an $80 real-money probe (`option_bunt_usd`: a probe cannot hold a smaller contract than a bunt)
+    while its family's forward record read 19 practice blocks and -0.3829 (16:53:40Z; bound -0.1088 on n 28): losing by
+    `families.losing(19, -0.3829, 6)`. The demotion path sells a long option at the bid, and outside the session holds the
+    sale for the open (`House._wind_down`): an options probe on a losing family goes back only once flat."""
+
+    def setUp(self):
+        super().setUp()
+        room = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"})
+        room.start()
+        self.addCleanup(room.stop)
+        self.clock.now = 1789048800.0  # Thursday Sept 10, 14:00Z: the options session is open
+        self.quote()
+        self.option = instrument_for("alpaca", {"occ": "F261009C00013000"})
+        self.real.set_quote(self.option, "0.30", "0.32")
+
+    def options_agent(self):
+        agent = self.house.spawn("krasker", "options-pullback", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        self.house.evaluator.seat(agent.id, 1, "test: straight to practice")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        self.house._state["next_wake"][agent.id] = self.clock() + 10 ** 9  # it never wakes: the test places its orders
+        return agent
+
+    def losing_like_krasker_14(self):
+        self.blocks("options-pullback", *([-0.02] * 18 + [-0.0229]), book="alpaca-paper", code=IDLE)  # 19 blocks, -0.3829
+
+    def test_an_options_probe_from_a_losing_family_is_refused(self):
+        self.losing_like_krasker_14()
+        a = self.options_agent()
+        self.assertEqual(self.house.allocator.target_stake(a, "bunt"), D("80"))  # what it would have been lent
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        self.assertEqual(self.status(a)["stage"], "family_losing")
+        self.assertIn("its family options-pullback's pooled forward record is -0.3829 over 19 active blocks", self.status(a)["reason"])
+        self.assertNotIn(a.id, self.house.books["alpaca"].accounts)
+
+    def test_a_seated_options_probe_holding_a_contract_goes_back_only_once_flat(self):
+        from league.book import Intent
+
+        a = self.options_agent()
         table = {a.id: dict(e=1.10, w_paper=1.21, w_real=1.0, paper_trades=6)}
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 2)
-        self.assertTrue(book.open_orders(a.id))  # the allocator cancels nothing of its own accord
-        book.cancel(a.id, outcome.order_id)
+        book = self.house.books["alpaca"]
+        self.assertEqual(book.account(a.id).staked, D("80"))
+        buy = Intent.new(agent=a.id, instrument=self.option, side="buy", quantity="1", order_type="limit", limit_price="0.32",
+                         reason="test", created_at=now_iso(self.clock), nonce="call")
+        self.assertEqual(book.submit([buy])[0].status, "filled")
+        self.losing_like_krasker_14()
+        submitted = len(self.real.submitted)
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertIn(self.option.key, book.account(a.id).holdings)
+        self.assertEqual(self.house.allocator.board()["agents"][a.id]["probe_gate"], "losing")
+        # After the bell the demotion path would hold the sale for the open: still nothing is planned or sold.
+        self.clock.now = 1789048800.0 + 8 * 3600  # 22:00Z
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        self.assertNotIn(a.id, self.house._state.get("wind_down_held") or {})
+        self.assertEqual([o for o in self.real.submitted[submitted:] if o.side == "sell"], [])
+        # Its own exit the next session: flat, it goes back to practice at the next pass.
+        self.clock.now = 1789048800.0 + 86400  # Friday 14:00Z
+        self.quote()
+        self.real.set_quote(self.option, "0.30", "0.32")
+        sell = Intent.new(agent=a.id, instrument=self.option, side="sell", quantity="1", order_type="limit", limit_price="0.30",
+                          reason="its own exit", created_at=now_iso(self.clock), nonce="exit")
+        self.assertEqual(book.submit([sell])[0].status, "filled")
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
+        demote = self.demotions(a)[-1]
+        self.assertEqual((demote["band_from"], demote["rule"]), ("probe", "allocator.family_probe"))
+        # 20 blocks by then: its own real day (the contract bought at 0.32, sold at 0.30) counts in its family's record too.
+        self.assertEqual(demote["family_forward"]["blocks"], 20)
+        self.assertLess(demote["family_forward"]["growth"], -0.3829)
+        self.assertEqual(len([o for o in self.real.submitted[submitted:] if o.side == "sell"]), 1)  # its own, and only it
 
 
 class TheBoard(ForwardBlocks, KalshiHouse):
@@ -453,37 +685,60 @@ class TheBoard(ForwardBlocks, KalshiHouse):
             self.tick()  # a day after its first real dollar
         clock = self.house.allocator.board()["families"]["kalshi"]["weather-favorites"]["swing_clock"]
         self.assertEqual((clock["real_n"], clock["real_days"], clock["real_per_day"]), (5, 1.0, 5.0))
-        self.assertEqual(clock["needs"], {"real_settlements": 10, "look_at": 15, "confidence": 0.9, "proof": False, "audit": True})
+        released = self.house.allocator._swing_released()
+        self.assertEqual(clock["needs"], {"real_settlements": 10, "look_at": 15, "confidence": 0.9, "proof": False, "audit": True,
+                                          "grant": not released})
         self.assertEqual(clock["days_to_swing"], 2.0)
         # The clock rides the board, never a `family.record` row (it moves with the clock alone).
         self.assertFalse([e for e in self.house.ledger.iter(kinds="family.record") if "swing_clock" in e.payload])
 
-    def test_the_clock_of_a_family_with_no_real_dollar_and_of_one_whose_look_passed(self):
-        rule = families.swing_rule()
-        record = real_record(n=0, bound=-0.5)
-        self.assertEqual(families.swing_clock(record, rule, first_real=None, now=1000.0)["days_to_swing"], None)
-        record = real_record(n=15, bound=0.05)  # its entry look at 15 passed: the audit is what is left
-        clock = families.swing_clock(record, rule, first_real=0.0, now=86400.0 * 3)
+    def test_the_clock_where_no_estimate_stands(self):
+        """Review of #276: no real dollar yet, a real life under an hour (a rate over minutes is noise), no member on real
+        money (the real record does not grow), or only the pooled proof left: no days to swing. A passed look waits for the
+        audit alone."""
+        rule, day = families.swing_rule(), 86400.0
+        self.assertIsNone(families.swing_clock(real_record(n=0, bound=-0.5), rule, first_real=None, now=1000.0)["days_to_swing"])
+        record = real_record(n=5, bound=-0.5)
+        record["members_real"] = 1
+        self.assertEqual(families.swing_clock(record, rule, first_real=0.0, now=3 * day)["days_to_swing"], 6.0)  # 10 at 5/3 a day
+        early = families.swing_clock(record, rule, first_real=0.0, now=1800.0)
+        self.assertEqual((early["real_per_day"], early["days_to_swing"]), (None, None))
+        record["members_real"] = 0
+        self.assertIsNone(families.swing_clock(record, rule, first_real=0.0, now=3 * day)["days_to_swing"])
+        passed = real_record(n=15, bound=0.05)  # its entry look at 15 passed: the audit is what is left
+        clock = families.swing_clock(passed, rule, first_real=0.0, now=3 * day, released=True)
         self.assertEqual((clock["needs"]["real_settlements"], clock["days_to_swing"], clock["real_per_day"]), (0, 0.0, 5.0))
-        self.assertIsNone(families.swing_clock(record, None, first_real=0.0, now=1.0))
+        self.assertFalse(clock["needs"]["grant"])
+        unproven = real_record(n=15, bound=0.05, proven=False)  # a passed look without the pooled proof
+        clock = families.swing_clock(unproven, rule, first_real=0.0, now=3 * day, released=False)
+        self.assertEqual((clock["needs"]["proof"], clock["needs"]["grant"], clock["days_to_swing"]), (True, True, None))
+        self.assertIsNone(families.swing_clock(passed, None, first_real=0.0, now=1.0))
 
     def test_the_sites_checkpoint_carries_none_of_the_new_fields(self):
-        """The site's validators refuse unknown fields: the publisher copies the board's fields by name."""
+        """The site's validators refuse unknown fields: the publisher copies the board's fields by name. The board here has
+        every new field: a losing family's newcomer, a held family's newcomer, a real row's equity, each family's clock."""
         from league.publish import Publisher
 
         self.blocks("weather-favorites", *[-0.01] * 6)
-        a, b = self.agent(), self.agent("hawk", family="kalshi-favorites")
-        with self.evidence_of({a.id: READY, b.id: READY}):
+        a, b, c = self.agent(), self.agent("hawk", family="kalshi-favorites"), self.agent("mullins", family="sports-favorites")
+        table = {a.id: READY, b.id: READY, c.id: READY}
+        with self.evidence_of(table):
+            self.tick()
+        table[c.id] = dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36)  # back to practice: sports-favorites is held
+        d = self.agent("meriwether", family="sports-favorites")
+        table[d.id] = READY
+        with self.evidence_of(table):
             self.tick()
         board = self.house.allocator.board()
         self.assertEqual(board["agents"][a.id]["probe_gate"], "losing")
+        self.assertTrue(str(board["agents"][d.id]["probe_gate"]).startswith("held since "))
         self.assertIsNotNone(board["agents"][b.id]["equity_usd"])
         self.assertIn("swing_clock", board["families"]["kalshi"]["kalshi-favorites"])
         self.clock.advance(5)
         publisher = Publisher("https://blakewoods.us", lambda: "t" * 40, self.house.allocator.path.parent / "publish.json",
                               tape="test", opener=lambda *a, **k: None, clock=self.clock)
         body = json.dumps(publisher.checkpoint(self.house), default=str)
-        for field in ("probe_gate", "family_forward", "equity_usd", "swing_clock", "held since"):
+        for field in ("probe_gate", "family_forward", "equity_usd", "swing_clock", "held since", "losing"):
             self.assertNotIn(field, body)
 
 
@@ -501,7 +756,8 @@ class RulesText(unittest.TestCase):
         self.assertIn("NO PROBE ON A LOSING FAMILY. When your family's forward record -- the active blocks of every member ever born, "
                       "living or dead, summed -- is at or below zero after 6 active blocks, no probe is seated from it", text)
         self.assertIn("A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until the "
-                      "family's record SINCE then is positive over 6 active blocks.", text)
+                      "family's record SINCE then is positive over 6 active blocks (each such demotion, until its own turn).", text)
+        self.assertIn("at Alpaca once it holds nothing that demotion would sell: its bids are cancelled, and nothing is sold for it", text)
         start, end = text.index("- YOUR FAMILY'S RECORD"), text.index("- REAL MONEY AT KALSHI")
         self.assertNotIn("paper", text[start:end].lower())  # the copy rule: practice, never paper
         c = copy.deepcopy(CONSTITUTION)

@@ -484,13 +484,16 @@ CONSTITUTION: dict[str, Any] = {
         #   1. the allocator seats no PROBE from the family: the promotion waits, its status naming the blocks and growth;
         #   2. a probe already seated on it goes back to practice at the next pass by the demotion path (`_move_down` to
         #      practice), which holds a Kalshi contract to settlement and so sells nothing there; on Alpaca, where that
-        #      path sells what the account holds, only once the probe is flat (no holding and no working order): no sale
-        #      is ever forced;
-        #   3. under `reseat: "gain_since_demotion"`, a probe that went back to practice from real money for any reason
-        #      holds its family: no probe from it is seated while its pooled forward record SINCE that demotion is not
-        #      positive over `losing_min_blocks` or more active blocks ("until the family's record turns"). The
-        #      demotion is read from the ledger's `eval.verdict` rows (a restart forgets nothing): its `band_from`, and
-        #      for a row that does not name its band, the family's state in the mechanism ledger just before it.
+        #      path sells what the account holds (an option at the bid, a stock at the next open), only once the probe
+        #      holds nothing that path would sell -- its working bids cancelled first, as the path itself does -- and no
+        #      buy is still in question at the venue: no sale is ever forced, and it is lent nothing more meanwhile;
+        #   3. under `reseat: "gain_since_demotion"`, each probe that goes back to practice from real money, for any
+        #      reason, holds its family until the family's pooled forward record SINCE that demotion turns: positive over
+        #      `losing_min_blocks` or more active blocks ("until the family's record turns"; a turn is for good, and each
+        #      demotion is its own hold). The demotions are read from the ledger's `eval.verdict` rows (a restart forgets
+        #      nothing): their `band_from`, and for a row that does not name its band, the family's state in the
+        #      mechanism ledger just before it.
+        # A gate that cannot be read seats no probe and demotes nobody.
         # A proven or swinging family's agents are bunts, not probes: none of this applies to them. Evidence
         # (docs/research/queries/2026-09-24/R5-family-probe.py, on the 15:06Z snapshot): of the allocator's 21
         # promotions to real money since Sept 23 00:00Z, 11 were onto families whose pooled forward record was negative

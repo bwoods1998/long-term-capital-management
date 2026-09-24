@@ -961,36 +961,46 @@ def first_real_at(tape: TradeTape, members: Iterable[str], venue: str) -> float 
 
 
 def swing_clock(record: Mapping[str, Any], rule: Mapping[str, Any] | None, *, first_real: float | None,
-                now: float) -> dict[str, Any] | None:
+                now: float, released: bool | None = None) -> dict[str, Any] | None:
     """The family's clock to its swing (R3 of the close-the-gaps run, Sept 24, 2026; the board's `families`, never a
     `family.record` row: it moves with the clock alone). `real_per_day`: its independent REAL settlements a day over its
-    real life, from its first real dollar (`first_real_at`); `needs`: what the family swing (`allocator.family_swing`)
-    still asks -- the real settlements to the next entry look (`min_real_settlements`, then every `entry_every`), the
-    confidence that look's bound is read at, whether the pooled proof is still missing, and the audit that follows a
-    passing look; `days_to_swing`: the days to that look at the family's own real rate (None without one). A swinging
-    family needs nothing; one whose look passed waits only for its audit. The owner's notes at the resume (Sept 24, 2026
-    14:30Z) read sports-central-run-under, the one proven family, at real n 5 against 15: this is that clock, read from the
-    rule itself."""
+    real life, from its first real dollar (`first_real_at`), once that life is an hour long (a rate over minutes is
+    noise); `needs`: what the family swing (`allocator.family_swing`) still asks -- the real settlements to the next entry
+    look (`min_real_settlements`, then every `entry_every`), the confidence that look's bound is read at, whether the
+    pooled proof is still missing, the audit that follows a passing look, and whether the live grant does not yet release
+    stakes above the bunt (`grant`, when `released` is known); `days_to_swing`: the days to that look at the family's own
+    real rate. None where no estimate stands: no rate yet, no member on real money (its real record does not grow), or
+    nothing left to count but the pooled proof. A swinging family needs nothing; one whose look passed waits only for its
+    audit. The owner's notes at the resume (Sept 24, 2026 14:30Z) read sports-central-run-under, the one proven family, at
+    real n 5 against 15: this is that clock, read from the rule itself."""
     if rule is None:
         return None
     real = record.get("real") or {}
     entry = real.get("entry") or {}
     n = int(real.get("n") or 0)
+    swinging = record.get("state") == "swing"
+    proven = bool(record.get("proven"))
     days = max(now - first_real, 0.0) / DAY if first_real is not None else None
-    rate = n / days if days and n > 0 else (0.0 if days else None)
-    if record.get("state") == "swing":
+    rate = (n / days if n > 0 else 0.0) if days is not None and days >= 1 / 24 else None
+    if swinging:
         needed, look = 0, None
     elif entry.get("ready"):
         needed, look = 0, entry.get("checkpoint")  # the look passed: the entry's audit is what is left
     else:
         look = int(entry.get("next_checkpoint") or rule["min_real_settlements"])
         needed = max(look - n, 0)
-    to_swing = 0.0 if needed == 0 else (needed / rate if rate else None)
+    if swinging or (needed == 0 and proven):
+        to_swing = 0.0
+    elif needed == 0 or not rate or int(record.get("members_real") or 0) <= 0:
+        to_swing = None
+    else:
+        to_swing = needed / rate
     return {"real_n": n, "real_since": None if first_real is None else datetime.fromtimestamp(first_real, tz=timezone.utc)
             .strftime("%Y-%m-%dT%H:%M:%SZ"), "real_days": None if days is None else round(days, 3),
             "real_per_day": None if rate is None else round(rate, 3),
             "needs": {"real_settlements": needed, "look_at": look, "confidence": float(rule["entry_confidence"]),
-                      "proof": not bool(record.get("proven")), "audit": record.get("state") != "swing"},
+                      "proof": not proven, "audit": not swinging,
+                      "grant": None if released is None or swinging else not released},
             "days_to_swing": None if to_swing is None else round(to_swing, 2)}
 
 

@@ -162,13 +162,14 @@ or never swings at all.
         if probe_rule:
             blocks = int(probe_rule.get("losing_min_blocks", 6))
             held = (f"  A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until\n"
-                    f"  the family's record SINCE then is positive over {blocks} active blocks.\n"
+                    f"  the family's record SINCE then is positive over {blocks} active blocks (each such demotion, until\n"
+                    f"  its own turn).\n"
                     if probe_rule.get("reseat") == "gain_since_demotion" else "")
             probe_gate_text = (
                 f"  NO PROBE ON A LOSING FAMILY. When your family's forward record -- the active blocks of every member\n"
                 f"  ever born, living or dead, summed -- is at or below zero after {blocks} active blocks, no probe is\n"
                 "  seated from it, and a probe seated on it goes back to practice at the next pass (at Alpaca once it\n"
-                "  holds nothing and has no working order: nothing is sold for it).\n"
+                "  holds nothing that demotion would sell: its bids are cancelled, and nothing is sold for it).\n"
                 f"{held}"
                 "  A proven family's members are bunts and are never held. (Sept 24, 2026: 11 of 21 promotions went to\n"
                 "  such families and lost $8.12 on 22 closes, no stay positive; the other 10 made $28.96.)\n")
