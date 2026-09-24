@@ -414,11 +414,15 @@ watch.
       (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
       living members run it; while it is owed, its desk gives a newcomer of another family no seat
       and is reserved from cards and merged strategies. Not at the family's measured capacity (E3),
-      not for a losing family. A member that inherited the family's name with other code is not its
-      program (meriwether-h2d625d-2). Since the same day a research fork or a retained candidate whose
-      NEEDS name other markets or another style than its parent's program is born into its own family
-      (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its parent as before); a fix
-      of the same program keeps the family. Agents born before keep their family on the ledger.
+      not for a losing family, and not for an hour after its program had no distinct valid PARAMS
+      mutation left (then nothing is owed and its desk is not held). A member that inherited the family's
+      name with other code is not its program (meriwether-h2d625d-2). Since the same day a research fork
+      or a retained candidate whose NEEDS name other markets or another style than its parent's program is
+      born into its own family (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its
+      parent as before); a fix of the same program keeps the family -- a proven family's name only when
+      that program is the family's founding one (its first member's NEEDS at birth, `_family_program`), so
+      a member carrying the name with another program cannot pass the proof to its forks, and never
+      anchors R3 (the review of #276). Agents born before keep their family on the ledger.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state

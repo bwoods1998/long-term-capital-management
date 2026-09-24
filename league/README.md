@@ -460,7 +460,9 @@ status is exposed in health and agent research context; qualification is distinc
    `economy.proven_family_members` (4) living members run it; the child is replayed like any
    mutation and reaches real money through the bunt line on its own record. While births are owed its
    desk gives a newcomer of another family no seat and is reserved from cards and merged strategies.
-   No birth for a family at its measured capacity (E3) or a losing one. A member that inherited the
+   No birth for a family at its measured capacity (E3) or a losing one, nor for an hour for one whose
+   program has no distinct valid PARAMS mutation left (`PROVEN_UNBRED_RETRY_SECONDS`: nothing is owed,
+   so its desk is not held from other families meanwhile). A member that inherited the
    family's name with other code is not its program (meriwether-h2d625d-2). **A new program, a new
    family** (Sept 24, 2026): a research fork (`fork` with code) or a retained candidate
    (`_admit_orphan`) whose NEEDS name other markets (venue, series, symbols) or another style than its
