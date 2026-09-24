@@ -522,15 +522,17 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
   wind down at once.
 - **"booked ... as dust instead of selling it"** (info, Sept 24, 2026): a wind-down found a holding
-  the venue will not trade -- worth under a cent at its mark, or under the venue's minimal order
-  quantity where the asset record states one -- and moved it off the account onto the House row, as
+  the venue will not trade -- worth under a cent even at the ask (a holding under a cent at its mark,
+  the last bid, is quoted again: a stub bid on a thin book is not a price), or under the venue's
+  minimal order quantity where the asset record states one -- and moved it off the account onto the House row, as
   the reconciliation books position dust (two `book.fill` rows with `source: dust`); the account then
   closes. Before, haghani-h426990's 0.000000001 LINK/USD was sent every five minutes and refused 107
   times ("order qty must be >= minimal qty of order 0.000000002").
 - **"the House's sale of ... was refused 3 times in a row"** (warning): the same refusal of a
   House-sent sale, by the venue or the book, three times in a row; the sale is not sent again until
-  the holding changes (`wind_down_refusals` in `house.json` keeps the count and the order id). Read
-  the refusal it names; clear the entry by hand only once its cause is fixed.
+  the holding changes, or a day after the last refusal (a refusal then stops it for another day, with
+  no second warning: an outage is not left to strand a holding for good). `wind_down_refusals` in
+  `house.json` keeps the count and the order id. Read the refusal it names.
 - **"... was superseded by its research child ..."** (info): L1, when the constitution's
   `allocator.corrected_child_supersedes` is on. The parent's research child passed replay and its
   own account names the parent's entry as the defect (taker liquidity, the fee, the side) -- an
@@ -629,7 +631,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
-| | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS` | 7 d, 1 d, 3, 72 h, 3 | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop. Constants in `league/house.py`: an update or owner deploy changes them |
+| | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |
 | | `research.gate.enabled`, `after`, `max_factor`, `sample_percent` | on, 2, 8, 10 | Back off research whose passes come back empty while nothing about the agent has changed; a 10% sample still runs. The routine epoch payout is not a trigger (Sept 23, 2026) |

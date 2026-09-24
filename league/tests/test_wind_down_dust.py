@@ -72,6 +72,45 @@ class DustWindDown(SeatCase):
         self.assertEqual(len(self.broker.submitted), 4)
 
 
+    # The review of #245 (Sept 24, 2026). Each failed on the branch as built.
+    def test_a_stub_bid_does_not_make_a_sellable_holding_dust(self):
+        """The mark is the last quote's bid: under a $12.28 ask a stub $0.01 bid valued half a LINK at half a cent,
+        and six dollars the venue would buy were booked off the account as dust."""
+        agent = self.seated("haghani")
+        book = self.hold(agent, "0.5")
+        self.broker.set_quote(self.LINK, "0.01", "12.28")
+        book.marks.pop(self.LINK.key, None)
+        self.house.kill(agent, "displaced", "test")
+        self.assertEqual([e for e in self.house.ledger.iter(kinds="book.fill") if e.payload.get("source") == "dust"], [])
+        self.assertEqual(len(self.broker.submitted), 1, "it is sold")
+        self.assertIsNone(self.house._dust_reason(book, self.LINK, Decimal("0.5")))
+        self.assertIsNotNone(self.house._dust_reason(book, self.LINK, Decimal("0.000000001")), "a real crumb is still dust")
+
+    def test_a_stopped_sale_is_tried_again_once_a_day(self):
+        """A dead agent's holding never changes: a refusal that is transient but identical three times in a row (an
+        outage) stopped its sale for good. It is tried again a day after the last refusal."""
+        agent = self.seated("haghani")
+        book = self.hold(agent, "0.5")
+        self.broker.raise_on_submit = RejectedOrder("alpaca submit: HTTP 503 service unavailable")
+        self.house.registry.died(agent.id, "displaced", "test")
+        dead = self.house.registry.get(agent.id)
+        for _ in range(4):
+            self.clock.advance(300)
+            self.house._retry_wind_down(dead, book)
+        self.assertEqual(len(self.broker.submitted), 3)
+        self.clock.advance(86400)
+        self.house._retry_wind_down(dead, book)
+        self.assertEqual(len(self.broker.submitted), 4, "a day after the last refusal: tried again")
+        self.clock.advance(300)
+        self.house._retry_wind_down(dead, book)
+        self.assertEqual(len(self.broker.submitted), 4, "refused again: stopped for another day")
+        self.assertEqual(len(alerts(self.house, "warning", "refused", "LINK")), 1, "and told once")
+        self.broker.raise_on_submit = None
+        self.clock.advance(86400)
+        self.house._retry_wind_down(dead, book)
+        self.assertEqual(len(self.broker.submitted), 5)
+        self.assertNotIn(self.LINK.key, ((self.house._state.get("wind_down_refusals") or {}).get(agent.id) or {}).get(book.name, {}))
+
 if __name__ == "__main__":
     import unittest
 
