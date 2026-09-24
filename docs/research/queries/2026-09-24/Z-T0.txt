@@ -1,0 +1,203 @@
+# python3 scripts/gap_scoreboard.py --snapshot <T0 snapshot: ledger.sqlite, lab.sqlite, campaigns.sqlite, health.json, house.json, allocator-board.json taken 2026-09-24 01:38-01:42Z; no feeds.sqlite>
+# T0 of the close-the-gaps run is 2026-09-24T01:34:02Z; the scoreboard's clock is the snapshot's newest ledger row.
+
+gap scoreboard: ledger 401,286 rows to 2026-09-24T01:41:05.956Z; window since 2026-09-23T01:41:05Z; baseline -; release 20260923T233921Z-493b4a2ff9ab; board 2026-09-24T01:38:43.742Z; feeds store no
+
+1  families with a positive real lower bound; capacity
+   2 (sports-central-run-under real n 2, $56.65/day; weather-favorites real n 5, $7.81/day); 0 on >= 10 real events   [real_bounds, family_capacity]
+2  allocator promotions to real money: settled result, share positive
+   11 promotions, $0.28 on 25 settlements, 3 positive (27%)   [allocator_promotions]
+3  real dollars in proven / unproven families; Alpaca real agents
+   $96.56 / $168.98; 0   [real_dollars]
+4  median life (h), all / day-horizon; deaths before 3 fills
+   14.38 / 19.83 h over 104 deaths; 69 (66%)   [deaths_in_window]
+5  lab batches an hour; LLM share of born graduates; waiters, longest wait; supersessions
+   0 in the last hour; 2 of 18; 30 at 33.84 h; 6 superseded in the window (0 on real money), 0 of 3 real-money parents with a passing research child   [lab_loop]
+6  self-cross refusals of reducing orders (6 h); promotions on stacked positions
+   26; 4 of 11 (below the bunt counts: 3 with every close counted per event, 2 with settlements only)   [self_cross_exits, stacked_promotions]
+7  recorders live on the allowed hosts; desks offered markets with no intent (48 h)
+   0 of 12; 1 (alpaca-open)   [recorders_live, idle_desks]
+
+== 1. families with a positive real lower bound [real_bounds, family_capacity]
+   kalshi/sports-central-run-under: real n 2 (eff 2.0) mean +0.0369 sd 0.0000 lcb +0.0369; 2 rows, P&L $4.51
+     capacity $56.65/day = 25.1 markets bid a day (30 over 1.19 days) x fill rate 1.0 (all books, bids <=$12, median $9.70) x $2.26 a settlement (real, n 2); real seats earn $3.78/day now
+   kalshi/weather-favorites: real n 5 (eff 5.0) mean +0.0159 sd 0.0057 lcb +0.0135; 12 rows, P&L $5.89
+     capacity $7.81/day = 26.52 markets bid a day (111 over 4.18 days) x fill rate 0.6 (real, bids <=$12, median $9.60) x $0.49 a settlement (real, n 12); real seats earn $1.41/day now
+   families with any real closed trade: 11
+
+== 2. allocator promotions to real money [allocator_promotions]
+   2026-09-23T12:10:19Z huang-h51fdd3-2 (crypto-15m-doge-flat-spot-no) to rung 2, stake None: -$2.44 on 4 settlements (4 events), 0 open; stay ended 2026-09-23T22:01:31Z; unlabelled (family record then: unproven)
+   2026-09-23T12:50:25Z meriwether-h2d625d (sports-central-run-under) to rung 2, stake 10: $4.51 on 2 settlements (2 events), 4 open; stay ended no; unlabelled (family record then: unproven)
+   2026-09-23T13:35:56Z huang-h427345 (crypto-15m-prior-window-reset) to rung 2, stake 10: -$2.55 on 1 settlements (1 events), 0 open; stay ended 2026-09-23T14:57:45Z; unlabelled (family record then: unproven)
+   2026-09-23T18:49:05Z huang-l23cdb7 (crypto-15m-lab-335592) to rung 2, stake 30: -$8.51 on 3 settlements (3 events), 0 open; stay ended 2026-09-23T20:25:51Z; unlabelled (family record then: unproven)
+   2026-09-23T20:07:05Z meriwether-h7d7702 (sports-central-over-under) to rung 2, stake 30: $16.30 on 1 settlements (1 events), 0 open; stay ended 2026-09-23T23:33:37Z; unlabelled (family record then: unproven)
+   2026-09-23T21:02:43Z hilibrand-h6ca596-3 (crypto-strikes-vol-shock-upside) to rung 2, stake 30: $3.70 on 3 settlements (3 events), 0 open; stay ended no; unlabelled (family record then: unproven)
+   2026-09-23T22:36:33Z huang-hd8ff7c-3 (crypto-15m-spot-impulse-lag) to rung 2, stake None: -$3.65 on 5 settlements (5 events), 1 open; stay ended no; unlabelled (family record then: unproven)
+   2026-09-23T23:50:01Z huang-hd8ff7c-4 (crypto-15m-spot-impulse-lag) to rung 2, stake 30: -$4.66 on 3 settlements (3 events), 0 open; stay ended 2026-09-24T01:01:35Z; unlabelled (family record then: proven)
+   2026-09-24T00:17:18Z huang-h427345-2 (crypto-15m-prior-window-reset) to rung 2, stake 30: -$2.43 on 3 settlements (3 events), 0 open; stay ended no; unlabelled (family record then: unproven)
+   2026-09-24T00:39:48Z meriwether-h7d7702 (sports-central-over-under) to rung 2, stake 30: $0.00 on 0 settlements (0 events), 2 open; stay ended no; unlabelled (family record then: unproven)
+   2026-09-24T00:39:48Z hilibrand-lc04657 (crypto-strikes-lab-955dae) to rung 2, stake 30: $0.00 on 0 settlements (0 events), 2 open; stay ended no; unlabelled (family record then: unproven)
+
+== 3. real dollars by family state [real_dollars]
+   hawkins-19 kalshi bunt $27.48 prices-favorites unproven
+   hilibrand-h6ca596-3 kalshi bunt $30.00 crypto-strikes-vol-shock-upside unproven
+   hilibrand-lc04657 kalshi bunt $30.00 crypto-strikes-lab-955dae unproven
+   huang-h427345-2 kalshi bunt $30.00 crypto-15m-prior-window-reset unproven
+   huang-hd8ff7c-3 kalshi bunt $30.00 crypto-15m-spot-impulse-lag unproven
+   meriwether-h2d625d kalshi bunt $30.00 sports-central-run-under proven
+   meriwether-h7d7702 kalshi bunt $21.50 sports-central-over-under unproven
+   mullins-2 kalshi bunt $29.86 weather-favorites proven
+   mullins-6 kalshi bunt $36.70 weather-favorites proven
+   Alpaca agents ever staked on real money: 1
+
+== 4. deaths in the window [deaths_in_window]
+   104 deaths since 2026-09-23T01:41:05Z; causes {'displaced': 79, 'redundant': 15, 'superseded': 6, 'evidence': 3, 'stuck': 1}
+   day-horizon agents: 49 deaths, median 19.83 h, 34 before 3 fills; on day-only desks: 38 deaths, median 20.38 h
+
+== 5. the lab and the loop [lab_loop]
+   batches: 0 in the last hour, 34.25 an hour over the window, the last at 2026-09-23T23:37:17Z
+   born graduates by origin {'param': 16, 'agent': 1, 'sol': 1}; in the window {'param': 16, 'agent': 1, 'sol': 1}
+   waiting: 25 graduates (longest 12.51 h since passing), 5 cards (longest 33.84 h since passing replay)
+   superseded in the window: 6 (0 on real money); real-money parents with a replay-passing research child: 3 (0 superseded, 2 still on real money)
+     mullins-2 -> mullins-14 passed replay 2026-09-23T16:45:23Z; parent superseded False, demoted since False, on real money now True
+     mullins-2 -> mullins-18 passed replay 2026-09-23T05:32:14Z; parent superseded False, demoted since False, on real money now True
+     huang-h51fdd3-2 -> huang-h51fdd3-3 passed replay 2026-09-23T19:31:49Z; parent superseded False, demoted since True, on real money now False
+     meriwether-h2d625d -> meriwether-h2d625d-2 passed replay 2026-09-24T00:18:31Z; parent superseded False, demoted since False, on real money now True
+     mullins-2 -> mullins-20 passed replay 2026-09-23T22:31:15Z; parent superseded False, demoted since False, on real money now True
+
+== 6. exits and stacked records [self_cross_exits, stacked_promotions]
+   self-cross refusals in 6 h: 54, of them reducing (sell intents) 26; by agent {'haghani-hb85bb8': 20, 'haghani-39': 6}
+   bunt counts: 5 closed trades or 3 settlements
+   2026-09-23T12:50:25Z meriwether-h2d625d: 7 practice closes on 5 events; passes with settlements per event True, with every close per event True
+   2026-09-23T20:07:05Z meriwether-h7d7702: 3 practice closes on 1 events; passes with settlements per event False, with every close per event False
+   2026-09-23T21:02:43Z hilibrand-h6ca596-3: 4 practice closes on 2 events; passes with settlements per event False, with every close per event False
+   2026-09-24T00:39:48Z meriwether-h7d7702: 6 practice closes on 2 events; passes with settlements per event True, with every close per event False
+
+== 7. inputs [recorders_live, idle_desks]
+   read from data.coverage rows; feeds live in the last day: ['funding', 'perps', 'sports', 'vol']
+   api.open-meteo.com: not recorded (feeds -)
+   ensemble-api.open-meteo.com: not recorded (feeds -)
+   historical-forecast-api.open-meteo.com: not recorded (feeds -)
+   api.weather.gov: not recorded (feeds -)
+   www.sec.gov: not recorded (feeds -)
+   efts.sec.gov: not recorded (feeds -)
+   api.nasdaq.com: not recorded (feeds -)
+   markets.newyorkfed.org: not recorded (feeds -)
+   home.treasury.gov: not recorded (feeds -)
+   sports.core.api.espn.com: not recorded (feeds -)
+   www.tsa.gov: not recorded (feeds -)
+   www.realclearpolling.com: not recorded (feeds -)
+   alpaca-open: 22 markets offered over 21 wakes, no intent
+
+== evidence clocks: first fill to the third independent settlement, members whose first fill is in the last 7 days [evidence_clocks]
+   alpaca-crypto-alts: Kaplan-Meier median 3.8 h; 15 of 24 reached it (median 3.3 h among them); the longest still waiting or dead first 12.6 h
+   alpaca-crypto-majors: Kaplan-Meier median not reached h; 2 of 10 reached it (median 8.2 h among them); the longest still waiting or dead first 28.0 h
+   alpaca-index-etfs: Kaplan-Meier median 18.1 h; 5 of 15 reached it (median 18.1 h among them); the longest still waiting or dead first 30.3 h
+   alpaca-megacaps: Kaplan-Meier median 4.4 h; 5 of 9 reached it (median 2.5 h among them); the longest still waiting or dead first 11.9 h
+   alpaca-options: Kaplan-Meier median 23.9 h; 1 of 13 reached it (median 23.9 h among them); the longest still waiting or dead first 20.6 h
+   kalshi-attention: Kaplan-Meier median not reached h; 0 of 2 reached it (median None h among them); the longest still waiting or dead first 71.8 h
+   kalshi-crypto-15m: Kaplan-Meier median 1.9 h; 16 of 23 reached it (median 1.6 h among them); the longest still waiting or dead first 18.5 h
+   kalshi-crypto-strikes: Kaplan-Meier median 4.4 h; 5 of 8 reached it (median 3.2 h among them); the longest still waiting or dead first 11.4 h
+   kalshi-prices: Kaplan-Meier median 36.5 h; 4 of 13 reached it (median 38.6 h among them); the longest still waiting or dead first 23.7 h
+   kalshi-sports: Kaplan-Meier median 20.5 h; 16 of 25 reached it (median 15.7 h among them); the longest still waiting or dead first 15.8 h
+   kalshi-sports-props: Kaplan-Meier median not reached h; 0 of 4 reached it (median None h among them); the longest still waiting or dead first 23.5 h
+   kalshi-weather: Kaplan-Meier median 31.8 h; 3 of 20 reached it (median 31.8 h among them); the longest still waiting or dead first 31.8 h
+
+== family records: practice 0.5 + real 1, one observation an event [family_records]
+   45 of 66 families have a closed trade; proven: weather-favorites, sports-central-run-under
+   alpaca/crypto-alts-reversion: n 156 (eff 155.0) mean -0.0013 sd 0.0043 lcb -0.0016; members 59 (8 living), real stake $0.00
+     practice n 155 (eff 155.0) mean -0.0012 sd 0.0042 lcb -0.0015 | real n 1 (eff 1.0) mean -0.0085 sd - lcb - | maker n 0 | taker n 156 (eff 155.0) mean -0.0013 sd 0.0043 lcb -0.0016
+   kalshi/crypto-15m-favorites: n 106 (eff 101.2) mean -0.0021 sd 0.0509 lcb -0.0064; members 28 (0 living), real stake $0.00
+     practice n 100 (eff 100.0) mean -0.0060 sd 0.0266 lcb -0.0083 | real n 6 (eff 6.0) mean +0.0307 sd 0.1424 lcb -0.0227 | maker n 78 (eff 78.0) mean -0.0053 sd 0.0205 lcb -0.0073 | taker n 29 (eff 26.1) mean +0.0054 sd 0.0866 lcb -0.0091
+   kalshi/kalshi-favorites: n 35 (eff 35.0) mean -0.0060 sd 0.0378 lcb -0.0114; members 37 (0 living), real stake $0.00
+     practice n 35 (eff 35.0) mean -0.0060 sd 0.0378 lcb -0.0114 | real n 0 | maker n 35 (eff 35.0) mean -0.0060 sd 0.0378 lcb -0.0114 | taker n 0
+   kalshi/crypto-15m-prior-window-reset: n 30 (eff 27.5) mean -0.0307 sd 0.1140 lcb -0.0493; members 2 (1 living), real stake $30.00
+     practice n 26 (eff 26.0) mean -0.0088 sd 0.0774 lcb -0.0218 | real n 4 (eff 4.0) mean -0.1018 sd 0.1928 lcb -0.1962 | maker n 0 | taker n 30 (eff 27.5) mean -0.0307 sd 0.1140 lcb -0.0493
+   kalshi/sports-favorites: n 28 (eff 28.0) mean -0.0026 sd 0.0192 lcb -0.0057; members 48 (9 living), real stake $0.00
+     practice n 28 (eff 28.0) mean -0.0026 sd 0.0192 lcb -0.0057 | real n 0 | maker n 21 (eff 21.0) mean -0.0025 sd 0.0159 lcb -0.0055 | taker n 13 (eff 13.0) mean -0.0051 sd 0.0266 lcb -0.0115
+   kalshi/crypto-15m-eth-prior-window-fad: n 20 (eff 20.0) mean -0.0049 sd 0.0345 lcb -0.0115; members 2 (0 living), real stake $0.00
+     practice n 20 (eff 20.0) mean -0.0049 sd 0.0345 lcb -0.0115 | real n 0 | maker n 0 | taker n 20 (eff 20.0) mean -0.0049 sd 0.0345 lcb -0.0115
+   kalshi/crypto-15m-spot-impulse-lag: n 20 (eff 17.8) mean -0.0131 sd 0.0500 lcb -0.0233; members 4 (4 living), real stake $30.00
+     practice n 16 (eff 16.0) mean +0.0026 sd 0.0112 lcb +0.0001 PROVEN | real n 7 (eff 7.0) mean -0.0245 sd 0.0765 lcb -0.0507 | maker n 4 (eff 4.0) mean +0.0006 sd 0.0169 lcb -0.0076 | taker n 17 (eff 15.2) mean -0.0139 sd 0.0534 lcb -0.0258
+   alpaca/megacaps-expanding-range-chas: n 17 (eff 17.0) mean -0.0000 sd 0.0003 lcb -0.0001; members 1 (0 living), real stake $0.00
+     practice n 17 (eff 17.0) mean -0.0000 sd 0.0003 lcb -0.0001 | real n 0 | maker n 0 | taker n 17 (eff 17.0) mean -0.0000 sd 0.0003 lcb -0.0001
+   alpaca/options-pullback: n 17 (eff 17.0) mean -0.0158 sd 0.0301 lcb -0.0222; members 15 (7 living), real stake $0.00
+     practice n 17 (eff 17.0) mean -0.0158 sd 0.0301 lcb -0.0222 | real n 0 | maker n 0 | taker n 17 (eff 17.0) mean -0.0158 sd 0.0301 lcb -0.0222
+   kalshi/crypto-15m-doge-flat-spot-no: n 17 (eff 15.2) mean -0.0334 sd 0.0818 lcb -0.0516; members 4 (2 living), real stake $0.00
+     practice n 13 (eff 13.0) mean -0.0131 sd 0.0277 lcb -0.0198 | real n 4 (eff 4.0) mean -0.0664 sd 0.1342 lcb -0.1321 | maker n 10 (eff 8.9) mean -0.0366 sd 0.1021 lcb -0.0670 | taker n 7 (eff 7.0) mean -0.0271 sd 0.0150 lcb -0.0323
+   kalshi/weather-favorites: n 16 (eff 14.2) mean +0.0050 sd 0.0073 lcb +0.0033 PROVEN; members 25 (13 living), real stake $66.56
+     practice n 13 (eff 13.0) mean +0.0000 sd 0.0075 lcb -0.0018 | real n 5 (eff 5.0) mean +0.0159 sd 0.0057 lcb +0.0135 | maker n 16 (eff 14.2) mean +0.0050 sd 0.0073 lcb +0.0033 PROVEN | taker n 0
+   kalshi/crypto-15m-lab-335592: n 15 (eff 13.5) mean -0.0418 sd 0.1552 lcb -0.0786; members 1 (1 living), real stake $0.00
+     practice n 12 (eff 12.0) mean +0.0010 sd 0.0345 lcb -0.0077 | real n 3 (eff 3.0) mean -0.1275 sd 0.2838 lcb -0.3013 | maker n 10 (eff 9.3) mean -0.0551 sd 0.1284 lcb -0.0924 | taker n 5 (eff 4.5) mean -0.0210 sd 0.2079 lcb -0.1154
+   alpaca/equity-trend: n 14 (eff 14.0) mean -0.0005 sd 0.0003 lcb -0.0005; members 23 (7 living), real stake $0.00
+     practice n 14 (eff 14.0) mean -0.0005 sd 0.0003 lcb -0.0005 | real n 0 | maker n 0 | taker n 14 (eff 14.0) mean -0.0005 sd 0.0003 lcb -0.0005
+   kalshi/crypto-15m-lab-0492e4: n 11 (eff 11.0) mean -0.0039 sd 0.0115 lcb -0.0069; members 1 (1 living), real stake $0.00
+     practice n 11 (eff 11.0) mean -0.0039 sd 0.0115 lcb -0.0069 | real n 0 | maker n 0 | taker n 11 (eff 11.0) mean -0.0039 sd 0.0115 lcb -0.0069
+   kalshi/sports-central-run-under: n 11 (eff 9.9) mean +0.0237 sd 0.0642 lcb +0.0058 PROVEN; members 2 (2 living), real stake $30.00
+     practice n 11 (eff 11.0) mean +0.0231 sd 0.0708 lcb +0.0043 PROVEN | real n 2 (eff 2.0) mean +0.0369 sd 0.0000 lcb +0.0369 | maker n 0 | taker n 11 (eff 9.9) mean +0.0237 sd 0.0642 lcb +0.0058 PROVEN
+   kalshi/sports-central-under-demand: n 11 (eff 11.0) mean -0.0154 sd 0.0588 lcb -0.0310; members 3 (1 living), real stake $0.00
+     practice n 11 (eff 11.0) mean -0.0154 sd 0.0588 lcb -0.0310 | real n 0 | maker n 3 (eff 3.0) mean -0.0172 sd 0.0374 lcb -0.0401 | taker n 8 (eff 8.0) mean -0.0147 sd 0.0673 lcb -0.0361
+   kalshi/sports-runline-leverage-tax: n 11 (eff 11.0) mean -0.0245 sd 0.0467 lcb -0.0369; members 4 (2 living), real stake $0.00
+     practice n 11 (eff 11.0) mean -0.0245 sd 0.0467 lcb -0.0369 | real n 0 | maker n 0 | taker n 11 (eff 11.0) mean -0.0245 sd 0.0467 lcb -0.0369
+   kalshi/crypto-strikes-vol-shock-upside: n 9 (eff 8.0) mean -0.0069 sd 0.1764 lcb -0.0628; members 3 (2 living), real stake $30.00
+     practice n 6 (eff 6.0) mean -0.0430 sd 0.1910 lcb -0.1147 | real n 3 (eff 3.0) mean +0.0292 sd 0.1794 lcb -0.0807 | maker n 9 (eff 8.0) mean -0.0069 sd 0.1764 lcb -0.0628 | taker n 0
+   alpaca/crypto-reversion: n 8 (eff 8.0) mean -0.0004 sd 0.0008 lcb -0.0007; members 42 (2 living), real stake $0.00
+     practice n 8 (eff 8.0) mean -0.0004 sd 0.0008 lcb -0.0007 | real n 0 | maker n 0 | taker n 8 (eff 8.0) mean -0.0004 sd 0.0008 lcb -0.0007
+   kalshi/crypto-strikes-downside-insurance-s: n 8 (eff 8.0) mean -0.0680 sd 0.1297 lcb -0.1091; members 1 (0 living), real stake $0.00
+     practice n 8 (eff 8.0) mean -0.0680 sd 0.1297 lcb -0.1091 | real n 0 | maker n 8 (eff 8.0) mean -0.0680 sd 0.1297 lcb -0.1091 | taker n 0
+   kalshi/prices-favorites: n 7 (eff 6.4) mean -0.0020 sd 0.0177 lcb -0.0084; members 27 (8 living), real stake $27.48
+     practice n 7 (eff 7.0) mean -0.0034 sd 0.0183 lcb -0.0097 | real n 1 (eff 1.0) mean +0.0119 sd - lcb - | maker n 7 (eff 6.4) mean -0.0020 sd 0.0177 lcb -0.0084 | taker n 0
+   alpaca/crypto-alts-trend: n 6 (eff 6.0) mean +0.0014 sd 0.0114 lcb -0.0029; members 2 (0 living), real stake $0.00
+     practice n 6 (eff 6.0) mean +0.0014 sd 0.0114 lcb -0.0029 | real n 0 | maker n 0 | taker n 6 (eff 6.0) mean +0.0014 sd 0.0114 lcb -0.0029
+   alpaca/megacaps-chip-demand-relay: n 6 (eff 6.0) mean +0.0002 sd 0.0005 lcb +0.0001; members 1 (1 living), real stake $0.00
+     practice n 6 (eff 6.0) mean +0.0002 sd 0.0005 lcb +0.0001 | real n 0 | maker n 0 | taker n 6 (eff 6.0) mean +0.0002 sd 0.0005 lcb +0.0001
+   alpaca/megacaps-semiconductor-catchu: n 6 (eff 6.0) mean -0.0002 sd 0.0011 lcb -0.0006; members 2 (2 living), real stake $0.00
+     practice n 6 (eff 6.0) mean -0.0002 sd 0.0011 lcb -0.0006 | real n 0 | maker n 0 | taker n 6 (eff 6.0) mean -0.0002 sd 0.0011 lcb -0.0006
+   kalshi/crypto-strikes-lab-955dae: n 6 (eff 6.0) mean +0.0044 sd 0.0014 lcb +0.0039; members 1 (1 living), real stake $30.00
+     practice n 6 (eff 6.0) mean +0.0044 sd 0.0014 lcb +0.0039 | real n 0 | maker n 6 (eff 6.0) mean +0.0044 sd 0.0014 lcb +0.0039 | taker n 0
+   alpaca/equity-overnight: n 5 (eff 5.0) mean -0.0002 sd 0.0004 lcb -0.0004; members 3 (1 living), real stake $0.00
+     practice n 5 (eff 5.0) mean -0.0002 sd 0.0004 lcb -0.0004 | real n 0 | maker n 0 | taker n 5 (eff 5.0) mean -0.0002 sd 0.0004 lcb -0.0004
+   alpaca/crypto-majors-absorbed-buy-program: n 4 (eff 4.0) mean -0.0045 sd 0.0045 lcb -0.0067; members 1 (0 living), real stake $0.00
+     practice n 4 (eff 4.0) mean -0.0045 sd 0.0045 lcb -0.0067 | real n 0 | maker n 0 | taker n 4 (eff 4.0) mean -0.0045 sd 0.0045 lcb -0.0067
+   alpaca/index-etfs-real-asset-rotation: n 4 (eff 4.0) mean -0.0001 sd 0.0002 lcb -0.0002; members 1 (1 living), real stake $0.00
+     practice n 4 (eff 4.0) mean -0.0001 sd 0.0002 lcb -0.0002 | real n 0 | maker n 0 | taker n 4 (eff 4.0) mean -0.0001 sd 0.0002 lcb -0.0002
+   alpaca/megacaps-lab-d7fe38: n 4 (eff 4.0) mean +0.0007 sd 0.0010 lcb +0.0002; members 2 (2 living), real stake $0.00
+     practice n 4 (eff 4.0) mean +0.0007 sd 0.0010 lcb +0.0002 | real n 0 | maker n 0 | taker n 4 (eff 4.0) mean +0.0007 sd 0.0010 lcb +0.0002
+   kalshi/sports-central-over-under: n 4 (eff 3.6) mean +0.2137 sd 0.1291 lcb +0.1450; members 1 (1 living), real stake $21.50
+     practice n 4 (eff 4.0) mean +0.1356 sd 0.0432 lcb +0.1145 | real n 1 (eff 1.0) mean +0.4341 sd - lcb - | maker n 0 | taker n 4 (eff 3.6) mean +0.2137 sd 0.1291 lcb +0.1450
+   kalshi/sports-props-favorites: n 4 (eff 4.0) mean -0.0225 sd 0.0288 lcb -0.0366; members 37 (4 living), real stake $0.00
+     practice n 4 (eff 4.0) mean -0.0225 sd 0.0288 lcb -0.0366 | real n 0 | maker n 4 (eff 4.0) mean -0.0225 sd 0.0288 lcb -0.0366 | taker n 0
+   alpaca/crypto-alts-funded-spot-hedge: n 3 (eff 3.0) mean -0.0126 sd 0.0118 lcb -0.0198; members 1 (0 living), real stake $0.00
+     practice n 3 (eff 3.0) mean -0.0126 sd 0.0118 lcb -0.0198 | real n 0 | maker n 0 | taker n 3 (eff 3.0) mean -0.0126 sd 0.0118 lcb -0.0198
+   alpaca/megacaps-quiet-vwap-reclaim: n 3 (eff 3.0) mean +0.0008 sd 0.0009 lcb +0.0003; members 4 (4 living), real stake $0.00
+     practice n 3 (eff 3.0) mean +0.0008 sd 0.0009 lcb +0.0003 | real n 0 | maker n 0 | taker n 3 (eff 3.0) mean +0.0008 sd 0.0009 lcb +0.0003
+   alpaca/crypto-majors-funding-short-relief: n 2 (eff 2.0) mean -0.0070 sd 0.0005 lcb -0.0075; members 1 (0 living), real stake $0.00
+     practice n 2 (eff 2.0) mean -0.0070 sd 0.0005 lcb -0.0075 | real n 0 | maker n 0 | taker n 2 (eff 2.0) mean -0.0070 sd 0.0005 lcb -0.0075
+   kalshi/crypto-15m-lab-a69fa4: n 2 (eff 2.0) mean -0.0581 sd 0.0046 lcb -0.0626; members 1 (1 living), real stake $0.00
+     practice n 2 (eff 2.0) mean -0.0581 sd 0.0046 lcb -0.0626 | real n 0 | maker n 0 | taker n 2 (eff 2.0) mean -0.0581 sd 0.0046 lcb -0.0626
+   kalshi/crypto-15m-prior-window-fade: n 2 (eff 2.0) mean -0.0295 sd 0.0455 lcb -0.0738; members 1 (0 living), real stake $0.00
+     practice n 2 (eff 2.0) mean -0.0295 sd 0.0455 lcb -0.0738 | real n 0 | maker n 2 (eff 2.0) mean -0.0295 sd 0.0455 lcb -0.0738 | taker n 0
+   alpaca/crypto-alts-alt-basket-catchup: n 1 (eff 1.0) mean -0.0034 sd - lcb -; members 1 (1 living), real stake $0.00
+     practice n 1 (eff 1.0) mean -0.0034 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean -0.0034 sd - lcb -
+   alpaca/crypto-majors-vol-risk-rebuild: n 1 (eff 1.0) mean -0.0004 sd - lcb -; members 1 (0 living), real stake $0.00
+     practice n 1 (eff 1.0) mean -0.0004 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean -0.0004 sd - lcb -
+   alpaca/index-etfs-duration-to-assets: n 1 (eff 1.0) mean -0.0002 sd - lcb -; members 1 (1 living), real stake $0.00
+     practice n 1 (eff 1.0) mean -0.0002 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean -0.0002 sd - lcb -
+   alpaca/index-etfs-morning-range-stops: n 1 (eff 1.0) mean -0.0002 sd - lcb -; members 2 (2 living), real stake $0.00
+     practice n 1 (eff 1.0) mean -0.0002 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean -0.0002 sd - lcb -
+   alpaca/megacaps-reversion: n 1 (eff 1.0) mean +0.0000 sd - lcb -; members 38 (3 living), real stake $0.00
+     practice n 1 (eff 1.0) mean +0.0000 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean +0.0000 sd - lcb -
+   alpaca/options-breakout: n 1 (eff 1.0) mean +0.0050 sd - lcb -; members 4 (0 living), real stake $0.00
+     practice n 1 (eff 1.0) mean +0.0050 sd - lcb - | real n 0 | maker n 0 | taker n 1 (eff 1.0) mean +0.0050 sd - lcb -
+   kalshi/attention-favorites: n 1 (eff 1.0) mean +0.0055 sd - lcb -; members 32 (0 living), real stake $0.00
+     practice n 1 (eff 1.0) mean +0.0055 sd - lcb - | real n 0 | maker n 1 (eff 1.0) mean +0.0055 sd - lcb - | taker n 0
+   kalshi/crypto-15m-sol-beta-catchup: n 1 (eff 1.0) mean -0.1143 sd - lcb -; members 1 (0 living), real stake $0.00
+     practice n 1 (eff 1.0) mean -0.1143 sd - lcb - | real n 0 | maker n 1 (eff 1.0) mean -0.1143 sd - lcb - | taker n 0
+   kalshi/crypto-strikes-lab-1b9d16: n 1 (eff 1.0) mean +0.0045 sd - lcb -; members 1 (1 living), real stake $0.00
+     practice n 1 (eff 1.0) mean +0.0045 sd - lcb - | real n 0 | maker n 1 (eff 1.0) mean +0.0045 sd - lcb - | taker n 0
+
+== the weather favourites' capacity [weather_capacity]
+   capacity $7.81/day = 26.52 markets bid a day (111 over 4.18 days) x fill rate 0.6 (real, bids <=$12, median $9.60) x $0.49 a settlement (real, n 12); real seats earn $1.41/day now
+   settlements a day over 4.18 days: {'real': 2.87, 'all': 17.2, 'real_independent': 1.19}; practice profit a settlement -$0.24
+   real bids <=$12: 18 of 30 markets filled (0.6), 22 of 38 bids
+   practice bids <=$12: 49 of 103 markets filled (0.4757), 94 of 278 bids
