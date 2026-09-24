@@ -60,7 +60,7 @@ recorded for the next open; live verification uses the markets that trade around
 | Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | done: promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`, watch passed 08:41:13Z |
 | E | The lab as a search; the foundry brief; capacity | building since 07:50Z (C-search) |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
-| W | The site's mechanism ledger | building since 07:50Z (C-site) |
+| W | The site's mechanism ledger | site deployed 08:55Z (`a4d25790`); publisher #261 merged, shipping through the updater; to verify on the checkpoint |
 | Deploy C | Wave 2 | ⟨pending⟩ |
 | Watch | At least three hours after the last deploy | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
@@ -432,6 +432,19 @@ recorded for the next open; live verification uses the markets that trade around
   (`astra/teacher/first-night-of-replays-ec3f3563`, `night/tick-never-blocks-e1-local`) pushed to
   origin. The main checkout fast-forwarded to `3faf146`; its untracked
   `docs/goals/LTCM_OVERNIGHT_GOAL.md` (Sept 21) is left for the owner.
+- 08:53Z — **C-site built** (W, C4): personal-site #7 (schema: a desk's `family_state` and `family_n`,
+  the board's `families` {unproven, rows} and `lab` {tested_last_hour, graduates_waiting}, exact and
+  bounded; the page: the readout names the family and its state and settlements, a "Proven edges" list
+  with the unproven count, one quiet lab line, and each birth and death with its cause in fixed plain
+  phrases) and league #261 (`publish.py`: the proven families with their HONEST bound — the lower of the
+  t bound and the loss-rate bound, so weather favourites would show -0.2112, not +0.0033 — and the lab
+  line from the newest `lab.stats` row). Tests: site 81 (78 before), publisher 41 (29 before), three of
+  them running the site's validators in node on Deploy B's real board. The owner's words to review:
+  "compounding" for a swinging family, "lower bound", the seven death causes.
+- 08:55Z — **Site deployed first** (personal-site `301e6a1`, Cloudflare version `a4d25790`), the live
+  checkpoint of 08:55:30Z still accepted; then #261 merged (main `3ceb5d6`), unprotected, so the in-box
+  updater ships it once main's CI passes on a quiet head. To verify when it ships: `board.families`,
+  `board.lab` and the desks' family fields in `/api/capital/checkpoint`, the checkpoint staying fresh.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
