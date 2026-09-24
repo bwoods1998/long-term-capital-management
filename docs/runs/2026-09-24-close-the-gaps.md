@@ -46,21 +46,21 @@ recorded for the next open; live verification uses the markets that trade around
 | 0.9 | First-hour decision 5: file owners per wave | done 01:55Z |
 | Z | The scoreboard (`scripts/gap_scoreboard.py`) | T0 reading done (PR #223, below) |
 | D1 | The lab's step | **verified** 06:40Z: 63 batches (84 candidates) in the first hour after Deploy A (target ≥ 30), no failed step, the ADA/USD row blocked "the House's tape for these NEEDS has no steps" |
-| D2 | Phantom OpenAI holds | live 05:37Z; gateway `44edfee6` 05:26Z; the meter anchored 05:38:57Z; the release to verify |
+| D2 | Phantom OpenAI holds | **verified** 07:48:57Z: 48 holds ($86.86) released into the gateway month; the House line equals the month's ($166.93 at 08:32Z); the check race fixed in Deploy B (#246) |
 | D3 | Exits walled off by the self-cross rule | live 05:37Z; **0 self-cross refusals** in the first hour (26 in the 6 h before T0); no exit has yet met a House bid (0 crosses, 0 re-prices) |
 | D4 | Independent settlements | live 05:37Z (money digest `521c4586`) |
 | P | Promotion on proof (probes, the one-loss trial, maker unless proven) | live 05:37Z; 05:44Z board: 1 proven-family bunt, 7 probes; lopsided gate adopted (04:15Z) |
 | X0 | Book rules through constitution keys | live 05:37Z |
 | Deploy A | Wave 0, ratified at promotion (digest change 1 of 2) | done: promoted 05:37:31Z, ratified 05:37:41Z on `521c4586`, watch passed 05:47:34Z |
-| C1/C2 | The mechanism ledger and the family swing | ⟨pending⟩ |
-| S | The evidence clock and the seat market | ⟨pending⟩ |
-| L | The loop's joints | ⟨pending⟩ |
-| I | Feed recorders on the allowed hosts | ⟨pending⟩ |
-| X1/X2 | Pause and size-down tools; the horizon rule | ⟨pending⟩ |
-| Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | ⟨pending⟩ |
-| E | The lab as a search; the foundry brief; capacity | ⟨pending⟩ |
-| C3 | Alpaca real money | ⟨pending⟩ |
-| W | The site's mechanism ledger | ⟨pending⟩ |
+| C1/C2 | The mechanism ledger and the family swing | live 08:31Z (Deploy B, #252): `family.record` rows, entry looks at 15 + 5k at 90%; to verify: rows and the board's families |
+| S | The evidence clock and the seat market | live 08:31Z (Deploy B, #254); window 2 h: waiters toward 0, no displacement by a worse forward record |
+| L | The loop's joints | live 08:31Z (Deploy B, #247 + L1 in #254); hourly: Sail research <= $2/h, Merton pauses, repeated warnings escalated |
+| I | Feed recorders on the allowed hosts | live 08:31Z (Deploy B, #250); EIA and Odds wait for the owner's keys; to verify: `data.coverage` rows |
+| X1/X2 | Pause and size-down tools; the horizon rule | reviewed (#258: 11 of 12 fixed; X2 by measured settle lag in progress); rides Deploy C |
+| Deploy B | Wave 1, ratified at promotion (digest change 2 of 2) | promoted 08:30:59Z, ratified 08:31:09Z on `c02ed852`; watch in progress |
+| E | The lab as a search; the foundry brief; capacity | building since 07:50Z (C-search) |
+| C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
+| W | The site's mechanism ledger | building since 07:50Z (C-site) |
 | Deploy C | Wave 2 | ⟨pending⟩ |
 | Watch | At least three hours after the last deploy | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
@@ -402,6 +402,19 @@ recorded for the next open; live verification uses the markets that trade around
   for the seat market or the stuck rule, and after 24 h paused its idle real stake shrinks toward the
   probe by free cash. `allocator.py` and `evaluator.py` change (code only, no digest move): #258 rides
   Deploy C. The wake skip was found sound (holidays, half days, a failed calendar).
+- 08:26Z — **Deploy B merged** (PR #260, CI green on `3a80182`: gateway, tests 3.11 and 3.14). The
+  first owner deploy was REFUSED at 08:26:49Z: the in-box updater was watching a release of its own.
+  Since Deploy A the updater had shipped Merton's strategy commits twice (`main-771488ad8fc2` at about
+  07:44Z, `main-6bd75939a291` promoted 08:19:15Z, verdict 08:29:15Z), each a House restart. The deploy
+  went again at 08:29:39Z.
+- 08:30:59Z — **Deploy B promoted** (release `20260924T082939Z-019dd23442a9`, main `3faf146`) and
+  **ratified 10 s later** on money digest `c02ed852` (08:31:08-09Z; 101 seats at the $10 probe). The
+  first health at 08:32:16Z: grant active on `c02ed852`, 112 living, no book frozen; the OpenAI line
+  $166.93 left, equal to the gateway month's (cap $607, spent $440.06), $0.08 pending.
+- **D2 verified.** The first OpenAI "holds absorbed" row was at 07:48:57Z, under the updater's release
+  of Deploy A's code: 48 holds with no response, $86.86, released when the House's settled calls since
+  the anchor and the gateway's growth were equal to the cent ($13.74). The race #246 fixes made that
+  moment rare; it now compares only calls the reading must hold.
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
