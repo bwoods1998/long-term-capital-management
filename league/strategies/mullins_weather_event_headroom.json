@@ -1,0 +1,8 @@
+{
+  "family": "weather-favorites",
+  "name": "mullins_weather_event_headroom",
+  "repair": {
+    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXHIGHLAX-#SEP# would hold $# of this account's $# (hold"
+  },
+  "why": "Corrected child of mullins-2: preserve daily weather NO-favourite post-only entries and settlement holding, but cap combined event exposure at 25% of equity after both legs' holdings at cost, remaining working buys across every strike, and earlier intents in the decision. Born on rung 0 to qualify on its own evidence."
+}
