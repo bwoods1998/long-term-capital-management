@@ -238,3 +238,187 @@ class MoneySet(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def hand_pool(observations):
+    """The family record's pooled statistics, written out independently: weighted mean, the
+    reliability-weighted sd, n_eff = (sum w)^2 / sum w^2, and the one-sided 80% lower bound on
+    Student's t with n_eff - 1 degrees of freedom (None under two effective observations)."""
+    from league import stats
+
+    W = sum(w for _, w in observations)
+    W2 = sum(w * w for _, w in observations)
+    m = sum(v * w for v, w in observations) / W
+    n_eff = W * W / W2
+    if n_eff < 2:
+        return m, None, n_eff, None
+    sd = math.sqrt(sum(w * (v - m) ** 2 for v, w in observations) / (W - W2 / W))
+    return m, sd, n_eff, m - stats.t_quantile(0.8, n_eff - 1) * sd / math.sqrt(n_eff)
+
+
+class FamilyCase(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        self.agents = {}
+        self.house = SimpleNamespace(ledger=self.ledger, registry=SimpleNamespace(agents=self.agents))
+
+    def member(self, agent, family="weather-favorites", venue="kalshi", alive=True):
+        self.agents[agent] = SimpleNamespace(id=agent, family=family, venue=venue, alive=alive)
+
+    def record(self, family="weather-favorites", venue="kalshi"):
+        return allocator.family_record(self.house, family, venue)
+
+
+class FamilyRecord(FamilyCase):
+    """P1's proof: the family's pooled forward record over independent events."""
+
+    def test_the_pooled_numbers_by_hand(self):
+        for agent in ("m1", "m2"):
+            self.member(agent)
+        self.member("m3", alive=False)  # the dead count
+        self.stake(200, agent="m1")
+        self.stake(200, agent="m2")
+        self.stake(30, agent="m2", book="kalshi")
+        self.stake(200, agent="m3")
+        self.settle("KXHIGHNY-26SEP24-B72.5", "2", agent="m1")      # E1 practice +1%
+        self.settle("KXHIGHNY-26SEP24-B74.5", "2", agent="m2")      # E1 again, another member: the same bet
+        self.settle("KXHIGHMIA-26SEP24-B90.5", "4", agent="m1")     # E2 practice +2%
+        self.settle("KXHIGHAUS-26SEP24-T96", "0.6", agent="m2", book="kalshi")  # E3 REAL +2%
+        self.settle("KXHIGHLAX-26SEP24-B80.5", "-1", agent="m3")    # E4 practice -0.5%
+        rec = self.record()
+        obs = [(math.log(1.01), 0.5), (math.log(1.02), 0.5), (math.log(1.02), 1.0), (math.log(0.995), 0.5)]
+        m, sd, n_eff, bound = hand_pool(obs)
+        self.assertEqual((rec["n"], rec["real_n"], rec["members"], rec["members_counted"]), (4, 1, 3, 3))
+        self.assertAlmostEqual(rec["mean_log"], m, places=12)
+        self.assertAlmostEqual(rec["sd"], sd, places=12)
+        self.assertAlmostEqual(rec["n_eff"], n_eff, places=12)
+        self.assertAlmostEqual(rec["bound"], bound, places=12)
+        self.assertFalse(rec["proven"])  # 4 independent settlements, 10 needed
+        self.assertEqual(rec["state"], "unproven")
+
+    def test_ten_independent_winning_events_prove_a_family_and_nine_do_not(self):
+        self.member("m1")
+        self.stake(200, agent="m1")
+        for day in range(1, 10):
+            self.settle(f"KXHIGHNY-26SEP{day:02d}-B72.5", str(1 + day / 10), agent="m1")
+        rec = self.record()
+        self.assertEqual(rec["n"], 9)
+        self.assertGreater(rec["bound"], 0)
+        self.assertFalse(rec["proven"])
+        self.settle("KXHIGHNY-26SEP10-B72.5", "1.5", agent="m1")
+        rec = self.record()
+        self.assertEqual((rec["n"], rec["proven"], rec["state"]), (10, True, "proven"))
+        # One big loss on the eleventh event takes the bound under zero: unproven again.
+        self.settle("KXHIGHNY-26SEP11-B72.5", "-30", agent="m1")
+        rec = self.record()
+        self.assertLessEqual(rec["bound"], 0)
+        self.assertFalse(rec["proven"])
+
+    def test_stacked_strikes_are_one_observation_worth_their_sum(self):
+        self.member("m1")
+        self.stake(200, agent="m1")
+        for ticker, quantity, price in MERIWETHER_BUYS:
+            self.buy(ticker, quantity, price, agent="m1")
+        for ticker, pnl in MERIWETHER_SETTLES:
+            self.settle(ticker, pnl, agent="m1")
+        rec = self.record()
+        self.assertEqual(rec["n"], 2)
+        wshdet = sum(math.log1p(float(p) / 200) for _, p in MERIWETHER_SETTLES[:3])
+        minsf = sum(math.log1p(float(p) / 200) for _, p in MERIWETHER_SETTLES[3:])
+        self.assertAlmostEqual(rec["mean_log"], (wshdet + minsf) / 2, places=12)
+        self.assertEqual(rec["taker"]["n"], 2)  # every entry was a taker fill
+        self.assertEqual(rec["maker"]["n"], 0)
+
+    def test_an_event_several_members_traded_is_one_observation_at_the_largest_weight(self):
+        self.member("p")
+        self.member("r")
+        self.stake(200, agent="p")
+        self.stake(20, agent="r", book="kalshi")
+        self.settle("KXBTCD-26SEP2401-T62999.99", "4", agent="p")            # practice +2%
+        self.settle("KXBTCD-26SEP2401-T63249.99", "-1", agent="r", book="kalshi")  # real -5%
+        rec = self.record()
+        self.assertEqual((rec["n"], rec["real_n"]), (1, 1))
+        expected = (0.5 * math.log(1.02) + 1.0 * math.log(0.95)) / 1.5
+        self.assertAlmostEqual(rec["mean_log"], expected, places=12)
+        self.assertIsNone(rec["bound"])  # one observation: no bound
+
+    def test_a_swept_or_dead_member_keeps_its_record_and_a_cutoff_starts_it_afresh(self):
+        self.member("gone", alive=False)
+        self.stake(200, agent="gone")
+        self.settle("KXHIGHNY-26SEP20-B72.5", "2", agent="gone")
+        self.stake(-202, agent="gone")  # swept at death: its net stake is now below zero
+        self.assertEqual(self.record()["n"], 1)
+        self.assertAlmostEqual(self.record()["mean_log"], math.log(1.01), places=12)
+        self.ledger.append("book.fill_correction", {"book": "kalshi-shadow", "cash_delta": "0", "fees_delta": "0",
+                                                    "realized_delta": "0", "holding_cost_deltas": {}}, agent="gone")
+        self.assertEqual(self.record()["n"], 0)  # a repaired attribution starts its evidence afresh
+
+    def test_members_are_the_familys_on_that_venue_only(self):
+        self.member("w1")
+        self.member("other", family="sports-favorites")
+        self.member("alp", venue="alpaca")
+        for agent in ("w1", "other", "alp"):
+            self.stake(200, agent=agent)
+            self.settle(f"KXHIGHNY-26SEP2{len(agent)}-B72.5", "2", agent=agent)
+        rec = self.record()
+        self.assertEqual((rec["n"], rec["members"]), (1, 1))
+
+    def test_maker_and_taker_records_apart(self):
+        self.member("mk")
+        self.member("tk")
+        for agent in ("mk", "tk"):
+            self.stake(200, agent=agent)
+        for day in range(1, 11):
+            ticker = f"KXHIGHNY-26SEP{day:02d}-B72.5"
+            self.buy(ticker, 10, "0.95", agent="mk", liquidity="maker")
+            self.settle(ticker, str(0.4 + day / 100), agent="mk")
+            other = f"KXETH15M-26SEP{day:02d}1200-00"
+            self.buy(other, 10, "0.50", agent="tk", liquidity="taker")
+            self.settle(other, "-2" if day % 2 else "1.5", agent="tk")
+        rec = self.record()
+        self.assertEqual((rec["maker"]["n"], rec["taker"]["n"], rec["n"]), (10, 10, 20))
+        self.assertTrue(rec["maker"]["positive"])
+        self.assertFalse(rec["taker"]["positive"])
+        self.assertEqual((rec["maker"]["members"], rec["taker"]["members"]), (1, 1))
+        m, _, _, bound = hand_pool([(math.log1p((0.4 + d / 100) / 200), 0.5) for d in range(1, 11)])
+        self.assertAlmostEqual(rec["maker"]["mean_log"], m, places=12)
+        self.assertAlmostEqual(rec["maker"]["bound"], bound, places=12)
+
+    def test_alpaca_counts_one_observation_per_closed_trade(self):
+        for agent in ("a1", "a2"):
+            self.member(agent, family="crypto-alts-reversion", venue="alpaca")
+            self.stake(200, agent=agent, book="alpaca-paper")
+            self.buy("BTC/USD", "0.001", "80000", agent=agent, book="alpaca-paper")
+            self.sell("BTC/USD", "1.00", agent=agent, book="alpaca-paper")
+        rec = self.record("crypto-alts-reversion", "alpaca")
+        self.assertEqual(rec["n"], 2)
+        self.assertAlmostEqual(rec["mean_log"], math.log(1.005), places=12)
+
+    def test_the_rows_are_the_evaluators_trade_returns(self):
+        """One definition: a member's log growths are ln(1 + r) of `Evaluator.trade_returns` read
+        through a fixed ledger position (the stake is the most it was ever lent)."""
+        self.member("m1")
+        self.stake(200, agent="m1")
+        self.buy("KXHIGHNY-26SEP20-B72.5", 10, "0.9", agent="m1")
+        self.sell("KXHIGHNY-26SEP20-B72.5", "0.30", agent="m1", flat=False)
+        self.sell("KXHIGHNY-26SEP20-B72.5", "0.20", agent="m1")
+        self.settle("KXHIGHMIA-26SEP20-B90.5", "-1.5", agent="m1")
+        self.stake(-150, agent="m1")  # a sweep does not rescale what was closed
+        returns, _ = Evaluator(self.ledger).trade_returns("m1", "kalshi-shadow", until_seq=self.ledger.head()[0])
+        self.assertEqual(len(returns), 2)
+        rec = self.record()
+        self.assertAlmostEqual(rec["mean_log"] * rec["n"], sum(math.log1p(r) for r in returns), places=12)
+
+    def test_the_tape_reads_only_new_rows(self):
+        self.member("m1")
+        self.stake(200, agent="m1")
+        tape = allocator.TradeTape()
+        self.settle("KXHIGHNY-26SEP20-B72.5", "2", agent="m1")
+        first = allocator.family_record(self.house, "weather-favorites", "kalshi", tape=tape)
+        cursor = tape.cursor
+        self.assertEqual((first["n"], cursor), (1, self.ledger.head()[0]))
+        self.settle("KXHIGHNY-26SEP21-B72.5", "2", agent="m1")
+        with patch.object(self.ledger, "iter", wraps=self.ledger.iter) as reads:
+            second = allocator.family_record(self.house, "weather-favorites", "kalshi", tape=tape)
+        self.assertEqual(second["n"], 2)
+        self.assertEqual([c.kwargs.get("after") for c in reads.call_args_list], [cursor])  # one read, from the cursor

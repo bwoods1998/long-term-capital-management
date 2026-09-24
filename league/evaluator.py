@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from . import stats
 from .constitution import CONSTITUTION
@@ -106,6 +106,60 @@ def count_key(seq: int, payload: Mapping[str, Any], by_event: bool) -> str:
         if key is not None:
             return key
     return f"#{seq}"
+
+
+def staked_base(stakes: Sequence[tuple[int, float]], until_seq: int | None = None) -> float:
+    """The stake a closed trade is measured against (`Evaluator.trade_returns`): what is lent now, net
+    of every sweep; or, read through a fixed ledger position (`until_seq`), the most the agent was ever
+    lent up to it, so that sweeping an account cannot erase or rescale the trades it closed."""
+    if until_seq is None:
+        return sum(usd for _, usd in stakes)
+    staked = running = 0.0
+    for seq, usd in stakes:
+        if seq <= until_seq:
+            running += usd
+            staked = max(staked, running)
+    return staked
+
+
+def closed_trade_rows(entries: Iterable[Any], book: str, *, since_seq: int = 0,
+                      until_seq: int | None = None) -> tuple[list[dict[str, Any]], list[float]]:
+    """The closed trades in one agent's `book.fill` and `book.settle` rows (oldest first) on `book`,
+    after `since_seq` and at or before `until_seq`, exactly as `Evaluator.trade_returns` has always
+    counted them, and the cash each entry put at risk. One trade is one instrument gone flat: a
+    settlement, or the sale that left it flat with the partial sales before it summed in (a position
+    sold in ten fills is one trade; an option is its contract, expiry and strike, not every contract
+    on the underlying). Each row is {"seq", "key", "instrument", "made" (dollars), "settled", and
+    "entry_seq" and "liquidity" of the position's first buy, read even before `since_seq`; "taker"
+    when a fill does not say, as `Book` reads it}. Shared since Sept 24, 2026 by `trade_returns` and
+    the allocator's family record, which must never count a trade differently."""
+    rows: list[dict[str, Any]] = []
+    entries_cash: list[float] = []
+    running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
+    opened: dict[str, tuple[int, str]] = {}  # the open position's first buy: (seq, liquidity)
+    for entry in entries:
+        p = entry.payload
+        if p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
+            continue
+        inst = p.get("instrument") or {}
+        key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
+        sale = entry.kind == "book.fill" and p.get("realized") is not None and p.get("source") != "dust"
+        if entry.kind == "book.fill" and p.get("side") == "buy" and p.get("source") != "dust":
+            opened.setdefault(key, (entry.seq, str(p.get("liquidity") or "taker")))
+        first = opened.pop(key, None) if entry.kind == "book.settle" or (sale and p.get("flat", True)) else opened.get(key)
+        if entry.seq <= since_seq:
+            continue
+        row = {"seq": entry.seq, "key": key, "instrument": inst, "entry_seq": first[0] if first else None,
+               "liquidity": first[1] if first else "taker"}
+        if entry.kind == "book.settle":
+            rows.append({**row, "made": running.pop(key, 0.0) + float(p["pnl"]), "settled": True})
+        elif sale:
+            running[key] = running.get(key, 0.0) + float(p["realized"])
+            if p.get("flat", True):
+                rows.append({**row, "made": running.pop(key), "settled": False})
+        elif p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
+            entries_cash.append(-float(p["cash_delta"]))
+    return rows, entries_cash
 
 
 def block_key(at: str, horizon: str) -> str:
@@ -364,34 +418,13 @@ class Evaluator:
         from .accounting import evidence_cutoffs
         since_seq = max(since_seq, evidence_cutoffs(self.ledger, agent).get(book, 0))
         stakes = [(e.seq, float(e.payload["usd"])) for e in self.ledger.iter(kinds="book.stake", agent=agent) if e.payload.get("book") == book]
-        if until_seq is None:
-            staked = sum(usd for _, usd in stakes)
-        else:
-            staked = running_stake = 0.0
-            for seq, usd in stakes:
-                if seq <= until_seq:
-                    running_stake += usd
-                    staked = max(staked, running_stake)
+        staked = staked_base(stakes, until_seq)
         if staked <= 0:
             return [], 0.0
-        returns, risked = [], []
-        running: dict[str, float] = {}  # a position sold in ten fills is one trade, closed when it is flat
-        for entry in self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent):
-            p = entry.payload
-            if entry.seq <= since_seq or p.get("book") != book or (until_seq is not None and entry.seq > until_seq):
-                continue
-            inst = p.get("instrument") or {}
-            # One trade is one instrument gone flat: for an option that is the contract (its expiry
-            # and strike), not every contract on the same underlying and side.
-            key = ":".join(str(inst.get(k)) for k in ("market_id", "symbol", "right", "expiry", "strike") if inst.get(k) is not None)
-            if entry.kind == "book.settle":
-                returns.append((running.pop(key, 0.0) + float(p["pnl"])) / staked)
-            elif p.get("realized") is not None and p.get("source") != "dust":
-                running[key] = running.get(key, 0.0) + float(p["realized"])
-                if p.get("flat", True):
-                    returns.append(running.pop(key) / staked)
-            elif p.get("side") == "buy" and p.get("source") in ("venue", "cross"):
-                risked.append(-float(p["cash_delta"]) / staked)
+        rows, entries = closed_trade_rows(self.ledger.iter(kinds=("book.fill", "book.settle"), agent=agent), book,
+                                          since_seq=since_seq, until_seq=until_seq)
+        returns = [row["made"] / staked for row in rows]
+        risked = [cash / staked for cash in entries]
         # With no entry seen since the rung began (contracts carried in), assume all of it was at risk.
         return returns, (sum(risked) / len(risked) if risked else 1.0)
 

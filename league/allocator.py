@@ -54,6 +54,7 @@ This module is a money judge: `league/ci.py` forbids Merton's pull requests to t
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -61,8 +62,9 @@ import threading
 from dataclasses import asdict, dataclass
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 
+from . import stats
 from .constitution import CONSTITUTION
 from .ledger import HOUSE, now_iso
 
@@ -197,6 +199,178 @@ def closed_trades(house: Any, agent: str, book_name: str, *, since_seq: int = 0)
         elif p.get("realized") is not None and p.get("source") != "dust" and p.get("flat", True):
             closed.add(count_key(entry.seq, p, by_event))
     return len(closed), len(settled)
+
+
+# ------------------------------------------------------------ the family record
+#: What the family record folds from the ledger (`TradeTape`): every agent's fills, settlements and
+#: stakes, and the two kinds that move an agent's evidence cutoff (`accounting.evidence_cutoffs`).
+TAPE_KINDS = ("book.fill", "book.settle", "book.stake", "book.fill_correction", "book.baseline")
+_TAPE_FIELDS = ("book", "pnl", "realized", "source", "flat", "side", "cash_delta", "liquidity", "usd")
+_TAPE_INSTRUMENT = ("market_id", "symbol", "right", "expiry", "strike", "event_ticker", "event")
+
+
+class TapeRow(NamedTuple):
+    seq: int
+    kind: str
+    payload: dict
+
+
+class TradeTape:
+    """Every agent's fills, settlements and stakes, read from the ledger BY KIND after a cursor and
+    kept in a compact form, with each agent's evidence cutoffs folded exactly as
+    `accounting.evidence_cutoffs` computes them (the latest correction or repair baseline on a book).
+
+    The family record reads every member of a family, living or dead. Read agent by agent that was
+    ~500 indexed reads a pass (1.4 s on the T0 snapshot of Sept 24, 2026); by kind it is one read of
+    ~3,000 rows (0.09 s) once, then only the rows that are new at each pass."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.rows: dict[str, list[TapeRow]] = {}
+        self.cutoffs: dict[str, dict[str, int]] = {}
+        self._lock = threading.Lock()
+
+    def refresh(self, ledger: Any) -> int:
+        """Fold what is new on the ledger; the ledger position it now stands at."""
+        with self._lock:
+            for entry in ledger.iter(kinds=TAPE_KINDS, after=self.cursor):
+                self._fold(entry)
+                self.cursor = entry.seq
+            return self.cursor
+
+    def _cut(self, agent: Any, book: Any, seq: int) -> None:
+        if agent and book:
+            cuts = self.cutoffs.setdefault(str(agent), {})
+            cuts[str(book)] = max(cuts.get(str(book), 0), seq)
+
+    def _fold(self, entry: Any) -> None:
+        p = entry.payload
+        if entry.kind == "book.fill_correction":
+            self._cut(entry.agent, p.get("book"), entry.seq)
+        elif entry.kind == "book.baseline":
+            for repair in p.get("repairs") or []:
+                if isinstance(repair, Mapping):
+                    self._cut(repair.get("agent"), p.get("book"), entry.seq)
+        elif entry.agent != HOUSE:
+            keep = {k: p[k] for k in _TAPE_FIELDS if k in p}
+            instrument = p.get("instrument")
+            if isinstance(instrument, Mapping):
+                keep["instrument"] = {k: instrument[k] for k in _TAPE_INSTRUMENT if k in instrument}
+            self.rows.setdefault(entry.agent, []).append(TapeRow(entry.seq, entry.kind, keep))
+
+
+def _family_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    rule = dict(rules(constitution).get("family_proven") or {})
+    return {"min_independent_settlements": int(rule.get("min_independent_settlements", 10)),
+            "practice_weight": float(rule.get("practice_weight", 0.5)), "real_weight": float(rule.get("real_weight", 1)),
+            "confidence": float(rule.get("confidence", 0.8))}
+
+
+def _log1p(r: float) -> float:
+    """ln(1 + r), a whole loss or worse floored at `stats.RUIN` as `stats.log_growth` floors it; a
+    return that is not a number (a malformed row) is no growth."""
+    if r <= -1.0:
+        return stats.RUIN
+    return max(stats.RUIN, math.log1p(r)) if math.isfinite(r) else 0.0
+
+
+def _pool(groups: Mapping[str, list[tuple[float, float]]], min_n: int, confidence: float) -> dict[str, Any]:
+    """One observation per group (an event, or a trade where nothing groups them): the weighted mean
+    of its members' values at the largest of their weights -- correlated bets are never counted as
+    independent. Then the weighted mean m, the reliability-weighted sd s, n_eff = (sum w)^2 / sum w^2
+    and the one-sided lower bound m - t(confidence, n_eff - 1) * s / sqrt(n_eff) on Student's t (the
+    coordinator's precision, Sept 24, 2026; no bound under two effective observations). `positive`
+    when there are `min_n` observations and the bound is above zero."""
+    observations = []
+    for units in groups.values():
+        if units:
+            total = sum(w for _, w in units)
+            observations.append((math.fsum(v * w for v, w in units) / total, max(w for _, w in units)))
+    out: dict[str, Any] = {"n": len(observations), "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "positive": False}
+    if not observations:
+        return out
+    weight = math.fsum(w for _, w in observations)
+    squares = math.fsum(w * w for _, w in observations)
+    mean = math.fsum(v * w for v, w in observations) / weight
+    n_eff = weight * weight / squares
+    out.update(n_eff=n_eff, mean_log=mean)
+    if n_eff >= 2:
+        sd = math.sqrt(math.fsum(w * (v - mean) ** 2 for v, w in observations) / (weight - squares / weight))
+        out.update(sd=sd, bound=mean - stats.t_quantile(confidence, n_eff - 1) * sd / math.sqrt(n_eff))
+    out["positive"] = bool(out["n"] >= min_n and out["bound"] is not None and out["bound"] > 0)
+    return out
+
+
+def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None = None,
+                  through: int | None = None) -> dict[str, Any]:
+    """A family's pooled forward record (P1, the close-the-gaps run, Sept 24, 2026): the proof that
+    moves a family's real stakes from probes to bunts. Read-only; a pure function of the ledger and
+    the registry. The scoreboard (`scripts/gap_scoreboard.py`) implements the same definition:
+
+    - members: every agent ever born into `family` on `venue`, living or dead;
+    - observations: one per distinct EVENT (`evaluator.event_key`) that any member closed -- settled,
+      or sold flat -- on the practice book or the real book since that member's evidence cutoff; on
+      Alpaca, where nothing groups trades, one per closed trade. A member's value on an event is the
+      sum of the log growths ln(1 + r) of its closed trades there, r as `Evaluator.trade_returns`
+      computes it read through this pass's fixed ledger position (`through`): a trade's result over
+      the most the member was ever lent on that book, so a sweep or a death never erases or rescales
+      a closed trade;
+    - an event several members traded is ONE observation: the weighted mean of their values (real at
+      `real_weight`, practice at `practice_weight`) at the largest weight among them (`_pool`);
+    - pooled: mean, sd, n_eff and the one-sided `confidence` lower bound; `proven` with at least
+      `min_independent_settlements` observations and the bound above zero;
+    - the maker and taker records apart: a member's observation is "taker" when its first entry fill
+      on that event (on that trade, on Alpaca) was a taker fill (`book.fill` `liquidity`).
+    """
+    from .evaluator import closed_trade_rows, event_key, per_event, staked_base
+
+    tape = tape if tape is not None else TradeTape()
+    head = tape.refresh(house.ledger)
+    through = head if through is None else min(int(through), head)
+    rule = _family_rule()
+    books = {PAPER_BOOK[venue]: rule["practice_weight"], REAL_BOOK[venue]: rule["real_weight"]}
+    registry = house.registry
+    with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
+        members = sorted(a.id for a in list(registry.agents.values()) if a.family == family and a.venue == venue)
+    units: dict[str, list[tuple[float, float, str, str]]] = {}
+    real_keys: set[str] = set()
+    for member in members:
+        rows = tape.rows.get(member) or []
+        cutoffs = tape.cutoffs.get(member) or {}
+        for book, weight in books.items():
+            stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
+            staked = staked_base(stakes, through)
+            if staked <= 0:
+                continue  # never lent anything on this book: no record there
+            closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book,
+                                          since_seq=cutoffs.get(book, 0), until_seq=through)
+            by_event = per_event(book)
+            mine: dict[str, list[Any]] = {}  # observation -> [sum of log growths, (first entry seq, its liquidity)]
+            for row in closed:
+                key = (event_key(row["instrument"]) if by_event else None) or f"{book}:{member}:{row['seq']}"
+                unit = mine.setdefault(key, [0.0, (math.inf, "taker")])
+                unit[0] += _log1p(row["made"] / staked)
+                entry = (row["entry_seq"] if row["entry_seq"] is not None else row["seq"], row["liquidity"])
+                if entry[0] < unit[1][0]:
+                    unit[1] = entry
+            for key, (value, (_, liquidity)) in mine.items():
+                units.setdefault(key, []).append((value, weight, liquidity, member))
+                if book == REAL_BOOK[venue]:
+                    real_keys.add(key)
+    minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
+
+    def side(liquidity: str | None) -> dict[str, Any]:
+        chosen = {k: [u for u in group if liquidity is None or (u[2] == "taker") == (liquidity == "taker")] for k, group in units.items()}
+        pooled = _pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()}, minimum, confidence)
+        pooled["members"] = len({u[3] for group in chosen.values() for u in group})
+        return pooled
+
+    whole = side(None)
+    return {"family": family, "venue": venue, "through": through, "members": len(members),
+            "members_counted": whole.pop("members"), "n": whole["n"], "n_eff": whole["n_eff"], "mean_log": whole["mean_log"],
+            "sd": whole["sd"], "bound": whole["bound"], "proven": whole["positive"],
+            "state": "proven" if whole["positive"] else "unproven", "real_n": len(real_keys),
+            "maker": side("maker"), "taker": side("taker"), "rule": rule}
 
 
 def real_stay_start(house: Any, agent: str) -> int | None:
