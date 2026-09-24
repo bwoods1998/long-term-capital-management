@@ -2177,8 +2177,11 @@ class Lab:
         # Seeds are parents, never graduates: a living agent's own program, a card or a founder has had
         # its own chance. Neither is a program a living agent already runs.
         running = {a.code_sha256 for a in self.house.registry.living()}
-        # A cell graduates its best program that may graduate: past one that is held, never past one that was
-        # tried (as its elite alone was before E1).
+        # A cell graduates its best program that may graduate: past one that is held (tried or not: on the T4
+        # snapshot a crypto-15m cell walked past four nudges that had failed the House's replay to a Luna program)
+        # or that a living agent runs, never past one that was tried and is not held (as its elite alone was before
+        # E1). Each program tried is a counted trial of its line and, on the history store, spends from its
+        # lineage's sealed-holdout ration (`_holdout_refusal`), never beyond it.
         decided: set[str] = set()
         for row in self._graduation_order(scores):
             if budget <= 0 or self.births_last_hour() >= int(settings["max_births_per_hour"]):
