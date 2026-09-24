@@ -304,4 +304,28 @@ Also measured at T0:
 
 ## Progress notes
 
-⟨every four hours from T0⟩
+### T+4 (05:30Z Sept 24)
+
+`scripts/gap_scoreboard.py --take` from `~/Work/ltcm-deploy` (ledger 437,170 rows to 05:28:53Z; window
+the last 24 h; `docs/research/queries/2026-09-24/` keeps the T0 reading). Before Deploy A; the
+scoreboard's family states use the t bound alone (the allocator adds the loss-rate gate from Deploy A:
+the scoreboard follows in Wave 1).
+
+| # | Metric | T0 | T+4 |
+|---|---|---|---|
+| 1 | Families with a positive real bound; capacity | 2 (n 2 and 5) | 4, none with ≥ 10 real events: sports-central-run-under n 5 (+$19.47 real, est. $103.61/day), crypto-strikes-lab-955dae n 5 ($22.93/day), weather-favorites n 5 ($7.93/day), prices-favorites n 2 |
+| 2 | Allocator promotions: settled, share positive | 11, +$0.28 on 25, 27% | 12, +$7.26 on 46, 25% |
+| 3 | Real $ proven / unproven; Alpaca real agents | $96.56 / $168.98; 0 | $117.10 / $103.98; **1** (haghani-56, since 02:17Z) |
+| 4 | Median life all / day-horizon; deaths before 3 fills | 14.38 / 19.83 h; 66% | 12.06 / 13.32 h over 97; 55% |
+| 5 | Lab batches last hour; LLM share; waiters | 0; 2 of 18; 30 at 33.84 h | 16 (the restarts let a few steps run before the poison row); 6 of 36; 10, the longest 37.64 h |
+| 6 | Self-cross refusals of sells (6 h); stacked promotions | 26; 4 of 11 | 34; 4 of 12 |
+| 7 | Recorders on allowed hosts; idle desks | 0 of 12; 1 | 0 of 12; 1 |
+
+**State.** Wave 0 is built, reviewed and integrated: PR #240 merged at 05:27Z (main `9191e81`), the
+gateway deployed at 05:25:59Z (`44edfee6`: the frontier month reports `settled_usd` $421.41,
+`inflight_usd` 0); the House deploy with the ratify (money digest `c2b0e09c` → `521c4586`) follows at
+05:36Z, ten minutes after the gateway. Wave 1: B-feeds (#234) and B-loop (#236) are ready; B-families
+and B-seats are building. The floor ran under the T0 rules meanwhile: the 15-minute crypto bunts kept
+losing (huang-h427345-2 demoted at 03:24Z), meriwether-h2d625d (the one family proven under Deploy A's
+rules) made +$19.47 real, and the first Alpaca real agent (haghani-56) was seated. Compute at 05:30Z:
+the OpenAI month $421.41 of $607; Sail about $168 (burn about $37 a day).
