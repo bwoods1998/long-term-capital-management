@@ -74,14 +74,14 @@ recorded for the next open; live verification uses the markets that trade around
 | E | The lab as a search; the foundry brief; capacity | built (#262, 08:58Z), in review; rides Deploy C |
 | C3 | Alpaca real money | haghani-56 (crypto-alts-reversion) is an Alpaca real agent since 02:17Z, a $25 probe since Deploy A; the rules-text line in C-search |
 | W | The site's mechanism ledger | **verified** 10:14Z: site `a4d25790` (08:55Z), publisher shipped by the updater 09:35:40Z; the checkpoint carries families, the lab line and every desk's family state |
-| Deploy C | Wave 2 | ⟨pending⟩ |
-| R0 | Re-baseline at T0' (scoreboard, watch loop, events feed) | ⟨pending⟩ |
-| R1 | Deploy C (`c/integration` + `c-search/review`), verified in its first hour | ⟨pending⟩ |
-| R2 | The seat market's capacity | ⟨pending⟩ |
-| R3 | More real members of the proven family | ⟨pending⟩ |
-| R4 | The stock and options session, every 30 minutes | ⟨pending⟩ |
-| R5 | The probe drain (the owner's third digest change, on evidence) | ⟨pending⟩ |
-| R6 | Bugs seen at the resume (practice-book 3-cent freeze, earnings polls, kalshi-open, kalshi-sports) | ⟨pending⟩ |
+| Deploy C | Wave 2 | done: first attempt promoted 15:37:57Z and rolled back 15:39:27Z (a practice freeze in the old House's last health file); C′ (#274, with the fixes) promoted 16:32:40Z, watch passed 16:42:49Z |
+| R0 | Re-baseline at T0' (scoreboard, watch loop, events feed) | done 15:06-15:08Z |
+| R1 | Deploy C (`c/integration` + `c-search/review`), verified in its first hour | done: verified 16:32-17:23Z (tick steps, E1 holds, X1 edits, L1, no newborn displaced); the tick under 60 s came with Deploy F's perf pass (34-45 s at 20:56-21:40Z); diesel's horizon judge waits for its lags (named window) |
+| R2 | The seat market's capacity | live 18:43:49Z (Deploy D, #276 + review): population 128, 20 crypto-15m waiters expired 18:56:18Z, stale seats, desks named in the two-hour warnings; about 40 waiters remain at the ceiling (numbers in the report) |
+| R3 | More real members of the proven family | live 18:43:49Z: three House births of the proven program (-3, -4, -5); the swing clock on the board; members trade the same games, so the swing's count grows with the anchor's real settlements (6 at 20:51Z) |
+| R4 | The stock and options session, every 30 minutes | done 13:30-20:00Z (table at 20:01Z); the wake skip verified after the close; the open wake and E2's stock cards: the next session |
+| R5 | The probe drain (the owner's third digest change, on evidence) | live 18:43:49Z, ratified 18:44:00Z on `535a7f15`; 8 probes drained at the first pass; the drain hold (Deploy E) verified 19:48:35Z |
+| R6 | Bugs seen at the resume (practice-book 3-cent freeze, earnings polls, kalshi-open, kalshi-sports) | done: #273, #278 (the freeze and its cause), #279 (polls, idle desks, the test flake), #274 (the watchdog, CI's limit) |
 | Watch | At least three hours after the last deploy | ⟨pending⟩ |
 | B | Bugs: regression test, fix, invariant | ⟨pending⟩ |
 | H | Cleanup: worktrees, branches, PRs, dead docs | ⟨pending⟩ |
