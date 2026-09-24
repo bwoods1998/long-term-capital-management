@@ -538,6 +538,54 @@ recorded for the next open; live verification uses the markets that trade around
   run kept writing the store after stop; in CI that raced `DispatcherTests`' temporary directory three
   times today ("Directory not empty"). Stop now waits, bounded at 5 s, for the runs in flight and
   leaves their results for the next tick. A test fails without it; the module passed three runs in a row.
+
+### Wave 3 (the resume, from T0' 15:04:54Z)
+
+- 15:01:06Z — The in-box updater shipped `main-0e1aec8b9e98` (the plan's Wave 3, #269, and Merton's #270 child);
+  its watch passed at 15:10:06Z.
+- 15:06Z — **R0, the scoreboard at T0'** (`gap_scoreboard.py --take --baseline 2026-09-24T05:37:31Z`; ledger
+  526,226 rows to 15:05:38Z): (1) 1 proven family, sports-central-run-under, real n 5, pooled n 19, bound
+  +0.204, capacity $82.17/day; (2) 9 promotions since Deploy A, all probes, −$6.07 on 8 settlements, 0
+  positive; (3) proven $20.06 / unproven $168.94 on the board's `stake_usd`, 3 Alpaca real agents; (4) median
+  life 5.84 h (day-horizon 5.09 h), 92 of 140 deaths (66%) before 3 fills, 132 of them displaced; (5) 71 lab
+  batches in the last hour, 14 of 54 graduates LLM-written, 56 waiters (41 graduates, 15 cards), the longest
+  47.25 h; (6) 0 self-cross refusals of reducing orders; (7) 9 of 12 recorders, kalshi-open idle (255 markets
+  offered over 4 wakes, no intent). Tick 85-200 s. The watch loop (events every 5 min, `floor_watch.py` every
+  15 min, the stock desks every 30 min in the session) started 15:08Z.
+- 15:10Z — **The proven bunt's stake was never short.** The board's `stake_usd` is the net loan after profit
+  sweeps (`account.staked`), not equity: meriwether-h2d625d was lent $10 (Sept 23 12:50Z) and $20 (22:30Z),
+  then swept $0.47, $8.99 and $0.48 as its equity ran over the $37.50 target ($43.54 at 04:37Z, $46.49 at
+  04:49Z, $41.67 at 12:40Z): net $20.06. The resume's "stake $20.06 against a $37.50 target" read the loan as
+  the stake; the lend-up works. The board gains `equity_usd` beside it (R3).
+- 15:12Z — **R5's evidence** (on the 15:06Z snapshot; `r5_evidence.py`: each allocator promotion to rung 2
+  since Sept 23 00:00Z, its family's pooled forward record at that moment by `House.family_forward`'s
+  definition, and the stay's realized real P&L): 11 promotions onto families negative over 6 or more active
+  blocks made **−$8.12 on 22 closes, none positive** (haghani-56 on crypto-alts-reversion at 241 blocks
+  −0.1779; huang-h427345-2 at 17 blocks −0.4677; hilibrand-h6ca596-3 at 8 blocks −0.4422; ...); the other 10
+  made +$28.96 on 34 closes (the two sports agents +$35.77; three 15-minute crypto bunts −$11.66). At 15:06Z
+  seven of the twelve seated probes, $115 of real money, sat on such families: huang-l5aa23e and
+  huang-l0c6f38 (crypto-15m-lab-335592, 20 blocks −0.4346), huang-h51fdd3-6 (crypto-15m-doge-flat-spot-no, 26
+  blocks −0.4835), huang-h427345-4 (crypto-15m-prior-window-reset, 24 blocks −0.7121), and haghani-62,
+  haghani-r42c38c and haghani-63 (crypto-alts-reversion, 336-345 blocks −0.06 to −0.11). The evidence
+  supports the owner's third digest change: R5 is built (`r5/family-probe`).
+- 15:08Z — **R4 at the first reading** (14:38-15:08Z): the four stock and option desks woke 68 times, wrote 11
+  intents and got 3 practice fills; 4 equity entries were refused by the practice-book freeze (R6). On the
+  15:06Z board, 39 stock and option agents live; 2 have 5 or more closed trades (scholes-21 8 trades, E
+  0.9981; mcentee-hddb4ae 7, E 1.0004); options and alpaca-open have none; the best E is 1.0341 on 0 closed
+  trades. All 20 equity orders since the open were market orders: no agent has sent an equity limit order,
+  so A7's fractional `day` limit path has no live instance to verify.
+- 15:13Z — **R6's freeze measured:** `alpaca-paper` read −$0.0322 at 14:39:07Z and stayed frozen until
+  14:51:06Z, when more fills raised the tolerance (one cent a fill) and −$0.0352 was booked as dust. The same
+  shape adopted the venue after three failed readings on Sept 21 (−$0.1436), Sept 22 (−$0.0200) and Sept 23
+  (−$0.0326), each near 19:30-20:10Z. Builders launched 15:26Z from `c/deploy`: R2 seats (`r2/seats`), R5 and
+  R3's board (`r5/family-probe`), R6 bugs (`r6/bugs`).
+- 15:28Z — **R1: Deploy C merged and deploying.** `c/deploy` = main + `c/integration` + `c-search/review`, both
+  merges clean (9f20640); the money digest is `c02ed852` on both sides (constitution `915c978e`), so no
+  ratify. Local parallel run: one timing flake under 7-way load (`test_tick_steps`, a 1 s slow step beaten by
+  a loaded first payout; R6 hardens it). CI green on both Pythons (run 36019308936); PR #272 merged
+  15:28Z (main `9807eec`); owner deploy from `~/Work/ltcm-deploy` at 15:28:31Z, release
+  `20260924T152831Z-4c7a6f088c6d`.
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
