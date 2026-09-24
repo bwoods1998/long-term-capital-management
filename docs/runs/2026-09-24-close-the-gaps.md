@@ -602,6 +602,24 @@ recorded for the next open; live verification uses the markets that trade around
   that ships it. (2) R6's practice-dust fix first and alone (`r6/practice-dust`): the new House must not
   freeze on a sub-dollar practice difference during its own watch. Deploy C is retried with both.
 
+- 15:58Z — **R6's freeze explained** (#273, `r6/practice-dust`, 514e5cf): the cents are the OCC clearing fee
+  Alpaca takes at an option buy's fill (about $0.03 a contract; listed as a FEE activity only the next
+  morning, so `_book_venue_fees` cannot see it yet), maker-fee refunds against the book's taker assumption
+  (+$0.03 at 15:27:53Z: haghani-56's AVAX sale charged $0.04 against $0.07) and rounding. -$0.0322 at 14:39Z
+  and -$0.0328 at 15:47Z were krasker-14's AAL buys, -$0.0269 at 15:37Z krasker-6's. Today's freezes refused
+  11 Alpaca practice entries. The fix: a practice book's cash difference under $1.00, with every position
+  agreeing and no order in doubt, is booked as House dust at once; real books keep the freeze.
+- 16:03Z — **The drain goes on:** huang-h51fdd3-6 (a $10 probe on crypto-15m-doge-flat-spot-no, 26 blocks
+  -0.4835 at its seating) lost $1.20 on an XRP 15-minute contract at 16:00:36Z and was demoted at 16:03:31Z.
+- 16:09Z — **R4, 15:08-15:38Z:** 73 stock and option wakes, 8 intents, 8 practice fills (7 equity, 1 option),
+  no refusal. **A7 has no instance by the agents' own choice:** of the living programs, 0 of 14 index-ETF and
+  0 of 12 megacap programs write a limit order (all market), 1 of 5 alpaca-open programs does, all 8 options
+  programs do.
+- 16:20Z — **CI's 3.14 job at its limit:** Deploy C′ (#274 = main + `r1/watchdog-inherit` + `r6/practice-dust`,
+  opened 15:58Z) passed 3.11 in 9m07s but 3.14 was cancelled at the 10-minute limit twice (15:58:41-16:08:56Z
+  and the re-run 16:09:28-16:19:43Z). The lasting fix rides C′ (`0245d76`): the tests job gets 20 minutes, and
+  `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` follows the workflow file (the running updater refuses
+  main heads with the new workflow until C′ lands, and trusts them after it).
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
