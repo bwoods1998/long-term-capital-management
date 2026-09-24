@@ -312,6 +312,41 @@ recorded for the next open; live verification uses the markets that trade around
   supersedes meriwether-h2d625d, 34 of 34 entries takers), the dust wind-down, `_trading_pending`; its
   adversarial review launched.
 
+- 07:05Z — **Wave 1 reviews, B-loop (#236) and B-feeds (#234):** three defects fixed on
+  `b-loop/review` (#247) and `b-feeds/review` (#250), each with a test that failed before: Deploy A's
+  House kept no record of repeating warnings, so a warning firing every tick through Deploy B's restart
+  would have escalated inside the 10-minute watch and rolled Deploy B back (the House now seeds the
+  runs from the ledger); the $2/h Sail research cap let queued jobs through as if already running (34
+  were queued at once at 00Z); a backfill page made the hourly pass skip its key (an open-interest hour
+  landed at 05:02 instead of 04:00). No point-in-time leak found; the reviewer broke every stamp on
+  purpose and the tests caught each. Left PLAUSIBLE: a warning that starts during a watch now rolls a
+  healthy release back after 10 repeats (by design of L3); daily rain totals may be shifted an hour.
+- 07:05Z — **C-tools (#249) built** (X1 pause and size-down in place, X2 the horizon by the scheduled
+  expiration, the stock/option wake skip; no protected file, no digest change). Its adversarial review
+  started. Integration of Deploy B began on `b/integration` (`~/Work/ltcm-b-int`): #246, `b-feeds/review`
+  and `b-loop/review` merged (two doc conflicts resolved), 157 tests of the touched modules OK.
+- 07:40Z — **B-families (#242) review: four majors and five minors fixed** on `b-families/review`
+  (#252): two newcomers seated into a swinging family in one pass were each lent the one-member share
+  ($150 against a $50 cap); the family audit's verdict counted as one member's own approval (a free
+  agent-level swing); Kelly per event was turned into a stake at the 20% position share while one event
+  may hold 25%; the at-risk unit weighted every event alike, so a family that lost $44 over 100 events
+  came out proven (now each event weighs what it put at risk); plus the grant's rung-3 check at every
+  pass, an audit-request error no longer sweeps a proven family to probes, `family.record` rows only
+  on a change (was ~10,000 rows a day), tests that mutations had slipped past, two doc errors.
+- 07:40Z — **Decision on the family swing's entry (findings 10-12 of that review).** Measured by
+  simulation (`scratchpad/rev-bfam/sim_rules2.py`, 500 runs a case, the PR's own pooling): judged at
+  every settlement at 80%, an edgeless family on 50c totals enters the swing by 30 / 50 / 200 real
+  settlements 37% / 44% / 61% of the time. The table's "one-sided 80% lower bound" is honest only for
+  one look. Chosen, inside the row: the entry is judged at 15 real settlements and every 5 after, at
+  90% a look for both the t bound and the loss-rate gate (`family_swing.entry_every` 5,
+  `entry_confidence` 0.9): edgeless 19% / 22% / 37%, near the stated 20% over the 30-50 settlements that
+  matter; a real +14%/$ edge (sports-central-run-under measured +0.14) enters at a median 30 settlements
+  instead of 20, a +8% edge at 40. Holding the swing and the doubling keep the 80% bound. Also: a
+  family swings only when its pooled record is proven (P1) as well (the review found a real-only route
+  to "proven"), and an audit approval lapses when the family leaves the swing. Rejected: an
+  anytime-valid bound (about 3x wider at n = 30: real edges would need months) and leaving it (a
+  money rule that swings on noise four times in ten repeats gap 2 at larger stakes).
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` on the T0 snapshot (ledger to 01:41:05Z; window the last 24 h;
