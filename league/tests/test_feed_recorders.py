@@ -409,7 +409,7 @@ class Edgar:
     def transport(self) -> FakeTransport:
         from ltcm.data.edgar import BROWSE_URL
 
-        return FakeTransport({BROWSE_URL + "?*": self.feed})
+        return FakeTransport({BROWSE_URL + "?*": lambda method, url, body: self.feed(method, url, body)})  # a test may swap `feed`
 
 
 def quarters(first: str, count: int, *, hour: str = "16:30:28-04:00") -> list:
@@ -505,6 +505,33 @@ class Earnings(RecorderCase):
         self.clock.advance(6 * 3600)
         store.run()
         self.assertEqual(store.coverage({"earnings_date": ["AAPL"]})["earnings_date"]["AAPL"]["snapshots"], 1)  # unchanged: once
+
+    def test_a_history_pass_gives_way_to_a_live_board_and_resumes_where_it_stopped(self):
+        edgar = Edgar({"AAPL": quarters("2025-10-30", 4), "MSFT": quarters("2025-10-29", 4), "NVDA": quarters("2025-11-19", 4)})
+        store = self.recorder({"earnings": ["AAPL", "MSFT", "NVDA"], "sports": ["nfl"]}, transports={"earnings": edgar.transport()},
+                              backfill_pages=0)
+        store._schedule("sports", "nfl", self.clock() + 10 ** 6)  # not due: the first pass runs through
+        store._poll_history("earnings", {"polled": [], "stored": 0, "failed": []})
+        self.assertEqual(sorted({t for t, _, _ in edgar.asked}), ["AAPL", "MSFT", "NVDA"])
+        # A scoreboard falls due while the next pass is on its first stock: the pass stops there.
+        feed = edgar.feed
+
+        def answer(method, url, body):
+            store._schedule("sports", "nfl", 0.0)
+            return feed(method, url, body)
+
+        edgar.feed = answer
+        self.clock.advance(600)
+        asked = len(edgar.asked)
+        store._poll_history("earnings", {"polled": [], "stored": 0, "failed": []})
+        self.assertEqual([t for t, _, _ in edgar.asked[asked:]], ["AAPL"])
+        self.assertTrue(store.due())  # due again at once, behind the board
+        edgar.feed = feed
+        store._schedule("sports", "nfl", self.clock() + 10 ** 6)  # the board has been polled
+        self.clock.advance(30)
+        asked = len(edgar.asked)
+        store._poll_history("earnings", {"polled": [], "stored": 0, "failed": []})
+        self.assertEqual([t for t, _, _ in edgar.asked[asked:]], ["MSFT", "NVDA"])  # on from where it stopped, AAPL not asked twice
 
     def test_needs_and_requests_for_earnings(self):
         self.assertEqual(requested({"earnings": ["aapl", "SPY", "BTC/USD", "VALE"], "earnings_date": ["HOOD", "XYZ"]}),

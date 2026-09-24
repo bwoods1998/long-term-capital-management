@@ -850,20 +850,35 @@ class FeedRecorder:
         """One pass of a history feed (`vol`, `funding`, and the history recorders of Sept 24, 2026):
         for each key, every completed candle, settled rate or final row newer than the newest row
         held (`_fetch_head`), stamped when it became final. Scheduled 90 seconds past the next hour
-        (vol) or half hour (funding), or at the recorder's own cadence, or sooner when a key failed."""
+        (vol) or half hour (funding), or at the recorder's own cadence, or sooner when a key failed.
+
+        A recorder of Sept 24, 2026 gives way between its keys to a scoreboard or the perps pass that
+        has fallen due (EDGAR's two dozen listings every ten minutes must not hold a live game's
+        minute): the pass stops, is due again at once, and the next one skips the keys it polled in
+        the last `RETRY_SECONDS`, so it goes on from where it stopped."""
         every, offset = _cadence(feed)
         started = self.clock()
         self._schedule(feed, "*", started + RETRY_SECONDS)  # due again soon in any case, pushed out below
         failed = False
         asked = 0
+        source = RECORDERS.get(feed)
         for key in self.keys(feed):
             if self._closed:
                 break
             began = self.clock()
             if self._unlisted_now(feed, key, began):
                 continue
-            if asked and (feed == "funding" or (feed in RECORDERS and RECORDERS[feed].pause)):
-                self._sleep(OKX_PAUSE if feed == "funding" else RECORDERS[feed].pause)
+            if source is not None:
+                with self._lock:
+                    last = (self._load_stats().get((feed, key)) or {}).get("last_poll")
+                if last is not None and began - float(last) < RETRY_SECONDS:
+                    continue  # polled in this cycle, before the pass gave way
+                if asked and self._urgent_due():
+                    out["polled"].append(feed)
+                    self._schedule(feed, "*", self.clock())  # behind the board, then on from here
+                    return
+            if asked and (feed == "funding" or (source is not None and source.pause)):
+                self._sleep(OKX_PAUSE if feed == "funding" else source.pause)
             asked += 1
             stored, error = 0, None
             try:
