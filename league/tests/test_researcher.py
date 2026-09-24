@@ -569,6 +569,70 @@ class Hiring(ResearchCase):
         self.assertIn("answer", self.tool_output(1))
 
 
+class EntryControls(ResearchCase):
+    """X1 (Sept 24, 2026): an agent can pause its entries and size down in place.
+
+    Evidence: meriwether-h2d625d, a real bunt still adding 20-contract positions, three sessions on
+    Sept 23: "available tools cannot pause this active rule ... Escalate to House/operator to halt
+    new entries"; huang-l23cdb7: "halving notional (16->8) ... FAILED the gate, so I cannot adopt a
+    smaller size". The tools only record what the agent asks; the House applies it when the pass
+    ends (`House._apply_controls`), as it does a retained candidate."""
+
+    def requests(self):
+        return [e for e in self.ledger.iter(kinds="agent.research", agent=self.parent.id) if e.payload.get("tool") == "control"]
+
+    def test_a_pause_and_a_resume_are_recorded_for_the_house_to_apply_when_the_pass_ends(self):
+        r = self.researcher([[("pause_entries", {"reason": "the live rule keeps adding losing positions"})],
+                             [("resume_entries", {"reason": "the settlements came back and the band is fine again"})]])
+        r.research(self.parent, {}, session="s1")
+        self.assertIn("when this pass ends", self.tool_output(1)["takes_effect"])
+        self.assertTrue(self.tool_output(2, 1)["recorded"])
+        rows = self.requests()
+        self.assertEqual([(e.id, e.payload["control"], e.payload["status"], e.payload["session"]) for e in rows],
+                         [("control-request:s1:0", "pause_entries", "requested", "s1"), ("control-request:s1:1", "resume_entries", "requested", "s1")])
+        self.assertEqual(rows[0].payload["note"], "the live rule keeps adding losing positions")
+
+    def test_a_control_needs_a_reason(self):
+        self.researcher([[("pause_entries", {"reason": "stop"})]]).research(self.parent, {}, session="s1")
+        self.assertIn("say why", self.tool_output(1)["error"])
+        self.assertEqual(self.requests(), [])
+
+    def test_an_edit_the_house_replay_passes_is_recorded_with_what_it_replaces(self):
+        asked = []
+
+        def edit_replay(agent, changes, *, session):
+            asked.append((agent.id, changes, session))
+            return {"passed": True, "reasons": [], "params": {"notional_usd": 5.0}, "was": {"notional_usd": 10.0},
+                    "code_sha256": agent.code_sha256, "numbers": {"trades": 31, "deflated_sharpe": 0.4}}
+
+        r = self.researcher([[("edit_params", {"params": {"notional_usd": 5}, "reason": "half the size while the fee eats the edge"})]])
+        r.edit_replay = edit_replay
+        r.research(self.parent, {}, session="s1")
+        self.assertEqual(asked, [(self.parent.id, {"notional_usd": 5}, "s1")])
+        answer = self.tool_output(1)
+        self.assertEqual((answer["passed"], answer["takes_effect"]), (True, "when this pass ends"))
+        (row,) = self.requests()
+        self.assertEqual({k: row.payload[k] for k in ("control", "params", "was", "code_sha256")},
+                         {"control": "edit_params", "params": {"notional_usd": 5.0}, "was": {"notional_usd": 10.0},
+                          "code_sha256": self.parent.code_sha256})
+
+    def test_an_edit_whose_replay_fails_or_is_refused_changes_nothing(self):
+        answers = [{"passed": False, "reasons": ["out-of-sample growth is not above zero"], "params": {}, "was": {}},
+                   {"error": "one in-place edit replay a day"}]
+        r = self.researcher([[("edit_params", {"params": {"notional_usd": 5}, "reason": "half the size while the fee eats the edge"})],
+                             [("edit_params", {"params": {"notional_usd": 4}, "reason": "smaller still, while the fee eats the edge"})]])
+        r.edit_replay = lambda agent, changes, *, session: answers.pop(0)
+        r.research(self.parent, {}, session="s1")
+        self.assertEqual((self.tool_output(1)["passed"], self.tool_output(1)["reasons"]), (False, ["out-of-sample growth is not above zero"]))
+        self.assertIn("a day", self.tool_output(2, 1)["error"])
+        self.assertEqual(self.requests(), [])
+
+    def test_without_the_house_an_edit_is_not_available(self):
+        self.researcher([[("edit_params", {"params": {"notional_usd": 5}, "reason": "half the size while the fee eats the edge"})]]
+                        ).research(self.parent, {}, session="s1")
+        self.assertIn("not available", self.tool_output(1)["error"])
+
+
 class Acting(ResearchCase):
     """A pass that reasons until its budget is gone and calls no tool has bought nothing.
 

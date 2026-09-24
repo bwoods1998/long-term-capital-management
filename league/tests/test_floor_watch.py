@@ -158,5 +158,48 @@ class SeatMarketLine(unittest.TestCase):
         self.assertIn("haghani-9 alpaca-paper crypto:LINKUSD refused 3x", text)
 
 
+class TickStepsLine(unittest.TestCase):
+    """C-perf (Sept 24, 2026): the tick took 51-64 s and nothing said which step cost what. The House
+    writes `tick_steps` in health.json; the watch prints the last tick's slowest steps, each step's
+    slowest in the hour, and each background lane's last run."""
+
+    def test_the_watch_prints_the_slowest_steps(self):
+        steps = {"last": {"at": "2026-09-24T08:45:00Z", "total_seconds": 63.1,
+                          "steps": {"health": 12.4, "wakes": 41.2, "mark:kalshi": 3.3, "poll:kalshi": 1.1, "cancel_stale": 0.01,
+                                    "save_state": 0.2, "due": 0.3, "publish": 4.6}},
+                 "ticks_in_hour": 52,
+                 "slowest_hour": [{"step": "wakes", "seconds": 47.9, "at": "2026-09-24T08:21:00Z"},
+                                  {"step": "health", "seconds": 13.0, "at": "2026-09-24T08:40:00Z"}],
+                 "background": {"research": {"key": "research:haghani-9", "seconds": 132.4, "state": "finished", "at": "t"}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            Ledger(state / "ledger.sqlite").close()
+            (state / "health.json").write_text(json.dumps({"at": "2026-09-24T08:45:00Z", "release": "r", "tick_duration_seconds": 50.7,
+                                                           "tick_steps": steps}))
+            run = subprocess.run([sys.executable, "-c", floor_watch.BOX_SNIPPET, "2026-09-24T00:00:00", str(state)],
+                                 capture_output=True, text=True, timeout=120, cwd=ROOT)
+            self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+            box = json.loads(run.stdout.strip().splitlines()[-1])
+        ticks = box["tick_steps"]
+        self.assertEqual(ticks["last"], [["wakes", 41.2], ["health", 12.4], ["publish", 4.6], ["mark:kalshi", 3.3], ["poll:kalshi", 1.1],
+                                         ["due", 0.3]])
+        self.assertEqual(ticks["slowest_hour"][0], ["wakes", 47.9, "2026-09-24T08:21:00Z"])
+        text = floor_watch.render(box, {}, {})
+        self.assertIn("## tick steps: last 63.1s: wakes 41.2s, health 12.4s, publish 4.6s", text)
+        self.assertIn("slowest in the hour (52 ticks): wakes 47.9s at 08:21:00, health 13.0s at 08:40:00", text)
+        self.assertIn("background research 132.4s (research:haghani-9, finished)", text)
+
+    def test_a_health_file_without_them_prints_nothing_for_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            Ledger(state / "ledger.sqlite").close()
+            (state / "health.json").write_text(json.dumps({"at": "2026-09-24T08:45:00Z", "release": "r"}))
+            run = subprocess.run([sys.executable, "-c", floor_watch.BOX_SNIPPET, "2026-09-24T00:00:00", str(state)],
+                                 capture_output=True, text=True, timeout=120, cwd=ROOT)
+            self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+            box = json.loads(run.stdout.strip().splitlines()[-1])
+        self.assertNotIn("## tick steps", floor_watch.render(box, {}, {}))
+
+
 if __name__ == "__main__":
     unittest.main()

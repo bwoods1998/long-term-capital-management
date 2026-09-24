@@ -39,6 +39,17 @@ class ResearchBackoff(HouseCase):
         self.house.ledger.append("eval.verdict", {"decision": "progress"}, agent=self.agent.id)
         self.assertTrue(self.house.research_due(self.agent))
 
+    def test_its_own_pause_is_not_new_evidence(self):
+        """Review of #249: a pause row (X1) restates the strategy in force, not a new one."""
+        self.empty(4)
+        self.clock.advance(3600 + 1)
+        self.assertFalse(self.house.research_due(self.agent))
+        self.house.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": "pause_entries",
+                                                    "session": "s1", "note": "the live rule keeps adding losing positions"},
+                                 agent=self.agent.id, id="control-request:s1:0")
+        self.assertEqual(self.house._apply_controls(self.agent.id, "s1"), ["pause_entries"])
+        self.assertFalse(self.house.research_due(self.agent))
+
     def test_the_backoff_is_capped_and_a_sample_still_runs(self):
         self.empty(12)
         self.clock.advance(8 * 3600 + 1)

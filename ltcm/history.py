@@ -289,6 +289,7 @@ class History:
         verbose: bool = True,
         max_retries: int = MAX_RETRIES,
         deadline: float | None = None,
+        debug: bool = False,
     ):
         if transport is None:
             from .data import HttpTransport
@@ -301,6 +302,8 @@ class History:
         self.min_interval = float(min_interval)
         self.sleep = sleep
         self.verbose = bool(verbose)
+        #: Also say a listing the disk cache answered (one line; `kalshi_settled`).
+        self.debug = bool(debug)
         self.max_retries = max(0, int(max_retries))
         #: A `time.monotonic()` moment after which no request starts and no retry waits: a caller
         #: with a wall-clock budget (a sandbox kills a run at its timeout, output and all) gets a
@@ -339,12 +342,16 @@ class History:
 
     def get_json(self, url: str, *, cacheable: bool = False) -> Any:
         """GET a JSON document, from the cache when allowed; retries 429 and 5xx with backoff."""
+        return self._get_json(url, cacheable=cacheable)[0]
+
+    def _get_json(self, url: str, *, cacheable: bool = False) -> tuple[Any, bool]:
+        """`get_json`'s document, and whether the disk cache answered it (True) or the venue did."""
         if cacheable and self.cache is not None:
             body = self.cache.get(url)
             if body is not None:
                 try:
                     self.cache_hits += 1
-                    return json.loads(body.decode("utf-8"))
+                    return json.loads(body.decode("utf-8")), True
                 except (UnicodeDecodeError, ValueError):
                     pass
         delay = 1.0
@@ -370,7 +377,7 @@ class History:
                     raise HistoryError(f"malformed JSON from {url[:160]}") from exc
                 if cacheable and self.cache is not None:
                     self.cache.put(url, body)
-                return payload
+                return payload, False
             if status and status != 429 and status < 500:
                 snippet = body[:200].decode("utf-8", "replace") if body else ""
                 raise HistoryError(f"HTTP {status} from {url[:160]}: {snippet}")
@@ -407,13 +414,17 @@ class History:
     ) -> list[dict[str, Any]]:
         """Settled single markets closing in [start_ts, end_ts], parsed like
         `KalshiMarketData.parse_market` plus `result`, `open_time`, `volume` and
-        `settlement_value` (dollars a YES contract paid). Combos (KXMVE) are excluded."""
+        `settlement_value` (dollars a YES contract paid). Combos (KXMVE) are excluded.
+
+        Only pages fetched from the venue are said (Sept 24, 2026: about 3,200 lines every 30
+        minutes in the House's log were reads the disk cache answered, said as if fetched); a read
+        the cache answered whole is one line with `debug`, and none without."""
         from .data.kalshi import KalshiMarketData
 
         cacheable = self._settled_window(end_ts, LISTING_SETTLE_SECONDS)
         out: list[dict[str, Any]] = []
         cursor = None
-        pages = 0
+        pages = fetched = 0
         for _ in range(max(1, int(max_pages))):
             params: dict[str, Any] = {
                 "status": "settled",
@@ -426,8 +437,9 @@ class History:
                 params["series_ticker"] = str(series).upper()
             if cursor:
                 params["cursor"] = cursor
-            payload = self.get_json(f"{KALSHI}/markets?" + urllib.parse.urlencode(params), cacheable=cacheable)
+            payload, cached = self._get_json(f"{KALSHI}/markets?" + urllib.parse.urlencode(params), cacheable=cacheable)
             pages += 1
+            fetched += 0 if cached else 1
             rows = payload.get("markets") if isinstance(payload, dict) else None
             if not isinstance(rows, list):
                 raise HistoryError("kalshi settled markets: no markets array")
@@ -452,15 +464,19 @@ class History:
                 parsed["settlement_value"] = _float(value)
                 out.append(parsed)
             cursor = payload.get("cursor")
-            if pages % 5 == 0:
-                self.say(f"kalshi settled {series or 'board'}: {pages} pages, {len(out)} markets kept so far")
+            if not cached and fetched % 5 == 0:
+                self.say(f"kalshi settled {series or 'board'}: {fetched} pages fetched, {len(out)} markets kept so far")
             if not cursor or not rows:
                 break
         else:
             if cursor:
                 self.truncated_listings += 1
                 self.say(f"kalshi settled {series or 'board'}: stopped at {max_pages} pages; more markets exist")
-        self.say(f"kalshi settled {series or 'board'}: {len(out)} markets in {pages} page(s)")
+        if fetched:
+            self.say(f"kalshi settled {series or 'board'}: {len(out)} markets in {pages} page(s)"
+                     + (f", {pages - fetched} of them from the disk cache" if fetched < pages else ""))
+        elif self.debug:
+            self.say(f"kalshi settled {series or 'board'}: {len(out)} markets in {pages} page(s), all from the disk cache")
         return out
 
     @staticmethod

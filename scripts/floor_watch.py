@@ -41,6 +41,14 @@ out['health'] = {'at': h.get('at'), 'release': h.get('release'), 'tick_s': h.get
                  'grant_active': lt.get('active'), 'money_digest': ((lt.get('policy') or {}).get('constitution_digest') or '')[:8],
                  'background_jobs': len(h.get('background_jobs') or []),
                  'long_jobs': [j['key'] for j in (h.get('background_jobs') or []) if j.get('running_seconds', 0) > 600]}
+# The tick's own clock (C-perf, Sept 24, 2026): the last tick's slowest steps, each step's slowest in the
+# last hour, and each background lane's last run (health.json `tick_steps`).
+ts = h.get('tick_steps') or {}
+tl = ts.get('last') or {}
+out['tick_steps'] = {'total_s': tl.get('total_seconds'), 'ticks_in_hour': ts.get('ticks_in_hour'),
+                     'last': sorted(([k, v] for k, v in (tl.get('steps') or {}).items()), key=lambda kv: (-kv[1], kv[0]))[:6],
+                     'slowest_hour': [[r.get('step'), r.get('seconds'), r.get('at')] for r in (ts.get('slowest_hour') or [])[:6]],
+                     'background': {lane: [r.get('key'), r.get('seconds'), r.get('state')] for lane, r in sorted((ts.get('background') or {}).items())}}
 acc = camp.get('accounts') or {}
 out['costs'] = {'openai_left': (acc.get('openai') or {}).get('remaining_usd'), 'sail_left': (acc.get('sail') or {}).get('remaining_usd'),
                 'pending_calls': camp.get('pending_calls'), 'jev': (h.get('jev') or {}).get('budget') if isinstance(h.get('jev'), dict) else None}
@@ -246,10 +254,18 @@ def render(box: dict, site: dict, gateway: dict) -> str:
     h = box["health"]
     lines = [f"# floor watch {h['at']}  release {h['release']}  tick {h['tick_s']}s  living {h['living']}  dead {h['dead']}",
              f"grant active {h['grant_active']} digest {h['money_digest']}  stopped: {h['stopped'] or '-'}  frozen books: {h['frozen_books'] or '-'}"
-             f"  long jobs: {h['long_jobs'] or '-'}",
-             f"## bands {box['bands']}",
-             f"moves {box['moves']}  births {box['births']}  deaths {box['deaths']}",
-             f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
+             f"  long jobs: {h['long_jobs'] or '-'}"]
+    ticks = box.get("tick_steps") or {}
+    if ticks.get("last") or ticks.get("slowest_hour"):
+        # C-perf (Sept 24, 2026): which steps the tick's seconds went to (health.json `tick_steps`).
+        lines.append(f"## tick steps: last {ticks.get('total_s')}s: " + (", ".join(f"{k} {v}s" for k, v in ticks.get("last") or []) or "-")
+                     + f"  |  slowest in the hour ({ticks.get('ticks_in_hour')} ticks): "
+                     + (", ".join(f"{k} {v}s at {str(at)[11:19]}" for k, v, at in ticks.get("slowest_hour") or []) or "-"))
+    if ticks.get("background"):
+        lines.append("   background " + ", ".join(f"{lane} {row[1]}s ({row[0]}, {row[2]})" for lane, row in ticks["background"].items()))
+    lines += [f"## bands {box['bands']}",
+              f"moves {box['moves']}  births {box['births']}  deaths {box['deaths']}",
+              f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
     lines += ["  " + row for row in box["move_rows"]]
     lines.append(f"## real money {json.dumps(box['fills'])}  performance fees ${box['performance_fees']}")
     lines.append(f"## practice {json.dumps(box.get('practice_fills') or {})}")

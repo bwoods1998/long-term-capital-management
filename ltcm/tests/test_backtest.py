@@ -829,6 +829,47 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(history.requests, 1)
             self.assertEqual(history.cache_hits, 1)
 
+    def test_a_listing_the_disk_cache_answers_is_not_logged_as_a_fetch(self):
+        """Sept 24, 2026 (C-perf): the House's log carried about 3,200 `[history] kalshi settled
+        <series>: N markets in P page(s)` lines every 30 minutes, nearly all of them reads the disk
+        cache answered, logged as if the venue had been asked. A fetch is logged; a read the cache
+        answered is one line at most, and only with `debug`."""
+        def read(history):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rows = history.kalshi_settled("KXA", start_ts=T0, end_ts=T0 + HOUR)
+            return rows, err.getvalue()
+
+        class Pages:
+            """Six pages of one market each, chained by cursor, answered by the cursor asked for."""
+
+            def __init__(self):
+                self.urls = []
+
+            def get(self, url, headers=None, timeout=20):
+                import urllib.parse
+
+                self.urls.append(url)
+                page = int((dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)).get("cursor") or "c0")[1:])
+                return 200, {}, json.dumps({"markets": [raw_market(f"KXA-1-{page}")], "cursor": f"c{page + 1}" if page < 5 else ""}).encode()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            history = History(Pages(), cache_dir=tmp, min_interval=0, clock=lambda: T0 + 30 * 86400)
+            rows, said = read(history)
+            self.assertEqual(len(rows), 6)
+            self.assertEqual(said.splitlines(), ["[history] kalshi settled KXA: 5 pages fetched, 5 markets kept so far",
+                                                 "[history] kalshi settled KXA: 6 markets in 6 page(s)"])
+            rows, said = read(history)
+            self.assertEqual((len(rows), history.requests, history.cache_hits), (6, 6, 6))
+            self.assertEqual(said, "", "a read the disk cache answered says nothing")
+            history.debug = True
+            self.assertEqual(read(history)[1].splitlines(), ["[history] kalshi settled KXA: 6 markets in 6 page(s), all from the disk cache"])
+            next(Path(tmp).glob("*.z")).unlink()  # one page gone from the cache: that page alone is fetched again, and said
+            history = History(Pages(), cache_dir=tmp, min_interval=0, clock=lambda: T0 + 30 * 86400)
+            rows, said = read(history)
+            self.assertEqual((len(rows), history.requests), (6, 1))
+            self.assertEqual(said.splitlines(), ["[history] kalshi settled KXA: 6 markets in 6 page(s), 5 of them from the disk cache"])
+
 
 # ----------------------------------------------------------------- review regressions (Sept 16)
 

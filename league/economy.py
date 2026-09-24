@@ -60,6 +60,16 @@ def check_bounds(game: Mapping[str, Any]) -> None:
             raise ValueError(f"game.json: horizon.{key} = {value:g} is outside [{low}, {high}]")
     if int(economy["min_population"]) > int(economy["max_population"]):
         raise ValueError("game.json: min_population is above max_population")
+    # The Alpha Lab's dials the close-the-gaps plan bounds (Sept 24, 2026): `lab_bounds`, each checked
+    # where the lab section sets it (league/lab.py holds `reserved_share` to its bounds as it reads it).
+    lab = game.get("lab") or {}
+    for key, bound in (game.get("lab_bounds") or {}).items():
+        if str(key).startswith("_") or key not in lab:
+            continue
+        low, high = bound
+        value = float(lab[key])
+        if not float(low) <= value <= float(high):
+            raise ValueError(f"game.json: lab.{key} = {value:g} is outside [{low}, {high}]")
     # Merton's dials (Sept 24, 2026): the scheduled hours `merton_bounds` bounds, and
     # `paused_until_profit` any subset of the roles it lists.
     merton, limits = game.get("merton") or {}, game.get("merton_bounds") or {}

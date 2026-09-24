@@ -82,7 +82,9 @@ def strings(value):
 
 
 def candidate(name, mechanism, code):
+    """A card as Merton writes one. Since Sept 24, 2026 (E2) every card states the fee it pays and the edge it needs."""
     return {"name": name, "mechanism": mechanism, "data": ["BTC/USD 5Min bars"], "edge_after_costs": "2% a round trip less 0.5% fees",
+            "fee": "Alpaca crypto taker 0.25% a side, 0.50% a round trip", "edge_needed": "above 0.50% a round trip plus the spread",
             "horizon": "five minutes, hour blocks", "rejection": "fewer than 20 trades or negative out-of-sample growth", "code": code}
 
 
@@ -409,7 +411,10 @@ class FastEvidence(FoundryCase):
         self.assertIn("15% of the stake is a ONE-LOSS TRIAL", FOUNDRY_BRIEF)
         game = json.loads((Path(__file__).resolve().parents[1] / "game.json").read_text(encoding="utf-8"))
         self.assertNotIn("kalshi-crypto-strikes", game["hypotheses"]["fast_desks"], "40 born, 2 replay passes, -10.3% a block")
-        self.assertIn("kalshi-crypto-15m", game["hypotheses"]["fast_desks"])
+        # Since Sept 24, 2026 (E2) the fifteen-minute desk is closed to every route until a family there is positive
+        # over three active forward blocks (test_foundry_brief); the brief still says how it must be traded.
+        self.assertNotIn("kalshi-crypto-15m", game["hypotheses"]["fast_desks"])
+        self.assertIn("kalshi-crypto-15m", game["hypotheses"]["closed_desks"])
         self.assertEqual((game["hypotheses"]["fast_lane_min_blocks"], game["hypotheses"]["fast_lane_reopen_blocks"]), (6, 3))
 
     def test_cards_may_queue_for_replay_and_another_role_does_not_hold_the_foundry(self):
@@ -453,6 +458,8 @@ class Transfer(FoundryCase):
         game = load_game()
         game["economy"]["min_population"] = 0
         game["economy"]["newcomer_seconds"] = 10 ** 9
+        # The ordinary ports; the first transfer to try (Sept 24, 2026, E2) has its own tests (test_foundry_brief).
+        game["hypotheses"]["first_transfer"] = {}
         kw.setdefault("game", game)
         return House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.broker, "alpaca": FakeBroker("alpaca", cash="500"),
@@ -512,7 +519,11 @@ class Transfer(FoundryCase):
             self.assertTrue(out["cards"])
             self.assertTrue(all(self.foundry.cards()[c]["transfer"] == {"family": "weather-favorites", "desk": "kalshi-weather"}
                                 for c in out["cards"]))
-        untried = kalshi - {"kalshi-weather", "kalshi-sports", "kalshi-prices"}
+        # Since Sept 24, 2026 (E2) the two crypto desks get no card on any route until a family there is positive
+        # over three active forward blocks (`closed_desks`, test_foundry_brief).
+        closed = set(self.foundry._closed_desks())
+        self.assertEqual(closed, {"kalshi-crypto-strikes", "kalshi-crypto-15m"})
+        untried = kalshi - {"kalshi-weather", "kalshi-sports", "kalshi-prices"} - closed
         self.assertEqual(picks, [n for n in order if n in untried], "each untried Kalshi desk once, the best-scored first")
         self.assertEqual(route, "evidence", "with every Kalshi desk tried, the call goes on to the next route")
         allocation = self.house.ledger.last("merton.pass").payload["allocation"]

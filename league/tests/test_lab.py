@@ -27,6 +27,9 @@ KNOB = PASSER.replace("PARAMS = {}", 'PARAMS = {"notional": 50.0}').replace('"no
 SMALLER = KNOB.replace('PARAMS = {"notional": 50.0}', 'PARAMS = {"notional": 25.0}')
 #: The same mechanism, entered at most once every three hours: another row of the grid.
 SPARSE = KNOB.replace("if low and not held:", 'if low and not held and int(ctx["now"][11:13]) % 3 == 0 and int(ctx["now"][14:16]) < 10:')
+#: KNOB written again with its threshold moved in the code, not in PARAMS: a code change beyond PARAMS, so
+#: not a nudge of a living KNOB (E1, Sept 24, 2026: SMALLER is one, and a nudge of a living program is held).
+REWRITTEN = KNOB.replace('bars[-1]["c"] < 80000', 'bars[-1]["c"] < 79999')
 #: One that buys the HIGH leg and sells the low one: it trades as much and loses.
 LOSER = PASSER.replace("low = bars[-1][\"c\"] < 80000", "low = bars[-1][\"c\"] > 80000")
 
@@ -339,6 +342,9 @@ class Graduation(LabCase):
 
     def test_seeds_to_mutations_to_the_archive_to_a_graduate_born_on_paper(self):
         seed = self.seated("sawtooth", KNOB)
+        # Luna rewrites the program (E1, Sept 24, 2026): the parameter children of a living program are nudges,
+        # held until their forward windows beat the desk's.
+        self.luna.programs = [REWRITTEN]
         self.lab.seed(force=True)
         out = self.lab.step()
         self.house.wait()
@@ -448,7 +454,7 @@ class Graduation(LabCase):
         agent = self.seated("sawtooth", KNOB)
         self.grind(agent, 20)
         self.assertEqual(len(self.house.evaluator.family_trials(agent.family, self.house.registry.lineage(agent.id))), 20)
-        out = self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant I already replayed"}])
+        out = self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant I already replayed"}])
         self.lab.evaluate_batch()
         grads = self.lab.graduate()
         self.assertEqual(len(grads), 1)
@@ -473,7 +479,7 @@ class Graduation(LabCase):
         for n in range(self.house.settings.holdout_lineage_budget):
             self.house.ledger.append("holdout.access", {"agent": agent.id, "lineage": agent.id, "version": f"v{n}", "state": "opened",
                                                         "window": ["a", "b"]}, agent=agent.id, id=f"holdout:v{n}:opened")
-        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
         with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay:
             out = self.lab.graduate()
@@ -513,7 +519,7 @@ class Graduation(LabCase):
         budget = self.house.settings.holdout_lineage_budget
         self.assertEqual(budget, 3)
         self.opened(agent.id, budget - 2)  # the line's own forks have spent one of three
-        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
+        self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
         self.lab.evaluate_batch()
         calls = []
         with patch.object(self.lab, "_deep", return_value=True), \
@@ -534,7 +540,7 @@ class Graduation(LabCase):
     def test_a_line_at_its_reserve_is_refused_before_any_trial(self):
         agent = self.seated("sawtooth", KNOB)
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
-        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
         with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay, \
                 patch.object(self.house, "_holdout") as holdout:
@@ -548,7 +554,7 @@ class Graduation(LabCase):
         """The House's own fork of the line may open the seal while the lab's replay runs."""
         agent = self.seated("sawtooth", KNOB)
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 2)
-        self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
+        self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
 
         def replay_while_the_house_forks(*args, **kwargs):
@@ -916,10 +922,13 @@ class BelowTheAllTier(LabCase):
     20:30Z, and `open()` would have stopped the whole lab with it."""
 
     def test_the_lab_keeps_breeding_evaluating_and_graduating_below_the_all_tier(self):
-        self.seated("sawtooth", KNOB)
+        agent = self.seated("sawtooth", KNOB)
         with patch.object(self.house, "frontier_tier", return_value="earned"):
             self.assertEqual(self.lab.open(), "")
             self.lab.seed(force=True)
+            # Since E1 (Sept 24, 2026) a parameter child of a LIVING program is a nudge, held for a forward
+            # score above its desk's median; this program's author has died, so its children are nobody's.
+            self.house.kill(agent, "credits", "a test death: its program stays in the lab")
             out = self.lab.step()
             self.house.wait()
         self.assertGreaterEqual(out["evaluated"], 2)

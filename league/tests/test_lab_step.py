@@ -325,11 +325,11 @@ class ARestart(StepCase):
         self.assertTrue(tape["steps"] and tape["source"]["window"])  # a development tape from the store
         live = {**self.needs, "symbols": ["ETH/USD"]}  # not in the store: the House's live tape
         self.house._tapes.clear()
-        deep_rows, live_rows = self.rows(self.needs, 10, "d"), self.rows(live, 6, "l", age=1800.0)
-        while self.lab.evaluate_batch():  # builds both tapes, evaluates a batch on each
+        deep_rows, live_rows = self.rows(self.needs, 12, "d"), self.rows(live, 8, "l", age=1800.0)
+        # Builds both tapes, a batch on each (since E1, Sept 24, 2026, one tape is built a turn: the queue's,
+        # then the largest group's, which is the deep tape again until the live one is larger).
+        while len(self.lab._tape_index) < 2 and self.lab.evaluate_batch():
             self.lab._tapes_built = 0
-            if self.lab.queued() <= 12:
-                break
         waiting_deep = sum(self.candidate(r)["status"] == "queued" for r in deep_rows)
         waiting_live = sum(self.candidate(r)["status"] == "queued" for r in live_rows)
         self.assertGreaterEqual(waiting_deep, 4)

@@ -37,7 +37,9 @@ The work flows through these stages:
    off, the old ladder decides again: the screen, then the micro stake with the audit after it.
 5. **The Alpha Lab** (since Sept 23, 2026). Off the tick, the lab searches strategy programs in
    batches on its own box and sends the fittest of each cell through the House's replay and the
-   sealed holdout; survivors are born on paper.
+   sealed holdout; survivors are born on paper. Since Sept 24, 2026 (E1) half of each batch and
+   half of its tape builds go to the programs someone wrote, and a graduate needs a code change
+   beyond its parameters or a forward score above its desk's living median (see the lab below).
 6. **Feedback.** Results and repairs feed the next round.
 
 ## Pause, resume, stop
@@ -177,6 +179,9 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   checkpoint from here. `--since` defaults to an hour ago. It prints:
   - health: release, tick seconds, living and dead, frozen books, the grant and its money digest,
     and background jobs running over ten minutes;
+  - the tick's steps (`## tick steps`, Sept 24, 2026, from `health.json` `tick_steps`): the last
+    tick's six slowest steps with their seconds, each step's slowest in the last hour with the time
+    of that tick, and each background lane's last run;
   - bands per venue from `allocator-board.json`, band moves, births and deaths, the envelope and
     the throttle;
   - venue fills, notional, realized P&L and agents per book: the real accounts (`kalshi`,
@@ -238,8 +243,16 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     and `born_total`. Since D1 (Sept 24, 2026): `failing_since` (null until five steps in a row
     have failed; then the first failure's time, until a step works again), `failures_in_a_row`,
     `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
-    `indexed`: the tapes built in the last six hours that a restart remembers).
+    `indexed`: the tapes built in the last six hours that a restart remembers). Since E1 (Sept 24,
+    2026): `held`, what the last graduation pass held back (`at`, `counts` by reason: `forward`, a
+    losing forward window, its own or, with none, its mechanism's on average; `idle`, a desk offered markets for 48 h with no intent and no feed it
+    asked for since; `nudge`, the same program beyond PARAMS as a living one on its desk without a
+    forward score above the desk's median), or null.
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
+  - `wakes_skipped` (Sept 24, 2026, the wake skip): the stock and option wakes not run while the
+    regular session was shut (`count`, `by_desk`, `since`, `last_at`; kept in `house.json`). Such an
+    agent is woken a few seconds after the bell instead; nothing it sent before then could trade.
+    In the 48 hours before T0 of the close-the-gaps run there were 2,891 of them (29% of all wakes).
   - `feeds` (`league/feeds.py`): per feed its `keys`, how many are `recording`, `since`, `last_ok`,
     `failing` keys, `polls`, `snapshots` and `next_due`; for a history feed its `backfill`
     (`complete`, `in_progress`, `unlisted`); `store_mb`. Since Sept 24, 2026 the recorders of the
@@ -251,6 +264,22 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     hourly `data.coverage` ledger row (`asset: feed`, `host`, `status`: current, partial or
     unavailable).
   - `background_jobs`, `durable_research` and `promotion_status`.
+  - `tick_steps` (Sept 24, 2026): where the tick's time went, on the monotonic clock. `last`: the
+    last tick's `at`, `total_seconds` (from its start to its health block written) and `steps`, the
+    seconds of each: `replay_rules`, `feeds` (scheduling the recorders), `poll:<book>` (fills and
+    settlements), `cancel_stale`, `order_path_invariants`, `meter` and `hold_absorb` (with a
+    campaign), `due`, `wakes` (the agents' wakes, side by side), `submit:<book>`, `wind_downs`,
+    `mark:<book>` and `judge:<book>` (on a mark pass: mark and reconcile; judge, wind-downs and
+    sweeps), `allocator`, `floor_invariants`, `research`, `schedule` (the background jobs it starts),
+    `jev`, `history_coverage`, `merton`, `hypotheses`, `lab`, `shards`, `payout`, `notices`,
+    `horizon`, `tuition`, `population` (culls and births), `save_state`, `publish` and `health` (this
+    file's own block). `slowest_hour`: each step's slowest over the ticks of the last hour, the eight
+    slowest first, with that tick's `at`; `ticks_in_hour`; and `background`: each lane's
+    (`research`, `replay`, `ops`, `audit`, `feeds`, `shards`) last job with its `key`, `state`,
+    `seconds` and `at`, which ran beside the tick and are not in its time. `tick_duration_seconds`
+    is unchanged: the tick up to its health block. Measured Sept 24, 2026 08:40-08:50Z: ticks of
+    51-64 s landing 70-80 s apart, the House at about 74% of the box's one vCPU, and nothing that said
+    which step cost what.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
     answer, by kind: `wakes` (an agent's box held by its research; woken on the next tick),
     `births` (the probe box held for more than `probe_wait_seconds`, or a Sail failure during
@@ -291,7 +320,10 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     `cards`, `strategies`) and `waiters_by_desk`; `reserved_desks` (desks a waiting graduate,
     retained candidate or card has first claim on); from the hourly watch, `displaceable`
     (residents an evidenced newcomer with no proof and no forward score could take now),
-    `never_traded_past_grace`, `waiting_over_an_hour` and `at`; and `last_refused_birth` a class
+    `never_traded_past_grace` (of those, the ones that never traded: replay-only seats and paper seats
+    past their fair chance -- since Sept 24, 2026 a never-traded paper seat is not an evidenced
+    newcomer's before its desk's evidence clock, capped at the plain grace and never under an hour,
+    has run), `waiting_over_an_hour` and `at`; and `last_refused_birth` a class
     (`count`, `why`, `at`). A warning `ops.alert` says once an hour a class when graduates,
     retained candidates, cards or merged strategies cannot be born and why, and once an hour when
     more than `economy.seat_waiters_warning` (8) newcomers have waited over an hour. A
@@ -386,7 +418,11 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     - `calls`: each Luna and Sol call's cost, programs written and programs refused;
     - `graduations`: each graduate's latest state (`refused`, `holdout_rationed`, `replay_failed`,
       `replay_unavailable`, `holdout_failed`, `passed`, `waiting_probe`, `waiting_seat`,
-      `refused_at_birth`, `born`), its line, family and agent;
+      `refused_at_birth`, `born`), its line, family and agent. Since Sept 24, 2026 (E1) also `held`:
+      a passer held before its birth, its `detail` starting `held:` with the reason; it is asked
+      again every ten minutes, scored in the forward windows as a waiting graduate is, and, not
+      being `passed`, reserves no seat in the House's seat market nor counts as a waiter on the
+      scoreboard. A program held before the House's replay has no row at all (it was not tried);
     - `forward` (S2, Sept 23, 2026): one row per candidate and forward-window run: `window_start`
       and `window_end` (epochs; the window starts at the hour after the program's code was frozen,
       so no search, replay or holdout saw a step of it), `blocks`, `active_blocks`, `log_growth`,
@@ -432,7 +468,23 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     last five minutes), no step runs and no `lab.stats` row is written: the rows stop, and
     `health.json` `lab` (`refusal`, `closed_since`, `closed_minutes`, `llm`, `waiting_seat` with
     up to eight graduates, each with its `forward` score for the seat market, `queued`,
-    `born_total`, `forward`) says why.
+    `born_total`, `forward`) says why. Since E1 (Sept 24, 2026) the rows also carry `reserved`
+    (`share`: the share of each batch and of the tape builds kept for the programs someone wrote,
+    `game.json` `lab.reserved_share` held to `lab_bounds`; `evaluated`: how many of theirs the hour
+    evaluated) and `held` (as in `health.json`). The batch turns (`batch_turn`): with the half,
+    queue order, written programs, largest group, written programs, and again; a step builds at
+    most `max_tapes_per_step` (4) tapes, one a turn. What the lab is searching for, and why it
+    graduates less than before, is in `held`: a desk with no ranked resident needs a graduate's own
+    winning forward window for a parameter nudge, and nudges wait for one.
+  - **The foundry's brief** (`foundry-2026-09-24.1`, E2): cards name the recorded feeds of their desk
+    and state their `fee` and `edge_needed` (a card without them is refused before its replay, and
+    says so in the call's `merton.pass` `refused`); `game.json` `hypotheses.fast_desks` is the
+    deep-market desks; `closed_desks` (kalshi-crypto-strikes, kalshi-crypto-15m) get no card until a
+    family there is positive over three active forward blocks on that desk (one block a block key,
+    however many of its members were active in it); the first transfer (`first_transfer`)
+    scales the weather favourites on the ensemble's fair value, once: its call's `merton.pass`
+    `allocation.transfer` carries `scale: true`. A family at its measured capacity gets no
+    evidence-driven House mutation (E3).
   - **`lab.graduate` rows**, one per candidate and outcome, carry the program's lineage, origin,
     author, parents, idea, fitness and cell. **`lab.royalty` rows** record each royalty charged to
     a graduate that earned a performance fee.
@@ -609,6 +661,49 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
   times in a day). One info alert names what is held (`wind_down_held` in `house.json`), and the
   House sells it in the first tick after the bell, an option at the bid. Coins and Kalshi positions
   wind down at once.
+- **A living stock or options agent is not woken at night** (Sept 24, 2026, the wake skip): no
+  `agent.woke` row, no box run, no order between the close and the open, counted in `health.json`
+  `wakes_skipped`. It is woken a few seconds after the bell, and its own exit of a position held
+  overnight goes then, if its strategy sends one: the skip itself sells nothing (a dead agent's
+  held wind-down still sells at the bell). "market orders outside regular hours are not permitted"
+  from a living agent now means an open-desk agent that names a coin (still woken all night) sent a
+  stock or option SELL at night; its stock or option buys are refused by the House first ("outside
+  the regular session no stock or option entry is sent").
+- **An agent paused its own entries, or edited its parameters in place** (X1, Sept 24, 2026). Its
+  `agent.strategy` rows carry `control` (`pause_entries`, `resume_entries`, `edit_params`), `was`
+  and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
+  and any the House did not make (status `not_applied`, with the reason: for an edit, an audit
+  running or owed, a standing veto, an approval standing on real money or a strategy changed after
+  its replay; already paused). A paused agent's wakes show `held` (buys the House held, never a
+  refusal) and its resting buys are cancelled. Held buys are not activity: its wakes count barren,
+  the stuck rule applies, and a practice resident paused past the grace is displaceable like an idle
+  one, and the seat report (`seats_holding_none`, the watch's seat line) counts it as holding none.
+  The allocator promotes no paused agent (a `progress` status with stage `paused`), and after
+  24 hours paused holds a real agent's stake to its probe by free cash only (a `size` verdict whose
+  reason says "held to the probe"; the board row's `entries_paused_since`).
+  `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
+  `agent.research` rows with tool `edit_replay` (at half the practice stake and caps, no
+  `eval.trial`, never the holdout, one an agent a day). Nothing here moves a limit, a stake or a
+  band. A pause or resume row adopts nothing (`allocator.adopted_strategy`): it moves no generation
+  and sets no audit verdict aside. An edit is a new strategy to `allocator.audit_standing`, so an
+  agent whose code was approved is audited again before a first swing.
+- **The horizon rule's refusals name what they judged by** (X2, Sept 24, 2026): "this market is
+  expected to resolve in N hours, by its scheduled expiration (...)", "..., by its close plus its
+  series' measured settle lag (...)", "..., by its expected expiration (...), a deadline days
+  after its close: its series has fewer than 20 settled markets on record ..." or "..., by its
+  close (...): the venue lists no scheduled expiration for it". An expected expiration two days
+  or more after the close is a deadline (the diesel prints, the AI-share weeklies); such a market
+  is judged by its close plus the p95 settle lag of its series' last 40 settled markets on record
+  (at least 20), which `settle_lags.json` beside the House's state keeps (fed by every Kalshi
+  tape's settled markets; recomputed once a day; delete it to measure afresh). The answer is
+  `league/resolution.py`, a money judge in `ci.FORBIDDEN` (an owner deploy changes it, never the
+  updater), and it reads that file as untrusted data: an entry that settled before its close, or is
+  not three finite times with a real deadline, is ignored; each lag is clamped to [0, its
+  deadline]; a series needs 20 good settlements. A series stuck on "fewer than 20 settled markets"
+  is one no tape has replayed enough of yet. The House asks before
+  the book; the book still judges every entry after it, from the same answer. The book's own shorter
+  text ("expected to resolve in N hours; entries must resolve within 48", no basis) would now mean
+  the two looks disagreed, at the boundary a moment apart.
 - **"booked ... as dust instead of selling it"** (info, Sept 24, 2026): a wind-down found a holding
   the venue will not trade -- worth under a cent even at the ask (a holding under a cent at its mark,
   the last bid, is quoted again: a stub bid on a thin book is not a price), or under the venue's
@@ -738,6 +833,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `Settings.enroll_displaces` | on | A merged strategy takes a seat in a full league, repairs first: from an agent still running the code it corrects, else from the weakest eligible resident. A born corrected child retires the agents off real money still running that code (`superseded`). Off: merged strategies wait for an empty seat |
+| `league/tapes.py` | `SETTLED_MEMO_ROWS` (`KalshiData.settled_memo_rows`) | 400,000 rows | A Kalshi series' day whose every market has settled is read from `ltcm.history` once a process and kept in memory: only the fields the tape reads (`SETTLED_FIELDS`, times as epoch seconds), the least recently used day out first (Sept 24, 2026). Measured on the real listings: 240-245 bytes a row held for KXBTC, KXBTCD, KXETH and KXETHD (3,350-3,470 as History parses it), 347 for the other series, so at most about 140 MB; a 14-day tape of those four is 293,888 rows. A second such tape costs about a quarter of what it did (on the developer machine: about 58 s every time before, 10-12 s once held; interleaved on a varying clock, a median 80 against 19.5 CPU-seconds). 0: every read is History's, as before. A day still settling keeps `settled_listing_ttl` (600 s) |
 | `league/game.json` | `audit.house_pays` | on | The House pays for promotion audits. Off: the agent pays at cost, and one under `audit.min_credits_usd` ($0.60) waits at `audit_credits` |
 | | `research.gate.enabled`, `after`, `max_factor`, `sample_percent` | on, 2, 8, 10 | Back off research whose passes come back empty while nothing about the agent has changed; a 10% sample still runs. The routine epoch payout is not a trigger (Sept 23, 2026) |
 | | `research.gate.clock_runs`, `abstain_lock_after` | `winners_and_idle`, 3 | Research runs on evidence, not the clock (Sept 23, 2026: 90.3% of 7,532 sessions abstained, $112.80 of $147.44, 41% of runs were `clock`/`backoff_elapsed`). A session is due only on a trigger (fill, settlement, refusal, active block, audit or repair verdict, code or rung change, a lesson or note for its desk, a fulfilled request, a lifted blocker); a winner (positive earned record) and an idle agent still run on the clock; the 24 h heartbeat and the sample stay. After 3 abstaining sessions in a row only a settlement, a fill or a refusal wakes the agent until a session produces a candidate. `all` / 0 restore the Sept 22 rule. Every `research.gate` row carries `trigger` and `record`; `python -m league.research_gate LEDGER` prices each trigger (`by_trigger`) |
