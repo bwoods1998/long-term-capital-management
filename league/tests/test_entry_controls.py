@@ -302,6 +302,41 @@ class InPlaceEdit(ControlCase):
         self.assertEqual(self.house.registry.get(self.agent.id).params["notional_usd"], 25.0)
 
 
+class EditInTheSeatMarket(ControlCase):
+    """Review of #249: `_displaceable` read an in-place edit as a new program. The edit bought a fresh
+    grace (a shield against the House's refill), and cleared "traded since its program's opportunity",
+    so a trader lost its protection and an evidenced newcomer could take its seat at once. An edit
+    keeps the seat and the record: the program's clock runs on."""
+
+    def edit_in_place(self, agent, changes, session="s1"):
+        """A passing edit replay on record (`_edit_replay` writes it), then the pass's request."""
+        agent = self.house.registry.get(agent.id)
+        was = dict(agent.params)
+        params = {**was, **changes}
+        self.house.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": True, "reasons": [],
+                                                    "params": params, "was": was}, agent=agent.id)
+        return self.apply(agent, "edit_params", session=session, params=params, was=was, code_sha256=agent.code_sha256)
+
+    def displaceable(self, **kw):
+        return [row[-1].id for row in self.house._displaceable(self.house.game["economy"], **kw)]
+
+    def test_an_edit_buys_no_fresh_grace(self):
+        agent = self.seated("sized", SIZED)
+        self.clock.advance(13 * 3600)  # past the 12-hour grace, never traded
+        self.assertEqual(self.displaceable(), [agent.id])
+        self.assertEqual(self.edit_in_place(agent, {"notional_usd": 20.0}), ["edit_params"])
+        self.assertEqual(self.displaceable(), [agent.id])
+
+    def test_an_edit_keeps_a_traders_protection(self):
+        agent = self.seated("sized", SIZED)
+        self.data.price = 79000.0  # under its line: it buys
+        self.broker.set_quote(self.btc, "78995", "79005")
+        self.house.tick()
+        self.assertIsNotNone(self.house.ledger.last("book.fill", agent=agent.id))
+        self.assertEqual(self.displaceable(evidenced=True), [])  # a trader short of its record keeps its seat
+        self.assertEqual(self.edit_in_place(agent, {"notional_usd": 20.0}), ["edit_params"])
+        self.assertEqual(self.displaceable(evidenced=True), [])
+
 if __name__ == "__main__":
     import unittest
 

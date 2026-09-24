@@ -3887,6 +3887,12 @@ class House:
                 signature = None
                 for entry in self.ledger.iter(kinds=("agent.born", "agent.strategy", "eval.verdict"), agent=agent.id):
                     p = entry.payload
+                    if entry.kind == "agent.strategy" and p.get("control"):
+                        # Its own entry control (X1): a pause or resume restates the program, and an
+                        # in-place edit keeps its seat and its record, so neither is a new opportunity.
+                        # Read as one, an edit bought a fresh grace and cleared "traded since", which
+                        # let an evidenced newcomer take a trader's seat at once (review of #249).
+                        continue
                     if entry.kind in ("agent.born", "agent.strategy"):
                         current = (p.get("code_sha256"), p.get("params"), p.get("needs"))
                         if current != signature:
