@@ -81,6 +81,34 @@ class ClosedDesks(TransferCase):
         self.clock.advance(301)
         self.assertEqual(self.foundry._closed_desks(), {})
 
+    def test_a_family_reopens_a_closed_desk_only_on_its_record_there(self):
+        """The review of #262: `House.family_forward` pools a family over every desk it lives on (kalshi-favorites lives
+        on kalshi-crypto-strikes and kalshi-weather at T4): its blocks elsewhere are no forward record on the closed desk."""
+        self.settings(closed_desks=[self.DESK], exploration_share=0, fast_share=0, transfer_share=0)
+        self.member("stayer", "shared-family", PASSER, specialty=self.DESK)
+        away = self.member("traveller", "shared-family", PASSER, specialty="alpaca-index-etfs")
+        for hour in range(4):
+            self.house.ledger.append("eval.block", {"log_growth": 0.01, "active": True, "book": "alpaca-paper",
+                                                    "key": f"2026-09-10T0{hour}"}, agent=away.id)
+        self.clock.advance(301)
+        self.assertIn("active blocks there", self.foundry._closed_desks()[self.DESK])
+
+    def test_members_active_in_one_hour_are_one_block_of_their_family(self):
+        """The review of #262: three members of one family active in the same hour (T4: huang-hd8ff7c-3, -4 and -5 at
+        2026-09-24T04) are one forward block of the family, not three; three hours are three."""
+        self.settings(closed_desks=[self.DESK], exploration_share=0, fast_share=0, transfer_share=0)
+        members = [self.member(name, "sibling-family", PASSER, specialty=self.DESK) for name in ("sib-one", "sib-two", "sib-three")]
+        for member in members:
+            self.house.ledger.append("eval.block", {"log_growth": 0.01, "active": True, "book": "alpaca-paper",
+                                                    "key": "2026-09-10T04"}, agent=member.id)
+        self.clock.advance(301)
+        self.assertIn(self.DESK, self.foundry._closed_desks())
+        for hour in ("05", "06"):
+            self.house.ledger.append("eval.block", {"log_growth": 0.01, "active": True, "book": "alpaca-paper",
+                                                    "key": f"2026-09-10T{hour}"}, agent=members[0].id)
+        self.clock.advance(301)
+        self.assertEqual(self.foundry._closed_desks(), {})
+
     def test_a_desk_whose_families_lose_stays_closed(self):
         self.settings(closed_desks=[self.DESK])
         member = self.member("loser", "majors-taker", PASSER, specialty=self.DESK)

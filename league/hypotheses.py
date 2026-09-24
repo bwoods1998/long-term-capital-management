@@ -1109,27 +1109,46 @@ class Foundry:
     def _closed_desks(self) -> dict[str, str]:
         """Desks that get no card on any route (E2 of the close-the-gaps run, Sept 24, 2026), with why: each of
         `closed_desks` until a family there -- of any agent that lived on the desk -- shows a positive pooled
-        forward record over `closed_reopen_blocks` active blocks (`House.family_forward`: the mechanism
-        ledger's tape since Deploy B). Measured at T0: every kalshi-crypto-15m family negative on its pooled
-        record (crypto-15m-favorites n 106, bound -0.0064), and kalshi-crypto-strikes -10.3% an active block,
-        2 replay passes in 40 births."""
+        forward record over `closed_reopen_blocks` active blocks ON THAT DESK (`_closed_desk_forward`). Measured
+        at T0: every kalshi-crypto-15m family negative on its pooled record (crypto-15m-favorites n 106, bound
+        -0.0064), and kalshi-crypto-strikes -10.3% an active block, 2 replay passes in 40 births."""
         closed = [str(d) for d in (self.settings.get("closed_desks") or [])]
         if not closed:
             return {}
         need = max(1, int(self.settings.get("closed_reopen_blocks") or 3))
         try:
-            forward = self.house.family_forward()
+            forward = self._closed_desk_forward(closed)
         except Exception:  # noqa: BLE001 - an unreadable record reopens nothing
             forward = {}
-        on: dict[str, set[str]] = {}
-        for agent in list(self.house.registry.agents.values()):
-            if agent.specialty in closed and agent.family:
-                on.setdefault(agent.specialty, set()).add(agent.family)
         out = {}
         for desk in closed:
-            if not any(int(forward.get(f, (0, 0.0))[0]) >= need and float(forward.get(f, (0, 0.0))[1]) > 0 for f in on.get(desk, ())):
-                out[desk] = f"no family on {desk} has a positive forward record over {need} active blocks"
+            if not any(blocks >= need and growth > 0 for blocks, growth in (forward.get(desk) or {}).values()):
+                out[desk] = f"no family on {desk} has a positive forward record over {need} active blocks there"
         return out
+
+    def _closed_desk_forward(self, desks: Sequence[str]) -> dict[str, dict[str, tuple[int, float]]]:
+        """Desk -> family -> (its distinct active forward blocks on that desk, their summed log growth), from the
+        `eval.block` rows of the family's members that lived on the desk, living or dead: one block a block key,
+        however many members were active in it.
+
+        The review of #262 (Sept 24, 2026): read from `House.family_forward`, which pools a family over every desk
+        it lives on and counts each member's block, a closed desk reopened on a family's record elsewhere
+        (kalshi-favorites lives on kalshi-crypto-strikes and kalshi-weather) or on one hour of siblings (three
+        members of one family, active in the same hour, were three blocks: huang-hd8ff7c-3, -4 and -5 at
+        2026-09-24T04 on the T4 snapshot)."""
+        ledger = self.house.ledger
+        rows: dict[str, dict[str, list[Any]]] = {}
+        for agent in list(self.house.registry.agents.values()):
+            if agent.specialty not in desks or not agent.family:
+                continue
+            row = rows.setdefault(agent.specialty, {}).setdefault(agent.family, [set(), 0.0])
+            for entry in ledger.iter(kinds="eval.block", agent=agent.id):
+                p = entry.payload
+                if not p.get("active"):
+                    continue
+                row[0].add(str(p.get("key") or entry.id))  # a row with no block key is a block of its own
+                row[1] += float(p.get("log_growth") or 0.0)
+        return {desk: {family: (len(keys), growth) for family, (keys, growth) in families.items()} for desk, families in rows.items()}
 
     def _blocked_desks(self) -> set[str]:
         """Desks with an open foundry repair report: no more cards until it is verified."""

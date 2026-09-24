@@ -448,7 +448,8 @@ refuses on any of them, though a canary runs no lab; `league.watchdog status` sh
     and state their `fee` and `edge_needed` (a card without them is refused before its replay, and
     says so in the call's `merton.pass` `refused`); `game.json` `hypotheses.fast_desks` is the
     deep-market desks; `closed_desks` (kalshi-crypto-strikes, kalshi-crypto-15m) get no card until a
-    family there is positive over three active forward blocks; the first transfer (`first_transfer`)
+    family there is positive over three active forward blocks on that desk (one block a block key,
+    however many of its members were active in it); the first transfer (`first_transfer`)
     scales the weather favourites on the ensemble's fair value, once: its call's `merton.pass`
     `allocation.transfer` carries `scale: true`. A family at its measured capacity gets no
     evidence-driven House mutation (E3).
