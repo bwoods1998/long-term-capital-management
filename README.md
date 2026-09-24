@@ -132,7 +132,8 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
   doubling after each 10 further winning real settlements while the whole real record's bound at 80%
   holds -- up to full Kelly on the bound and 60% of the venue for the whole family, held where fills
   at the bigger size halve, and back to bunts, by free cash only, when the bound falls. Leaving the
-  swing, or a member's new program, lapses the approval: the next entry is audited again. On the T0
+  swing, a member's new program or a member born into the family lapses the approval: the next entry
+  is audited again. On the T0
   snapshot no family qualified: 93c favourites need 32 clean real events for the loss-rate bound at
   90% (a look at 35). An options agent's probe or bunt is one contract's premium, $80, because a
   contract cannot be cut smaller. A position is capped at a fifth of the stake on Kalshi and half at

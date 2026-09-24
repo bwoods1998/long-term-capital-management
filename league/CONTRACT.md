@@ -152,8 +152,8 @@ rate at the bigger size is under half its fill rate at the smaller one ("capacit
 never under the bunt. The envelope's headroom bounds every raise. A bound at zero or below returns the
 members to bunts (to probes if the pooled proof has gone too), by free cash only, and so does a live
 grant that stops releasing stakes above the bunt (its rung 3). Leaving the swing lapses the family's
-approval, and so does a new program taken by any member after the audit looked: the next entry is
-audited again. The family's audit is the family's: it is never read as the verdict on
+approval, and so does a new program taken by any member, or a member born into the family (a research
+child), after the audit looked: the next entry is audited again, while a swing already running is untouched. The family's audit is the family's: it is never read as the verdict on
 the member it was written against, whose own promotions are audited as before. A swinging member's positions are the same
 share of its stake, and the book holds it to its daily-loss rule as it holds every swing.
 
