@@ -129,6 +129,28 @@ PROBE_BOX = "house-probe"
 ORDER_INVARIANTS_EVERY_SECONDS = 60.0
 ORDER_INVARIANTS_FIRST_ROWS = 2000
 QUIET_ROUND_THE_CLOCK_SECONDS = 1800.0
+#: Warnings that repeat are defects (L3, Sept 24, 2026): the same warning text (`alert_key`) this many
+#: times inside the window is ONE error alert, and it is listed in health.json `repeating_warnings`
+#: until it has been quiet for the window. "the lab's step failed (IndexError: list index out of
+#: range)" was a warning 115 times in 2 h 18 min on Sept 23-24, 43 of them in two hours, and nothing
+#: escalated; at this rule it would have been an error, with its traceback, at 23:44:48Z.
+REPEAT_WARNINGS = 10
+REPEAT_WINDOW_SECONDS = 1800.0
+#: A session the provider broke gives the agent its turn back this soon (`House.research`).
+PROVIDER_RETRY_SECONDS = 900.0
+#: The lab evaluated nothing for this long while its queue was not empty: a health failure (L3).
+LAB_IDLE_SECONDS = 3600.0
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_NUMBERED = re.compile(r"[\w.:/@+\-]*\d[\w.:/@+\-]*")
+
+
+def alert_key(text: Any) -> str:
+    """What makes two warnings the same text: ids and numbers folded, so "failed 3 times" and "failed
+    4 times" are one, and two agents' identical failures with two order ids are one. A UUID becomes
+    `<id>` and every token that carries a digit (a count, an amount, a time, an agent or order id, a
+    URL with a version in it) becomes `#`; words stay, so two books or two desks stay apart."""
+    folded = _NUMBERED.sub("#", _UUID.sub("<id>", str(text or "")))
+    return re.sub(r"\s+", " ", folded).strip()[:300]
 
 
 @dataclass
@@ -221,6 +243,13 @@ class House:
         self._base_game = deepcopy(dict(game or load_game()))
         self._burst = active(campaigns, clock)
         self.game = game_for(self._base_game, self._burst)
+        # L2 (Sept 24, 2026): turbo.json `sail_research_usd_per_hour`, the Sail research cap
+        # (`_sail_cap_state`). It only ever holds research back, so it applies with or without a burst.
+        from .overnight import load_turbo
+
+        cap = load_turbo().get("sail_research_usd_per_hour")
+        self._sail_research_cap: Decimal | None = Decimal(str(cap)) if cap is not None else None
+        self._sail_cap_cache: tuple[float, dict[str, Any]] | None = None
         if self._burst:
             from .overnight import policy_with_turbo
             accelerated = policy_with_turbo(self._burst)
@@ -588,8 +617,57 @@ class House:
     def alert(self, level: str, text: str, **payload: Any) -> None:
         """An `ops.alert` row. `payload` rides in the same row beside the level and the text (D1,
         Sept 24, 2026: the Alpha Lab's step sends its traceback as `_traceback`; a key that starts
-        with an underscore is private, and `ledger.public_view` strips it from everything published)."""
+        with an underscore is private, and `ledger.public_view` strips it from everything published).
+
+        A warning that repeats escalates (L3, Sept 24, 2026; `_repeating`): the same text
+        (`alert_key`) `REPEAT_WARNINGS` times inside `REPEAT_WINDOW_SECONDS` becomes ONE error alert
+        carrying the last warning's payload -- its traceback when the caller supplied one -- with
+        `repeated` (the folded text, the count, first and last seen) and `began_at` (when the run of
+        repeats began: `league/watchdog.py` counts an error whose condition began before a promotion
+        as inherited, never as the new release's doing)."""
         self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
+        if str(level).lower() == "warning":
+            self._repeating(str(text), payload)
+
+    def _repeating(self, text: str, payload: Mapping[str, Any]) -> None:
+        """Count one warning toward its run of repeats; escalate once when the run reaches the line.
+        The runs live in the House's state (house.json), so a restart neither forgets a run nor
+        escalates it again."""
+        lock, state = getattr(self, "_state_lock", None), getattr(self, "_state", None)
+        if lock is None or state is None:
+            return  # an alert raised while the House is still being built
+        now = self.clock()
+        key = alert_key(text)
+        escalate = None
+        with lock:
+            runs = state.setdefault("repeating_warnings", {})
+            for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+                runs.pop(quiet)
+            run = runs.setdefault(key, {"first_seen": now_iso(self.clock), "count": 0, "times": [], "escalated": None})
+            run["count"] = int(run.get("count") or 0) + 1
+            run["times"] = [t for t in run.get("times") or [] if now - float(t) < REPEAT_WINDOW_SECONDS][-4 * REPEAT_WARNINGS:] + [now]
+            run.update(text=text[:300], last_seen=now_iso(self.clock), last_epoch=now)
+            if len(run["times"]) >= REPEAT_WARNINGS and not run.get("escalated"):
+                run["escalated"] = now_iso(self.clock)
+                escalate = {k: run[k] for k in ("first_seen", "last_seen", "count")} | {"in_window": len(run["times"])}
+        if escalate is not None:
+            minutes = int(REPEAT_WINDOW_SECONDS // 60)
+            self.ledger.append("ops.alert", {
+                **payload, "level": "error",
+                "text": f"a warning repeated {escalate['in_window']} times in {minutes} minutes: {text}"[:1000],
+                "repeated": {"text": key, "count": escalate["count"], "first_seen": escalate["first_seen"], "last_seen": escalate["last_seen"]},
+                "began_at": escalate["first_seen"]})
+
+    def _repeating_health(self) -> list[dict[str, Any]]:
+        """health.json `repeating_warnings`: each escalated run until it has been quiet for the window."""
+        now = self.clock()
+        with self._state_lock:
+            runs = self._state.setdefault("repeating_warnings", {})
+            for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
+                runs.pop(quiet)
+            return [{"text": run.get("text"), "key": key, "count": run.get("count"), "first_seen": run.get("first_seen"),
+                     "last_seen": run.get("last_seen"), "escalated_at": run.get("escalated")}
+                    for key, run in sorted(runs.items(), key=lambda kv: str(kv[1].get("first_seen"))) if run.get("escalated")]
 
     # ------------------------------------------------------- a tick that never blocks
     def _box_patience(self) -> Any:
@@ -3487,13 +3565,16 @@ class House:
             return False
         if self.paused():
             return False
-        if not self.pacer.may_spend(self._research_budget_kind(agent)):
+        kind = self._research_budget_kind(agent)
+        if not self.pacer.may_spend(kind):
             return False
         if self.deploying():
             return False  # existing sessions are checkpointed; do not add work during staging
         pending = self.research_jobs.active(agent.id)
         if pending:
             return self.clock() >= pending["available"]
+        if kind == "sail" and self._sail_research_capped():
+            return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
         rules = self.game.get("research") or {}
         if self.economy.balance(agent.id) <= Decimal(str(rules.get("min_credits_usd", "0.10"))) * 2:
             return False
@@ -3562,7 +3643,13 @@ class House:
                                              "empty_streak": streak, "sampled": decision == "sample"}, agent=agent.id)
 
     def _note_research_result(self, agent_id: str, outcome: Any) -> None:
-        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy."""
+        """Count empty passes in a row: no candidate, no replay trial and no Merton strategy. A session
+        that is no completed pass (`research_gate.completed_pass`: a provider failure) moves nothing,
+        as it moves nothing in the Jev gate's streak (Sept 24, 2026)."""
+        from .research_gate import completed_pass
+
+        if not completed_pass({"reason": getattr(outcome, "reason", "")}):
+            return
         useful = bool(getattr(outcome, "candidate", None) or int(getattr(outcome, "trials", 0) or 0)
                       or getattr(outcome, "consulted", ""))
         with self._state_lock:
@@ -4206,6 +4293,53 @@ class House:
             return 'campaign allowance unavailable'
         return ''
 
+    def _sail_research_capped(self) -> bool:
+        """Whether the last hour's Sail research spend has reached turbo.json
+        `sail_research_usd_per_hour` (`_sail_cap_state`): then no NEW session starts on Sail."""
+        state = self._sail_cap_state()
+        return bool(state and state["capped"])
+
+    def _sail_cap_state(self) -> dict[str, Any] | None:
+        """The Sail research cap as health.json shows it, read at most once a minute; None without a
+        cap or a campaign guard. One `ops.budget` row ("sail research cap") each time it closes or
+        opens.
+
+        The hour's spend is the settled cost of the Sail commitments created in the last hour
+        (campaigns.sqlite `commitments`, kind `sail`: every Sail call is research, campaign
+        `baseline-research`). A call in flight counts once it settles, seconds to minutes later: its
+        reservation is its worst case, about $0.25 against a median $0.016, and six in flight would
+        read as a spent cap. Sept 23, 2026, 22-23Z: Sail research settled $11.66 in an hour (344
+        calls) once cheap research moved to Sail; $1.27 in the hour before T0."""
+        cap, guard = getattr(self, "_sail_research_cap", None), self.campaigns
+        if cap is None or guard is None:
+            return None
+        now = self.clock()
+        cached = getattr(self, "_sail_cap_cache", None)
+        if cached is not None and now - cached[0] < 60:
+            return cached[1]
+        try:
+            with guard.lock:
+                settled, calls, inflight, held = guard.db.execute(
+                    "SELECT COALESCE(SUM(cost),0), COALESCE(SUM(cost IS NOT NULL),0), COALESCE(SUM(cost IS NULL),0),"
+                    " COALESCE(SUM(CASE WHEN cost IS NULL THEN reserved ELSE 0 END),0) FROM commitments WHERE kind='sail' AND created>=?",
+                    (now - 3600,)).fetchone()
+        except Exception as exc:  # noqa: BLE001 - an unreadable meter caps nothing; the campaign's own limits stand
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}", "capped": False}
+        spent = (Decimal(int(settled)) / 1_000_000).quantize(CENT)
+        state = {"cap_usd": format(cap, "f"), "last_hour_usd": format(spent, "f"), "calls": int(calls),
+                 "inflight_calls": int(inflight), "inflight_reserved_usd": format((Decimal(int(held)) / 1_000_000).quantize(CENT), "f"),
+                 "capped": spent >= cap}
+        with self._state_lock:
+            before = bool(self._state.get("sail_research_capped"))
+            self._state["sail_research_capped"] = state["capped"]
+        if state["capped"] != before:
+            self.ledger.append("ops.budget", {"what": "sail research cap", "capped": state["capped"], "last_hour_usd": state["last_hour_usd"],
+                                              "cap_usd": state["cap_usd"], "calls": state["calls"],
+                                              "reason": ("the last hour's Sail research spend reached the cap: no new Sail session starts"
+                                                         if state["capped"] else "the last hour's Sail research spend is under the cap again")})
+        self._sail_cap_cache = (now, state)
+        return state
+
     def research_capabilities(self, agent: Agent) -> dict[str, Any]:
         from .capabilities import describe
         result = describe(agent, self.settings, self.niche_of(agent), clock=self.clock,
@@ -4419,12 +4553,20 @@ class House:
                 if candidate:
                     self._admit_researched(agent.id, generation, candidate, session)
                 self._trace_adoption(agent.id, session, outcome.candidate)
-            self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'))
+            # Sept 24, 2026 (L2): a session the provider broke (a 5xx; `research_gate.provider_fault`) was
+            # refunded by the researcher and is not a completed pass: its job is closed as cancelled, so
+            # it does not restart the research clock, and the agent may research again in
+            # PROVIDER_RETRY_SECONDS instead of after its whole interval. Every other ending is a pass.
+            from .research_gate import provider_fault
+
+            broken = provider_fault(getattr(outcome, 'reason', ''))
+            retry = self.research_interval_hours(agent) * 3600 - PROVIDER_RETRY_SECONDS if broken else 0.0
+            self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'), cancelled=broken)
             self._note_research_result(agent.id, outcome)
             with self._lifecycle_lock:
                 with self._state_lock:
                     if self._generation(agent.id) is not None:
-                        self._state['last_research'][agent.id] = self.clock()
+                        self._state['last_research'][agent.id] = self.clock() - max(0.0, retry)
             return outcome
 
     def _trace_adoption(self, agent_id: str, session: str, candidate: Mapping[str, Any]) -> None:
@@ -5371,6 +5513,22 @@ class House:
             seats = self._seats_health()
         except Exception as exc:  # noqa: BLE001 - health is written whatever the seat market says
             seats = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        lab = self.lab.health() if self.lab is not None else None
+        # L3 (Sept 24, 2026): warnings that repeat, and the health failures the in-box watchdog reads.
+        try:
+            repeating = self._repeating_health()
+        except Exception as exc:  # noqa: BLE001
+            repeating = [{"error": f"{type(exc).__name__}: {str(exc)[:160]}"}]
+        try:
+            failures = self._health_failures(lab)
+        except Exception as exc:  # noqa: BLE001 - a check that cannot run is not a failure it found
+            failures = []
+            self.alert("warning", f"the health failures could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
+        try:
+            economy = {"sail_cap": self._sail_cap_state(),
+                       "merton": self.merton.pause_state() if getattr(self.merton, "pause_state", None) else None}
+        except Exception as exc:  # noqa: BLE001
+            economy = {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
         health = {
             "at": summary["at"], "living": len(self.registry.living()), "dead": len(self.registry.dead()),
             "books": {name: {"frozen": book.frozen, "open_orders": len(book.open_orders()),
@@ -5399,15 +5557,68 @@ class House:
             "stopped_because": summary.get("stopped_because"),
             "jev": self.jev_floor.health() if self.jev_floor else None,
             "hypotheses": self.hypotheses.stats() if self.hypotheses is not None else None,
-            "lab": self.lab.health() if self.lab is not None else None,  # closed since when, paid phases skipped, graduates waiting
+            "lab": lab,  # closed since when, paid phases skipped, graduates waiting
             "feeds": self.feeds.health() if self.feeds is not None else None,
             "shards": self.shards.health() if self.shards is not None else None,
             "deferred": deferred,
             "seats": seats,
+            "repeating_warnings": repeating,
+            "failures": failures,
+            "research_economy": economy,
         }
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.root / "health.json")
+
+    def _health_failures(self, lab: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+        """health.json `failures`: what the in-box watchdog (league/watchdog.py) reads as a failure of
+        the House, each `{check, text, since}`. The House says so once when one begins (an error
+        alert whose `began_at` is its `since`) and once when it ends (an info).
+
+        `lab_evaluates` (L3, Sept 24, 2026): the Alpha Lab evaluated nothing for LAB_IDLE_SECONDS
+        while its queue was not empty. At T0 of the close-the-gaps run its last batch was 23:37:17Z
+        with 618 candidates queued, and only a warning a step said anything. What the watchdog does
+        with it is in its `read_health`: a canary would refuse on it, the watch after a promotion
+        never rolls back for it (an hour of nothing cannot begin inside a ten-minute watch)."""
+        out = []
+        idle = self._lab_idle(lab)
+        if idle is not None:
+            out.append(idle)
+        current = {row["check"]: row for row in out}
+        with self._state_lock:
+            known = self._state.setdefault("health_failures", {})
+            began = [row for check, row in current.items() if check not in known]
+            ended = [check for check in list(known) if check not in current]
+            for row in began:
+                known[row["check"]] = row["since"]
+            for check in ended:
+                known.pop(check, None)
+        for row in began:
+            self.alert("error", f"health failure: {row['text']}", failure=row["check"], began_at=row["since"])
+        for check in ended:
+            self.alert("info", {"lab_evaluates": "the lab evaluates again"}.get(check, f"the health failure {check} has cleared"),
+                       failure=check)
+        return out
+
+    def _lab_idle(self, lab: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        """The lab's health failure, or None: candidates queued, and no batch for LAB_IDLE_SECONDS since
+        the later of its last batch and its oldest queued candidate (a queue that filled half an hour
+        ago has not had its hour)."""
+        if self.lab is None or not isinstance(lab, Mapping):
+            return None
+        queued = int(lab.get("queued") or 0)
+        if queued <= 0:
+            return None
+        last = self.lab._q("SELECT MAX(at) AS at FROM batches")[0]["at"]
+        oldest = self.lab._q("SELECT MIN(created) AS at FROM candidates WHERE status='queued'")[0]["at"]
+        since = max(float(last or 0), float(oldest or 0))
+        if not since or self.clock() - since < LAB_IDLE_SECONDS:
+            return None
+        shown = now_iso(lambda: float(last)) if last else "never"
+        notes = "".join(f"; {name}: {str(lab.get(key))[:200]}" for key, name in (("refusal", "closed"), ("error", "its step fails"))
+                        if lab.get(key))
+        return {"check": "lab_evaluates", "since": now_iso(lambda: since),
+                "text": f"the lab evaluated nothing in the last hour while {queued} candidates are queued (last batch {shown}{notes})"}
 
     def close(self, *, wait: float | None = 5.0) -> None:
         self._closing.set()

@@ -309,6 +309,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                         daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
                         purpose_calls=jev.get("purpose_calls") or None)
         house.jev_floor = JevFloor(house, sensor, jev)
+        if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
+            # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
+            house.researcher.routes.lock = house.jev_floor.gate.lock_profile
     if not canary:
         from .frontier import FrontierMonth
 
