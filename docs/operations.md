@@ -179,6 +179,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - the lab's `lab.sqlite` table counts, its `lab.*` ledger rows, the batches it ran since `--since`,
     and from `health.json` whether its step is failing (`failing_since`, `failures_in_a_row`,
     `error`; D1, Sept 24, 2026);
+  - the seat market (`## seats`, S1-S4 of the close-the-gaps run, Sept 24, 2026): waiters by class
+    (the `retained` candidates of dead authors too), the displaceable count, the seats holding no
+    evidence (`seats_holding_none`: count and the first ids), the desks' evidence clocks, and why each
+    class of waiter was last refused a seat; and each House-sent sale stopped after three identical
+    refusals (`wind down stopped`, from house.json `wind_down_refusals`);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
     checkpoint's age and whether it carries the board.

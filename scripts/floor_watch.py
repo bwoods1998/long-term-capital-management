@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 BOX_SNIPPET = r'''
 import sqlite3, pathlib, json, sys, collections, math, time, calendar
-root = pathlib.Path('/workspace/state')
+root = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else '/workspace/state')  # a state directory to read (tests); the box's by default
 since = sys.argv[1]
 out = {}
 def ro(name):
@@ -147,10 +147,28 @@ try:
 except Exception:
     hs = {}
 sh, seats, labh = h.get('shards') or {}, h.get('seats') or {}, h.get('lab') or {}
+seat_block = {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour', 'waiters_by_desk')} if seats else None
+if seats:
+    # S1-S4 (the close-the-gaps run, Sept 24, 2026): the seats holding no evidence (no forward score, no fill, no grace
+    # left: count and the first ids), the desks' evidence clocks the grace follows, and why each class of waiter
+    # (the retained research candidates of dead authors too) was last refused a seat.
+    none = seats.get('seats_holding_none') or {}
+    seat_block['seats_holding_none'] = {'count': none.get('count'), 'ids': (none.get('ids') or [])[:12]} if none else None
+    seat_block['evidence_clocks'] = (seats.get('evidence_clocks') or {}).get('hours')
+    seat_block['refused'] = {c: str((r or {}).get('why') or '')[:100] for c, r in (seats.get('last_refused_birth') or {}).items()} or None
+# The House-sent sales the venue or the book refused three times in a row (`WIND_DOWN_REFUSALS`): not sent again
+# until the holding changes or a day has passed (house.json `wind_down_refusals`).
+stopped = []
+for a, books in (hs.get('wind_down_refusals') or {}).items():
+    for b, rows in (books or {}).items():
+        for key, r in (rows or {}).items():
+            if int((r or {}).get('count') or 0) >= 3:
+                stopped.append(f"{a} {b} {key} refused {r.get('count')}x: {str(r.get('detail') or '')[:90]}")
 out['blocks'] = {
     'tier': hs.get('frontier_tier'),
     'shards': {k: sh.get(k) for k in ('balances', 'moved_24h_usd', 'unattributed_usd', 'blocked', 'pending', 'last_error')} if sh else None,
-    'seats': {k: seats.get(k) for k in ('waiters', 'displaceable', 'never_traded_past_grace', 'waiting_over_an_hour')} if seats else None,
+    'seats': seat_block,
+    'wind_down_stopped': stopped[:10] or None,
     'lab': {'closed_since': labh.get('closed_since'), 'llm_paused': (labh.get('llm') or {}).get('paused'),
             'waiting_seat': (labh.get('waiting_seat') or {}).get('count'), 'queued': labh.get('queued')} if labh else None}
 # D1 (Sept 24, 2026): whether the lab's step is failing, and since when (five in a row sets it).
@@ -225,6 +243,14 @@ def render(box: dict, site: dict, gateway: dict) -> str:
                  f"  error {step.get('error') or '-'}  batches since --since {box.get('lab_batches')}"
                  f"  tables {box.get('lab')} {box.get('lab_ledger', '')}")
     lines.append(f"## costs {json.dumps(box['costs'])}  gateway {json.dumps(gateway)}")
+    seats = (box.get("blocks") or {}).get("seats") or {}
+    if seats:
+        none = seats.get("seats_holding_none") or {}
+        lines.append(f"## seats waiters {seats.get('waiters')}  displaceable {seats.get('displaceable')}  holding none "
+                     f"{none.get('count', '-')} {none.get('ids') or ''}  clocks {seats.get('evidence_clocks')}"
+                     f"  refused {seats.get('refused') or '-'}")
+    for row in (box.get("blocks") or {}).get("wind_down_stopped") or []:
+        lines.append("  wind-down stopped " + row)
     if box.get("blocks"):
         lines.append(f"## blocks {json.dumps(box['blocks'], default=str)}")
     if box.get("yield"):
