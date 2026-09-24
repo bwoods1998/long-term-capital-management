@@ -342,13 +342,14 @@ class RealPnl:
     `realized` on `kalshi` and `alpaca`, fees included, practice books never.
 
     Why the books' realized rows and not the allocator's `floor_pnl` (Sept 24, 2026): `floor_pnl`
-    is a level, equity less stake over the accounts on the real books now, since those books began;
-    it has no 24-hour window, and it forgets the result of an account swept after a demotion, so
-    its change over a day is neither the day's P&L nor stable. The ledger's settlements and closing
-    fills are the venue's own verdicts, windowed exactly, and they survive a restart. What they
-    leave out is the mark of positions still open, which a day-horizon book settles within a day or
-    three. At T0 of the close-the-gaps run this read +$5.10 over 24 hours (34 settlements) and
-    -$2.73 over the last six.
+    is a level, equity less stake over every account the real books have held since they began (a
+    sweep moves cash and stake together, so it keeps an account's result). It has no 24-hour
+    window: its change over a day needs a reading from a day before, which the House does not keep
+    across a restart, and it moves with the marks of positions still open. The ledger's settlements
+    and closing fills are the venue's own verdicts, windowed exactly, and they survive a restart.
+    What they leave out is the mark of positions still open, which a day-horizon book settles within
+    a day or three. At T0 of the close-the-gaps run this read +$5.10 over 24 hours (34 settlements)
+    and -$2.73 over the last six; `floor_pnl` read +$0.75.
 
     Read incrementally (only rows after the last one seen) at most every `every_seconds`."""
 
