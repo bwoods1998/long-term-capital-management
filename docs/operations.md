@@ -248,7 +248,8 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - Under the allocator (Sept 23, 2026) only the allocator writes these for moves up: `promoted`
     ("the allocator seated it as a probe" or "as a bunt", or moved it to the swing band), `auditing` (a known
     defect before the bunt, or the first swing), `envelope` (the venue's envelope cannot seat
-    another bunt and no weaker flat bunt can be displaced; with `capital_usd` and `headroom_usd`),
+    another probe or bunt and no weaker flat agent can be displaced -- a probe displaces only a probe;
+    with `capital_usd` and `headroom_usd`),
     `venue_cash` (the account's free cash cannot take the stake now), `campaign` (the grant has not
     released the swing band) and `accounting_integrity`.
 - **Ledger rows from the Sept 23 revision:**

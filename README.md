@@ -138,7 +138,7 @@ longer move anyone to or on real money. They are the rollback path (`allocator.e
 - **The envelope.** Per venue, it is the grant's capital plus realized profit there, so stars
   compound past the starting envelope; losses count in full. When it cannot seat every eligible
   agent, the best E goes first, and a newcomer with better evidence displaces the weakest flat
-  bunt, one per venue per pass.
+  bunt or probe, one per venue per pass; a probe displaces only a probe, never a proven family's bunt.
 - **Throttle.** If the floor's real P&L falls below −30% of the envelope, every real stake is halved
   until it recovers to −15%, but never below the smallest stake that can still trade. Each change
   writes an `ops.budget` row (`what: "allocator throttle"`).

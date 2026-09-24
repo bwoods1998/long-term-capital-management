@@ -168,7 +168,7 @@ or never swings at all.
   {alloc['swing_exit_w_real']}; losing {float(alloc['real_drawdown_demote']):.0%} of your real record from its high sends you back to paper at once.
 {trial_text}  W_paper under {alloc['die_below']} after {alloc['die_min_trades']} closed trades is DEATH. When the owner's envelope (the grant's
   capital per venue, plus realized profit there) is full, the best E is seated first and a newcomer
-  with better evidence displaces the weakest flat bunt. If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
+  with better evidence displaces the weakest flat bunt (a probe only a probe). If the floor loses {-float(alloc['throttle']['halve_below']):.0%} of the envelope, every
   real stake is halved until it is back above {-float(alloc['throttle']['restore_above']):.0%} down.
 - PERFORMANCE FEE: {float(alloc['performance_fee_share']):.0%} of every dollar of realized REAL profit (a settlement or a sale) is paid to
   you as compute credits. Stars buy frontier research, consults and forks with it; losses cost nothing extra.

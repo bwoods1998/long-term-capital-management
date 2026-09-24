@@ -641,6 +641,46 @@ class ProbesAndBunts(KalshiHouse):
             self.assertEqual(book.account(a.id).staked, D("30"))
             self.assertEqual((book.limits[a.id].max_position_usd, book.limits[a.id].max_order_usd), (D("6.00"), D("6.00")))
 
+    def full_floor(self):
+        """A $40 envelope held by a proven family's $30 bunt (E 1.02) and an unproven family's $10 probe (E 1.06)."""
+        tight = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "40"})
+        tight.start()
+        self.addCleanup(tight.stop)
+        self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=16, bound=0.0033)
+        proven, probe = self.agent("mullins", family="weather-favorites"), self.agent("hawkins", family="kalshi-favorites")
+        table = {proven.id: dict(self.READY, e=1.02, w_real=1.0), probe.id: dict(self.READY, e=1.06, w_real=1.0)}
+        with self.evidence_of(table):
+            self.tick()
+        book = self.house.books["kalshi"]
+        self.assertEqual((book.account(proven.id).staked, book.account(probe.id).staked), (D("30"), D("10")))
+        self.assertEqual(self.house.allocator.headroom("kalshi"), D(0))
+        return proven, probe, table
+
+    def test_a_probe_never_displaces_a_proven_familys_bunt(self):
+        """Review of #224 (Sept 24, 2026): with the envelope full, an unproven family's newcomer at E 1.05
+        displaced the proven family's flat bunt at E 1.02 -- $30 of proven money back to practice to seat
+        $10 of unproven money, on the agent-level E the family's proof replaced. It waits instead."""
+        proven, probe, table = self.full_floor()
+        newcomer = self.agent("huang", family="crypto-15m-favorites")
+        table[newcomer.id] = dict(self.READY, e=1.05)
+        with self.evidence_of(table):
+            self.tick()
+        rungs = [self.house.evaluator.rung(a.id) for a in (proven, probe, newcomer)]
+        self.assertEqual(rungs, [2, 2, 1])
+        status = [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=newcomer.id) if e.payload.get("decision") == "progress"]
+        self.assertEqual((status[-1]["stage"], status[-1]["reason"]),
+                         ("envelope", "the kalshi envelope cannot seat another $10 probe and no weaker flat probe can be displaced"))
+
+    def test_a_proven_familys_newcomer_still_displaces_a_weaker_probe(self):
+        proven, probe, table = self.full_floor()
+        table[probe.id] = dict(self.READY, e=1.01, w_real=1.0)  # now the weakest flat agent on the floor
+        newcomer = self.agent("mullins", family="weather-favorites")
+        table[newcomer.id] = dict(self.READY, e=1.08)
+        with self.evidence_of(table):
+            self.tick()
+        self.assertEqual([self.house.evaluator.rung(a.id) for a in (proven, probe)], [2, 1])  # the probe gave way
+        self.assertEqual(self.house.evaluator.rung(newcomer.id), 1)  # its $30 still waits for the $20 the probe's $10 did not free
+
     def test_a_probe_keeps_what_it_makes_on_its_own_base(self):
         """`bunt_growth: "w_real"` applies to both tiers, each on its own base, up to the swing line."""
         a = self.agent()

@@ -1052,12 +1052,14 @@ class Allocator:
             house._start_audit(agent, verdict, generation)
             return
         if self.headroom(venue) < stake:
-            weakest = self._weakest_bunt(venue, ev.e, displaced_at)
+            newcomer = self.tier(agent)
+            weakest = self._weakest_bunt(venue, ev.e, displaced_at, tier=newcomer)
             if weakest is None:
                 # The reason stays the same while the wait does (a `progress` row is written only when
                 # it changes); the moving numbers ride along as detail.
                 house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "envelope",
-                                        f"the {venue} envelope cannot seat another ${stake} bunt and no weaker flat bunt can be displaced",
+                                        f"the {venue} envelope cannot seat another ${stake} {newcomer} and no weaker flat "
+                                        + ("probe" if newcomer == "probe" else "bunt") + " can be displaced",
                                         capital_usd=str(self.capital(venue)), headroom_usd=str(self.headroom(venue)))
                 return
             other, other_ev = weakest
@@ -1085,7 +1087,12 @@ class Allocator:
         house._promotion_status(agent, _verdict(agent.id, 1, why, ev), "promoted", f"the allocator seated it as a {tier}")
         summary["moves"].append({"agent": agent.id, "from": "paper", "to": tier, "why": why, "stake_usd": str(stake)})
 
-    def _weakest_bunt(self, venue: str, e: float, displaced_at: set[str]) -> tuple[Any, Evidence] | None:
+    def _weakest_bunt(self, venue: str, e: float, displaced_at: set[str], *, tier: str = "bunt") -> tuple[Any, Evidence] | None:
+        """The flat rung-2 agent with the weakest E under `e` that a newcomer of `tier` may displace, or None.
+        A probe displaces only a probe: an agent's own E on a few settlements is the statistic the family's
+        proof replaced (the plan's gap 2), so it never sends a proven family's bunt back to practice to seat
+        an unproven mechanism's pocket change (review of #224, Sept 24, 2026). A proven family's newcomer
+        displaces either."""
         if venue in displaced_at:
             return None  # one displacement a venue a pass: no churn
         house = self.house
@@ -1097,6 +1104,8 @@ class Allocator:
                 continue
             if ev.e >= e or book is None:
                 continue
+            if tier == "probe" and self.tier(agent) != "probe":
+                continue  # capital follows proof: an unproven newcomer never displaces a proven family's bunt
             account = book.account(agent_id)
             if account.holdings or book.open_orders(agent_id):
                 continue  # displacing never forces a sale
