@@ -27,11 +27,14 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
   member's stake would halve that member's growth per event and pull its own bound down. The
   at-risk unit is scale-free across purses, stakes and books, so the table's weights mean what
   they say, and `bound / variance` in it is the Kelly fraction of capital at risk an event.
-  The effect at T0, both units computed on the same events: weather-favorites unproven in both
-  (loss-rate gate -0.0125 account, -0.2114 at risk: 2 losses in 16); sports-central-run-under
-  proven on account growth (+0.0058) and unproven at risk (-0.1190): 6 of 11 practice events won
-  at about even money after a 7% taker fee, and its account-growth proof came from buying two
-  strikes on the games it won and one on those it lost. Every other family's state is the same.
+  Each event WEIGHS what it put at risk against its member's mean on that book (review of #242,
+  Sept 24, 2026: the ratio estimator, sum made / sum at risk, within a member's book): weighed
+  alike, small wins and large losses -- a resting bid filled in full as the price falls through
+  it -- read as an edge while the dollars lost, and a family that lost $44 of real money over 100
+  events was proven and ready to swing. The effect at T0 is Deploy A's: weather-favorites unproven
+  (2 losses in 16; its practice losers carried 2.4 times its winners' dollars), sports-central-
+  run-under proven (+0.1423 at risk: 6 of 11 practice events won at about even money, and its
+  winners carried twice its losers' dollars), every other family unproven.
 - **The states** (`FamilyBook`): "unproven"; "proven" (`allocator.family_proven`: probes become
   bunts); "swing" (`allocator.family_swing`: the REAL record has `min_real_settlements` or more
   independent settlements and its honest lower bound -- the t bound, and the loss-rate bound for a
@@ -506,9 +509,11 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
       "account" unit, the sum of the log growths ln(1 + r) of its closed trades there, r as
       `Evaluator.trade_returns` computes it read through that trade's own ledger position (its result
       over the most the member had been lent on that book by then); in the "at_risk" unit, what the
-      event made over what its positions put at risk (`at_risk_value`);
+      event made over what its positions put at risk (`at_risk_value`), weighted by what it put at risk
+      against the mean its member put at risk on that book (so the record is sum made / sum at risk);
     - an event several members traded is ONE observation: the weighted mean of their values (real at
-      `real_weight`, practice at `practice_weight`) at the largest weight among them (`pool`);
+      `real_weight`, practice at `practice_weight`, times the event's weight at risk) at the largest
+      weight among them (`pool`);
     - pooled: mean, sd, n_eff and the one-sided `confidence` lower bound; `proven` with at least
       `min_independent_settlements` observations and the bound above zero (and the loss-rate gate for a
       lopsided record);
@@ -586,12 +591,23 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 if entry[0] < unit[3][0]:
                     unit[3] = entry
                 unit[4], unit[5] = min(unit[4], row["seq"]), max(unit[5], row["seq"])
+            # An event weighs what it put at risk against the mean this member put at risk on this book (review of #242,
+            # Sept 24, 2026): the ratio estimator, sum made / sum at risk within a member's book. Weighed alike, a record
+            # of small wins and large losses -- a resting bid filled in full as the price falls through it -- read as an
+            # edge while its dollars lost (weather-favorites' practice events on the T0 snapshot: $16.17 at risk on the
+            # average win, $38.50 on the average loss; +0.0077 a dollar an event alike, -0.025 a dollar in its dollars).
+            # Books, purses and stakes stay on one scale: a member's mean event weighs its book's weight. The account
+            # unit already scales an event's growth with what it risked, and keeps Deploy A's weights.
+            risks = [u[2] for u in mine.values() if u[2] > 0]
+            mean_risk = math.fsum(risks) / len(risks) if risks else 0.0
             for key, (growth, made, risk, (_, liquidity), first, last) in mine.items():
                 value = at_risk_value(made, risk, share) if at_risk_unit else growth
-                units.setdefault(key, []).append((value, weight, liquidity, member))
-                edges.setdefault(key, []).append((max(made / risk, -1.0) if risk > 0 else (-1.0 if made < 0 else 0.0), weight))
+                dollars = risk / mean_risk if risk > 0 and mean_risk > 0 else 1.0
+                size = dollars if at_risk_unit else 1.0
+                units.setdefault(key, []).append((value, weight * size, liquidity, member))
+                edges.setdefault(key, []).append((max(made / risk, -1.0) if risk > 0 else (-1.0 if made < 0 else 0.0), weight * dollars))
                 if book == REAL_BOOK[venue]:
-                    real_units.setdefault(key, []).append((value, 1.0))
+                    real_units.setdefault(key, []).append((value, size))
                     real_first[key] = min(real_first.get(key, first), first)
                     real_at[key] = max(real_at.get(key, 0.0), when.get(last, 0.0))
     minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
@@ -611,7 +627,8 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     real = pool(real_units, minimum, confidence, **gate)
     # Each real event's first close and its value (the mean of its real members' values, as `pool` takes
     # it): the ramp counts the positive ones that closed after the family entered the swing.
-    real["first_closes"] = sorted((real_first[k], math.fsum(v for v, _ in group) / len(group)) for k, group in real_units.items() if group)
+    real["first_closes"] = sorted((real_first[k], math.fsum(v * w for v, w in group) / math.fsum(w for _, w in group))
+                                  for k, group in real_units.items() if group)
     real["closed_at"] = sorted(real_at.values())
     weight_sum = math.fsum(max(w for _, w in group) for group in edges.values())
     edge = (math.fsum(max(w for _, w in group) * math.fsum(r * w for r, w in group) / math.fsum(w for _, w in group)

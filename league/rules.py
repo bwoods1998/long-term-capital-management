@@ -135,11 +135,13 @@ or never swings at all.
         at_risk = str(proof.get("unit") or "account") == "at_risk"
         measured = "what their events made per dollar put at risk" if at_risk else "their mean log growth an event"
         if at_risk:
-            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE. Each event counts at its weight whatever its\n"
-                      "  size (it is measured per dollar at risk), so size cannot inflate your family's proof, and a token size\n"
-                      "  measures fees and fills you will never pay trading real money: size a practice position the way your\n"
-                      "  code would size it with real money. What proves (or disproves) a family faster is MORE independent\n"
-                      "  events. This is information, never an order: your size is your code's.\n")
+            # Each event weighs what it put at risk against the member's mean on that book (review of #242).
+            sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE. An event is measured per dollar it put at risk\n"
+                      "  and weighs what it put at risk against your usual size on that book: scaling every bet up or down\n"
+                      "  proves nothing faster, a big losing bet counts for its dollars, and a token size measures fees and fills\n"
+                      "  you will never pay trading real money: size a practice position the way your code would size it with\n"
+                      "  real money. What proves (or disproves) a family faster is MORE independent events. This is\n"
+                      "  information, never an order: your size is your code's.\n")
         else:
             sizing = ("  SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE: a conviction-sized practice record proves (or\n"
                       "  disproves) your family faster than a token one. Information, never an order: your size is your code's.\n")
@@ -166,10 +168,11 @@ or never swings at all.
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
-  A FAMILY IS ONE MECHANISM. A new mechanism from the lab or the foundry starts a family of its own and
-  proves itself from zero; your research children and parameter mutations stay in your family and their
-  trades add to its record (its maker and taker entries are pooled apart: a child that makes the market
-  where you took it builds the maker record, and the taker record decides whether a real entry may take).
+  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
+  foundry card starts a family of its own and proves itself from zero; your research children stay in
+  your family, whatever they change, and their trades add to its record (its maker and taker entries are
+  pooled apart: a child that makes the market where you took it builds the maker record, and the taker
+  record decides whether a real entry may take).
 {sizing}{family_swing_text}""" if alloc.get("probe_bunt_usd") else "")
         # The real book's entry rules and exits (Deploy A, Sept 24, 2026: X0 and D3 in league/book.py,
         # read through the constitution's allocator keys): what an agent on real money must know before

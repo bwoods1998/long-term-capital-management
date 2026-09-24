@@ -393,11 +393,15 @@ CONSTITUTION: dict[str, Any] = {
         # itself, so a family swing that doubled a member's stake would halve its growth an event and pull
         # the family's own bound down. The at-risk unit is scale-free across purses, stakes and books, the
         # weights mean what they say, and bound / variance in it is Kelly's fraction of capital at risk.
-        # Effect at T0 (docs/runs/2026-09-24-close-the-gaps.md): weather-favorites unproven either way (2
-        # losses in 16; loss-rate bound -0.2126 a dollar at risk); sports-central-run-under unproven at risk
-        # (bound -0.1234: 6 of 11 practice events won at about even money after a 7% taker fee; its proof
-        # on account growth, +0.0058, came from two strikes bought on the games it won and one on those it
-        # lost); every other family as before. "account" restores Deploy A's unit exactly.
+        # Each event weighs what it put at risk against its member's mean on that book (the review of #242:
+        # weighed alike, small wins and large losses -- a resting bid filled in full as the price falls
+        # through it -- read as an edge while the dollars lost; weather-favorites' practice losers carried
+        # 2.4 times its winners' dollars at T0, and a family that lost $44 of real money over 100 events was
+        # proven and ready to swing). Effect at T0 (docs/runs/2026-09-24-close-the-gaps.md), the same states
+        # as Deploy A's: weather-favorites unproven (2 losses in 16; loss-rate bound -0.2112 a dollar at risk);
+        # sports-central-run-under proven (bound +0.1423: 6 of 11 practice events won at about even money after
+        # a 7% taker fee, its winners carrying twice its losers' dollars; weighed alike it was -0.1234); every
+        # other family unproven. "account" restores Deploy A's unit exactly.
         "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
                           "confidence": "0.8", "lopsided_gate": True, "unit": "at_risk", "reference_share": "0.01"},
         # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a

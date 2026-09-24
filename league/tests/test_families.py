@@ -115,7 +115,11 @@ class AtRiskRecord(AtRiskCase):
         self.buy("KXHIGHLAX-26SEP24-B80.5", 10, "0.40", agent="m3")         # E4 practice, a dead member: +1 on $4
         self.settle("KXHIGHLAX-26SEP24-B80.5", "1", agent="m3")
         rec = self.record()
-        obs = [((v(1 / 9) + v(2 / 8)) / 2, 0.5), (v(5 / 5), 0.5), (v(-1), 1.0), (v(1 / 4), 0.5)]
+        # Each event weighs what it put at risk against its member's mean on that book: m1's practice events put $9 and $5
+        # at risk (a $7 mean); m2's and m3's one event on each book weigh their book's weight (review of #242).
+        w1, w2 = 0.5 * 9 / 7, 0.5 * 5 / 7
+        e1 = (v(1 / 9) * w1 + v(2 / 8) * 0.5) / (w1 + 0.5)
+        obs = [(e1, max(w1, 0.5)), (v(5 / 5), w2), (v(-1), 1.0), (v(1 / 4), 0.5)]
         m, sd, n_eff, bound = hand_pool(obs)
         self.assertEqual((rec["n"], rec["real_n"], rec["members"], rec["members_living"], rec["members_counted"]), (4, 1, 3, 2, 3))
         self.assertAlmostEqual(rec["mean_log"], m, places=12)
@@ -136,9 +140,31 @@ class AtRiskRecord(AtRiskCase):
         rec = self.record()
         self.assertEqual(rec["n"], 2)
         game = lambda rows, buys: sum(float(p) for _, p in rows) / sum(q * float(c) for _, q, c in buys)  # noqa: E731
-        expected = (v(game(MERIWETHER_SETTLES[:3], MERIWETHER_BUYS[:3])) + v(game(MERIWETHER_SETTLES[3:], MERIWETHER_BUYS[3:]))) / 2
+        risk = lambda buys: sum(q * float(c) for _, q, c in buys)  # noqa: E731
+        first, second = risk(MERIWETHER_BUYS[:3]), risk(MERIWETHER_BUYS[3:])  # each game weighs what it put at risk
+        expected = (v(game(MERIWETHER_SETTLES[:3], MERIWETHER_BUYS[:3])) * first
+                    + v(game(MERIWETHER_SETTLES[3:], MERIWETHER_BUYS[3:])) * second) / (first + second)
         self.assertAlmostEqual(rec["mean_log"], expected, places=12)
         self.assertEqual((rec["taker"]["n"], rec["maker"]["n"]), (2, 0))
+
+    def test_a_record_that_lost_its_money_on_its_big_bets_is_not_proven(self):
+        """Review of #242: weighed alike, 86 wins of $0.40 on $1.60 and 14 whole losses of $5.60 -- $44 of real money lost
+        -- read +0.074 an event with a bound of +0.037 and a loss-rate bound of +0.027: proven, and ready for the family
+        swing to stake it up. A resting bid filled in full as the price falls through it makes exactly this record. Each
+        event now weighs what it put at risk, and the record is what its dollars say."""
+        self.member("m1")
+        self.stake(30, agent="m1", book="kalshi")
+        for i in range(100):
+            ticker = f"KXHIGHNY-26SEP{i % 28 + 1:02d}{i // 28:02d}-B72.5"
+            lost = i % 7 == 6
+            self.buy(ticker, 7 if lost else 2, "0.80", agent="m1", book="kalshi", liquidity="maker")
+            self.settle(ticker, "-5.60" if lost else "0.40", agent="m1", book="kalshi")
+        rec = self.record()
+        self.assertEqual((rec["n"], rec["real"]["n"]), (100, 100))
+        self.assertAlmostEqual(rec["edge_per_dollar"], -44 / (86 * 1.6 + 14 * 5.6), places=9)  # sum made / sum at risk
+        self.assertLess(rec["mean_log"], 0)
+        self.assertFalse(rec["proven"])
+        self.assertFalse(families.swing_ready(rec, families.swing_rule()))
 
     def test_maker_and_taker_records_apart(self):
         self.member("mk")
@@ -779,10 +805,13 @@ class RulesText(unittest.TestCase):
     def test_the_agents_are_told_the_mechanism_ledger(self):
         text = self.text()
         self.assertIn("80% lower bound on what their events made per dollar put at risk is above zero", text)
-        self.assertIn("A FAMILY IS ONE MECHANISM. A new mechanism from the lab or the foundry starts a family of its own", text)
-        self.assertIn("your research children and parameter mutations stay in your family", text)
+        # Every lab graduate is born into a `-lab-<lineage>` family, a nudge of a member's parameters included (`Lab._names`).
+        self.assertIn("A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every "
+                      "foundry card starts a family of its own", text)
+        self.assertIn("your research children stay in your family, whatever they change", text)
         self.assertIn("SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE.", text)
-        self.assertIn("so size cannot inflate your family's proof", text)
+        self.assertIn("weighs what it put at risk against your usual size on that book: scaling every bet up or down proves "
+                      "nothing faster, a big losing bet counts for its dollars", text)
         self.assertIn("What proves (or disproves) a family faster is MORE independent events", text)
         self.assertIn("THE FAMILY SWING. When your family's REAL-money record alone has 15 or more independent settlements", text)
         self.assertIn("2x the bunt ($60 at Kalshi), doubled after every 10 further WINNING real settlements", text)
