@@ -413,18 +413,18 @@ watch.
       on its desk, a House mutation of the anchor's PARAMS inside their bounds at the newcomer cadence
       (`House._proven_births`, route `proven_family`), until `economy.proven_family_members` (4)
       living members run it; while it is owed, no newcomer of another family may displace a resident of
-      its desk, and the desk is reserved from cards and merged strategies (a free seat there is not held:
-      the lab's graduates and retained candidates take one without asking). Not at the family's measured
-      capacity (E3), not for a losing family, and not for an hour after its program had no distinct valid
-      PARAMS mutation left (then nothing is owed and its desk is not held). A member that inherited the
-      family's name with other code is not its program (meriwether-h2d625d-2). Since the same day a
-      research fork or a retained candidate whose NEEDS name other markets or another style than its
-      parent's program is born into its own family (`<desk>-<style>-<6 hex>`; its birth row's reason says
-      so, and names its parent as before); a fix of the same program keeps the family -- a proven family's
-      name only when that program is the family's founding one (its first member's NEEDS at birth,
-      `_family_program`), so a member carrying the name with another program cannot pass the proof to its
-      forks, and never anchors R3 (the review of #276). Agents born before keep their family on the
-      ledger.
+      its desk, and the desk is reserved from cards (and, in a full league, from merged strategies); a
+      free seat there is not held: the lab's graduates, retained candidates and merged strategies take one
+      without asking. Not at the family's measured capacity (E3), not for a losing family, and not for an
+      hour after its program had no distinct valid PARAMS mutation left (then nothing is owed and its desk
+      is not held). A member that inherited the family's name with other code is not its program
+      (meriwether-h2d625d-2). Since the same day a research fork or a retained candidate whose NEEDS name
+      other markets or another style than its parent's program is born into its own family
+      (`<desk>-<style>-<6 hex>`; its birth row's reason says so, and names its parent as before); a fix of
+      the same program keeps the family -- a proven family's name only when that program is the family's
+      founding one (its first member's NEEDS at birth, `_family_program`), so a member carrying the name
+      with another program cannot pass the proof to its forks, and never anchors R3 (the review of #276).
+      Agents born before keep their family on the ledger.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state

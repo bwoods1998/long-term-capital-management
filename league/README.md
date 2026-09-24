@@ -460,8 +460,9 @@ status is exposed in health and agent research context; qualification is distinc
    `economy.proven_family_members` (4) living members run it; the child is replayed like any
    mutation and reaches real money through the bunt line on its own record. While births are owed no
    newcomer of another family may displace a resident of its desk, and the desk is reserved from cards
-   and merged strategies; a free seat there is not held (the lab seats a graduate, and the admission
-   pass a retained candidate, into a free seat without asking).
+   (and, in a full league, from merged strategies); a free seat there is not held (the lab seats a
+   graduate, the admission pass a retained candidate and `enroll` a merged strategy into a free seat
+   without asking).
    No birth for a family at its measured capacity (E3) or a losing one, nor for an hour for one whose
    program has no distinct valid PARAMS mutation left (`PROVEN_UNBRED_RETRY_SECONDS`: nothing is owed,
    so its desk is not held from other families meanwhile). A member that inherited the
