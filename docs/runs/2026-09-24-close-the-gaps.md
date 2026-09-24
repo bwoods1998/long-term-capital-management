@@ -311,7 +311,7 @@ recorded for the next open; live verification uses the markets that trade around
   longshot or a crowded event); no band move. B-seats (#245) opened: S1-S4, L1 (its first pass
   supersedes meriwether-h2d625d, 34 of 34 entries takers), the dust wind-down, `_trading_pending`; its
   adversarial review launched.
-- 07:05Z — **Wave 1 reviews, B-loop (#236) and B-feeds (#234):** three defects fixed on
+- 06:50Z — **Wave 1 reviews, B-loop (#236) and B-feeds (#234):** three defects fixed on
   `b-loop/review` (#247) and `b-feeds/review` (#250), each with a test that failed before: Deploy A's
   House kept no record of repeating warnings, so a warning firing every tick through Deploy B's restart
   would have escalated inside the 10-minute watch and rolled Deploy B back (the House now seeds the
@@ -320,11 +320,11 @@ recorded for the next open; live verification uses the markets that trade around
   landed at 05:02 instead of 04:00). No point-in-time leak found; the reviewer broke every stamp on
   purpose and the tests caught each. Left PLAUSIBLE: a warning that starts during a watch now rolls a
   healthy release back after 10 repeats (by design of L3); daily rain totals may be shifted an hour.
-- 07:05Z — **C-tools (#249) built** (X1 pause and size-down in place, X2 the horizon by the scheduled
+- 07:00Z — **C-tools (#249) built** (X1 pause and size-down in place, X2 the horizon by the scheduled
   expiration, the stock/option wake skip; no protected file, no digest change). Its adversarial review
   started. Integration of Deploy B began on `b/integration` (`~/Work/ltcm-b-int`): #246, `b-feeds/review`
   and `b-loop/review` merged (two doc conflicts resolved), 157 tests of the touched modules OK.
-- 07:40Z — **B-families (#242) review: four majors and five minors fixed** on `b-families/review`
+- 07:10Z — **B-families (#242) review: four majors and five minors fixed** on `b-families/review`
   (#252): two newcomers seated into a swinging family in one pass were each lent the one-member share
   ($150 against a $50 cap); the family audit's verdict counted as one member's own approval (a free
   agent-level swing); Kelly per event was turned into a stake at the 20% position share while one event
@@ -332,7 +332,7 @@ recorded for the next open; live verification uses the markets that trade around
   came out proven (now each event weighs what it put at risk); plus the grant's rung-3 check at every
   pass, an audit-request error no longer sweeps a proven family to probes, `family.record` rows only
   on a change (was ~10,000 rows a day), tests that mutations had slipped past, two doc errors.
-- 07:40Z — **Decision on the family swing's entry (findings 10-12 of that review).** Measured by
+- 07:15Z — **Decision on the family swing's entry (findings 10-12 of that review).** Measured by
   simulation (`scratchpad/rev-bfam/sim_rules2.py`, 500 runs a case, the PR's own pooling): judged at
   every settlement at 80%, an edgeless family on 50c totals enters the swing by 30 / 50 / 200 real
   settlements 37% / 44% / 61% of the time. The table's "one-sided 80% lower bound" is honest only for
@@ -345,7 +345,7 @@ recorded for the next open; live verification uses the markets that trade around
   to "proven"), and an audit approval lapses when the family leaves the swing. Rejected: an
   anytime-valid bound (about 3x wider at n = 30: real edges would need months) and leaving it (a
   money rule that swings on noise four times in ten repeats gap 2 at larger stakes).
-- 07:50Z — **B-seats (#245) review: not safe as built; four majors and four minors fixed** on
+- 07:25Z — **B-seats (#245) review: not safe as built; four majors and four minors fixed** on
   `b-seats/review` (#254). L1 would have retired meriwether-h2d625d, the floor's best real record
   (sports-central-run-under, the one proven family), on its first pass: the "defect" its child fixed
   was in a moneyline-favourites file the parent never ran (the plan's own L1 example misread the same
@@ -359,7 +359,7 @@ recorded for the next open; live verification uses the markets that trade around
   parents with a corrected child" starts at 0. Decided: L1 also skips a parent whose family's taker
   record is proven (X0 allows its taker entries); the reviewer is adding that, `seats_holding_none`
   in `floor_watch.py`, and checks of two more suspects.
-- 08:20Z — **The swing-entry decision is built** on `b-families/review` (#252 at `7fe1703`, CI
+- 07:40Z — **The swing-entry decision is built** on `b-families/review` (#252 at `7fe1703`, CI
   green): `proven` follows the pooled record alone and only a proven family swings; the entry is
   judged at 15 real settlements and every 5 after on the first that many real events, the t bound and
   the loss-rate bound both at 90%, the look derived from the real count (a restart cannot look early);
