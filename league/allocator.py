@@ -832,8 +832,18 @@ class Allocator:
         return self.target_stake(agent, band, ev)
 
     def limits(self, agent: Any, staked: Decimal) -> tuple[Decimal, Decimal]:
+        """(max position, max order) for a real account lent `staked` net: a share of its stake, which
+        at a new seat is the target `House.seat` is about to lend. A raise the allocator has not lent
+        is not yet the account's stake: while the target is above both what the account was lent and
+        what it holds, the limits follow what it holds. (Review of #224, Sept 24, 2026: a $10 probe
+        whose family was proven while the envelope had no room for the $20 raise was given the $30
+        bunt's $6 position at its next wake, and a $3.00 position, 30% of its stake, filled.)"""
         target = self.seat_stake(agent)
-        return limits_for(max(staked, target) if staked > 0 else target, agent.venue)
+        if staked <= 0:
+            return limits_for(target, agent.venue)
+        book = self.house.book_of(agent)
+        held = book.equity(agent.id) if book is not None and agent.id in book.accounts else staked
+        return limits_for(min(max(staked, target), max(staked, held)), agent.venue)
 
     # ---------------------------------------------------- facts for the books
     def band_of(self, agent_id: str) -> str | None:

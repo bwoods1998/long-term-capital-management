@@ -884,7 +884,14 @@ class BuntGrowth(HouseCaseReal):
         evidence = ev(agent=a.id, venue="alpaca", rung=2, w_real=1.2, e=1.2, real_trades=3)
         alloc._evidence = {a.id: evidence}
         self.assertEqual(alloc.seat_stake(a), D("30.00"))
-        self.assertEqual(alloc.limits(a, D("25")), limits_for(D("30"), "alpaca"))
+        # The limits follow the target the account holds: a bunt that made its $5 (W_real 1.2, equity $30)
+        # is limited on $30, one target with the seat, the packet and the board. A raise the allocator has
+        # not lent is not yet the account's stake (review of #224, Sept 24, 2026): lent $25 and holding
+        # $25, it is limited on $25 until the raise lands.
+        real = book.equity
+        with patch.object(book, "equity", side_effect=lambda agent: D("30") if agent == a.id else real(agent)):
+            self.assertEqual(alloc.limits(a, D("25")), limits_for(D("30"), "alpaca"))
+        self.assertEqual(alloc.limits(a, D("25")), limits_for(D("25"), "alpaca"))
         self.assertEqual(D(alloc.context(evidence, "bunt")["stake_usd"]), D("30"))
         with self.evidence_of({a.id: dict(e=1.2, w_paper=1.0, w_real=1.2, paper_trades=6, real_trades=3)}):
             alloc.rebalance()

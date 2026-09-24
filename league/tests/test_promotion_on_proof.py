@@ -616,6 +616,31 @@ class ProbesAndBunts(KalshiHouse):
         self.assertGreaterEqual(book.equity(a.id), D("9.99"))  # to the probe's $10, its position kept
         self.assertEqual(self.house.allocator.board()["agents"][a.id]["band"], "probe")
 
+    def test_a_raise_the_envelope_cannot_lend_does_not_raise_the_limits(self):
+        """Review of #224 (Sept 24, 2026): a probe whose family is proven while the envelope has no room
+        for the bunt's $20 raise keeps a fifth of what it holds ($2), not a fifth of the $30 it was not
+        lent ($6: a 60% position, and the book's 30% desk cap let a $3.00 one fill). The raise, once
+        there is room for it, brings the bunt's limits with it."""
+        agents = [self.agent(f"kay{i}") for i in range(10)]  # ten $10 probes fill the $100 envelope
+        book = self.house.books["kalshi"]
+        table = {a.id: dict(self.READY, w_real=1.0) for a in agents}
+        a = agents[0]
+        with self.evidence_of(table):
+            self.tick()
+            self.assertEqual([book.account(x.id).staked for x in agents], [D("10")] * 10)
+            self.assertEqual(self.house.allocator.headroom("kalshi"), D(0))
+            self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=10, bound=0.001)
+            self.tick()
+            self.house.wake(self.house.registry.get(a.id))  # every wake re-seats: the limits are written again
+            self.assertEqual(book.account(a.id).staked, D("10"))
+            row = self.house.allocator.board()["agents"][a.id]
+            self.assertEqual((row["band"], row["target_usd"]), ("bunt", "30"))
+            self.assertEqual((book.limits[a.id].max_position_usd, book.limits[a.id].max_order_usd), (D("2.00"), D("2.00")))
+            with patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "120"}):  # room for one raise
+                self.tick()
+            self.assertEqual(book.account(a.id).staked, D("30"))
+            self.assertEqual((book.limits[a.id].max_position_usd, book.limits[a.id].max_order_usd), (D("6.00"), D("6.00")))
+
     def test_a_probe_keeps_what_it_makes_on_its_own_base(self):
         """`bunt_growth: "w_real"` applies to both tiers, each on its own base, up to the swing line."""
         a = self.agent()
