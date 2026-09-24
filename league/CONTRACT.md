@@ -544,7 +544,12 @@ ask; the House applies it when your research pass ends, as it does a retained ca
   and your code keeps running and keeping its memory. **`resume_entries`** lets your buys through
   again. Your standing says which state you are in, since when, why, and how many buys were held.
   A paused agent that does not trade is judged like any other: it earns nothing while it does not
-  trade, and the usual rules may still demote it or give its seat away.
+  trade, and the usual rules may still demote it or give its seat away. Held buys are not activity:
+  shown live markets, a paused agent counts barren wakes (the stuck rule applies to it when it is
+  broke), and a practice resident paused longer than its seat's grace is displaced like one that
+  never traded (a winner and real money stay protected, as for everyone). A paused agent is promoted
+  to no real band. On real money it keeps its band and its positions (its sells go on), but after
+  24 hours paused its stake is held to its venue's probe, by free cash only; nothing is sold.
 - **`edit_params`** changes your PARAMS in place and keeps your seat, your record and your code: only
   the numeric knobs your standing's `parameter_validation` lists as `mutable`, each inside its
   `bounds` (declare yours in `NEEDS["parameter_rules"]`), never NEEDS or code. The House first

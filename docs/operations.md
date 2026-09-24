@@ -523,9 +523,12 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   and its `note`; `agent.research` rows with tool `control` are its requests (status `requested`)
   and any the House did not make (status `not_applied`, with the reason: for an edit, an audit
   running or owed, a standing veto, an approval standing on real money or a strategy changed after
-  its replay; already paused). A
-  paused agent's wakes show `held` (buys the House held, never a refusal) and its resting buys are
-  cancelled.
+  its replay; already paused). A paused agent's wakes show `held` (buys the House held, never a
+  refusal) and its resting buys are cancelled. Held buys are not activity: its wakes count barren,
+  the stuck rule applies, and a practice resident paused past the grace is displaceable like an idle
+  one. The allocator promotes no paused agent (a `progress` status with stage `paused`), and after
+  24 hours paused holds a real agent's stake to its probe by free cash only (a `size` verdict whose
+  reason says "held to the probe"; the board row's `entries_paused_since`).
   `Registry.entries_paused` is the live state; the ledger is the record. Its edit replays are
   `agent.research` rows with tool `edit_replay` (at half the practice stake and caps, no
   `eval.trial`, never the holdout, one an agent a day). Nothing here moves a limit, a stake or a

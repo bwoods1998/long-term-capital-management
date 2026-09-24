@@ -36,6 +36,10 @@ death keep working:
 | swing  | 3    | E >= swing_at, W_real >= 1 and enough REAL closed trades; the first entry is audited | bunt_usd x min(E, e_cap)^kappa, up to max_share_of_venue |
 | star   | 3    | the top `stars` swing agents by real P&L with W_real >= star_min_w_real | the swing stake |
 
+An agent that paused its own entries (X1, `pause_entries`) is promoted to no band; on real money it
+keeps its band and positions, but after `PAUSED_STAKE_AFTER_SECONDS` (24 h) its stake is held to its
+venue's probe, by free cash only (review of #249, P2).
+
 Down: hysteresis (leave a band below `hysteresis` x its entry), a real drawdown of
 `real_drawdown_demote` from the real high-water mark sends an agent back to paper at once, and an
 agent whose paper wealth is below `die_below` after `die_min_trades` closed trades dies (paper death
@@ -475,6 +479,11 @@ def left_real_at(house: Any, agent: str) -> float | None:
             return parsed.timestamp() if parsed else None
     return None
 
+
+#: A paused agent (X1, `pause_entries`) is promoted to no real band. On real money it keeps its band
+#: and its positions (its sells go on), but after this long paused its stake is held to its venue's
+#: probe: free cash comes back, as a demotion's does, and no sale is forced (review of #249, P2).
+PAUSED_STAKE_AFTER_SECONDS = 24 * 3600
 
 #: X1 (Sept 24, 2026): an agent's own pause and resume of its entries are `agent.strategy` rows that
 #: restate the strategy in force (`House._apply_controls`). They adopt nothing, so no reader that asks
@@ -952,6 +961,12 @@ class Allocator:
             stake = swing_stake(ev, self.capital(agent.venue), p)
         else:
             stake = bunt_stake(ev, base, p)
+        if self.paused_long(agent.id):
+            # Paused a day or more (review of #249, P2): an idle stake is held to the probe, by free cash only.
+            probe = p["probe_bunt_usd"].get(agent.venue, p["bunt_usd"].get(agent.venue, _d("10")))
+            if niche is not None and niche.asset_class == "option":
+                probe = max(probe, p["option_bunt_usd"])
+            stake = min(stake, probe)
         if self.state.get("throttle"):
             # Halved, but never under the smallest stake that can still trade: a position is at most
             # `position_share` of the stake (`position_share_event` on Kalshi) and must hold the venue's
@@ -961,6 +976,23 @@ class Allocator:
                         / _d(_position_share(agent.venue, p))).quantize(CENT)
             stake = max((stake / 2).quantize(CENT, rounding=ROUND_DOWN), min(tradable, stake))
         return stake
+
+    def paused_since(self, agent_id: str) -> float | None:
+        """When the agent paused its own entries (epoch seconds), or None while they are open
+        (X1: `Registry.entries_paused`, folded from its `agent.strategy` rows)."""
+        from ltcm.broker import instant
+
+        registry = getattr(self.house, "registry", None)
+        paused = registry.entries_paused(agent_id) if registry is not None and hasattr(registry, "entries_paused") else None
+        if not paused:
+            return None
+        parsed = instant(paused.get("since"))
+        return parsed.timestamp() if parsed else self.house.clock()
+
+    def paused_long(self, agent_id: str) -> bool:
+        """Paused for `PAUSED_STAKE_AFTER_SECONDS` or more: its stake is held to the probe."""
+        since = self.paused_since(agent_id)
+        return since is not None and self.house.clock() - since >= PAUSED_STAKE_AFTER_SECONDS
 
     def seat_stake(self, agent: Any) -> Decimal:
         """The stake a newly seated real account is lent (House.seat)."""
@@ -1096,6 +1128,14 @@ class Allocator:
             displaced_at: set[str] = set()
             for _, agent, ev, band, why in ups:
                 if not live_ok.get(agent.venue):
+                    continue
+                since = self.paused_since(agent.id)
+                if since is not None:
+                    # Its own pause (X1): a stake it will not enter with is capital another agent's evidence
+                    # could use (review of #249, P2). Said once, on its promotion status.
+                    house._promotion_status(agent, _verdict(agent.id, ev.rung, why, ev), "paused",
+                                            f"its entries are paused (since {now_iso(lambda: since)}): a paused agent is promoted to "
+                                            "no real band; resume_entries lets the allocator weigh it again")
                     continue
                 if band == "bunt":
                     self._bunt(agent, ev, why, p, summary, displaced_at)
@@ -1339,9 +1379,13 @@ class Allocator:
             return None
         house.seat(agent)  # the limits follow the stake
         named = self.tier(agent) if band == "bunt" else band  # a rung-2 stake is a probe's or a bunt's (Sept 24, 2026)
+        reason = f"{named} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")
+        if self.paused_long(agent.id):
+            reason = (f"{named} stake held to the probe: its entries have been paused since "
+                      f"{now_iso(lambda: self.paused_since(agent.id))}, {PAUSED_STAKE_AFTER_SECONDS // 3600} hours or more "
+                      "(free cash only; its positions stay)")
         row = {"band": named, "stake_usd": str(target), "moved_usd": str(delta), "equity_usd": str(equity.quantize(CENT)),
-               "via": "allocator", "evidence": ev.row(),
-               "reason": f"{named} stake follows the evidence (E {ev.e:.4f})" + (" and the floor throttle" if self.state.get("throttle") else "")}
+               "via": "allocator", "evidence": ev.row(), "reason": reason}
         house.ledger.append("eval.verdict", {"decision": "size", "rung": house.evaluator.rung(agent.id), "book": book.name, **row}, agent=agent.id)
         return {"agent": agent.id, **row}
 
@@ -1400,9 +1444,13 @@ class Allocator:
                 band = self.tier(agent)  # P1 (Sept 24, 2026): "probe" or "bunt", by the family's proof
             # `league/publish.py` sends the site only the fields it knows: the family fields are for the
             # watch and the scoreboard until the site learns them (W).
+            since = self.paused_since(agent.id)
             agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target, "evidence": ev.row() if ev else None,
                                 "venue": agent.venue, "last_move": None, "family": agent.family,
-                                "family_state": record["state"], "family_bound": record["bound"], "family_n": record["n"]}
+                                "family_state": record["state"], "family_bound": record["bound"], "family_n": record["n"],
+                                # Its own pause (X1; review of #249, P2): promoted to no real band, and after
+                                # `PAUSED_STAKE_AFTER_SECONDS` its stake is held to the probe. For the watch, not the site.
+                                "entries_paused_since": None if since is None else now_iso(lambda: since)}
         for _, agent_id in sorted(swings, reverse=True)[:p["stars"]]:
             agents[agent_id]["band"] = "star"
         moves = self._moves()

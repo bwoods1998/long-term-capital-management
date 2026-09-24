@@ -85,7 +85,7 @@ class PauseAndResume(ControlCase):
         self.assertIsNone(self.house.ledger.last("book.refused", agent=agent.id))  # a refusal row would buy a research pass
         woke = self.house.ledger.last("agent.woke", agent=agent.id).payload
         self.assertEqual((woke["intents"], woke["held"]), (0, 1))
-        self.assertEqual(self.house.idle_run(agent)["barren"], 0)  # its rules fired: it is not idle
+        self.assertEqual(self.house.idle_run(agent)["barren"], 1)  # held buys are not activity (review of #249, P3)
 
     def test_a_paused_desk_is_not_called_quiet(self):
         """Review of #249: held buys read as "no agent of the desk wrote an intent ... its rules are not
@@ -466,6 +466,116 @@ class ControlsAcrossAStop(ControlCase):
         self.house.research(self.house.registry.get(agent.id))  # the restart resumes the job
         self.assertIsNotNone(self.house.registry.entries_paused(agent.id))
         self.assertEqual(jobs.get(session)["status"], "cancelled")
+
+def pause(house, agent, session="pause-1", note="its live rule keeps adding losing positions"):
+    """What a research pass's `pause_entries` asks and the House applies when the pass ends."""
+    house.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": "pause_entries", "session": session,
+                                           "note": note}, agent=agent.id, id=f"control-request:{session}:0")
+    return house._apply_controls(agent.id, session)
+
+
+class PausedEntriesAndCapital:
+    """Review of #249, P2 and P3 (the main session's decisions): a paused agent is promoted to no real
+    band; on real money it keeps its band and its positions, but after 24 hours paused its stake is
+    held to its venue's probe, by free cash only; held buys are not activity, and a resident paused
+    past the grace is displaceable like an idle one."""
+
+
+from league.tests.test_allocator import HouseCaseReal, P as allocator_params, ev as evidence_row  # noqa: E402
+
+
+class PausedAndTheAllocator(HouseCaseReal):
+    __doc__ = PausedEntriesAndCapital.__doc__
+
+    def test_a_paused_agent_is_promoted_to_no_real_band_and_the_reason_is_recorded(self):
+        house = self.house
+        a = self.agent()
+        self.assertEqual(pause(house, a), ["pause_entries"])
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+            self.assertEqual(house.evaluator.rung(a.id), 1)
+            status = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=a.id) if e.payload.get("decision") == "progress"][-1]
+            self.assertEqual(status["stage"], "paused")
+            self.assertIn("a paused agent is promoted to no real band", status["reason"])
+            self.assertIsNotNone(house.allocator.board()["agents"][a.id]["entries_paused_since"])
+            house.ledger.append("agent.research", {"tool": "control", "status": "requested", "control": "resume_entries", "session": "resume-1",
+                                                   "note": "the settlements came back"}, agent=a.id, id="control-request:resume-1:0")
+            self.assertEqual(house._apply_controls(a.id, "resume-1"), ["resume_entries"])
+            self.tick()
+        self.assertEqual(house.evaluator.rung(a.id), 2)
+
+    def bunted(self):
+        a = self.agent()
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6)}):
+            self.tick()
+        book = self.house.books["alpaca"]
+        self.assertEqual((self.house.evaluator.rung(a.id), book.account(a.id).staked), (2, D("25")))
+        return a, book
+
+    def sized(self, a, book, w_real, equity):
+        """One sizing pass with the agent's real equity read as `equity` (as `test_allocator.BuntGrowth`)."""
+        from unittest.mock import patch
+
+        real = book.equity
+        with patch.object(book, "equity", side_effect=lambda agent: D(equity) if agent == a.id else real(agent)):
+            return self.house.allocator._size(a, evidence_row(agent=a.id, venue="alpaca", rung=2, w_real=w_real, e=w_real, real_trades=3),
+                                              "bunt", allocator_params())
+
+    def test_a_day_paused_on_real_money_holds_the_stake_to_the_probe_by_free_cash_only(self):
+        a, book = self.bunted()
+        self.assertIsNone(self.sized(a, book, 1.2, "30"))  # its target is $30 (25 x 1.2): the $5 it made is kept
+        pause(self.house, a)
+        self.clock.advance(23 * 3600)
+        self.assertIsNone(self.sized(a, book, 1.2, "30"))  # a pause younger than a day moves nothing
+        self.clock.advance(3600)
+        row = self.sized(a, book, 1.2, "30")
+        self.assertEqual((row["stake_usd"], row["moved_usd"]), ("25", "-5.00"))
+        self.assertIn("held to the probe: its entries have been paused since", row["reason"])
+        self.assertEqual(book.account(a.id).staked, D("20"))
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)  # it keeps its band
+
+
+class PausedIsNotActive(ControlCase):
+    __doc__ = PausedEntriesAndCapital.__doc__
+
+    def test_held_buys_are_not_activity(self):
+        agent = self.seated()  # buys when flat: every wake it is shown a live market and its buy is held
+        pause(self.house, agent)
+        for _ in range(3):
+            self.house.tick()
+            self.clock.advance(301)
+        self.assertEqual(self.house.idle_run(agent)["barren"], 3)
+
+    def test_a_paused_resident_that_is_broke_dies_stuck_like_an_idle_one(self):
+        """Neither trading nor able to buy the research that would resume it: the stuck rule's case."""
+        agent = self.seated()
+        pause(self.house, agent)
+        self.house.game["economy"]["idle_broke_wakes"] = 3
+        self.house.tick()  # the first tick pays the epoch's floor
+        self.clock.advance(301)
+        self.house.economy.charge(agent.id, self.house.economy.balance(agent.id) - D("0.10"), "spent to the floor", id="test-broke")
+        for _ in range(3):
+            self.house.tick()  # its buy is held at every wake; `keep_population` runs at the end of each tick
+            self.clock.advance(301)
+        self.assertEqual(self.house.registry.get(agent.id).cause, "stuck")
+
+    def test_a_trader_paused_past_the_grace_is_displaceable_like_an_idle_one(self):
+        agent = self.seated("sized", SIZED)
+        self.data.price = 79000.0  # under its line: it buys, and is a trader short of its record
+        self.broker.set_quote(self.btc, "78995", "79005")
+        self.house.tick()
+        self.assertIsNotNone(self.house.ledger.last("book.fill", agent=agent.id))
+        rules = self.house.game["economy"]
+        self.assertEqual(self.house._displaceable(rules, evidenced=True), [])
+        pause(self.house, agent)
+        grace = float(rules.get("displace_after_epochs", 2)) * float(rules["epoch_seconds"])
+        self.clock.advance(grace - 60)
+        self.assertEqual(self.house._displaceable(rules, evidenced=True), [])  # paused, but not past the grace
+        self.clock.advance(120)
+        (row,) = self.house._displaceable(rules, evidenced=True)
+        self.assertEqual((row[-1].id, row[0]), (agent.id, False))  # ranked with the idle
+        (row,) = self.house._displaceable(rules)
+        self.assertEqual(row[-1].id, agent.id)  # and the House's own refill may take its seat too
 
 if __name__ == "__main__":
     import unittest

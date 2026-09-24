@@ -192,7 +192,12 @@ status is exposed in health and agent research context; qualification is distinc
    `Registry.entries_paused`) has every buy its code sends held before sizing: counted as `held` on
    `agent.woke`, never a `book.refused` row (which would pull a research pass forward each wake),
    and its resting buys that are its alone are cancelled when the pause is made and at each wake
-   (`_cancel_paused_entries`). Its sells, cancels and settlements go on.
+   (`_cancel_paused_entries`). Its sells, cancels and settlements go on. Held buys are not activity
+   (review of #249, P3): the wake counts it barren when it is shown live markets (the stuck rule
+   and research's idle cadence read that), and `_displaceable` takes a resident paused past the
+   grace like one that never traded. The allocator promotes a paused agent to no real band (its
+   status says "paused"), and after `allocator.PAUSED_STAKE_AFTER_SECONDS` (24 h) holds a paused
+   real agent's stake to the probe by free cash only (P2; the board row's `entries_paused_since`).
    **The horizon's basis (X2, Sept 24, 2026).** `tapes.resolution(row, close)` is when a Kalshi
    market is expected to pay and what that is judged by: its scheduled (expected) expiration where
    the venue gives one, its close otherwise, never the deprecated latest date it may expire

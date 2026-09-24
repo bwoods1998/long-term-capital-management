@@ -1437,8 +1437,9 @@ class House:
             cancelled = [book.cancel(agent.id, order_id).status for order_id in result.get("cancels") or []]
             if paused:
                 cancelled += self._cancel_paused_entries(agent, book)
-            # Held buys are its rules firing: a paused agent is not barren (`_note_wake`).
-            idle = self._note_wake(agent, acted=bool(intents or held or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
+            # Held buys are not activity (review of #249, P3): a paused agent that holds nothing and is shown
+            # live markets is barren, for the stuck rule and research's idle cadence alike (`_note_wake`).
+            idle = self._note_wake(agent, acted=bool(intents or cancelled or ctx["positions"] or ctx["open_orders"]), offered=offered)
             self.ledger.append(
                 "agent.woke",
                 {"ok": True, "book": book.name, "intents": len(intents), "dropped": dropped, "cancels": len(cancelled), "seconds": result.get("seconds"),
@@ -3012,6 +3013,13 @@ class House:
             if self._generation(agent_id) != generation:
                 return
             agent = self.registry.get(agent_id)
+            paused = self.registry.entries_paused(agent_id)
+            if paused:
+                # It paused its entries while it was audited (X1): a paused agent is promoted to no real
+                # band (review of #249, P2); the allocator weighs it again once it resumes.
+                self._promotion_status(agent, verdict, 'paused', f"its entries were paused (since {paused.get('since')}) when "
+                                                                 "the audit finished: a paused agent is not promoted")
+                return
             source_book = self.book_of(agent)
             if rung >= 1 and source_book is not None and not source_book.evidence_integrity(agent.id)['ok']:
                 self._promotion_status(agent, verdict, 'accounting_integrity',
@@ -3951,8 +3959,15 @@ class House:
                         if self.research_jobs.active(agent.id):
                             continue
                         agent_grace = 0
+            # Its own pause (X1; review of #249, P3): held buys are not activity, and a resident paused past
+            # the grace is displaceable like one that never traded -- no trader's, screen's or grace's
+            # wait, ranked with the idle. A winner and real money stay protected, as for everyone.
+            paused = self.registry.entries_paused(agent.id) if standing.rung == 1 else None
+            idle_pause = bool(paused) and now - _epoch(str(paused.get("since") or now_iso(self.clock))) >= grace
+            if idle_pause:
+                agent_grace = 0
             traded = False
-            if standing.rung == 1 and (keeps_hours or evidenced):
+            if standing.rung == 1 and (keeps_hours or evidenced) and not idle_pause:
                 # Has it traded since its current program's opportunity? Read for every desk when an
                 # evidenced newcomer asks (a never-traded seat is what it may take); the plain
                 # tournament reads it only where the session rules below need it.
@@ -3992,8 +4007,8 @@ class House:
             seated = session_time(opportunity, now)[0] if keeps_hours else now - opportunity
             if seated < agent_grace:
                 continue
-            rank.append((standing.active_blocks > 0 or traded, standing.rung, standing.mean_growth, standing.active_blocks,
-                         float(self.economy.balance(agent.id)), agent))
+            rank.append((not idle_pause and (standing.active_blocks > 0 or traded), standing.rung, standing.mean_growth,
+                         standing.active_blocks, float(self.economy.balance(agent.id)), agent))
         rank.sort(key=lambda row: row[:5])  # has it traded at all, replay-only first, then growth, how much, and its purse
         return rank
 
