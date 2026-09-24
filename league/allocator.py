@@ -1286,12 +1286,20 @@ class Allocator:
     def families_board(self) -> dict[str, dict[str, Any]]:
         """The board's `families` block (C4): per venue, per family followed this pass, its state and since, the
         pooled and real counts and bounds, the stake a member on real money is lent, its members on real money
-        and its capacity."""
+        and its capacity; and since R3 (Sept 24, 2026) its clock to the family swing (`families.swing_clock`: real
+        settlements a day over its real life, what the swing still needs, the days to it at that rate), which moves
+        with the clock alone and so rides the board, never a `family.record` row."""
         out: dict[str, dict[str, Any]] = {}
+        rule, now = families.swing_rule(), self.house.clock()
         for (family, venue), record in sorted(self._families.items()):
             row = self._family_row(record)
             row.pop("family", None)
             row.pop("venue", None)
+            try:
+                first = families.first_real_at(self._tape, [a.id for a in self._members(family, venue)], venue)
+                row["swing_clock"] = families.swing_clock(record, rule, first_real=first, now=now)
+            except Exception:  # noqa: BLE001 - a display number never costs the pass its board
+                row["swing_clock"] = None
             out.setdefault(venue, {})[family] = row
         return out
 
@@ -2032,11 +2040,13 @@ class Allocator:
             rung = house.evaluator.rung(agent.id)
             ev = evid.get(agent.id)
             band = band_of_rung(rung)
-            stake = target = None
+            stake = target = equity = None
             if rung >= 2:
                 book = house.book_of(agent)
                 if book is not None and agent.id in book.accounts:
                     stake = max(book.account(agent.id).staked, ZERO)
+                    if book.real_money:
+                        equity = book.equity(agent.id).quantize(CENT)
                 if ev is not None:  # the target the stake follows: the same number `seat_stake`, `limits` and `context` use
                     target = str(self.target_stake(agent, "swing" if rung >= 3 else "bunt", ev))
             if rung >= 3 and ev is not None and ev.w_real >= p["star_min_w_real"]:
@@ -2053,9 +2063,11 @@ class Allocator:
             usd = capacity.get("usd_per_day")
             since = self.paused_since(agent.id)
             blocks, growth = self.forward(agent.family) if agent.family else (0, 0.0)
-            # R5 (Sept 24, 2026), for the watch and the owner, never the site (`league/publish.py` copies the fields the
-            # site's schema knows, by name): the family's pooled forward record and the probe gate.
-            agents[agent.id] = {"band": band, "stake_usd": stake, "target_usd": target,
+            # R3 and R5 (Sept 24, 2026), for the watch and the owner, never the site (`league/publish.py` copies the fields the
+            # site's schema knows, by name): `stake_usd` is the net loan -- what was lent less the profit swept back -- and
+            # `equity_usd` what the account is worth (at the resume the notes read meriwether-h2d625d's $20.06 stake as short
+            # of its $37.50 target while its equity was $41.67); the family's pooled forward record and the probe gate.
+            agents[agent.id] = {"band": band, "stake_usd": stake, "equity_usd": equity, "target_usd": target,
                                 "evidence": ev.row() if ev else None,
                                 "family_forward": {"blocks": int(blocks), "growth": round(float(growth), 6)},
                                 "probe_gate": self.gate_words(self.probe_gate(agent)) if rung in (1, 2) else None,

@@ -1,4 +1,5 @@
-"""No probe on a losing family (R5 of the close-the-gaps run, Sept 24, 2026; `allocator.family_probe`).
+"""No probe on a losing family (R5 of the close-the-gaps run, Sept 24, 2026; `allocator.family_probe`), and the proven
+family on the board (R3).
 
 The evidence (docs/research/queries/2026-09-24/R5-family-probe.py, the 15:06Z snapshot): of the allocator's 21 promotions
 to real money since Sept 23 00:00Z, 11 went onto families whose pooled forward record -- the House's `family_forward`,
@@ -20,6 +21,7 @@ from league import allocator, families
 from league.constitution import CONSTITUTION, digest, money_digest
 from league.ledger import now_iso
 from league.tests.test_allocator import IDLE, HouseCaseReal
+from league.tests.test_families import real_record
 from league.tests.test_promotion_on_proof import KALSHI_IDLE, KalshiHouse, canned
 
 D = Decimal
@@ -421,6 +423,68 @@ class ProbeGateOnAlpaca(ForwardBlocks, HouseCaseReal):
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
+
+
+class TheBoard(ForwardBlocks, KalshiHouse):
+    """R3: the board's real rows carry equity beside the net loan, and each family its clock to the swing."""
+
+    def test_a_real_row_carries_its_equity_beside_its_net_loan(self):
+        a = self.agent()
+        with self.evidence_of({a.id: READY}):
+            self.tick()
+        b = self.agent("hawk")
+        with self.evidence_of({a.id: dict(READY, w_real=1.0), b.id: dict(READY, e=1.0)}):
+            self.tick()
+        rows = self.house.allocator.board()["agents"]
+        book = self.house.books["kalshi"]
+        self.assertEqual(rows[a.id]["equity_usd"], book.equity(a.id).quantize(D("0.01")))
+        self.assertEqual(rows[a.id]["stake_usd"], book.account(a.id).staked)
+        self.assertIsNone(rows[b.id]["equity_usd"])  # practice: no real account
+        self.assertEqual(rows[b.id]["family_forward"], {"blocks": 0, "growth": 0.0})
+
+    def test_each_family_carries_its_clock_to_the_swing(self):
+        self.families["weather-favorites"] = real_record(n=5, bound=-0.5)  # proven on the pooled record, 5 real events
+        a = self.agent()
+        with self.evidence_of({a.id: READY}):
+            self.tick()
+        self.assertEqual(self.house.books["kalshi"].account(a.id).staked, D("30"))
+        self.clock.advance(86400 - 300)
+        with self.evidence_of({a.id: dict(READY, w_real=1.0)}):
+            self.tick()  # a day after its first real dollar
+        clock = self.house.allocator.board()["families"]["kalshi"]["weather-favorites"]["swing_clock"]
+        self.assertEqual((clock["real_n"], clock["real_days"], clock["real_per_day"]), (5, 1.0, 5.0))
+        self.assertEqual(clock["needs"], {"real_settlements": 10, "look_at": 15, "confidence": 0.9, "proof": False, "audit": True})
+        self.assertEqual(clock["days_to_swing"], 2.0)
+        # The clock rides the board, never a `family.record` row (it moves with the clock alone).
+        self.assertFalse([e for e in self.house.ledger.iter(kinds="family.record") if "swing_clock" in e.payload])
+
+    def test_the_clock_of_a_family_with_no_real_dollar_and_of_one_whose_look_passed(self):
+        rule = families.swing_rule()
+        record = real_record(n=0, bound=-0.5)
+        self.assertEqual(families.swing_clock(record, rule, first_real=None, now=1000.0)["days_to_swing"], None)
+        record = real_record(n=15, bound=0.05)  # its entry look at 15 passed: the audit is what is left
+        clock = families.swing_clock(record, rule, first_real=0.0, now=86400.0 * 3)
+        self.assertEqual((clock["needs"]["real_settlements"], clock["days_to_swing"], clock["real_per_day"]), (0, 0.0, 5.0))
+        self.assertIsNone(families.swing_clock(record, None, first_real=0.0, now=1.0))
+
+    def test_the_sites_checkpoint_carries_none_of_the_new_fields(self):
+        """The site's validators refuse unknown fields: the publisher copies the board's fields by name."""
+        from league.publish import Publisher
+
+        self.blocks("weather-favorites", *[-0.01] * 6)
+        a, b = self.agent(), self.agent("hawk", family="kalshi-favorites")
+        with self.evidence_of({a.id: READY, b.id: READY}):
+            self.tick()
+        board = self.house.allocator.board()
+        self.assertEqual(board["agents"][a.id]["probe_gate"], "losing")
+        self.assertIsNotNone(board["agents"][b.id]["equity_usd"])
+        self.assertIn("swing_clock", board["families"]["kalshi"]["kalshi-favorites"])
+        self.clock.advance(5)
+        publisher = Publisher("https://blakewoods.us", lambda: "t" * 40, self.house.allocator.path.parent / "publish.json",
+                              tape="test", opener=lambda *a, **k: None, clock=self.clock)
+        body = json.dumps(publisher.checkpoint(self.house), default=str)
+        for field in ("probe_gate", "family_forward", "equity_usd", "swing_clock", "held since"):
+            self.assertNotIn(field, body)
 
 
 class RulesText(unittest.TestCase):

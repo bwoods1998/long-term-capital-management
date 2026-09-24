@@ -58,7 +58,8 @@ the House's `_losing_family`), and the lab's lineage weights (`Allocator.family_
 - **The probe gate** (`probe_rule`, `losing`, `gaining`; R5, Sept 24, 2026): no probe on a family whose pooled forward
   record (the House's `family_forward`: active blocks and summed log growth, every member ever born) is at or below zero
   after `losing_min_blocks` active blocks, and none from a family one of whose probes went back to practice until its
-  record since then is positive over as many (`Allocator.probe_gate`).
+  record since then is positive over as many (`Allocator.probe_gate`). The board's clock to a family's swing is
+  `swing_clock`.
 
 A money judge: `league/ci.py` forbids Merton's pull requests to touch it.
 """
@@ -70,7 +71,7 @@ import hashlib
 import json
 import math
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
@@ -939,6 +940,58 @@ def gaining(blocks: int, growth: float, minimum: int) -> bool:
     """The mirror of `losing`: a pooled forward record POSITIVE over at least `minimum` active blocks, the turn a family
     held by a probe's demotion waits for (`allocator.family_probe`). A record that nets to zero has not turned."""
     return blocks >= minimum and growth >= 1e-9
+
+
+def first_real_at(tape: TradeTape, members: Iterable[str], venue: str) -> float | None:
+    """When the family's first real dollar was lent (the earliest `book.stake` above zero on the venue's real book, any
+    member, living or dead), in epoch seconds, or None: where the family's real life starts."""
+    book = REAL_BOOK.get(venue)
+    first = None
+    for member in members:
+        for row in tape.rows.get(member) or ():
+            if row.kind != "book.stake" or row.payload.get("book") != book or not row.at:
+                continue
+            try:
+                lent = float(row.payload.get("usd") or 0)
+            except (TypeError, ValueError):
+                continue
+            if lent > 0 and (first is None or row.at < first):
+                first = row.at
+    return first
+
+
+def swing_clock(record: Mapping[str, Any], rule: Mapping[str, Any] | None, *, first_real: float | None,
+                now: float) -> dict[str, Any] | None:
+    """The family's clock to its swing (R3 of the close-the-gaps run, Sept 24, 2026; the board's `families`, never a
+    `family.record` row: it moves with the clock alone). `real_per_day`: its independent REAL settlements a day over its
+    real life, from its first real dollar (`first_real_at`); `needs`: what the family swing (`allocator.family_swing`)
+    still asks -- the real settlements to the next entry look (`min_real_settlements`, then every `entry_every`), the
+    confidence that look's bound is read at, whether the pooled proof is still missing, and the audit that follows a
+    passing look; `days_to_swing`: the days to that look at the family's own real rate (None without one). A swinging
+    family needs nothing; one whose look passed waits only for its audit. The owner's notes at the resume (Sept 24, 2026
+    14:30Z) read sports-central-run-under, the one proven family, at real n 5 against 15: this is that clock, read from the
+    rule itself."""
+    if rule is None:
+        return None
+    real = record.get("real") or {}
+    entry = real.get("entry") or {}
+    n = int(real.get("n") or 0)
+    days = max(now - first_real, 0.0) / DAY if first_real is not None else None
+    rate = n / days if days and n > 0 else (0.0 if days else None)
+    if record.get("state") == "swing":
+        needed, look = 0, None
+    elif entry.get("ready"):
+        needed, look = 0, entry.get("checkpoint")  # the look passed: the entry's audit is what is left
+    else:
+        look = int(entry.get("next_checkpoint") or rule["min_real_settlements"])
+        needed = max(look - n, 0)
+    to_swing = 0.0 if needed == 0 else (needed / rate if rate else None)
+    return {"real_n": n, "real_since": None if first_real is None else datetime.fromtimestamp(first_real, tz=timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%SZ"), "real_days": None if days is None else round(days, 3),
+            "real_per_day": None if rate is None else round(rate, 3),
+            "needs": {"real_settlements": needed, "look_at": look, "confidence": float(rule["entry_confidence"]),
+                      "proof": not bool(record.get("proven")), "audit": record.get("state") != "swing"},
+            "days_to_swing": None if to_swing is None else round(to_swing, 2)}
 
 
 def score(record: Mapping[str, Any], state: str) -> int:
