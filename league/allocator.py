@@ -488,6 +488,7 @@ class Allocator:
         self._families: dict[tuple[str, str], dict[str, Any]] = {}
         self._through: int | None = None
         self._family_alerted: set[tuple[str, str, str]] = set()  # (family, venue, error): each told once
+        self._rungs: dict[str, int] | None = None  # the pass's rungs while `_begin_pass` reads the families
         if self.state.get("families") is None:
             # A first start under the mechanism ledger: the states the ledger's last `family.record` rows say.
             self.state["families"] = families.restore_states(getattr(house, "ledger", None))
@@ -641,10 +642,14 @@ class Allocator:
             self._through = self._tape.cursor
         self._families = {}
         try:
+            # Each living agent's rung read once for the families' members on real money (a ledger read an agent).
+            self._rungs = {a.id: self.house.evaluator.rung(a.id) for a in list(self.house.registry.living())}
             for family, venue in self._family_keys():
                 self._families[(family, venue)] = self._compute_family(family, venue, advance=True)
         except Exception as exc:  # noqa: BLE001 - the ledger's states feed money; a fault there never stops the pass
             self._family_error("the mechanism ledger", "", exc)
+        finally:
+            self._rungs = None  # after the families, rungs move with the pass: read afresh
 
     def _family_keys(self) -> list[tuple[str, str]]:
         """The families the ledger follows at a pass: every living agent's, and every family whose state is not
@@ -704,7 +709,9 @@ class Allocator:
 
     def _members_real(self, family: str, venue: str) -> int:
         """The family's living members on real money at `venue`: the family swing's caps are shared by them."""
-        return sum(1 for a in self._members(family, venue) if a.alive and self.house.evaluator.rung(a.id) >= 2)
+        rungs = getattr(self, "_rungs", None) or {}
+        return sum(1 for a in self._members(family, venue)
+                   if a.alive and (rungs[a.id] if a.id in rungs else self.house.evaluator.rung(a.id)) >= 2)
 
     def _decorate(self, record: Mapping[str, Any], *, advance: bool) -> dict[str, Any]:
         """The record with the mechanism ledger's state: "swing" while the REAL record qualifies and the entry was
