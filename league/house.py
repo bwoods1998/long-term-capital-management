@@ -256,7 +256,7 @@ class House:
         self.engineer: Any = None  # set by the service: the repair worklist's engineer (`league/engineer.py`)
         self.semantic_lab: Any = None
         self.options_history: Any = None  # set by the service: listed-option history (`league/options_history.py`)
-        self.feeds: Any = None  # set by the service: scoreboards, perp funding, DVOL and settled funding (`league/feeds.py`)
+        self.feeds: Any = None  # set by the service: the recorded feeds (`league/feeds.py`: scoreboards, perps, DVOL, funding, weather, earnings, rates ...)
         self._feeds_waiting: dict[str, float] = {}  # agent -> when it was last said its replay waits for recorded feeds
         self._feed_requests_at = 0.0  # when the tool requests the feeds answer were last looked at
         self.jev_floor: Any = None  # set by the service: research gate, inactivity, triage, links, exposure (league/sensors.py)
@@ -1919,8 +1919,8 @@ class House:
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
-        # window (the backfilled vol and funding cover the live window): a strategy that reads either
-        # is replayed on the live tape.
+        # window (the backfilled history feeds cover the live window): a strategy that reads either is
+        # replayed on the live tape.
         if venue == "alpaca" and self.settings.deep_replay and not option and not wanted:
             deep = self._deep_tape(needs)
             if deep is not None:
@@ -2024,10 +2024,12 @@ class House:
         """Why the recorded feeds cannot carry a replay of these NEEDS; '' when they can. Every
         declared key must cover the replay gate's `min_blocks` blocks of the strategy's horizon inside
         the window (20 on Sept 22, 2026: twenty hours for an hourly strategy, twenty days for a daily
-        one) before a replay can judge a strategy that reads it. `sports` and `perps` are recorded
-        live and never backfilled, so that is twenty blocks of recording; `vol` and `funding` are
-        point-in-time history backfilled over the window (Sept 23, 2026), so they cover it as soon as
-        the backfill is in -- and a key still waiting for its first page is a wait, not missing data."""
+        one) before a replay can judge a strategy that reads it. The live feeds (`sports`, `perps` and
+        the live recorders of Sept 24, 2026) are never backfilled, so that is twenty blocks of
+        recording; the history feeds (`feeds.HISTORY_FEEDS`: `vol` and `funding` since Sept 23, the
+        forecast, earnings and open-interest histories since Sept 24) are point-in-time history
+        backfilled over the window, so they cover it as soon as the backfill is in -- and a key still
+        waiting for its first page is a wait, not missing data."""
         horizon = "day" if str(needs.get("horizon") or "") == "day" else "hour"
         block = 86400.0 if horizon == "day" else 3600.0
         need = int(CONSTITUTION["ladder"]["replay"]["min_blocks"])
@@ -2038,7 +2040,9 @@ class House:
             return (f"{feeds_module.BACKFILLING}: " + ", ".join(filling) + " -- the House is fetching their point-in-time history "
                     "(league/feeds.py), and the replay runs once it is in. A live wake is handed ctx['feeds'] as soon as a row is.")
         if missing:
-            polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in feeds_module.FEEDS}
+            # What the House records of the feeds these NEEDS declare (seventeen feeds since Sept 24, 2026:
+            # every key of all of them would bury the answer).
+            polled = {feed: (self.feeds.keys(feed) if self.feeds is not None else []) for feed in wanted}
             return ("unsupported input: feeds not recorded: " + ", ".join(missing) + "; the House records "
                     + "; ".join(f"{feed} {', '.join(keys) or 'nothing'}" for feed, keys in polled.items()))
         blocks = {f"{feed} {key}": float(row.get("covered_seconds") or 0.0) / block for feed, key, row in rows}
@@ -4208,7 +4212,7 @@ class House:
             shipped = {'sports': 'live sports score feed', 'perps': 'perpetual funding/open-interest feed'}
             gone = {text for feed, text in shipped.items() if (described.get(feed) or {}).get('recording_since')}
             result['observations']['not_supplied'] = [x for x in result['observations'].get('not_supplied') or [] if x not in gone]
-            # The two backfilled histories (Sept 23, 2026), said plainly: a strategy that reads them can
+            # The backfilled histories (Sept 23 and 24, 2026), said plainly: a strategy that reads them can
             # be replayed now, which no live-recorded feed can offer on its first day.
             history = {feed: {'backfilled_since': (described.get(feed) or {}).get('backfilled_since'),
                               'replayable_now': (described.get(feed) or {}).get('replayable_now')}
@@ -4216,10 +4220,12 @@ class House:
             if history:
                 result['observations']['replayable_history'] = {
                     **history,
-                    'note': 'vol (Deribit DVOL, BTC and ETH, hourly candles stamped at their close) and funding (OKX settled '
-                            'funding per coin, stamped at settlement, with avg_24h, avg_7d, zscore_30d) are point-in-time '
-                            'history backfilled over the replay window: declare NEEDS["feeds"] = {"vol": [...], "funding": [...]} '
-                            'and a replay can judge the strategy now. Row shapes: observations.feeds and the contract.'}
+                    'note': 'vol (Deribit DVOL, BTC and ETH, hourly candles stamped at their close), funding (OKX settled '
+                            'funding per coin, stamped at settlement), forecast (GFS and ECMWF daily highs, lows and rain at one '
+                            'to three days lead per settlement station, stamped 11:00 local standard time), earnings (each 8-K '
+                            'Item 2.02 at EDGAR\'s acceptance time) and oi (OKX hourly open interest, stamped at the hour\'s end) '
+                            'are point-in-time history backfilled over the replay window: declare them in NEEDS["feeds"] and a '
+                            'replay can judge the strategy now. Row shapes: observations.feeds and the contract.'}
         return result
 
     def research_coverage(self, agent: Agent, needs: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -4249,8 +4255,8 @@ class House:
                 history = ({'tape': 'development window before the sealed holdout', **dict(tape.get('source') or {})}
                            if query.startswith('deep:') else {'tape': 'live recent tape',
                                                              'why': 'no feed reaches back into the history store\'s development window '
-                                                                    '(sports and perps are recorded live; vol and funding are backfilled '
-                                                                    'over the live replay window)' if wanted
+                                                                    '(the live feeds are recorded as received; the history feeds are '
+                                                                    'backfilled over the live replay window)' if wanted
                                                              else 'the history store has not fetched every input yet' if self.settings.deep_replay else 'deep replay is off'})
             feeds = None
             if wanted:
@@ -4259,12 +4265,12 @@ class House:
                     'unsupported input: this House records no live feeds'
                 feeds = {'requested': wanted, 'coverage': tape.get('feeds_coverage'), 'replay_ready': not short,
                          **({'blocked_by': short} if short else {}),
-                         'note': 'Every row is replayed point in time by its t. sports and perps rows are recorded live with their '
-                                 'receive time, and nothing before recording began exists. vol and funding rows are point-in-time '
-                                 'history, stamped when each value became final (a DVOL candle at its close, a funding rate at its '
-                                 'settlement) and backfilled over the replay window (coverage.<feed>.<key>.backfill says from where '
-                                 'and since when), so they are replayable as soon as the backfill is in. A live wake is handed '
-                                 'ctx["feeds"] whether or not a replay may use them yet.'}
+                         'note': 'Every row is replayed point in time by its t. A live feed\'s rows are recorded with their receive '
+                                 'time, and nothing before recording began exists. A history feed\'s rows (' + ', '.join(feeds_module.HISTORY_FEEDS)
+                                 + ') are stamped when each value became final (a candle at its close, a rate at its settlement, an 8-K at '
+                                 'its acceptance, a forecast at its issue plus its publication allowance) and backfilled over the replay '
+                                 'window (coverage.<feed>.<key>.backfill says from where and since when), so they are replayable as soon as '
+                                 'the backfill is in. A live wake is handed ctx["feeds"] whether or not a replay may use them yet.'}
             return {'query': query, **tape_coverage(tape), 'effective_needs': effective, **({'history': history} if history else {}),
                     **({'feeds': feeds} if feeds else {}),
                     'proposed_inputs': needs is not None,

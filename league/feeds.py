@@ -55,6 +55,36 @@ WHAT IS RECORDED
   `backfills` keeps, for each key, the endpoint its rows came from, the span they cover, and whether
   the backfill has reached its target (the provenance).
 
+THE RECORDERS OF SEPT 24, 2026 (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I, gap 7). The owner allowed
+twelve key-free data hosts that morning; each recorder is a `Source` in `RECORDERS`, polled on the same
+lane, kept in the same store and read by the same point-in-time paths. Who had asked, in the T0 snapshot
+(Sept 19 21:14Z - Sept 24 01:40Z: tool requests, research summaries, request_tool arguments and paid
+consults; each agent once an input): earnings dates and announcement times 26 agents (and 31 for an
+earnings SURPRISE panel, which nothing here is), attention underlyings 35 (20 naming TSA volumes or an
+approval average), perp open interest or positioning 34, settlement fixings 12, Kalshi price against
+outcome 7, weather forecasts 4, sportsbook odds 2, rates 0 (built for the open desk's rates series).
+
+- `weather` (ensemble-api.open-meteo.com): GFS and ECMWF ensemble members' daily high, low and rain per
+  settlement station (`KNYC` from `KXHIGHNY` or `KXLOWTNYC`) and NWS climate day, with each model run's
+  start and availability. Receive-stamped; fetched again only when a newer run exists.
+- `nws` (api.weather.gov): the NWS forecast per station as issued (its `updateTime`). Receive-stamped.
+- `forecast` (historical-forecast-api.open-meteo.com): GFS's and ECMWF's forecasts at one to three
+  days' lead, a row a station a day stamped 11:00 local standard time (every value in it predicted by
+  23:00 the evening before, plus a 12-hour publication allowance). HISTORY, backfilled.
+- `earnings` (www.sec.gov): each 8-K Item 2.02 at EDGAR's acceptance time. HISTORY, backfilled two
+  years; SPARSE (covered = the span the listing was read).
+- `earnings_date` (api.nasdaq.com): the next announcement date per stock. Receive-stamped.
+- `rates` (markets.newyorkfed.org), `treasury` (home.treasury.gov): SOFR and the other reference rates,
+  par yields by tenor. Receive-stamped (neither publishes when a number appeared).
+- `odds` (sports.core.api.espn.com): every provider's line and ESPN's predictor for the coming games of
+  each recorded board. Receive-stamped.
+- `tsa` (www.tsa.gov): checkpoint throughput. `polls` (www.realclearpolling.com): the RCP approval
+  average -- BLOCKED by the site's bot wall on Sept 24, recorded as such, never got around.
+- `oi` (www.okx.com): hourly open interest per coin, stamped at the hour's end. HISTORY, backfilled.
+- `eia` (api.eia.gov), `consensus` (api.the-odds-api.com): keyed; off until the owner places
+  `EIA_API_KEY` / `ODDS_API_KEY` in the House's .env and the host is on the recorded allowlist
+  (`waiting_for`), then live with no code change. Their keys are redacted from every error.
+
 THREE RULES KEEP IT HONEST (as in `league/options_history.py`).
 
 1. **Point in time.** A row is stamped `t` with the moment it became knowable, and it is visible at
@@ -2563,8 +2593,8 @@ class SportsOdds(Source):
         return out
 
     def asks(self, words: set[str]) -> bool:
-        if words & {"outcome", "outcomes", "resolved", "settlement", "settled", "kalshi", "consensus"}:
-            return False
+        if words & {"outcome", "outcomes", "resolved", "settlement", "settled", "kalshi", "consensus", "replay", "tape", "tapes"}:
+            return False  # Kalshi's own prices, or a replay tape: not a sportsbook's line
         sporting = bool(words & _SPORTS_CONTEXT) or bool(words & {"nfl", "ncaaf", "mlb", "nba", "nhl", "wnba", "epl", "mls"})
         priced = bool(words & {"odds", "moneyline", "moneylines", "sportsbook", "sportsbooks", "betting", "vegas", "bookmaker",
                                "bookmakers"}) or ("win" in words and bool(words & {"probability", "probabilities", "prob"}))

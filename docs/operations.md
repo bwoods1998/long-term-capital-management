@@ -195,6 +195,16 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     (`count`, `longest_hours`, up to eight graduates with their line, desk and hours), `queued`
     and `born_total`.
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
+  - `feeds` (`league/feeds.py`): per feed its `keys`, how many are `recording`, `since`, `last_ok`,
+    `failing` keys, `polls`, `snapshots` and `next_due`; for a history feed its `backfill`
+    (`complete`, `in_progress`, `unlisted`); `store_mb`. Since Sept 24, 2026 the recorders of the
+    allowed data hosts carry their `host`, and a keyed one (`eia`, `consensus`) its `waiting_for`
+    until the owner's key is in the House's `.env` and its host in `LEAGUE_HOSTS`. Waiting is not
+    failing. A key a source does not list (a stock Nasdaq shows no date for, a league whose board is
+    not recorded yet) or a site that refuses the House (`polls`: RealClearPolling's bot wall) shows
+    in `failing` with its reason and is not warned about hourly. Each recording feed also writes an
+    hourly `data.coverage` ledger row (`asset: feed`, `host`, `status`: current, partial or
+    unavailable).
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
     answer, by kind: `wakes` (an agent's box held by its research; woken on the next tick),
@@ -432,18 +442,29 @@ What the Sept 23 study (`docs/research/2026-09-23-agent-study.md`) found the age
 House cannot do for itself. Each is the owner's to take; nothing in the League widens its own
 egress, funds itself or changes a venue account.
 
-- **Data hosts the agents asked for** (177 `tool.request` rows; 744 research sessions skipped for
-  `blocked:missing_data`). Add a host with `python3 scripts/floor_box.py hosts --add <host>` (the
-  box's egress is an exact-host allowlist; wildcards are ignored), then the toolsmith or a builder
-  wires the feed with point-in-time stamps as `league/feeds.py` does:
-  - `www.sec.gov` (EDGAR 8-K index; Item 2.02 acceptance times give as-known earnings announcement
-    times; 16 agents on the megacap and options desks asked) or `api.nasdaq.com` (the earnings
-    calendar);
-  - `www.tsa.gov` (checkpoint passenger volumes) and `www.realclearpolling.com` (polling averages):
-    the underlyings of the `kalshi-attention` desk's series (21 agents asked; the desk had 0
-    intents in 67 wakes over 48 hours);
-  - `api.eia.gov` or `www.eia.gov` (WTI daily spot): the fixings the `kalshi-prices` desk's contracts
-    settle on.
+- **Data hosts the agents asked for.** Sept 24, 2026: the owner allowed twelve key-free hosts
+  (`scripts/floor_box.py` LEAGUE_HOSTS) and the House records them (`league/feeds.py` RECORDERS:
+  weather, nws, forecast, earnings, earnings_date, rates, treasury, odds, tsa, polls, oi). Who had
+  asked, in the T0 snapshot (Sept 19 21:14Z - Sept 24 01:40Z; tool requests, research summaries,
+  `request_tool` arguments and consults; each agent once an input): earnings dates and
+  announcement times 26 agents, an earnings surprise panel 31 (not recorded: no allowed host
+  publishes estimates against actuals point in time), attention underlyings 35 (20 naming TSA
+  volumes or an approval average), perp open interest or positioning 34, settlement fixings 12,
+  Kalshi price against outcome 7, weather forecasts 4, sportsbook odds 2, rates 0. What is still
+  the owner's:
+  - `api.eia.gov` (a free key; WTI, Brent, gasoline and diesel for `kalshi-prices`) and
+    `api.the-odds-api.com` (paid; consensus win probabilities for `kalshi-sports`, about 8 calls a
+    league a day at its three-hour cadence). Place `EIA_API_KEY` / `ODDS_API_KEY` in the box's
+    `/workspace/.env` by hand -- `floor_box.py secrets` sends only `BOX_ENV_NAMES` -- and run
+    `python3 scripts/floor_box.py hosts --add api.eia.gov api.the-odds-api.com`, adding the hosts
+    to LEAGUE_HOSTS as well: the recorder reads the key within five minutes and needs no restart.
+    Until then `health.json` `feeds.eia.waiting_for` says which part is missing.
+  - The approval average (`kalshi-attention`'s KXTRUMPAPPROVE): www.realclearpolling.com answers
+    every automated client, a browser User-Agent included, with a DataDome captcha (HTTP 403, Sept
+    24, 2026). The House does not get around a bot wall; the `polls` recorder records the refusal
+    and nothing else. Another source for the average is the owner's decision.
+  - The contact address SEC and NWS ask for: `CONTACT_USER_AGENT` in `ltcm/data/__init__.py` (one
+    constant) is `ltcm (agent@blakewoods.us)`.
 - **A decision on the one-loss trial** (the study's blocker 1): with W_real at 1, one lost position
   over about 15% of a fresh bunt's stake drops E under `bunt_at × hysteresis` and sends it back to
   practice (huang-h427345 on $2.55 at 14:57Z; the lab graduate huang-l23cdb7 on $7.32 and $7.84 at

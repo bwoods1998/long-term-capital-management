@@ -234,7 +234,7 @@ a zero: a replay of a strategy that asks for features of a symbol the House has 
 refused as unsupported input (not a trial), and the House's daily options job backfills the
 symbols living strategies ask for.
 
-### Feeds: sports scoreboards, perpetual funding, implied vol and settled funding (`NEEDS["feeds"]`)
+### Feeds: scoreboards, perps, implied vol, funding, weather, earnings, rates, odds and more (`NEEDS["feeds"]`)
 
 ```python
 NEEDS["feeds"] = {"sports": ["nfl", "mlb"], "perps": ["BTC", "ETH"],   # recorded live
@@ -328,6 +328,71 @@ trial. `runtime_status` says what is recorded and since when (for `vol` and `fun
 whether a replay may use it yet, and for a backfilled key the endpoint it came from. An Alpaca
 strategy that declares feeds is replayed on the recent live tape, never on the development window
 of the history store.
+
+#### The feeds added on Sept 24, 2026
+
+Declared and read exactly like the four above (known keys only, at most six a feed; a key the House
+does not record is absent, never zero). A **live** feed's `t` is when the House received the row and
+it is never backfilled; a **history** feed's `t` is when the value became final by the source's own
+record, and it is backfilled over the replay window, so a strategy that declares only history feeds
+is replayed at once. Weather keys are the settlement station a Kalshi series names: `KXHIGHNY`,
+`KXLOWTNYC`, `nyc` and `KNYC` all mean `KNYC` (twenty stations: `ltcm/data/weather.py`).
+
+```python
+NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGHNY"],   # weather
+                  "earnings": ["AAPL"], "earnings_date": ["AAPL"],                        # earnings
+                  "rates": ["SOFR"], "treasury": ["10Y"], "odds": ["nfl"], "tsa": ["checkpoint"],
+                  "oi": ["BTC"]}
+```
+
+- **weather** (live; Open-Meteo's GFS and ECMWF ensembles): `dates[day]` for the next three whole
+  NWS climate days -- midnight to midnight local STANDARD time, the day the CLI report and every
+  Kalshi high, low and rain market settle on (in summer an hour off the local clock) -- each with
+  `high`, `low` (F) and `precip_in` as `{members, mean, sd, p10, p50, p90, min, max, n}`: one value
+  per ensemble member (82 when both models answer). `runs[model]` = `{model, init, available,
+  modified}`: when the forecast run began and when Open-Meteo had it (the forecast's issue time).
+  Members are hourly samples at the nearest model cell and run a little cool of a station's
+  maximum: calibrate before you price. A new row only when a newer model run exists.
+- **nws** (live; api.weather.gov): the National Weather Service's own forecast for the station as
+  issued: `issued` (its update time, never after `t`), `periods` (the 12-hour periods: `name`,
+  `start`, `end`, `daytime`, `temperature` F -- a daytime period's is the NWS high, a night's the
+  low -- `pop` %, `short`) and `days` (`date`, `hourly_max`, `hourly_min`, `hours`, `pop_max` of the
+  hourly forecast over each climate day; `hours` < 24 where it does not cover the day whole).
+- **forecast** (history; Open-Meteo's archive of GFS and ECMWF IFS): one row a station a day,
+  `t` 11:00 local standard time, with `dates[day]` = `{lead_days, models: {gfs_seamless: {high,
+  low, precip_in}, ecmwf_ifs025: {...}}}` for today at one day's lead, tomorrow at two and the day
+  after at three. Every value in a row was predicted by 23:00 the evening before (`issued_by`);
+  `t` adds a 12-hour allowance for the run to be published. Nothing a model published after the
+  hour it forecast (its day-0 output) is ever in it. Replayable at once.
+- **earnings** (history; EDGAR): the stock's newest earnings announcement -- the 8-K reporting Item
+  2.02 -- with `t` its acceptance time (the moment it was public; the company's press release can
+  come minutes earlier), `form`, `accession`, `filed`, `accepted`, `items`, `url`, and `previous`:
+  the acceptance times of the four before it. Keys: the megacap and options desks' stocks (funds
+  have none; VALE files 6-Ks, which are not recorded). Replayable at once.
+- **earnings_date** (live; Nasdaq): the next announcement Nasdaq shows: `date`, `estimated` (True
+  when it is Zacks' estimate from past dates, not the company's), `time` (`after_close`,
+  `before_open` or None), `eps_forecast`, `analysts`, `last_year_eps`. A moved date is a new row.
+- **rates** (live; New York Fed): `SOFR`, `EFFR`, `OBFR`, `TGCR`, `BGCR` -- `effective_date` (the
+  business day the rate applies to, published the next), `rate` %, `p1`, `p25`, `p75`, `p99`,
+  `volume_bn`, `revised`. **treasury** (live; the Treasury's par curve): `1M`, `6W`, `2M`, `3M`,
+  `4M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `7Y`, `10Y`, `20Y`, `30Y` -- `date`, `yield` %.
+- **odds** (live; ESPN's core API; league keys as for `sports`): each game on the league's
+  recorded board that has not started and starts within 36 hours: `id`, `name`, `start`, `home`,
+  `away`, `lines` (every provider: `details`, `spread` signed from the home side, `over_under`,
+  `home_ml`, `away_ml`, `implied_home` with the book's margin taken out, `open` prices) and
+  `win_probability` (ESPN's predictor, football and basketball only, else None).
+- **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
+  newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
+  House (a bot check) since Sept 24, 2026, so it has no row.
+- **oi** (history; OKX): the coin's open interest in its USDT perpetual for the newest COMPLETED
+  hour, `t` the hour's end (the running hour moves, so it is never shown): `oi_usd`, `oi_coin`,
+  `oi_contracts`, `hours`, `change_24h_pct`. Replayable at once.
+- **eia** (WTI, BRENT, GASOLINE, DIESEL) and **consensus** (sportsbooks' consensus win
+  probability per league) wait for the owner's keys: until `runtime_status` shows them recording,
+  they have no rows.
+
+`runtime_status` (`observations.feeds`) says for each feed its host, what is recorded and since
+when, and for a waiting one what it waits for; `replay_coverage` says whether a replay may use it.
 
 ## What you may watch but not trade
 

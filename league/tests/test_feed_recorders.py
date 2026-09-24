@@ -618,9 +618,11 @@ class Odds(RecorderCase):
         self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("odds", "nfl")])
         self.assertEqual(other.latest({"odds": ["nfl"]}, self.clock()), {})  # never a partial board
         self.assertEqual({name: request_feed(name) for name in ("nfl_sportsbook_odds", "live_win_probability_nfl",
-                                                                "resolved_sports_moneyline_price_outcome_", "live_sports_scores")},
+                                                                "resolved_sports_moneyline_price_outcome_", "live_sports_scores",
+                                                                "sports_moneyline_inseason_replay_tape")},
                          {"nfl_sportsbook_odds": "odds", "live_win_probability_nfl": "odds",
-                          "resolved_sports_moneyline_price_outcome_": None, "live_sports_scores": "sports"})
+                          "resolved_sports_moneyline_price_outcome_": None, "live_sports_scores": "sports",
+                          "sports_moneyline_inseason_replay_tape": None})  # a Kalshi tape, asked by name on Sept 23
 
 
 # ------------------------------------------------------------------------------------ attention
@@ -860,6 +862,8 @@ class InTheHouse(HouseCase):
         with self.assertRaises(ValueError) as caught:
             self.house._require_feeds(needs, needs["feeds"], tape["feeds_coverage"])
         self.assertTrue(str(caught.exception).startswith("unsupported input: feeds not recorded: weather KPHL"), str(caught.exception))
+        self.assertIn("the House records weather KNYC", str(caught.exception))
+        self.assertNotIn("perps", str(caught.exception))  # only what these NEEDS declare, not every key of every feed
 
 
 if __name__ == "__main__":
