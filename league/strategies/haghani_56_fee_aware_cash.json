@@ -1,0 +1,8 @@
+{
+  "family": "crypto-alts-reversion",
+  "name": "haghani_56_fee_aware_cash",
+  "repair": {
+    "key": "order_refusal:alpaca:needs $# with fees; free cash is $#"
+  },
+  "why": "Corrected child of haghani-56: preserve its hourly Alpaca altcoin deep-dip maker signals and exits, but reserve outstanding buy commitments and fees and share remaining cash across new entries. Do not spend anticipated cancellation releases or sale proceeds; skip entries below the venue minimum. New rung-0 candidate requiring its own evidence."
+}

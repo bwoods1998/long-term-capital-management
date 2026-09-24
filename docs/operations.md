@@ -30,7 +30,9 @@ The work flows through these stages:
    - Kalshi programs on recorded markets.
 4. **Bands of capital** (since Sept 23, 2026). At every mark pass the allocator
    (`league/allocator.py`) reads each agent's evidence (its wealth multiple) and moves it between
-   Paper, Bunt and Swing, sizing its real stake inside the live grant's envelope. The first swing is
+   Paper, Bunt and Swing, sizing its real stake inside the live grant's envelope. Since Sept 24, 2026
+   (promotion on proof) a bunt is a PROBE ($10 Kalshi, $25 Alpaca) unless the agent's family's pooled
+   record is proven, and counts on Kalshi are once per event. The first swing is
    audited, and an agent with a known defect is audited before its bunt. With `allocator.enabled`
    off, the old ladder decides again: the screen, then the micro stake with the audit after it.
 5. **The Alpha Lab** (since Sept 23, 2026). Off the tick, the lab searches strategy programs in
@@ -132,9 +134,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
-  digest needs the ratify. In force since Deploy A of the learn-and-unblock run (17:34Z, Sept 23,
-  2026): constitution `52c6c7e5…`, money `1d63a56e…`, the grant re-ratified at 17:34:36Z (40 agents,
-  a $25 stake line). Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
+  digest needs the ratify. The close-the-gaps run's Deploy A (Sept 24, 2026) moves them to
+  constitution `8116302e…`, money `521c4586…` (101 agents over the $10 Kalshi probe once ratified);
+  at that run's T0 they were `34adf385…` / `c2b0e09c…` (40 agents, a $25 stake line). Deploy A of the
+  learn-and-unblock run (17:34Z, Sept 23, 2026) had set `52c6c7e5…` / `1d63a56e…`, the grant
+  re-ratified at 17:34:36Z. Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
   line); that day's Deploys 2-7 changed no money rule and needed no ratify.
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
@@ -145,7 +149,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   `profit_index` (`equity_usd` against `baseline_usd`, `earned_usd`, `bonus_usd`, `read_ok`,
   `reason`). Since Sept 23, 2026 `/v1/health` reports the stored equity reading and never reads
   the venues itself, because the House reads its kill switch there on the order path. The first
-  frontier call more than ten minutes after the last reading takes a new one.
+  frontier call more than ten minutes after the last reading takes a new one. Since Sept 24, 2026
+  it also reports `settled_usd` (the month's spend less the holds of calls still unanswered, to the
+  microdollar), `inflight_usd` (those holds) and `previous` (the month that ended, with its
+  `spent_usd` and `settled_usd`). The House's OpenAI meter reads all three, so deploy the gateway
+  before a House release that reads them (below, **The OpenAI meter**).
 - **Checkpoint the box before risky work:**
   `python3 scripts/floor_box.py checkpoint --name why --ttl-days 30`.
   - It contains the box's credentials.
@@ -168,7 +176,9 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     `alpaca`) on the "real money" line with the performance fees, and the practice books on their
     own line;
   - the top evidence (E, W_paper, W_real, trades, stake);
-  - the lab's `lab.sqlite` table counts and its `lab.*` ledger rows;
+  - the lab's `lab.sqlite` table counts, its `lab.*` ledger rows, the batches it ran since `--since`,
+    and from `health.json` whether its step is failing (`failing_since`, `failures_in_a_row`,
+    `error`; D1, Sept 24, 2026);
   - costs (OpenAI settled in the hour and pending holds, Sail, Jev), the gateway's month with its
     `profit_index` (E1: equity, baseline, bonus and why), refusals, alerts, and the site
     checkpoint's age and whether it carries the board.
@@ -188,12 +198,24 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   definition is in the script's docstring.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
-    not yet settled).
+    not yet settled). `meters` (Sept 24, 2026) has one entry per metered provider (`sail`,
+    `openai`): `ready` (read in the last 180 s), `checked_at`, and `line`, the burst line's
+    arithmetic: `house_line_usd` = `cap_usd` - max(`settled_usd`, `measured_usd`) -
+    `before_meter_usd` - `unmetered_settled_usd` - `pending_usd`; `provider_left_usd`, what the
+    gateway's month has left at a fresh reading less what the House committed since (null without
+    one); and `remaining_usd`, the smaller of the two, which is what every reader of the House's
+    line sees. OpenAI's entry also has `month`: the gateway month last read, its highest reading
+    (`high_usd`), the finals carried from earlier months (`carried_usd`), `settled_total_usd`, the
+    month's own `cap_usd` and `spent_usd` at the last reading, `base_usd` (what the meter carried
+    when `covers_from` last moved), `covers_from` and the check's `anchor`.
   - `hypotheses`: cards, pending evaluations, the foundry's `refusal` reason and its window spend.
   - `lab` (Sept 23, 2026): the Alpha Lab's `refusal`, `closed_since` and `closed_minutes`, `llm`
     (`paused`, `skipped`: the Luna and Sol phases skipped below the `all` tier), `waiting_seat`
     (`count`, `longest_hours`, up to eight graduates with their line, desk and hours), `queued`
-    and `born_total`.
+    and `born_total`. Since D1 (Sept 24, 2026): `failing_since` (null until five steps in a row
+    have failed; then the first failure's time, until a step works again), `failures_in_a_row`,
+    `error` (the last failed step's, null once one works) and `tapes` (`search_copies` in memory,
+    `indexed`: the tapes built in the last six hours that a restart remembers).
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
   - `background_jobs`, `durable_research` and `promotion_status`.
   - `deferred` (Sept 23, 2026): work the tick put off because a box was busy or Sail did not
@@ -244,9 +266,10 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `audit_cooldown`, `tuition`, `campaign`, `live_book`, `accounting_integrity`, `paused` and
     `evidence` say what else holds it. `audit_credits` appears only when `audit.house_pays` is off.
   - Under the allocator (Sept 23, 2026) only the allocator writes these for moves up: `promoted`
-    ("the allocator seated it as a bunt", or moved it to the swing band), `auditing` (a known
+    ("the allocator seated it as a probe" or "as a bunt", or moved it to the swing band), `auditing` (a known
     defect before the bunt, or the first swing), `envelope` (the venue's envelope cannot seat
-    another bunt and no weaker flat bunt can be displaced; with `capital_usd` and `headroom_usd`),
+    another probe or bunt and no weaker flat agent can be displaced -- a probe displaces only a probe;
+    with `capital_usd` and `headroom_usd`),
     `venue_cash` (the account's free cash cannot take the stake now), `campaign` (the grant has not
     released the swing band) and `accounting_integrity`.
 - **Ledger rows from the Sept 23 revision:**
@@ -257,9 +280,11 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   - `agent.died` has two new causes, `superseded` (a born corrected child replaces its code) and
     `redundant` (the holdout would not evaluate its passing replay, and the same program already
     holds a paper seat);
-  - `ops.budget` with `what: "holds absorbed"`: the Sail holds released into the meter, with
-    `absorbed`, `usd`, `measured_usd` and `settled_usd`. Each hold's evidence is in
-    `campaigns.sqlite` `cost_reconciliations`, under `absorbed:<commitment>`.
+  - `ops.budget` with `what: "holds absorbed"`: holds released into their provider's meter, with
+    `kind` (`sail`, or `openai` since Sept 24, 2026), `absorbed`, `usd`, `measured_usd` and
+    `settled_usd`; an OpenAI row also has `check` (`since_anchor_usd`, `gateway_growth_usd`,
+    `anchor_at`). Each hold's evidence is in `campaigns.sqlite` `cost_reconciliations`, under
+    `absorbed:<commitment>`.
 - **`/workspace/state/repairs.json`:** the repair queue by state, its top jobs and the engineer's
   last step.
 - **Read-only reports, on the box.** Every database is opened `mode=ro`.
@@ -295,13 +320,22 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
       forward record; the archive's `fitness` is never rewritten by it. `SELECT candidate,
       active_blocks, mean_log_growth FROM forward f WHERE at = (SELECT MAX(at) FROM forward WHERE
       candidate = f.candidate) ORDER BY mean_log_growth DESC` is the forward leaderboard;
-    - `meta`: cursors and stamps (`forward_at`: the last completed forward run).
+    - `meta`: cursors and stamps (`forward_at`: the last completed forward run). Since D1 (Sept 24,
+      2026) also the step's failure record (`failures_in_a_row`, `failures_first_at`,
+      `last_failure` with its phase and error, `failing_since` once escalated) and `tape_index`:
+      a JSON object, tape key -> `at` (built), `ident` (the lab's tape id, as `batches.tape_id`
+      names it), `house` (the House's tape id) and `source` (`history-dev`, rebuilt from the
+      history store on the House's disk; `live`, fetched), for the tapes of the last six hours.
+      A `blocked` candidate's `error` says why: unsupported input (a sealed tape, missing
+      observed bars, a tape with no steps: nothing was recorded in its window), or "the lab could
+      not read its NEEDS or its tape" / "the lab could not score its result" with the exception.
   - **`lab.stats` ledger rows**, at most every ten minutes (`stats_every_minutes`), over the last
     hour: `batches`, `evaluated`, `per_hour`, `candidates_per_box_second`, `stages` (programs written
     by origin, ran, eligible, gate, archived, graduations by state), `pass_rates`, `calls`,
     `coverage` (cells by desk), `queued`, `spend` (OpenAI, the Sail estimate, the royalty balance),
     `born_total`, `refusal`, `llm` (`paused`: why Luna and Sol are being skipped, or null;
     `skipped`: the Luna and Sol phases skipped since the process started), `closed_since`,
+    `failing_since`, `failures_in_a_row` and `error` (D1, Sept 24, 2026: as in `health.json`),
     `waiting_seat` (`count`, `longest_hours`) and, since S2 (Sept 23, 2026), `forward`
     (`last_run_at`; `last_run` with `candidates`, `scored`, `batches`, `seconds` and `skipped` by
     reason, for example `no forward data yet` or `the run's box seconds are spent`; `records`, the
@@ -367,12 +401,56 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
     settled since the burst began. Measured before the fix (Sept 22, 23:50Z): 329 holds ($60.59)
     made the campaign read $54.76 left while the account held $116.
   - **OpenAI.** A verified frontier call settles at the gateway's metered cost, and a refused one
-    (HTTP 4xx) at $0. Before, every call was booked at the long-context ceiling when that was
-    higher, and the House's line closed at about half the owner's real spend.
-  - **What stays held.** A frontier call that never answered (5xx, a timeout, a dropped
-    connection) keeps its worst case, because the gateway keeps its worst case on the month too,
-    so there is no measured cost to settle it at. The Jev earmark's holds stay until that route
-    is closed and billed. Releasing either needs vendor receipts.
+    (HTTP 4xx) at $0. Before Sept 23, every call was booked at the long-context ceiling when that
+    was higher, and the House's line closed at about half the owner's real spend. A call with no
+    answer (a 5xx, a timeout, the House's own restart) keeps its hold, and since Sept 24, 2026
+    that hold is absorbed into OpenAI's meter, the gateway's frontier month (**The OpenAI meter**,
+    below), once it is six hours old. Measured before the fix (Sept 24, 01:34Z): 49 such holds
+    ($98.36, 28 of them over a day old) made the House's line read $7.94 while the gateway's month
+    had $13.54 left, and the frontier tier fell to "audits".
+  - **What stays held.** Jev's backing (`external-pilot:typesafe:*`, $20) stays until that route
+    is closed and billed: the gateway's frontier month never sees it, so releasing it would drop
+    Jev's spend. An OpenAI hold younger than six hours, or made before the meter's `covers_from`,
+    stays too.
+- **The OpenAI meter** (Sept 24, 2026). OpenAI is metered like Sail (`campaigns.json`
+  `meter_required`), and its meter is the gateway's frontier month, read on every tick
+  (`league/frontier.py` `FrontierMonth` into `CampaignBudget.observe_month`).
+  - **It never runs backwards.** The month falls whenever a call settles below its worst case and
+    starts at zero on the 1st, so the meter keeps the month's highest reading plus the finals of
+    earlier months (the gateway's `previous`). It counts from the start of the first month it read
+    (`covers_from`); a month the gateway could not close moves `covers_from` forward, and what the
+    meter carried until then leaves its measure (`base_usd`), because the House's own settled costs
+    of those calls are counted apart (`before_meter_usd`).
+  - **What is released.** Every ten minutes, a `frontier:` hold with no answer, older than six
+    hours and made since `covers_from`, is absorbed: the gateway reserved that call's worst case
+    on its month before it called OpenAI, and settled it at the metered cost or kept the worst
+    case, so the month already counts it once.
+  - **The check.** Nothing is released until a call has settled since the meter's anchor (its first
+    reading with `settled_usd`, taken again each month), and nothing while the gateway's settled
+    figure has grown less than what the House settled since then. The anchor is not the burst's
+    start because the House booked calls at its ceiling prices until Sept 23: its settled sum
+    since the burst ($495.35) was above the gateway's whole September ($402.96).
+  - **What the owner reads.** `health.json` `campaign.meters.openai` (the line's arithmetic and
+    the month), the `ops.budget` "holds absorbed" rows with `kind: "openai"`, and
+    `meter_reconciliations` in `campaigns.sqlite` (the meter's start, its anchors and every month
+    it closed). The tier still reads the nearer of the House line and the gateway's month.
+  - **Never above the month.** While a reading is fresh, the House's OpenAI line reads at most the
+    gateway month's `cap_usd` less its `spent_usd`, less what the House has committed since that
+    reading: reservations, the pacer, the agents' credit pool, the tier and `health.json` all see
+    the smaller line. The gateway's month is the one aligned to the owner's funded balance; the
+    House's own line is raised by top-ups and settles at the House's prices, and on the T0 snapshot
+    it read $273.85 after the release against the month's $203.74. Nothing is rewritten: no top-up
+    is lowered and no settled row changes (`house_line_usd` keeps the House's own arithmetic).
+  - **An unread gateway.** Three minutes without a reading and OpenAI reservations are refused:
+    Merton, audits and the lab's Luna and Sol calls wait. Sail work, trading and exits go on. A
+    reservation that finds the reading a minute old reads the gateway again first. While it lasts
+    the tier reads "audits", so no role is scheduled into a refusal and new research runs on
+    Sail, and one `ops.alert` warning ("OpenAI's meter is not ready ...") says so; another says
+    when the meter is read again. The House's line then stands alone (`provider_left_usd` null).
+  - **The first deploy** records the policy change in `phase_amendments` beside the phase's pinned
+    policy, which is never rewritten, so a rollback to the release before still opens the phase.
+    Only a new meter may be added this way; any other change to `campaigns.json` still refuses to
+    open the phase.
 - **Wakes or births keep being deferred.** Since Sept 23, 2026 the tick never waits on a box that
   background work holds, so a hung Sail call shows up as `deferred` in `health.json` (above), not as
   a stale health file. Background Sail calls give up on their own: a resume, a checkpoint or a
@@ -395,6 +473,24 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   agents that have earned their seats (`league/niches.json` seats, `league/turbo.json`
   `max_population`); the lab asks again every ten minutes. `health.json` `lab.waiting_seat` lists
   them, longest wait first.
+- **"the lab's step failed (<error>)"** (a warning, each failed phase of a step; D1, Sept 24,
+  2026). The payload names the `phase` (`royalties`, `seed`, `breed`, `batches`, `graduate`,
+  `forward`) and carries the last 2,000 characters of the traceback as `_traceback` (private:
+  never published). Read it with `SELECT payload FROM ledger WHERE kind='ops.alert' AND payload
+  LIKE '%step failed%' ORDER BY seq DESC LIMIT 1`. The other phases of the step still ran. From
+  23:21:59Z Sept 23 this warning came every one to three minutes for over two hours with no
+  traceback: one queued candidate whose tape had no steps failed every step.
+- **"the Alpha Lab's step has failed N times in a row since <time> (<error>)"** (an error, once
+  per run of failures, after `failures_alert_after`, 5). It carries the traceback like the
+  warnings, and `health.json` `lab.failing_since` is set until a step works again, when "the
+  Alpha Lab's step works again after N failures in a row since <time>" (an info) clears it. The
+  count is in `lab.sqlite` `meta`, so a restart does not reset it. Like every error alert, the
+  watchdog reads it: inside a release's ten-minute watch after promotion it rolls the release back.
+- **"the lab could not evaluate N queued candidate(s) and blocked them (<error>)"** (a warning,
+  at most one a step; D1). A row's NEEDS, tape or result raised something the lab has no refusal
+  for; `candidates` names the rows, each now `blocked` with its error, and `_traceback` is the
+  first one's. More than `row_errors_per_step` (8) in one step is the lab's own defect, not the
+  rows': the step fails (the warning above) and the rest of the queue is left as it was.
 - **Research ends with `provider: campaign_post_unconfirmed`.** A Sail request was in flight when
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
@@ -416,6 +512,26 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   (once a desk an hour: its rules are not firing on what it is shown, a research pass is the answer)
   and `<agent>: a real-money bunt on <book> was frozen by a daily-loss rule` (once an agent a day:
   the book's daily rule is meant not to apply to a rung-2 bunt; if this fires, it is applying).
+- **An exit that met the House's own resting order** (D3, Sept 24, 2026). It is no longer refused
+  ("a market order here could trade against the House's own resting order" now refuses entries
+  only; 74 sells were refused so in the 48 hours to 01:42Z Sept 24, and time-stopped crypto
+  positions sat 9 h past their stops). What the ledger shows instead: the seller's own crossing
+  bid cancelled (its `book.order` `cancelled` row's `reason` says why); a peer's bid at or above the
+  market's bid cancelled at the venue, then one `book.cross_plan` with `cross` fills for both (the
+  seller's at the market's bid, never under its own limit, with `resting_orders`; the bidder's at its
+  own limit, with `resting_order` and `note`) and `cross-house` rows that mirror them, the House row
+  keeping the gap, no venue order (with no fresh market bid, no cross); a peer's bid under the market's bid left alone, the exit sent as a
+  limit one step above it; and on doubt (a cancel the venue has not confirmed after two re-reads a
+  quarter-second apart, an order it has not acknowledged) the exit resting post-only at the ask.
+  Each re-priced order's `book.order` rows carry the reason, and `house_repriced` (the agent's own
+  order terms): such an order lives one pass (each poll re-prices it, or cancels it and sends the
+  agent's order again, a new client order id for the same intent, once nothing is in the way), and
+  the agent's own next sell of the instrument cancels it first (its cancelled row says so). A self-cross refusal on a SELL is a
+  defect: `book.refused` rows whose `reasons` mention "House's own resting order" should all be buys.
+  Two sells may still be refused where no price exists at all, and neither is a self-cross refusal:
+  "no price is left above the House's own best bid to rest this exit at" (a House bid at the top of an
+  event's range, or a stale quote, while a cross is not allowed) and "no ask to rest this exit at".
+  A crossed book reconciles to the cent: the venue saw only the cancel.
 - **"does not reconcile" on a paper book, by cents.** This is a warning, not an error (#108): it is
   the venue's end-of-day fee activity. An error means real money, or positions that disagree; read
   the `book.reconciled` rows.
@@ -444,17 +560,19 @@ egress, funds itself or changes a venue account.
     intents in 67 wakes over 48 hours);
   - `api.eia.gov` or `www.eia.gov` (WTI daily spot): the fixings the `kalshi-prices` desk's contracts
     settle on.
-- **A decision on the one-loss trial** (the study's blocker 1): with W_real at 1, one lost position
-  over about 15% of a fresh bunt's stake drops E under `bunt_at × hysteresis` and sends it back to
-  practice (huang-h427345 on $2.55 at 14:57Z; the lab graduate huang-l23cdb7 on $7.32 and $7.84 at
-  $30 stakes on Sept 23 evening). The fix is outside the run's money table: either the hysteresis
-  exit applies only after `bunt_min_settled` real settlements (the 35% stay drawdown still binds),
-  or `position_share` 0.15 on event books. Either needs the owner's word, a deploy and a ratify.
+- **The one-loss trial** (the study's blocker 1) was decided in the close-the-gaps run (Sept 24,
+  2026, inside its money table): the hysteresis exit applies only after
+  `allocator.hysteresis_after_settled` (3) independent real results in the stay, and a Kalshi position
+  is `allocator.position_share_event` (0.2) of the stake. See Switches.
 - **Compute:** an OpenAI top-up (the September gateway month is funded at $408 and the House line
   fell under the $20 "earned" reserve at about 20:50Z Sept 23; the month resets Oct 1) and Sail
   auto-recharge (about 2.6 days of runway at $32 a day on Sept 23). After a top-up, align
   `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD` (`gateway/wrangler.jsonc`) and the House line
-  (`scripts/campaign_topup.py`) up to the funded balance, never above.
+  (`scripts/campaign_topup.py`) up to the funded balance, never above. Since Sept 24, 2026 the
+  House line no longer counts holds with no answer (**The OpenAI meter**), and while the gateway's
+  month is read the line never reads above what that month has left, so aligning the gateway's
+  month to the funded balance bounds the House's line too; read `house_line_usd` and
+  `provider_left_usd` in `health.json` `campaign.meters.openai.line` before aligning the House's own.
 - **Level-3 options:** a second Alpaca practice account that no House reconciles, with its keys in
   the gateway, to settle the multi-leg unknowns before any spread trades (the design is
   `docs/design/2026-09-24-level-3-debit-verticals.md` on its draft branch).
@@ -493,7 +611,8 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `lab.box_usd_per_hour` | $0.20 | The price the lab records for its box's time (`lab.stats` `spend.sail_usd_estimate`, `batches.sail_usd`) |
 | | `lab.holdout_reserve`, `stats_every_minutes`, `max_queue`, `max_tapes_per_step` | 1, 10, 600, 4 | Not in `game.json`: defaults in `league/lab.py` `DEFAULTS`, which a `game.json` `lab` key of the same name overrides. The sealed-holdout evaluations of a living line the lab never spends (they stay with the line's own forks); how often a `lab.stats` row is written; the most candidates queued at once; search tapes built a step |
 | | `lab.closed_alert_minutes`, `seat_wait_alert_hours` | 30, 6 | Also `DEFAULTS` only (Sept 23, 2026): after how long closed the lab raises its one warning, and after how long waiting for a seat a graduate is named once |
-| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour |
+| | `lab.failures_alert_after`, `row_errors_per_step` | 5, 8 | `DEFAULTS` only (D1, Sept 24, 2026): failed steps in a row before the one error alert and `health.json` `lab.failing_since`; queued rows a step may block for an error of the lab's own before the step fails instead |
+| | `lab.forward_every_minutes`, `forward_candidates_per_run`, `forward_box_seconds`, `forward_days`, `forward_min_active_blocks`, `forward_min_trades` | 60, 48, 90, 7, 3, 3 | `DEFAULTS` only (S2, Sept 23, 2026): how often the lab replays its elites and waiting graduates on their forward windows, how many a run and for at most how many box seconds, how many days of live tape the lab builds for the deep-replay Alpaca desks, how many active forward blocks a record needs to rank anything, and from how many closed practice trades a born graduate's board row moves its lineage's search share. At the box's measured rates (11 candidates a second on Kalshi tapes, 1.7 on crypto) a run is some 5-30 box seconds: under a cent of Sail an hour. But `forward_box_seconds` is the run's own time and the tapes it builds fill it: on Sept 23 (22:11Z, 23:14Z) a run scored 4 and 5 of its 48 due and skipped the rest, so 25 graduates waiting for seats need several hourly runs. Since D1 a waiting graduate's first window comes before an elite's |
 | | `research.evidence_max_turns` | 20 | Research turns for an agent with evidence (rung >= 1 and a closed trade); others keep `max_turns` |
 | | `economy.line_exhausted_trials`, `explore_every` | 15, 5 | Retire lines with 15 failed trials and no pass; one birth in five explores |
 | | `economy.losing_family_min_blocks`, `seat_waiters_warning` | 6, 8 | The seat market (Sept 23, 2026): no House mutation, parameter fork or revival of a family whose pooled forward record is negative after this many active blocks (an info alert an hour a family); a warning when more than this many newcomers have waited for seats over an hour |
@@ -501,13 +620,20 @@ deploy and a re-ratified grant (see "A money rule" above).
 | `league/shards.py` | `FLOOR_USD`, `TOP_UP_USD`, `KEEP_USD`, `MAX_MOVE_USD`, `MAX_DAY_USD` | $20, $30, $60, $100, $200 | The Kalshi shard funder (Sept 23, 2026): a wanted shard under the floor is topped up from the richest other shard that keeps its floor (shard 0 keeps $60) and the stakes of the desks on it; at most $100 a move and $200 a rolling day, counted from the ledger. Constants in a protected file: an owner deploy changes them |
 | | `allocator.evidence` `paper_weight`, `alpaca_paper_haircut_bps` | 0.5; crypto 4, equity 2, option 24 | E = W_paper^paper_weight × W_real; Alpaca paper fills haircut per side of filled notional at the rate of the fill's asset class (A8, Sept 23, 2026 ~22:00 UTC: each class's practice optimism against the order's reference at intent time, the larger of the notional-weighted mean and the round-trip reading, rounded up, never below 2; `docs/research/queries/2026-09-23/A8-haircut.py`). Options tightened from 10, crypto and stocks loosened to what was measured. A plain number charges every class (the rollback); a class not named pays the table's largest rate |
 | | `allocator` `bunt_at`, `bunt_min_trades`, `bunt_min_settled` | 1.01, 5, 3 | Paper → bunt: E at the line and 5 closed paper trades, or 3 settlements on Kalshi (plan default 1.03; set from the Sept 23 06:45 UTC distribution, bounds 1.0-1.25) |
-| | `allocator.bunt_usd` | Kalshi $30, Alpaca $25 | A bunt's real stake (plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum). Kalshi $10 → $30 on Sept 23, 2026 ~17:00 UTC: a $10 bunt was a one-loss trial (any lost $5 position over $1.54 crossed the hysteresis line); the grant's seats follow the smallest bunt, floor($1,017.75 / $25) = 40 |
+| | `allocator.bunt_usd` | Kalshi $30, Alpaca $25 | A PROVEN family's bunt (since Sept 24, 2026; plan default Alpaca $15: untradeable under the book's 50%-of-equity order rule and Alpaca's $10 crypto minimum). Kalshi $10 → $30 on Sept 23, 2026 ~17:00 UTC: a $10 bunt was a one-loss trial (any lost $5 position over $1.54 crossed the hysteresis line) |
+| | `allocator.probe_bunt_usd` | Kalshi $10, Alpaca $25 | An UNPROVEN family's first real stake (P1, Sept 24, 2026; table Kalshi $5-15, Alpaca $20-25): the nine promotions of Sept 23-24 all ran unproven mechanisms and settled -$18.62. A probe becomes a bunt the pass after its family is proven and back when the bound falls (free cash only). An options probe is still $80. The grant's seats follow the smallest real stake: floor($1,017.75 / $10) = 101 (40 at $25) |
+| | `allocator.family_proven` | 10 independent settlements, practice 0.5, real 1, 80%, `lopsided_gate` true | The proof (P1): a family's pooled forward record (`allocator.family_record`: every member ever born, living or dead; one observation per event, members of one event pooled at the largest weight; an Alpaca practice trade pays `alpaca_paper_haircut_bps`, as E does) with a one-sided 80% lower bound (Student's t on n_eff - 1) above zero, and a lopsided record (80% or more of its observations winning: favourites) also above the House's exact loss-rate gate at 80% (`stats.lopsided_growth_lcb`, as `Evaluator._judge_family` applies it; `lopsided_gate` false restores the t bound alone). At T0 (Sept 24, 2026) this proves only sports-central-run-under; weather-favorites (14 of 16 winning, t bound +0.0033) has a loss-rate bound of -0.0125. The board shows `family`, `family_state`, `family_bound`, `family_n`, and "probe" as its own band in rows, the summary and the moves (the site shows it as Probe) |
+| | `allocator.independent_settlements` | `event` | Closed trades and settlements on the Kalshi books count once per event (D4, Sept 24, 2026; `evaluator.event_key`) for the bunt line, the swing's real trades, the one-loss trial and the family record: meriwether-h7d7702 was promoted "on 6 closed trades" that were two games. W is unchanged. `trade`: every settlement counts |
+| | `allocator` `hysteresis_after_settled`, `position_share_event` | 3, 0.2 | The one-loss trial (P2, Sept 24, 2026): the hysteresis exit waits for 3 independent real results in the stay (the 35% stay drawdown always applies); a Kalshi position is a fifth of the stake ($6 of $30, $2 of a $10 probe). 4 of the nine promotions were demoted after one loss |
 | | `allocator.bunt_growth` | `w_real` | A bunt keeps what it makes (Sept 23, 2026 ~16:00 UTC, the learn-and-unblock run): its target is `bunt_usd` × clamp(W_real, 1, `swing_at`), profit inside the headroom is not swept, and a bunt with W_real under 1 is never topped back up. `flat`: the flat `bunt_usd`, swept above 10%, as before |
 | | `allocator.option_bunt_usd` | $80 | An options bunt's stake (was max(`bunt_usd`, `rungs.2.option_max_position_usd`) = $40, which the book's 50%-of-equity rules cut to a $20 contract): one $40 contract fits under half of $80 |
 | | `allocator.bunt_daily_loss` | `stay_drawdown` | A real-money bunt is not frozen by the book's per-desk daily-loss rule (`book.DEFAULT_RULES` `max_daily_loss_pct` 0.10, unchanged); its stay drawdown (`real_drawdown_demote`) and hysteresis govern. Swings and practice books keep the book's rule. `book`: the book's rule for bunts too |
 | | `allocator.real_halt` | `venue_grant_capital`, 0.08 | The real book's daily-loss halt is 8% of that venue's grant capital ($41.42 Kalshi, $40.00 Alpaca), per venue, never the combined envelope on one venue and never the staked accounts' sum (one $25 bunt made that a $2.00 halt). Practice books keep the staked-sum basis; `staked` restores it on real books. Since Sept 23, 2026 ~22:00 UTC the day's opening equity survives a House restart (`day_open.<book>.json` in the House root, see below), so a restart mid-day no longer gives either daily-loss line back |
-| | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.25, 8, 1.0, 0.9 | Bunt → swing (audited the first time); a swing leaves under 1.25 × hysteresis or W_real 0.9. 1.5 → 1.25 on Sept 23, 2026 ~17:00 UTC: the only two earners needed 2.8 and 5.6 days at their rates to reach 1.5 |
-| | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake (never under the venue minimum × 1.2) |
+| | `allocator.longshot_floor_real` (read by `book.py`) | `"0.30"` | X0, Sept 24, 2026: a REAL Kalshi entry priced under it is refused by the risk engine's longshot rule; the floor is the larger of it and the book's `min_event_price` (0.15, which practice books keep). 20-cent ETH strikes lost twice on real money on Sept 23. Without the key: 0.15 everywhere |
+| | `allocator.real_entry_liquidity` (read by `book.py`) | `maker_unless_family_taker_positive` | X0: a REAL Kalshi entry must be a post-only limit unless the agent's family's pooled taker record is positive (`Allocator.family_taker`, wired to each real book as `family_taker`); an unmeasured record refuses it, and the refusal names the family, its taker settlements and bound. The taker mechanisms were the loss engine of the nine promotions of Sept 23. Without the key: any order type |
+| | `allocator.max_event_share` (read by `book.py`) | `"0.25"` | X0: on a REAL Kalshi book an agent's holdings at cost, working buys and the new order on one event (a ticker's first two `-` segments, Kalshi's own event: every strike of one game or one city's day, every player prop of one game; a two-segment ticker is its own event) are at most this share of its equity on the book; the refusal says "one event may hold at most 25% of the stake". Without the key: no cap. `Book.risk_lines(agent)["entry_rules"]` lists the three a real book enforces |
+| | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.25, 8, 1.0, 0.9 | Bunt → swing (audited the first time), for a PROVEN family's agent only since Sept 24, 2026 (an unproven family's agent stays a probe, and a swing whose family stops being proven drops to a probe; a swing audit that finishes after that does not commit); a swing leaves under 1.25 × hysteresis or W_real 0.9. 1.5 → 1.25 on Sept 23, 2026 ~17:00 UTC: the only two earners needed 2.8 and 5.6 days at their rates to reach 1.5 |
+| | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake at Alpaca (`position_share_event` on Kalshi), never under the venue minimum × 1.2 |
 | | `allocator` `stars`, `star_min_w_real` | 3, 1.25 | The site's top lane: the best swings by real P&L |
 | | `allocator` `hysteresis`, `real_drawdown_demote`, `die_below`, `die_min_trades` | 0.85, 0.35, 0.80, 10 | Down as fast as up: band exits, a 35% real drawdown (of the current real stay) back to paper, paper-wealth death |
 | | `allocator.reentry_cooldown_hours` | 1.0 | An agent sent back to paper from real money waits an hour before it may bunt again, so a record near a line cannot flap between books at every mark pass |
