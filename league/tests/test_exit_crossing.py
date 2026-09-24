@@ -121,20 +121,21 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertFalse(self.book.orders[orders["haghani-59"]].open)
         for agent in ("haghani-55", "haghani-37", "haghani-57", "haghani-56"):
             self.assertTrue(self.book.orders[orders[agent]].open)
-        price = D("12.173015625")
-        # The exiter sold at the resting bid's price and paid the taker's fee, in cash, as the venue would.
+        # The exiter sold at what the venue would have paid it alone -- the market's bid, 12.17, not the House bid's
+        # 12.173015625 (review of #226) -- and paid the taker's fee, in cash, as the venue would.
+        price, bid = D("12.17"), D("12.173015625")
         taker = Fees("alpaca").charge(self.inst, "sell", held, price, liquidity="taker")
         self.assertEqual(self.book.account("haghani-hb85bb8").holdings, {})
         self.assertEqual(self.book.account("haghani-hb85bb8").cash, cash_before + q_cash(held * price - taker.usd))
         # The peer bought at its own limit as a maker: the fee comes out of the coins.
-        maker = Fees("alpaca").charge(self.inst, "buy", held, price, liquidity="maker")
+        maker = Fees("alpaca").charge(self.inst, "buy", held, bid, liquidity="maker")
         peer = self.book.account("haghani-59")
         self.assertEqual(peer.holdings[self.inst.key].quantity, received(held, maker))
-        self.assertEqual(peer.cash, D("200") - q_cash(held * price))
+        self.assertEqual(peer.cash, D("200") - q_cash(held * bid))
         (sold,) = self.crossed_fills("haghani-hb85bb8")
         (bought,) = self.crossed_fills("haghani-59")
         self.assertEqual((sold["side"], sold["liquidity"], D(sold["price"])), ("sell", "taker", price))
-        self.assertEqual((bought["side"], bought["liquidity"], D(bought["price"])), ("buy", "maker", price))
+        self.assertEqual((bought["side"], bought["liquidity"], D(bought["price"])), ("buy", "maker", bid))
         self.assertEqual(sold["resting_orders"], [orders["haghani-59"]])
         self.assertEqual(bought["resting_order"], orders["haghani-59"])
         self.assertIsNotNone(sold["realized"])
@@ -207,11 +208,13 @@ class PracticeAlpacaExitTest(CrossCase):
         rest = held - D("1")
         self.assertEqual(D(self.crossed_fills("p1")[0]["quantity"]), D("1"))
         self.assertEqual(D(self.crossed_fills("p2")[0]["quantity"]), rest)
+        self.assertEqual(D(self.crossed_fills("p1")[0]["price"]), D("12.17"))  # each bidder at its own limit
         self.assertEqual(D(self.crossed_fills("p2")[0]["price"]), D("12.16"))
-        proceeds = D("12.17") + rest * D("12.16")
-        taker = Fees("alpaca").charge(self.inst, "sell", held, D(sold["price"]), liquidity="taker")
-        self.assertEqual(D(sold["cash_delta"]), q_cash(held * D(sold["price"]) - taker.usd))
-        self.assertLess(abs(held * D(sold["price"]) - proceeds), D("0.000001"))
+        # The seller at the market's bid, 12.16, for all of it: never the 12.17 bid, which is over the market
+        # (review of #226). The House row keeps the cent between them on the one unit.
+        self.assertEqual(D(sold["price"]), D("12.16"))
+        taker = Fees("alpaca").charge(self.inst, "sell", held, D("12.16"), liquidity="taker")
+        self.assertEqual(D(sold["cash_delta"]), q_cash(held * D("12.16") - taker.usd))
         self.assertTrue(self.book.reconcile().ok)
 
     def test_an_unconfirmed_cancel_is_never_a_cross_the_exit_rests_post_only_at_the_ask(self):
@@ -483,6 +486,21 @@ class PracticeAlpacaExitTest(CrossCase):
         self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.18"), False))
         self.assertIn("one step above the House's own resting bid", out.detail)
 
+    def test_without_a_fresh_market_bid_nothing_is_crossed(self):
+        """Review of #226 (owner's decision): a cross pays the seller the market's bid, so a quote older than the book
+        lets a quote be (`max_quote_age_seconds`, 900 s) prices no cross: the exit takes the doubt path and rests
+        post-only at the ask, and the peer's bid is left alone."""
+        held = self.hold("seller", self.inst, "1.62")
+        bid = self.rest_bid("buyer", self.inst, "3", "12.17")
+        self.clock.advance(901)  # the venue's quote (stamped at the start) is now 901 s old
+        out = self.book.submit([self.intent("seller", self.inst, "sell", held)])[0]
+        self.assertEqual(self.crossed_fills("seller"), [])
+        self.assertEqual(self.broker.cancelled, [])
+        self.assertTrue(self.book.orders[bid].open)
+        sent = self.broker.submitted[-1]
+        self.assertEqual((sent.side, sent.order_type, sent.limit_price, sent.post_only), ("sell", "limit", D("12.19"), True))
+        self.assertIn("no fresh market bid", out.detail)
+
     def test_a_kill_switch_engaged_while_the_way_is_cleared_stops_the_cross(self):
         """Review of #226 (mutation testing): the kill-switch guard in `_crossable` could be removed with every test
         passing, because `check` refuses everything while the switch is on. It still decides one case: the switch
@@ -553,6 +571,38 @@ class RealKalshiExitTest(CrossCase):
         result = self.book.reconcile()
         self.assertTrue(result.ok, result.detail)
         self.assertIsNone(self.book.frozen)
+
+    def test_a_bid_inside_the_spread_pays_the_seller_only_the_markets_bid(self):
+        """Review of #226 (owner's decision): the House's own post-only re-pricing rests bids one tick under the
+        ask, inside the spread. A market NO exit crossed with such a bid at 0.42 was paid 0.42 where its venue would
+        have paid it 0.40, the market's bid. The seller now gets 0.40, the bidder still pays its 0.42 limit, and the
+        House row keeps the two cents a contract."""
+        self.broker.set_quote(self.no, "0.40", "0.43")
+        self.broker.set_quote(event("yes", venue=self.venue), "0.57", "0.60")
+        held = self.hold("seller", self.no, "5")
+        self.rest_bid("buyer", self.no, "5", "0.42", post_only=True)
+        house_before = self.book.account(HOUSE).cash
+        out = self.book.submit([self.intent("seller", self.no, "sell", held)])[0]
+        self.assertEqual(out.status, "crossed", out.detail)
+        (sold,) = self.crossed_fills("seller")
+        (bought,) = self.crossed_fills("buyer")
+        self.assertEqual(D(sold["price"]), D("0.40"))
+        self.assertEqual(D(bought["price"]), D("0.42"))
+        taker = Fees("kalshi").charge(self.no, "sell", held, D("0.40"), liquidity="taker")
+        maker = Fees("kalshi").charge(self.no, "buy", held, D("0.42"), liquidity="maker")
+        self.assertEqual(self.book.account(HOUSE).cash - house_before, q_cash(held * D("0.02") + taker.usd + maker.usd))
+        self.assertTrue(self.book.reconcile().ok)
+
+    def test_a_crossed_limit_exit_is_never_paid_under_its_own_limit(self):
+        self.broker.set_quote(self.no, "0.40", "0.43")
+        self.broker.set_quote(event("yes", venue=self.venue), "0.57", "0.60")
+        held = self.hold("seller", self.no, "5")
+        self.rest_bid("buyer", self.no, "5", "0.42", post_only=True)
+        out = self.book.submit([self.intent("seller", self.no, "sell", held, order_type="limit", limit_price="0.41")])[0]
+        self.assertEqual(out.status, "crossed", out.detail)
+        self.assertEqual(D(self.crossed_fills("seller")[0]["price"]), D("0.41"))  # its own limit, over the 0.40 bid
+        self.assertEqual(D(self.crossed_fills("buyer")[0]["price"]), D("0.42"))
+        self.assertTrue(self.book.reconcile().ok)
 
     def test_a_no_bid_under_the_market_is_left_and_the_exit_goes_one_cent_above_it(self):
         held = self.hold("seller", self.no, "5")

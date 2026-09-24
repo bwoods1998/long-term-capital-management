@@ -25,8 +25,9 @@ venue refuses a post-only order that would cross: the agent re-prices or waits.
 Exits are never walled off (D3, Sept 24, 2026). A sell that would cross the House's own resting
 order is cleared instead: the seller's own crossing order is cancelled first; a peer's resting bid
 is cancelled at the venue and, once the venue has confirmed the cancel and what had filled, the two
-are crossed inside the House at the bid's price (`_cross_resting`: the seller a taker, the bidder a
-maker, the House row balancing, one `book.cross_plan`); what cannot be crossed so (a cancel not
+are crossed inside the House (`_cross_resting`: the seller a taker at the market's bid, what its venue
+would have paid it alone, never under its own limit; the bidder a maker at its own limit; the House
+row keeping the gap and balancing, one `book.cross_plan`; no fresh market bid, no cross); what cannot be crossed so (a cancel not
 confirmed, an order the venue has not acknowledged, any doubt) is re-priced as a post-only limit at
 the ask, and the order row says why. Before, 74 sells in the 48 hours to Sept 24 01:42Z were
 refused against a sibling's resting bid, and their positions sat hours past their stops.
@@ -1571,7 +1572,7 @@ class Book:
         says was left unfilled of an order it says is cancelled."""
         if intent.side != "sell" or not self._crossing_orders(intent):
             return None
-        touch = quote.bid if quote is not None and quote.bid is not None and quote.bid > 0 else None
+        touch = self._fresh_bid(intent.instrument, quote, now)
         doubt: str | None = None
         withdrawn: list[str] = []
         for working in [w for w in self._crossing_orders(intent) if any(s.agent == intent.agent for s in w.shares)]:
@@ -1593,6 +1594,10 @@ class Book:
                 break
             working = peers[0]
             doubt = doubt or self._doubt_about(working)
+            if not doubt and touch is None and cross and not intent.post_only and not self.frozen:
+                # A cross pays the seller the market's bid (`_cross_resting`); with no fresh one there is no price to
+                # pay it, and no way to tell a bid at the market from one under it (review of #226).
+                doubt = "no fresh market bid to price a cross inside the House at"
             if doubt or not self._crossable(working, intent, cross=cross, touch=touch, now=now):
                 break
             reference = working.broker_order_id or working.order_id
@@ -1623,7 +1628,7 @@ class Book:
         cleared = Clearing(left=left, doubt=doubt)
         notes = [f"your own resting order{'s' if len(withdrawn) > 1 else ''} {', '.join(withdrawn)} cancelled first"] if withdrawn else []
         if parts:
-            cleared.crossed, cleared.price = self._cross_resting(intent, parts, now)
+            cleared.crossed, cleared.price = self._cross_resting(intent, parts, now, touch=touch)
             notes.append(
                 f"{text(cleared.crossed)} sold inside the House at {text(cleared.price)} to the House's own resting "
                 f"bid{'s' if len(parts) > 1 else ''} ({', '.join(f'{s.agent} {w.order_id}' for w, s, _ in parts)}), "
@@ -1631,6 +1636,18 @@ class Book:
             )
         cleared.detail = "; ".join(notes)
         return cleared
+
+    def _fresh_bid(self, instrument: Instrument, quote: Quote | None, now: str) -> Decimal | None:
+        """The market's bid to price a cross at, or None when the quote has none, or is older than the book lets a
+        quote be for an entry (`max_quote_age_seconds`; options `max_option_quote_age_seconds`), or cannot say how
+        old it is: then there is no fresh touch and nothing is crossed (the doubt path, `_clear_the_way`)."""
+        if quote is None or quote.bid is None or quote.bid <= 0:
+            return None
+        age = _age_seconds(quote.as_of, now)
+        oldest = self.rules["max_option_quote_age_seconds" if instrument.asset_class == "option" else "max_quote_age_seconds"]
+        if age is None or age > int(oldest):
+            return None
+        return quote.bid
 
     def _await_cancel(self, working: Working, now: str, *, why: str = "") -> None:
         """Read an order whose cancel the venue has not confirmed yet again, a moment apart and a
@@ -1648,20 +1665,30 @@ class Book:
                 return
             self._attribute(working, order, now, reason=why if order.status == "cancelled" else "")
 
-    def _cross_resting(self, intent: Intent, parts: Sequence[tuple[Working, Share, Decimal]], now: str) -> tuple[Decimal, Decimal]:
+    def _cross_resting(self, intent: Intent, parts: Sequence[tuple[Working, Share, Decimal]], now: str, *,
+                       touch: Decimal) -> tuple[Decimal, Decimal]:
         """Cross an exit with peers' resting bids the venue has confirmed cancelled: one `book.cross_plan`
         committed as one ledger transaction (`_commit_cross`), so a restart, or the next submit or poll,
         finishes it from the ledger alone and an older release sees all of it or none.
 
-        Each bidder buys at its own limit as a maker; the seller sells the sum at the bids' weighted
-        price as a taker (`cross:<exit intent>`); fees are what the venue would have charged each side,
-        and a House row mirrors every fill exactly, so the accounts still sum to the venue's, which saw
-        nothing. Fill ids keep the fold's rule (`<source>:<intent id>`): the exit intent is crossed here
+        Each bidder buys at its own limit as a maker. The seller sells the sum as a taker
+        (`cross:<exit intent>`) at what the venue would have paid it alone: the market's bid `touch`,
+        never under the seller's own limit and never over a crossed bid's price. The House row keeps the
+        gap to the bids' prices, as `_net` keeps the spread (the module's rule: a crossed agent is filled
+        exactly as the venue would have filled it alone). Before the review of #226 (Sept 24, 2026) the
+        seller was paid the bids' own prices, so a bid resting inside the spread -- which the House's own
+        post-only re-pricing puts one tick under the ask -- paid a practice seller up to the spread more
+        than its venue would have (0.42 for a market NO sell on a 0.40 bid). Fees are what the venue
+        would have charged each side, and a House row mirrors every fill exactly, so the accounts still
+        sum to the venue's, which saw nothing. Fill ids keep the fold's rule (`<source>:<intent id>`): the exit intent is crossed here
         at most once and never also netted (`submit`), and a bid is cancelled so it is crossed once."""
         plan_id = f"cross-plan:{self.name}:" + hashlib.sha256(f"resting|{intent.id}".encode()).hexdigest()[:32]
         sold = sum((quantity for _, _, quantity in parts), ZERO)
-        price = parts[0][0].limit_price if len(parts) == 1 else money(
-            sum((quantity * working.limit_price for working, _, quantity in parts), ZERO) / sold).quantize(QTY_PLACES)
+        price = touch
+        own = intent.limit_price if intent.order_type == "limit" else None
+        if own is not None and own > price:
+            price = own  # never under the seller's own limit (every crossed bid is at or above it)
+        price = min([price] + [working.limit_price for working, _, _ in parts])  # never over a crossed bid's price
         orders = [working.order_id for working, _, _ in parts]
         accounts = {intent.agent: copy.deepcopy(self._account(intent.agent))}
         for _, share, _ in parts:
@@ -1683,8 +1710,10 @@ class Book:
         charge = self.fees.charge(intent.instrument, "sell", sold, price, liquidity="taker")
         payload = self._fill_payload(intent.agent, intent, quantity=sold, price=price, charge=charge, source="cross", order_id=None,
                                      account=accounts[intent.agent])
-        payload.update(resting_orders=orders, note=("crossed inside the House at the resting bid's price: this exit would have met the "
-                                                    "House's own resting bid, which was cancelled at the venue first; no venue order"))
+        payload.update(resting_orders=orders, note=(
+            f"crossed inside the House at {text(price)}, what the venue would have paid this sell alone (the market's bid, "
+            "never under your own limit): it would have met the House's own resting bid, which was cancelled at the venue "
+            "first and filled at its own limit; the House keeps any gap between the two; no venue order"))
         add(intent.agent, intent.id, payload)
         for working, share, quantity in parts:
             charge = self.fees.charge(working.instrument, "buy", quantity, working.limit_price, liquidity="maker")

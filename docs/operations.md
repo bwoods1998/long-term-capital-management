@@ -408,8 +408,9 @@ canary ticks on a simulated venue, promotes, then watches the House for 10 minut
   positions sat 9 h past their stops). What the ledger shows instead: the seller's own crossing
   bid cancelled (its `book.order` `cancelled` row's `reason` says why); a peer's bid at or above the
   market's bid cancelled at the venue, then one `book.cross_plan` with `cross` fills for both (the
-  seller's `resting_orders`, the bidder's `resting_order` and `note`) and `cross-house` rows that
-  mirror them, no venue order; a peer's bid under the market's bid left alone, the exit sent as a
+  seller's at the market's bid, never under its own limit, with `resting_orders`; the bidder's at its
+  own limit, with `resting_order` and `note`) and `cross-house` rows that mirror them, the House row
+  keeping the gap, no venue order (with no fresh market bid, no cross); a peer's bid under the market's bid left alone, the exit sent as a
   limit one step above it; and on doubt (a cancel the venue has not confirmed after two re-reads a
   quarter-second apart, an order it has not acknowledged) the exit resting post-only at the ask.
   Each re-priced order's `book.order` rows carry the reason. A self-cross refusal on a SELL is a

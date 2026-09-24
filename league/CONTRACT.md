@@ -453,8 +453,10 @@ House's wind-down or horizon rule -- is never refused for it:
   says why), and the sell goes on.
 - **Another agent's resting bid at or above the market's bid**, where a sell at the venue would
   really meet it, is cancelled at the venue and, once the venue has confirmed the cancel and what
-  had filled, your sell is crossed with it inside the House at that bid's price: you sell as a taker
-  and pay the taker's fee, the bidder buys at its own limit as a maker and pays the maker's. Both are
+  had filled, your sell is crossed with it inside the House: you sell at what the venue would have
+  paid you alone, the market's bid (never under your own limit), as a taker, and pay the taker's fee;
+  the bidder buys at its own limit as a maker and pays the maker's; the House keeps any gap between
+  the two. With no fresh market bid nothing is crossed (the post-only fallback below). Both are
   `cross` fills (yours names the bids in `resting_orders`); nothing reaches the venue. What the
   bidder's order had left is not re-placed: its cancelled row and its fill say so, and it bids again
   at its next wake if it still wants to.
