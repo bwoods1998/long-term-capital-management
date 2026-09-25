@@ -968,9 +968,10 @@ watch.
     the fees are listed they find no shortfall and are not booked again.
   - *Resting crypto bids.* Alpaca holds each at its notional rounded half-up to the cent, and the
     book now adds each back that way. Added back unrounded (to eighteen places) they moved the
-    reading by tenths of a cent at every change of the resting bids, each booked as dust, until the
-    cancel of four of eight bids at 02:49Z Sept 25 left "cash differs by 0.0108" and froze the real
-    book, with no fill and no fee behind it, until a restart. New `book.reconciled` rows carry
+    reading by tenths of a cent at every change of the resting bids, each booked as dust, until four
+    of the eight bids resting at 02:26Z Sept 25 were cancelled or replaced over the next passes and
+    the real book froze on "cash differs by 0.0149", then "0.0108", from 02:38:59Z to a restart at
+    04:11:50Z, with no fill and no fee behind it. New `book.reconciled` rows carry
     `holds: "cent"`. The first clean reading after the deploy that ships this also allows exactly the
     sub-cent error the last reading of the release before left on the bids resting then (read from
     the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean readings of
