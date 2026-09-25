@@ -547,6 +547,63 @@ ORDER BY seq DESC LIMIT 20`.
       founding one (its first member's NEEDS at birth, `_family_program`), so a member carrying the name
       with another program cannot pass the proof to its forks, and never anchors R3 (the review of #276).
       Agents born before keep their family on the ledger.
+
+    **F3 and C7 (Sept 25, 2026, the forward-first run): forward tenure, desk capacity, the merged
+    strategies' quota, expiries, and a proven family's real members on disjoint events.** Measured on
+    the T0 snapshot (04:23Z): 128 of 128 seats held and none displaceable; 65 waiters, the longest 60.6 h;
+    111 deaths in 24 h, 96 displaced (86%); the 18 merged strategies "waiting" were 13 corrected children
+    whose foundry card had passed replay (counted again among the cards, born only at the cards'
+    one-an-hour cadence) and 5 whose card had failed replay (never to be born, counted for good).
+    - **Quota** (`_strategy_births`, route `strategies_quota`, a `quota:<child>` row): while
+      `economy.strategies_reserved_seats` (1; 0 turns it off) is on, one merged strategy is born each
+      births pass, first of every class but a proven family's: corrected children of a REAL-money parent
+      first (a repair of a refusal on the `kalshi` or `alpaca` book, or a parent on rung 2+:
+      hilibrand-event-budget-child), then one whose defect a resident runs, then a positive desk's, then
+      the longest wait. Its seat: the defect's resident (retired `superseded`), a free seat of its desk,
+      the league's weakest eligible resident when only the league is full, or its desk's weakest
+      NEVER-TRADED resident past its fair chance -- never a trader's seat. Meanwhile its desk keeps those
+      seats for it: another class's newcomer is given only a trader's seat there, and a card or a
+      retained candidate no free seat the desk keeps (`seats.quota.held`). A passed card is born through
+      the foundry's own admission (`Foundry.refill(only=..., seat_chosen=True)`), seated on practice.
+      `seats.waiters.strategies` counts each merged strategy once, with its `route` (`card` passed replay,
+      `replay` pending, `pending` handed to the foundry next pass, `enroll`) in `seats.quota.routes`;
+      the cards class no longer counts them.
+    - **Expiry** (`seats.expired.by_rule`, the watch prints it): rule `replay` -- a merged strategy whose
+      card failed the replay gate leaves the queue (a new file version is a new card); rule `aged` -- a
+      waiter that waited over `economy.waiter_expiry_hours` (24) goes back to the Alpha Lab with its
+      forward record kept: a card's, a retained candidate's or a merged strategy's program is queued in the
+      lab (`Lab.admit`, origin `agent`; its `seat-expired:` row and house.json entry say `lab`: "queued in
+      the Alpha Lab as candidate <id>" or why not), a graduate is held by the lab (`Lab._hold`: "aged:
+      ...") until its own forward window wins, when it is a waiter again. A graduate whose window is
+      positive keeps its place; a proven family's births never age. The foundry admits only the cards the
+      House still counts (`only`), never an expired one, and `enroll` never births an expired strategy.
+    - **Desk capacity** (`_desk_capacity`, house.json `desk_capacity`, `seats.caps[desk]` `record`,
+      `rule`, `moved_at`, `floor`, `ceiling`; a `desk-capacity:<desk>:<at>` `route.decision` row and one
+      info alert a pass for each move): a desk whose pooled forward record over the last
+      `desk_capacity_days` (7) is negative on `desk_capacity_shrink_blocks` (100) active blocks loses a
+      seat, down to `desk_capacity_floor` (4; "at its floor: done"); positive on `desk_capacity_grow_blocks`
+      (30) gains one, up to its niches.json cap plus `desk_capacity_max_gain` (4); one step every 12 hours
+      (`desk_capacity_seats_a_day` 2; 0 puts every cap back to niches.json). niches.json is never edited.
+      Nobody is killed: a desk over its cap makes no seat for an unproven family's newcomer (the reason
+      "its desk is over the cap its forward record gives it" in `over_two_hours`) except a real parent's
+      corrected child one for one, and its displaceable residents rank first league-wide, so its seats
+      move to the desks with room. At T0: crypto-15m 8->7 (4 once the Kalshi run's niches.json row lands:
+      at its floor), crypto-strikes 6->5, crypto-majors 12->11, index ETFs 18->17; crypto-alts, megacaps,
+      weather and sports +1.
+    - **Tenure** (`kept`: "a trader inside its desk's evidence clock from its first fill"): a resident that
+      has traded keeps its seat until its desk's evidence clock (the plain grace where none is measured)
+      has run from its current program's first own fill, against every newcomer and S3's stale rule; a
+      never-traded seat keeps its fair chance, max(1 h, min(clock, grace)).
+    - **Deaths** (`seats.deaths`, every health write): the last day's deaths by cause and
+      `displacement_share` (`displaced` over all), with the Kalshi-scale run's `desk_closed` counted
+      apart. At T0: 96 of 111 (0.865).
+    - **C7** (`House._split_events`, `_event_refusal`): the members of a PROVEN family on real money on one
+      Kalshi desk (two or more) split its events by a stable SHA-256 hash of `evaluator.event_key` (the
+      ticker's first two segments): each is shown only its share's markets (`ctx["event_share"]` says how
+      many members and how many markets fell to the others), and a real entry on another member's event
+      is refused with a `book.refused` row naming whose share it is. Exits are never split. Verify: the
+      family's `real.n` on the allocator board rises with its members, and no two members' real fills share
+      an event.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
