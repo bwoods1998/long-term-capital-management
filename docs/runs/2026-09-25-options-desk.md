@@ -313,5 +313,11 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   drain of a probe on the losing options-pullback family); singles -$34.15. Structures: none (krasker-22 has no
   signal). krasker-11 bought a SOFI put at $0.31.
 - **14:31Z (14:00-14:31):** desk 10 wakes, 0 intents; no fills, refusals or alerts. Day: singles -$34.15 on 5 closes; structures none.
+- **15:01Z (14:30-15:01):** desk 10 wakes, 0 intents; nothing filled, refused or alerted. **The learning loop on
+  structures (11:00-15:01Z):** 145 research turns and 7 replay trials on the options desk. krasker-16 (a single-leg
+  pullback agent) wrote a trend-aligned defined-risk credit-vertical candidate: its replay failed (two IWM closes);
+  krasker-22 tried a credit-spread rewrite (no trades in replay) and a momentum debit-vertical rewrite (-93.32% in
+  replay), both refused. The agents reach for structures from the brief and CONTRACT.md; the replay judges them as it
+  judged the founders.
 
 ## Report
