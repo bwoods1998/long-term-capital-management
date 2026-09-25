@@ -77,6 +77,7 @@ from ltcm.broker import (
 )
 from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
+from . import structures
 from .constitution import CONSTITUTION
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
@@ -105,6 +106,16 @@ DUST_USD = Decimal("0.01")
 PRACTICE_DUST_USD = Decimal("1.00")
 #: How long an event position the venue no longer shows may wait for its settlement row.
 SETTLEMENT_GRACE_SECONDS = 300
+#: Level-3 structures on a venue that holds their LEGS (`structure_legs`: the Alpaca accounts; Sept
+#: 25, 2026, the options-desk run). How many readings in a row must show a structure's contract apart
+#: from what the book explains before the House breaks the structure and closes what is left of it
+#: (`_mend_structures`): one reading can fall between a fill at the venue and the poll that books it.
+BREAK_AFTER = 2
+#: The source of the House rows that take a broken structure's legs, and what the venue shows of
+#: them, onto the House row to be closed (`_break_structure`, `_mend_structures`).
+BREAK_SOURCE = "structure-break"
+#: The last New York time a structure expiring today may be entered (the spec's section 4).
+STRUCTURE_LAST_ENTRY_NY = "14:30"
 
 #: What the adapters' open statuses look like to the book.
 OPEN_STATUSES = ("new", "accepted", "partially_filled", "unknown")
@@ -637,6 +648,16 @@ class Book:
         #: for the cancelled row a later poll writes (`_attribute`): the agent reads its orders' latest rows. In memory
         #: only: after a restart that row carries no reason, as before (review of #226, Sept 24, 2026).
         self._cancel_why: dict[str, str] = {}
+        #: Level-3 structures on a venue that holds their legs (Sept 25, 2026): how many readings in a
+        #: row each contract has stood apart (`_mend_structures`); the position keys the House row
+        #: holds from broken structures, folded from `BREAK_SOURCE` rows (`_apply_house`); the House's
+        #: buys that close a short leg, sent as exits (`_order_intent`); and the venue's own reading
+        #: of each position at the last `_venue` (its instruments, its quantities after the fold).
+        self._break_readings: dict[str, int] = {}
+        self._break_keys: set[str] = set()
+        self._closing_buys: set[str] = set()
+        self._venue_instruments: dict[str, Instrument] = {}
+        self._venue_positions: dict[str, Decimal] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -1204,7 +1225,10 @@ class Book:
         # Nobody can short, so every sell reduces a holding: it is an exit, and says so. The risk
         # engine then checks that it reduces without reversing, and the gateway (which lets an
         # exit through its dollar caps) does not count closing a position against the day.
-        closing = {"purpose": "exit", "exit_reason": "desk", "exit_of": intent.id} if intent.side == "sell" else {}
+        # The one buy that closes: the House buying back a short leg a broken structure left at the venue
+        # (`_close_break_units`), which the adapter sends as `buy_to_close`.
+        closing = ({"purpose": "exit", "exit_reason": "desk", "exit_of": intent.id}
+                   if intent.side == "sell" or intent.id in self._closing_buys else {})
         return OrderIntent.new(
             **closing,
             desk_id=f"book-{self.name}"[:60],
@@ -1474,8 +1498,14 @@ class Book:
         if intent.instrument.asset_class == "option":
             if intent.order_type != "limit" or intent.limit_price is None:
                 reasons.append("an option order must be a limit order")
-            if intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
+            if structures.is_structure(intent.instrument):
+                reasons.extend(self._structure_entry_reasons(intent, now))
+            elif intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
                 reasons.append("an option entry must expire after today: what expires today is a coin held to the bell")
+            if intent.side == "buy" and self._legs_at_venue():
+                netted = self._netting_reason(intent.instrument)
+                if netted:
+                    reasons.append(netted)
         if intent.side == "buy" and intent.instrument.asset_class == "event" and limits.max_hours_to_resolve is not None:
             try:
                 due = self.resolves_at(intent.instrument) if self.resolves_at else None
@@ -2090,12 +2120,27 @@ class Book:
         if delta != 0 and p.get("instrument"):
             instrument = Instrument.from_dict(p["instrument"])
             self._traded[position_key(instrument)] = instrument
+            if p.get("source") == BREAK_SOURCE:
+                self._break_keys.add(instrument.key)
             holding = account.holdings.get(instrument.key)
             if holding is None:
                 holding = account.holdings[instrument.key] = Holding(instrument)
             holding.quantity += delta
             if holding.quantity == 0:
                 del account.holdings[instrument.key]
+        order_id = p.get("order_id")
+        working = self.orders.get(order_id) if order_id and p.get("source") == "venue" else None
+        if working is not None:
+            # The House row's own venue orders (a broken structure's remains, `_close_break_units`,
+            # Sept 25, 2026) count their fills on the order exactly as an agent's do (`_apply_fill`).
+            self._fills_since_reconcile += 1
+            traded = money(p["quantity"])
+            working.filled += traded
+            working.notional += traded * money(p["price"])
+            working.fees_seen += money(p.get("venue_fee") or 0)
+            for share in working.shares:
+                if share.intent_id == p.get("intent_id"):
+                    share.filled += traded
 
     def _fill_payload(
         self,
@@ -2334,9 +2379,7 @@ class Book:
                     # order's fees, and they decide maker or taker at the moment of the fill.
                     charge = Charge(usd=venue_fee)
                 else:
-                    charge = self.fees.charge(
-                        working.instrument, working.side, part, price, liquidity=liquidity, filled_before=before
-                    )
+                    charge = self._charge(working.instrument, working.side, part, price, liquidity=liquidity, filled_before=before)
                 target = share.filled + part
                 targets.append({"intent_id": share.intent_id, "target": text(target), "quantity": text(part),
                                 "fee_usd": text(charge.usd), "fee_quantity": text(charge.quantity), "venue_fee": text(venue_fee),
@@ -2656,6 +2699,7 @@ class Book:
                 # cancels sends the rest, cleared as the House's orders stand now.
                 self._recheck_repriced(now)
                 self._advance_plans(now)
+            self._record_venue_answers()
         return checked
 
     def _venue_missed(self, working: Working, now: str) -> None:
@@ -2880,6 +2924,12 @@ class Book:
             expired = 0
             for agent, key, holding in due:
                 inst = holding.instrument
+                if structures.is_structure(inst) and self._legs_at_venue():
+                    # Nothing is held into an expiry (the House closes from 15:30 New York on the
+                    # earliest expiry day); one that was is broken and what is left of it closed.
+                    self._break_structure(agent, holding, f"held past its earliest expiry {inst.expiry}")
+                    expired += 1
+                    continue
                 if position_key(inst) in shown:
                     continue
                 payload = {
@@ -2926,6 +2976,292 @@ class Book:
                 )
             return out
 
+    # ---------------------------------------- structures on a venue that holds their legs
+    def _legs_at_venue(self) -> bool:
+        """Does this book's venue hold a structure's LEGS (the Alpaca adapter's `structure_legs`, Sept
+        25, 2026), so that the book, which holds each structure as ONE instrument, folds them? The
+        House's own options shadow book holds the structure itself and does not say so."""
+        try:
+            return "structure_legs" in set(self.broker.capabilities() or ())
+        except Exception:  # noqa: BLE001 - a venue that cannot say holds no legs of ours
+            return False
+
+    def _held_structures(self) -> dict[str, tuple[Instrument, Decimal]]:
+        """Every structure the book holds, every agent's and the House row's together: key -> (instrument, quantity)."""
+        out: dict[str, tuple[Instrument, Decimal]] = {}
+        for account in self.accounts.values():
+            for holding in account.holdings.values():
+                if holding.quantity != 0 and structures.is_structure(holding.instrument):
+                    key = position_key(holding.instrument)
+                    instrument, quantity = out.get(key, (holding.instrument, ZERO))
+                    out[key] = (instrument, quantity + holding.quantity)
+        return out
+
+    def _fold_structure_legs(self, positions: dict[str, Decimal]) -> Decimal:
+        """Fold the venue's legs into the structures the book holds, in place; return the cash to take
+        off the venue's before the two are compared.
+
+        Alpaca holds ONE net position a contract for the whole account, whatever made it: two agents'
+        structures sharing a strike, or one's short leg beside another's long contract, net at the
+        venue. So a structure is never matched to "its" legs one by one (two opposite legs that netted
+        to nothing would both read as missing). The book says instead what the venue must show: each
+        structure it holds at the book's own quantity, and each leg's contracts (sign x ratio x
+        quantity) taken off that contract's venue position. What is left of a contract is exactly what
+        the book's single contracts and its baseline must explain, so a difference reconciliation then
+        finds is a contract the venue holds apart from the book's structures (`_mend_structures`).
+
+        Cash: opening a credit structure, the venue ADDS the credit to cash (a margin account), while
+        the book, holding it at S = K - credit, DEBITS K - credit, its maximum loss. The two differ by
+        K x 100 x quantity for every credit structure held (K: the width, or the widest wing), closing
+        it moves them back together, and a debit structure (K = 0) moves both alike: that is the cash
+        returned."""
+        collateral = ZERO
+        for key, (instrument, quantity) in self._held_structures().items():
+            spec = structures.spec_of(instrument)
+            positions[key] = positions.get(key, ZERO) + quantity
+            self._venue_instruments[key] = instrument
+            for leg in spec.legs:
+                leg_key = position_key(leg.instrument)
+                self._venue_instruments.setdefault(leg_key, leg.instrument)
+                left = positions.get(leg_key, ZERO) - leg.sign * leg.ratio * quantity
+                if left == 0:
+                    positions.pop(leg_key, None)
+                else:
+                    positions[leg_key] = left
+            collateral += spec.collateral * instrument.multiplier * quantity
+        return collateral
+
+    @staticmethod
+    def _contract_signs(instrument: Instrument, quantity: Decimal = ONE) -> dict[str, int]:
+        """The option contracts an instrument holds at the venue, by position key: +1 long, -1 short."""
+        if structures.is_structure(instrument):
+            return {position_key(leg.instrument): leg.sign for leg in structures.spec_of(instrument).legs}
+        if instrument.asset_class == "option":
+            return {position_key(instrument): 1 if quantity > 0 else -1}
+        return {}
+
+    def _contracts_in_flight(self) -> set[str]:
+        """The contracts an open order of this book trades: a difference on one may be a fill not yet booked."""
+        busy: set[str] = set()
+        for working in self.orders.values():
+            if working.open:
+                busy.update(self._contract_signs(working.instrument))
+        return busy
+
+    def _netting_reason(self, instrument: Instrument) -> str | None:
+        """Why an entry may not be sent to a venue that holds one net position a contract: it would be
+        long a contract this book is short (in a structure, or a broken one's leg on the House row), or
+        short one it is long, held or bid. The venue would net the two, and neither could then be
+        closed as its own (a `buy_to_close` of a short the account no longer shows is refused)."""
+        mine = self._contract_signs(instrument)
+        if not mine:
+            return None
+        theirs = [self._contract_signs(h.instrument, h.quantity) for account in self.accounts.values()
+                  for h in account.holdings.values() if h.quantity != 0]
+        theirs += [self._contract_signs(w.instrument) for w in self.orders.values() if w.open and w.side == "buy"]
+        for signs in theirs:
+            for key, sign in signs.items():
+                if key in mine and mine[key] != sign:
+                    held, here = ("short", "long") if sign < 0 else ("long", "short")
+                    return (f"the account holds one net position a contract: {_contract_name(key)} is {held} on this book and "
+                            f"would be {here} here, and the venue would net the two")
+        return None
+
+    def _structure_entry_reasons(self, intent: Intent, now: str) -> list[str]:
+        """A structure's own rules at the book (the spec's section 4): its clock is its EARLIEST expiry;
+        it may be entered on that day until 14:30 New York, never after, and never once expired."""
+        try:
+            structures.spec_of(intent.instrument)
+        except ValueError as exc:
+            return [f"not a structure this book can hold: {exc}"]
+        if intent.side != "buy":
+            return []
+        expiry, today = str(intent.instrument.expiry or ""), _new_york_date(now)
+        if expiry < today:
+            return ["this structure's earliest leg has expired"]
+        if expiry == today and _new_york_clock(now) >= STRUCTURE_LAST_ENTRY_NY:
+            return [f"a structure expiring today may be entered only until {STRUCTURE_LAST_ENTRY_NY} New York"]
+        return []
+
+    def _charge(self, instrument: Instrument, side: str, quantity: Decimal, price: Decimal, *, liquidity: str = "taker",
+                filled_before: Decimal = ZERO) -> Charge:
+        """A fill's fee. A structure's fill is a fill of every leg at the venue, and each leg pays the
+        venue's fee on its own contracts (quantity x ratio): a condor four, a butterfly four."""
+        if not structures.is_structure(instrument):
+            return self.fees.charge(instrument, side, quantity, price, liquidity=liquidity, filled_before=filled_before)
+        usd = sum((self.fees.charge(leg.instrument, side, quantity * leg.ratio, price, liquidity=liquidity).usd
+                   for leg in structures.spec_of(instrument).legs), ZERO)
+        return Charge(usd=usd)
+
+    def _break_structure(self, agent: str, holding: Holding, why: str) -> None:
+        """A structure the venue no longer holds whole: its holder's position is written off at nothing
+        (`book.settle`, result "broken": the agent's record takes its whole cost as the loss, never a
+        flattering price for a structure that stopped being one) and the House row takes its legs
+        (`BREAK_SOURCE` rows), with a credit structure's collateral as cash, so what the book says the
+        venue holds, cash and contracts, does not move. One ledger group; the House row then closes the
+        legs (`_close_break_units`)."""
+        instrument, quantity = holding.instrument, holding.quantity
+        spec = structures.spec_of(instrument)
+        now = now_iso(self.clock)
+        rows: list[dict[str, Any]] = [{
+            "kind": "book.settle", "agent": agent, "id": f"break:{self.name}:{agent}:{instrument.key}:{now}",
+            "payload": {"book": self.name, "instrument": instrument.to_dict(), "result": "broken", "quantity": text(quantity),
+                        "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)), "reason": holding.reason,
+                        "opened_at": holding.opened_at, "real_money": self.real_money, "detail": why[:500]},
+        }]
+        # The collateral the book set aside for a credit structure (K x 100 x quantity: what makes its
+        # held price its maximum loss, `_fold_structure_legs`) is cash again once its legs are the House
+        # row's, as they always were at the venue: without it the book would stand that far under the
+        # venue's cash from the moment of the break.
+        released = spec.collateral * instrument.multiplier * quantity
+        for index, leg in enumerate(spec.legs):
+            units = leg.sign * leg.ratio * quantity
+            cash = released if index == 0 else ZERO
+            rows.append({"kind": "book.fill", "agent": HOUSE, "payload": {
+                "book": self.name, "source": BREAK_SOURCE, "instrument": leg.instrument.to_dict(), "side": "buy" if units > 0 else "sell",
+                "quantity": text(abs(units)), "price": "0", "fee_usd": "0", "cash_delta": text(q_cash(cash)), "position_delta": text(units),
+                "realized": None, "real_money": self.real_money,
+                "detail": (f"a leg of {agent}'s broken {spec.type}, taken by the House row to be closed: {why}"
+                           + (f"; the ${q_cash(released):.2f} of collateral set aside for it is cash again" if cash else ""))[:500]}})
+        for entry in self.ledger.append_many(rows):
+            self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        self.marks.pop(instrument.key, None)
+
+    def _mend_structures(self, result: Reconciliation) -> bool:
+        """A structure the venue no longer holds whole is BROKEN: it goes to the House row and what is
+        left of it is closed at once; a short contract no structure explains is closed with it (the
+        owner's rule, Sept 25, 2026: never a naked short leg, and never a freeze that stops every agent
+        on the venue). Returns whether rows were written, so the caller reads the venue again.
+
+        Which contracts: a difference on a contract that is a leg of a structure the book holds (a leg
+        assigned, exercised, expired, or filled apart from the rest) or that the House row holds from a
+        broken one, or on which the venue is net SHORT beyond what the book's structures explain (a leg
+        an order left when its legs filled unevenly).
+        A long contract no structure touches is left as ever (a lost single-contract fill, which a
+        practice book adopts). Never while an open order of this book trades the contract (its fill
+        may not be booked yet), and only once `BREAK_AFTER` readings in a row have shown it.
+
+        Then, in order: every structure with a leg among them is broken (`_break_structure`); the House
+        row takes each contract's difference (the leg the venue no longer shows, the short it shows
+        beyond the book), so the book says exactly what the venue holds -- a short there is never a
+        baseline and never an agent's, and is bought back first (`_close_break_units`); and an error
+        alert says what was found and done. A share position an exercise or assignment left is not
+        closed here: it stays a difference, and the alert names it."""
+        diffs = {key: money(value) for key, value in (result.position_diffs or {}).items()}
+        legs_of: dict[str, list[str]] = {}
+        for key, (instrument, _) in self._held_structures().items():
+            for leg in structures.spec_of(instrument).legs:
+                legs_of.setdefault(position_key(leg.instrument), []).append(key)
+        house = self.accounts.get(HOUSE)
+        remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}
+        busy = self._contracts_in_flight()
+        found = {key: diff for key, diff in diffs.items()
+                 if key.startswith("option:") and "|" not in key and key not in busy
+                 and (key in legs_of or key in remains or self._venue_positions.get(key, ZERO) < 0)}
+        self._break_readings = {key: self._break_readings.get(key, 0) + 1 for key in found}
+        due = {key: diff for key, diff in found.items() if self._break_readings[key] >= BREAK_AFTER}
+        if not due:
+            return False
+        broken = {structure for key in due for structure in legs_of.get(key, [])}
+        apart = ", ".join(f"{_contract_name(key)} {diff:+}" for key, diff in sorted(due.items()))
+        written_off = []
+        for agent, account in list(self.accounts.items()):
+            for holding in list(account.holdings.values()):
+                if position_key(holding.instrument) in broken:
+                    why = f"the venue no longer holds it whole (contracts against the book: {apart})"
+                    self._break_structure(agent, holding, why)
+                    written_off.append(f"{agent}: {text(holding.quantity)} {holding.instrument.market_id}")
+        rows = []
+        for key, diff in sorted(due.items()):
+            instrument = self._venue_instruments.get(key) or self._traded.get(key)
+            if instrument is None:
+                continue
+            rows.append({"kind": "book.fill", "agent": HOUSE, "payload": {
+                "book": self.name, "source": BREAK_SOURCE, "instrument": instrument.to_dict(), "side": "buy" if diff > 0 else "sell",
+                "quantity": text(abs(diff)), "price": "0", "fee_usd": "0", "cash_delta": "0", "position_delta": text(diff), "realized": None,
+                "real_money": self.real_money,
+                "detail": ("the venue holds this contract apart from the book's structures; the House row takes the difference to close it"
+                           if diff < 0 or key not in legs_of else "a leg the venue no longer shows: written off the House row")}})
+        for entry in self.ledger.append_many(rows) if rows else []:
+            self._apply(entry.kind, entry.agent, entry.payload, entry.at)
+        for key in due:
+            self._break_readings.pop(key, None)
+        others = sorted(k for k in diffs if not k.startswith("option:"))
+        self.ledger.append("ops.alert", {
+            "level": "error", "book": self.name, "structure_break": {"contracts": {k: text(v) for k, v in due.items()}, "written_off": written_off},
+            "text": (f"{self.name}: a structure broke at the venue (contracts apart from the book: {apart}); "
+                     "written off at nothing and taken by the House row: "
+                     f"{'; '.join(written_off) or 'none (a short no structure explains)'}; the House row closes the rest now, shorts first"
+                     + (f"; still apart, not closed here: {', '.join(others)}" if others else ""))[:1000]})
+        return True
+
+    def _close_break_units(self, result: Reconciliation) -> int:
+        """Send the House row's closing orders for what it holds of broken structures: every SHORT
+        contract first, each a single buy-back at the ask (an exit, which the adapter sends as
+        `buy_to_close`), and only once no short is left every long contract, each a single sale at the
+        bid. One order a contract at a time, in the regular session only (the venue takes option
+        orders then; outside it this waits), and never a contract the last reading (`result`) found
+        apart from the venue: what the venue no longer holds (a leg expired or assigned) is mended
+        first, never traded. Returns the orders sent.
+
+        Why single contracts and not one multi-leg order for what is left: what is left of a broken
+        structure is seldom an admitted structure (a condor without a wing is three legs of no type),
+        Alpaca accepts a multi-leg order only when "all its legs are covered within the same MLeg
+        order" (https://docs.alpaca.markets/docs/options-level-3-trading), and buying the shorts back
+        first can never leave a short uncovered: every order after the first only takes risk off."""
+        from ltcm.data import market_open_at
+
+        account = self.accounts.get(HOUSE)
+        if account is None:
+            return 0
+        units = [(h.instrument, h.quantity) for key, h in account.holdings.items()
+                 if key in self._break_keys and h.quantity != 0 and h.instrument.asset_class == "option"]
+        if not units:
+            return 0
+        now = now_iso(self.clock)
+        if not market_open_at(now):
+            return 0
+        busy = self._contracts_in_flight() | set(result.position_diffs or {})
+        shorts = [(instrument, quantity) for instrument, quantity in units if quantity < 0]
+        sent = 0
+        for instrument, quantity in shorts or units:
+            if position_key(instrument) in busy:
+                continue
+            side = "buy" if quantity < 0 else "sell"
+            quote = self._quote(instrument)
+            price = None if quote is None else (quote.ask if side == "buy" else quote.bid)
+            if price is None or price <= 0:
+                continue  # no touch to take: asked again at the next reading
+            intent = Intent.new(agent=HOUSE, instrument=instrument, side=side, quantity=abs(quantity), order_type="limit",
+                                limit_price=price, time_in_force="day", created_at=now, nonce=f"{BREAK_SOURCE}:{now}",
+                                reason=("the House buys back a short leg a broken structure left" if side == "buy" else
+                                        "the House sells a long leg a broken structure left"))
+            if side == "buy":
+                self._closing_buys.add(intent.id)
+            self._route([intent], [abs(quantity)], now)
+            sent += 1
+        return sent
+
+    def _record_venue_answers(self) -> None:
+        """Write the venue's kept answers about structures to the ledger for the owner's record
+        (`AlpacaBroker.drain_structure_answers`): whether the practice account takes each type and how
+        it reports its legs cannot be known before an agent's first order (no test orders)."""
+        drain = getattr(self.broker, "drain_structure_answers", None)
+        if drain is None:
+            return
+        try:
+            answers = drain() or []
+        except Exception:  # noqa: BLE001 - a record not kept is not a trade not booked
+            return
+        for answer in answers:
+            stage = str(answer.get("stage") or "")
+            level = "error" if stage == "uneven" else ("warning" if stage == "refused" else "info")
+            self.ledger.append("ops.alert", {
+                "level": level, "book": self.name, "structure_answer": answer,
+                "text": (f"{self.name}: the venue's {stage} answer for a {answer.get('structure')}, kept for the owner's record "
+                         "(does the practice account take each structure, and how does it report its legs)"
+                         + ("; ERROR: its legs filled unevenly" if stage == "uneven" else ""))[:1000]})
+
     # --------------------------------------------------------------- reconcile
     def _venue(self) -> tuple[Decimal, dict[str, Decimal]]:
         balance = self.broker.balance()
@@ -2947,6 +3283,11 @@ class Book:
                 quantity = -quantity
             key = position_key(instrument)
             positions[key] = positions.get(key, ZERO) + quantity
+            self._venue_instruments[key] = instrument
+        if self._legs_at_venue():
+            # Level-3 structures (Sept 25, 2026): the venue shows legs, the book holds structures.
+            cash -= self._fold_structure_legs(positions)
+        self._venue_positions = dict(positions)
         return cash, positions
 
     def _book_venue_fees(self, shortfall: Decimal) -> Decimal:
@@ -3081,6 +3422,14 @@ class Book:
             self.open_baseline()
             result = self._reconcile()
             self._reconciled_here = True
+            if self._legs_at_venue():
+                # Level-3 structures on a venue that holds their legs (Sept 25, 2026): a structure the
+                # venue no longer holds whole is broken and its remains go to the House row, which
+                # closes them (the owner's rule: never a naked short leg, never a freeze on one).
+                self._record_venue_answers()
+                if self._mend_structures(result):
+                    result = self._reconcile()
+                self._close_break_units(result)
             if result.ok:
                 self._unreconciled = 0
                 return result
@@ -3339,6 +3688,24 @@ def _epoch_seconds(now: str) -> float:
     if moment is None:
         raise ValueError(f"not a timestamp: {now!r}")
     return moment.timestamp()
+
+
+def _contract_name(key: str) -> str:
+    """An option contract's position key as a trader reads it: `SPY 2026-09-28 580 put`."""
+    parts = key.split(":")
+    return " ".join([parts[1], parts[3], parts[4], parts[5]]) if len(parts) >= 6 and parts[0] == "option" else key
+
+
+def _new_york_clock(now: str) -> str:
+    """The time of day in New York at this instant, `HH:MM`."""
+    from zoneinfo import ZoneInfo
+
+    from ltcm.broker import instant
+
+    moment = instant(now)
+    if moment is None:
+        raise ValueError(f"not a timestamp: {now!r}")
+    return moment.astimezone(ZoneInfo("America/New_York")).strftime("%H:%M")
 
 
 def _new_york_date(now: str) -> str:
