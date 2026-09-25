@@ -406,5 +406,6 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   variance (quiet is 0.70x)"; putspread-dip "SPY only 0.14% under its high (a dip is 0.40%)"; calendar-term "IWM Sept
   28 at 12.8% against Oct 5 at 16.4% (0.78x; a kink is 1.10x)"; trend-vertical and diagonal "no pullback inside a
   trend"; orb holding IWM at +$0.05 a share; skew holding AAL and RIVN at -$0.05 each. House RSS 2,147 MB (17:30Z).
+- **18:01Z (17:30-18:01):** 38 wakes, 2 intents; no structure fill. No structure closed on the day; singles -$41.15. House RSS about 2.3 GB, flat since 17:20Z.
 
 ## Report
