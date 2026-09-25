@@ -1,0 +1,8 @@
+{
+  "family": "weather-favorites",
+  "name": "mullins_6_resolution_guard",
+  "repair": {
+    "key": "order_refusal:kalshi:this market is expected to resolve in # hours, by its scheduled expiration (#-#-#T#:#:#Z); entries m"
+  },
+  "why": "Corrected child of mullins-6. Its close-time filter admitted KXRAIN contracts expected to pay in 51\u201352 hours despite the day horizon's 48-hour limit. Require finite hours_to_resolve in [0, 48], with no close-time fallback, while preserving its strike-bin filter, specialty and other decision logic. Born on rung 0 with no inherited record; qualification and nonrecurrence must be established independently."
+}
