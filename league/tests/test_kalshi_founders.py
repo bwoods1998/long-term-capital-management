@@ -503,6 +503,34 @@ class YieldingDesk(FounderSeats):
         self.house._displaceable(self.rules, specialty=self.DESK, evidenced=True, why=kept)
         self.assertIn("one displacement a desk a tick", kept)
 
+    def test_a_noisy_winner_goes_and_an_evidenced_winner_stays(self):
+        # Sept 25, 2026, 22:00Z: crypto-15m's pooled record was -4.17 over 375 active blocks, but 6 of its 7 members had a
+        # positive own mean (three on noise: t 0.32, 0.19, one block), so the seat market's plain "a winner" kept them all
+        # and the desk never yielded. On this path a winner needs evidence: >= 6 active blocks and a one-sided t >= 1.0.
+        losers = [self.resident() for _ in range(3)]
+        for agent in losers:
+            self.order(agent, "0.94", post_only=True)  # each holds a working order: kept for that, whatever its record
+        noisy = self.resident(growth=0.05, blocks=4)
+        self.blocks(noisy, -0.04, 4)  # mean +0.005 over 8 blocks, t about 0.29
+        evidenced = self.resident(growth=0.01, blocks=6)  # the same positive growth every block
+        self.full()
+        born = kalshi_founders.seat(self.house)
+        self.assertEqual(born.founder, "k1-mlb-model")
+        self.assertEqual(self.alive(noisy, evidenced, *losers), [False, True, True, True, True])
+        self.assertEqual(self.house.registry.get(noisy.id).cause, "desk_closed")
+
+    def test_a_desk_that_gave_up_a_seat_this_tick_yields_none_until_the_next(self):
+        # The forward-first run's F3 shrinks this desk in the same births pass, before this line: one seat a desk a tick.
+        residents = [self.resident() for _ in range(5)]
+        self.full()
+        self.house._desk_displaced[self.DESK] = self.clock()
+        self.assertIsNone(kalshi_founders.seat(self.house))
+        self.assertEqual(sum(self.alive(*residents)), 5)
+        self.assertEqual(len(alerts(self.house, "warning", "kalshi-crypto-15m already gave up a seat this tick")), 1)
+        self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+        self.assertEqual(kalshi_founders.seat(self.house).founder, "k1-mlb-model")
+        self.assertEqual(sum(self.alive(*residents)), 4)
+
     def test_found_refusing_or_raising_after_a_retirement_was_decided_kills_nobody(self):
         residents = [self.resident() for _ in range(5)]
         self.full()
@@ -647,6 +675,17 @@ def sports_newcomer():
     from league.house import Newcomer
 
     return Newcomer(family="sports-favorites", venue="kalshi", what="the founder k1-mlb-model")
+
+
+class EvidencedWinner(unittest.TestCase):
+    def test_a_winner_on_the_yield_path_needs_six_blocks_and_a_t_of_one(self):
+        ok = kalshi_founders.evidenced_winner
+        self.assertTrue(ok([0.01] * 6, 6), "the same positive growth every block is evidence")
+        self.assertFalse(ok([0.01] * 5, 6), "too few blocks")
+        self.assertFalse(ok([0.05, -0.04] * 4, 6), "positive mean, t about 0.29: noise")
+        self.assertFalse(ok([-0.01] * 6, 6))
+        self.assertTrue(ok([0.02, 0.01, 0.03, 0.02, 0.01, 0.02], 6))
+        self.assertFalse(ok([], 6))
 
 
 if __name__ == "__main__":
