@@ -567,7 +567,8 @@ ORDER BY seq DESC LIMIT 20`.
   estimate's clock-driven rates aside (`families.change_view`): the durable record of every state
   change. The family states and the swing's audits live in `allocator.json`
   (`families`, `family_audits`). Since R3 and R5 of the close-the-gaps run (Sept 24, 2026), for the watch
-  and the owner and never the site (the publisher copies the site's fields by name):
+  and the owner and never the site (the publisher copies the site's fields by name; since Sept 25, 2026 a
+  proven family's `swing_clock` reaches the site in the site's own shape, below):
   - every row has `family_forward` (`blocks`, `growth`: the family's pooled forward record, the House's
     `family_forward`, every member ever born), and a practice or rung-2 row `probe_gate`: null, `"losing"`
     (no probe is seated from the family; a probe seated on it goes back to practice), `"held since
@@ -584,6 +585,25 @@ ORDER BY seq DESC LIMIT 20`.
     rate, with no member on real money, or with only the pooled proof left). It moves with
     the clock alone, so it is never on a `family.record` row. sports-central-run-under at 15:06Z Sept 24:
     real n 5 since 04:52Z Sept 23, 3.5 a day, 10 to the look at 15, about 2.9 days;
+  - **the site's flywheel strip** (W of the forward-first run, Sept 25, 2026; blakewoods.us/capital, the
+    ladder, under the moves) reads the checkpoint's `flywheel`, built by `publish.site_flywheel` each
+    minute: `restarts_per_day` (health.json `restarts_24h`), `real_profit_usd_per_day` (health.json
+    `research_economy.merton.real_pnl_24h_usd`, the realized real settlements and closing fills of the last
+    24 hours: $19.38 at the 10:36Z reading), `compute_usd_per_day` (only once Y2's health.json
+    `unit_economics` carries `compute_per_day_usd`; its `profit_per_day_usd` then replaces Merton's
+    reading), `proofs_per_day` (families proven or compounding whose state began in the last day),
+    `positive_blocks_per_day` and `graduates_per_day` (the hourly `ops.budget` yield rows of the last day).
+    health.json is the previous tick's (the publish runs before `_health`) and is not used once it is 30
+    minutes old; the page draws the strip while its `at` is at most 30 minutes older than the checkpoint.
+    A proven family's line adds its clock (`swing_clock` in the site's shape: `look_at`, `to_go`,
+    `per_day`, `days`, and `dates_to_go`/`grant_holds` when the House's clock carries M1's distinct dates
+    or a grant that holds) and, once C6 ships, its capacity curve at 1x, 2x and 4x the stake. Deploy the
+    site (personal-site #8) before the House that sends them: a site that predates them refuses the whole
+    checkpoint with a 400, and the publisher then posts it again without them and writes
+    `flywheel_refused` (the refused checkpoint's `published_at`) into `publish.json`, cleared by the first
+    full checkpoint the site takes. Verify after a deploy: `publish.json` has no `flywheel_refused`, and
+    `curl -s https://blakewoods.us/api/capital/checkpoint | jq .flywheel` shows `at` within a minute or two
+    of `published_at` and `restarts_per_day` equal to health.json `restarts_24h`;
   - `allocator.json` `probe_holds`: the ledger position the probe demotions were folded to (`cursor`),
     each family's probe demotions still in force (`families`: a list of `seq`, `at`, `agent`, `why`; a
     demotion whose family record since has turned is dropped for good) and the mechanism ledger's state per
