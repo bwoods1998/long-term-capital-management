@@ -4211,10 +4211,24 @@ class House:
         return live
 
     # ---------------------------------------------------------------- horizon
+    #: The reasons the House's own exits carry (`_enforce_horizon`): how it knows its exit from the agent's orders.
+    HORIZON_EXIT = "The House's horizon rule"
+    EXPIRY_EXIT = "The House's expiry rule"
+
     def _enforce_horizon(self) -> int:
         """Close crypto positions held past the horizon (the entry side of the rule, for Kalshi, is
         in the book's check). The agent's own working orders in that coin are cancelled first, so
-        the whole holding is free to sell; a position is closed by the House, at the market."""
+        the whole holding is free to sell; a position is closed by the House, at the market.
+
+        The House's own exit, once sent, stands until the venue reports it (the review of #297, Sept 25,
+        2026). Until then this rule cancelled every working order in the coin, its own exit included, and
+        sent the exit again under the same nonce: the same intent id, refused by the book as a duplicate,
+        so a market sell the venue had not yet reported (Alpaca accepts first and fills on a later read)
+        left the position with no exit until the hour turned -- and with the venues polled once a minute
+        beside a thirty-second tick, the tick between a send and its poll always met it unreported. An
+        exit is sent only while none of the House's stands (`_house_exits`), so a second sell is never
+        beside a first that might still fill; one after an exit the venue cancelled carries that exit's
+        order id in its nonce, so it is never the cancelled one's duplicate."""
         hours = float((self.game.get("horizon") or {}).get("crypto_max_hold_hours") or 0)
         if hours <= 0:
             hours = float("inf")  # the crypto rule is off; the option expiry rule below is not a dial
@@ -4231,42 +4245,70 @@ class House:
                     held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
                     if held <= hours:
                         continue
+                    standing, after = self._house_exits(book, agent_id, holding.instrument.key, self.HORIZON_EXIT)
                     for working in book.open_orders(agent_id):
-                        if working.instrument.key == holding.instrument.key:
+                        if working.instrument.key == holding.instrument.key and working.order_id not in standing:
                             book.cancel(agent_id, working.order_id)
+                    if standing:
+                        continue  # the House's market sell stands until the venue says what became of it
                     quantity = book.account(agent_id).holdings.get(holding.instrument.key)
                     if quantity is None or quantity.quantity <= 0:
                         continue
                     exits.append(Intent.new(
                         agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
-                        reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
-                        created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
+                        reason=f"{self.HORIZON_EXIT}: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
+                        created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}{after}",
                     ))
             # A long option is sold before it can expire: in the money at the bell it would be
             # exercised into a hundred shares this account cannot carry. From 14:30 New York on
-            # its last day the House sells it at the bid, again each tick until it is gone; one
-            # with no bid left is worthless and is written off once the venue has cleared it.
+            # its last day the House sells it at the bid; one with no bid left is worthless and is
+            # written off once the venue has cleared it. Its sell stands while its limit is at or under
+            # the bid (it can fill there); one above a bid that fell is cancelled, and the next goes at
+            # the new bid only once the venue has confirmed that cancel -- in this pass or a later one.
             today, hour = _new_york(self.clock)
             for agent_id in book.agents():
                 for holding in list(book.account(agent_id).holdings.values()):
                     inst = holding.instrument
                     if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
                         continue
-                    for working in book.open_orders(agent_id):
-                        if working.instrument.key == inst.key:
-                            book.cancel(agent_id, working.order_id)
                     quote = book.broker.quote(inst)
-                    if quote.bid is None or quote.bid <= 0:
+                    bid = quote.bid if quote.bid is not None and quote.bid > 0 else None
+                    standing, _ = self._house_exits(book, agent_id, inst.key, self.EXPIRY_EXIT)
+                    for working in book.open_orders(agent_id):
+                        if working.instrument.key != inst.key:
+                            continue
+                        if working.order_id not in standing or (bid is not None and working.limit_price is not None and working.limit_price > bid):
+                            book.cancel(agent_id, working.order_id)  # the agent's own, or the House's above a bid that fell
+                    standing, after = self._house_exits(book, agent_id, inst.key, self.EXPIRY_EXIT)
+                    if standing or bid is None:
+                        continue  # its sell stands, or a cancel the venue has not confirmed may yet fill: never a second
+                    left = book.account(agent_id).holdings.get(inst.key)
+                    if left is None or left.quantity <= 0:
                         continue
                     exits.append(Intent.new(
-                        agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
-                        reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
-                        created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
+                        agent=agent_id, instrument=inst, side="sell", quantity=left.quantity, order_type="limit", limit_price=bid,
+                        reason=f"{self.EXPIRY_EXIT}: a long option is sold on its last afternoon, never left to be exercised.",
+                        created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}{after}",
                     ))
             if exits:
                 closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
             closed += book.expire_options()
         return closed
+
+    @staticmethod
+    def _house_exits(book: Book, agent_id: str, key: str, rule: str) -> tuple[set[str], str]:
+        """The House's own exits of one holding under `rule` (`HORIZON_EXIT`, `EXPIRY_EXIT`: the reason its sells
+        carry) that are still open on the book -- sent, and not yet reported filled, cancelled or rejected by the
+        venue -- and the nonce suffix of the next one: `:<order id>` of the newest the venue cancelled, or "" when
+        none was. A rejected exit adds nothing, so its duplicate waits for the nonce's own hour (or ten minutes) as
+        before; a cancelled one is sent again at once, as a new intent. The review of #297 (Sept 25, 2026)."""
+        with book._lock:
+            mine = [w for w in book.orders.values() if w.side == "sell" and w.instrument.key == key
+                    and any(s.agent == agent_id and s.reason.startswith(rule) for s in w.shares)]
+        standing = {w.order_id for w in mine if w.open}
+        cancelled = [w for w in mine if w.status == "cancelled"]
+        newest = max(cancelled, key=lambda w: (w.submitted_at, w.order_id), default=None)
+        return standing, (f":{newest.order_id}" if newest is not None else "")
 
     # ---------------------------------------------------------------- tuition
     def tuition(self, venue: str | None = None) -> dict[str, Any]:
