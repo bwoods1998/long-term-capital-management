@@ -207,6 +207,10 @@ class Researcher:
         #: (`House._edit_replay`): {"passed", "reasons", "params", "was", "code_sha256", "numbers"} or
         #: {"error"}. None: `edit_params` is not available (X1, Sept 24, 2026).
         self.edit_replay = None
+        #: (agent, playbook entry) -> whether `playbook_read` holds the entry back from this agent: the
+        #: research gate's control arm (`ResearchGate.withheld`, set by the service; review of #311, Sept 25,
+        #: 2026). None holds nothing back.
+        self.withheld = None
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -686,10 +690,17 @@ class Researcher:
             return {"error": "Merton is not available on this floor"}
         if len(question.strip()) < 20:
             return {"error": "ask him something specific: he is paid by the question"}
-        price = Decimal(str(rules.get("min_credits_usd", "1.00")))
+        # F4 (Sept 25, 2026; league/merton.py `consult_price_multiple`): the consultant may be paused until
+        # the floor's real P&L is positive, and each consult the agent did nothing with doubles its price.
+        if getattr(self.merton, "consult_paused", lambda: False)():
+            return {"error": "Merton's consultations are paused until the floor's real P&L over the last 24 hours is positive"}
+        multiple, unproductive = getattr(self.merton, "consult_price_multiple", lambda _: (1, 0))(agent.id)
+        price = Decimal(str(rules.get("min_credits_usd", "1.00"))) * multiple
         balance = self.economy.balance(agent.id)
         if balance < price:
-            return {"error": f"you hold {balance:.2f} of credits and Merton is not hired below {price}: earn it first"}
+            doubled = (f" ({multiple}x: your last {unproductive} consult(s) produced no candidate or strategy change "
+                       "within two sessions)") if multiple > 1 else ""
+            return {"error": f"you hold {balance:.2f} of credits and Merton is not hired below {price}{doubled}: earn it first"}
         if self.house_budget is not None and not self.house_budget():
             return {"error": "the firm's frontier budget for today is spent; ask again tomorrow"}
         # Frontier intelligence is the scarcest thing on the floor and it is a PRIZE, not a rebate.
@@ -741,14 +752,31 @@ class Researcher:
                                                   "wrote_code": False, "error": True, "charged": False}, agent=agent.id)
             return {"error": f"the consultation failed and you were not charged: {str(reply.get('answer') or '')[:300]}",
                     "cost_usd": "0", "charged": False, "note": "ask again later; the cooldown counts this attempt"}
+        # The surcharge is capped at what the balance can bear (review of #311, Sept 25, 2026): the
+        # admission check above asks for min_credits_usd x the multiple ($0.35 x 8 = $2.80), but the cost
+        # is only known now and a charge is never refused. At T0 prices (median $0.525, p90 $0.73, max
+        # $0.92), replaying the consults since Sept 23, 8 of the 83 that clear the 8x check would have
+        # taken the balance to zero or below -- a dead agent, whose real book the House winds down. The
+        # consult's own cost is always charged, as before the multiple; the multiple never takes the
+        # balance under the 1x consult price, nor under research's floor (`House.research_due`).
+        charged, capped = cost, False
+        if cost > 0 and multiple > 1:
+            floor = max(Decimal(str(rules.get("min_credits_usd", "1.00"))), Decimal(str(self.settings.get("min_credits_usd", "0.10"))) * 2)
+            surcharge = cost * (multiple - 1)
+            room = max(ZERO, self.economy.balance(agent.id) - cost - floor)
+            capped = surcharge > room
+            charged = cost + min(surcharge, room)
         if cost > 0:
-            self.economy.charge(agent.id, cost, "merton's time", detail={"session": session}, id=f"merton:{session}")
+            self.economy.charge(agent.id, charged, "merton's time", detail={"session": session}, id=f"merton:{session}")
             out.cost_usd += cost
         code = str(reply.get("code") or "")
         self.ledger.append("agent.research", {"tool": "merton", "session": session, "at_epoch": self.clock(),
                                               "question": question[:600], "answer": str(reply.get("answer") or "")[:2000],
                                               "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
-                                              "wrote_code": bool(code.strip())}, agent=agent.id)
+                                              "wrote_code": bool(code.strip()),
+                                              **({"price_multiple": multiple, "charged_usd": format(charged, "f"),
+                                                  **({"surcharge_capped": True} if capped else {})} if multiple > 1 else {})},
+                           agent=agent.id)
         if code.strip():
             try:
                 check_code(code)
@@ -994,7 +1022,10 @@ class Researcher:
         if name == "library_write":
             return self.commons.library_write(agent.id, str(args.get("title") or ""), str(args.get("text") or ""), list(args.get("tags") or []), niche=agent.specialty)
         if name == "playbook_read":
-            return self.commons.playbook_read(str(args.get("query") or ""))
+            withheld = self.withheld
+            if withheld is None:
+                return self.commons.playbook_read(str(args.get("query") or ""))
+            return self.commons.playbook_read(str(args.get("query") or ""), keep=lambda entry: not withheld(agent, entry))
         if name == "request_tool":
             return self.commons.request_tool(agent.id, str(args.get("name") or ""), str(args.get("description") or ""))
         if name == "classify":

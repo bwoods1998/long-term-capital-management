@@ -260,6 +260,8 @@ def _allocator_rule(key: str) -> Decimal | None:
 
 #: `allocator.real_entry_liquidity`'s one value that holds a real event entry to a post-only limit.
 MAKER_UNLESS_TAKER_POSITIVE = "maker_unless_family_taker_positive"
+#: M2 of the forward-first run (Sept 25, 2026): the same, except that a PROBE may take (`family_taker`'s `may_take`).
+PROBE_MAY_TAKE = "probe_may_take"
 #: What the House tells an agent whose own resting order stood in its exit's way (`_clear_the_way`).
 OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would have met it, and an account never "
                  "trades against itself")
@@ -437,6 +439,9 @@ class Working:
     #: at the ask on doubt): such an order never walls the agent's own next exit off (`_withdraw_repriced`) and lives
     #: one pass (`_recheck_repriced`). From the order rows' `house_repriced`, so a restart keeps it (review of #226).
     repriced: dict[str, Any] | None = None
+    #: M6 (Sept 25, 2026): on an Alpaca book, the role the book read for this order when it was placed (`_liquidity_role`),
+    #: written on each of its fills as `liquidity_role`; None elsewhere and on orders placed before it.
+    liquidity_role: str | None = None
 
     @property
     def open(self) -> bool:
@@ -916,6 +921,7 @@ class Book:
                 liquidity=str(p.get("liquidity") or "taker"),
                 reference_price=None if p.get("reference_price") is None else money(p["reference_price"]),
                 repriced=dict(p["house_repriced"]) if p.get("house_repriced") else None,
+                liquidity_role=p.get("liquidity_role") if p.get("liquidity_role") in ("maker", "taker") else None,
             )
             part = p.get("slice") or {}
             if part.get("plan"):
@@ -1202,8 +1208,8 @@ class Book:
         floor = _allocator_rule("longshot_floor_real")
         if floor is not None:
             out["longshot_floor_real"] = float(floor)
-        if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") == MAKER_UNLESS_TAKER_POSITIVE:
-            out["real_entry_liquidity"] = MAKER_UNLESS_TAKER_POSITIVE
+        if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") in (MAKER_UNLESS_TAKER_POSITIVE, PROBE_MAY_TAKE):
+            out["real_entry_liquidity"] = str(CONSTITUTION["allocator"]["real_entry_liquidity"])
         share = _allocator_rule("max_event_share")
         if share is not None:
             out["max_event_share"] = float(share)
@@ -1229,7 +1235,10 @@ class Book:
         - `real_entry_liquidity` "maker_unless_family_taker_positive": an entry must be a post-only
           limit unless the agent's family has a positive pooled TAKER record (`family_taker`). The taker
           mechanisms were the loss engine of the allocator's nine promotions to real money (15-minute
-          crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16).
+          crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16). Under
+          "probe_may_take" (M2, Sept 25, 2026) the allocator's `may_take` decides: a PROBE may take, one
+          position at its cap in all (`_probe_taker_room`); a bunt or a swing on the taker record. The
+          refusal names the band.
         - `max_event_share`: the agent's exposure to one event -- its holdings there at cost, its
           working buys on every market of the event, and this order -- at most that share of its
           equity on the book. meriwether-h7d7702 held NO at strikes 6, 7 and 8 of one MLB total, which
@@ -1238,18 +1247,29 @@ class Book:
             return []
         reasons: list[str] = []
         liquidity = str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "")
-        if liquidity == MAKER_UNLESS_TAKER_POSITIVE and not (intent.order_type == "limit" and intent.post_only):
+        if liquidity in (MAKER_UNLESS_TAKER_POSITIVE, PROBE_MAY_TAKE) and not (intent.order_type == "limit" and intent.post_only):
             record = self._family_taker(intent.agent)
-            if not (record is not None and record.get("positive") is True):
+            # M2 (Sept 25, 2026): under "probe_may_take" the allocator says whether THIS agent may take (`may_take`: a probe
+            # may; a bunt or a swing on its family's taker proof). A probe's taker entry is one position, its cap.
+            allowed = record is not None and (record.get("may_take") if liquidity == PROBE_MAY_TAKE and "may_take" in record
+                                               else record.get("positive")) is True
+            if allowed and liquidity == PROBE_MAY_TAKE and record.get("positive") is not True:
+                reasons.extend(self._probe_taker_room(intent, quote, account, record))  # a probe's taking: one position
+            if not allowed:
                 family = str((record or {}).get("family") or "").strip()
+                band = str((record or {}).get("band") or "").strip()
                 if record is not None and record.get("n") is not None:
                     bound = record.get("bound")
                     measured = f"{int(record['n'])} taker settlements" + ("" if bound is None else f", bound {float(bound):.4g}")
+                    if record.get("proof_min"):
+                        measured += f"; positive from {int(record['proof_min'])} with the bound above zero"
                 else:
                     measured = "no pooled taker record is measured for this agent's family"
+                who = f"by a {band} " if band else ""
+                probes = "; a probe may take" if liquidity == PROBE_MAY_TAKE else ""
                 reasons.append(
-                    f"a real entry on {family or 'this venue'} must be a post-only limit until the family's pooled taker record "
-                    f"is positive ({measured}): send a limit with post_only, which rests or is refused "
+                    f"a real entry {who}on {family or 'this venue'} must be a post-only limit until the family's pooled taker record "
+                    f"is positive ({measured}{probes}): send a limit with post_only, which rests or is refused "
                     "(constitution allocator.real_entry_liquidity)"
                 )
         share = _allocator_rule("max_event_share")
@@ -1270,6 +1290,53 @@ class Book:
                         "constitution allocator.max_event_share)"
                     )
         return reasons
+
+    def _probe_taker_room(self, intent: Intent, quote: Quote | None, account: Account, record: Mapping[str, Any]) -> list[str]:
+        """M2 (Sept 25, 2026; the Deploy B money review): a PROBE that may take only because it is a probe (its family's
+        taker record is not proven) takes one position at its cap, in all -- what it holds that it bought at the price, its
+        working buys that were not post-only, and this order at most `probe_cap_usd` (`Allocator.family_taker`:
+        `position_share_event` of a probe's stake, $2 of a $10 Kalshi probe), else the book's position cap. The per-market
+        cap alone let a $10 probe take $2 on each of five events, its whole stake at the ask (three filled in the review's
+        run). A taker order the book cannot price is refused: unmeasured is not room."""
+        cap = record.get("probe_cap_usd")
+        if cap is None:
+            limits = self.limits.get(intent.agent)
+            cap = limits.max_position_usd if limits is not None else None
+        rule = "(constitution allocator.real_entry_liquidity: probe_may_take)"
+        price = intent.limit_price if intent.order_type == "limit" and intent.limit_price else (quote.ask if quote is not None else None)
+        if cap is None or price is None or price <= 0:
+            return [f"a probe's taker entry cannot be priced against its one position's cap here: send a limit with post_only {rule}"]
+        cap = money(cap)
+        order = intent.quantity * price * intent.instrument.multiplier
+        taken = self._taker_exposure(intent.agent, account)
+        if taken + order <= cap:
+            return []
+        return [f"a probe takes the price for one position at its cap: it holds or bids ${taken:.2f} it took, and this order's "
+                f"${order:.2f} would make ${taken + order:.2f}, over its ${cap:.2f} (position_share_event of a probe's stake); "
+                f"send a limit with post_only, or take again once what it took has settled {rule}"]
+
+    def _taker_exposure(self, agent: str, account: Account) -> Decimal:
+        """What `agent` holds at cost on event markets it bought at the price (a buy that was not post-only filled there;
+        the whole holding counts, the safe side), plus what is left of its open buys that are not post-only, at their
+        limit: M2's probe taker room (`_probe_taker_room`)."""
+        taken: set[str] = set()
+        working = ZERO
+        with self._lock:
+            for order in list(self.orders.values()):
+                if order.side != "buy" or order.post_only or order.instrument.asset_class != "event":
+                    continue
+                shares = [share for share in order.shares if share.agent == agent]
+                if not shares:
+                    continue
+                if any(share.filled > 0 for share in shares) or order.filled > 0:
+                    taken.add(order.instrument.key)
+                if order.open:
+                    price = order.limit_price or order.reference_price or ZERO
+                    left = sum((share.quantity - share.filled for share in shares), ZERO)
+                    working += max(left, ZERO) * price * order.instrument.multiplier
+            held = sum((h.cost for key, h in account.holdings.items()
+                        if key in taken and h.cost > 0 and h.instrument.asset_class == "event"), ZERO)
+        return held + working
 
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
@@ -2236,6 +2303,7 @@ class Book:
         liquidity: str = "taker",
         venue_fee: Decimal = ZERO,
         account: Account | None = None,
+        liquidity_role: str | None = None,
     ) -> dict[str, Any]:
         instrument = instrument or intent.instrument
         side = side or intent.side
@@ -2278,11 +2346,13 @@ class Book:
         }
         if source == 'venue' and self.fees.family == 'kalshi':
             payload['venue_accounting_version'] = 2
+        if liquidity_role is not None:
+            payload["liquidity_role"] = liquidity_role  # M6: the Alpaca fill's own role (`_liquidity_role`)
         return payload
 
     def _route(self, intents: Sequence[Intent], quantities: Sequence[Decimal], now: str, *, reference_price: Decimal | None = None,
                slice_of: tuple[str, int] | None = None, note: str = "", repriced: Mapping[str, Any] | None = None,
-               again: str | None = None) -> Outcome:
+               again: str | None = None, quote: Quote | None = None) -> Outcome:
         """Send one venue order for these intents' quantities, then attribute what filled at once.
 
         `slice_of` is (plan id, index) for one slice of a sliced exit: its client order id is
@@ -2322,6 +2392,9 @@ class Book:
             base["slice"] = {"plan": slice_of[0], "index": int(slice_of[1])}
         if repriced is not None:
             base["house_repriced"] = dict(repriced)
+        role = self._liquidity_role(first, quote)
+        if role is not None:
+            base["liquidity_role"] = role  # M6: what its fills are, maker or taker, for the family's record
         # The order is on the ledger before it is on the wire: a crash between the two leaves an
         # `unknown` order the next poll resolves by its client id, never an order nobody recorded.
         def told(reason: str = "") -> str:
@@ -2366,10 +2439,33 @@ class Book:
         """What the book assumes a fill of this order costs. Kalshi reports each order's fee, so
         this only matters on Alpaca, which reports none: there every order is booked at the
         taker's fee (a limit order may really have made, which only the venue knows), and
-        reconciliation hands the difference to the House row within a known allowance."""
+        reconciliation hands the difference to the House row within a known allowance. What a
+        fill WAS, maker or taker, is `_liquidity_role` on Alpaca (M6, Sept 25, 2026)."""
         if self.fees.family == "kalshi" and intent.order_type == "limit" and intent.post_only:
             return "maker"
         return "taker"
+
+    def _liquidity_role(self, intent: Intent, quote: Quote | None) -> str | None:
+        """M6 of the forward-first run (Sept 25, 2026): on an ALPACA book, whether this order's fills made or took liquidity,
+        written on each fill as `liquidity_role` (its `liquidity` stays the fee it is charged at, the taker's: `_liquidity`),
+        which the family record reads where present (`families.TradeTape`): "maker" for a limit order that was not marketable
+        at the touch the book saw when it placed it -- a buy under the ask, a sell over the bid -- so it rested; "taker"
+        otherwise: a market order, a marketable limit, or any order placed with no touch to read. None on a Kalshi book, which
+        reports each fill's fee and so its role (`_attribute`). What the venue does NOT tell us: Alpaca's order and fill
+        answers name no maker or taker and the adapter reads no fee, so this is the book's own reading of its order; the touch
+        can move between the quote and the order's arrival, and a stock order resting into the open fills in the opening
+        auction. Before it, every Alpaca fill read as a taker, post-only dip bids included: at T0 (04:23Z Sept 25)
+        crypto-alts-reversion's record was 292 taker events and no maker, and all five "probe taker entries" of the day were
+        Alpaca's. Fills booked before it keep what they say."""
+        if self.fees.family != "alpaca":
+            return None
+        if intent.order_type != "limit" or intent.limit_price is None or quote is None:
+            return "taker"
+        touch = quote.ask if intent.side == "buy" else quote.bid
+        if touch is None or touch <= 0:
+            return "taker"
+        resting = intent.limit_price < touch if intent.side == "buy" else intent.limit_price > touch
+        return "maker" if resting else "taker"
 
     def _order_row(self, base: Mapping[str, Any], status: str, broker_order_id: str | None, *, suffix: str, reason: str = "", rested: bool | None = None,
                    allocation: Mapping[str, Any] | None = None) -> None:
@@ -2498,6 +2594,7 @@ class Book:
                 source="venue", order_id=working.order_id,
                 instrument=working.instrument, side=working.side, reason=share.reason, intent_id=share.intent_id,
                 liquidity=plan["liquidity"], venue_fee=money(target["venue_fee"]), account=accounts[share.agent],
+                liquidity_role=working.liquidity_role,
             )
             rows.append({"kind": "book.fill", "payload": payload, "agent": share.agent, "id": target["fill_id"], "at": plan["at"]})
             self._apply_account_fill(accounts[share.agent], payload, plan["at"])
@@ -2546,7 +2643,7 @@ class Book:
         """Route one intent's order; a sell worth more than the order cap is sent in slices."""
         if intent.side == "sell" and self._over_cap(intent, quantity, quote):
             return self._start_exit_plan(intent, quantity, now, quote)
-        return self._route([intent], [quantity], now, reference_price=reference_price, note=note)
+        return self._route([intent], [quantity], now, reference_price=reference_price, note=note, quote=quote)
 
     def _slice_quantity(self, intent: Intent, available: Decimal, quote: Quote | None, cap: Decimal) -> Decimal:
         """The next slice: `available` cut into equal parts of at most the cap, on the instrument's

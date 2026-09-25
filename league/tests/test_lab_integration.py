@@ -350,8 +350,13 @@ class LabBirthsOnSail(StalledSailCase):
         return [a for a in self.house.registry.living() if str(a.founder or "").startswith("lab:")]
 
     def evolve(self):
-        self.lab.admit(KNOB, niche=self.niche, origin="luna", author="luna", lineage="founder:test")
+        ident = self.lab.admit(KNOB, niche=self.niche, origin="luna", author="luna", lineage="founder:test")
         self.lab.evaluate_batch()
+        # F1 (Sept 25, 2026): a winning forward window of its own, what a candidate needs before the House's replay.
+        now = self.house.clock()
+        self.lab._x("INSERT INTO forward(candidate, at, window_start, window_end, tape_id, ok, blocks, active_blocks, log_growth,"
+                    " mean_log_growth, trades, error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (ident, now, now - 3600, now, "fwd:test", 1, 6, 3, 0.012, 0.002, 4, None))
 
     def test_a_birth_that_displaces_makes_no_sail_call_under_the_lifecycle_lock(self):
         self.evolve()

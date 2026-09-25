@@ -339,6 +339,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
             # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
             house.researcher.routes.lock = house.jev_floor.gate.lock_profile
+        if house.jev_floor.gate is not None and house.researcher is not None:
+            # Review of #311 (Sept 25, 2026, F4): the teacher's control arm does not read the lesson that
+            # names it during the window the lift measures (`ResearchGate.withheld`).
+            house.researcher.withheld = house.jev_floor.gate.withheld
     if not canary:
         from .frontier import FrontierMonth
 
@@ -358,7 +362,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                             schedule_hours=pace.get("schedule_hours"), first_after_hours=pace.get("first_after_hours"), effort=pace.get("effort"),
                             pace=house.frontier_pace, backoff_max=pace.get("backoff_max"),
                             # Sept 24, 2026 (L2): these roles wait while the floor's 24-hour real P&L is not positive.
-                            paused_until_profit=pace.get("paused_until_profit"))
+                            paused_until_profit=pace.get("paused_until_profit"), lift=pace.get("lift"))
     if house.merton is not None:
         # Always built with Merton: switched off in league/engineer.json it still reports (free),
         # and buys nothing.

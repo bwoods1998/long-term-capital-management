@@ -75,7 +75,7 @@ import math
 import re
 import threading
 from contextlib import nullcontext
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from . import niches as niches_module
 from .agents import code_sha
@@ -99,6 +99,7 @@ RECORD_DAYS = 7.0
 #: How long the desks' records are reused: an hour, as the seat market watch (the births pass runs every 300 s).
 RECORD_CACHE_SECONDS = 3600.0
 _CACHE_KEY = "kalshi_founders_desk_records"
+_AGENTS_KEY = ("kalshi_founders", "agent_records")
 _TAPE_KEY = "kalshi_founders_desk_tape"
 #: One warning an hour at most, for a founder that cannot be seated, a malformed row and an error in here.
 TELL_SECONDS = 3600.0
@@ -154,6 +155,14 @@ def pending(house: Any) -> list[tuple[Any, Mapping[str, Any]]]:
                                   f"{'is' if len(bad) == 1 else 'are'} skipped: " + "; ".join(bad[:6]))
     rows.sort(key=lambda r: r[:3])
     return [(niche, row) for _, _, _, niche, row in rows]
+
+
+#: On the yield path a resident is kept as "a winner" only when its own forward record over the window is positive WITH
+#: evidence: at least `losing_family_min_blocks` active blocks and a one-sided t of at least this. Measured Sept 25,
+#: 2026, 22:00Z: crypto-15m's pooled 7-day record was -4.17 over 375 active blocks, yet 6 of its 7 members passed the
+#: seat market's plain rule (own mean growth > 0), three of them on noise (t 0.32 over 26 blocks, t 0.19 over 15, one
+#: block): the survivors of dead losers, so the desk the run closes could never yield a seat to a founder.
+WINNER_T = 1.0
 
 
 class _Tape:
@@ -218,7 +227,35 @@ def desk_records(house: Any, *, days: float = RECORD_DAYS) -> dict[str, tuple[in
             row[1] += growth
     value = {desk: (int(n), growth) for desk, (n, growth) in out.items()}
     house._data_cache[_CACHE_KEY] = (now, value, days)
+    agents: dict[str, list[float]] = {}
+    for _, agent, growth in rows:
+        agents.setdefault(agent, []).append(growth)
+    house._data_cache[_AGENTS_KEY] = (now, agents, days)
     return value
+
+
+def agent_records(house: Any, *, days: float = RECORD_DAYS) -> dict[str, list[float]]:
+    """Agent -> the log growth of each of its active blocks that began in the last `days`: the same rows, window and
+    cache as `desk_records` (which it refreshes when stale)."""
+    hit = house._data_cache.get(_AGENTS_KEY)
+    if not (hit and hit[2] == days and house.clock() - hit[0] < RECORD_CACHE_SECONDS):
+        house._data_cache.pop(_CACHE_KEY, None)  # both are made by one fold
+        desk_records(house, days=days)
+        hit = house._data_cache.get(_AGENTS_KEY)
+    return hit[1] if hit else {}
+
+
+def evidenced_winner(growths: Sequence[float], minimum: int) -> bool:
+    """A forward record that is positive with evidence: at least `minimum` active blocks, a positive mean, and a
+    one-sided t of at least `WINNER_T` (every block equal and positive counts as evidence)."""
+    n = len(growths)
+    if n < max(2, int(minimum)):
+        return False
+    mean = sum(growths) / n
+    if mean <= 0:
+        return False
+    var = sum((g - mean) ** 2 for g in growths) / (n - 1)
+    return var <= 0 or mean / math.sqrt(var / n) >= WINNER_T
 
 
 def yielding(house: Any) -> dict[str, dict[str, Any]]:
@@ -384,6 +421,7 @@ def _yielded(house: Any, rules: Mapping[str, Any], niche: Any, family: str | Non
     minimum = int(rules.get("losing_family_min_blocks", 6))
     epoch = float(rules["epoch_seconds"])
     records = desk_records(house)
+    own = agent_records(house)
     pooled = house.family_forward()
     living = house.registry.living()
     notes = []
@@ -396,6 +434,12 @@ def _yielded(house: Any, rules: Mapping[str, Any], niche: Any, family: str | Non
         if len(members) <= flag["floor"]:
             notes.append(f"{desk} is at its floor ({len(members)} members, floor {flag['floor']})")
             continue
+        displaced_at = (getattr(house, "_desk_displaced", None) or {}).get(desk)
+        if displaced_at is not None and house.clock() - float(displaced_at) < float(house.settings.tick_seconds):
+            # One seat a desk a tick, whichever rule took it: the forward-first run's F3 shrinks this desk toward its floor
+            # in the same births pass, before this line, and the House's own seat market stamps the desk the same way.
+            notes.append(f"{desk} already gave up a seat this tick")
+            continue
         if not losing(blocks, growth, minimum):
             notes.append(f"{desk}'s pooled forward record over the last {RECORD_DAYS:g} days is not negative "
                          f"({growth:+.4f} over {blocks} active blocks)")
@@ -405,8 +449,8 @@ def _yielded(house: Any, rules: Mapping[str, Any], niche: Any, family: str | Non
         for agent in members:
             why = _protected(house, agent, family)
             standing = None if why else house._standing(agent, epoch)
-            if standing is not None and (standing.mean_growth > 0 or standing.score_growth > 0):
-                why = "a winner"
+            if standing is not None and evidenced_winner(own.get(agent.id) or (), minimum):
+                why = "a winner"  # positive with evidence over the window (`WINNER_T`); the seat market's plain rule kept noise
             if why:
                 kept[why] = kept.get(why, 0) + 1
                 continue
