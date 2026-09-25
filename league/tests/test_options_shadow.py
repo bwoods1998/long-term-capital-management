@@ -206,6 +206,19 @@ class Surface(ShadowCase):
         with self.assertRaises(VenueUnavailable):
             self.broker.quote(instrument_for(V, {"occ": occ(580)}))
 
+    def test_a_leg_with_no_bid_is_worth_nothing_to_sell_and_one_with_no_ask_cannot_be_bought_back(self):
+        self.quote_vertical(low=(None, "0.03"), high=(None, "0.02"))  # both legs far out of the money
+        quote = self.broker.quote(structures.instrument(VERTICAL, V))
+        self.assertEqual((quote.bid, quote.ask), (D(0), D("0.03")))  # 0 - 0.02 floored; 0.03 - 0
+        self.later(10)
+        self.quote_vertical(high=("1.00", None))  # the short leg cannot be bought back: no bid for the structure
+        quote = self.broker.quote(structures.instrument(VERTICAL, V))
+        self.assertEqual((quote.bid, quote.ask), (None, D("0.55")))
+        self.buy(VERTICAL, "1", "0.10")
+        self.later()
+        self.quote_vertical(low=(None, "0.03"), high=(None, "0.02"))  # ask 0.03 <= 0.10, but the legs have no bid
+        self.assertEqual(self.broker.advance(), 0)
+
     def test_a_quote_reads_every_held_and_resting_leg_in_one_request(self):
         self.quote_condor()
         self.buy(CONDOR, "1", "0.77")

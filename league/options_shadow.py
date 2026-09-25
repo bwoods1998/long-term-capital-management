@@ -392,12 +392,16 @@ class OptionsShadowBroker:
         return {occ: read.get(occ, {}) for occ in occs}
 
     @staticmethod
-    def _touches(spec: structures.Spec, rows: Mapping[str, Mapping[str, Any]]) -> dict[str, tuple[Any, Any]]:
+    def _touches(spec: structures.Spec, rows: Mapping[str, Mapping[str, Any]], *, no_bid: Decimal | None = None) -> dict[str, tuple[Any, Any]]:
+        """Each leg's (bid, ask), a side the venue shows as zero or not at all being None, or for the bid
+        `no_bid`: `quote` passes zero, because a leg quoted with no bid is worth nothing to sell (so a long
+        wing with no bid marks the structure lower, and a short leg with no bid makes opening it dearer),
+        while a leg with no ask still has no price to buy it back at. Fills never read `no_bid`."""
         out = {}
         for leg in spec.legs:
             row = rows.get(leg.occ) or {}
             bid, ask = _number(row.get("bid")), _number(row.get("ask"))
-            out[leg.occ] = (bid if bid is not None and bid > 0 else None, ask if ask is not None and ask > 0 else None)
+            out[leg.occ] = (bid if bid is not None and bid > 0 else no_bid, ask if ask is not None and ask > 0 else None)
         return out
 
     @staticmethod
@@ -437,7 +441,7 @@ class OptionsShadowBroker:
         as_of = self._oldest(spec, rows)
         if as_of is None:
             raise VenueUnavailable(f"{self.venue}: a leg of {instrument.market_id} has no quote")
-        bid, ask = structures.quote(spec, self._touches(spec, rows))
+        bid, ask = structures.quote(spec, self._touches(spec, rows, no_bid=ZERO))
         return Quote(instrument, bid, ask, None, as_of, f"{self.venue}:{self.feed}", delayed=self.feed != "opra")
 
     # ------------------------------------------------------------- accounting
