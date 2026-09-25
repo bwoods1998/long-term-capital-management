@@ -1303,8 +1303,15 @@ class LeagueHostsTests(unittest.TestCase):
             data = ["api.open-meteo.com", "ensemble-api.open-meteo.com", "historical-forecast-api.open-meteo.com", "api.weather.gov",
                     "www.sec.gov", "efts.sec.gov", "api.nasdaq.com", "markets.newyorkfed.org", "home.treasury.gov",
                     "sports.core.api.espn.com", "www.tsa.gov", "www.realclearpolling.com"]
-            self.assertEqual(floor_box.missing_league_hosts(have), ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com", *feeds, *data])
-            self.assertEqual(floor_box.missing_league_hosts(have + ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com", *feeds, *data]), [])
+            # The key-free hosts the Kalshi-scale run added on Sept 25-26, 2026 (workstream I2, league/open_feeds.py).
+            opened = ["mesonet.agron.iastate.edu", "aviationweather.gov", "www.ncei.noaa.gov", "api.bls.gov", "api.fiscaldata.treasury.gov",
+                      "www.ecb.europa.eu", "publicreporting.cftc.gov", "www.federalreserve.gov", "wikimedia.org", "api.gdeltproject.org",
+                      "www.nhc.noaa.gov", "earthquake.usgs.gov", "mempool.space", "api.alternative.me", "www.whitehouse.gov",
+                      "www.federalregister.gov", "www.eia.gov", "tgftp.nws.noaa.gov", "www.bls.gov", "www.bea.gov", "www.nasdaqtrader.com"]
+            self.assertEqual(floor_box.missing_league_hosts(have), ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com", *feeds, *data,
+                                                                    *opened])
+            self.assertEqual(floor_box.missing_league_hosts(have + ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com", *feeds, *data,
+                                                                    *opened]), [])
 
 
 if __name__ == "__main__":  # pragma: no cover

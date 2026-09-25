@@ -1780,18 +1780,20 @@ class FeedRecorder:
         """Mark the open and blocked tool requests that plainly ask for a feed the House now records
         (`request_feed`) as fulfilled, so the research of the lines that asked wakes (the research
         gate counts a `tool.fulfilled` for its line). A feed with nothing recorded has not shipped.
-        Idempotent: a fulfilled request is neither open nor blocked any more."""
+        Idempotent: a fulfilled request is neither open nor blocked any more. Then the open requests no
+        recorder answers and a rule of `open_feeds.REFUSALS` names are answered with that rule
+        (`tool.blocked`, Sept 25, 2026: workstream I3); their ids follow the fulfilled ones."""
         with self._lock:
             shipped = {feed for (feed, _), row in self._load_stats().items() if row.get("first_ok") is not None}
         if not shipped:
-            return []
+            return _open_feeds.refuse_requests(commons)
         done: list[str] = []
         for row in list(commons.open_requests(stale_days=0)) + list(commons.blocked_requests()):
             feed = request_feed(row.get("name"))
             if feed in shipped and str(row["id"]) not in done:
                 commons.fulfil(str(row["id"]), self._outcome(feed), change="league/feeds.py")
                 done.append(str(row["id"]))
-        return done
+        return done + _open_feeds.refuse_requests(commons, skip=done)
 
     def _outcome(self, feed: str) -> str:
         from .constitution import CONSTITUTION
@@ -2934,6 +2936,11 @@ def _register(*sources: Source) -> dict[str, Source]:
 RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), ForecastHistory(), EarningsHistory(), EarningsDate(),
                                          ReferenceRates(), ParYields(), SportsOdds(), TsaVolumes(), ApprovalPolls(),
                                          OpenInterestHistory(), EiaPrices(), OddsConsensus())
+# The recorders of the key-free hosts the Kalshi-scale run added on Sept 25-26, 2026 (workstream I2),
+# built in league/open_feeds.py -- imported here, once `Source` and the helpers it builds on exist.
+from . import open_feeds as _open_feeds  # noqa: E402
+
+RECORDERS.update(_register(*_open_feeds.SOURCES))
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():

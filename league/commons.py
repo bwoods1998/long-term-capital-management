@@ -193,6 +193,13 @@ class Commons:
     def fulfil(self, request_id: str, outcome: str, *, change: str | None = None) -> None:
         self.ledger.append("tool.fulfilled", {"request": request_id, "outcome": str(outcome)[:1200], "change": change}, agent=HOUSE)
 
+    def block(self, request_id: str, outcome: str, *, owner: str, change: str | None = None) -> None:
+        """Answer a request with the rule that keeps it from being built (`tool.blocked`, as `fulfil` answers
+        one that shipped): `owner` is who could unlock it -- "owner" for a key, a login or a paid plan,
+        "no-source" when nothing that passes the data-host rule publishes it (league/open_feeds.py, Sept 25, 2026)."""
+        self.ledger.append("tool.blocked", {"request": request_id, "outcome": str(outcome)[:1200], "change": change,
+                                            "status": "blocked", "owner": str(owner)}, agent=HOUSE)
+
     # ---------------------------------------------------------------- playbook
     def playbook_add(self, title: str, text: str, *, source: str, agent: str = HOUSE) -> str:
         entry = self.ledger.append(

@@ -368,7 +368,7 @@ class WhatIsRecorded(RecorderCase):
             "weather_forecast_history_backfill", "live_sports_scores", "weather_station_observations_history")},
             {"weather_ensemble_forecasts": "weather", "gfs_ecmwf_ensemble_members": "weather", "nws_point_forecast": "nws",
              "historical_weather_forecasts": "forecast", "weather_forecast_history_backfill": "forecast",
-             "live_sports_scores": "sports", "weather_station_observations_history": None})
+             "live_sports_scores": "sports", "weather_station_observations_history": "metar"})  # the METARs, Sept 25, 2026
         commons = Commons(self.ledger, clock=self.clock)
         asked = commons.request_tool("mullins-2", "weather_ensemble_forecasts", "the fair value of each bracket I bid on")["queued"]
         store = self.recorder({"weather": ["KNYC"]}, transports=Meteo(self.clock).transport())
