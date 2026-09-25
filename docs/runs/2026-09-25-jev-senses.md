@@ -329,7 +329,7 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   K1 and a slot). Open PRs: #304 (J5), #322 (J3), #327 (J1 serving), #328 (J3 hook). Next House deploy: Saturday's
   window after forward-first's B and the options run's G.
 
-- **22:21Z (T0 + 16 h; the 18:17Z note was missed: nothing needed action between 16:45Z and 22:15Z, and the
+- **22:19Z (T0 + 16 h; the 18:17Z note was missed: nothing needed action between 16:45Z and 22:15Z, and the
   watch was quiet).** The move sensor ran through two other runs' restarts (the options run's 16:39Z, the Kalshi
   run's K1 at 20:54Z) without an alert: 56,021 rows over 3,424 markets by 22:15Z, cycles 2-24 s, no refusal, no
   breaker, 0 gate decisions without Jev. Jev spend today $0.474 (move $0.443 of its $0.75); the gateway's Jev line
