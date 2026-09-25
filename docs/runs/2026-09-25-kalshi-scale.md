@@ -168,6 +168,14 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
   22/43 at 0.510, −3.6% a dollar, t −0.24: no premium. Sent to the forward-first run at 06:52Z (it owns the family
   proof, the swing at 10 and M3's members); this run changes nothing of theirs, writes no football sibling of the
   mechanism, and puts model-versus-market pricing (K1, K3) ahead of behavioural premia.
+- **K1's premise, measured point in time (06:55Z).** Every `odds` row recorded since 08:35Z Sept 24 (one provider,
+  Draft Kings, de-vigged) against Kalshi's winner-market public prints in the 30 minutes before the row: MLB 112
+  readings on 10 games, mean Kalshi − DK +0.6¢, median gap 0.7¢, p90 1.4¢, none ≥ 3¢; WNBA 56 on 4 games, median
+  1.3¢, p90 2.2¢; NCAAF 6 on 4 games, median 1.8¢, p90 2.7¢. Kalshi's winner markets sit on the book's line, so a
+  model-versus-market founder earns there only as a maker inside the spread (thin, adverse selection the risk); the
+  spread and total ladders, thinner and wider, are where a larger gap can exist. Sent to the K1 builder for its
+  defaults (winner threshold about 1-1.5¢ after the maker fee, ladders about 3¢, taking only above 6¢, requotes on
+  line moves).
 - **Open agent data requests at T0** (in the watch window): `mlb_point_in_time_lineup_pitcher_feed` (hufschmid-39),
   `mlb_player_prop_reference_history` (hufschmid-38), `historical_external_crypto_indexes` (rosenfeld-h35c05b),
   `crypto_spot_rebalance_events` (haghani-l22bffc), and five for the options and equity desks (earnings panels,
