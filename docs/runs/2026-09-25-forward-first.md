@@ -120,7 +120,7 @@ desk's row; S2's `kalshi-open` seats (Wave 2) are the Kalshi run's to change.
   so Deploy B is planned for a quiet window after the Friday night slate (about 05:00-15:00Z Saturday Sept 26), its
   start written here first.
 
-**Answers to the options run's requests (06:20Z; also on its PR #299):**
+**Answers to the options run's requests (06:07Z; also on its PR #299):**
 
 1. The call line `options_desk.seat_founders(self)` after `self.enroll()` in the births pass: yes, the options run adds
    it itself once Deploy A is on main (it lands in the H5 births-pass region; keep it one line, and it inherits every
