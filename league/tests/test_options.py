@@ -385,8 +385,22 @@ class OptionsTapes(HouseCase):
         self.assertEqual(len({single, structural, zero, unsaid, featured}), 5)
         self.assertEqual(len(self.built), 5)
         self.assertTrue(tape["structures"])
-        self.assertEqual(self.house.tape_for({**self.NEEDS, "structures": True})[0], structural)  # and a tape is still shared
+        self.assertEqual(self.house.tape_for({**self.NEEDS, "structures": True})[0], structural)  # one key for one NEEDS
+        self.assertEqual(len(self.built), 6, "an options tape is built for its call and never kept")
+
+    def test_no_options_tape_is_kept_in_memory_and_the_cache_is_bounded(self):
+        """Sept 25, 2026: the House was killed for memory at 14:37:30Z (exit 137): the tape cache had no bound and
+        a structure agent's tape holds up to 2 M option bars."""
+        for days in range(1, 6):
+            self.house.tape_for({**self.NEEDS, "structures": True, "max_days_to_expiry": days})
+        self.assertFalse(any(":option" in k or "option" in k for k in self.house._tapes), list(self.house._tapes))
         self.assertEqual(len(self.built), 5)
+        for n in range(self.house.TAPES_KEPT + 10):
+            self.house._tapes[f"k{n}"] = (float(n), {})
+        self.house._trim_tapes()
+        self.assertEqual(len(self.house._tapes), self.house.TAPES_KEPT)
+        self.assertNotIn("k0", self.house._tapes)
+        self.assertIn(f"k{self.house.TAPES_KEPT + 9}", self.house._tapes)
 
     def test_a_structure_agents_tape_carries_its_feeds_and_a_single_contract_agents_is_refused_them(self):
         class Feeds:
