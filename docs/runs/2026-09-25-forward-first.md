@@ -508,7 +508,12 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   left). Still to verify in their windows: H2 at the next vendor failure; H3 over the next 4 h (the updater's holds).
 - **A live bug found in the verification: the site has refused every checkpoint since 15:50:21Z** ("HTTP 400 Invalid
   checkpoint", 197 warnings to 20:21Z; the last accepted checkpoint is from 15:48:18Z; no deploy between them): a data
-  value crossing a validator bound is the likely cause. A builder is on it (`fix/site-400`).
+  value crossing a validator bound is the likely cause. **Found (20:40Z):** krasker-22's CCL iron condor on
+  `options-shadow`, bought 15:48:59Z (seq 772456, held to Oct 2), is published with its four-leg code as the position's
+  `market_id`, 95 characters against the site's 80 (`validInstrument`; also in `league/tests/fixtures/site_contract.md`).
+  Fix: PR #342 (`publish.site_market_id`: a leg's underlying and expiry left out when they match the instrument's;
+  anything still over 80 cut; the ledger keeps the full code; a test runs the site's own validator). It ships in Deploy
+  B (06:00Z Saturday) rather than as a restart among tonight's real-family games; the page stays frozen until then.
 
 ## Progress notes
 
