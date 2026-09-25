@@ -171,6 +171,8 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 
 - **07:30-10:30Z Sept 25: the account's usage limit** (HTTP 429, "session limit, resets 3:30am America/Los_Angeles") stopped five of this run's agents mid-work (the K1 wake fix, I2, and the seat-hook, weather-seed and scale-rule reviews); the other runs stalled too (Deploy A did not happen in its 08:00-09:30Z window; main moved only by Merton's #314-316). Nothing was lost: each worktree kept its uncommitted work. Resumed at 10:32Z in priority order, Deploy K1's path first (the wake fix, the seat-hook review, the weather review), then I2 and the K5 review; the limit is shared by four runs, so this run keeps at most three agents at once from here. Two waiter loops of the K5 builder (`pgrep -f` matching its own command line, 3 h 20 min) were stopped; its `test_live_trading` run had finished (19 OK).
 
+- **11:44Z: #320's first CI run was cancelled at its 20-minute limit** (main's suite takes 7-8). With the weekend's founder rows flagged in `niches.json`, every unrelated House test's births pass seated a real founder, each birth probing its NEEDS (`test_house` grew a `meriwether`). Fixed (`0773e13`): `Settings.kalshi_founders` (default off) gates `kalshi_founders.seat()`; `service.build` turns it on for the floor and never for the canary, whose ticks the watchdog times; the founder tests turn it on in their own Houses; a test that a House without it seats nobody. Founder + House tests 97 OK, 616 more House-heavy tests OK.
+
 ## Findings before the builders report
 
 - **No agent has ever declared `weather`, `nws`, `forecast` or `odds`** (every `agent.born` row to 06:30Z Sept 25:
