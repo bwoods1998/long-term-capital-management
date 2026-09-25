@@ -10,8 +10,8 @@ the owner asked to see before the switch is flipped:
   `PARAMS["structure"]` is a type that account opens (the five Alpaca closes as ONE covered order);
   every other structure agent stays on the options shadow book.
 - The migration (`House._structure_move`): an agent holding structures on its old book keeps trading
-  there until it is flat (opens for a day, then closes only), and is then re-seated, its stake moved,
-  on the new book; never positions or orders on two books.
+  there until it is flat (opens through one full session, then closes only), and is then re-seated, its
+  stake moved, on the new book; never positions or orders on two books.
 - The whole path House -> adapter -> book over a fake of the practice account in Alpaca's documented
   shapes (`Venue`, P2's `FakeAlpaca` with the account's type, FILL activities per leg and legs filled
   one at a time): per-leg fills, a partial fill, a late leg, a restart mid-order, a broken structure,
@@ -324,12 +324,12 @@ class TheMigration(PracticeCase):
         self.assertEqual([i.instrument.venue for i in opens], [SHADOW])
         self.assertEqual(self.venue.posted, [])
         self.assert_one_book(agent)
-        # A day after the first wake that found it moving, it only closes there, so the move always ends.
-        self.at(THURSDAY_11_NY + 86400 + 300)  # Friday 11:05 New York
+        # Through the close of the first full session after the first wake that found it moving (Thursday's), its
+        # opens still go there: Friday 11:05 New York (`test_after_one_full_session_it_only_closes_there`).
+        self.at(THURSDAY_11_NY + 86400 + 300)
         self.house.seat(agent)
-        self.assertEqual(self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])[0], [])
-        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
-        self.assertIn("after a day of trading on here it closes what it holds on options-shadow", refused[-1])
+        opens, _ = self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])
+        self.assertEqual([i.instrument.venue for i in opens], [SHADOW])
         self.assertEqual(self.venue.posted, [])
         # 3. A close rests there (0.60 over the 0.55 bid): still not flat, still there.
         rested = self.send(agent, [condor_row(action="close", limit=0.40)])
@@ -355,6 +355,61 @@ class TheMigration(PracticeCase):
         self.assertEqual(len(self.mleg_posts()), 1)
         self.assert_one_book(agent)
         self.assertEqual(shadow.account(agent.id).holdings, {})
+
+    def test_after_one_full_session_it_only_closes_there(self):
+        agent, shadow, inst = self.condor_on_the_shadow_book()
+        self.switch(True)
+        self.house.seat(agent)  # Thursday 11:00 New York: found moving
+        self.at(THURSDAY_11_NY + 4 * 86400 - 5100)  # Monday 09:35 New York: Friday's full session has closed
+        self.house.seat(agent)
+        self.assertIs(self.house.book_of(agent), shadow)
+        self.assertEqual(self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])[0], [])
+        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertIn("after a full session of trading on here it closes what it holds on options-shadow", refused[-1])
+        closing, _ = self.house._intents(agent, shadow, [condor_row(action="close", limit=0.40)])
+        self.assertEqual([i.side for i in closing], ["sell"])  # a close is never refused for the move
+        self.assertEqual(self.venue.posted, [])
+
+    def test_a_weekend_flip_leaves_a_full_session_of_opens_on_the_old_book(self):
+        """The review of Wave 2 (Sept 25, 2026), its demonstration kept as the regression: Deploy G with the switch on in
+        Saturday's 07:00Z slot, the agent's wakes seating it every 15 minutes all weekend. Counted as a day of wall clock
+        from the first wake, its opens on the old book ran out on Sunday, and on Monday an agent still holding (krasker-22,
+        a CCL condor to Oct 2) could open on neither book. Counted in sessions, Monday is its session there."""
+        self.switch(False)
+        agent = self.agent("iron_condor", name="k22")
+        shadow = self.house.books[SHADOW]
+        self.house.seat(agent)
+        held = condor_row(expiry="2026-09-18")
+        self.shadow.set_quote(structures.instrument(structures.parse(SHADOW, held).spec, SHADOW), "0.55", "0.62")
+        self.assertEqual([o.status for o in self.send(agent, [held])], ["filled"])
+        self.switch(True)
+        for hours in range(40, 40 + 48, 1):  # Saturday 07:00Z onward: seated through the weekend
+            self.at(THURSDAY_11_NY + hours * 3600)
+            self.house.seat(agent)
+        self.assertIs(self.house.book_of(agent), shadow)
+        other = condor_row(expiry="2026-09-18", limit=0.40)
+        other["legs"] = [{"occ": occ("2026-09-18", "put", 575), "role": "long"}, {"occ": occ("2026-09-18", "put", 576), "role": "short"},
+                         {"occ": occ("2026-09-18", "call", 595), "role": "short"}, {"occ": occ("2026-09-18", "call", 596), "role": "long"}]
+        self.at(THURSDAY_11_NY + 4 * 86400 - 5100)  # Monday Sept 14, 09:35 New York: the first session since the flip
+        self.house.seat(agent)
+        opens, _ = self.house._intents(agent, shadow, [other])
+        self.assertEqual([i.instrument.venue for i in opens], [SHADOW])
+        self.at(THURSDAY_11_NY + 5 * 86400 - 5100)  # Tuesday 09:35 New York: Monday's session has closed
+        self.assertEqual(self.house._intents(agent, shadow, [other])[0], [])
+        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertIn("after a full session of trading on here", refused[-1])
+        self.assertEqual(self.venue.posted, [])
+
+    def test_the_window_is_the_close_of_the_first_full_session_after_the_stamp(self):
+        from ltcm.data import to_datetime
+
+        until = self.house._structure_move_opens_until
+        for stamp, close in (("2026-09-10T15:00:00Z", "2026-09-11T20:00:00Z"),   # Thursday in session: Friday's close
+                             ("2026-09-11T19:00:00Z", "2026-09-14T20:00:00Z"),   # Friday's last hour: Monday's close
+                             ("2026-09-12T07:00:00Z", "2026-09-14T20:00:00Z"),   # Saturday: Monday's close
+                             ("2026-11-25T15:00:00Z", "2026-11-27T18:00:00Z")):  # before Thanksgiving: Friday's early close
+            with self.subTest(stamp=stamp):
+                self.assertEqual(until(to_datetime(stamp).timestamp()), to_datetime(close).timestamp())
 
     def test_a_decision_made_for_the_old_book_is_dropped_once_it_has_moved(self):
         agent, shadow, inst = self.condor_on_the_shadow_book()
@@ -384,7 +439,7 @@ class TheMigration(PracticeCase):
         agent = self.agent("iron_condor")
         self.house.seat(agent)
         self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
-        self.switch(False)  # a rollback
+        self.switch(False)  # a config-only release sets it false (never a rollback past this code)
         self.assertIs(self.house.book_of(agent), self.practice)
         self.house.seat(agent)
         self.assertIn(agent.id, self.house._state["structure_moving"])

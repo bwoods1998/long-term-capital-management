@@ -152,10 +152,14 @@ STRUCTURE_CHAIN_PER_UNDERLYING = 80
 STRUCTURE_CHAIN_WINDOW_DAYS = 7
 STRUCTURE_CHAIN_SPLIT_ROWS = 600
 #: A structure agent moving between the options shadow book and the Alpaca practice account (`House._structure_move`,
-#: Wave 2, Sept 25, 2026) keeps trading on its old book, opens included, until it is flat, for at most this long
-#: from the first wake that found it moving; after that it only closes there, so the move always ends (a structure
-#: it cannot close itself is sold by the House's expiry-day close). A day: a founder of 0-7 day structures is
-#: usually flat within its session, and one that never is must not trade on the old book for ever.
+#: Wave 2, Sept 25, 2026) keeps trading on its old book, opens included, until it is flat -- through the close of the
+#: first FULL regular session after the first wake that found it moving (`_structure_move_opens_until`); after that it
+#: only closes there, so the move always ends (a structure it cannot close itself is sold by the House's expiry-day
+#: close). A founder of 0-7 day structures is usually flat within a session, and one that never is must not trade on
+#: the old book for ever. Counted in sessions, not hours (the review of Wave 2): a deploy on Saturday stamped the
+#: agents moving at once, 15-minute wakes seat them all weekend, and a day of wall clock ran out on Sunday, so on
+#: Monday krasker-22 (a CCL condor to Oct 2) could open on neither book. This is the fallback when the calendar
+#: cannot say: a day.
 STRUCTURE_MOVE_OPENS_SECONDS = 24 * 3600
 PROBE_BOX = "house-probe"
 #: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
@@ -964,7 +968,17 @@ class House:
         `options_structures.practice_account`, read once. Only a literal `true` turns it on; absent, false
         or unreadable, every structure agent trades on `options_structures.book` as before. On, a structure
         agent whose program trades a type the Alpaca practice account can close as ONE covered order trades
-        there (`_structure_target`). A rollback of the deploy that flips it turns it back off."""
+        there (`_structure_target`).
+
+        THE ROLLBACK RULE (the review of Wave 2, Sept 25, 2026). The release that brings this code (Deploy G)
+        ships it OFF; it is flipped only by a later release that changes nothing but this key, so that
+        undoing the flip lands on this code with the switch off, which moves agents back to the shadow book
+        once they are flat (`_structure_move`). NEVER roll back past the release that brought this code
+        while `alpaca-paper` holds a structure: the older code cannot fold the venue's legs into the
+        structures (the practice book freezes for every agent on it, for good), and its wind-down would sell
+        a held structure as its FIRST LEG alone (`alpaca_symbol` on the held instrument's first leg), which
+        for a debit vertical leaves a naked short -- legging out and a naked short, both not authorized. To
+        undo, release this key false."""
         if self.structure_practice_account is None:
             try:
                 config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
@@ -1019,13 +1033,14 @@ class House:
         """Leave a structure book the agent is flat on for the one `book_of` now names (Wave 2, Sept 25, 2026).
 
         THE MIGRATION, when the switch moves a structure agent between the options shadow book and the Alpaca
-        practice account (either way: the switch turned on, off by a rollback, or its program's type changed):
+        practice account (either way: the switch turned on, off by a config-only release -- never by rolling
+        back past this code, `_structure_practice_account` -- or its program's type changed):
         1. While the agent holds a structure, has an order of one open or a never-arrived buy of one binding
            cash on its OLD book, `_structure_book` keeps it there: its wakes see that book and it keeps trading
-           there, opens included, for `STRUCTURE_MOVE_OPENS_SECONDS` (a day) from the first wake that found it
-           moving (kept in house.json, `structure_moving`); after that the House refuses its opens there
-           (`_structure_refusal`) and it only gets flatter: the House's expiry-day close and a strategy's own
-           exits bound the rest by its structures' earliest expiry.
+           there, opens included, through the close of the first full regular session after the first wake
+           that found it moving (kept in house.json, `structure_moving`; `_structure_move_opens_until`); after
+           that the House refuses its opens there (`_structure_refusal`) and it only gets flatter: the House's
+           expiry-day close and a strategy's own exits bound the rest by its structures' earliest expiry.
         2. At the first `seat` once it is flat there (every wake seats), this sweeps the old account's free
            cash back to the House (`_sweep`, "account closed"), says so once, and `seat` stakes it on the new
            book at the rung's practice stake, as `_move_books` does for any change of book. Its old record
@@ -1038,7 +1053,7 @@ class House:
         with self._state_lock:
             since = self._state.setdefault("structure_moving", {})
             if moving:
-                since.setdefault(agent.id, self.clock())  # when this wake first found it moving (`STRUCTURE_MOVE_OPENS_SECONDS`)
+                since.setdefault(agent.id, self.clock())  # when this wake first found it moving (`_structure_move_opens_until`)
             else:
                 since.pop(agent.id, None)
         if moving:
@@ -1053,6 +1068,20 @@ class House:
             if old.account(agent.id).swept:
                 self.alert("info", f"{agent.id}: moved from {old.name} to {book.name} for its structures ({(agent.params or {}).get('structure')}), "
                                    f"flat on {old.name}: its practice account there closed and swept, staked on {book.name}")
+
+    @staticmethod
+    def _structure_move_opens_until(since: float) -> float:
+        """Until when a moving structure agent may still OPEN on its old book (`_structure_move`, the review of
+        Wave 2, Sept 25, 2026): the close of the first regular session that opens after `since` (the first wake
+        that found it moving), so it always has one full session of trading there, whenever the switch was
+        flipped -- a Saturday deploy's wakes all weekend spend none of it. A calendar that cannot say: a day."""
+        try:
+            session = next_session(to_datetime(since))
+            if session is not None:
+                return to_datetime(session.close_at).timestamp()
+        except Exception:  # noqa: BLE001 - a date past the calendar's years: the day of wall clock
+            pass
+        return float(since) + STRUCTURE_MOVE_OPENS_SECONDS
 
     def is_structure_agent(self, agent: Agent | None) -> bool:
         """Whether `agent` trades structures: on the options desk, with `"structures": True` in its NEEDS."""
@@ -1143,18 +1172,9 @@ class House:
                     "carry \"structures\": true")
         if book.real_money:
             return "structures on real money wait for the owner's switch (O1): nothing is sent to a real account"
-        target = self._structure_target(agent)
-        wanted = target.name if target is not None else self._structure_book_name()
-        if book.name != wanted:
-            if self._structure_book(agent) is not book:
-                return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
-                        if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
-            # Moving (`_structure_move`, Wave 2, Sept 25, 2026): it trades on here until it is flat, opens only for a day.
-            if order.action == "open":
-                since = (self._state.get("structure_moving") or {}).get(agent.id)
-                if since is not None and self.clock() - float(since) >= STRUCTURE_MOVE_OPENS_SECONDS:
-                    return (f"this agent's structures are moving to the {wanted} book: after a day of trading on here it closes what "
-                            f"it holds on {book.name} and opens nothing more here; once it is flat its next open goes to {wanted}")
+        refusal = self._structure_practice_refusal(agent, book, order)
+        if refusal:
+            return refusal
         if order.action != "open":
             return ""
         niche = self.niche_of(agent)
@@ -1181,8 +1201,26 @@ class House:
         except LedgerConflict:
             pass  # this very intent was refused already
 
+    def _structure_practice_refusal(self, agent: Agent, book: Book, order: Any) -> str:
+        """Why a structure order is not sent on this PRACTICE book (empty when it is; `_structure_refusal`): not the book
+        the agent's structures trade on (`_structure_target`), unless it is moving off this one (`_structure_move`, Wave
+        2, Sept 25, 2026: it trades on here until it is flat, and opens here only until `_structure_move_opens_until`)."""
+        target = self._structure_target(agent)
+        wanted = target.name if target is not None else self._structure_book_name()
+        if book.name == wanted:
+            return ""
+        if self._structure_book(agent) is not book:
+            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
+                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+        if order.action == "open":
+            since = (self._state.get("structure_moving") or {}).get(agent.id)
+            if since is not None and self.clock() >= self._structure_move_opens_until(float(since)):
+                return (f"this agent's structures are moving to the {wanted} book: after a full session of trading on here it closes "
+                        f"what it holds on {book.name} and opens nothing more here; once it is flat its next open goes to {wanted}")
+        return ""
+
     def _structure_context(self, agent: Agent, ctx: dict[str, Any], symbols: list[str], max_order: Decimal,
-                           max_position: Decimal) -> None:
+                           max_position: Decimal, *, book: Book | None = None) -> None:
         """A structure agent's options block (`snapshot`): `ctx["chain"]`, not filtered by a single contract's
         affordability, 0 to `max_days_to_expiry` days (today until 14:30 New York), at most 80 contracts an
         underlying; `ctx["structures"]`, the ready-made candidates within its caps (`structures.candidates`,
@@ -1208,12 +1246,20 @@ class House:
             "fee_per_contract_leg_usd": float(structures.FEE_PER_CONTRACT),
             "book": self._structure_book_name(),
         }
+        self._structure_moving_context(agent, ctx, book)
+
+    def _structure_moving_context(self, agent: Agent, ctx: dict[str, Any], book: Book | None) -> None:
+        """The practice book a structure agent's wake trades on, and where it is moving (`_structure_move`, Wave 2,
+        Sept 25, 2026), in `ctx["structure_rules"]`. Never on a real-money wake: there the book is the real one."""
+        if book is not None and book.real_money:
+            return
         here, target = self._structure_book(agent), self._structure_target(agent)
         if here is not None:
             ctx["structure_rules"]["book"] = here.name
             if target is not None and target is not here:
-                ctx["structure_rules"]["moving_to"] = (f"{target.name}: you trade on {here.name} until you are flat there (opens for a "
-                                                       f"day, then closes only); once flat, your next open goes to {target.name}")
+                ctx["structure_rules"]["moving_to"] = (f"{target.name}: you trade on {here.name} until you are flat there (opens "
+                                                       f"until the close of a full session there, then closes only); once flat, "
+                                                       f"your next open goes to {target.name}")
 
     def _structure_row(self, inst: Instrument, *, average_cost: Decimal | None = None, mark: Decimal | None = None,
                        quantity: Decimal | None = None, limit: Decimal | None = None, side: str | None = None) -> dict[str, Any]:
@@ -2466,7 +2512,7 @@ class House:
                                                        lambda: self.options_history.features_at(symbols, self.clock()))
             niche = self.niche_of(agent)
             if niche is not None and niche.asset_class == "option" and self.is_structure_agent(agent):
-                self._structure_context(agent, ctx, symbols, max_order, max_position)  # its chain and ctx["structures"]
+                self._structure_context(agent, ctx, symbols, max_order, max_position, book=book)  # its chain and ctx["structures"]
             elif niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
                 # A contract is 100 shares: what one contract may cost a share, by the same number the
