@@ -116,6 +116,8 @@ test of every founder on true touches.
 
 - **Deploy V2 (PR #336, `v/founders12`):** the 11 seeds, rows, tests; CI started 16:10Z; the owner deploy follows
   CI, one House restart, canary and watch; start and release id written here first.
+  **Started 16:19:40Z:** PR #336 merged 16:19:25Z (`a31b9d2`, CI green 16:19Z, 3 of 3), owner deploy from
+  `~/Work/ltcm-deploy` at `origin/main`; no gateway change; no money-rule change.
 
 ## Coordination with the forward-first run
 
