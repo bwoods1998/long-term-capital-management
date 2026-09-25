@@ -43,6 +43,21 @@ SEEDS: list[dict] = [
      "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
     {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
+    # The structure founders, volatility and premium (S4a of the options-desk run, Sept 25, 2026): each
+    # a level-3 defined-risk structure held as one position (`league/structures.py`), opened and closed
+    # at the touch within the session or the next, with its own profit target, stop and time exit.
+    {"name": "options-condor-vrp", "family": "options-condor-vrp", "file": "options_condor_vrp.py",
+     "why": "The variance risk premium (published): index options price more movement than follows. A $1-winged 0-2 day iron condor on SPY/QQQ/IWM when the implied move is rich against the realized one and the condor's expected value clears every leg's touch."},
+    {"name": "options-putspread-dip", "family": "options-putspread-dip", "file": "options_putspread_dip.py",
+     "why": "Sell the put skew after an intraday dip in an uptrend (published: rich index put premium, short-term reversal): a $1-wide put credit vertical, 0-4 days, bought back within a day."},
+    {"name": "options-ironfly-quiet", "family": "options-ironfly-quiet", "file": "options_ironfly_quiet.py",
+     "why": "Volatility clusters (published): a quiet midday tends to stay quiet while at-the-money premium decays fastest. A 0-1 day at-the-money iron butterfly with $1 wings, flat by 15:15 New York."},
+    {"name": "options-strangle-cheap", "family": "options-strangle-cheap", "file": "options_strangle_cheap.py",
+     "why": "The one time buying options pays (published): when implied volatility lags a burst of realized. A 2-5 day long strangle on IWM/QQQ/SPY only when the implied move is cheap against the realized one, out on a move or after a day."},
+    {"name": "options-calendar-term", "family": "options-calendar-term", "file": "options_calendar_term.py",
+     "why": "Term-structure mean reversion (published): when the near expiry's implied volatility is kinked above the far one's, sell the near and buy the far at one strike, closed before the near expiry."},
+    {"name": "options-butterfly-pin", "family": "options-butterfly-pin", "file": "options_butterfly_pin.py",
+     "why": "Pinning at heavily traded strikes on expiry days (published: Ni, Pearson and Poteshman 2005): a $1-winged long butterfly expiring today, centred on the strike that traded most in the last two hours, sold before the close."},
 ]
 
 _HERE = Path(__file__).resolve().parent
