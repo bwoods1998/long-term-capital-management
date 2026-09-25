@@ -45,18 +45,19 @@ SEEDS: list[dict] = [
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
     # The structure founders of direction and events (builder S4b of the options-desk run, Sept 25, 2026): each held
     # as ONE position priced at its net value plus its collateral (`league/structures.py`), each writing its own exits.
+    # Universes, directions and defaults were chosen on the first two thirds of the replay window (May 22 to Aug 11, 2026).
     {"name": "options-orb", "family": "options-orb-vertical", "file": "options_orb.py",
-     "why": "Intraday momentum in SPY (published: the first half hour predicts the last, Gao et al. 2018): a 0-4 day $1 debit vertical in the direction of an opening-range breakout, flat by the close."},
+     "why": "Opening-range breakouts LOST from May 22 to Aug 11, 2026 on IWM, BAC, SOFI, SNAP and AAL (-0.14% to -0.44% to the close): fade them with a 0-4 day debit vertical, flat by the close; `fade` 0 is the published intraday momentum."},
     {"name": "options-trend-vertical", "family": "options-trend-vertical", "file": "options_trend_vertical.py",
-     "why": "Buy the pullback in a 20-day trend (published time-series momentum; Connors-style short-term pullbacks): a 3-9 day debit vertical with the trend, taking most of its width."},
+     "why": "A pullback inside a rising 20-day trend was bought the next day on BAC, PFE, T and SOFI (+0.40% pooled, 62% up, fit window): a near-the-money call debit vertical, out the next day."},
     {"name": "options-reversal", "family": "options-reversal-vertical", "file": "options_reversal.py",
-     "why": "Index ETFs give back part of a two-sigma day within days (published short-term reversal in index returns): a 2-7 day debit vertical against the move."},
+     "why": "Short-term reversal after a sharp drop (Nagel 2012): after a 1.5-sigma down day five stocks and IWM rose +1.88% the next day (21, fit window); a call debit vertical, out the next day."},
     {"name": "options-gap-drift", "family": "options-gap-drift", "file": "options_gap_drift.py",
-     "why": "Post-announcement drift (published since Ball and Brown, 1968): a single stock that gaps two sigmas on news keeps drifting its way for days; a 3-11 day vertical with the gap."},
+     "why": "Post-announcement drift (Ball and Brown 1968): after a 2-sigma, 3% news day BAC, T, F, AAL, RIVN and CCL kept drifting (+0.95% the next day, 21, fit window); a vertical with the move."},
     {"name": "options-skew", "family": "options-skew", "file": "options_skew.py",
-     "why": "Put skew mean-reverts and rich skew pays its seller (published: the variance and skew risk premia): a put credit vertical when 25-delta skew is rich in an uptrend, a put debit vertical when it is cheap."},
+     "why": "Put skew against its own level: a cheap 25-delta skew on SPY, QQQ and IWM preceded rises (+0.35% to +1.28% over 3 days, fit window), so the calm is ridden with a call debit vertical; a rich-skew put credit arm is one switch away."},
     {"name": "options-diagonal", "family": "options-trend-diagonal", "file": "options_diagonal.py",
-     "why": "Time decay is steepest in the last days: sell a 0-3 day option and own a later one at a better strike in the trend's direction, a diagonal whose loss is capped at its debit."},
+     "why": "Time decay is steepest in the last days: in a $5-60 stock's uptrend, sell a 1-4 day call and own a 5-10 day one at a lower strike, a diagonal whose loss is capped at its debit."},
 ]
 
 _HERE = Path(__file__).resolve().parent

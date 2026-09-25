@@ -1,18 +1,19 @@
-# options-skew: trade the 25-delta put skew of SPY, QQQ and IWM against its own recent level with a vertical.
-#
+# options-skew: trade a stock's 25-delta put skew against its own recent level with a 3-9 day debit vertical.
 # THE IDEA. The 25-delta put's implied volatility over the 25-delta call's (the skew) is the price of crash
-# insurance. When it is cheap against its recent level the market is calm, and calm index markets kept drifting
-# up: ride it with a call debit vertical (`cheap_side` 1; -1 buys the cheap puts instead). When it is rich above a
-# rising index, the fear can be sold with a put credit vertical (`rich_side` 1, off by default: see below).
-# THE EVIDENCE. Published: the skew and variance risk premia (Bakshi, Kapadia and Madan 2003). Measured on this
-# firm's options history (the House's daily features, May 14 to Aug 11, 2026): 3 days after a skew one sd under
-# its 20-day mean SPY rose 0.62% (11, 82% of the time), QQQ 1.28% (11), IWM 0.35% (12); after a rich skew over a
-# rising index the next 3 days fell (SPY, QQQ, IWM: 5 cases). It reads the House's daily `skew_25d`
-# (`options_features`), else the chain's; until `min_obs` days of its own exist it measures against `skew_norm` +- `skew_sd`.
-# WHAT IT NEEDS. Daily bars (30), quotes and options features of the three ETFs, the chain within 9 days, `structures: True`.
+# insurance. Rich skew with the price over its 20-day mean is fear the tape does not share: ride the trend with a call
+# vertical (`rich_side` 1). Cheap skew is complacency, and protection on sale: buy a put vertical (`cheap_side` -1;
+# +1 buys calls instead, 0 turns the arm off).
+# THE EVIDENCE. Published: the skew and variance risk premia (Bakshi, Kapadia and Madan 2003). Measured on the
+# House's daily features, May 14 to Aug 11, 2026, 3 days after a reading one sd from its 20-day mean: rich, price over
+# its mean F +1.55% (11, 82% up), AAL +4.04% (6), RIVN +0.22% (6), CCL -0.58% (5); cheap, then down: F 3.92%
+# (4), AAL 0.51% (9), CCL 1.45% (10), RIVN 2.89% (8). On SPY, QQQ and IWM the replay lost 96% of the debit on each
+# of 4 structures (Sept 25, 07:19Z): index legs cost dollars and the estimated spread is a share of the premium.
+# It reads the House's daily `skew_25d` (`options_features`), else the chain's; until `min_obs` days of its own
+# exist it measures against `skew_norm` +- `skew_sd` (the four's fit-window skew: 0.02, sd 0.045).
+# WHAT IT NEEDS. Daily bars (30), quotes and options features, the chain within 9 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:30 New York) to `entry_end` (15:00), once an underlying a day.
-# HOW IT EXITS. At `profit_target` of what it can make (a credit: of the credit), at `stop_loss` of the debit
-# (or of the credit), after `max_hold_days`, and on its expiry day `exit_minutes_before_close` before the close.
+# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), from 10:00
+# `max_hold_days` after entry, and on its expiry day `exit_minutes_before_close` before the close.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -95,6 +96,9 @@ def _exits(ctx, ny, p, notes, signal_exit):
                else f"up {gain:.2f} a share, the target is {p['profit_target']:.0%} of the {room:.2f} it can make" if room > 0 and gain >= p["profit_target"] * room
                else f"down {-gain:.2f} a share, the stop is {p['stop_loss']:.0%} of {unit:.2f}" if unit > 0 and -gain >= p["stop_loss"] * unit
                else signal_exit(row, kind, occs, dte))
+        if dte <= 0 and mins >= 930:  # from 15:30 on its expiry day the House is closing it: nothing to send
+            notes.append(f"{parts[0][0]} {kind}: the House is closing it before its expiry")
+            continue
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue
@@ -133,17 +137,17 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-skew", "asset_class": "option", "structures": True,
-         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 30}, "max_days_to_expiry": 9, "wake_minutes": 10, "options_features": True,
+         "symbols": ["F", "AAL", "CCL", "RIVN"], "bars": {"timeframe": "1Day", "limit": 30}, "max_days_to_expiry": 9, "wake_minutes": 10, "options_features": True,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 9], "dte_max": [1, 9], "wing_delta": [0.02, 0.3], "entry_delta": [0.15, 0.5], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.3, 2.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
-                                        "z_rich": [0.5, 3.0], "z_cheap": [0.5, 3.0], "cheap_side": [-1, 1], "rich_side": [0, 1], "skew_norm": [0.0, 0.15], "skew_sd": [0.005, 0.05],
+                                        "z_rich": [0.5, 3.0], "z_cheap": [0.5, 3.0], "cheap_side": [-1, 1], "rich_side": [0, 1], "skew_norm": [-0.1, 0.15], "skew_sd": [0.005, 0.05],
                                         "min_obs": [3, 20], "lookback": [5, 20], "trend_days": [5, 25], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 10.0, "dte_min": 1, "dte_max": 9, "wing_delta": 0.12, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 3, "dte_max": 9, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 72.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.28, "requote_minutes": 30, "z_rich": 1.0, "z_cheap": 1.0, "cheap_side": 1, "rich_side": 0, "skew_norm": 0.05, "skew_sd": 0.013,
-          "min_obs": 8, "lookback": 20, "trend_days": 20, "max_hold_days": 4, "entry_start": 630, "entry_end": 900}
+          "min_credit": 0.28, "requote_minutes": 30, "z_rich": 1.0, "z_cheap": 1.0, "cheap_side": -1, "rich_side": 1, "skew_norm": 0.02, "skew_sd": 0.045,
+          "min_obs": 8, "lookback": 20, "trend_days": 20, "max_hold_days": 3, "entry_start": 630, "entry_end": 900}
 
 def _skew(ctx, under, p, ny):  # the nearest expiry's 25-delta put IV less its 25-delta call IV, or None
     rows = [r for r in ctx.get("chain") or [] if isinstance(r, dict) and r.get("underlying") == under and _num(r.get("iv"), None) and _num(r.get("delta"), None) is not None
@@ -161,11 +165,10 @@ def decide(ctx):
     day, notes, kind = ny.date().toordinal(), [], "credit_vertical" if p["structure"] == "credit_vertical" else "debit_vertical"
     seen = {k: [x for x in v if isinstance(x, list) and len(x) == 2][-int(p["lookback"]):] for k, v in (memory.get("skew") or {}).items() if k in NEEDS["symbols"] and isinstance(v, list)} \
         if isinstance(memory.get("skew"), dict) else {}
-
     def aged(row, held_kind, occs, dte):
         opened = _ny(row.get("opened_at"))
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
-
+        days = (ny.date() - opened.date()).days if opened else 0
+        return f"held {days} days, the most is {int(p['max_hold_days'])}" if opened and days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
     readings = {}
     for under in NEEDS["symbols"] if p["entry_start"] <= ny.hour * 60 + ny.minute < p["entry_end"] else []:
         row = ((ctx.get("options_features") or {}).get(under) or {}) if isinstance(ctx.get("options_features"), dict) else {}
@@ -178,19 +181,17 @@ def decide(ctx):
             mean = sum(past) / len(past) if len(past) >= p["min_obs"] else p["skew_norm"]
             sd = math.sqrt(sum((x - mean) ** 2 for x in past) / len(past)) if len(past) >= p["min_obs"] else p["skew_sd"]
             readings[under] = (skew, (skew - mean) / max(sd, 0.002), mean)
-
     def signal(under):
         closes, price = _closes(ctx, under), _price(ctx, under)
         if under not in readings or price <= 0 or len(closes) < p["trend_days"]:
             return "no 25-delta put and call to read the skew from, or too few daily bars"
         (skew, z, mean), trend = readings[under], sum(closes[-int(p["trend_days"]):]) / int(p["trend_days"])
         if z >= p["z_rich"] and price > trend and p["rich_side"] >= 1:
-            return True, f"{under}'s 25-delta skew {skew:.3f} is rich ({z:+.1f} sd over {mean:.3f}) above its {int(p['trend_days'])}-day mean: selling the fear", "credit_vertical", day
+            return True, f"{under}'s 25-delta skew {skew:.3f} is rich ({z:+.1f} sd over {mean:.3f}) above its {int(p['trend_days'])}-day mean: the fear is overpaid", kind, day
         if z <= -p["z_cheap"] and p["cheap_side"] != 0:
             return (p["cheap_side"] > 0, f"{under}'s 25-delta skew {skew:.3f} is cheap ({z:+.1f} sd under {mean:.3f}): "
-                    + ("riding the calm with calls" if p["cheap_side"] > 0 else "buying protection on sale"), kind, day)
+                    + ("riding the calm with calls" if p["cheap_side"] > 0 else "buying protection on sale"), "debit_vertical", day)
         return f"skew {skew:.3f} is {z:+.1f} sd from {mean:.3f}" + (", rich but under the trend" if z >= p["z_rich"] else "")
-
     intents, cancels = _exits(ctx, ny, p, notes, aged)
     kept = {k: memory.get(k) if isinstance(memory.get(k), dict) else {} for k in ("sent", "done")}
     if p["entry_start"] <= ny.hour * 60 + ny.minute < p["entry_end"]:

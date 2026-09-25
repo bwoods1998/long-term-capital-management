@@ -95,6 +95,9 @@ def _exits(ctx, ny, p, notes, signal_exit):
                else f"up {gain:.2f} a share, the target is {p['profit_target']:.0%} of the {room:.2f} it can make" if room > 0 and gain >= p["profit_target"] * room
                else f"down {-gain:.2f} a share, the stop is {p['stop_loss']:.0%} of {unit:.2f}" if unit > 0 and -gain >= p["stop_loss"] * unit
                else signal_exit(row, kind, occs, dte))
+        if dte <= 0 and mins >= 930:  # from 15:30 on its expiry day the House is closing it: nothing to send
+            notes.append(f"{parts[0][0]} {kind}: the House is closing it before its expiry")
+            continue
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue

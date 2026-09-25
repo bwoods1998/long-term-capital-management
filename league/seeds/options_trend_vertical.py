@@ -1,4 +1,4 @@
-# options-trend-vertical: buy the pullback in a stock's 20-day uptrend with a 1-10 day call debit vertical, out next day.
+# options-trend-vertical: buy a 1% pullback in a stock's 20-day uptrend with a 3-10 day call debit vertical, for 3 days.
 #
 # THE IDEA. A stock above a rising 20-day mean that closed yesterday under its 5-day mean has pulled back inside
 # its trend, and such pullbacks were bought within days. A near-the-money call debit vertical (long the strike
@@ -6,8 +6,9 @@
 # THE EVIDENCE. Published: time-series momentum (Moskowitz, Ooi and Pedersen 2012) and short pullbacks in uptrends
 # (Connors). Measured on this firm's history (underlying closes, May 22 to Aug 11, 2026, the replay window's first
 # two thirds): 3-day returns after such a pullback were +2.43% BAC (7), +0.88% PFE (4), +0.83% T (6), +1.27% SOFI
-# (12), negative on SPY, QQQ, F, AAL and RIVN; pooled over the four, the NEXT day +0.40% (29, 62% up), and after
-# Aug 11 (out of sample) +0.59% (14). The owner wants structures closed within the session or the next day.
+# (12), negative on SPY, QQQ, F, AAL and RIVN. Pooled over the four, a close 1% or more under the 5-day mean was
+# followed by +0.81% the next day and +1.75% over three (16, 81% up); the next day alone did not pay the costs: held
+# one day (the owner's preference) the replay lost 20% of the debit a trade (31 trades, Sept 25 07:11Z).
 # Names whose near legs cost over a dollar (HOOD, INTC) are left out: the replay's estimated spreads eat them.
 # WHAT IT NEEDS. Daily bars (60) and quotes of four stocks, the chain within 10 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (15:00), once a pullback, at most `max_open`.
@@ -96,6 +97,9 @@ def _exits(ctx, ny, p, notes, signal_exit):
                else f"up {gain:.2f} a share, the target is {p['profit_target']:.0%} of the {room:.2f} it can make" if room > 0 and gain >= p["profit_target"] * room
                else f"down {-gain:.2f} a share, the stop is {p['stop_loss']:.0%} of {unit:.2f}" if unit > 0 and -gain >= p["stop_loss"] * unit
                else signal_exit(row, kind, occs, dte))
+        if dte <= 0 and mins >= 930:  # from 15:30 on its expiry day the House is closing it: nothing to send
+            notes.append(f"{parts[0][0]} {kind}: the House is closing it before its expiry")
+            continue
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue
@@ -138,11 +142,11 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-trend-vertical",
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 10], "dte_max": [1, 10], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
-                                        "trend_days": [10, 50], "slope_days": [1, 10], "fast": [2, 10], "max_hold_days": [1, 10], "both_sides": [0, 1], "trend_exit": [0, 1]},
+                                        "trend_days": [10, 50], "slope_days": [1, 10], "fast": [2, 10], "max_hold_days": [1, 10], "both_sides": [0, 1], "trend_exit": [0, 1], "pull_pct": [0, 0.05]},
                              "ordered": [["dte_min", "dte_max"], ["fast", "trend_days"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 2.0, "dte_min": 3, "dte_max": 10, "wing_delta": 0.15, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 1, "both_sides": 0, "trend_exit": 0,
+          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 3, "both_sides": 0, "trend_exit": 0, "pull_pct": 0.01,
           "entry_start": 600, "entry_end": 900}
 
 def _trend(ctx, under, p):  # (price now, the 20-day mean, its slope, yesterday's close against the 5-day mean) or None
@@ -150,7 +154,7 @@ def _trend(ctx, under, p):  # (price now, the 20-day mean, its slope, yesterday'
     if len(closes) < n + k or _price(ctx, under) <= 0:
         return None
     mean = sum(closes[-n:]) / n
-    return _price(ctx, under), mean, mean - sum(closes[-n - k:-k]) / n, closes[-1] - sum(closes[-f:]) / f
+    return _price(ctx, under), mean, mean - sum(closes[-n - k:-k]) / n, closes[-1] / (sum(closes[-f:]) / f) - 1.0
 
 def decide(ctx):
     p, ny, memory, shut = _setup(ctx)
@@ -162,17 +166,18 @@ def decide(ctx):
         found, bull, opened = _trend(ctx, _parts(occs[0])[0], p), (_parts(occs[0])[2] == "call") != (held_kind in CREDIT), _ny(row.get("opened_at"))
         if p["trend_exit"] >= 1 and found and (found[0] < found[1] if bull else found[0] > found[1]):
             return f"the price {found[0]:.2f} crossed the {int(p['trend_days'])}-day mean {found[1]:.2f} against it"
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
+        days = (ny.date() - opened.date()).days if opened else 0
+        return f"held {days} days, the most is {int(p['max_hold_days'])}" if opened and days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     def signal(under):
         found = _trend(ctx, under, p)
         if found is None:
             return f"fewer than {int(p['trend_days'] + p['slope_days'])} daily bars"
         price, mean, slope, pulled = found
-        bull = True if price > mean and slope > 0 and pulled < 0 else False if p["both_sides"] >= 1 and price < mean and slope < 0 and pulled > 0 else None
+        bull = True if price > mean and slope > 0 and pulled < -p["pull_pct"] else False if p["both_sides"] >= 1 and price < mean and slope < 0 and pulled > p["pull_pct"] else None
         return (f"{price:.2f} against a {int(p['trend_days'])}-day mean {mean:.2f} ({slope:+.2f}): no pullback inside a trend" if bull is None else
                 (bull, f"{under} {price:.2f} is {'above a rising' if bull else 'below a falling'} {int(p['trend_days'])}-day mean {mean:.2f} and closed "
-                       f"{'under' if bull else 'over'} its {int(p['fast'])}-day mean yesterday", kind, day))
+                       f"{abs(pulled):.1%} {'under' if bull else 'over'} its {int(p['fast'])}-day mean yesterday", kind, day))
 
     intents, cancels = _exits(ctx, ny, p, notes, broken)
     kept = {k: memory.get(k) if isinstance(memory.get(k), dict) else {} for k in ("sent", "done")}

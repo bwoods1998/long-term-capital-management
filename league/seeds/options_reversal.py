@@ -1,4 +1,4 @@
-# options-reversal: buy a sharp drop with a 1-7 day call debit vertical against the move, out the next day.
+# options-reversal: buy a sharp drop with a 3-7 day call debit vertical against the move, held up to 4 days.
 #
 # THE IDEA. A day that drops a stock or an index ETF more than `z_entry` standard deviations of its last 20 daily
 # moves is mostly liquidity demand (forced sellers), and part of it comes back within days. Late that day (or the
@@ -7,7 +7,8 @@
 # on this firm's history (underlying closes, May 22 to Aug 11, 2026): 2 days after a 1.8-sigma drop BAC +1.90%
 # (2), SOFI +1.93% (3), AAL +10.3% (1), CCL +6.0% (2), RIVN +1.02% (3), IWM +1.05% (2); after spikes the fade was
 # no better than a coin (SPY +0.09% on 9), so spikes are not faded by default. After a 1.5-sigma drop, pooled over
-# the six, the NEXT day made +1.88% (21, 71% up).
+# the six, the next day made +1.88% and four days +4.96% (21, 81% up). Held one day the replay lost (fit window
+# -1.6% a day, Sept 25 07:13Z): a near-the-money vertical's round trip costs about a fifth of its debit.
 # WHAT IT NEEDS. Daily bars (40) and quotes of six names, the chain within 7 days, `structures: True`.
 # WHEN IT TRADES. Today's drop from `entry_start` (14:30 New York) to `entry_end` (15:30), or yesterday's from
 # 10:00 to 11:00, once an event, at most `max_open` at once; never on an expiry day after 14:00.
@@ -96,6 +97,9 @@ def _exits(ctx, ny, p, notes, signal_exit):
                else f"up {gain:.2f} a share, the target is {p['profit_target']:.0%} of the {room:.2f} it can make" if room > 0 and gain >= p["profit_target"] * room
                else f"down {-gain:.2f} a share, the stop is {p['stop_loss']:.0%} of {unit:.2f}" if unit > 0 and -gain >= p["stop_loss"] * unit
                else signal_exit(row, kind, occs, dte))
+        if dte <= 0 and mins >= 930:  # from 15:30 on its expiry day the House is closing it: nothing to send
+            notes.append(f"{parts[0][0]} {kind}: the House is closing it before its expiry")
+            continue
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue
@@ -140,9 +144,9 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-reversal", "asse
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "z_entry": [1.0, 3.5], "lookback": [10, 30], "fade_up": [0, 1], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 7, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 3, "dte_max": 7, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.5, "lookback": 20, "fade_up": 0, "max_hold_days": 1, "entry_start": 870, "entry_end": 930}
+          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.5, "lookback": 20, "fade_up": 0, "max_hold_days": 4, "entry_start": 870, "entry_end": 930}
 
 def _event(ctx, under, p, ny, late):
     # (z of the move, the close before it, the event's day): today's move so far late in the day, else yesterday's.
@@ -169,7 +173,8 @@ def decide(ctx):
         before, price = _num(events.get(under), 0.0), _price(ctx, under)
         if before > 0 and price > 0 and (price >= before if bull else price <= before):
             return f"the move has reversed: {price:.2f} is back {'over' if bull else 'under'} the close before it, {before:.2f}"
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
+        days = (ny.date() - opened.date()).days if opened else 0
+        return f"held {days} days, the most is {int(p['max_hold_days'])}" if opened and days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     def signal(under):
         found = _event(ctx, under, p, ny, late)

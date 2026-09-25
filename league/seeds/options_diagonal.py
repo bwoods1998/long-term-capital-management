@@ -1,5 +1,4 @@
 # options-diagonal: in a stock's uptrend, sell a 1-4 day call and own a 5-10 day one at a lower strike (a diagonal).
-#
 # THE IDEA. An option loses its time value fastest in its last days. Short the near call `entry_delta` out of
 # the money and own a later call at least `width` lower: the near leg's decay pays for the far leg, and a move
 # with the trend lifts the far leg more than the near. The loss is capped at the debit as long as it is closed
@@ -11,8 +10,8 @@
 # WHAT IT NEEDS. Daily bars (40) and quotes of six stocks, the chain within 10 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (14:00), once a stock a day, at most
 # `max_open`, the near leg `near_dte_min`-`near_dte_max` days out and the far leg `dte_min`-`dte_max`.
-# HOW IT EXITS. At `profit_target` of its debit, at `stop_loss` of the debit, when the price crosses the trend's
-# mean, and `exit_minutes_before_close` before the close `exit_dte` days before the near expiry. PARAMS:
+# HOW IT EXITS. At `profit_target` of its debit, at `stop_loss` of the debit (1.0: none), below the trend's mean if
+# `trend_exit`, and `exit_minutes_before_close` before the close `exit_dte` days before the near expiry. PARAMS:
 # `trend_days`, `slope_days`, `both_sides` (1 buys put diagonals in downtrends), `width`, `notional_usd`.
 
 import json, math, re
@@ -96,6 +95,9 @@ def _exits(ctx, ny, p, notes, signal_exit):
                else f"up {gain:.2f} a share, the target is {p['profit_target']:.0%} of the {room:.2f} it can make" if room > 0 and gain >= p["profit_target"] * room
                else f"down {-gain:.2f} a share, the stop is {p['stop_loss']:.0%} of {unit:.2f}" if unit > 0 and -gain >= p["stop_loss"] * unit
                else signal_exit(row, kind, occs, dte))
+        if dte <= 0 and mins >= 930:  # from 15:30 on its expiry day the House is closing it: nothing to send
+            notes.append(f"{parts[0][0]} {kind}: the House is closing it before its expiry")
+            continue
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue
@@ -138,11 +140,11 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-diagonal", "asse
          "parameter_rules": {"bounds": {"width": [0.5, 5], "dte_min": [3, 10], "dte_max": [3, 10], "near_dte_min": [1, 4], "near_dte_max": [1, 4],
                                         "entry_delta": [0.15, 0.5], "profit_target": [0.2, 2.0], "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240],
                                         "exit_dte": [0, 3], "max_open": [1, 3], "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05],
-                                        "trend_days": [10, 30], "slope_days": [1, 10], "both_sides": [0, 1]},
+                                        "trend_days": [10, 30], "slope_days": [1, 10], "both_sides": [0, 1], "trend_exit": [0, 1]},
                              "ordered": [["dte_min", "dte_max"], ["near_dte_min", "near_dte_max"]]}}
 PARAMS = {"structure": "diagonal", "width": 0.5, "dte_min": 5, "dte_max": 10, "near_dte_min": 1, "near_dte_max": 4, "entry_delta": 0.35,
-          "profit_target": 0.4, "stop_loss": 0.5, "exit_minutes_before_close": 120, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 75.0,
-          "slip": 0.01, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "both_sides": 0, "entry_start": 600, "entry_end": 840}
+          "profit_target": 0.5, "stop_loss": 1.0, "exit_minutes_before_close": 120, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 75.0,
+          "slip": 0.01, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "both_sides": 0, "trend_exit": 0, "entry_start": 600, "entry_end": 840}
 
 def _diagonal(ctx, under, bullish, kind, p, ny, budget):
     # Short the near leg nearest entry_delta; long the far leg at the strike at least `width` more favourable (the nearest such).
@@ -178,7 +180,8 @@ def decide(ctx):
 
     def against(row, held_kind, occs, dte):  # the trend turned against it
         found, bull = _trend(ctx, _parts(occs[0])[0], p), _parts(occs[0])[2] == "call"
-        return f"the price {found[0]:.2f} crossed the {int(p['trend_days'])}-day mean {found[1]:.2f} against it" if found and (found[0] < found[1] if bull else found[0] > found[1]) else None
+        return (f"the price {found[0]:.2f} crossed the {int(p['trend_days'])}-day mean {found[1]:.2f} against it"
+                if p["trend_exit"] >= 1 and found and (found[0] < found[1] if bull else found[0] > found[1]) else None)
 
     def signal(under):
         found = _trend(ctx, under, p)
