@@ -32,7 +32,21 @@ READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
 
 class ForwardBlocks:
     """A family's pooled forward record set by the test: active `eval.block` rows of a dead member (the House's
-    `family_forward` counts every agent ever born into the family, living or dead)."""
+    `family_forward` counts every agent ever born into the family, living or dead).
+
+    `reseat`: the hold's turn these tests pin. R5's mechanics (each demotion its own hold, a turn for good, the record
+    since a block's beginning, read as a pass finds it) are tested here on its first rule, a positive sum
+    ("gain_since_demotion"); the forward-first run's M5 (Sept 25, 2026: "bound_since_demotion", the constitution's since
+    then) is tested, on the same mechanics, in league/tests/test_capital_follows_proof.py. None: the constitution's."""
+
+    reseat: str | None = "gain_since_demotion"
+
+    def setUp(self):
+        if self.reseat is not None:
+            pinned = patch.dict(CONSTITUTION["allocator"]["family_probe"], {"reseat": self.reseat})
+            pinned.start()
+            self.addCleanup(pinned.stop)
+        super().setUp()
 
     def ghost(self, family, code):
         key = ("ghost", family)
@@ -65,8 +79,11 @@ class TheRule(unittest.TestCase):
         """The run's third money-digest change: the owner's live grant pins the new key."""
         import copy
 
-        self.assertEqual(CONSTITUTION["allocator"]["family_probe"], {"losing_min_blocks": 6, "reseat": "gain_since_demotion"})
-        self.assertEqual(families.probe_rule(), {"losing_min_blocks": 6, "reseat": "gain_since_demotion", "hold": True})
+        # The forward-first run's M5 (Sept 25, 2026): the hold turns on a lower bound (league/tests/test_capital_follows_proof.py).
+        self.assertEqual(CONSTITUTION["allocator"]["family_probe"],
+                         {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "reseat_confidence": "0.8"})
+        self.assertEqual(families.probe_rule(), {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "hold": True, "bound": True,
+                                                 "confidence": 0.8})
         for path in (("family_probe",), ("family_probe", "losing_min_blocks"), ("family_probe", "reseat")):
             changed = copy.deepcopy(CONSTITUTION)
             node = changed["allocator"]
@@ -816,9 +833,10 @@ class TheBoard(ForwardBlocks, KalshiHouse):
         clock = self.house.allocator.board()["families"]["kalshi"]["weather-favorites"]["swing_clock"]
         self.assertEqual((clock["real_n"], clock["real_days"], clock["real_per_day"]), (5, 1.0, 5.0))
         released = self.house.allocator._swing_released()
-        self.assertEqual(clock["needs"], {"real_settlements": 10, "look_at": 15, "confidence": 0.9, "proof": False, "audit": True,
-                                          "grant": not released})
-        self.assertEqual(clock["days_to_swing"], 2.0)
+        # The forward-first run's M1 (Sept 25, 2026): the first look at 10, on 5 distinct settlement dates (these 5 span 5).
+        self.assertEqual(clock["needs"], {"real_settlements": 5, "look_at": 10, "confidence": 0.9, "distinct_dates": 0, "proof": False,
+                                          "audit": True, "grant": not released})
+        self.assertEqual(clock["days_to_swing"], 1.0)
         # The clock rides the board, never a `family.record` row (it moves with the clock alone).
         self.assertFalse([e for e in self.house.ledger.iter(kinds="family.record") if "swing_clock" in e.payload])
 
@@ -830,7 +848,13 @@ class TheBoard(ForwardBlocks, KalshiHouse):
         self.assertIsNone(families.swing_clock(real_record(n=0, bound=-0.5), rule, first_real=None, now=1000.0)["days_to_swing"])
         record = real_record(n=5, bound=-0.5)
         record["members_real"] = 1
-        self.assertEqual(families.swing_clock(record, rule, first_real=0.0, now=3 * day)["days_to_swing"], 6.0)  # 10 at 5/3 a day
+        self.assertEqual(families.swing_clock(record, rule, first_real=0.0, now=3 * day)["days_to_swing"], 3.0)  # 5 at 5/3 a day
+        short = real_record(n=5, bound=-0.5, dates=2)  # M1: 3 more dates, a slate a day at most
+        short["members_real"] = 1
+        clock = families.swing_clock(short, rule, first_real=0.0, now=3 * day)
+        self.assertEqual((clock["needs"]["distinct_dates"], clock["days_to_swing"]), (3, 3.0))
+        clock = families.swing_clock(short, rule, first_real=0.0, now=1 * day)  # 5 a day: the dates, not the count, set it
+        self.assertEqual(clock["days_to_swing"], 3.0)
         early = families.swing_clock(record, rule, first_real=0.0, now=1800.0)
         self.assertEqual((early["real_per_day"], early["days_to_swing"]), (None, None))
         record["members_real"] = 0
@@ -885,12 +909,18 @@ class RulesText(unittest.TestCase):
         text = self.text()
         self.assertIn("NO PROBE ON A LOSING FAMILY. When your family's forward record -- the active blocks of every member ever born, "
                       "living or dead, summed -- is at or below zero after 6 active blocks, no probe is seated from it", text)
+        # M5 of the forward-first run (Sept 25, 2026): the turn is a lower bound, one observation an hour or a day.
         self.assertIn("A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until the "
-                      "family's record SINCE then is positive over 6 active blocks (each such demotion, until its own turn).", text)
+                      "family's record SINCE then, one observation per hour (or day) of its members' blocks, has its 80% lower "
+                      "bound above zero over 6 or more of them (each such demotion, until its own turn): a few lucky hours are not "
+                      "a turn.", text)
         self.assertIn("at Alpaca once it holds nothing that demotion would sell: its bids are cancelled, and nothing is sold for it", text)
         start, end = text.index("- YOUR FAMILY'S RECORD"), text.index("- REAL MONEY AT KALSHI")
         self.assertNotIn("paper", text[start:end].lower())  # the copy rule: practice, never paper
         c = copy.deepcopy(CONSTITUTION)
+        c["allocator"]["family_probe"]["reseat"] = "gain_since_demotion"  # R5's first rule
+        self.assertIn("A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until the "
+                      "family's record SINCE then is positive over 6 active blocks (each such demotion, until its own turn).", self.text(c))
         c["allocator"]["family_probe"]["reseat"] = "any"
         self.assertNotIn("holds its family", self.text(c))
         del c["allocator"]["family_probe"]

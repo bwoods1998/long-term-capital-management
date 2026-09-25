@@ -207,7 +207,10 @@ class MoneySet(unittest.TestCase):
 
     def test_an_unproven_familys_first_real_stake_is_a_probe(self):
         probe, bunt = self.r["probe_bunt_usd"], self.r["bunt_usd"]
-        self.assertEqual(probe, {"kalshi": "10", "alpaca": "25"})
+        # The forward-first run's M4 (Sept 25, 2026): a stock or ETF program's class key, $25-60.
+        self.assertEqual(probe, {"kalshi": "10", "alpaca": "25", "alpaca_equity": "50"})
+        self.assertTrue(D("25") <= D(probe["alpaca_equity"]) <= D("60"))
+        probe = {k: v for k, v in probe.items() if k != "alpaca_equity"}  # a venue's own probe, below
         self.assertTrue(D("5") <= D(probe["kalshi"]) <= D("15"))
         self.assertTrue(D("20") <= D(probe["alpaca"]) <= D("25"))
         # A proven family's bunt is unchanged and never smaller than a probe.
@@ -240,7 +243,9 @@ class MoneySet(unittest.TestCase):
     def test_the_book_side_keys(self):
         self.assertEqual(self.r["longshot_floor_real"], "0.30")
         self.assertTrue(D("0.15") <= D(self.r["longshot_floor_real"]) <= D("0.35"))
-        self.assertEqual(self.r["real_entry_liquidity"], "maker_unless_family_taker_positive")
+        # The forward-first run's M2 (Sept 25, 2026): a probe may take; the taker proof counts from 5.
+        self.assertEqual(self.r["real_entry_liquidity"], "probe_may_take")
+        self.assertTrue(5 <= self.r["taker_proof_min"] <= 10)
 
     def test_the_lines_that_may_only_rise_did_not_fall(self):
         self.assertGreaterEqual(self.r["bunt_at"], 1.01)
@@ -520,11 +525,14 @@ def decide(ctx):
 
 
 def canned(family, venue="kalshi", *, proven=False, n=4, bound=-0.01, taker_positive=False):
-    """A family record as `allocator.family_record` returns it, with the numbers a test sets."""
+    """A family record as `allocator.family_record` returns it, with the numbers a test sets. A proven one's real record
+    spans the settlement dates every swing look asks since the forward-first run's M1 (Sept 25, 2026), so a test of the
+    agent-level swing's mechanics tests those (the dates are league/tests/test_capital_follows_proof.py's)."""
     side = {"n": n, "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "positive": False, "members": 1}
     return {"family": family, "venue": venue, "through": 0, "members": 2, "members_counted": 1, "n": n,
             "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "proven": proven,
             "state": "proven" if proven else "unproven", "real_n": 0,
+            "real": {"n": 0, "dates": 5 if proven else 0, "entry": None},
             "maker": dict(side), "taker": {**side, "positive": taker_positive, "bound": 0.004 if taker_positive else bound},
             "rule": allocator._family_rule()}
 
@@ -790,8 +798,9 @@ class ProbesAndBunts(KalshiHouse):
     def test_the_book_reads_the_familys_taker_record(self):
         a = self.agent()
         alloc = self.house.allocator
+        # The forward-first run's M2 (Sept 25, 2026) adds the agent's band, whether it may take, and the proof's count.
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 4,
-                                                   "mean_log": 0.01, "bound": -0.01})
+                                                   "mean_log": 0.01, "bound": -0.01, "band": None, "may_take": False, "proof_min": 5})
         self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.002, taker_positive=True)
         alloc.rebalance()
         self.assertTrue(alloc.family_taker(a.id)["positive"])
@@ -807,7 +816,7 @@ class ProbesAndBunts(KalshiHouse):
         alloc.rebalance()
         self.assertEqual(alloc.tier(a), "bunt")
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                   "mean_log": 0.0, "bound": None})
+                                                   "mean_log": 0.0, "bound": None, "band": None, "may_take": False, "proof_min": 5})
 
     def test_the_audit_judges_a_probe_as_a_probe(self):
         a = self.agent()
@@ -849,7 +858,9 @@ class GrantSeats(unittest.TestCase):
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual((grant["stake_usd"], grant["max_agents"]), ("10", 101))  # floor($1,017.75 / $10)
-        self.assertIn("probes of $25 at alpaca, $10 at kalshi for an unproven family", grant["scaling"])
+        # The forward-first run's M4 (Sept 25, 2026): a stock program's probe is its own class key; the seat count still
+        # follows the smallest real stake, the $10 Kalshi probe.
+        self.assertIn("probes of $25 at alpaca, $50 at alpaca_equity, $10 at kalshi for an unproven family", grant["scaling"])
 
 
 class OneLossTrial(unittest.TestCase):
@@ -1067,8 +1078,10 @@ class TrialOnTheFloor(KalshiHouse):
             self.assertEqual(out.get("agent"), a.id)
             self.assertIn(out.get("skipped"), (None, "no data"))  # past its seat: the fake venue lists no market
             self.assertEqual(self.house.books["kalshi"].limits[a.id].max_position_usd, D("2.00"))  # a probe's
+            # An unreadable record is an unproven family's: its PROBE may take (M2, one position at its cap), no bunt could.
             self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                       "mean_log": 0.0, "bound": None})
+                                                       "mean_log": 0.0, "bound": None, "band": "probe", "may_take": True,
+                                                       "proof_min": 5})
             with self.evidence_of({a.id: dict(self.READY, **self.SWING_READY)}):
                 summary = alloc.rebalance()
                 alloc.rebalance()
@@ -1149,8 +1162,12 @@ class RulesText(unittest.TestCase):
             game = json.load(f)
         text = " ".join(rules_text(game).split())
         self.assertIn("REAL MONEY AT KALSHI. Entries:", text)
-        self.assertIn("an entry must be a POST-ONLY LIMIT", text)
-        self.assertIn("until your family's pooled TAKER record is proven positive", text)
+        # The forward-first run's M2 (Sept 25, 2026): a probe may take; a bunt's or a swing's entry is post-only until the proof.
+        self.assertIn("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap; a bunt's or a "
+                      "swing's entry must be a POST-ONLY LIMIT until your family's pooled TAKER record is proven positive (5 or more "
+                      "independent taker events with the lower bound above zero)", text)
+        old = {**CONSTITUTION, "allocator": {**CONSTITUTION["allocator"], "real_entry_liquidity": "maker_unless_family_taker_positive"}}
+        self.assertIn("an entry must be a POST-ONLY LIMIT", " ".join(rules_text(game, old).split()))
         self.assertIn("no entry under 30c", text)
         self.assertIn("holds at most 25% of your equity on the book", text)
         self.assertIn("Exits are never refused for meeting another agent's resting order", text)

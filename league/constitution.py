@@ -356,7 +356,16 @@ CONSTITUTION: dict[str, Any] = {
         # for a proven one. Alpaca's probe is $25, the bunt's own floor: Alpaca takes no crypto order
         # under $10 and the book refuses an order over half an account. An options probe is still
         # staked `option_bunt_usd` ($80): one contract cannot be cut smaller.
-        "probe_bunt_usd": {"kalshi": "10", "alpaca": "25"},
+        # `alpaca_equity` (row M4 of the forward-first run, Sept 25, 2026: $25-60 for stock and ETF programs; crypto
+        # stays at `alpaca`, options at `option_bunt_usd`): a STOCK or ETF program's real stake at Alpaca -- one whose
+        # desk trades equities (`niches.json` asset_class "equity"), or an open desk's program whose NEEDS name only
+        # stocks -- is this much, probe or bunt: a proven family's bunt is never staked less than an unproven family's
+        # probe of its class, as `option_bunt_usd` holds for an options bunt. The position cap stays half the stake
+        # ($25), under the gateway's $68.18 Alpaca order cap. Evidence (the plan's gap 3, Sept 25, 2026): no real stock
+        # has ever traded on this floor; equity practice fills are measured 0.21 bps adverse (A8, 136 fills), so the
+        # 2 bps haircut on a $25 fractional position cannot move W, and the proven megacaps-chip-demand-relay's
+        # capacity was measured at a $12.50 position that understates liquid names.
+        "probe_bunt_usd": {"kalshi": "10", "alpaca": "25", "alpaca_equity": "50"},
         # `family_proven` (row "allocator.family_proven": >= 10-20 independent settlements, practice at
         # 0.5, real at 1, a one-sided 80% lower bound above zero): a family is PROVEN when its pooled
         # forward record (`allocator.family_record`: every member ever born, living or dead; one
@@ -404,6 +413,26 @@ CONSTITUTION: dict[str, Any] = {
         # other family unproven. "account" restores Deploy A's unit exactly.
         "family_proven": {"min_independent_settlements": 10, "practice_weight": "0.5", "real_weight": "1",
                           "confidence": "0.8", "lopsided_gate": True, "unit": "at_risk", "reference_share": "0.01"},
+        # `proven_family_member` (row M3 of the forward-first run, Sept 25, 2026; C3): a living member of a PROVEN (or
+        # swinging) family on practice, with at least `min_practice_closed` closed practice trades of its own and W_paper
+        # at or above `min_w_paper`, is seated as a BUNT on its family's proof -- no E >= `bunt_at` needed -- best W_paper
+        # first, while the family holds fewer than `game.json` `economy.proven_family_members` (4) seats on real money,
+        # and ONLY when (the main session's decisions of 07:11Z, the run record's "The proven sports family, verified"):
+        #   - the family's POOLED proof spans at least `min_distinct_dates` distinct settlement dates (each event's own
+        #     date, `families.event_day`): the one proven sports family's 25 events lie on 3 slate dates inside one
+        #     five-day MLB under-regime, and the same mechanism lost 12-14% a dollar over Sept 4-24 on Kalshi's public
+        #     record; one observation per date gives an 80% bound of -0.0665. A count of events cannot tell a regime
+        #     from an edge, and more members on the same slate are exposure, not evidence;
+        #   - the member runs the PROVEN CODE (`same_code`): the program (`code_sha256`, PARAMS apart) that entered a
+        #     majority of the family's settled observations (`Allocator.proven_code`). meriwether-h2d625d-4 rewrote
+        #     itself at 02:37Z Sept 25 into a KXWNBAGAME favourite maker and kept the family's name;
+        #   - its E is at or above the bunt band's exit line (`bunt_at` x `hysteresis`): a member the exit sent back is
+        #     not re-seated on the family's proof until its own E is back over it.
+        # Measured on the T0 snapshot (04:23Z Sept 25): megacaps-chip-demand-relay is proven on practice (13 events, bound
+        # +0.0010), all 13 entered by mcentee-hddb4ae's current code, at W_paper 1.0036 -- on 2 trading dates (Sept 23
+        # and 24), so it waits for 3 more; sports-central-run-under's pooled proof spans 3 slate dates, and its members
+        # -3, -5 and -6 (the proven code) have no closed practice trade. Nobody is seated by it at T0.
+        "proven_family_member": {"min_practice_closed": 1, "min_w_paper": "1.0", "min_distinct_dates": 5, "same_code": True},
         # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a
         # PROVEN family (`family_proven`, the pooled record: the table's one proof) whose REAL record has
         # `min_real_settlements` or more independent settlements and whose honest lower bound on it is above
@@ -434,7 +463,28 @@ CONSTITUTION: dict[str, Any] = {
         # table's 80% bound computed honestly under repeated looks, as the loss-rate gate computed it honestly for
         # favourites at 04:15Z). Measured at T0: no family's real record qualifies (weather-favorites 5 real
         # events, all won: at 93c its loss-rate bound needs 23 clean real events at 80% and 32 at 90%, a look at 35).
-        "family_swing": {"min_real_settlements": 15, "start_multiple": 2, "doubling_every": 10,
+        #
+        # Row M1 of the forward-first run (Sept 25, 2026; C1): `min_real_settlements` 15 -> 10 (the table's 10-15;
+        # `entry_every` 5, `entry_confidence` 0.9 and the loss-rate gate at every look unchanged: the looks are 10, 15,
+        # 20, ...), so the one proven family meets its entry look in a day, not three; AND a stricter gate carried in the
+        # same row, `min_distinct_dates` 5: every swing look -- the entry (on the first that many real events), the hold
+        # and so every doubling of the ramp (the whole real record), and the agent-level swing (`swing_at`: its entry and its
+        # hold, `Allocator.swing_dates`) -- needs the family's real events to span at least 5 distinct
+        # settlement dates, each event's OWN date (`families.event_day`: the date code of its Kalshi event ticker, the
+        # slate the game was played on; the UTC date of its close where the ticker carries none, an Alpaca trade's).
+        # Not the UTC date of the settlement: a night slate settles across two UTC dates (the real Sept 24 MLB slate
+        # settled one event on Sept 24 UTC and five on Sept 25), and one regime must not count twice. Evidence (the main
+        # session's verification of 07:11Z, the run record's "The proven sports family, verified"): the one proven
+        # family's 25 events lie on 3 slate dates inside one five-day MLB under-regime, its real 11 on 2; rebuilt from
+        # Kalshi's public prints the same program lost 12-14% a dollar over Sept 4-24 (14 of 21 days negative); one
+        # observation per date is n 3, mean +0.1507, 80% bound -0.0665. A count of events cannot tell a regime from an
+        # edge. On the T0 snapshot the look at 10 reads the first 10 real events (Sept 23 and 24 slates: 2 dates) and
+        # does not pass (its 90% bound -0.1187 too); the looks at 15 and 20 need 5 slates among their first events. The
+        # auditor's packet for an entry look is prepared `game.json` `audit.pre_pack` (8) real settlements into the
+        # count before it (8 for the look at 10, 13 for 15), when the dates can still be met, so a passing look is not
+        # delayed by its audit; an approval prepared so licenses that look and later ones, and lapses at a look that
+        # does not pass (`Allocator._swing_approval`).
+        "family_swing": {"min_real_settlements": 10, "min_distinct_dates": 5, "start_multiple": 2, "doubling_every": 10,
                          "capacity_fill_ratio": "0.5", "capacity_min_markets": 5, "capacity_days": 7,
                          "entry_every": 5, "entry_confidence": "0.9"},
         # `swing_requires_proven_family` (the main session's decision on the review of #224, Sept 24, 2026,
@@ -474,7 +524,17 @@ CONSTITUTION: dict[str, Any] = {
         # real entry on an event book is post-only unless the agent's family's pooled TAKER record is
         # positive (`Allocator.family_taker`). Evidence: the taker mechanisms were the loss engine of
         # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
-        "real_entry_liquidity": "maker_unless_family_taker_positive",
+        # Row M2 of the forward-first run (Sept 25, 2026; C2): "probe_may_take" -- a PROBE, the smallest stake, may enter
+        # as a taker, one position of at most `position_share_event` of its stake ($2 of a $10 probe: the book's position
+        # cap, `allocator.limits_for`); a bunt and a swing stay post-only until the family's pooled taker record is
+        # positive. `taker_proof_min` (the same row, 5-10): that record is positive from this many independent taker
+        # events with its honest lower bound above zero (`families.family_record`'s taker side; the proof's 10 before).
+        # Evidence: in the Sept 25 01:42-02:12Z watch the over-under family's taker entry was refused on a taker record
+        # of +$30.75 on 3; 22+ real entries were refused by maker-until-proven in the Sept 24 session; the real fill rate
+        # was 10% (72 of 694 orders in 24 h). Pocket change may take the price; a taker record cannot be earned by an agent
+        # that may not take. "maker_unless_family_taker_positive" restores the rule for probes too.
+        "real_entry_liquidity": "probe_may_take",
+        "taker_proof_min": 5,
         # `real_book_dust_usd` (row "H4 allocator.real_book_dust_usd" of the forward-first run, Sept 25, 2026:
         # $0.25-1.00; `league/book.py` reads it, and treats a value outside `book.REAL_BOOK_DUST_BOUNDS` as no
         # key): a REAL book's cash shortfall under this, with every position agreeing, no order in doubt and no
@@ -515,7 +575,21 @@ CONSTITUTION: dict[str, Any] = {
         # crypto-15m-prior-window-reset (25, -0.7019), crypto-strikes-vol-shock-upside (26, -0.2168) and
         # prices-favorites (23, -0.2225). 6 is the House's breeding line (`game.json` `economy.losing_family_min_blocks`).
         # Absent, a probe is seated on any family's record, as before.
-        "family_probe": {"losing_min_blocks": 6, "reseat": "gain_since_demotion"},
+        # Row M5 of the forward-first run (Sept 25, 2026; C5): `reseat` "gain_since_demotion" -> "bound_since_demotion": a
+        # hold turns only when the family's record since the demotion has a one-sided `reseat_confidence` (80%) lower bound
+        # above zero over `losing_min_blocks` (6) or more active block periods -- one observation an hour (or a day for a
+        # daily program), the mean of the family's active blocks in it (`families.bound_gaining`), as the family's proof
+        # takes one observation an event: members of one program in one hour are one observation, not six. Evidence (the
+        # Sept 24 report's decision 1; the T0 snapshot): the zero-edge crypto-alts-reversion (its whole forward record
+        # +0.0570 over 423 active blocks at T0, an 80% bound of -0.00006 a block; pooled proof bound -0.018) flipped back
+        # in at 21:00:53Z Sept 24 as its forward record crossed zero (+0.0003 over 371 blocks; +0.0113 over 375 by 21:30Z)
+        # and the 18:47Z demotions' hold turned on six blocks since, +0.0101 -- two hours, five of the blocks written in
+        # the same second. Read a period at a time that hold waited until 01:02Z Sept 25 (6 periods, bound +0.0012); at T0
+        # six Alpaca probes ($150) sat on the family. The deploy folds every demotion on the ledger again under the new
+        # rule (`Allocator._fold_demotions`): at T0 crypto-15m-doge-flat-spot-no (14 blocks since, +0.0145),
+        # crypto-15m-lab-335592 (16, +0.0626) and crypto-15m-prior-window-reset (9, +0.0371) had turned on sums whose
+        # bounds are below zero and hold again. It changes no seated probe: a hold keeps new probes out.
+        "family_probe": {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "reseat_confidence": "0.8"},
         # `family_key` (row C8 of the forward-first run's money table, Sept 25, 2026; `league/families.py` reads it):
         # "mechanism": a family is keyed by its program's MECHANISM -- its code beyond its PARAMS literal
         # (`parameters.same_logic`'s line, `lab.mechanism_digest`) with the venue, series and symbols it trades. A child
@@ -575,4 +649,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '2fa6e95be2898072b20120f670ef6e684c61b6380f08bd0c2c041277db49536f'
+PINNED_DIGEST = '32db7547483829fdf4b2842e4ecbafc91806fa087d95c401815cf09ac72f62ac'

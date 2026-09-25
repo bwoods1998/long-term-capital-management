@@ -126,9 +126,12 @@ class Run:
 
     def transcript(self):
         # A row appended without an id gets a random one (`le-<uuid4>`), and the hash chain -- each row's digest, and
-        # the `ledger_digest` a reconciliation records -- follows the ids: those are the only parts not compared.
+        # the `ledger_digest` a reconciliation records -- follows the ids: those are the only parts not compared. And the
+        # forward-first run's M6 (C-money, Sept 25, 2026): an Alpaca order's and fill's `liquidity_role`, a field the
+        # frozen copy predates (`Book._liquidity_role`, tested in league/tests/test_capital_follows_proof.py); every other
+        # field of those rows is still compared.
         rows = [(e.seq, "le-*" if e.id.startswith("le-") else e.id, e.kind, e.agent, e.at, e.public,
-                 {k: v for k, v in e.payload.items() if k != "ledger_digest"}) for e in self.ledger.iter()]
+                 {k: v for k, v in e.payload.items() if k not in ("ledger_digest", "liquidity_role")}) for e in self.ledger.iter()]
         accounts = {name: (a.staked, a.cash, a.realized, a.fees, sorted(a.holdings)) for name, a in self.book.accounts.items()}
         return {"log": self.log, "rows": rows, "accounts": accounts, "frozen": self.book.frozen, "marks": dict(self.book.marks)}
 
