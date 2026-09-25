@@ -1001,8 +1001,9 @@ class House:
     def _structure_busy(book: Book, agent_id: str) -> bool:
         """Whether the agent is not flat in structures on `book` (`Book.structures_busy`: it holds one, an order
         of one is open, or a never-arrived buy of one still binds cash there). Cannot tell: not flat."""
-        if agent_id not in book.accounts:
-            return False
+        account = book.accounts.get(agent_id)
+        if account is None or (account.swept and not account.holdings):
+            return False  # never seated there, or left: `book_of` asks this often, so the orders are not scanned
         try:
             return bool(book.structures_busy(agent_id))
         except Exception:  # noqa: BLE001 - cannot tell: not flat, so it is not moved

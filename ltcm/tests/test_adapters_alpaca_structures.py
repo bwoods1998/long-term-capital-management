@@ -518,5 +518,85 @@ class SingleContractsUnchanged(unittest.TestCase):
             mleg_limit(spec("debit_vertical"), D("0.405"), True)
 
 
+
+class TheAccountsType(unittest.TestCase):
+    """Wave 2 (Sept 25, 2026): the account's type, read once from `GET /v2/account` (`multiplier`: 1 is Alpaca's 1x
+    limited margin account, the owner's "cash" account; 2 or 4 margin, https://docs.alpaca.markets/reference/getaccount-1),
+    decides whether a credit is added to cash and which structure types this account opens."""
+
+    ACCOUNT = {"cash": "98000", "equity": "98000", "buying_power": "392000", "currency": "USD"}
+
+    def client(self, venue=VENUE, **account):
+        from ltcm.adapters.alpaca import LIVE_BASE
+
+        base = PAPER_BASE if venue == VENUE else LIVE_BASE
+        transport = FakeTransport({("GET", base + "/v2/account"): {**self.ACCOUNT, **account}})
+        client = AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), transport=transport, venue=venue, base_url=base)
+        return client, transport
+
+    def test_the_practice_account_on_margin_offsets_and_opens_all_five(self):
+        client, _ = self.client(multiplier="4", options_trading_level="3")
+        self.assertEqual((client.account_type(), client.credit_in_cash()), ("margin", True))
+        self.assertTrue(client.practice)  # by its venue's name: the gateway's credentials carry no paper flag
+        self.assertEqual(client.structure_types, MLEG_TYPES)
+        self.assertEqual(client.drain_structure_answers()[0]["stage"], "account")
+
+    def test_read_once_and_only_from_a_row_that_states_it(self):
+        client, transport = self.client()
+        self.assertIsNone(client.account_type())  # no multiplier stated: unknown
+        self.assertIsNone(client.credit_in_cash())
+        self.assertEqual(client.structure_types, MLEG_TYPES)  # the practice account: the owner verified it margin, level 3
+        transport.route(("GET", PAPER_BASE + "/v2/account"), {**self.ACCOUNT, "multiplier": "1"})
+        client.balance()
+        self.assertEqual(client.account_type(), "cash")
+        transport.route(("GET", PAPER_BASE + "/v2/account"), {**self.ACCOUNT, "multiplier": "4"})
+        client.balance()
+        self.assertEqual(client.account_type(), "cash")  # once for the life of the process
+
+    def test_a_practice_account_that_reads_as_cash_opens_no_credit_type(self):
+        client, _ = self.client(multiplier="1")
+        client.balance()
+        self.assertEqual(client.structure_types, ("debit_vertical", "long_butterfly"))
+        self.assertIn("reads as a cash account", client.structure_refusal("iron_condor"))
+
+    def test_under_level_3_nothing_opens_and_nothing_is_sent(self):
+        client, transport = self.client(multiplier="4", options_trading_level="2")
+        client.balance()
+        self.assertEqual(client.structure_types, ())
+        with self.assertRaises(RejectedOrder) as refused:
+            client.submit(order_intent("debit_vertical", limit="0.40"))
+        self.assertIn("options level is 2", str(refused.exception))
+        self.assertEqual([c["method"] for c in transport.calls], ["GET"])
+
+    def test_the_real_account_opens_a_credit_type_only_if_the_owner_admitted_it(self):
+        from unittest import mock
+
+        from league.constitution import CONSTITUTION
+
+        client, transport = self.client("alpaca", multiplier="1", options_trading_level="3")
+        client.balance()
+        self.assertFalse(client.practice)
+        self.assertEqual(client.structure_types, ("debit_vertical", "long_butterfly"))
+        with self.assertRaises(RejectedOrder) as refused:
+            client.submit(order_intent("iron_condor"))
+        self.assertIn("wait for the owner's confirmation", str(refused.exception))
+        self.assertEqual([c["method"] for c in transport.calls], ["GET"])  # nothing was sent
+        for admitted, opens in (("iron_condor, credit_vertical", ("credit_vertical", "iron_condor")), (["iron_butterfly"], ("iron_butterfly",)),
+                                ("off", ()), (None, ()), (7, ())):
+            with self.subTest(admitted=admitted), mock.patch.dict(CONSTITUTION, {"allocator": {**CONSTITUTION["allocator"],
+                                                                                                "option_spread_real_types": admitted}}):
+                self.assertEqual(tuple(t for t in client.structure_types if t not in ("debit_vertical", "long_butterfly")), opens)
+
+    def test_a_close_is_never_refused_by_the_accounts_type(self):
+        client, transport = self.client("alpaca", multiplier="1", options_trading_level="2")
+        client.balance()
+        from ltcm.adapters.alpaca import LIVE_BASE
+
+        transport.route(("POST", LIVE_BASE + "/v2/orders"), condor_order(opening=False, limit="0.47"))
+        order = client.submit(order_intent("iron_condor", side="sell", limit="0.53"))
+        self.assertEqual(order.side, "sell")
+        self.assertEqual(transport.last["body"]["limit_price"], "0.47")
+
+
 if __name__ == "__main__":
     unittest.main()

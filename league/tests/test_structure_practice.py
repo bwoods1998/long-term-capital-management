@@ -438,6 +438,25 @@ class EndToEnd(PracticeCase):
         stages = [a["structure_answer"]["stage"] for a in self.alerts() if a.get("structure_answer")]
         self.assertEqual(sorted(stages), ["account", "activity", "fill", "submit"])
 
+    def test_each_type_keeps_its_own_first_answers_once(self):
+        """The owner asked whether the practice account takes each structure and how it lists per-leg fills: the first
+        order of EACH type on the account is recorded (its answer, its fill, its legs' FILL activities), once."""
+        condor = self.seated()
+        vertical = self.agent("debit_vertical", name="kv")
+        self.house.seat(vertical)
+        self.assertEqual([o.status for o in self.send(condor, [condor_row()])], ["filled"])
+        self.assertEqual([o.status for o in self.send(vertical, [vertical_row()])], ["filled"])
+        self.assertEqual([o.status for o in self.send(vertical, [vertical_row(action="close", limit=0.38)])], ["filled"])
+        self.at(self.clock() + 60)
+        self.assertEqual([o.status for o in self.send(vertical, [vertical_row()])], ["filled"])  # a second order of the type
+        self.practice.reconcile()
+        kept = sorted((a["structure_answer"]["structure"], a["structure_answer"]["stage"]) for a in self.alerts() if a.get("structure_answer"))
+        self.assertEqual(kept, [("debit_vertical", "activity"), ("debit_vertical", "fill"), ("debit_vertical", "submit"),
+                                ("iron_condor", "activity"), ("iron_condor", "fill"), ("iron_condor", "submit"), ("margin", "account")])
+        rows = {a["structure_answer"]["structure"]: a["structure_answer"]["detail"] for a in self.alerts()
+                if (a.get("structure_answer") or {}).get("stage") == "activity"}
+        self.assertEqual({len(r["rows"]) for r in rows.values()}, {2, 4})  # one FILL row a leg, each under its leg's id
+
     def rested(self, agent, row, held):
         orders = self.send(agent, [row])  # under the ask: it rests at the venue
         self.assertEqual([o.status for o in orders], ["resting"], orders[0].detail)
