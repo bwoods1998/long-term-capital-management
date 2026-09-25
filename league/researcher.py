@@ -658,15 +658,30 @@ class Researcher:
                                                   "wrote_code": False, "error": True, "charged": False}, agent=agent.id)
             return {"error": f"the consultation failed and you were not charged: {str(reply.get('answer') or '')[:300]}",
                     "cost_usd": "0", "charged": False, "note": "ask again later; the cooldown counts this attempt"}
+        # The surcharge is capped at what the balance can bear (review of #311, Sept 25, 2026): the
+        # admission check above asks for min_credits_usd x the multiple ($0.35 x 8 = $2.80), but the cost
+        # is only known now and a charge is never refused. At T0 prices (median $0.525, p90 $0.73, max
+        # $0.92), replaying the consults since Sept 23, 8 of the 83 that clear the 8x check would have
+        # taken the balance to zero or below -- a dead agent, whose real book the House winds down. The
+        # consult's own cost is always charged, as before the multiple; the multiple never takes the
+        # balance under the 1x consult price, nor under research's floor (`House.research_due`).
+        charged, capped = cost, False
+        if cost > 0 and multiple > 1:
+            floor = max(Decimal(str(rules.get("min_credits_usd", "1.00"))), Decimal(str(self.settings.get("min_credits_usd", "0.10"))) * 2)
+            surcharge = cost * (multiple - 1)
+            room = max(ZERO, self.economy.balance(agent.id) - cost - floor)
+            capped = surcharge > room
+            charged = cost + min(surcharge, room)
         if cost > 0:
-            self.economy.charge(agent.id, cost * multiple, "merton's time", detail={"session": session}, id=f"merton:{session}")
+            self.economy.charge(agent.id, charged, "merton's time", detail={"session": session}, id=f"merton:{session}")
             out.cost_usd += cost
         code = str(reply.get("code") or "")
         self.ledger.append("agent.research", {"tool": "merton", "session": session, "at_epoch": self.clock(),
                                               "question": question[:600], "answer": str(reply.get("answer") or "")[:2000],
                                               "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
                                               "wrote_code": bool(code.strip()),
-                                              **({"price_multiple": multiple, "charged_usd": format(cost * multiple, "f")} if multiple > 1 else {})},
+                                              **({"price_multiple": multiple, "charged_usd": format(charged, "f"),
+                                                  **({"surcharge_capped": True} if capped else {})} if multiple > 1 else {})},
                            agent=agent.id)
         if code.strip():
             try:

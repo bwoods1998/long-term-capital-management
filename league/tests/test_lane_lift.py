@@ -113,8 +113,8 @@ class ConsultVerdicts(LedgerCase):
 
 class ThePriceAnAgentPays(ResearchCase):
     class Merton:
-        def __init__(self, multiple=(1, 0), paused=False):
-            self.multiple, self.paused, self.seen = multiple, paused, []
+        def __init__(self, multiple=(1, 0), paused=False, cost="0.40"):
+            self.multiple, self.paused, self.seen, self.cost = multiple, paused, [], cost
 
         def consult_paused(self):
             return self.paused
@@ -124,7 +124,7 @@ class ThePriceAnAgentPays(ResearchCase):
 
         def consult(self, agent, question, evidence, *, contract, **settings):
             self.seen.append(agent.id)
-            return {"answer": "Rewrite the entry.", "code": "", "confidence": "medium", "cost_usd": "0.40"}
+            return {"answer": "Rewrite the entry.", "code": "", "confidence": "medium", "cost_usd": self.cost}
 
     def hire(self, merton, credits_min="1.00"):
         r = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead, or is it the parameters?"})]],
@@ -141,6 +141,26 @@ class ThePriceAnAgentPays(ResearchCase):
         row = [e.payload for e in self.ledger.iter(kinds="agent.research", agent=self.parent.id) if e.payload.get("tool") == "merton"][-1]
         self.assertEqual((row["cost_usd"], row["price_multiple"], row["charged_usd"]), ("0.40", 2, "0.80"), "the House's cost stays the cost")
         self.assertLess(self.economy.balance(self.parent.id), before - D("0.79"))
+
+    def test_the_multiple_never_takes_an_agent_to_its_death(self):
+        """Review of #311: the admission check asks for $0.35 x 8 = $2.80 but the charge was the consult's
+        cost x 8. At T0 prices (median $0.525, p90 $0.73, max $0.92) and real agents holding $1.04-$14.61,
+        one consult at 8x took a $5.00 balance to -$0.60, and `House.keep_population` kills a balance at
+        or below zero for 'credits' and winds its book down. The surcharge is capped at what the balance
+        can bear: the consult's own cost is always charged, and the multiple never takes the balance
+        under the 1x consult price."""
+        merton = self.Merton(multiple=(8, 3), cost="0.70")
+        before = self.hire(merton, credits_min="0.35")
+        self.assertEqual(merton.seen, [self.parent.id], "$5.00 clears the $2.80 floor")
+        charged = [D(e.payload["usd"]) for e in self.ledger.iter(kinds="credit.charge", agent=self.parent.id) if e.payload["what"] == "merton's time"]
+        self.assertEqual(len(charged), 1)
+        self.assertGreaterEqual(charged[0], D("0.70"), "the consult's own cost is always charged")
+        self.assertLess(charged[0], D("5.60"))
+        self.assertGreaterEqual(before - charged[0], D("0.35"), "the multiple never takes the balance under the 1x price")
+        self.assertTrue(self.economy.alive(self.parent.id))
+        row = [e.payload for e in self.ledger.iter(kinds="agent.research", agent=self.parent.id) if e.payload.get("tool") == "merton"][-1]
+        self.assertEqual((row["cost_usd"], row["price_multiple"], D(row["charged_usd"])), ("0.70", 8, charged[0]))
+        self.assertTrue(row["surcharge_capped"])
 
     def test_the_doubled_minimum_and_the_pause_refuse_before_anything_is_spent(self):
         merton = self.Merton(multiple=(8, 3))
