@@ -48,8 +48,10 @@ SOURCES = ("audit", "refusals", "ci", "triage", "consult", "operator", "syntheti
 #: Severity words to weights. A number in [0.1, 5] is taken as it is.
 SEVERITY = {"blocker": 3.0, "critical": 3.0, "high": 2.0, "major": 2.0, "medium": 1.0, "moderate": 1.0,
             "low": 0.5, "minor": 0.5, "note": 0.25}
-#: Working state a status row may carry that later rows need (`Job.carry`).
-CARRIED = ("_failure", "_files", "failed_pr", "_proposal", "digests")
+#: Working state a status row may carry that later rows need (`Job.carry`). `_contract_sections` (Sept 25, 2026, Y):
+#: the contract sections an engineer attempt asked for when the per-job ceiling left no room to ask again, which the
+#: next attempt is sent whole (`Engineer._with_sections`); without it here the next attempt asked again and again.
+CARRIED = ("_failure", "_files", "failed_pr", "_proposal", "digests", "_contract_sections")
 #: Evidence kept in memory per job: the first rows (the original evidence) and the latest.
 KEEP_FIRST, KEEP_LAST = 8, 24
 EXCERPT_CHARS = 1200

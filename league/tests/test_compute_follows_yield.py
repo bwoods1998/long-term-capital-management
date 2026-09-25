@@ -450,6 +450,21 @@ class EngineerLane(LedgerCase):
         self.assertGreater(worst_whole - worst_now, D("0.25"))
 
 
+    def test_sections_an_attempt_asked_for_are_sent_whole_to_the_next(self):
+        """The review of Deploy C (Sept 25, 2026): an attempt that asked for contract sections and had no room under the
+        per-job ceiling to ask again wrote them on its `repair.status` row (`_contract_sections`), but the worklist's fold
+        never carried them, so the next attempt was sent the index again and asked again."""
+        frontier, engineer = self.engineer([self.nothing()])
+        self.report("bug_report:kalshi-weather:1")
+        job = self.worklist.get("bug_report:kalshi-weather:1")
+        engineer._after_failure(job, 1, D("0.10"), "patch 1 asked for contract sections the-alpha-lab; no room", _contract_sections=["the-alpha-lab"])
+        job = self.worklist.get("bug_report:kalshi-weather:1")
+        self.assertEqual(job.carry.get("_contract_sections"), ["the-alpha-lab"])
+        self.clock.advance(3600)
+        engineer.step()
+        self.assertEqual(len(frontier.asked), 1)
+        self.assertIn("## The Alpha Lab", frontier.asked[0]["system"], "the section it asked for comes whole")
+
 class ContractBySection(unittest.TestCase):
     TEXT = ("# The contract\n\nIntro.\n\n## The file\n\n```python\n# not a heading\nNEEDS = {}\n```\n\n## What decide is given\n\nctx.\n\n"
             "### Options: the chain\n\nchain.\n\n#### Greeks\n\ngreeks.\n\n### Feeds: weather\n\nfeeds.\n\n## The open desks\n\nopen.\n\n"
