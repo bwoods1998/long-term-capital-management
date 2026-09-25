@@ -409,7 +409,9 @@ class StaleSeatsOnADeskThatKeepsHours(HouseCase):
         self.fill(agent, "2026-09-23T14:11:00Z", closed=True)  # one closed trade: short of the bunt line's record
         self.at("2026-09-24T07:00:00Z")  # 17.5 h: inside the desk's clock
         self.assertIsNone(self.stale_pick(desk.id))
-        self.at("2026-09-24T09:00:00Z")  # 19.5 h and Wednesday's session closed: stale, and flat
+        self.at("2026-09-24T09:00:00Z")  # 19.5 h from its seat, but 18.8 h from its first fill: F3's tenure keeps it
+        self.assertIsNone(self.stale_pick(desk.id), "F3: never before the desk's clock has run from its first fill (14:10Z)")
+        self.at("2026-09-24T09:30:00Z")  # 19.3 h from its first fill and Wednesday's session closed: stale, and flat
         self.assertEqual(self.stale_pick(desk.id), agent.id)
         self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "without a forward score: the trading protection")
         self.fill(agent, "2026-09-24T19:30:00Z")  # Thursday's basket, held overnight
