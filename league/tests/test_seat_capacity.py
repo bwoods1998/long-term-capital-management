@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from league.constitution import CONSTITUTION
 from league.house import SEAT_WAIT_WARN_SECONDS, House, Newcomer
 from league.ledger import now_iso
 from league.tests.test_house import BUYER
@@ -437,6 +438,12 @@ class NewCodeFamilies(EvidenceCase):
     them (28 living) named other markets or another style."""
 
     def setUp(self):
+        # The Sept 24 rule this class pins is the label rule: C8 (the forward-first run, Sept 25, 2026; the constitution's
+        # `allocator.family_key` "mechanism") keys every birth by its mechanism instead, which league/tests/test_family_key.py
+        # tests. Without the key a birth keeps its label, with this rule for a research fork: the rollback form.
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         super().setUp()
         self.house.close(wait=None)  # a House with a Kalshi practice book too, as test_seat_evidence's RetainedCandidates
         from league.economy import load_game

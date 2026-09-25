@@ -499,6 +499,14 @@ class Transfer(FoundryCase):
         return out
 
     def test_an_earning_family_goes_to_every_untried_desk_of_its_venue_and_never_where_it_has_lived(self):
+        # The family "lived" on sports and prices through members running OTHER programs under its label, which the label
+        # rule allows. Under C8 (Sept 25, 2026; `allocator.family_key` "mechanism") those members are families of their
+        # own, and a family's program on another desk trades other series: it is another mechanism there too.
+        from unittest.mock import patch
+
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         self.settings(transfer_share=1.0, fast_share=0, exploration_share=0)
         weather = self.member("mullins", "weather-favorites", WEATHER, specialty="kalshi-weather",
                               why="resting maker bids on daily weather favourites above 90 cents")
