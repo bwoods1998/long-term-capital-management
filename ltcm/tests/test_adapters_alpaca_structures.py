@@ -262,6 +262,13 @@ class TheOrderRead(unittest.TestCase):
         self.assertEqual(order.filled_quantity, D(1))
         self.assertIsNone(order.average_price)  # a book reads "not yet" and asks again
 
+    def test_a_close_read_without_its_legs_is_still_a_sale(self):
+        intent = order_intent(side="sell", limit="0.80")
+        client = broker({})[0]
+        client.parse_order(condor_order(opening=False, limit="0.20"), intent=intent)  # sent: the adapter knows it
+        order, _ = self.read(condor_order(opening=False, limit="0.20", legs=False, status="accepted"), client=client)
+        self.assertEqual((order.side, order.instrument, order.limit_price), ("sell", intent.instrument, D("0.80")))
+
     def test_an_order_that_ended_with_uneven_legs_is_an_error(self):
         order, client = self.read(condor_order(status="canceled", qty="2", filled=("2", "2", "1", "1"),
                                                prices=self.PRICES), intent=order_intent(quantity="2"))

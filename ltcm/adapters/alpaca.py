@@ -973,8 +973,14 @@ class AlpacaBroker:
             return order
         if instrument is None:
             instrument = s.instrument(spec, self.venue)
-        opening = (intent.side == "buy") if intent is not None else (
-            any(str(leg.get("position_intent") or "").endswith("_to_open") for leg in legs) if legs else str(row.get("side") or "buy") == "buy")
+        if intent is not None:
+            opening = intent.side == "buy"
+        elif legs:
+            opening = any(str(leg.get("position_intent") or "").endswith("_to_open") for leg in legs)
+        else:  # an answer without its legs: what this adapter sent under this id, else the parent's own side
+            with self._structure_lock:
+                known = self._parent_side.get(str(row.get("id") or ""))
+            opening = (known or str(row.get("side") or "buy")) == "buy"
         side = "buy" if opening else "sell"
         self._remember(row, legs, instrument, side)
         k = spec.collateral
