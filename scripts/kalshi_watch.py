@@ -235,6 +235,31 @@ for agent, at, kind, p in rows(('tool.request', 'tool.fulfilled', 'tool.blocked'
     reqs.append([at[5:19], kind.split('.')[1], agent, str(p.get('name') or p.get('tool') or p.get('request') or '')[:60],
                  str(p.get('description') or p.get('reason') or p.get('outcome') or p.get('why') or '')[:160]])
 out['requests'] = reqs
+# The scoreboard's inputs the sections above do not carry (docs/goals/LTCM_KALSHI_SCALE.md, "The scoreboard"):
+# the feed hosts recording, research's web reads, the swing clocks, and every request's resolution in the window.
+feeds_health = health.get('feeds') or {}
+# The first four feeds (league/feeds.py SOURCES) carry no `host` in health: their hosts, as LEAGUE_HOSTS lists them.
+BASE_HOSTS = {'sports': ('site.api.espn.com',), 'perps': ('www.okx.com', 'api.hyperliquid.xyz', 'futures.kraken.com', 'www.deribit.com'),
+              'vol': ('www.deribit.com',), 'funding': ('www.okx.com',)}
+hosts = {}
+for name, row in feeds_health.items():
+    if not isinstance(row, dict):
+        continue
+    for host in ([row['host']] if row.get('host') else BASE_HOSTS.get(name, ())):
+        hosts.setdefault(str(host), 0)
+        hosts[str(host)] += int(row.get('recording') or 0)
+out['feed_hosts'] = {'recording': sorted(h for h, n in hosts.items() if n), 'silent': sorted(h for h, n in hosts.items() if not n)}
+fetch_kinds = [k for (k,) in db.execute("select distinct kind from ledger where kind like '%web_fetch%' or kind like '%webfetch%'")]
+out['web_fetch'] = {kind: db.execute("select count(*), count(distinct agent) from ledger where kind=? and at >= ?" + (" and at < ?" if until else ""),
+                                     (kind, since, until) if until else (kind, since)).fetchone() for kind in fetch_kinds}
+ids = {r[0] for r in db.execute("select id from ledger where kind='tool.request' and at >= ?" + (" and at < ?" if until else ""),
+                                (since, until) if until else (since,))}
+answered = {}
+for rid, kind in db.execute("select json_extract(payload, '$.request'), kind from ledger where kind in ('tool.fulfilled', 'tool.blocked') order by seq"):
+    if rid in ids:
+        answered[rid] = kind.split('.')[1]  # the latest resolution stands, as `Commons._requests` folds them
+out['requests_answered'] = {'asked': len(ids), 'fulfilled': sum(1 for v in answered.values() if v == 'fulfilled'),
+                            'blocked': sum(1 for v in answered.values() if v == 'blocked'), 'open': len(ids) - len(answered)}
 print(json.dumps(out, default=str))
 '''
 
@@ -285,7 +310,12 @@ def render(box: dict) -> str:
     lines.append("## real Kalshi agents")
     lines += ["  " + " ".join(str(x) for x in row) for row in box["real_agents"]]
     lines.append(f"## shards {json.dumps(box.get('shards'))}")
-    lines.append(f"## data requests {len(box['requests']) or '-'}")
+    fh = box.get("feed_hosts") or {}
+    lines.append(f"## feed hosts recording {len(fh.get('recording') or [])}: {' '.join(fh.get('recording') or [])}")
+    if fh.get("silent"):
+        lines.append(f"  silent: {' '.join(fh['silent'])}")
+    lines.append(f"## research web reads {json.dumps(box.get('web_fetch') or {})}")
+    lines.append(f"## data requests {len(box['requests']) or '-'} (answered in the window: {json.dumps(box.get('requests_answered'))})")
     lines += ["  " + " ".join(str(x) for x in row) for row in box["requests"]]
     return "\n".join(lines)
 

@@ -128,5 +128,37 @@ class TheBoxSnippet(unittest.TestCase):
         self.assertEqual(out["shards"]["balances"]["3"], "76.98")
 
 
+    def test_the_scoreboard_inputs_hosts_web_reads_and_requests_answered(self):
+        from scripts.floor_watch import normalize_since
+
+        since = normalize_since(self.ledger.append("ops.started", {}).at)
+        self.clock.advance(30)
+        asked = self.ledger.append("tool.request", {"name": "mlb_point_in_time_lineup_pitcher_feed", "description": "lineups " * 5},
+                                   agent="hufschmid-39")
+        refused = self.ledger.append("tool.request", {"name": "mlb_player_prop_reference_history", "description": "props " * 5},
+                                     agent="hufschmid-38")
+        self.ledger.append("tool.request", {"name": "something_else", "description": "other " * 5}, agent="rosenfeld-1")
+        self.ledger.append("tool.fulfilled", {"request": asked.id, "outcome": "Shipped", "change": "league/feeds.py"}, agent="house")
+        self.ledger.append("tool.blocked", {"request": refused.id, "outcome": "needs a paid key", "status": "blocked"}, agent="house")
+        # The web-read row's kind is I1's to register in league/ledger.py; the watch counts any kind naming web_fetch,
+        # so the row is written here as the ledger stores it, without the kind check.
+        import sqlite3
+
+        raw = sqlite3.connect(self.root / "ledger.sqlite")
+        raw.execute("insert into ledger (id, kind, agent, at, public, payload, previous_hash, digest) values (?, ?, ?, ?, 0, ?, ?, ?)",
+                    ("w1", "tool.web_fetch", "hufschmid-39", "2999-01-01T00:00:00.000Z", json.dumps({"url": "https://example.org/"}), "x", "d-w1"))
+        raw.commit()
+        raw.close()
+        health = {"at": "t", "feeds": {"odds": {"host": "sports.core.api.espn.com", "recording": 5},
+                                       "consensus": {"host": "api.the-odds-api.com", "recording": 0},
+                                       "backfill_next_due": None}}
+        out = self.run_snippet(since, health=health)
+        self.assertEqual(out["feed_hosts"], {"recording": ["sports.core.api.espn.com"], "silent": ["api.the-odds-api.com"]})
+        self.assertEqual(out["web_fetch"], {"tool.web_fetch": [1, 1]})
+        self.assertEqual(out["requests_answered"], {"asked": 3, "fulfilled": 1, "blocked": 1, "open": 1})
+        text = kalshi_watch.render(out)
+        self.assertIn("## feed hosts recording 1", text)
+        self.assertIn("## research web reads", text)
+
 if __name__ == "__main__":
     unittest.main()
