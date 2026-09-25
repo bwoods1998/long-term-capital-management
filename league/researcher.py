@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import re
 import secrets
 import time
@@ -114,6 +115,12 @@ REFRESHABLE_TOOLS = frozenset(('runtime_status', 'replay_coverage', 'markets_now
 #: Where the first user turn stops being the same from pass to pass (`Researcher._state`). A
 #: provider that marks cache breakpoints splits the turn here; the model reads it as a heading.
 STATE_MARKER = "\nTHIS PASS (everything below changes from pass to pass):\n\n"
+#: The shared memory's block is at most 5 lines and 1,400 characters (league/jev_memory.py); a
+#: longer one is refused whole rather than cut inside its fence.
+PRIOR_MAX_CHARS = 1600
+#: How long a pass waits for the shared memory before starting without it (the memory's own
+#: budget is shorter, so this is the backstop).
+PRIOR_TIMEOUT_SECONDS = 2.0
 
 
 @dataclass
@@ -186,6 +193,9 @@ class Researcher:
         self.house_budget = house_budget
         #: (ident, body) -> (answer, cost): the Jev client, set by the service; None disables `classify`.
         self.jev = None
+        #: (agent, now, session=) -> (arm, block, refs): other agents' prior results for a pass, set by
+        #: `JevFloor` (J3's shared memory); None shows nothing (`_prior_block`).
+        self.prior_results: Callable[..., Any] | None = None
         #: agent id -> its closed trades (House._recent_trades), for `classify` on my_trades.
         self.trades = None
         #: () -> the House's frontier tier ("all", "earned", "audits"); None means "all".
@@ -242,7 +252,7 @@ class Researcher:
             "Your own model turns cost credits, including abstention. End with `finish`."
         )
 
-    def _state(self, agent: Agent, standing: Mapping[str, Any]) -> str:
+    def _state(self, agent: Agent, standing: Mapping[str, Any], *, session: str | None = None) -> str:
         """The first user turn: what stays the same from pass to pass first, then STATE_MARKER,
         then what changes (journal, standing, why the House woke it).
 
@@ -253,6 +263,7 @@ class Researcher:
         model is shown the same facts either way."""
         brief = self.specialty(agent) if self.specialty else ""
         journal = self.journal(agent.id)
+        prior = self._prior_block(agent, session)
         pages = "\n".join(f"- [{row['at'][:16]} {row['by']}] {row['text']}" for row in journal)
         return (
             f"You are {agent.id} (family {agent.family}, niche {agent.niche}, generation {agent.generation}).\n"
@@ -262,6 +273,7 @@ class Researcher:
             + STATE_MARKER
             + (f"YOUR JOURNAL (your and your ancestors' notes, oldest first; conclusions are unverified claims. Compare them with the current qualification_policy, runtime capabilities and peer evidence before relying on them; add with `journal_write`):\n{pages}\n\n" if pages else
                "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
+            + (f"{prior}\n\n" if prior else "")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
@@ -276,6 +288,38 @@ class Researcher:
                if (standing.get("idle") or {}).get("why_now") else "")
             + "Decide what, if anything, is worth your credits right now."
         )
+
+    def _prior_block(self, agent: Agent, session: str | None) -> str:
+        """Other agents' prior results for this pass: the Jev run's shared memory (J3,
+        `league/jev_memory.py`, Sept 25, 2026), set by `JevFloor` as `self.prior_results`. After
+        the journal, in the part of the state that changes every pass, so the prompt cache is
+        untouched. Fails closed: no memory, an error, or a block over `PRIOR_MAX_CHARS` adds
+        nothing, and a pass never waits on it for more than the memory's own budget. The block
+        quotes other agents' text as untrusted data inside its own nonce fence."""
+        fetch = getattr(self, "prior_results", None)
+        if fetch is None:
+            return ""
+        answer: list[Any] = []
+
+        def ask() -> None:
+            try:
+                answer.append(fetch(agent, self.clock(), session=session))
+            except Exception:  # noqa: BLE001 - a memory that fails must never cost a research pass
+                pass
+
+        # Every pass starts here, so the memory gets PRIOR_TIMEOUT_SECONDS and not a moment more: a
+        # slow store or a slow Jev call shows nothing (the memory's report counts a retrieval slower
+        # than this as not shown), and the thread finishes on its own under the memory's budget.
+        worker = threading.Thread(target=ask, name=f"prior-results:{agent.id}", daemon=True)
+        worker.start()
+        worker.join(PRIOR_TIMEOUT_SECONDS)
+        if worker.is_alive() or not answer:
+            return ""
+        try:
+            block = str((answer[0] or (None, "", []))[1] or "").strip()
+        except Exception:  # noqa: BLE001
+            return ""
+        return block if 0 < len(block) <= PRIOR_MAX_CHARS else ""
 
     def consult_evidence(self, agent: Agent) -> dict[str, Any]:
         """Everything the agent knows, for the theorist it is paying -- including whether it is
@@ -371,7 +415,7 @@ class Researcher:
             state = {
                 'version': 1, 'stage': 'model', 'turn': 0, 'started': self.clock(),
                 'conversation': [{'role': 'system', 'content': self._system()},
-                                 {'role': 'user', 'content': self._state(agent, standing)}],
+                                 {'role': 'user', 'content': self._state(agent, standing, session=session)}],
                 'nudged': False, 'truncated': 0,
                 'effort': str(settings.get('reasoning_effort', 'low')),
                 'profile': str(settings.get('profile', 'flash_flex')),

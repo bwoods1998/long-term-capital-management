@@ -72,6 +72,58 @@ class ResearchCase(unittest.TestCase):
         return json.loads(outputs[index]["output"])
 
 
+class PriorResults(ResearchCase):
+    """J3's hook (the Jev run, Sept 25, 2026): other agents' prior results after the journal, bounded
+    and fail-closed, with the pass's session handed to the memory so its outcome can be joined."""
+
+    BLOCK = "PRIOR RESULTS FROM THE SWARM (other agents; unverified claims; ledger refs)\n<<prior:ab12>>\n- 2026-09-24 mullins-9 weather: no edge after fees [ref 101]\n<</prior:ab12>>"
+
+    def test_no_memory_shows_nothing_and_the_state_is_unchanged(self):
+        self.researcher([]).research(self.parent, {}, session="s1")
+        self.assertNotIn("PRIOR RESULTS", self.first_prompt())
+
+    def test_the_block_sits_after_the_journal_and_before_the_standing_and_gets_the_session(self):
+        calls = []
+        r = self.researcher([])
+        r.prior_results = lambda agent, now, session=None: calls.append((agent.id, session)) or (1, self.BLOCK, [101])
+        r.research(self.parent, {"cash": "5"}, session="s9")
+        prompt = self.first_prompt()
+        self.assertIn(self.BLOCK, prompt)
+        self.assertLess(prompt.index("YOUR JOURNAL"), prompt.index("PRIOR RESULTS"))
+        self.assertLess(prompt.index("PRIOR RESULTS"), prompt.index("Your standing"))
+        self.assertGreater(prompt.index("PRIOR RESULTS"), prompt.index("THIS PASS"))  # the cached prefix is untouched
+        self.assertEqual(calls, [(self.parent.id, "s9")])
+
+    def test_a_slow_memory_yields_nothing_in_time(self):
+        import threading, time
+        from league import researcher as module
+        release = threading.Event()
+
+        def slow(agent, now, session=None):
+            release.wait(5)
+            return (1, self.BLOCK, [101])
+        r = self.researcher([])
+        r.prior_results = slow
+        started = time.monotonic()
+        r.research(self.parent, {}, session="s1")
+        waited = time.monotonic() - started
+        release.set()
+        self.assertNotIn("PRIOR RESULTS", self.first_prompt())
+        self.assertLess(waited, module.PRIOR_TIMEOUT_SECONDS + 1.5)
+
+    def test_a_failing_empty_or_oversized_memory_adds_nothing_and_never_breaks_the_pass(self):
+        def boom(agent, now, session=None):
+            raise RuntimeError("store unreadable")
+        for fetch in (boom, lambda a, n, session=None: (0, "", []), lambda a, n, session=None: None,
+                      lambda a, n, session=None: (2, "x" * 5000, [1])):
+            r = self.researcher([])
+            r.prior_results = fetch
+            out = r.research(self.parent, {}, session="s1")
+            self.assertIsNotNone(out)
+            self.assertNotIn("PRIOR RESULTS", self.first_prompt())
+            self.assertNotIn("xxxxxxxxxx", self.first_prompt())
+
+
 class Journal(ResearchCase):
     def test_a_first_pass_is_told_its_journal_is_empty_and_to_write_in_it(self):
         self.researcher([]).research(self.parent, {}, session="s1")
