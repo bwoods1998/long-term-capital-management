@@ -67,6 +67,8 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
 | H3 | The release train | built, PR #296 (CI green 05:31Z); owner deploy (Deploy A) |
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
+| H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
+| Z | The scoreboard | built, PR #298 (CI green); merges with Deploy A |
 
 ## Findings before Wave 0 reports
 
@@ -193,6 +195,21 @@ cash" is the second refusal (83 in the day) and names no constitution key; the e
   resumed and 25 were lost with no alert (23 `campaign_post_unconfirmed`, 2 `tool outcome unconfirmed: replay`),
   each closed as a finished pass; they are now named in a warning and the agent may research again in 15 minutes.
   `health.json` gains `restarts_24h`, `restarts_24h_in_session`, `last_start`, `restart_research`.
+
+- **H4 (#302; money digest `535a7f15` -> `d7d910fe`, constitution `38a57fe9` -> `d0aa4c2a`).** The Sept 25
+  02:38:59-04:11:50Z real Alpaca freeze had no fee or fill behind it: the book added each resting crypto bid back to
+  the venue's cash unrounded while Alpaca holds each bid rounded half-up to the cent ($317.95 cash + $147.68 of
+  rounded holds = $465.63 at 04:37Z); the fractions were booked as dust at each reading until four of the eight bids
+  resting at 02:26Z were cancelled or replaced and -0.01075 stood. With the rounding the cash never moves across 339
+  fill-free pairs of readings (unrounded it moved 66 times). The 04:11:50Z un-freeze was a second bug: the rebuild
+  after a restart counted every fill the book ever had as "since the last check", so the first reading allowed $0.12
+  of slack ($1.39 on the real Kalshi book) and booked the 0.0108 as dust 1.2 s after start; the same cleared the
+  Sept 24 option freeze (-0.0324) at 18:45:22Z. Fixes: holds at the cent (the first clean reading after the deploy
+  takes back the old rounding once), restarts count fills since the last clean reading, real option fills pay the
+  OCC $0.03 a contract at the fill, and the key `allocator.real_book_dust_usd` 0.50 (a shortfall under it, positions
+  agreeing, nothing in doubt, inside the room recent option and stock fills leave for regulators' fees, is dust on the
+  House row with an error alert; anything else freezes). Open, from the builder: the Sept 24 ORF fee ($0.03) is still
+  unbooked on the real book; a dividend or interest credit would freeze a real book as an unexplained surplus.
 
 ## Progress notes
 
