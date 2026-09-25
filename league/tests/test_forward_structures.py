@@ -29,8 +29,11 @@ def row(occ: str, bid: float, ask: float, as_of: str, size: int | None = 100) ->
             "bid": bid, "ask": ask, "bid_size": size, "ask_size": size, "as_of": as_of, "last": None, "last_t": None, "mbar": None, "volume": 10}
 
 
-def line(at: str, rows: list[dict], spot: tuple[float, float] = (700.4, 700.42)) -> str:
-    return json.dumps({"v": 2, "at": at, "feed": "opra", "spot": {"SPY": {"bid": spot[0], "ask": spot[1]}}, "rows": rows, "errors": []})
+def line(at: str, rows: list[dict], spot: tuple[float, float] = (700.4, 700.42), others: tuple[str, ...] = ("QQQ", "IWM")) -> str:
+    """A recorder line: SPY's touch and a touch of each of `others` (condor-vrp trades SPY, QQQ and IWM: a floor
+    starts only once each of its founders' symbols is quoted)."""
+    touches = {"SPY": {"bid": spot[0], "ask": spot[1]}, **{symbol: {"bid": 100.0, "ask": 100.02} for symbol in others}}
+    return json.dumps({"v": 2, "at": at, "feed": "opra", "spot": touches, "rows": rows, "errors": []})
 
 
 class Harness(unittest.TestCase):
@@ -117,6 +120,12 @@ class Harness(unittest.TestCase):
         self.assertEqual(founder["opens"], 1)
         self.assertEqual(founder["fills"][0]["held_price"], 0.57)
         self.assertEqual(founder["fills"][0]["fee_usd"], 0.10)  # $0.05 a contract a leg
+        # scoreboard metric 4: the structure's mid on the fill's snapshot is (1.02 + 1.07) / 2 - (0.50 + 0.53) / 2 = 0.53,
+        # so the open paid 0.04 a share over it: $4.00 on a $57.00 premium
+        self.assertEqual((founder["fills"][0]["mid"], founder["fills"][0]["spread_paid_usd"]), (0.53, 4.0))
+        self.assertEqual(founder["fills"][0]["spread_share_of_premium"], 0.0702)
+        self.assertEqual(result["desk"]["metric_4_spread_share_of_premium_median"], 0.0702)
+        self.assertEqual(log[0]["spread"]["premium_usd"], 57.0)
 
     def test_a_close_far_under_the_bid_is_refused_before_v4_and_re_priced_to_the_band_by_the_house_on_main(self):
         def probe(ctx):
@@ -164,6 +173,188 @@ class Harness(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0].startswith("2026-09-25T15:01:00"))  # its start: no quote in it is later
         self.assertEqual(result["checks"]["sized_from"], "2026-09-25T15:01:00.000000Z")
+        self.assertEqual(result["checks"]["started_from"], "2026-09-25T15:01:00.000000Z")
+
+    def test_a_floor_starts_only_once_every_founder_symbol_is_quoted_and_start_after_skips_that_many(self):
+        # Reviewed Sept 25: the recorder's second line carried the ETFs only, and a floor started on it showed the stock
+        # founders a price of 0. condor-vrp trades SPY, QQQ and IWM: a line without IWM's touch starts nothing.
+        calls = []
+
+        def probe(ctx):
+            calls.append((ctx["now"][:19], sorted(ctx["quotes"])))
+            return {"intents": [], "cancels": [], "memory": {}}
+
+        self.write([
+            line("2026-09-25T15:00:00Z", [row(LOW, 1.00, 1.05, "2026-09-25T14:59:59Z")], others=("QQQ",)),
+            line("2026-09-25T15:01:00Z", [row(LOW, 1.00, 1.05, "2026-09-25T15:00:59Z")]),
+            line("2026-09-25T15:02:00Z", [row(LOW, 1.00, 1.05, "2026-09-25T15:01:59Z")]),
+        ])
+        result = self.run_probe(probe)
+        self.assertEqual(calls, [("2026-09-25T15:01:00", ["IWM", "QQQ", "SPY"])])
+        self.assertEqual((result["checks"]["sized_from"], result["checks"]["started_from"]),
+                         ("2026-09-25T15:00:00.000000Z", "2026-09-25T15:01:00.000000Z"))
+        calls.clear()
+        later = fwd.run(self.path, house_bars=None, local_store=None, founders=["options_condor_vrp"], work=self.dir.name,
+                        decide_override={"options_condor_vrp": probe}, start_after=1)
+        self.assertEqual([at for at, _ in calls], ["2026-09-25T15:02:00"])  # the next tick phase
+        self.assertEqual(later["checks"]["started_from"], "2026-09-25T15:02:00.000000Z")
+
+    def test_founders_on_one_floor_share_the_houses_chain_cache_and_floors_share_nothing(self):
+        # Reviewed Sept 25: the House caches a structure chain two minutes for every structure agent reading the same
+        # underlying, so a founder's wake can see a chain another founder's wake read earlier. On one floor, condor-vrp
+        # (every 5 minutes) reads SPY at 15:05 and putspread-dip, held back to 15:06, is served that 15:05 chain; on a
+        # floor of its own, putspread-dip reads the 15:06 chain.
+        seen: dict[str, list] = {"together": [], "alone": []}
+
+        def watcher(where):
+            def probe(ctx):
+                chain = {r["occ"]: r for r in ctx.get("chain") or []}
+                seen[where].append((ctx["now"][11:19], chain.get(LOW, {}).get("bid")))
+                return {"intents": [], "cancels": [], "memory": {}}
+            return probe
+
+        quiet = lambda ctx: {"intents": [], "cancels": [], "memory": {}}  # noqa: E731
+        self.write([line(f"2026-09-25T15:{m:02d}:00Z", [row(LOW, 1.00 + m / 100, 1.05 + m / 100, f"2026-09-25T15:{m:02d}:00Z")])
+                    for m in range(0, 8)])
+        held_back = {"options-putspread-dip": fwd.parse_ts("2026-09-25T15:06:00Z")}
+        results = fwd.run_many(self.path, [
+            fwd.RunConfig(founders=["options_condor_vrp", "options_putspread_dip"], starts=held_back,
+                          decide_override={"options_condor_vrp": quiet, "options_putspread_dip": watcher("together")}),
+            fwd.RunConfig(founders=["options_putspread_dip"], starts=held_back, decide_override={"options_putspread_dip": watcher("alone")}),
+        ], house_bars=None, local_store=None, work=self.dir.name)
+        self.assertEqual(seen["together"], [("15:06:00", 1.05)])  # the chain condor-vrp's 15:05 wake read
+        self.assertEqual(seen["alone"], [("15:06:00", 1.06)])
+        self.assertEqual([r["run"]["founders"] for r in results], [2, 1])
+
+
+class SameDayGreeks(unittest.TestCase):
+    """Reviewed Sept 25: which founders the chain's missing greeks on today's expiries bear on. The first reading named
+    orb, gap-drift, reversal, skew, trend-vertical and diagonal as never able to trade a 0-DTE structure live, and the
+    other six as computing their own deltas. Five of the six can never pick a same-day expiry at all, and five of the
+    other six take the chain's delta whenever it has one."""
+
+    def test_only_orb_is_blocked_and_five_founders_would_change_with_greeks_on_todays_expiries(self):
+        exposure = fwd.zero_dte_exposure()
+        verdicts = {founder: row["verdict"] for founder, row in exposure.items()}
+        self.assertEqual(verdicts, {
+            "options-orb": "blocked",
+            "options-condor-vrp": "changed_by_greeks", "options-butterfly-pin": "changed_by_greeks",
+            "options-ironfly-quiet": "changed_by_greeks", "options-strangle-cheap": "changed_by_greeks",
+            "options-putspread-dip": "changed_by_greeks",
+            "options-calendar-term": "unaffected", "options-gap-drift": "unaffected", "options-reversal": "unaffected",
+            "options-skew": "unaffected", "options-trend-vertical": "unaffected", "options-diagonal": "unaffected"})
+        # the premise from each founder's NEEDS: the lowest its nearest expiry may be
+        self.assertEqual(exposure["options-orb"]["bounds"], [0, 4])
+        for founder in ("options-gap-drift", "options-reversal", "options-skew", "options-trend-vertical", "options-calendar-term"):
+            self.assertEqual(exposure[founder]["bounds"][0], 1, founder)
+        self.assertEqual((exposure["options-diagonal"]["expiry_parameter"], exposure["options-diagonal"]["bounds"]), ("near_dte_min", [1, 4]))
+
+    def test_a_chain_delta_first_founder_takes_the_chains_delta_over_its_own(self):
+        founder = importlib.util.spec_from_file_location("condor_under_test", SCRIPT.parents[1] / "league" / "seeds" / "options_condor_vrp.py")
+        module = importlib.util.module_from_spec(founder)
+        founder.loader.exec_module(module)
+        from datetime import datetime, timezone
+
+        ny = datetime(2026, 9, 25, 15, 0, tzinfo=timezone.utc)
+        row_ = {"delta": 0.42, "iv": 0.2, "strike": 700.0, "expiry": "2026-09-25", "right": "call"}
+        self.assertEqual(module._delta(row_, 700.4, ny, 0.2), 0.42)  # the chain's, not its own
+        self.assertNotEqual(module._delta({**row_, "delta": None}, 700.4, ny, 0.2), 0.42)  # its own only where the chain has none
+
+    def test_the_forward_chain_carries_no_greeks_on_todays_expiry_unless_the_what_if(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "live.jsonl"
+            path.write_text(line("2026-09-25T15:00:00Z", [row(LOW, 1.00, 1.05, "2026-09-25T14:59:59Z")]) + "\n", encoding="utf-8")
+            snap = next(fwd.read_snapshots(path))
+            source = fwd.LegSource(fwd.SimClock(snap.t))
+            source.current = snap
+            [live] = fwd.ChainBroker(source).option_chain("SPY", expiry_from="2026-09-25", expiry_to="2026-09-25")
+            [what_if] = fwd.ChainBroker(source, zero_dte_greeks=True).option_chain("SPY", expiry_from="2026-09-25", expiry_to="2026-09-25")
+        self.assertEqual((live["iv"], live["delta"]), (None, None))
+        self.assertIsNotNone(what_if["delta"])
+
+
+class Inputs(unittest.TestCase):
+    """Reviewed Sept 25: the inputs for any day, the House's features used, the local store never opened for writing."""
+
+    def test_the_queries_are_filled_in_for_the_day_and_name_no_agent(self):
+        text = fwd.live_query("2026-09-28")
+        compile(text, "live_query", "exec")
+        self.assertIn("'2026-09-28T13:00:00Z'", text)
+        self.assertIn("'2026-09-28T20:05:00Z'", text)
+        self.assertIn("'options-orb'", text)
+        self.assertNotIn("krasker", text)
+        for query in (fwd.bars_query("2026-09-28"), fwd.chains_query("2026-09-28")):
+            compile(query, "query", "exec")
+            self.assertNotIn("__", query.replace("__main__", ""))
+        self.assertIn(repr(fwd.parse_ts("2026-09-28T13:00:00Z")), fwd.chains_query("2026-09-28"))
+
+    def test_features_come_from_the_later_of_the_houses_rows_and_the_local_copy(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "store.sqlite"
+            db = sqlite3.connect(store)
+            db.execute("CREATE TABLE features (symbol TEXT, day TEXT, version TEXT, available_at TEXT, payload TEXT)")
+            db.execute("INSERT INTO features VALUES ('AAL', '2026-09-23', 'bs-close-v2', '2026-09-23T21:00:00Z', '{\"from\": \"local\"}')")
+            db.commit()
+            db.close()
+            house = [{"symbol": "AAL", "day": "2026-09-24", "version": "bs-close-v2", "available_at": "2026-09-24T21:00:00Z", "payload": {"from": "house"}},
+                     {"symbol": "AAL", "day": "2026-09-24", "version": "other", "available_at": "2026-09-24T21:30:00Z", "payload": {"from": "no"}}]
+            features = fwd.Features(store, house)
+            self.assertEqual(features.features_at(["AAL"], fwd.parse_ts("2026-09-24T12:00:00Z")), {"AAL": {"from": "local"}})
+            self.assertEqual(features.features_at(["aal"], fwd.parse_ts("2026-09-25T15:00:00Z")), {"AAL": {"from": "house"}})
+            self.assertEqual(features.features_at(["AAL"], fwd.parse_ts("2026-09-23T20:00:00Z")), {})
+            self.assertEqual(features.served, {"house": 1, "local": 1})
+
+    def test_the_calibrations_underlier_bars_never_open_the_local_store_for_writing(self):
+        import hashlib
+        import os
+        import sqlite3
+        import stat
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "store.sqlite"
+            db = sqlite3.connect(store)
+            db.execute("CREATE TABLE underlier_bars (symbol TEXT, timeframe TEXT, t TEXT, ts REAL, payload TEXT)")
+            db.execute("INSERT INTO underlier_bars VALUES ('SPY', '15Min', '2026-09-24T20:00:00Z', ?, '{\"t\": \"2026-09-24T20:00:00Z\", \"c\": 660.0}')",
+                       (fwd.parse_ts("2026-09-24T20:00:00Z"),))
+            db.commit()
+            db.close()
+            before = hashlib.sha256(store.read_bytes()).hexdigest()
+            os.chmod(store, stat.S_IRUSR)
+
+            def refuse(*args, **kwargs):
+                raise AssertionError("the calibration built an OptionsHistory on the local store")
+
+            fit = type("Fit", (), {"OptionsHistory": staticmethod(refuse), "stored_underlier": staticmethod(refuse)})
+            underlier = fwd._underlier(fit, store, {"SPY": [(fwd.parse_ts("2026-09-25T15:10:00Z"), 661.0)]})
+            bars = underlier("SPY", "15Min", "2026-09-24T00:00:00Z", "2026-09-25T23:00:00Z")
+            os.chmod(store, stat.S_IRUSR | stat.S_IWUSR)
+            self.assertEqual([(b["t"], b["c"]) for b in bars], [("2026-09-24T20:00:00Z", 660.0), ("2026-09-25T15:15:00Z", 661.0)])
+            self.assertEqual(hashlib.sha256(store.read_bytes()).hexdigest(), before)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["store.sqlite"])
+
+
+class Thoughts(unittest.TestCase):
+    """Reviewed Sept 25: the fidelity claim ("the same reasons at matching minutes") needs every wake's thought."""
+
+    def test_a_digest_takes_the_numbers_out(self):
+        self.assertEqual(fwd.digest("Condor VRP. SPY: rich (1.18x) but no 1-wide condor near 0.15 delta; entries 10:00-14:00 New York"),
+                         "Condor VRP. SPY: rich (#) but no #-wide condor near # delta; entries #:#-#:# New York")
+
+    def test_thoughts_agree_where_the_twin_said_the_same_within_a_wake_and_stop_at_the_first_rewrite(self):
+        forward = {"founders": [{"founder": "options-orb", "wake_minutes": 5.0, "thought_runs": [
+            ["2026-09-25T16:40:00.000000Z", "2026-09-25T16:50:00.000000Z", 3, "Options ORB. nothing to do."],
+            ["2026-09-25T16:55:00.000000Z", "2026-09-25T17:30:00.000000Z", 8, "Options ORB. IWM: buying #"]]}]}
+        live = {"options-orb": {"strategy_changes": [{"at": "2026-09-25T17:20:00.000Z"}], "thought_digests": [
+            ["2026-09-25T16:42:10.000Z", "Options ORB. nothing to do."],
+            ["2026-09-25T16:58:00.000Z", "Options ORB. IWM: buying #"],
+            ["2026-09-25T17:05:00.000Z", "Options ORB. nothing to do."],
+            ["2026-09-25T17:25:00.000Z", "a rewritten program's thought"]]}}
+        got = fwd.thought_agreement(forward, live)["options-orb"]
+        self.assertEqual((got["live_thoughts_compared"], got["with_a_forward_thought_near"], got["same_digest"]), (3, 3, 2))
+        self.assertEqual(got["first_differences"][0]["live_at"], "2026-09-25T17:05:00.000Z")
+        self.assertEqual(fwd.runs_of([("a", "x"), ("b", "x"), ("c", "y")]), [["a", "b", 2, "x"], ["c", "c", 1, "y"]])
 
 
 class CalibrationBars(unittest.TestCase):

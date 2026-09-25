@@ -32,33 +32,54 @@ quoted after the acceptance, sizes); `league/tests/test_forward_structures.py` p
 
 **What is not the House's** (said in the output): the chain rows carry Black-Scholes IV and delta from each contract's
 mid (r 4%, `options_history.implied_vol`), where the live chain carries Alpaca's greeks (the recorder did not keep
-them; measured against the House's recorded chains, within 0.003 of delta at the median), and none on a contract
-expiring today, as live; the recorded bands (4% of spot on the ETFs, 12% on the stocks) are narrower than the chain's 20%; the
-underlying bars are the House's own recordings of the day (`recordings.sqlite`, read-only, `--house-bars`), completed
-from the local history (`underlier_bars`) and, failing both, from the snapshots' mids; the tick is one a snapshot (60 s;
-the live House's ticks ran 60-200 s); all twelve wake on one clock from the first snapshot with sizes.
+them; measured against the House's recorded chains on contracts of 1 day or more, within 0.003 of delta at the median,
+0.01 at p90), and none on a contract expiring today, as live; the recorded bands (4% of spot on the ETFs, 12% on the
+stocks) are narrower than the chain's 20%; the underlying bars are the House's own recordings of the day
+(`recordings.sqlite`, read-only, `--house-bars`), completed from the local history (`underlier_bars`) and, failing
+both, from the snapshots' mids; the tick is one a snapshot (60 s; the live House's ticks ran 60-200 s).
 
-The comparison with the live House: the live structure founders' own rows (`LIVE_QUERY`), a second run from each
-live founder's first wake (`--from-birth`), and the chains the House recorded against the forward chain
-(`CHAINS_QUERY`, `compare_chains`). The House changed in the session: from 18:33:52Z (Deploy V4, PR #339) it re-prices a
-structure limit further through its touch than the book's 10% band to the band's edge (`House._fit_structure_limit`);
-`HouseShim.reprice_from` runs the House of either release, or the switch as the floor made it. A labelled what-if
-(`--what-if-0dte-greeks`, never the House) gives today's expiries greeks. `calibrate` refits s3/calibration's fill
-half-spread table with the day's recorded quotes.
+**When a floor starts** (reviewed Sept 25): on the first snapshot with leg sizes AND a spot for every symbol its
+founders trade (`RunConfig.require_spots`). On Sept 25 the recorder's first line has no sizes and its second only the
+ETFs (no stock row or spot until 15:12:02Z), so a floor started there showed the stock founders a price of 0 and
+orb one symbol of five. The recording itself begins at 15:10Z: the session's first 1 h 40 min (the opening range, 70
+minutes of condor-vrp's entry window) is not in it, and the output says "the recorded session", never the whole one.
 
-Usage (ONE process at a time on the shared machine; it streams the file, about 100 MB of memory, 25 s a run):
-    python3 scripts/forward_structures.py query-bars|query-live|query-chains   # the read-only queries' text (rx.py)
-    python3 scripts/forward_structures.py --house-bars bars.json --live live.json --from-birth --before-v4 \
-        --what-if-0dte-greeks --house-chains chains.json --until 2026-09-25T20:00:00Z --out forward.json
-    python3 scripts/forward_structures.py calibrate --fit-from s3_options_history.py --out calibration.json
+**One figure is one path** (reviewed Sept 25). The House's structure chains are cached two minutes and shared by
+every structure agent reading the same underlying, so what a founder sees depends on which founders share its
+House and on the minute it wakes. `run_many` drives many independent floors (each its own House caches, book, broker
+and ledger) over ONE pass of the file; `paths` runs every founder alone and all together from several start
+snapshots and gives each figure as a range.
+
+The comparison with the live House: the live structure founders' own rows (`live_query`), a second run from each
+live founder's first wake (`--from-birth`), the thoughts of both digested by wake (`thought_agreement`), and the
+chains the House recorded against the forward chain (`chains_query`, `compare_chains`). The House changed in the
+session: from 18:33:52Z (Deploy V4, PR #339) it re-prices a structure limit further through its touch than the book's
+10% band to the band's edge (`House._fit_structure_limit`); `HouseShim.reprice_from` runs the House of either
+release, or the switch as the floor made it. A labelled what-if (`--what-if-0dte-greeks`, never the House) gives
+today's expiries Black-Scholes greeks, which nothing has validated on a same-day contract (Alpaca gives none to
+compare with); `zero_dte_exposure` says which founders it bears on. Each fill's bid-ask paid against the structure's
+mid is measured on the snapshot it was made on (`spread_of_fill`: scoreboard metric 4). `calibrate` refits
+s3/calibration's fill half-spread table with the day's recorded quotes.
+
+**Inputs** (`--day`): the snapshots `~/Work/.options-history/live-<day>.jsonl` and, beside them, the three read-only
+query outputs `house-bars-<day>.json`, `house-live-<day>.json`, `house-chains-<day>.json` (the queries' text is
+printed for the day by `query-bars|query-live|query-chains`); the output records each file's sha256.
+
+Usage (ONE process at a time on the shared machine; it streams the file once, about 20 s, plus the floors' work):
+    python3 scripts/forward_structures.py --day 2026-09-25 query-bars|query-live|query-chains   # the read-only queries (rx.py)
+    python3 scripts/forward_structures.py --day 2026-09-25 --from-birth --before-v4 --what-if-0dte-greeks --paths 5 \
+        --until 2026-09-25T20:00:00Z --out forward.json
+    python3 scripts/forward_structures.py --day 2026-09-25 calibrate --fit-from s3_options_history.py --out calibration.json
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
+import re
 import sqlite3
 import sys
 import tempfile
@@ -228,7 +249,7 @@ class ChainBroker:
     def __init__(self, source: LegSource, *, zero_dte_greeks: bool = False):
         self.source = source
         self.zero_dte_greeks = zero_dte_greeks  # a WHAT-IF: greeks on today's expiries too (the live feed has none)
-        self._greeks: dict[tuple[int, str], tuple[float | None, float | None]] = {}
+        self._greeks: dict[tuple[int, str], tuple[float | None, float | None]] = {}  # the current snapshot's, shared by every floor
 
     def option_chain(self, underlying: str, *, expiry_from: str, expiry_to: str, limit: int = 1000) -> list[dict[str, Any]]:
         snap = self.source.current
@@ -237,6 +258,8 @@ class ChainBroker:
         clock = self.source.clock()
         if snap.t > clock + 1e-9:
             raise AssertionError("look-ahead in the chain")
+        if self._greeks and next(iter(self._greeks))[0] != snap.index:
+            self._greeks.clear()
         under = underlying.upper()
         today = datetime.fromtimestamp(clock, NEW_YORK).strftime("%Y-%m-%d")
         spot = snap.spot.get(under)
@@ -253,8 +276,6 @@ class ChainBroker:
                 # As the live feed: Alpaca's snapshot carries no greeks on a contract expiring today (the House's recorded
                 # chains of Sept 25: none on 12,882 of 12,882 0-DTE index rows and 7,986 of 7,986 0-DTE stock rows).
                 self._greeks[key] = (None, None) if str(row.get("expiry")) <= today and not self.zero_dte_greeks else greeks(row, mid_spot, snap.t)
-                if len(self._greeks) > 200_000:
-                    self._greeks.clear()
             iv, delta = self._greeks[key]
             out.append({"symbol": occ, "underlying": under, "expiry": str(row["expiry"]), "strike": float(row["strike"]),
                         "right": str(row["right"]), "bid": float(bid), "ask": float(ask), "as_of": row.get("as_of"),
@@ -319,8 +340,8 @@ class Bars:
                 out[f"{symbol}:{timeframe}"] = counts
         return out
 
-    def load_house(self, path: str | Path) -> None:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    def load_house(self, payload: Mapping[str, Any]) -> None:
+        """BARS_QUERY's output (`bars_query`): every recorded key's earliest and latest payload."""
         for key, recs in (payload.get("bars") or {}).items():
             timeframe = key.split(":")[2]
             for label in ("earliest", "latest"):  # the latest recording's bars replace the earliest's
@@ -396,26 +417,44 @@ class Bars:
 
 
 class Features:
-    """`options_features` for a strategy that asks for them (`House.snapshot`: `options_history.features_at`), read
-    from the local copy of the store; nothing is ever written to it."""
+    """`options_features` for a strategy that asks for them (`House.snapshot`: `options_history.features_at`): the
+    latest `bs-close-v2` row available by the clock, from the House's own rows of the day when given (BARS_QUERY's
+    `features`: the box's store, read-only) and the local copy of the store (through Sept 24), whichever is later.
+    Nothing is ever written to either; `served` counts where each answer came from."""
 
-    def __init__(self, store: str | Path | None):
+    VERSION = "bs-close-v2"
+
+    def __init__(self, store: str | Path | None, rows: Sequence[Mapping[str, Any]] = ()):
         self.path = None if store is None else Path(store).expanduser()
+        self.house: dict[str, list[tuple[float, dict[str, Any]]]] = {}
+        for row in rows or ():
+            at = parse_ts(row.get("available_at"))
+            if at is not None and row.get("version") == self.VERSION and isinstance(row.get("payload"), dict):
+                self.house.setdefault(str(row.get("symbol") or "").upper(), []).append((at, row["payload"]))
+        for found in self.house.values():
+            found.sort(key=lambda pair: pair[0])
+        self.served = {"house": 0, "local": 0}
 
     def features_at(self, symbols: Sequence[str], now_ts: float) -> dict[str, Any]:
-        if self.path is None or not self.path.exists():
-            return {}
-        db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
-        try:
-            out = {}
-            for symbol in symbols:
-                row = db.execute("SELECT payload FROM features WHERE symbol = ? AND version = 'bs-close-v2' AND available_at <= ? "
-                                 "ORDER BY available_at DESC LIMIT 1", (str(symbol).upper(), iso(now_ts))).fetchone()
-                if row:
-                    out[str(symbol).upper()] = json.loads(row[0])
-            return out
-        finally:
-            db.close()
+        out: dict[str, tuple[float, dict[str, Any], str]] = {}
+        for symbol in symbols:
+            ready = [pair for pair in self.house.get(str(symbol).upper(), []) if pair[0] <= now_ts]
+            if ready:
+                out[str(symbol).upper()] = (ready[-1][0], ready[-1][1], "house")
+        if self.path is not None and self.path.exists():
+            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+            try:
+                for symbol in symbols:
+                    row = db.execute("SELECT available_at, payload FROM features WHERE symbol = ? AND version = ? AND available_at <= ? "
+                                     "ORDER BY available_at DESC LIMIT 1", (str(symbol).upper(), self.VERSION, iso(now_ts))).fetchone()
+                    at = parse_ts(row[0]) if row else None
+                    if at is not None and at <= now_ts and at > out.get(str(symbol).upper(), (-1.0,))[0]:
+                        out[str(symbol).upper()] = (at, json.loads(row[1]), "local")
+            finally:
+                db.close()
+        for _, _, where in out.values():
+            self.served[where] += 1
+        return {symbol: payload for symbol, (_, payload, _) in out.items()}
 
 
 # ------------------------------------------------------------------------------------------ the House, borrowed
@@ -510,6 +549,27 @@ def load_founder(name: str) -> SimpleNamespace:
                            specialty="alpaca-options", code=source, decide=module.decide, alive=True)
 
 
+_NUMBER = re.compile(r"\$?\d[\d,]*(?:\.\d+)?(?:%|x\b)?")
+
+
+def digest(thought: str) -> str:
+    """A thought with its numbers taken out (prices, times, ratios, strikes all read '#'): what a founder SAID at a
+    wake, so the forward twin and the live agent can be compared although their quotes are a minute apart."""
+    return re.sub(r"\s+", " ", _NUMBER.sub("#", str(thought or ""))).strip()[:240]
+
+
+def runs_of(rows: Sequence[tuple[str, str]]) -> list[list[Any]]:
+    """[(at, digest)] as runs of one digest: [first at, last at, wakes, digest]."""
+    out: list[list[Any]] = []
+    for at, text in rows:
+        if out and out[-1][3] == text:
+            out[-1][1] = at
+            out[-1][2] += 1
+        else:
+            out.append([at, at, 1, text])
+    return out
+
+
 @dataclass
 class Tally:
     wakes: int = 0
@@ -518,155 +578,268 @@ class Tally:
     intents: int = 0
     dropped: list[str] = field(default_factory=list)
     thoughts: list[tuple[str, str]] = field(default_factory=list)
+    digests: list[tuple[str, str]] = field(default_factory=list)  # every wake's (at, digest(thought))
     decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------------------------------ the run
+def founder_symbols(agents: Sequence[Any]) -> list[str]:
+    return sorted({str(s).upper() for a in agents for s in a.needs.get("symbols") or ()})
+
+
+@dataclass
+class RunConfig:
+    """One simulated floor. Its `founders` share one House: the House's two-minute structure-chain caches are
+    shared by every structure agent reading the same underlying, so who runs together changes what each one sees.
+    Its book starts on the first snapshot at or after `start` with leg sizes and a spot of every symbol in
+    `require_spots` (its founders' symbols when None), after skipping `start_after` such snapshots (the tick phase);
+    `starts` holds a founder back until its own first wake (the live birth, for the comparison); `reprice_from` says
+    from when the House re-prices a structure limit beyond the book's band (`HouseShim.reprice_from`);
+    `zero_dte_greeks` is a WHAT-IF, not the House: Black-Scholes greeks on today's expiries, which the live feed does
+    not carry; `decide_override` replaces a founder's decide (the tests)."""
+
+    label: str = "forward"
+    founders: Sequence[str] = FOUNDERS
+    start: float | None = None
+    start_after: int = 0
+    starts: Mapping[str, float] | None = None
+    reprice_from: float | None = None
+    zero_dte_greeks: bool = False
+    decide_override: Mapping[str, Callable[[dict], dict]] | None = None
+    keep_thoughts: int = 6
+    mark_every: float = MARK_EVERY
+    require_spots: Sequence[str] | None = None
+
+
+class Market:
+    """What every floor of one pass shares: the clock, the current snapshot, the underlying's bars and features,
+    and the chain readers (without and with the what-if's greeks on today's expiries), whose Black-Scholes is
+    computed once a snapshot. None of it is a House's state: each floor keeps its own House caches, book, broker,
+    ledger and clock-driven marks."""
+
+    def __init__(self, clock: SimClock, *, house_bars: str | Path | None, local_store: str | Path | None,
+                 symbols: Sequence[str], timeframes: Sequence[str]):
+        self.clock = clock
+        self.source = LegSource(clock)
+        self.bars = Bars(clock, self.source)
+        rows: Sequence[Mapping[str, Any]] = ()
+        if house_bars:
+            payload = json.loads(Path(house_bars).read_text(encoding="utf-8"))
+            self.bars.load_house(payload)
+            rows = payload.get("features") or ()
+        self.features = Features(local_store, rows)
+        self.chains = {flag: ChainBroker(self.source, zero_dte_greeks=flag) for flag in (False, True)}
+        self.local_store = local_store
+        self.symbols, self.timeframes = list(symbols), list(timeframes)
+        self.local_loaded_before: float | None = None
+
+    def observe(self, snap: Snapshot) -> None:
+        self.clock.now = snap.t
+        self.source.current = snap
+        self.bars.observe(snap)
+
+    def load_local(self, before: float) -> None:
+        """The local history's underlier bars, once, when the first floor starts (they end the day before)."""
+        if self.local_store and self.local_loaded_before is None:
+            self.bars.load_local(self.local_store, self.symbols, self.timeframes, before)
+            self.local_loaded_before = before
+
+
+class Floor:
+    """One simulated floor over the market's snapshots: its founders, the House's methods over its own caches
+    (`HouseShim`), the real `Book` and `OptionsShadowBroker` on its own ledger. `step` is the House's tick."""
+
+    def __init__(self, market: Market, config: RunConfig, root: Path):
+        self.market, self.config, self.clock = market, config, market.clock
+        clock = market.clock
+        self.source = LegSource(clock)  # the broker's own reader, so its reads count for this floor alone
+        self.agents = [load_founder(name) for name in config.founders]
+        for agent in self.agents:
+            if config.decide_override and agent.seed in config.decide_override:
+                agent.decide = config.decide_override[agent.seed]
+        wanted = config.require_spots if config.require_spots is not None else founder_symbols(self.agents)
+        self.require = {str(s).upper() for s in wanted}
+        root.mkdir(parents=True, exist_ok=True)
+        self.ledger = Ledger(root / "ledger.sqlite", clock=clock)
+        self.broker = OptionsShadowBroker(root / "options-shadow.json", self.source, underlying_close=None, starting_cash="100000", clock=clock)
+        self.book = Book(BOOK, self.broker, self.ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=clock,
+                         market_open=market_hours)
+        books = {"alpaca-paper": _ChainBook(market.chains[bool(config.zero_dte_greeks)]), BOOK: self.book}
+        self.shim = HouseShim(clock, self.ledger, books, market.bars, market.features)
+        self.shim.reprice_from = config.reprice_from
+        self.tallies = {a.id: Tally() for a in self.agents}
+        self.next_wake: dict[str, float] = {}
+        self.last_mark = -1e18
+        self.checks: dict[str, Any] = {
+            "decisions": 0, "decision_snapshot_after_clock": 0, "fills": 0, "fills_not_on_newer_snapshot": 0, "fills_failing_audit": 0,
+            "snapshots": 0, "first_snapshot": None, "last_snapshot": None, "sized_from": None, "started_from": None,
+            "start_rule": f"the first snapshot with leg sizes and a spot of {','.join(sorted(self.require))}, after {config.start_after} such"}
+        self.decided_on: dict[str, list[tuple[float, int]]] = {}  # agent -> [(decision clock, snapshot index)]
+        self.fill_snapshot: dict[str, int] = {}
+        self.submitted_at: dict[str, float] = {}
+        self.fill_log: list[dict[str, Any]] = []
+        self.spread: dict[int, dict[str, Any]] = {}  # ledger seq of a fill -> `spread_of_fill`
+        self.fill_seq = 0
+        self.skipped = 0
+        self.started = False
+        self.last: Snapshot | None = None
+
+    def step(self, snap: Snapshot) -> None:
+        config, clock, book, checks = self.config, self.clock, self.book, self.checks
+        if config.start is not None and snap.t < config.start:
+            return
+        self.source.current = snap
+        self.last = snap
+        checks["snapshots"] += 1
+        checks["first_snapshot"] = checks["first_snapshot"] or iso(snap.t)
+        checks["last_snapshot"] = iso(snap.t)
+        if not any(r.get("bid_size") is not None for r in snap.rows.values()):
+            return  # no leg sizes (the recorder's first line): the broker could fill nothing on it; nothing starts on it
+        checks["sized_from"] = checks["sized_from"] or iso(snap.t)
+        if not self.started:
+            if not self.require <= set(snap.spot):
+                return  # a symbol has no touch yet (Sept 25's second line: the ETFs only): its founder would see a price of 0
+            if self.skipped < config.start_after:
+                self.skipped += 1
+                return
+            self.started = True
+            checks["started_from"] = iso(snap.t)
+            self.market.load_local(snap.t)
+            for agent in self.agents:
+                book.stake(agent.id, STAKE, note="rung 1 stake")
+                book.limits[agent.id] = Limits(LIMITS[0], LIMITS[1], asset_classes=("option",))
+                self.next_wake[agent.id] = max(snap.t, float((config.starts or {}).get(agent.founder) or snap.t))
+        # The House's tick: the broker's fills, the book's poll, the wakes and their batch, the expiry rules, the marks.
+        self.broker.advance()
+        book.poll()
+        for row in self.ledger.iter(kinds=("book.fill",), after=self.fill_seq):
+            self.fill_seq = row.seq
+            checks["fills"] += 1
+            order_id = str(row.payload.get("order_id") or "")
+            order_snap = self.fill_snapshot.get(order_id)
+            audit = audit_fill(row.payload, snap, self.submitted_at.get(order_id))
+            spread = self.spread[row.seq] = spread_of_fill(row.payload, snap)
+            self.fill_log.append({"agent": row.agent, "order_id": order_id, "side": row.payload.get("side"),
+                                  "submitted_snapshot": order_snap, "filled_snapshot": snap.index, "at": row.at, "price": row.payload.get("price"),
+                                  "audit": audit, "spread": spread})
+            if order_snap is None or order_snap >= snap.index:
+                checks["fills_not_on_newer_snapshot"] += 1
+            if not audit.get("ok"):
+                checks["fills_failing_audit"] += 1
+        batch = []
+        for agent in self.agents:
+            if self.next_wake.get(agent.id, float("inf")) > clock():
+                continue
+            self.next_wake[agent.id] = clock() + agent.wake_minutes * 60
+            tally = self.tallies[agent.id]
+            tally.wakes += 1
+            ctx = self.shim.snapshot(agent, book)
+            ctx = json.loads(json.dumps(ctx, default=str))  # the box sees JSON, as the sandbox passes it
+            checks["decisions"] += 1
+            if self.source.current is None or self.source.current.t > clock() + 1e-9:
+                checks["decision_snapshot_after_clock"] += 1
+            self.decided_on.setdefault(agent.id, []).append((clock(), snap.index))
+            try:
+                answer = agent.decide(ctx)
+                if not isinstance(answer, dict):
+                    raise TypeError(f"decide returned {type(answer).__name__}")
+                answer = json.loads(json.dumps(answer, default=str))
+            except Exception as exc:  # noqa: BLE001 - a strategy's error is its wake's, as in its box
+                tally.errors += 1
+                tally.last_error = f"{type(exc).__name__}: {str(exc)[:300]} | {traceback.format_exc(limit=2)[-300:]}"
+                continue
+            self.shim._state["memory"][agent.id] = answer.get("memory") or {}
+            thought = str(answer.get("thought") or "").strip()
+            if thought:
+                tally.thoughts.append((iso(clock()), thought[:600]))
+                del tally.thoughts[:-config.keep_thoughts]
+                tally.digests.append((iso(clock()), digest(thought)))
+            for order_id in answer.get("cancels") or ():
+                if isinstance(order_id, str):
+                    book.cancel(agent.id, order_id)
+            rows = [r for r in (answer.get("intents") or []) if isinstance(r, Mapping)]
+            intents, dropped = self.shim._intents(agent, book, rows)
+            tally.intents += len(rows)
+            tally.dropped += dropped
+            if rows:
+                tally.decisions.append({"at": iso(clock()), "snapshot": snap.index, "asked": [
+                    {k: r.get(k) for k in ("structure", "action", "quantity", "limit_price", "legs", "reason")} for r in rows]})
+            batch += intents
+        if batch:
+            for outcome in book.submit(batch):
+                if outcome.order_id:
+                    self.fill_snapshot[str(outcome.order_id)] = snap.index
+                    self.submitted_at[str(outcome.order_id)] = clock()
+        self.shim._horizon_exits(book, float("inf"))
+        for working in book.open_orders():
+            self.fill_snapshot.setdefault(str(working.order_id), snap.index)
+            self.submitted_at.setdefault(str(working.order_id), clock())
+        if clock() - self.last_mark >= config.mark_every:
+            book.mark()
+            self.last_mark = clock()
+
+    def finish(self) -> dict[str, Any]:
+        if self.last is not None and self.started:
+            self.book.mark()
+        result = summarize(self)
+        result["checks"]["fill_log"] = self.fill_log
+        result["checks"]["decision_snapshots"] = {agent: [[iso(at), index] for at, index in rows] for agent, rows in self.decided_on.items()}
+        result["run"] = {"label": self.config.label, "founders": len(self.agents), "start_after": self.config.start_after,
+                         "starts": {k: iso(v) for k, v in (self.config.starts or {}).items() if v},
+                         "reprice_from": None if self.config.reprice_from is None else
+                         ("never" if self.config.reprice_from == float("inf") else iso(self.config.reprice_from)),
+                         "zero_dte_greeks": bool(self.config.zero_dte_greeks)}
+        return result
+
+    def close(self) -> None:
+        self.ledger.close()
+
+
+def run_many(snapshots: str | Path, configs: Sequence[RunConfig], *, house_bars: str | Path | None, local_store: str | Path | None,
+             work: str | Path | None = None, until: float | None = None, log: Callable[[str], None] | None = None) -> list[dict[str, Any]]:
+    """Every floor in `configs` over ONE pass of the snapshot file (the file's parsing is most of a run's time).
+    The floors share the market (`Market`) and nothing else. Returns each floor's result document (`summarize`),
+    in order; `market` in each says what the pass's bars and features came from."""
+    say = log or (lambda text: None)
+    clock = SimClock()
+    everyone = [load_founder(name) for name in sorted({name for config in configs for name in config.founders})]
+    timeframes = sorted({str((a.needs.get("bars") or {}).get("timeframe") or "5Min") for a in everyone})
+    market = Market(clock, house_bars=house_bars, local_store=local_store, symbols=founder_symbols(everyone), timeframes=timeframes)
+    tmp = tempfile.TemporaryDirectory(prefix="forward-structures-", dir=work)
+    floors: list[Floor] = []
+    try:
+        for n, config in enumerate(configs):
+            floors.append(Floor(market, config, Path(tmp.name) / f"floor-{n}"))
+        for snap in read_snapshots(snapshots, until=until):
+            market.observe(snap)
+            for floor in floors:
+                floor.step(snap)
+            if snap.index % 30 == 0:
+                say(f"{iso(snap.t)} snapshot {snap.index}: {len(floors)} floors, fills {sum(f.checks['fills'] for f in floors)}")
+        results = [floor.finish() for floor in floors]
+        shared = {"bar_sources": market.bars.sources(), "bars_from_snapshot_mids": dict(sorted(market.bars.from_mids.items())),
+                  "features_served": dict(market.features.served), "floors_in_the_pass": len(floors)}
+        for result in results:
+            result["market"] = shared
+        return results
+    finally:
+        for floor in floors:
+            floor.close()
+        tmp.cleanup()
+
+
 def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: str | Path | None, founders: Sequence[str] = FOUNDERS,
         work: str | Path | None = None, start: float | None = None, until: float | None = None, starts: Mapping[str, float] | None = None,
         mark_every: float = MARK_EVERY, keep_thoughts: int = 6, log: Callable[[str], None] | None = None,
         decide_override: Mapping[str, Callable[[dict], dict]] | None = None, reprice_from: float | None = None,
-        zero_dte_greeks: bool = False) -> dict[str, Any]:
-    """The forward test. `start`/`until` bound the simulated session (epoch seconds); `starts` holds a founder back
-    until its own first wake (the live birth, for the comparison); `decide_override` replaces a founder's decide (the
-    tests). `reprice_from` says from when the House re-prices a structure limit beyond the book's band
-    (`HouseShim.reprice_from`); `zero_dte_greeks` is a WHAT-IF, not the House: Black-Scholes greeks on today's
-    expiries, which the live feed does not carry.
-    Returns the result document (`summarize`)."""
-    say = log or (lambda text: None)
-    clock = SimClock()
-    source = LegSource(clock)
-    chain_broker = ChainBroker(source, zero_dte_greeks=zero_dte_greeks)
-    data = Bars(clock, source)
-    agents = [load_founder(name) for name in founders]
-    if decide_override:
-        for agent in agents:
-            if agent.seed in decide_override:
-                agent.decide = decide_override[agent.seed]
-    symbols = sorted({str(s).upper() for a in agents for s in a.needs.get("symbols") or ()})
-    timeframes = sorted({str((a.needs.get("bars") or {}).get("timeframe") or "5Min") for a in agents})
-    if house_bars:
-        data.load_house(house_bars)
-    tmp = tempfile.TemporaryDirectory(prefix="forward-structures-", dir=work)
-    root = Path(tmp.name)
-    ledger = Ledger(root / "ledger.sqlite", clock=clock)
-    broker = OptionsShadowBroker(root / "options-shadow.json", source, underlying_close=None, starting_cash="100000", clock=clock)
-    book = Book(BOOK, broker, ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=clock, market_open=market_hours)
-    books = {"alpaca-paper": _ChainBook(chain_broker), BOOK: book}
-    shim = HouseShim(clock, ledger, books, data, Features(local_store))
-    shim.reprice_from = reprice_from
-    tallies = {a.id: Tally() for a in agents}
-    next_wake: dict[str, float] = {}
-    last_mark = -1e18
-    checks = {"decisions": 0, "decision_snapshot_after_clock": 0, "fills": 0, "fills_not_on_newer_snapshot": 0, "fills_failing_audit": 0, "snapshots": 0,
-              "first_snapshot": None, "last_snapshot": None, "sized_from": None}
-    decided_on: dict[str, list[tuple[float, int]]] = {}  # agent -> [(decision clock, snapshot index)]
-    fill_snapshot: dict[str, int] = {}
-    fill_log: list[dict[str, Any]] = []
-    submitted_at: dict[str, float] = {}
-    seen_fills = 0
-    started_book = False
-    snap = None
-    try:
-        for snap in read_snapshots(snapshots, until=until):
-            if start is not None and snap.t < start:
-                data.observe(snap)
-                continue
-            clock.now = snap.t
-            source.current = snap
-            data.observe(snap)
-            checks["snapshots"] += 1
-            checks["first_snapshot"] = checks["first_snapshot"] or iso(snap.t)
-            checks["last_snapshot"] = iso(snap.t)
-            if not any(r.get("bid_size") is not None for r in snap.rows.values()):
-                continue  # no leg sizes (the recorder's first line): the broker could fill nothing on it; nothing starts on it
-            if not started_book:
-                started_book = True
-                checks["sized_from"] = iso(snap.t)
-                if local_store:
-                    data.load_local(local_store, symbols, timeframes, snap.t)
-                for agent in agents:
-                    book.stake(agent.id, STAKE, note="rung 1 stake")
-                    book.limits[agent.id] = Limits(LIMITS[0], LIMITS[1], asset_classes=("option",))
-                    next_wake[agent.id] = max(snap.t, float((starts or {}).get(agent.founder) or snap.t))
-            # The House's tick: the broker's fills, the book's poll, the wakes and their batch, the expiry rules, the marks.
-            broker.advance()
-            book.poll()
-            fills = [row for row in ledger.iter(kinds=("book.fill",))]
-            for row in fills[seen_fills:]:
-                checks["fills"] += 1
-                order_id = str(row.payload.get("order_id") or "")
-                order_snap = fill_snapshot.get(order_id)
-                audit = audit_fill(row.payload, snap, submitted_at.get(order_id))
-                fill_log.append({"agent": row.agent, "order_id": order_id, "side": row.payload.get("side"),
-                                 "submitted_snapshot": order_snap, "filled_snapshot": snap.index, "at": row.at, "price": row.payload.get("price"),
-                                 "audit": audit})
-                if order_snap is None or order_snap >= snap.index:
-                    checks["fills_not_on_newer_snapshot"] += 1
-                if not audit.get("ok"):
-                    checks["fills_failing_audit"] += 1
-            seen_fills = len(fills)
-            batch = []
-            for agent in agents:
-                if next_wake.get(agent.id, float("inf")) > clock():
-                    continue
-                next_wake[agent.id] = clock() + agent.wake_minutes * 60
-                tally = tallies[agent.id]
-                tally.wakes += 1
-                ctx = shim.snapshot(agent, book)
-                ctx = json.loads(json.dumps(ctx, default=str))  # the box sees JSON, as the sandbox passes it
-                checks["decisions"] += 1
-                if source.current is None or source.current.t > clock() + 1e-9:
-                    checks["decision_snapshot_after_clock"] += 1
-                decided_on.setdefault(agent.id, []).append((clock(), snap.index))
-                try:
-                    answer = agent.decide(ctx)
-                    if not isinstance(answer, dict):
-                        raise TypeError(f"decide returned {type(answer).__name__}")
-                    answer = json.loads(json.dumps(answer, default=str))
-                except Exception as exc:  # noqa: BLE001 - a strategy's error is its wake's, as in its box
-                    tally.errors += 1
-                    tally.last_error = f"{type(exc).__name__}: {str(exc)[:300]} | {traceback.format_exc(limit=2)[-300:]}"
-                    continue
-                shim._state["memory"][agent.id] = answer.get("memory") or {}
-                thought = str(answer.get("thought") or "").strip()
-                if thought:
-                    tally.thoughts.append((iso(clock()), thought[:600]))
-                    del tally.thoughts[:-keep_thoughts]
-                for order_id in answer.get("cancels") or ():
-                    if isinstance(order_id, str):
-                        book.cancel(agent.id, order_id)
-                rows = [r for r in (answer.get("intents") or []) if isinstance(r, Mapping)]
-                intents, dropped = shim._intents(agent, book, rows)
-                tally.intents += len(rows)
-                tally.dropped += dropped
-                if rows:
-                    tally.decisions.append({"at": iso(clock()), "snapshot": snap.index, "asked": [
-                        {k: r.get(k) for k in ("structure", "action", "quantity", "limit_price", "legs", "reason")} for r in rows]})
-                batch += intents
-            if batch:
-                for outcome in book.submit(batch):
-                    if outcome.order_id:
-                        fill_snapshot[str(outcome.order_id)] = snap.index
-                        submitted_at[str(outcome.order_id)] = clock()
-            shim._horizon_exits(book, float("inf"))
-            for working in book.open_orders():
-                fill_snapshot.setdefault(str(working.order_id), snap.index)
-                submitted_at.setdefault(str(working.order_id), clock())
-            if clock() - last_mark >= mark_every:
-                book.mark()
-                last_mark = clock()
-            if snap.index % 30 == 0:
-                say(f"{iso(snap.t)} snapshot {snap.index}: fills {checks['fills']}, open orders {len(book.open_orders())}")
-        if snap is not None and started_book:
-            book.mark()
-        result = summarize(agents, book, broker, ledger, shim, tallies, checks, source, data, snap)
-        result["checks"]["fill_log"] = fill_log
-        result["checks"]["decision_snapshots"] = {agent: [[iso(at), index] for at, index in rows] for agent, rows in decided_on.items()}
-        return result
-    finally:
-        ledger.close()
-        tmp.cleanup()
+        zero_dte_greeks: bool = False, start_after: int = 0, require_spots: Sequence[str] | None = None,
+        label: str = "forward") -> dict[str, Any]:
+    """The forward test of one floor (`RunConfig` says what each argument does); `until` bounds the simulated
+    session (epoch seconds). Returns the result document (`summarize`)."""
+    config = RunConfig(label=label, founders=founders, start=start, start_after=start_after, starts=starts, reprice_from=reprice_from,
+                       zero_dte_greeks=zero_dte_greeks, decide_override=decide_override, keep_thoughts=keep_thoughts,
+                       mark_every=mark_every, require_spots=require_spots)
+    return run_many(snapshots, [config], house_bars=house_bars, local_store=local_store, work=work, until=until, log=log)[0]
 
 
 def audit_fill(payload: Mapping[str, Any], snap: Snapshot, submitted: float | None) -> dict[str, Any]:
@@ -701,19 +874,53 @@ def audit_fill(payload: Mapping[str, Any], snap: Snapshot, submitted: float | No
     return {"ok": ok, "touch": None if touch is None else str(touch), "legs_newer_than_acceptance": newer, "legs_short_of_size": short}
 
 
+def spread_of_fill(payload: Mapping[str, Any], snap: Snapshot) -> dict[str, Any]:
+    """What a fill paid for crossing the structure's bid-ask, on the snapshot it was made on (scoreboard metric 4,
+    "the bid-ask paid, a share of premium or net debit"): the structure's mid from its legs' recorded quotes (a leg
+    with no bid at half its ask), the fill's distance from it (a buy above, a sale under) times the multiplier and
+    the contracts, and that as a share of the premium (the structure's natural price at the fill, times the same:
+    the debit paid, the credit taken, the value sold or the cost to buy back). Empty for a fill that is not a
+    structure's; `mid` None where a leg has no ask."""
+    try:
+        spec = core.spec_of_code(str((payload.get("instrument") or {}).get("market_id")))
+    except ValueError:
+        return {}
+    mid = Decimal(spec.collateral)
+    for leg in spec.legs:
+        row = snap.rows.get(leg.occ) or {}
+        if row.get("ask") in (None, 0, 0.0):
+            return {"mid": None}
+        mid += leg.sign * leg.ratio * (Decimal(str(row.get("bid") or 0)) + Decimal(str(row["ask"]))) / 2
+    price = Decimal(str(payload.get("price")))
+    size = Decimal(str(payload.get("quantity"))) * Decimal(str((payload.get("instrument") or {}).get("multiplier") or 100))
+    paid = ((price - mid) if payload.get("side") == "buy" else (mid - price)) * size
+    premium = abs(core.natural_price(spec, price)) * size
+    return {"mid": float(round(mid, 4)), "spread_paid_usd": float(round(paid, 2)), "premium_usd": float(round(premium, 2)),
+            "spread_share_of_premium": None if premium <= 0 else float(round(paid / premium, 4))}
+
+
+def _median(values: Sequence[float]) -> float | None:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    n = len(ordered)
+    return round(ordered[n // 2] if n % 2 else (ordered[n // 2 - 1] + ordered[n // 2]) / 2, 4)
+
+
 def _money(value: Any) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.01")))
 
 
-def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, shim: HouseShim, tallies: Mapping[str, Tally],
-              checks: Mapping[str, Any], source: LegSource, data: Bars, last: Snapshot | None) -> dict[str, Any]:
+def summarize(floor: Floor) -> dict[str, Any]:
     """Per founder: its wakes, intents, House refusals and drops, book refusals, opens and closes (every fill, at
-    held and natural prices), realized P&L after fees, what it still holds at the last snapshot with its mark (the
-    structure's bid) and unrealized P&L, and its latest thoughts."""
+    held and natural prices, with the bid-ask it paid against the structure's mid), realized P&L after fees, what it
+    still holds at the last snapshot with its mark (the structure's bid) and unrealized P&L, its latest thoughts and
+    a digest of every wake's thought (`runs_of`)."""
+    book, broker, ledger, shim, last = floor.book, floor.broker, floor.ledger, floor.shim, floor.last
     fills = [row for row in ledger.iter(kinds=("book.fill",))]
     refused = [row for row in ledger.iter(kinds=("book.refused",))]
     out = []
-    for agent in agents:
+    for agent in floor.agents:
         account = book.account(agent.id)
         mine = [row for row in fills if row.agent == agent.id]
         trades = []
@@ -723,11 +930,13 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
             spec = core.spec_of_code(str(inst.get("market_id")), venue=BOOK) if inst.get("market_id") else None
             price = Decimal(str(p["price"]))
             natural = None if spec is None else float(core.natural_price(spec, price))
+            spread = floor.spread.get(row.seq) or {}
             trades.append({"at": row.at, "side": p.get("side"), "action": "open" if p.get("side") == "buy" else "close",
                            "structure": spec.type if spec else None, "market_id": inst.get("market_id"), "quantity": float(Decimal(str(p["quantity"]))),
                            "held_price": float(price), "natural_price": natural, "fee_usd": _money(p.get("fee_usd") or 0),
                            "realized_usd": _money(p["realized"]) if p.get("realized") is not None and p.get("side") == "sell" else None,
-                           "flat": bool(p.get("flat")), "reason": str(p.get("reason") or "")[:240]})
+                           "flat": bool(p.get("flat")), "mid": spread.get("mid"), "spread_paid_usd": spread.get("spread_paid_usd"),
+                           "spread_share_of_premium": spread.get("spread_share_of_premium"), "reason": str(p.get("reason") or "")[:240]})
         held = []
         for holding in account.holdings.values():
             inst = holding.instrument
@@ -744,13 +953,16 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
                     value = structures.intrinsic(spec, Decimal(str(round((touch[0] + touch[1]) / 2, 4))))
                     row["intrinsic_at_last_spot"] = float(value)
             held.append(row)
-        tally = tallies[agent.id]
+        tally = floor.tallies[agent.id]
         reasons: dict[str, int] = {}
         for row in refused:
             if row.agent == agent.id:
                 for reason in row.payload.get("reasons") or ["?"]:
                     reasons[str(reason)[:160]] = reasons.get(str(reason)[:160], 0) + 1
         closes = [t for t in trades if t["action"] == "close" and t["flat"]]
+        closed_ids = {t["market_id"] for t in closes}
+        on_closed = sum(t["spread_paid_usd"] or 0 for t in trades if t["market_id"] in closed_ids)
+        realized_closed = sum(t["realized_usd"] or 0 for t in closes)
         out.append({
             "founder": agent.founder, "seed": agent.seed, "wake_minutes": agent.wake_minutes, "wakes": tally.wakes, "decide_errors": tally.errors,
             "last_error": tally.last_error, "intents_asked": tally.intents, "dropped": tally.dropped[:10], "refusals": reasons,
@@ -758,65 +970,100 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
             "opens": sum(1 for t in trades if t["action"] == "open"), "closes": sum(1 for t in trades if t["action"] == "close"),
             "closed_structures": len(closes), "realized_usd": _money(account.realized), "fees_usd": _money(account.fees),
             "closed_realized_usd": [t["realized_usd"] for t in closes],
+            "spread_paid_usd": round(sum(t["spread_paid_usd"] or 0 for t in trades), 2),
+            "spread_share_of_premium_median": _median([t["spread_share_of_premium"] for t in trades if t["spread_share_of_premium"] is not None]),
+            "spread_paid_on_closed_usd": round(on_closed, 2),
+            "spread_share_of_closed_net": round(on_closed / realized_closed, 4) if realized_closed > 0 else None,
             "equity_usd": _money(book.equity(agent.id)), "stake_usd": float(STAKE), "held_at_end": held, "fills": trades,
-            "decisions_with_intents": tally.decisions[:40], "last_thoughts": tally.thoughts,
+            "decisions_with_intents": tally.decisions[:40], "last_thoughts": tally.thoughts, "thought_runs": runs_of(tally.digests),
         })
     orders = [order for order in broker._orders.values()]
     statuses: dict[str, int] = {}
     for order in orders:
         statuses[order.status] = statuses.get(order.status, 0) + 1
-    served = source.served
+    every = [t for f in out for t in f["fills"]]
+    realized_closed = sum(r or 0 for f in out for r in f["closed_realized_usd"])
+    on_closed = sum(f["spread_paid_on_closed_usd"] for f in out)
     return {"founders": out,
             "desk": {"closed_structures": sum(f["closed_structures"] for f in out), "realized_usd": _money(sum(Decimal(str(f["realized_usd"])) for f in out)),
                      "agents_positive_on_2_closed": sum(1 for f in out if f["closed_structures"] >= 2 and f["realized_usd"] > 0),
                      "held_at_end": sum(len(f["held_at_end"]) for f in out),
-                     "unrealized_usd_at_end": _money(sum(Decimal(str(h["unrealized_usd"] or 0)) for f in out for h in f["held_at_end"]))},
+                     "unrealized_usd_at_end": _money(sum(Decimal(str(h["unrealized_usd"] or 0)) for f in out for h in f["held_at_end"])),
+                     "spread_paid_usd": round(sum(t["spread_paid_usd"] or 0 for t in every), 2),
+                     "metric_4_spread_share_of_premium_median": _median([t["spread_share_of_premium"] for t in every if t["spread_share_of_premium"] is not None]),
+                     "spread_shares_of_premium": sorted(t["spread_share_of_premium"] for t in every if t["spread_share_of_premium"] is not None),
+                     "spread_paid_on_closed_usd": round(on_closed, 2),
+                     "spread_share_of_closed_net": round(on_closed / realized_closed, 4) if realized_closed > 0 else None},
             "broker": {"orders": len(orders), "statuses": statuses, "fills": len(broker._fills)},
-            "checks": {**checks, "leg_reads": len(served)},
-            "alerts": shim.alerts[-40:], "bar_sources": data.sources(),
-            "bars_from_snapshot_mids": dict(sorted(data.from_mids.items()))}
+            "checks": {**floor.checks, "leg_reads": len(floor.source.served)},
+            "alerts": shim.alerts[-40:]}
 
 
 # ------------------------------------------------------------------------------------------ the live House's day
-#: The read-only queries the forward test's inputs came from, run on the House box through the session's
-#: `rx.py` (sqlite `mode=ro`; no order, no write): the House's recorded bars of the day (argv[1]: the bar keys,
-#: `;`-separated, as `bar_keys()` prints them) and the live structure founders' day (krasker-22..33).
-BARS_QUERY = r'''# READ-ONLY (sqlite mode=ro): the underlying bars and features the House showed today's structure founders, as it
-# recorded them (recordings.sqlite, `House._cached`), the earliest and the latest recording of each key since 13:00Z;
-# and the options feature rows available since Sept 24 12:00Z for the skew founder's symbols. No order, no write.
+DAY = "2026-09-25"
+
+
+def day_window(day: str) -> tuple[float, float]:
+    """The day's read window in epoch seconds: 09:00 to 16:05 New York (the session and its opening minutes' data)."""
+    from datetime import date as _date, time as _time
+
+    moment = _date.fromisoformat(day)
+    begin = datetime.combine(moment, _time(9, 0), NEW_YORK).timestamp()
+    end = datetime.combine(moment, _time(16, 5), NEW_YORK).timestamp()
+    return begin, end
+
+
+def _fill(template: str, **values: Any) -> str:
+    for key, value in values.items():
+        template = template.replace(f"__{key.upper()}__", repr(value))
+    return template
+
+
+#: The read-only queries the forward test's inputs come from, run on the House box through the session's `rx.py`
+#: (sqlite `mode=ro`; no order, no write), filled in for a day by `bars_query`, `live_query`, `chains_query`.
+BARS_QUERY = r'''# READ-ONLY (sqlite mode=ro): the underlying bars and features the House showed the day's structure founders, as it
+# recorded them (recordings.sqlite, `House._cached`), the earliest and the latest recording of each key in the day's
+# window; and the options feature rows available from noon UTC the day before for the founders' symbols. No order, no write.
 import gzip, json, sqlite3, sys, time
 keys = sys.argv[1].split(";")
-since = 1790341200.0  # 2026-09-25T13:00:00Z
+since, until, features_from, symbols = __SINCE__, __UNTIL__, __FEATURES_FROM__, __SYMBOLS__
 db = sqlite3.connect('file:/workspace/state/recordings.sqlite?mode=ro', uri=True)
 out = {"bars": {}, "features": []}
 for key in keys:
     got = {}
     for label, order in (("earliest", "ASC"), ("latest", "DESC")):
-        row = db.execute(f"SELECT received, payload FROM snapshots WHERE source = ? AND received >= ? ORDER BY received {order} LIMIT 1", (key, since)).fetchone()
+        row = db.execute(f"SELECT received, payload FROM snapshots WHERE source = ? AND received >= ? AND received <= ? ORDER BY received {order} LIMIT 1",
+                         (key, since, until)).fetchone()
         if row:
             got[label] = {"received": row[0], "value": json.loads(gzip.decompress(row[1]))}
     out["bars"][key] = got
 oh = sqlite3.connect('file:/workspace/state/options_history.sqlite?mode=ro', uri=True)
-for r in oh.execute("SELECT symbol, day, version, available_at, payload FROM features WHERE available_at >= '2026-09-24T12:00:00Z' AND symbol IN ('F','AAL','CCL','RIVN','SPY','QQQ','IWM','BAC','T','PFE','SOFI','SNAP','INTC','HOOD')"):
+marks = ",".join("?" * len(symbols))
+for r in oh.execute(f"SELECT symbol, day, version, available_at, payload FROM features WHERE available_at >= ? AND symbol IN ({marks})", (features_from, *symbols)):
     out["features"].append({"symbol": r[0], "day": r[1], "version": r[2], "available_at": r[3], "payload": json.loads(r[4])})
 print(json.dumps(out, separators=(",", ":")))
 '''
-LIVE_QUERY = r'''# READ-ONLY (sqlite mode=ro): what the live structure founders krasker-22..33 did today on options-shadow: birth
-# (founder, family, code sha), strategy changes, wakes, intents, House/book refusals, fills, the latest marks and
-# thoughts. No order, no write.
+LIVE_QUERY = r'''# READ-ONLY (sqlite mode=ro): what the live structure founders (every agent born of one of the forward test's
+# founders, alive in the day's window) did on the day: birth (founder, family, code sha), strategy changes, wakes,
+# intents, House/book refusals, fills, the latest mark, and EVERY thought. No order, no write.
 import json, sqlite3
+since, until, founders = __SINCE__, __UNTIL__, set(__FOUNDERS__)
 db = sqlite3.connect('file:/workspace/state/ledger.sqlite?mode=ro', uri=True)
-agents = [f"krasker-{i}" for i in range(22, 34)]
+born = {}
+for at, agent, payload in db.execute("SELECT at, agent, payload FROM ledger WHERE kind = 'agent.born' ORDER BY seq"):
+    p = json.loads(payload)
+    if p.get("founder") in founders and at <= until and agent not in born:
+        born[agent] = {"at": at, "founder": p.get("founder"), "family": p.get("family"), "code_sha256": p.get("code_sha256"), "style": p.get("style")}
+agents = sorted(born)
+out = {a: {"born": born[a], "strategy": [], "woke": [], "intents": [], "refused": [], "fills": [], "orders": [], "mark": None, "thoughts": []} for a in agents}
 marks = ",".join("?" * len(agents))
-out = {a: {"born": None, "strategy": [], "woke": [], "intents": [], "refused": [], "fills": [], "orders": [], "mark": None, "thoughts": []} for a in agents}
-for at, kind, agent, payload in db.execute(
-        f"SELECT at, kind, agent, payload FROM ledger WHERE at >= '2026-09-25T13:00:00Z' AND agent IN ({marks}) AND kind IN "
-        "('agent.born','agent.strategy','agent.woke','agent.intent','book.refused','book.fill','book.order','book.mark','agent.thought') ORDER BY seq", agents):
+kinds = ('agent.strategy', 'agent.woke', 'agent.intent', 'book.refused', 'book.fill', 'book.order', 'book.mark', 'agent.thought')
+rows = db.execute(f"SELECT at, kind, agent, payload FROM ledger WHERE agent IN ({marks}) AND kind IN ({','.join('?' * len(kinds))}) "
+                  "AND at >= ? AND at <= ? ORDER BY seq", (*agents, *kinds, since, until)) if agents else []
+for at, kind, agent, payload in rows:
     p = json.loads(payload)
     row = out[agent]
-    if kind == "agent.born":
-        row["born"] = {"at": at, "founder": p.get("founder"), "family": p.get("family"), "code_sha256": p.get("code_sha256"), "style": p.get("style")}
-    elif kind == "agent.strategy":
+    if kind == "agent.strategy":
         row["strategy"].append({"at": at, "code_sha256": p.get("code_sha256"), "note": str(p.get("note") or p.get("reason") or "")[:200],
                                 "control": p.get("control"), "family": p.get("family")})
     elif kind == "agent.woke":
@@ -838,13 +1085,44 @@ for at, kind, agent, payload in db.execute(
     elif kind == "book.mark" and p.get("book") == "options-shadow":
         row["mark"] = {"at": at, "equity": p.get("equity"), "cash": p.get("cash"), "realized": p.get("realized"), "fees": p.get("fees"), "holdings": p.get("holdings")}
     elif kind == "agent.thought":
-        row["thoughts"] = (row["thoughts"] + [[at, str(p.get("text") or "")[:500]]])[-4:]
-for at, agent, payload in db.execute(f"SELECT at, agent, payload FROM ledger WHERE kind = 'agent.born' AND agent IN ({marks})", agents):
-    p = json.loads(payload)
-    if out[agent]["born"] is None:
-        out[agent]["born"] = {"at": at, "founder": p.get("founder"), "family": p.get("family"), "code_sha256": p.get("code_sha256"), "style": p.get("style")}
+        row["thoughts"].append([at, str(p.get("text") or "")[:400]])
+print(json.dumps({a: r for a, r in out.items() if r["woke"]}, separators=(",", ":")))
+'''
+CHAINS_QUERY = r'''# READ-ONLY (sqlite mode=ro): every structure chain the House showed its structure agents in the day's window, as it
+# recorded them (recordings.sqlite, `House._cached` "structure-chain:..." keys), a row as [occ, bid, ask, iv, delta,
+# as_of, spot]. No order, no write.
+import gzip, json, sqlite3
+since, until = __SINCE__, __UNTIL__
+db = sqlite3.connect('file:/workspace/state/recordings.sqlite?mode=ro', uri=True)
+out = []
+for source, started, received, payload in db.execute(
+        "SELECT source, started, received, payload FROM snapshots WHERE received >= ? AND received <= ? AND source LIKE 'structure-chain:%' "
+        "ORDER BY received", (since, until)):
+    rows = json.loads(gzip.decompress(payload))
+    out.append({"source": source, "started": started, "received": received,
+                "rows": [[r.get("occ") or r.get("symbol"), r.get("bid"), r.get("ask"), r.get("iv"), r.get("delta"), r.get("as_of"), r.get("underlying_price")]
+                         for r in rows if isinstance(r, dict)]})
 print(json.dumps(out, separators=(",", ":")))
 '''
+
+
+def bars_query(day: str = DAY, founders: Sequence[str] = FOUNDERS) -> str:
+    begin, end = day_window(day)
+    from datetime import date as _date, timedelta as _timedelta
+
+    before = (_date.fromisoformat(day) - _timedelta(days=1)).isoformat()
+    return _fill(BARS_QUERY, since=begin, until=end, features_from=f"{before}T12:00:00Z",
+                 symbols=founder_symbols([load_founder(name) for name in founders]))
+
+
+def live_query(day: str = DAY, founders: Sequence[str] = FOUNDERS) -> str:
+    begin, end = day_window(day)
+    return _fill(LIVE_QUERY, since=_sec(begin), until=_sec(end), founders=sorted({load_founder(name).founder for name in founders}))
+
+
+def chains_query(day: str = DAY) -> str:
+    begin, end = day_window(day)
+    return _fill(CHAINS_QUERY, since=begin, until=end)
 
 
 def bar_keys(founders: Sequence[str] = FOUNDERS) -> str:
@@ -861,11 +1139,16 @@ def bar_keys(founders: Sequence[str] = FOUNDERS) -> str:
 def live_summary(live: Mapping[str, Any], *, since: str = "") -> dict[str, dict[str, Any]]:
     """What each live structure founder did (LIVE_QUERY's rows), by its founder: its agent, birth, first wake, wakes,
     intents, the House's and the book's refusals, its fills on options-shadow (opens, closes, realized after fees), the
-    structures it still held at the last row, strategy changes (a rewrite, a pause), and its latest thought."""
-    out = {}
-    for agent, row in sorted(live.items()):
+    structures it still held at the last row, strategy changes (a rewrite, a pause), its latest thought and a digest of
+    every thought (`runs_of`). Where several agents alive that day descend from one founder, the one born first is
+    the founder's row and the others are named under `others`."""
+    out: dict[str, dict[str, Any]] = {}
+    for agent, row in sorted(live.items(), key=lambda pair: str((pair[1].get("born") or {}).get("at") or "")):
         founder = (row.get("born") or {}).get("founder") or (row.get("born") or {}).get("family")
         if not founder:
+            continue
+        if founder in out:
+            out[founder]["others"].append(agent)
             continue
         woke = [w for w in row.get("woke") or [] if w[0] >= since]
         fills = [f for f in row.get("fills") or [] if f.get("book") == BOOK and f["at"] >= since]
@@ -878,6 +1161,7 @@ def live_summary(live: Mapping[str, Any], *, since: str = "") -> dict[str, dict[
                 for reason in r.get("reasons") or ["?"]:
                     reasons[str(reason)[:160]] = reasons.get(str(reason)[:160], 0) + 1
         closes = [f for f in fills if f["side"] == "sell"]
+        thoughts = [t for t in row.get("thoughts") or [] if t[0] >= since]
         out[founder] = {"agent": agent, "born": (row.get("born") or {}).get("at"), "first_wake_today": woke[0][0] if woke else None,
                         "wakes": len(woke), "intents": sum(1 for i in row.get("intents") or [] if i["at"] >= since and i.get("book") == BOOK),
                         "refusals": reasons, "opens": sum(1 for f in fills if f["side"] == "buy"), "closes": len(closes),
@@ -887,13 +1171,49 @@ def live_summary(live: Mapping[str, Any], *, since: str = "") -> dict[str, dict[
                         "fills": [{k: f.get(k) for k in ("at", "side", "market_id", "quantity", "price", "fee_usd", "realized", "flat", "reason")} for f in fills],
                         "held_at_end": [code for code, q in held.items() if q > 0],
                         "strategy_changes": [{k: c.get(k) for k in ("at", "control", "code_sha256", "note")} for c in row.get("strategy") or []],
-                        "last_mark": row.get("mark"), "last_thought": (row.get("thoughts") or [[None, None]])[-1]}
+                        "last_mark": row.get("mark"), "last_thought": (thoughts or [[None, None]])[-1],
+                        "thought_runs": runs_of([(at, digest(text)) for at, text in thoughts]), "others": [],
+                        "thought_digests": [[at, digest(text)] for at, text in thoughts]}
+    return out
+
+
+def thought_agreement(forward: Mapping[str, Any] | None, live: Mapping[str, Mapping[str, Any]], *, wake_minutes: Mapping[str, float] | None = None) -> dict[str, Any]:
+    """Whether the forward twin gave the live founder's reasons at the same minutes. Each live thought of the
+    founder's OWN code (before its first strategy change: a rewrite or a pause) against the forward thoughts within
+    one wake interval of it, both digested (`digest`: the numbers out). Per founder: the live thoughts compared, how
+    many had a forward thought that near, how many of those said the same, and the first three that did not."""
+    twins = {f["founder"]: f for f in (forward or {}).get("founders") or []}
+    out: dict[str, Any] = {}
+    for founder, mine in sorted(live.items()):
+        twin = twins.get(founder)
+        if twin is None:
+            continue
+        tolerance = 60.0 * float((wake_minutes or {}).get(founder) or twin.get("wake_minutes") or 10)
+        cut = min((str(c.get("at")) for c in mine.get("strategy_changes") or []), default="9999")
+        runs = [(parse_ts(first), parse_ts(last), text) for first, last, _, text in twin.get("thought_runs") or []]
+        compared = near = same = 0
+        differ = []
+        for at, text in mine.get("thought_digests") or []:
+            moment = parse_ts(at)
+            if at >= cut or moment is None:
+                continue
+            compared += 1
+            close = [said for begin, end, said in runs if begin - tolerance <= moment <= end + tolerance]
+            if close:
+                near += 1
+                if text in close:
+                    same += 1
+                elif len(differ) < 3:
+                    differ.append({"live_at": at, "live": text, "forward_near": close[:2]})
+        out[founder] = {"live_thoughts_compared": compared, "with_a_forward_thought_near": near, "same_digest": same,
+                        "share_same": round(same / near, 3) if near else None, "cut_at_first_strategy_change": None if cut == "9999" else cut,
+                        "first_differences": differ}
     return out
 
 
 def compare(session: Mapping[str, Any], from_birth: Mapping[str, Any] | None, live: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """One row a founder: the forward test over the whole recorded session, the forward test from the live founder's
-    first wake, and the live founder."""
+    """One row a founder: the forward test over the recorded session (all founders on one floor, the first start),
+    the forward test from the live founder's first wake, and the live founder."""
     def brief(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         if row is None:
             return None
@@ -905,33 +1225,22 @@ def compare(session: Mapping[str, Any], from_birth: Mapping[str, Any] | None, li
     out = []
     for founder in sorted(set(a) | set(live)):
         mine = live.get(founder)
-        out.append({"founder": founder, "forward_session": brief(a.get(founder)), "forward_from_birth": brief(b.get(founder)),
+        out.append({"founder": founder, "forward_recorded_session": brief(a.get(founder)), "forward_from_birth": brief(b.get(founder)),
                     "live": None if mine is None else {k: mine[k] for k in ("agent", "first_wake_today", "wakes", "intents", "opens", "closes",
                                                                              "closed_structures", "realized_usd", "held_at_end", "refusals",
-                                                                             "strategy_changes")}})
+                                                                             "strategy_changes", "others")}})
     return out
-
-
-#: READ-ONLY: every structure chain the House showed its structure agents that day, as it recorded them
-#: (`recordings.sqlite`, `House._cached` "structure-chain:..." keys), a row as [occ, bid, ask, iv, delta, as_of, spot].
-CHAINS_QUERY = r'''import gzip, json, sqlite3
-db = sqlite3.connect('file:/workspace/state/recordings.sqlite?mode=ro', uri=True)
-out = []
-for source, started, received, payload in db.execute(
-        "SELECT source, started, received, payload FROM snapshots WHERE received >= 1790341200 AND source LIKE 'structure-chain:%' ORDER BY received"):
-    rows = json.loads(gzip.decompress(payload))
-    out.append({"source": source, "started": started, "received": received,
-                "rows": [[r.get("occ") or r.get("symbol"), r.get("bid"), r.get("ask"), r.get("iv"), r.get("delta"), r.get("as_of"), r.get("underlying_price")]
-                         for r in rows if isinstance(r, dict)]})
-print(json.dumps(out, separators=(",", ":")))
-'''
 
 
 def compare_chains(snapshots: str | Path, house_chains: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """The chain the forward test shows against the chains the live House showed (CHAINS_QUERY): each recorded chain
     against the last snapshot before the House finished reading it. Per row the House showed: whether the recording
     holds the contract at all (the recorder's 4% and 12% bands against the chain's 20%), the difference of the mids
-    (the two reads are up to a minute apart), and of the greeks (Alpaca's against the forward test's Black-Scholes)."""
+    (the two reads are up to a minute apart), and of the greeks (Alpaca's against the forward test's Black-Scholes) on
+    contracts of 1 day or more ONLY: Alpaca gives no greeks on a contract expiring today, so nothing here validates a
+    same-day Black-Scholes delta (`*_0dte_rows_forward_delta_computable` only counts where one could be solved).
+    `*_rows_delta_missing_house`: rows of 1 day or more the House showed WITHOUT a delta that the forward chain carries
+    one for (a founder that keeps only rows with a delta could pick one forward and not live)."""
     chains = sorted(house_chains, key=lambda c: float(c.get("received") or 0))
     stats: dict[str, dict[str, list[float]]] = {}
     counts: dict[str, int] = {}
@@ -954,13 +1263,15 @@ def compare_chains(snapshots: str | Path, house_chains: Sequence[Mapping[str, An
                 continue
             add(kind, "abs_mid_difference", abs((float(row["bid"]) + float(row["ask"])) / 2 - (float(bid) + float(ask)) / 2))
             zero = "20" + str(occ)[-15:-9] == today.replace("-", "")
+            touch = snap.spot.get(str(occ)[:-15])
+            mine = greeks(row, (touch[0] + touch[1]) / 2 if touch else None, snap.t)
             if zero:
                 count(f"{kind}_0dte_rows")
                 if delta is None:
                     count(f"{kind}_0dte_rows_house_no_delta")
+                if mine[1] is not None:
+                    count(f"{kind}_0dte_rows_forward_delta_computable")
                 continue
-            touch = snap.spot.get(str(occ)[:-15])
-            mine = greeks(row, (touch[0] + touch[1]) / 2 if touch else None, snap.t)
             if delta is None or mine[1] is None:
                 count(f"{kind}_rows_delta_missing_{'house' if delta is None else 'forward'}")
                 continue
@@ -1093,10 +1404,31 @@ def build_calibration_store(snapshots: str | Path, store_path: str | Path, fit: 
             "last": _sec(last) if last else None, "copied_from_local": copied}
 
 
+def stored_underlier_read_only(local_store: str | Path) -> Callable[[str, str, str, str], list[dict[str, Any]]]:
+    """`options_history.stored_underlier` over a READ-ONLY connection (`?mode=ro`): the local copy's `underlier_bars`
+    (a bar whose close is in [start, end]). Reviewed Sept 25: building `OptionsHistory` on the shared copy runs its
+    SCHEMA and a commit there, and a fit module with a newer SCHEMA (`--fit-from`) would write into the copy every
+    other run's replays read."""
+    path = Path(local_store).expanduser()
+
+    def underlier_bars(symbol: str, timeframe: str, start: str, end: str) -> list[dict[str, Any]]:
+        begin, finish = parse_ts(start) if start else None, parse_ts(end) if end else None
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            rows = db.execute("SELECT payload FROM underlier_bars WHERE symbol = ? AND timeframe = ? AND ts >= ? AND ts <= ? ORDER BY ts",
+                              (symbol.upper(), timeframe, 0.0 if begin is None else begin, 1e18 if finish is None else finish))
+            return [json.loads(payload) for (payload,) in rows]
+        finally:
+            db.close()
+
+    return underlier_bars
+
+
 def _underlier(fit: Any, local_store: str | Path | None, spots: Mapping[str, Sequence[tuple[float, float]]]) -> Callable[..., list[dict[str, Any]]]:
-    """`underlier_bars(symbol, "15Min", start, end)` for the fit's moneyness: the local copy's bars through Sept 24,
-    then the day's 15-minute closes of the snapshots' mids (close-stamped)."""
-    stored = fit.stored_underlier(fit.OptionsHistory(Path(local_store).expanduser())) if local_store else None
+    """`underlier_bars(symbol, "15Min", start, end)` for the fit's moneyness: the local copy's bars through Sept 24
+    (read-only: `stored_underlier_read_only`), then the day's 15-minute closes of the snapshots' mids (close-stamped).
+    `fit` is not asked for a store."""
+    stored = stored_underlier_read_only(local_store) if local_store else None
     built: dict[str, list[dict[str, Any]]] = {}
     for symbol, points in spots.items():
         closes: dict[int, float] = {}
@@ -1254,6 +1586,21 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
         zero = [p for p in pairs if p["expiry"] == day]
         if zero:
             out["held_out_zero_dte"] = {"s3_table": judge(fit, zero, fit.CALIBRATED_SPREADS), "current_estimate": judge(fit, zero, None)}
+        # Reviewed Sept 25: the day's pairs are older than S3's (a bar's close synthesized from minute snapshots, and
+        # later quotes), and a pair's need grows with its age, so the held-out miss above mixes ages. The same judgement
+        # on pairs within a minute of the bar's close (the pairing at max_gap 60 is the pairing at max_gap 300 cut to
+        # those pairs), without the day's own expiries, and S3's table judged in sample on S3's own days.
+        near = [p for p in pairs if p["age"] <= 60.0]
+        s3_pairs = calibration_pairs(fit, store, underlier, start="", end=before, max_gap=max_gap) if local_store else []
+        out["held_out_age_matched"] = {
+            "median_pair_age_seconds": {"day": _median([p["age"] for p in pairs]), "day_within_60s": _median([p["age"] for p in near]),
+                                        "s3_days": _median([p["age"] for p in s3_pairs])},
+            "day_within_60s": {"pairs": len(near), "s3_table": judge(fit, near, fit.CALIBRATED_SPREADS),
+                               "s3_table_without_the_days_expiries": judge(fit, [p for p in near if p["expiry"] != day], fit.CALIBRATED_SPREADS),
+                               "current_estimate": judge(fit, near, None)},
+            "s3_days_in_sample": {"pairs": len(s3_pairs), "s3_table": judge(fit, s3_pairs, fit.CALIBRATED_SPREADS),
+                                  "s3_table_within_60s": judge(fit, [p for p in s3_pairs if p["age"] <= 60.0], fit.CALIBRATED_SPREADS),
+                                  "pairs_within_60s": sum(1 for p in s3_pairs if p["age"] <= 60.0)} if s3_pairs else None}
         store.close()
         return out
     finally:
@@ -1273,68 +1620,234 @@ def _write(result: Mapping[str, Any], out: str | None) -> None:
         print(text)
 
 
+def zero_dte_exposure(founders: Sequence[str] = FOUNDERS) -> dict[str, dict[str, Any]]:
+    """Which founders the live chain's missing greeks on today's expiries bear on (reviewed Sept 25, 2026: the first
+    reading named six founders as blocked, but five of them can never pick a same-day expiry, and the six it called
+    unaffected read the chain's delta first).
+
+    A founder can pick a same-day expiry when the lowest value its nearest leg's expiry parameter may take is 0:
+    `near_dte_min` where it declares one (the diagonal's near leg), else `dte_min`, over its PARAMS today and the
+    bounds the edit replay and the lab may move it within (`NEEDS.parameter_rules.bounds`). How it reads a
+    contract's delta, from its code: 'chain delta only' keeps only the rows the chain gives a delta (the
+    `_num(r.get("delta"), None) is not None` filter), so with none on today's expiries it never picks one live;
+    'chain delta first' takes the chain's delta where there is one and solves its own only where not (`_delta`), so
+    greeks on today's expiries would change its strike choice. Verdict: `blocked` (can pick today's expiry, chain
+    delta only), `changed_by_greeks` (can pick it, chain delta first), `unaffected` (can never pick it)."""
+    out: dict[str, dict[str, Any]] = {}
+    for name in founders:
+        agent = load_founder(name)
+        bounds = dict((agent.needs.get("parameter_rules") or {}).get("bounds") or {})
+        key = "near_dte_min" if ("near_dte_min" in agent.params or "near_dte_min" in bounds) else "dte_min"
+        values = [v for v in (agent.params.get(key), (bounds.get(key) or [None])[0]) if v is not None]
+        can = bool(values) and min(float(v) for v in values) <= 0
+        if 'if row["delta"] is not None:\n        return row["delta"]' in agent.code:
+            reads = "chain delta first"
+        elif '_num(r.get("delta"), None) is not None' in agent.code:
+            reads = "chain delta only"
+        else:
+            reads = "unknown"
+        verdict = "unaffected" if not can else {"chain delta only": "blocked", "chain delta first": "changed_by_greeks"}.get(reads, "unknown")
+        out[agent.founder] = {"expiry_parameter": key, "params": agent.params.get(key), "bounds": bounds.get(key),
+                              "can_pick_todays_expiry": can, "reads_delta": reads, "verdict": verdict}
+    return out
+
+
+def path_brief(row: Mapping[str, Any], started: str | None) -> dict[str, Any]:
+    """One founder on one floor, briefly: what it asked, opened and closed, and its money."""
+    opens = [t for t in row["fills"] if t["action"] == "open"]
+    return {"started_from": started, "intents_asked": row["intents_asked"], "opens": row["opens"], "closes": row["closes"],
+            "closed_structures": row["closed_structures"], "realized_usd": row["realized_usd"],
+            "unrealized_usd": round(sum(h["unrealized_usd"] or 0 for h in row["held_at_end"]), 2),
+            "held_at_end": [h["market_id"] for h in row["held_at_end"]], "spread_paid_usd": row["spread_paid_usd"],
+            "opened": [[t["at"][11:19], t["market_id"], t["held_price"]] for t in opens],
+            "asked": [[d["at"][11:19], [(a.get("action"), a.get("structure"), sorted(str(leg.get("occ")) for leg in a.get("legs") or []))
+                                        for a in d["asked"]]] for d in row["decisions_with_intents"]]}
+
+
+def path_ranges(briefs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """A founder's figures over several floors (start snapshots, company) as [lowest, highest]."""
+    def span(key: str) -> list[float]:
+        values = [b[key] for b in briefs]
+        return [min(values), max(values)] if values else []
+    return {"floors": len(briefs), "realized_usd": span("realized_usd"), "unrealized_usd": span("unrealized_usd"),
+            "closed_structures": span("closed_structures"), "opens": span("opens"),
+            "floors_that_opened": sum(1 for b in briefs if b["opens"]),
+            "structures_opened": sorted({o[1] for b in briefs for o in b["opened"]})}
+
+
+def compact(result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """A floor's result for the published file: decision snapshots as counts, the first 12 decisions a founder."""
+    if result is None:
+        return None
+    out = dict(result)
+    checks = dict(out["checks"])
+    checks["decision_snapshots"] = {agent: len(rows) for agent, rows in (checks.get("decision_snapshots") or {}).items()}
+    out["checks"] = checks
+    founders = []
+    for row in out["founders"]:
+        row = dict(row)
+        row["decisions_with_intents"] = row["decisions_with_intents"][:12]
+        founders.append(row)
+    out["founders"] = founders
+    return out
+
+
+def sha256(path: str | Path | None) -> str | None:
+    if not path or not Path(path).exists():
+        return None
+    digest_ = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest_.update(chunk)
+    return digest_.hexdigest()
+
+
+ARCHIVE = Path("~/Work/.options-history").expanduser()
+
+
+def _default(value: str | None, name: str) -> str | None:
+    """An input's path: the flag's ('' for none), else the archived file beside the snapshots when it exists."""
+    if value is not None:
+        return value or None
+    path = ARCHIVE / name
+    return str(path) if path.exists() else None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys", "query-bars", "query-live", "query-chains"))
-    parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
-    parser.add_argument("--house-bars", default=None, help="the House's recorded bars of the day (BARS_QUERY's output)")
-    parser.add_argument("--local-store", default=str(Path("~/Work/.options-history/options_history.sqlite").expanduser()))
-    parser.add_argument("--live", default=None, help="the live founders' day (LIVE_QUERY's output): compared, and read by --from-birth")
+    parser.add_argument("--day", default=DAY, help="the session (New York date): the inputs' names, the queries' window, the calibration's day")
+    parser.add_argument("--snapshots", default=None, help="the recorder's file (default ~/Work/.options-history/live-<day>.jsonl)")
+    parser.add_argument("--house-bars", default=None, help="BARS_QUERY's output (default house-bars-<day>.json beside the snapshots; '' for none)")
+    parser.add_argument("--local-store", default=str(ARCHIVE / "options_history.sqlite"))
+    parser.add_argument("--live", default=None, help="LIVE_QUERY's output (default house-live-<day>.json): compared, and read by --from-birth")
     parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake, as the floor ran the day")
     parser.add_argument("--v4-at", default=V4_STARTED, help="when the floor began re-pricing structure limits (the --from-birth run)")
     parser.add_argument("--before-v4", action="store_true", help="also run the session as the House ran before V4 (no re-pricing)")
     parser.add_argument("--what-if-0dte-greeks", action="store_true", help="also run the session with greeks on today's expiries (a what-if)")
-    parser.add_argument("--house-chains", default=None, help="the House's recorded structure chains (CHAINS_QUERY's output): compared")
+    parser.add_argument("--paths", type=int, default=1, help="start each floor on each of the first N snapshots it may start on")
+    parser.add_argument("--alone", action="store_true", help="also run every founder alone on its own floor (session and what-if)")
+    parser.add_argument("--house-chains", default=None, help="CHAINS_QUERY's output (default house-chains-<day>.json): compared")
     parser.add_argument("--founders", default=",".join(FOUNDERS))
     parser.add_argument("--start", default=None, help="ISO time: simulate from here")
-    parser.add_argument("--until", default=None, help="ISO time: simulate to here")
-    parser.add_argument("--work", default=None, help="where a run's ledger and book file live (deleted after)")
+    parser.add_argument("--until", default=None, help="ISO time: simulate to here (default the day's 16:00 New York)")
+    parser.add_argument("--work", default=None, help="where the floors' ledgers and book files live (deleted after)")
     parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, while main has no fit")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
     founders = [f for f in args.founders.split(",") if f]
+    day = args.day
+    snapshots = args.snapshots or str(ARCHIVE / f"live-{day}.jsonl")
     if args.command == "bar-keys":
         print(bar_keys(founders))
         return 0
-    if args.command.startswith("query-"):  # the read-only query's text, to run on the box through rx.py
-        print({"query-bars": BARS_QUERY, "query-live": LIVE_QUERY, "query-chains": CHAINS_QUERY}[args.command])
+    if args.command.startswith("query-"):  # the read-only query's text for the day, to run on the box through rx.py
+        print({"query-bars": lambda: bars_query(day, founders), "query-live": lambda: live_query(day, founders),
+               "query-chains": lambda: chains_query(day)}[args.command]())
         return 0
     if args.command == "calibrate":
         began = time.time()
-        result = calibrate(args.snapshots, fit_from=args.fit_from, local_store=args.local_store, work=args.work)
-        result["run"] = {"snapshots_file": str(args.snapshots), "seconds": round(time.time() - began, 1)}
+        result = calibrate(snapshots, fit_from=args.fit_from, local_store=args.local_store, work=args.work, day=day)
+        result["run"] = {"snapshots_file": snapshots, "snapshots_sha256": sha256(snapshots), "day": day, "seconds": round(time.time() - began, 1)}
         _write(result, args.out)
         return 0
-    common = dict(house_bars=args.house_bars, local_store=args.local_store, founders=founders, work=args.work,
-                  start=parse_ts(args.start) if args.start else None, until=parse_ts(args.until) if args.until else None,
-                  log=lambda text: print(text, file=sys.stderr, flush=True))
+    house_bars = _default(args.house_bars, f"house-bars-{day}.json")
+    live_path = _default(args.live, f"house-live-{day}.json")
+    chains_path = _default(args.house_chains, f"house-chains-{day}.json")
+    until = parse_ts(args.until) if args.until else datetime.combine(datetime.fromisoformat(day).date(), datetime.min.time().replace(hour=16),
+                                                                      NEW_YORK).timestamp()
+    start = parse_ts(args.start) if args.start else None
+    spots = founder_symbols([load_founder(name) for name in founders])  # every floor starts once every founder's symbol is quoted
+    live = live_summary(json.loads(Path(live_path).read_text(encoding="utf-8"))) if live_path else None
+    offsets = range(max(1, args.paths))
+    main_house = None  # the House on main: re-pricing a structure limit beyond the band from the start
+    configs: list[tuple[tuple[str, str, int], RunConfig]] = []
 
-    def timed(label: str, **kw: Any) -> dict[str, Any]:
-        began = time.time()
-        out = run(args.snapshots, **common, **kw)
-        out["run"] = {"label": label, "seconds": round(time.time() - began, 1),
-                      "starts": {k: iso(v) for k, v in (kw.get("starts") or {}).items() if v},
-                      "reprice_from": None if kw.get("reprice_from") is None else ("never" if kw["reprice_from"] == float("inf") else iso(kw["reprice_from"]))}
-        return out
+    def add(key: tuple[str, str, int], **kw: Any) -> None:
+        configs.append((key, RunConfig(label=" / ".join(map(str, key)), start=start, start_after=key[2], require_spots=spots, **kw)))
 
-    result: dict[str, Any] = {"session": timed("every founder over the whole recorded session, under the House on main (re-pricing from the start)")}
+    variants = [("session", {"reprice_from": main_house})]
     if args.before_v4:
-        result["session_before_v4"] = timed("the same, under the House before V4 (no re-pricing: release 20260925T163626Z)", reprice_from=float("inf"))
-    if args.live:
-        live = live_summary(json.loads(Path(args.live).read_text(encoding="utf-8")))
-        result["live"] = live
-        if args.from_birth:
-            births = {founder: parse_ts(row["first_wake_today"]) for founder, row in live.items() if row.get("first_wake_today")}
-            result["from_birth"] = timed("each founder from its live first wake, the House re-pricing from V4 as the floor did",
-                                         starts=births, reprice_from=parse_ts(args.v4_at))
-        result["comparison"] = compare(result["session"], result.get("from_birth"), live)
+        variants.append(("session_before_v4", {"reprice_from": float("inf")}))
     if args.what_if_0dte_greeks:
-        result["what_if_0dte_greeks"] = timed("WHAT-IF, not the House: the session with Black-Scholes greeks on today's expiries, which the live "
-                                              "feed does not carry", zero_dte_greeks=True)
-    if args.house_chains:
-        result["chains_against_the_house"] = compare_chains(args.snapshots, json.loads(Path(args.house_chains).read_text(encoding="utf-8")))
-    result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live,
-                        "house_chains": args.house_chains, "v4_at": args.v4_at}
+        variants.append(("what_if_0dte_greeks", {"reprice_from": main_house, "zero_dte_greeks": True}))
+    for name, kw in variants:
+        for k in offsets:
+            add((name, "together", k), founders=founders, **kw)
+            if args.alone and name != "session_before_v4":
+                for founder in founders:
+                    add((name, f"alone:{founder}", k), founders=[founder], **kw)
+    if args.from_birth and live:
+        births = {founder: parse_ts(row["first_wake_today"]) for founder, row in live.items() if row.get("first_wake_today")}
+        add(("from_birth", "together", 0), founders=founders, starts=births, reprice_from=parse_ts(args.v4_at))
+    began = time.time()
+    results = run_many(snapshots, [config for _, config in configs], house_bars=house_bars, local_store=args.local_store, work=args.work,
+                       until=until, log=lambda text: print(text, file=sys.stderr, flush=True))
+    by = {key: result for (key, _), result in zip(configs, results)}
+    labels = {"session": "every founder on one floor over the recorded session, the House on main (re-pricing from the start)",
+              "session_before_v4": "the same under the House before V4 (no re-pricing: release 20260925T163626Z)",
+              "what_if_0dte_greeks": "WHAT-IF, not the House: the recorded session with Black-Scholes greeks on today's expiries, which the live "
+                                     "feed does not carry and nothing has validated",
+              "from_birth": "each founder from its live first wake on one floor, the House re-pricing from V4 as the floor did"}
+    result: dict[str, Any] = {}
+    for name in ("session", "session_before_v4", "from_birth", "what_if_0dte_greeks"):
+        if (name, "together", 0) in by:
+            result[name] = compact(by[(name, "together", 0)])
+            result[name]["run"]["label"] = labels[name]
+    paths: dict[str, Any] = {"note": "each founder on the floor it shares with every founder ('together') and on a floor of its own ('alone'), "
+                                     "started on each of the first snapshots a floor may start on: one figure a floor, [lowest, highest] over them",
+                             "starts": sorted({r["checks"]["started_from"] for r in results if r["checks"]["started_from"] and r["run"]["starts"] == {}})}
+    for name, _ in variants:
+        section: dict[str, Any] = {}
+        for founder in founders:
+            seed_founder = load_founder(founder).founder
+            entry: dict[str, Any] = {}
+            for company in ("together", f"alone:{founder}"):
+                briefs = []
+                for k in offsets:
+                    got = by.get((name, company, k))
+                    if got is None:
+                        continue
+                    row = next(f for f in got["founders"] if f["seed"] == founder)
+                    briefs.append(path_brief(row, got["checks"]["started_from"]))
+                if briefs:
+                    tag = "together" if company == "together" else "alone"
+                    entry[tag] = {"range": path_ranges(briefs), "per_start": briefs}
+            section[seed_founder] = entry
+        desks = [by[(name, "together", k)]["desk"] for k in offsets if (name, "together", k) in by]
+        section["desk_together"] = {"realized_usd": [min(d["realized_usd"] for d in desks), max(d["realized_usd"] for d in desks)],
+                                    "closed_structures": [min(d["closed_structures"] for d in desks), max(d["closed_structures"] for d in desks)],
+                                    "unrealized_usd_at_end": [min(d["unrealized_usd_at_end"] for d in desks), max(d["unrealized_usd_at_end"] for d in desks)],
+                                    "metric_4_spread_share_of_premium_median": [d["metric_4_spread_share_of_premium_median"] for d in desks],
+                                    "agents_positive_on_2_closed": max(d["agents_positive_on_2_closed"] for d in desks)}
+        paths[name] = section
+    result["paths"] = paths
+    exposure = zero_dte_exposure(founders)
+    if args.what_if_0dte_greeks and args.alone:
+        for founder in founders:
+            changed = 0
+            for k in offsets:
+                a, b = by.get(("session", f"alone:{founder}", k)), by.get(("what_if_0dte_greeks", f"alone:{founder}", k))
+                if a and b:
+                    rows = [next(f for f in r["founders"] if f["seed"] == founder) for r in (a, b)]
+                    changed += path_brief(rows[0], None)["asked"] != path_brief(rows[1], None)["asked"]
+            exposure[load_founder(founder).founder]["what_if_changed_its_orders_alone"] = f"{changed} of {len(offsets)} starts"
+    result["zero_dte_exposure"] = exposure
+    result["checks_every_floor"] = {key: sum(r["checks"][key] for r in results) for key in
+                                    ("decisions", "decision_snapshot_after_clock", "fills", "fills_not_on_newer_snapshot", "fills_failing_audit")}
+    result["checks_every_floor"]["floors"] = len(results)
+    result["market"] = results[0]["market"] if results else None
+    if live is not None:
+        result["live"] = {founder: {k: v for k, v in row.items() if k != "thought_digests"} for founder, row in live.items()}
+        result["comparison"] = compare(by.get(("session", "together", 0)), by.get(("from_birth", "together", 0)), live)
+        if ("from_birth", "together", 0) in by:
+            result["thought_agreement"] = thought_agreement(by[("from_birth", "together", 0)], live)
+    if chains_path:
+        result["chains_against_the_house"] = compare_chains(snapshots, json.loads(Path(chains_path).read_text(encoding="utf-8")))
+    result["inputs"] = {"day": day, "until": iso(until), "seconds": round(time.time() - began, 1),
+                        **{name: {"path": path, "sha256": sha256(path)} for name, path in
+                           (("snapshots", snapshots), ("house_bars", house_bars), ("house_live", live_path), ("house_chains", chains_path))},
+                        "local_store": args.local_store, "v4_at": args.v4_at}
     _write(result, args.out)
     return 0
 
