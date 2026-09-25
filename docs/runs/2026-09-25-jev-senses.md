@@ -261,7 +261,7 @@ recorded feed pricing them. The largest near-term volume with no feed: WTA match
 0.26M, F1 0.19M: ESPN's public scoreboards cover these sports, but the House's sports map does not. Sent to the
 Kalshi run at 10:31Z.
 
-### J1's ship rule, written before the post-ship data is read (12:24Z)
+### J1's ship rule, written before the post-ship data is read (12:22Z)
 
 The evaluation command ran once at 12:21Z as a smoke test of the pipeline on the first 30 minutes of rows (it
 works; those rows are too few to decide anything and the reading is not the decision). The rule, fixed now:
