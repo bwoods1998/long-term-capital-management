@@ -15,7 +15,8 @@ for a structure agent, by the House's OWN methods borrowed onto a small stand-in
 and $75 an order), `_structure_context` (the chain through `_chain`/`_expiry_chain` with its two-minute cache, 0 to
 `max_days_to_expiry` days, today's expiry until the 14:30 New York cut, 80 contracts an underlying nearest the money;
 `ctx["structures"]` from `structures.candidates`; `ctx["structure_rules"]`), `_intents`/`_structure_intent`/
-`_structure_refusal` (the House's refusals) and `_horizon_exits` (the entry cut and the 15:30 expiry-day close). The
+`_structure_refusal` (the House's refusals; since Deploy G, Sept 25, also `_structure_reach_refusal`, the chain's reach,
+and the practice-account switch, off as G ships it) and `_horizon_exits` (the entry cut and the 15:30 expiry-day close). The
 orders go through the REAL `league.book.Book` (caps, the risk engine, marks every 300 s, one closed trade a
 structure) into the REAL `league.options_shadow.OptionsShadowBroker`, whose fill rules are the live book's own: a fill
 only on a quote of every leg strictly newer than the order's acceptance, opens at the structure's ask and closes at its
@@ -477,7 +478,15 @@ BORROWED = ("snapshot", "_stamped", "_structure_context", "_structure_hours", "_
             "_trading_days", "_read_expiry", "_cached", "_opened_since", "_session_open", "_structure_row", "_real_limits",
             "is_structure_agent", "niche_of", "_feeds_wanted", "_intents", "_structure_intent", "_structure_refusal",
             "_refuse_intent", "_horizon_exits", "_cancel_structure_opens_at_cut", "_structure_expiry_close", "_structure_bid",
-            "_structure_resting", "_structure_sale")
+            "_structure_resting", "_structure_sale",
+            # Deploy G (Sept 25, 2026): the chain's reach (g/loop: an open with a leg outside the 160 contracts nearest the
+            # money in the chain the wake read is refused, as the replay refuses it) and the practice account's switch and
+            # migration (g/trackp: `_structure_context` names the book a wake trades on, `_structure_refusal` asks whether
+            # this is it). The switch is off here (`structure_practice_account`), as Deploy G ships it: the book stays
+            # options-shadow, and the practice-account route is never simulated.
+            "_note_structure_reach", "_structure_reach_refusal", "_structure_moving_context", "_structure_book",
+            "_structure_target", "_structure_practice_account", "_structure_books", "_structure_busy",
+            "_structure_practice_refusal", "_structure_move_opens_until", "_structure_unsendable", "_real_netting_refusal")
 
 
 class HouseShim:
@@ -485,6 +494,7 @@ class HouseShim:
     simulated books, clock and market data: no House is built, nothing else of it runs."""
 
     structure_book_name = BOOK
+    structure_practice_account = False  # Deploy G's switch, off as it ships (`House._structure_practice_account`)
 
     def __init__(self, clock: SimClock, ledger: Ledger, books: dict[str, Any], data: Bars, features: Features):
         self.clock = clock
@@ -529,10 +539,13 @@ for _name in BORROWED:
 
 
 class _ChainBook:
-    """What `House._chain` looks for among the books: an Alpaca book whose broker lists a chain."""
+    """What `House._chain` looks for among the books: an Alpaca book whose broker lists a chain. It is filed as
+    `alpaca-paper`, one of `House._structure_books`, so it has accounts to be asked about: none (no agent is ever
+    seated on it, so no agent is ever moving off it)."""
 
     def __init__(self, broker: ChainBroker):
         self.broker = broker
+        self.accounts: dict[str, Any] = {}
 
 
 # ------------------------------------------------------------------------------------------ the founders

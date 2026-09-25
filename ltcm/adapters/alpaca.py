@@ -379,7 +379,11 @@ class AlpacaBroker:
         #: What this account is, read ONCE from `GET /v2/account` (`_note_account`, Wave 2, Sept 25,
         #: 2026): {"kind": "margin" | "cash", "multiplier", "options_trading_level"}; None until read.
         self._account: "dict[str, Any] | None" = None
-        self._account_tried = 0.0
+        #: When the account was last asked for (monotonic). Minus infinity, never 0.0: `time.monotonic()`
+        #: counts from boot, so on a host up under `ACCOUNT_RETRY_SECONDS` (a fresh CI runner, a Sailbox
+        #: restored from a checkpoint) a 0.0 start skipped the FIRST read and left the type unknown (the
+        #: G review, Sept 25, 2026: CI run 36191065036 red on `(None, None) != ('margin', True)`).
+        self._account_tried = float("-inf")
 
     # ------------------------------------------------------------------- http
     def _call(
