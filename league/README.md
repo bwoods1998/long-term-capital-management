@@ -177,7 +177,9 @@ births pass 22.0 s of it at p50, and the log's tick lines 60-68 s apart at p50 i
    unread for three minutes stops paid OpenAI work (the tier reads "audits" and an alert says so),
    never the floor. When stopped, only
    agents holding real-money positions or orders are woken, so they can exit; research, Merton,
-   payouts and births wait.
+   payouts and births wait. A stop is told (one warning, and an info when business reopens) once it
+   has lasted two minutes (`STOPPED_TELL_SECONDS`; "three ticks" until the tick was halved to 30 s,
+   the review of #297).
 3. **Wake each agent that is due** (at most 16 a tick, 6 side by side; its own `wake_minutes`, 5 to
    1,440). If its code has not had its replay, one is started in the background. A rung-0 agent
    stops here. Otherwise the House seats it (limits and stake for its rung), builds its snapshot
@@ -525,7 +527,9 @@ births pass 22.0 s of it at p50, and the log's tick lines 60-68 s apart at p50 i
    asking the displacement scan once for each of 395 deferred research candidates. Inside a pass the
    scan answers each question (desk, evidenced, the newcomer family's proof, its forward score) once
    while the roster stands (`_scan_memo`): 399 scans were 10 questions on the T0 snapshot, and every
-   answer matched a fresh scan.
+   answer matched a fresh scan. A kept answer asks the research queue again for its replay-only
+   residents when the newcomer is evidenced (the House lane queues research beside the pass, and
+   research in flight keeps such a seat; the review of #297), and under a burst none is kept.
    Since Sept 23, 2026 every birth of this step (forks, founders, merged strategies, the refill)
    holds the probe box for the whole step, where each birth reads its NEEDS. When background work
    has that box, the step waits at most `probe_wait_seconds` (15 s) and the births are deferred to
