@@ -194,7 +194,7 @@ class TheOrderSent(unittest.TestCase):
             PAPER_BASE + f"/v2/orders/{PARENT}*": nested,
         })
         order = client.submit(intent)
-        self.assertEqual(transport.last["query"], {"nested": "true"})
+        self.assertEqual([c["query"] for c in transport.calls if c["path"] == f"/v2/orders/{PARENT}"], [{"nested": "true"}])
         self.assertEqual((order.status, order.filled_quantity), ("filled", D(1)))
         self.assertEqual(order.average_price, D(1) + D("0.10") - D("0.30") - D("0.35") + D("0.12"))
 
@@ -227,7 +227,8 @@ class TheOrderRead(unittest.TestCase):
 
     def test_a_filled_condor_is_one_fill_of_the_held_instrument_at_its_held_price(self):
         intent = order_intent()
-        order, client = self.read(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=intent)
+        client, _ = broker({PAPER_BASE + "/v2/account/activities/FILL*": []})
+        order, client = self.read(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=intent, client=client)
         self.assertEqual((order.status, order.filled_quantity, order.side), ("filled", D(1), "buy"))
         # K 1.00 + 0.10 - 0.30 - 0.35 + 0.12 = 0.57: a credit of 0.43 received, $57 at risk.
         self.assertEqual(order.average_price, D("0.57"))
@@ -235,6 +236,25 @@ class TheOrderRead(unittest.TestCase):
         self.assertEqual(order.limit_price, D("0.62"))  # the venue's -0.38 net read back as S
         answers = client.drain_structure_answers()
         self.assertEqual([a["stage"] for a in answers], ["fill"])
+
+    def test_the_first_fill_of_a_type_records_how_the_venue_lists_its_legs_fills(self):
+        rows = [activity(occ(580, "P"), "buy", "1", "0.10", "2026-09-25T14:00:01Z", order_id=f"leg-{occ(580, 'P')}"),
+                activity(occ(581, "P"), "sell", "1", "0.30", "2026-09-25T14:00:01Z", order_id=f"leg-{occ(581, 'P')}"),
+                activity("AAPL", "buy", "1", "234", "2026-09-25T14:00:02Z", order_id="other")]
+        client, transport = broker({PAPER_BASE + "/v2/account/activities/FILL*": rows})
+        client.parse_order(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=order_intent())
+        record = [a for a in client.drain_structure_answers() if a["stage"] == "activity"]
+        self.assertEqual(len(record), 1)
+        self.assertEqual(record[0]["detail"]["order_id_is"], ["leg"])
+        self.assertEqual([r["symbol"] for r in record[0]["detail"]["rows"]], [occ(580, "P"), occ(581, "P")])
+        self.assertEqual(transport.last["query"]["after"], "2026-09-25T14:00:00Z")
+        client.parse_order(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=order_intent())
+        self.assertEqual(len([c for c in transport.calls if "activities" in c["path"]]), 1)  # once a type
+
+    def test_a_failed_activity_read_never_stops_the_order_being_read(self):
+        client, _ = broker({PAPER_BASE + "/v2/account/activities/FILL*": (500, {}, b"down")})
+        order = client.parse_order(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=order_intent())
+        self.assertEqual(order.filled_quantity, D(1))
 
     def test_a_leg_ahead_of_the_others_is_pending(self):
         order, _ = self.read(condor_order(status="partially_filled", qty="2", filled=("2", "1", "1", "1"),

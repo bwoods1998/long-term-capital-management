@@ -194,6 +194,8 @@ LEG_FIELDS = ("id", "symbol", "side", "position_intent", "ratio_qty", "qty", "fi
 ACTIVITY_FIELDS = ("id", "order_id", "symbol", "side", "qty", "price", "cum_qty", "leaves_qty", "order_status", "transaction_time", "type")
 #: How many structure orders the adapter remembers by id (a session's are a few dozen).
 REMEMBERED_ORDERS = 2000
+#: How many times a type's first fill reads the FILL activities for the owner's record.
+ACTIVITY_READS = 5
 
 
 def _structures() -> Any:
@@ -326,6 +328,7 @@ class AlpacaBroker:
         #: each structure type, for the owner's record: `drain_structure_answers`.
         self._answers: list[dict[str, Any]] = []
         self._answered: set[tuple[str, str]] = set()
+        self._activity_reads: dict[str, int] = {}
 
     # ------------------------------------------------------------------- http
     def _call(
@@ -1011,6 +1014,7 @@ class AlpacaBroker:
             reason = message_of(row)
         if filled > 0 and average is not None:
             self._answer("fill", spec.type, compact_order(row))
+            self._record_leg_activities(row, spec)
         net = dec(row.get("limit_price"))
         limit = (k + net if opening else k - net) if net is not None else (intent.limit_price if intent else None)
         order = Order(
@@ -1036,6 +1040,32 @@ class AlpacaBroker:
         order._raw = {"status": row.get("status"), "order_class": "mleg", "structure": spec.type,
                       "legs": [_pick(leg, LEG_FIELDS) for leg in legs], **({"uneven_legs": uneven} if uneven else {})}
         return order
+
+    def _record_leg_activities(self, row: dict[str, Any], spec: Any) -> None:
+        """For the owner's record, once a type: the FILL activities of a filled structure's legs, as
+        the venue lists them (`GET /v2/account/activities/FILL` from the order's submission), which say
+        which order id a leg's fill carries -- the leg's own or the parent's; the docs do not. A book
+        reads fills from the order (`parse_order`), so this is a record, never a booking. Asked at most
+        `ACTIVITY_READS` times a type (the activity may trail the fill by seconds); a failure is silent."""
+        with self._structure_lock:
+            if ("activity", spec.type) in self._answered or self._activity_reads.get(spec.type, 0) >= ACTIVITY_READS:
+                return
+            self._activity_reads[spec.type] = self._activity_reads.get(spec.type, 0) + 1
+        try:
+            rows = self._call("GET", "/v2/account/activities/FILL",
+                              params={"after": row.get("submitted_at") or row.get("created_at"), "direction": "asc", "page_size": 100},
+                              what="alpaca fills (structure record)", ok=(200,))
+        except Exception:  # noqa: BLE001 - a record not kept is not a trade not booked
+            return
+        symbols = {leg.occ for leg in spec.legs}
+        ids = {str(row.get("id") or "")} | {str(leg.get("id") or "") for leg in row.get("legs") or [] if isinstance(leg, dict)}
+        mine = [_pick(r, ACTIVITY_FIELDS) for r in rows if isinstance(r, dict) and str(r.get("symbol") or "").upper() in symbols
+                and str(r.get("order_id") or "") in ids] if isinstance(rows, list) else []
+        if mine:
+            self._answer("activity", spec.type, {"parent": str(row.get("id") or ""), "leg_ids": sorted(ids - {str(row.get("id") or "")}),
+                                                 "rows": mine,
+                                                 "order_id_is": sorted({"parent" if r.get("order_id") == str(row.get("id")) else "leg"
+                                                                        for r in mine})})
 
     def _identify(self, legs: "list[dict[str, Any]]") -> Any:
         """The structure a multi-leg order's legs make, read from each leg's OCC symbol, `ratio_qty`
