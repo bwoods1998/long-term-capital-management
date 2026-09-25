@@ -65,10 +65,10 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | 0.4 | The scoreboard at T0 | done (below; Z, PR #298) |
 | H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); Sail's checkpoints recovered at 01:55:04Z, so the backup alert is quiet until the next failure; the updater's next CODE release is the last check |
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
-| H3 | The release train | built, PR #296 (CI green 05:31Z); owner deploy (Deploy A) |
+| H3 | The release train | merged 10:33:52Z (#296); ships in the options run's Deploy V (owner deploy) |
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
-| Z | The scoreboard | built, PR #298 (CI green); merges with Deploy A |
+| Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
@@ -145,7 +145,9 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
   `options_desk.seat_founders(self)` in `_births` lands on main before this run's Wave 0 (H5 rebases over it); (2) its
   structure-only hunks in `league/book.py` land before H4 (H4 rebases over them), with a test that non-structure books
   and positions behave exactly as before. Offered: H3 (#296) and Z (#298) merged to main before its 11:45Z merge so
-  Deploy V carries the release train into today's session, if it agrees by 11:15Z.
+  Deploy V carries the release train into today's session, if it agrees by 11:15Z. It agreed; **H3 (#296) merged to
+  main at 10:33:52Z (`2aa7690`) and Z (#298) at 10:33:56Z (`ce3b97c`)**, both with CI green (tests 3.11 and 3.14,
+  gateway). H3 is protected: the updater now refuses main's heads until an owner deploy ships them (Deploy V).
 
 **Answers to the options run's requests (06:07Z; also on its PR #299):**
 
