@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`, draft PR #323) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; 630 targeted tests OK after re-pointing the structure-invariance test to H4's book.py; CI running; Deploy A 20:10Z |
@@ -331,6 +332,21 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   its structure work (house.py +577 lines incl. the births-pass line, book.py structure hunks). Merging it into
   `a/integration` conflicted in `_enforce_horizon`: rebuilt by hand as main's per-book `_horizon_exits` (with the
   structure close) plus the H5 review's standing exits; `league/fees.py`'s docstring keeps both runs' paragraphs.
+
+- **C-family (#324, Wave 1; digest `d7d910fe` -> `555b7aac`, constitution `d0aa4c2a` -> `2fa6e95b`).** The family key is
+  the program's code less its PARAMS literal (`parameters.same_logic`, digested by `lab.mechanism_digest`) plus its
+  venue, series and symbols; a params-only child stays in its parent's family, any other program founds or joins the
+  family of its mechanism (founders included); an in-place rewrite moves the agent from the rewrite's row on; a
+  one-time re-key at the first start writes `agent.family` rows (no old row edited). On the T0 snapshot: 781 rows for
+  424 agents; 60 of 110 labels keep their record exactly, 50 change, 588 new families; real dollars +$25.55 before and
+  after. **sports-central-run-under reproduces to the cent** (n 25, bound +0.0344, real n 11, +$16.39 real; -2 leaves,
+  -4 keeps only its pre-rewrite stretch with 0 fills). **megacaps-chip-demand-relay's proof moves whole** to
+  `megacaps-megacap-short-horizon-re-8a220c` (its one member rewrote itself 11 times on Sept 23; all 26 fills came
+  after the 11th). Consequences to settle in Wave 1: three more families prove on their own records (two single-program
+  crypto-15m families on practice only, n 20 bound +0.093 and n 14 bound +0.018; crypto-alts-reversion's original
+  program, no living member); haghani-58 lands in a losing family and drains; krasker-14's $80 options probe stops
+  draining (its own program has 3 blocks, under R5's 6); R5's holds must be keyed by the family at the demotion
+  (`tape.family_at`, C-money); the scoreboard must read `agent.family` rows (Z follow-up).
 
 ## Progress notes
 
