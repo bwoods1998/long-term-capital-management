@@ -258,6 +258,35 @@ session (13:30-20:00Z) as the day's baseline.
 | 7 | Real options activity Monday | krasker-14's two contracts (AAL, $34), draining | real structures by an O4 family, or the numbers why not |
 | 8 | Harness incidents this run caused | - | 0 |
 
+## After 20:05Z Friday: the fix list and Wave 2 (G)
+
+Nothing here deploys inside the session. Order:
+
+1. **Fixes (House, options desk; branch `v2/fixes`), one owner deploy after the forward-first run's Deploy A
+   and the Kalshi run's K1, in a quiet slot:** the House review's open items (a demoted resident still holding
+   a real position is never retired by the seat rule; a structure agent stays on its structure book at every
+   rung until O1; no Sail call under the lifecycle lock in `seat_founders`; rule (a)'s losing family measured over
+   >= 6 active blocks as the House does elsewhere; the 7-day window by block time; `"structures": true` read the
+   same way live and in replay); the shadow review's MINOR (a missing short-leg ask keeps the last mark); CONTRACT.md's
+   structures section moved to `league/STRUCTURES.md` with a pointer (the forward-first run's cost note); every bug
+   the watch finds, each with a regression test.
+2. **The history:** ingest SPY/QQQ/IWM daily expiries (`weekly_only=False`, about 4.5 M bars, 0.8-1 GB,
+   25-45 minutes on the operations lane) so the replay sees the 0-DTE market the live chain shows; raise or band
+   the 2 M-bar structure-tape cap to fit; refit `s3/calibration` on more days of recorded quotes, incl. a
+   Friday's 0-DTE legs; adopt it only once the ETF buckets rest on more than one day.
+3. **Track P (`p/book`), after H4 is on main:** rebase onto the forward-first run's Deploy A (keep
+   `test_structure_book_invariance` against `fixtures/book_h4_b62b215.py`), adversarial review, deploy in
+   Deploy G switched OFF (`options_structures.book` stays `options-shadow`); the practice account's five closeable
+   types (verticals, iron condors, iron and long butterflies).
+4. **Wave 2 money rows (after the forward-first run's Deploy B, Saturday's quiet window):** `PAPER_BOOK` maps
+   `options-shadow` into the evidence the allocator and families read (agreed); O1 `allocator.option_spreads_real`
+   (false), O2 `spread_probe_usd`, O3 `spread_position_share`, O4 `spread_probe_line`, O5 the spread haircut; one
+   digest change, ratified within a minute of promotion. O1 flips only on O4's evidence, which today's session
+   cannot give (one structure founder, no structure closed so far).
+5. **The lab (cut-order item c), after the forward-first run's Deploy B:** `Lab._desk` admits structure programs,
+   standard PARAMS ranges for structure keys, the batch budget for ETF structure replays; and more founders that
+   pass the replay on the fuller history.
+
 ## Progress notes
 
 ## Watch log
