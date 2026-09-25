@@ -62,7 +62,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | 0.1 | T0 recorded and committed | done |
 | 0.2 | Plan merged to main (#295) | done 04:31:43Z (`2470d26`) |
 | 0.3 | First-hour decisions | done 04:28Z (above) |
-| 0.4 | The scoreboard at T0 | snapshot taken 04:23-04:26Z (`--take`); the plan's seven rows from Z |
+| 0.4 | The scoreboard at T0 | done (below; Z, PR #298) |
 | H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); Sail's checkpoints recovered at 01:55:04Z, so the backup alert is quiet until the next failure; the updater's next CODE release is the last check |
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
 | H3 | The release train | built, PR #296 (CI green 05:31Z); owner deploy (Deploy A) |
@@ -81,6 +81,34 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
   and made 3 intents; its thought each time is its program's screen ("Screen low-priced YES football outcomes and
   place bounded post-only NO bids; at most one position per event"), which rarely fires. Not a defect. The desk's
   gap is seats: 2 of 8 held, 4 waiters over 2 h, refused because the league's 128 seats are held (F3's case).
+
+## The scoreboard at T0
+
+`scripts/gap_scoreboard.py --snapshot` (Z, PR #298) on the snapshot taken at 04:23-04:26Z Sept 25 (ledger to
+04:23:14Z, window the 24 h before), with the box's `deploys.jsonl` read at 05:20Z.
+
+| # | Metric | Reading (each number names its function) | Target at the end |
+|---|---|---|---|
+| 1 | Real settled profit a day (24 h) against compute a day (24 h); proven families and each one's capacity at its real size | `real_settled` $21.35 a day realized (57 settlements $21.17, 4 closing sales $0.18); `compute_per_day` $118.88 a day (OpenAI $102.69: Luna $38.58, Astra $59.61, lab $4.50; Sail $16.16; Jev $0.03); lifetime $570.52 ($564.70 by scripts/economics.py + $5.82 lab); `gateway_meter` the gateway metered the OpenAI line at $96.41 a day over 21.4 h; `unit_economics` compute 5.6x the profit: short of the target; `proven_capacity` 2 proven: megacaps-chip-demand-relay $0.12/day at $12.50 (the board), `capacity_at_sizes` $0.29 / $0.59 / - a day at 1x/2x/4x of $25.00 (the median bid; no real bid yet); sports-central-run-under $25.86/day at $6.00 (the board), `capacity_at_sizes` $28.41 / $56.82 / - a day at 1x/2x/4x of $5.10 (the median real bid) | compute <= 2 x real settled profit, or <= $60/day while no family swings; >= 3 proven families, capacity measured at 1x, 2x and 4x the stake |
+| 2 | Forward-positive share of the last day's graduates and newborns (lab forward windows, first practice day); living median W_paper; agents above the 1.01 line | `forward_positive` graduates 2 of 8 with an active forward block (25%; 110 graduated, 91 with a window); newborns 16 of 44 on their first practice day so far (36%; 127 born), first day ended 37 of 76 (49%); lab-born active blocks 109 of 217 (50%, the baseline's measure); `practice_standing` median W_paper 1.00025 over 125; 37 above the 1.01 line (E at bunt_at 1.01: 27) | >= 60%; >= 1.005; >= 50 |
+| 3 | Real dollars on proven families / on unproven (stake); the first family swing; Alpaca real stock agents (ever) | `real_dollars` $16.62 proven / $269.62 unproven; `capital_on_proof` no family swing yet: megacaps-chip-demand-relay 0 real settlements, 15 to go (look at 15, - days); sports-central-run-under 11 real settlements, 4 to go (look at 15, 0.72 days); Alpaca real stock agents ever: 0 filled (0 in a session), 0 staked on a stock desk | proven >= unproven; the swing reached at the sports family's 10th settlement, or the exact count why not; >= 2 during a session |
+| 4 | House restarts a day; releases rolled back by causes outside the House (vendor, backup, site); tick p50; deploys inside a US session | `restarts` 26 in the window (26.0 a day), 7 inside a US session; `deploy_record` 7 releases rolled back, 6 by causes outside the House (backup 6, house 1); 5 of 21 deploys inside a US session (from deploys.jsonl); `tick_p50` interval p50 73.6 s over 989 ticks (p90 122.0 s); the last tick 30.4 s | <= 6; 0; <= 40 s; 0 |
+| 5 | Waiters over 2 h and the longest; merged strategies never born; median life against each desk's evidence clock; displacement share of deaths | `seat_queue` 45 of 65 waiters over 2 h (13 on desks with a free seat), the longest 60.6 h (cards on kalshi-weather); 18 merged strategies waiting (the seat market at 2026-09-25T03:41:54.653Z); `life_vs_clock` median life under the desk's clock on 4 of 8 desks (alpaca-crypto-alts 0.2 h < 3.7 h, kalshi-crypto-15m 0.7 h < 2.8 h, kalshi-prices 6.0 h < 36.5 h, kalshi-sports 3.3 h < 20.5 h); `displacement_share` 86% of 111 deaths in the window (90% of 519 lifetime) | 0 with free capacity, longest < 2 h; 0; >= the clock on every desk; < 50% |
+| 6 | Real fill rate (fills / orders, 24 h); real entries refused a day; taker entries by probes | `real_fill_rate` 61 of 165 orders filled (37%; kalshi 51 of 74, alpaca 10 of 91); the baseline's rows measure 62 of 695 (9%); `real_refusals` 341 real entries refused (341 a day), 116 in the last session (2026-09-24); the most: allocator.max_event_share 149, insufficient desk cash 83, allocator.real_entry_liquidity 56; `probe_taker_entries` 0 Kalshi taker entries by probes ($0.00), 60 probe entries refused for taking; Alpaca books every fill a taker (5 probe entries, $70.81) | >= 25%; < 30; allowed and measured |
+| 7 | Sail runway; the October OpenAI cap; the population ceiling binding on runway | `runway` Sail 9.13 days ($152.57 less $5.00 reserve at $16.17 a day; the House reads 9.13); the OpenAI month 2026-09 at $529.37 of $607.00, October's cap unset; the population ceiling does not bind on runway (128 of 128; 0 population alerts in the window) | >= 5 days throughout; set from funded money at the owner's word; never |
+
+How it compares with the plan's baseline (Z's hand checks): rollbacks since 21:16Z Sept 24, deploys inside the
+Sept 24 session, restarts, the session's 116 real refusals, lifetime displacement and Sail runway all agree. The
+real fill rate reads 37% per order (Kalshi 51 of 74, Alpaca 10 of 91) against the plan's 10%, which divided fill
+rows by order-status rows (62 of 695): by the per-order measure row 6's fill target is met at T0. Waiters 65 (18
+merged strategies, not 12). Forward-positive graduates 2 of 8 and newborns 16 of 44 on their first practice day;
+the plan's 53% was lab-born agents' active blocks (109 of 217, 50%, at T0). Compute $118.88 a day includes $4.50 of
+lab model calls that `scripts/economics.py` does not see.
+
+Found by Z, for Wave 1: every Alpaca fill is booked as a taker (`Book._liquidity`), post-only dip bids included, so
+Alpaca families' maker/taker records mean nothing (crypto-alts-reversion: taker n 292, maker n 0); "insufficient desk
+cash" is the second refusal (83 in the day) and names no constitution key; the evidence clocks were last measured at
+08:32Z Sept 24.
 
 ## Wave 0 reports
 
