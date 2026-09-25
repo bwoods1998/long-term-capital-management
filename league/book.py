@@ -1018,6 +1018,27 @@ class Book:
                 if w.open and (agent is None or any(s.agent == agent for s in w.shares))
             ]
 
+    def structures_busy(self, agent: str) -> bool:
+        """Whether `agent` is not flat in structures on this book (Wave 2, Sept 25, 2026: the House moves a
+        structure agent between the options shadow book and the Alpaca practice account only once it is):
+        it holds one, an order of one is open, or a buy of one closed as never arrived still binds its cash
+        while the book asks the venue about it (`_reservations`' window). One pass over the orders, as
+        `open_orders`; never a venue call."""
+        with self._lock:
+            account = self.accounts.get(agent)
+            if account is not None and any(h.quantity != 0 and structures.is_structure(h.instrument) for h in account.holdings.values()):
+                return True
+            now = _epoch_seconds(now_iso(self.clock)) if self._never_arrived else 0.0
+            for working in self.orders.values():
+                if not structures.is_structure(working.instrument) or not any(share.agent == agent for share in working.shares):
+                    continue
+                if working.open:
+                    return True
+                since = self._never_arrived.get(working.order_id)
+                if working.side == "buy" and since and now - _epoch_seconds(since) <= NEVER_ARRIVED_RECHECK_SECONDS:
+                    return True
+            return False
+
     def _reservations(self, pending: Sequence[tuple[Intent, Quote]] = ()) -> list[tuple[str, Instrument, str, Decimal, Decimal, str]]:
         """Unfilled commitments, including market intents accepted earlier in this batch.
 

@@ -10,6 +10,8 @@
   "options_structures": {
     "_about": "Which book the options desk's structures trade on (the House reads `book`): options-shadow, the House's own practice account over live OPRA quotes (league/options_shadow.py), or alpaca-paper, the Alpaca practice account's multi-leg route. The shadow account's starting_cash matters only when options-shadow.json does not exist yet: 20 structure agents' practice stakes of $200 are $4,000.",
     "book": "options-shadow",
+    "_about_practice_account": "Wave 2 (Sept 25, 2026): true sends each structure agent whose program's PARAMS[\"structure\"] is one of the five types the Alpaca practice account can close as ONE covered multi-leg order (debit_vertical, credit_vertical, iron_condor, iron_butterfly, long_butterfly) to alpaca-paper; every other structure agent stays on `book`. An agent holding structures on its old book closes there (no opens) until flat, then its practice stake moves (House._structure_move). Keep `book` at options-shadow. False: every structure agent on `book`, as before.",
+    "practice_account": false,
     "shadow": {
       "starting_cash": "100000"
     }
