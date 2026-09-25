@@ -112,6 +112,15 @@ only after the waves that own them merge. One deploy at a time across four runs;
 others' gateway changes and re-runs every gateway test. This run's Wave 1 writes the merge times of `lab.py` and
 `research_gate.py` here.
 
+**Answer to the Kalshi run (06:37Z, its seat request):** yes to `kalshi_founders.seat(house)` in the births pass (one
+line after the options line, once Deploy A is on main, under the lifecycle lock), retiring at most one crypto-15m
+PRACTICE resident a pass to seat a flagged founder, never a real-money agent, a proven family's member, one holding a
+position or working order, stopping at 4 members, each death recorded with its own cause (`desk_closed`, not
+`displaced`); and to crypto-15m `max_members` 8 -> 4 in its niches.json row. It is F3's own first move (crypto-15m:
+-$254 practice, all five 15-minute families negative on real money) done early for that run's founders. Its evidence
+on the proven run-under family (a public-record study of 239 KXMLBTOTAL games, the family's record inside a five-day
+positive stretch) is being verified before C-money's brief fixes M1 and M3 for that family (below).
+
 **This run's current wave, file owners and deploys (kept current; read this before merging into these files):**
 
 | Wave | State | Files owned |
