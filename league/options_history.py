@@ -893,6 +893,24 @@ def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[s
     return underlier_bars
 
 
+def stored_underlier(store: OptionsHistory) -> Callable[[str, str, str, str], list[dict[str, Any]]]:
+    """`underlier_bars(symbol, timeframe, start, end)` read from the store's `underlier_bars` table
+    instead of the gateway: the same close-stamped, UNADJUSTED bars `adapter_from` returns, as
+    `adapter_from` fetched them when the copy was made (a bar whose close is in [start, end]).
+
+    The table is not part of `SCHEMA`: only a LOCAL copy of the store carries it (Sept 25, 2026, the
+    options-desk run: `~/Work/.options-history/`, made on the House box with the House's own data
+    client, so a structure replay on a laptop needs no gateway and never touches the box)."""
+    if not store.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'underlier_bars'").fetchone():
+        raise HistoryError(f"{store.path} holds no underlier bars: only a local copy of the store does")
+
+    def underlier_bars(symbol: str, timeframe: str, start: str, end: str) -> list[dict[str, Any]]:
+        rows = store.db.execute("SELECT payload FROM underlier_bars WHERE symbol = ? AND timeframe = ? AND ts >= ? AND ts <= ? ORDER BY ts",
+                                (symbol.upper(), timeframe, _ts(start), _ts(end)))
+        return [json.loads(payload) for (payload,) in rows]
+    return underlier_bars
+
+
 def refresh(store: OptionsHistory, symbols: Sequence[str], underlier_bars: Callable[..., list[dict[str, Any]]], *,
             days: int = 10, timeframes: Sequence[str] = ("1Day",), band: float = 0.10, max_days: int = 45) -> dict[str, Any]:
     """The House's daily job: the last `days` of bars for `symbols`, then their feature rows.
