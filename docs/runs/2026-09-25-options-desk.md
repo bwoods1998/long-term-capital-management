@@ -134,6 +134,11 @@ test of every founder on true touches.
   added; CI started 16:22Z; owner deploy after V2's watch (the owner's lifted rule for today).
   **Deploy V3 (the hotfix) started 16:36:30Z:** CI green 16:36:05Z (3 of 3); House RSS 2,363 MB at 16:35:48Z
   and rising about 250 MB every two minutes with seven of eleven founders born.
+  **V3:** release `20260925T163626Z-46eda79f4052` promoted 16:38:14Z; the new House at 161 MB (16:39:49Z). **All
+  twelve structure founders seated by 16:43Z** (eleven born 16:24-16:43Z, each retiring one resident by the seat rule,
+  eleven retirements plus krasker-13's this morning: the rule's cap of 12 reached); the options desk at 15 living.
+  RSS 553 MB at 16:43:50Z with all births done (the hotfix holds). First new structure fill: krasker-29 bought an IWM
+  Sept 28 282/283 put debit vertical at 0.46 on options-shadow (16:43:48Z).
 
 ## Coordination with the forward-first run
 
