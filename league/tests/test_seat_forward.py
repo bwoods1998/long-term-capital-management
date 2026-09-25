@@ -299,6 +299,7 @@ class GraduatesAge(LabCase):
     def waiting_graduate(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a graduate needs a winning forward window of its own
         self.niche.max_members = 1
         resident = self.seated("resident")
         self.house.evaluator.promote(resident.id, 2, "test: real money")  # nobody may be displaced: the graduate waits
@@ -312,13 +313,18 @@ class GraduatesAge(LabCase):
                     (ident, now, now - 86400, now, "fwd:test", 1, 4, 4, mean * 4, mean, 6, None))
 
     def test_a_graduate_that_waited_its_day_is_held_by_the_lab_until_its_forward_window_wins(self):
+        """Under F1 a graduate reaches the queue only on a winning window of its own, so one that waited its day
+        and whose latest window has since lost leaves the queue by the lab's forward rule (the more specific
+        reason than "aged"), and is a waiter again once a later window of its own wins."""
         ident = self.waiting_graduate()
         self.clock.advance(24 * 3600 + 60)
+        self.window(ident, -0.0002)  # its latest window loses
         self.assertEqual(self.house.seat_waiters(fresh=True)["graduates"], [])
         gone = self.house._state["seat_expired"][f"graduates:{ident}"]
-        self.assertEqual((gone["rule"], gone["lab"]), ("aged", "held by the Alpha Lab as a candidate until its own forward window wins"))
-        self.assertTrue(str(self.lab._hold(self.candidate(ident))).startswith("aged: "))
-        self.window(ident, 0.0002)  # its own window wins
+        self.assertEqual(gone["rule"], "forward")
+        self.assertTrue(str(self.lab._hold(self.candidate(ident))).startswith("forward: "))
+        self.clock.advance(60)
+        self.window(ident, 0.0002)  # its own window wins again
         self.assertIsNone(self.lab._hold(self.candidate(ident)))
         self.assertEqual([w["candidate"] for w in self.house.seat_waiters(fresh=True)["graduates"]], [ident], "a waiter again")
         self.assertNotIn(f"graduates:{ident}", self.house._state["seat_expired"])
