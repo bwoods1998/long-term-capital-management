@@ -2901,7 +2901,12 @@ class Book:
                     "cost": text(q_cash(holding.cost)), "payout": text(payout), "pnl": text(q_cash(payout - holding.cost)),
                     "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
                 }
-                entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
+                entry_id = f"expire:{self.name}:{agent}:{key}"
+                if len(entry_id) > 200:
+                    # A structure's key names every leg (about 140 characters for a condor), and a ledger id
+                    # is at most 200: such an id is hashed, as deterministic as the one it replaces.
+                    entry_id = f"expire:{self.name}:" + hashlib.sha256(f"{agent}|{key}".encode()).hexdigest()[:32]
+                entry = self.ledger.append("book.settle", payload, agent=agent, id=entry_id, at=at)
                 self._apply(entry.kind, agent, entry.payload, entry.at)
                 self.marks.pop(key, None)
                 expired += 1

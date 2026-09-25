@@ -692,6 +692,44 @@ class ThroughTheBook(ShadowCase):
             self.assertEqual((self.book.account(agent).holdings, self.book.account(agent).realized), ({}, D("-55.10")))
         self.reconciled()
 
+    def test_a_condors_ledger_ids_fit_the_ledger_whatever_the_agents_name(self):
+        """A ledger id is at most 200 characters (`Ledger.append`); a condor's instrument key names all four legs
+        (141 characters here). Every row this path writes for one -- intent, order, fill, sale, mark, settlement
+        at expiry -- is accepted with a long agent name, and the settlement's id is the same on a second pass."""
+        for agent in ("krasker-h4cb387-12", "krasker-h4cb387-12-" + "x" * 40):
+            self.book.stake(agent, "200")
+            self.book.limits[agent] = Limits(D(100), D(75), asset_classes=("option",))
+        self.legs.set(occ(575, "P"), "0.10", "0.12")
+        self.legs.set(occ(576, "P"), "0.30", "0.32")
+        self.legs.set(occ(585), "0.30", "0.32")
+        self.legs.set(occ(586), "0.10", "0.12")  # ask 1 + .12 + .12 - .30 - .30 = 0.64, bid 0.56
+        condor = structures.instrument(CONDOR, V)
+        self.assertEqual(len(condor.key), 141)
+        for agent in ("krasker-h4cb387-12", "krasker-h4cb387-12-" + "x" * 40):
+            self.n += 1
+            [outcome] = self.book.submit([Intent.new(agent=agent, instrument=condor, side="buy", quantity="1", order_type="limit",
+                                                     limit_price="0.64", reason="a condor", created_at=now_iso(self.clock), nonce=str(self.n))])
+            self.assertEqual(outcome.status, "resting", outcome.detail)
+        self.later()
+        for symbol in (occ(575, "P"), occ(576, "P"), occ(585), occ(586)):
+            self.legs.touch(symbol)
+        self.broker.advance()
+        self.book.poll()
+        self.book.mark()
+        self.reconciled()
+        self.clock.now = epoch("2026-09-29T04:30:00Z")
+        self.closes.prices[("SPY", "2026-09-28")] = D("580.00")  # between the short strikes: the whole credit kept
+        self.assertEqual(self.book.expire_options(), 2)
+        self.assertEqual(self.book.expire_options(), 0)
+        settles = [row for row in self.ledger.iter(kinds=("book.settle",))]
+        self.assertEqual(len(settles), 2)
+        for row in settles:
+            self.assertEqual(D(row.payload["payout"]), D(100))
+            self.assertEqual(D(row.payload["pnl"]), D(100) - D("64.20"))
+        ids = [row.id for row in self.ledger.iter()]
+        self.assertTrue(ids and all(len(i) <= 200 for i in ids), max(ids, key=len))
+        self.reconciled()
+
     def test_the_expiry_safety_net_books_what_the_account_was_paid(self):
         self.book.submit([self.wish("buy", "1", "0.55")])
         self.requote()
