@@ -138,6 +138,11 @@ run's `config.json` change is its own new `options_structures` key).
 - **Announced deploys:** Deploy V (practice; no money-digest change expected; the House release and
   the gateway's practice multi-leg route, the gateway first) between 10:00Z and 12:25Z Sept 25, never
   within 30 minutes of the forward-first run's Deploy A; its exact start and end are written here.
+  **Deploy V, planned (10:48Z):** PR #317 (main + H3 #296 + Z #298 + the options run's branches; money digest
+  `535a7f15` unchanged, so no ratify) merges when CI is green (about 11:07Z); then the gateway (`npx wrangler
+  deploy`, practice multi-leg route, `OPTION_STRUCTURES_REAL` off) at about 11:10Z and the House owner deploy
+  (`floor_box.py deploy` from `~/Work/ltcm-deploy` at `origin/main`) at about 11:15Z; no real Kalshi family's
+  game is in play (the proven family's MLB totals start from 22:40Z). Exact times below as they happen.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
   otherwise Saturday after Deploy B and Deploy G. State (10:33Z): **Saturday** (the outage below delayed V). Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
