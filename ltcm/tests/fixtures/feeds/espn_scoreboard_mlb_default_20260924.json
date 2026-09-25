@@ -1,0 +1,135 @@
+{
+ "events": [
+  {
+   "id": "401817063",
+   "name": "St. Louis Cardinals at Pittsburgh Pirates",
+   "shortName": "STL @ PIT",
+   "date": "2026-09-24T16:35Z",
+   "competitions": [
+    {
+     "id": "401817063",
+     "date": "2026-09-24T16:35Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "id": "23",
+        "location": "Pittsburgh",
+        "name": "Pirates",
+        "abbreviation": "PIT",
+        "displayName": "Pittsburgh Pirates",
+        "shortDisplayName": "Pirates"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "81-78"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "id": "24",
+        "location": "St. Louis",
+        "name": "Cardinals",
+        "abbreviation": "STL",
+        "displayName": "St. Louis Cardinals",
+        "shortDisplayName": "Cardinals"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "77-82"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 9,
+      "displayClock": "0:00",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "401817065",
+   "name": "Chicago White Sox at Kansas City Royals",
+   "shortName": "CHW @ KC",
+   "date": "2026-09-24T18:10Z",
+   "competitions": [
+    {
+     "id": "401817065",
+     "date": "2026-09-24T18:10Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "id": "7",
+        "location": "Kansas City",
+        "name": "Royals",
+        "abbreviation": "KC",
+        "displayName": "Kansas City Royals",
+        "shortDisplayName": "Royals"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "68-91"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "9",
+       "team": {
+        "id": "4",
+        "location": "Chicago",
+        "name": "White Sox",
+        "abbreviation": "CHW",
+        "displayName": "Chicago White Sox",
+        "shortDisplayName": "White Sox"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Game",
+         "type": "total",
+         "summary": "82-77"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 9,
+      "displayClock": "0:00",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "detail": "Final",
+       "shortDetail": "Final"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "day": {
+  "date": "2026-09-24"
+ }
+}

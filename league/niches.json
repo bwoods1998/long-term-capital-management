@@ -92,7 +92,11 @@
    "category": "Crypto",
    "desk": "huang",
    "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm",
-   "max_members": 8
+   "max_members": 4,
+   "yields_seats": {
+    "floor": 4,
+    "reason": "K1 (the Kalshi-scale run, Sept 25, 2026): the fifteen-minute desk's pooled practice record is -$253.97 and every 15-minute family is negative on real money (-$40), and the foundry closes the desk (E2); it gives its seats, one a births pass down to 4 members, to the founder rows flagged seat_full_league (the weekend's model-versus-market sports founders), and its cap is 4, so no newcomer refills the seats it gives"
+   }
   },
   {
    "id": "kalshi-weather",
@@ -139,7 +143,12 @@
     "KXLOWTNOLA",
     "KXLOWTDC",
     "KXLOWTBOS",
-    "KXLOWTHOU"
+    "KXLOWTHOU",
+    "KXLOWTPHIL",
+    "KXLOWTDEN",
+    "KXLOWTSEA",
+    "KXLOWTMIN",
+    "KXLOWTSFO"
    ],
    "brief": "Daily high and low temperature and rain markets for about twenty US cities: roughly $1M a day, stop trading the evening before and pay the next afternoon from the NWS climate report. Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Weather was the BEST favourites group in the first run (+$23.78 on 16 outcomes). What does NOT work, measured over 8 cities and 68 days: forecasting the temperature yourself. The market beat every forecast and observation signal, and point-forecast bets at about 50 cents lost real money. A specialist should stay on the favourite side and learn: which cities and which hours before the close a 93-cent favourite is safest, how the intraday observation already in hand (the high is usually set by 4pm local) makes a favourite nearly certain, and the rounding rules of the NWS report.",
    "founders": [
@@ -162,6 +171,150 @@
       "max_hours_to_close": 30
      },
      "key": "weather-no"
+    },
+    {
+     "seed": "weather-ensemble-east",
+     "key": "weather-ensemble-east",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHNY",
+       "KXLOWTNYC",
+       "KXHIGHMIA",
+       "KXLOWTMIA",
+       "KXHIGHPHIL",
+       "KXLOWTPHIL",
+       "KXHIGHTATL",
+       "KXLOWTATL",
+       "KXHIGHTBOS",
+       "KXLOWTBOS",
+       "KXHIGHTDC",
+       "KXLOWTDC"
+      ],
+      "feeds": {
+       "weather": [
+        "KNYC",
+        "KMIA",
+        "KPHL",
+        "KATL",
+        "KBOS",
+        "KDCA"
+       ],
+       "nws": [
+        "KNYC",
+        "KMIA",
+        "KPHL",
+        "KATL",
+        "KBOS",
+        "KDCA"
+       ]
+      }
+     },
+     "seat_priority": 50
+    },
+    {
+     "seed": "weather-ensemble-central",
+     "key": "weather-ensemble-central",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHCHI",
+       "KXLOWTCHI",
+       "KXHIGHTMIN",
+       "KXLOWTMIN",
+       "KXHIGHTOKC",
+       "KXLOWTOKC",
+       "KXHIGHTNOLA",
+       "KXLOWTNOLA"
+      ],
+      "feeds": {
+       "weather": [
+        "KMDW",
+        "KMSP",
+        "KOKC",
+        "KMSY"
+       ],
+       "nws": [
+        "KMDW",
+        "KMSP",
+        "KOKC",
+        "KMSY"
+       ]
+      }
+     },
+     "seat_priority": 70
+    },
+    {
+     "seed": "weather-ensemble-texas",
+     "key": "weather-ensemble-texas",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHAUS",
+       "KXLOWTAUS",
+       "KXHIGHTHOU",
+       "KXLOWTHOU",
+       "KXHIGHTDAL",
+       "KXLOWTDAL",
+       "KXHIGHTSATX",
+       "KXLOWTSATX"
+      ],
+      "feeds": {
+       "weather": [
+        "KAUS",
+        "KHOU",
+        "KDFW",
+        "KSAT"
+       ],
+       "nws": [
+        "KAUS",
+        "KHOU",
+        "KDFW",
+        "KSAT"
+       ]
+      }
+     },
+     "seat_priority": 60
+    },
+    {
+     "seed": "weather-ensemble-west",
+     "key": "weather-ensemble-west",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHDEN",
+       "KXLOWTDEN",
+       "KXHIGHTPHX",
+       "KXLOWTPHX",
+       "KXHIGHLAX",
+       "KXLOWTLAX",
+       "KXHIGHTSEA",
+       "KXLOWTSEA",
+       "KXHIGHTLV",
+       "KXLOWTLV",
+       "KXHIGHTSFO",
+       "KXLOWTSFO"
+      ],
+      "feeds": {
+       "weather": [
+        "KDEN",
+        "KPHX",
+        "KLAX",
+        "KSEA",
+        "KLAS",
+        "KSFO"
+       ],
+       "nws": [
+        "KDEN",
+        "KPHX",
+        "KLAX",
+        "KSEA",
+        "KLAS",
+        "KSFO"
+       ]
+      }
+     },
+     "seat_priority": 40
     }
    ],
    "maker_fee_series": [],
@@ -171,7 +324,7 @@
    "category": "Climate and Weather",
    "desk": "mullins",
    "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined",
-   "max_members": 17
+   "max_members": 21
   },
   {
    "id": "kalshi-sports",
@@ -181,7 +334,7 @@
    ],
    "title": "Sports results on Kalshi: winners, spreads and totals in every league",
    "category": "Sports",
-   "max_members": 19,
+   "max_members": 25,
    "patterns": [
     "^KX[A-Z0-9]+(GAME|MATCH|FIGHT|SPREAD|TOTAL|TEAMTOTAL|BTTS|MAP|TOTALMAPS|1H|1HSPREAD|1HTOTAL|1Q|1QSPREAD|1QTOTAL|F5|F5TOTAL|RFI|ADVANCE)$"
    ],
@@ -297,7 +450,7 @@
     "KXATPMATCH",
     "KXWTAMATCH"
    ],
-   "brief": "Who wins, by how much, and how many points: every league Kalshi lists. This is most of the venue: about $50M of the $63M a day that resolves within 48 hours (surveyed on a football Saturday: college football $23M, the Premier League $13M, the NFL, La Liga, MLB, Serie A, cricket, esports). THE CALENDAR DECIDES WHAT IS LIVE: football from September to February, baseball to October, basketball and hockey from October to June, soccer August to May, esports, cricket, fights and tennis all year and at hours when US sport is dark. The House re-surveys the venue daily, so the universe below follows the season; if the series your strategy names go dark, you are shown the busiest live ones instead. You specialise INSIDE this niche by the series you name: be the NFL agent, or the soccer-totals agent, and spend your research there. Games list a close two days after kickoff; the House shows you when each is expected to END. The published bias is the favourite-longshot bias: longshots are overpriced and heavy favourites slightly underpriced, strongest in moneylines with a big underdog and in extreme totals (over 5.5 goals is a 95-cent NO almost every match). Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Nothing in sports is measured by this firm yet. A specialist should learn: whether the bias survives the maker fee where one is charged, how prices move on team news before the start, how reliable heavy favourites are by league and format (a best-of-one esports map upsets far more than a best-of-three series; a 70% baseball team is rare), and which books are deep enough to rest in. MEASURED Sept 19, 2026, on a week of real soccer totals: a resting bid left in the book DURING a match is picked off the moment a goal is scored (38 wins and 7 losses at 93 cents, -20% in a week). The founders therefore only enter before the start (`min_hours` is measured to the expected END of the game, so it includes the game's length) and re-quote every 30 minutes. Trading in-game needs a strategy that knows the score; the House does not show it yet, so ask for it.",
+   "brief": "Who wins, by how much, and how many points: every league Kalshi lists. This is most of the venue: about $50M of the $63M a day that resolves within 48 hours (surveyed on a football Saturday: college football $23M, the Premier League $13M, the NFL, La Liga, MLB, Serie A, cricket, esports). THE CALENDAR DECIDES WHAT IS LIVE: football from September to February, baseball to October, basketball and hockey from October to June, soccer August to May, esports, cricket, fights and tennis all year and at hours when US sport is dark. The House re-surveys the venue daily, so the universe below follows the season; if the series your strategy names go dark, you are shown the busiest live ones instead. You specialise INSIDE this niche by the series you name: be the NFL agent, or the soccer-totals agent, and spend your research there. Games list a close two days after kickoff; the House shows you when each is expected to END. The published bias is the favourite-longshot bias: longshots are overpriced and heavy favourites slightly underpriced, strongest in moneylines with a big underdog and in extreme totals (over 5.5 goals is a 95-cent NO almost every match). Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Nothing in sports is measured by this firm yet. A specialist should learn: whether the bias survives the maker fee where one is charged, how prices move on team news before the start, how reliable heavy favourites are by league and format (a best-of-one esports map upsets far more than a best-of-three series; a 70% baseball team is rare), and which books are deep enough to rest in. MEASURED Sept 19, 2026, on a week of real soccer totals: a resting bid left in the book DURING a match is picked off the moment a goal is scored (38 wins and 7 losses at 93 cents, -20% in a week). The founders therefore only enter before the start (`min_hours` is measured to the expected END of the game, so it includes the game's length) and re-quote every 30 minutes. Trading in-game needs a strategy that knows the score; the House does not show it yet, so ask for it. Sept 25, 2026 (the Kalshi-scale run, K1): five MODEL-VERSUS-MARKET founders, `consensus-nfl`, `-ncaaf`, `-mlb`, `-mls` and `-ligamx`, each its own family, price winners, spreads and totals from the sportsbook line the House records (NEEDS['feeds'] = {'odds': [league], 'sports': [league]}: DraftKings, de-vigged, the only book ESPN answered) and rest post-only bids where Kalshi is off it by more than the fee and a margin. Measured the day before: on WINNERS Kalshi sits on the book's line (MLB, 112 readings: median gap 0.7 cents, 90th percentile 1.4, none of 3), so the edge there is thin and adverse selection is the risk; the ladders are thinner and wider.",
    "founders": [
     {
      "seed": "favorites-daily",
@@ -441,6 +594,163 @@
       ]
      },
      "key": "matches-favorites"
+    },
+    {
+     "seed": "consensus-nfl",
+     "key": "consensus-nfl",
+     "seat_full_league": true,
+     "seat_priority": 30,
+     "params": {
+      "sigma_margin": 13.5,
+      "sigma_total": 13.5
+     },
+     "needs": {
+      "series": [
+       "KXNFLGAME",
+       "KXNFLSPREAD",
+       "KXNFLTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "nfl"
+       ],
+       "sports": [
+        "nfl"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-ncaaf",
+     "key": "consensus-ncaaf",
+     "seat_full_league": true,
+     "seat_priority": 10,
+     "params": {
+      "sigma_margin": 15.5,
+      "sigma_total": 16.0
+     },
+     "needs": {
+      "series": [
+       "KXNCAAFGAME",
+       "KXNCAAFSPREAD",
+       "KXNCAAFTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "ncaaf"
+       ],
+       "sports": [
+        "ncaaf"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-mlb",
+     "key": "consensus-mlb",
+     "seat_full_league": true,
+     "seat_priority": 20,
+     "params": {
+      "sigma_margin": 4.2,
+      "sigma_total": 4.4,
+      "max_strike_z": 0.25
+     },
+     "needs": {
+      "series": [
+       "KXMLBGAME",
+       "KXMLBSPREAD",
+       "KXMLBTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "mlb"
+       ],
+       "sports": [
+        "mlb"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 300,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-mls",
+     "key": "consensus-mls",
+     "seat_full_league": true,
+     "seat_priority": 60,
+     "needs": {
+      "series": [
+       "KXMLSGAME"
+      ],
+      "feeds": {
+       "odds": [
+        "mls"
+       ],
+       "sports": [
+        "mls"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-ligamx",
+     "key": "consensus-ligamx",
+     "seat_full_league": true,
+     "seat_priority": 70,
+     "needs": {
+      "series": [
+       "KXLIGAMXGAME"
+      ],
+      "feeds": {
+       "odds": [
+        "ligamx"
+       ],
+       "sports": [
+        "ligamx"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "h2h-ufc",
+     "key": "h2h-ufc",
+     "seat_full_league": true,
+     "seat_priority": 80,
+     "needs": {
+      "series": [
+       "KXUFCFIGHT"
+      ],
+      "feeds": {
+       "odds": [
+        "ufc"
+       ],
+       "sports": [
+        "ufc"
+       ]
+      },
+      "max_hours_to_close": 42,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
+      "wake_minutes": 10
+     }
     }
    ],
    "desk": "meriwether",

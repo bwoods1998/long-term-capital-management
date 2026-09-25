@@ -3,6 +3,10 @@
 - **Web search.** Sail's search API (real pages with excerpts), with Google News RSS as the
   fallback. The House runs the search; an agent's box has no network. Each search is charged to
   the agent that asked.
+- **Web fetch.** One public page's text, read by the gateway (`POST /v1/web/fetch`,
+  gateway/lib/fetch.mjs), never by the House box, whose egress stays exact-host. The gateway
+  refuses private and local addresses, re-checks every redirect, forwards no credential and caps
+  the text; what comes back is untrusted data from the open web.
 - **Research library.** Notes any agent writes and every agent can search: a finding costs one
   agent the compute once. Notes are rows on the ledger, so the library is public and permanent.
 - **Tool requests.** An agent that needs something the House does not offer (a data feed, an
@@ -15,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
 import re
 import urllib.error
@@ -28,6 +33,21 @@ MAX_NOTE_CHARS = 4000
 #: Sail does not publish a price for search. The House charges this per query until the usage
 #: record shows the real number; it errs high.
 SEARCH_CHARGE_USD = "0.01"
+#: The gateway's research web reader (gateway/lib/fetch.mjs).
+FETCH_PATH = "/v1/web/fetch"
+#: A page read through the gateway is charged like a search. What it costs the firm is the
+#: Worker's time, well under a cent; the page's tokens are charged as the research turns that read it.
+FETCH_CHARGE_USD = SEARCH_CHARGE_USD
+#: The gateway refuses a longer URL; the House does not send one.
+MAX_FETCH_URL_CHARS = 2048
+#: The gateway's answer: at most 200,000 characters of text, JSON-escaped, and a few fields.
+MAX_FETCH_ANSWER_BYTES = 2 * 1024 * 1024
+#: The page fields the gateway answers (gateway/lib/fetch.mjs `webFetch`).
+PAGE_FIELDS = ("url", "final_url", "status", "content_type", "title", "text", "truncated", "bytes", "fetched_at")
+#: The most of each string field kept from the gateway's answer. The gateway bounds them too; what
+#: reaches the model and the ledger is bounded here whatever the gateway (or a page) sent.
+PAGE_FIELD_CHARS = {"url": MAX_FETCH_URL_CHARS, "final_url": MAX_FETCH_URL_CHARS, "content_type": 127, "title": 300,
+                    "text": 200_000, "fetched_at": 40}
 WORD = re.compile(r"[a-z0-9]{3,}")
 
 
@@ -55,13 +75,63 @@ def sail_search(key_source: Callable[[], str], *, opener: Any = None, timeout: f
     return search
 
 
+def gateway_fetch(gateway_url: str, token_source: Callable[[], str], *, opener: Any = None,
+                  timeout: float = 40.0) -> Callable[[str, str], tuple[int, dict[str, Any]]]:
+    """A `fetch(url, agent) -> (HTTP status, answer)` function over the gateway's `/v1/web/fetch`.
+
+    The House calls the gateway as it does for everything else it may not do itself: the bearer
+    token and a JSON body. An HTTP error is returned with its status, not raised; a gateway that
+    cannot be reached raises (`URLError`, `OSError`), and `Commons.web_fetch` answers it."""
+    endpoint = gateway_url.rstrip("/") + FETCH_PATH
+
+    def fetch(url: str, agent: str) -> tuple[int, dict[str, Any]]:
+        request = urllib.request.Request(
+            endpoint, data=json.dumps({"url": url, "agent": agent}).encode(), method="POST",
+            headers={"Authorization": "Bearer " + token_source(), "Content-Type": "application/json", "User-Agent": "ltcm-floor/1.0"},
+        )
+        try:
+            with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
+                status = int(getattr(response, "status", None) or response.getcode())
+                raw = response.read(MAX_FETCH_ANSWER_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            status, raw = int(exc.code), exc.read(MAX_FETCH_ANSWER_BYTES + 1)
+        if len(raw) > MAX_FETCH_ANSWER_BYTES:
+            raise ValueError("the gateway's answer is larger than a page can be")
+        try:
+            answer = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            answer = {}
+        return status, answer if isinstance(answer, dict) else {}
+
+    return fetch
+
+
+def _page_field(key: str, value: Any) -> Any:
+    """One field of a page the gateway answered, as the House keeps it: a string cut to its bound, a
+    count as an int, a flag as a bool; anything else None."""
+    if key == "truncated":
+        return value is True
+    if key in ("status", "bytes"):
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return value[:PAGE_FIELD_CHARS[key]] if isinstance(value, str) else None
+
+
+def _may_have_read(exc: BaseException) -> bool:
+    """Whether a call that failed may still have had the gateway read the page. A connection never
+    made (refused, no such host) did not; a timeout, a dropped answer or an answer too large to be
+    a page may have, and the gateway may have spent its time on it."""
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError) else exc
+    return not isinstance(reason, (ConnectionRefusedError, socket.gaierror))
+
+
 class Commons:
     def __init__(self, ledger: Ledger, *, search: Callable[[str, int], list[dict[str, Any]]] | None = None, news: Any = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, fetch: Callable[[str, str], tuple[int, dict[str, Any]]] | None = None):
         self.ledger = ledger
         self.clock = clock
         self._search = search
         self._news = news  # an ltcm.data.news.News: the keyless fallback
+        self._fetch = fetch  # `gateway_fetch(...)`: None, and `web_fetch` says it is not configured
 
     # ------------------------------------------------------------- web search
     def web_search(self, query: str, limit: int = 5) -> dict[str, Any]:
@@ -82,6 +152,50 @@ class Commons:
             except Exception as exc:  # noqa: BLE001 - a search that fails is an answer, not a crash
                 return {"error": f"search failed: {type(exc).__name__}"}
         return {"error": f"search failed: {failure}"}
+
+    # -------------------------------------------------------------- web fetch
+    def web_fetch(self, url: str, agent: str) -> dict[str, Any]:
+        """One public page, read by the gateway: its fields (`PAGE_FIELDS`, bounded), or `{"error"}`.
+
+        Errors are answers, never exceptions. `judged` says whether the gateway answered about this
+        URL -- a page (whatever the page's own status), a refusal of the URL, a redirect or a
+        content type, or the page's host failing to answer -- as opposed to a gateway that could not
+        act at all (unreachable, its token, its day's cap, busy, a Worker error). Every answer the
+        gateway gives about a URL names it (`url`); nothing else does.
+
+        `reached` says whether the gateway may have read the page, which is what the researcher
+        charges and counts: a judged answer, and also a Worker error (5xx naming no url: a page
+        that exhausted the Worker's CPU or memory ends that way) or a call that timed out or lost
+        its answer. Only a request the gateway refused before reading (4xx naming no url: its body,
+        its token, its day's cap, busy) or a connection never made is free -- otherwise a page
+        that kills the Worker could be asked for again and again at no cost to anyone."""
+        url = str(url or "").strip()
+        if not url:
+            return {"error": "give the url of one public page", "judged": False, "reached": False}
+        if len(url) > MAX_FETCH_URL_CHARS:
+            return {"error": f"the url is longer than {MAX_FETCH_URL_CHARS} characters", "judged": False, "reached": False}
+        if not url.lower().startswith(("http://", "https://")):
+            return {"error": "only a public http or https url can be read", "judged": False, "reached": False}
+        if self._fetch is None:
+            return {"error": "web fetch is not configured on this floor", "judged": False, "reached": False}
+        try:
+            status, answer = self._fetch(url, str(agent or ""))
+        except Exception as exc:  # noqa: BLE001 - a gateway that cannot be reached is an answer, not a crash
+            return {"error": f"the gateway could not be reached: {type(exc).__name__}", "judged": False, "reached": _may_have_read(exc)}
+        answer = answer if isinstance(answer, dict) else {}
+        judged = isinstance(answer.get("url"), str)
+        reached = judged or (isinstance(status, int) and status >= 500)
+        if status == 200 and judged and isinstance(answer.get("text"), str):
+            return {**{key: _page_field(key, answer.get(key)) for key in PAGE_FIELDS}, "judged": True, "reached": True}
+        error = str(answer.get("error") or f"the gateway answered HTTP {status}")[:400]
+        out: dict[str, Any] = {"error": error, "gateway_status": status, "judged": judged, "reached": reached}
+        for key in ("url", "final_url", "status", "content_type", "refused", "cap"):
+            value = answer.get(key)
+            if isinstance(value, str):
+                out[key] = value[:400]
+            elif isinstance(value, (int, float)):
+                out[key] = value
+        return out
 
     # ---------------------------------------------------------------- library
     def library_write(self, agent: str, title: str, text: str, tags: list[str] | None = None, *, niche: str | None = None) -> dict[str, Any]:
@@ -192,6 +306,13 @@ class Commons:
 
     def fulfil(self, request_id: str, outcome: str, *, change: str | None = None) -> None:
         self.ledger.append("tool.fulfilled", {"request": request_id, "outcome": str(outcome)[:1200], "change": change}, agent=HOUSE)
+
+    def block(self, request_id: str, outcome: str, *, owner: str, change: str | None = None) -> None:
+        """Answer a request with the rule that keeps it from being built (`tool.blocked`, as `fulfil` answers
+        one that shipped): `owner` is who could unlock it -- "owner" for a key, a login or a paid plan,
+        "no-source" when nothing that passes the data-host rule publishes it (league/open_feeds.py, Sept 25, 2026)."""
+        self.ledger.append("tool.blocked", {"request": request_id, "outcome": str(outcome)[:1200], "change": change,
+                                            "status": "blocked", "owner": str(owner)}, agent=HOUSE)
 
     # ---------------------------------------------------------------- playbook
     def playbook_add(self, title: str, text: str, *, source: str, agent: str = HOUSE) -> str:

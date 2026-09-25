@@ -17,6 +17,7 @@ the House (Sail VM)                    this Worker                          outs
                                          (market data, either pair)    ->   data.alpaca.markets
                                        OPENAI_SECRET_KEY               ->   api.openai.com
                                        GITHUB_TOKEN                    ->   api.github.com
+                                       (no credential at all)          ->   one public http(s) page, for research
                                        caps, budgets, kill switch (one Durable Object)
                                        watchdog cron (checkpoint, balance, box)
 ```
@@ -41,6 +42,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 | `GET` | `/v1/frontier/models` | The model ids the key can reach, and which of them are priced. Free. |
 | `POST` | `/v1/github/pr` | Opens one pull request from a proposal `{role, slug, title, body, files}`. See [Pull requests](#pull-requests). Not stopped by the kill switch: it moves no money. |
 | `GET` | `/v1/github/pr/<number>` | That pull request's `state`, `merged`, `mergeable_state`, `head` and its check runs counted into `success`, `failure` or `pending`, so the VM watches CI with no GitHub credential. Free. |
+| `POST` | `/v1/web/fetch` | Reads one public page for research, `{"url", "agent"}`, and answers its readable text. No credential is sent; private, local and own-domain addresses are refused on the request and every redirect; 3,000 pages a UTC day across the floor. See [Research reads the web](#research-reads-the-web). Not stopped by the kill switch: it moves no money. |
 | `POST` | `/v1/notify` | Mails the owner one trade notice composed here from the facts posted (`kind` of `trade`, `settled` or `test`; 32 KiB at most). A `notice_id` makes a repeat a no-op for 48 hours; `NOTIFY_MAX_PER_DAY` (300) a trading day, then `429`. The first run's desks used it; the league does not call it. |
 
 The gateway serves exactly three venue names: `kalshi`, `alpaca` and `alpaca-paper`. Any other is
@@ -400,6 +402,66 @@ Every rule is enforced here first and by the repository's own CI (`league/ci.py`
 
 The reply is `{"ok": true, "branch", "number", "url", "head"}`.
 
+## Research reads the web
+
+`POST /v1/web/fetch` with `{"url": "...", "agent": "..."}` (Sept 25, 2026, `lib/fetch.mjs`). The
+House box's egress is exact-host -- it holds the Sail key and this Worker's token, and Sail's
+allowlist ignores wildcards -- so a research agent's `web_fetch` (league/researcher.py) is read
+here, on Cloudflare's egress, instead. The strategy boxes stay sealed: only the House calls this,
+on an agent's behalf.
+
+What goes out: a `GET`, with exactly three headers -- `User-Agent: LTCM-research/1.0
+(+https://blakewoods.us/capital)`, an `Accept` for HTML, JSON, XML and text, and
+`Accept-Language: en`. No cookie, no `Authorization`, no credential of any kind, and never a
+header the caller sent.
+
+What is refused, on the request **and on every redirect hop** (redirects are followed by hand,
+`redirect: 'manual'`, at most 5), before anything is fetched:
+
+- a scheme other than `http` or `https`; a port other than the scheme's default; a user or
+  password in the URL; a URL longer than 2,048 characters;
+- an IP-literal host that is not public: private (10/8, 172.16/12, 192.168/16), loopback,
+  link-local (169.254/16, with the metadata address 169.254.169.254 named), CGNAT (100.64/10),
+  multicast, unspecified, reserved and documentation ranges; for IPv6, anything outside global
+  unicast (2000::/3) -- loopback, unspecified, IPv4-mapped, IPv4-compatible, NAT64, ULA
+  (fc00::/7), link-local, multicast -- and the Teredo, 6to4 and documentation prefixes inside it.
+  The URL parser has already turned `2130706433`, `0x7f.1` and `127.1` into `127.0.0.1`;
+- `localhost`, `*.localhost`, `*.local`, `*.internal` (so `metadata.google.internal`),
+  `*.home.arpa`, `*.localdomain`, a host with no dot, and this Worker's own domain (its host and,
+  on workers.dev, its account's subdomain).
+
+A refused URL is `403 {"error", "url", "refused": "url" | "redirect"}` and, when refused on the
+request, takes none of the day's places. Names are not resolved here: a public name that resolves
+to a private address is left to Cloudflare's egress, which has no route to private networks.
+
+What comes back: `{url, final_url, status, content_type, title, text, truncated, bytes,
+fetched_at}`. A page that answers non-2xx is still a `200` from the gateway, with the page's own
+`status`. The read has 15 seconds in all; the body is read to 2 MiB and no further. It reads
+`text/*`, `application/json`, `application/xml`, `application/rss+xml`, `application/atom+xml`
+and `application/xhtml+xml`; any other type, none, or a `Content-Type` that is not a well-formed
+media type of at most 127 characters is `415` naming it (`(none)`, `(malformed)`). HTML becomes
+readable text: the title on its own, and the body without scripts, styles, `noscript`, `svg`,
+`template` or the head, links kept as their text, list items and table cells marked, entities
+decoded, whitespace collapsed. JSON, XML and plain text come back as they are. The text is cut at
+200,000 characters, with `truncated: true` (as it is when the body passed 2 MiB). A page that did
+not answer in time is `504`, one that failed is `502`, too many redirects is `502`.
+
+The HTML is read in one forward pass, linear in the page: no pattern is retried at every `<`
+(the first reader's regexes were super-linear: 32 KB of `<a<a<a...` took 22 seconds on a test
+machine, and a 2 MiB page far longer). A tag that never closes, or a script, style or comment that never ends, ends the text
+there, as it would in a browser. The page is read in the same isolate that serves the order
+routes, so one isolate reads at most `MAX_IN_FLIGHT` (4) pages at once; one more is
+`429 {"busy": true}` with `Retry-After: 5`, before it takes a place of the day's cap.
+
+The floor reads at most **3,000 pages a UTC day** together (`DAY_CAP`), counted in the `Gate` in
+one step with the page's agent, and reported in `/v1/health` as `web_fetch: {day, fetches, cap,
+by_agent}`; over it is `429 {"cap": "web_fetch_day"}`. The House keeps its own budget of 20 pages
+per agent a day, charged like a search. Every answer about a URL names it (`url`), so the House
+can tell a page the gateway judged from a gateway that could not act (a bad body, the cap, busy,
+a Worker error). It charges and counts a judged read and also a Worker error (`5xx` naming no
+url, which is how a page that exhausted the Worker ends) or a timeout: only a request refused
+before any read (`4xx` naming no url) or never received is free.
+
 ## The watchdog, and the mail
 
 The `*/5 * * * *` cron reads the **production** checkpoint
@@ -543,7 +605,8 @@ curl -s -H "Authorization: Bearer $GATEWAY_TOKEN" https://ltcm-gateway.<subdomai
 that carries only the bearer token and a `VenueClient` (both from `ltcm/adapters`) that rewrites
 every call onto `<gateway_url>/v1/<venue>/...` and drops the venue auth headers. There is no
 direct, key-in-process mode in the league: no key file, key id or venue secret exists on Sail.
-`league/frontier.py` calls `/v1/frontier/responses`, `league/merton.py` calls `/v1/github/pr`, and
+`league/frontier.py` calls `/v1/frontier/responses`, `league/merton.py` calls `/v1/github/pr`,
+`league/commons.py` calls `/v1/web/fetch` for research's `web_fetch`, and
 `league/service.py` reads `/v1/health` so the House knows the kill switch is engaged and can refuse
 first. The adapters' gateway mode is covered by `ltcm/tests/test_adapters_gateway.py`.
 
