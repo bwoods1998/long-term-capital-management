@@ -101,6 +101,12 @@ SETTLE_LAGS_FILE = "settle_lags.json"
 #: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
 #: passed or not, so it cannot search its parameters in place for a lucky look that is no trial.
 EDIT_REPLAY_NOTIONAL = 0.5
+#: A STRUCTURE agent's edit is replayed at the full practice caps instead (G-LOOP, Sept 25, 2026): the program as it
+#: would trade. At half notional its order cap is $37.50, and a structure's cost is its maximum loss: a $1-wide iron
+#: condor or credit vertical at the founders' 0.15-0.30 short deltas takes $0.25-0.45 of credit, so it costs $55-75 to
+#: hold and cannot be opened at all; its edit's replay traded nothing and failed on trade count, whatever the edit was
+#: (builder S3's finding, the options-desk run record, row S3).
+EDIT_REPLAY_STRUCTURE_NOTIONAL = 1.0
 EDIT_REPLAY_EVERY_SECONDS = 24 * 3600.0
 #: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
 #: called a mismatch (`reconcile_with_second_look`).
@@ -859,7 +865,7 @@ class House:
         self._health({"at": now_iso(self.clock)})
 
     def _chain(self, symbols: list[str], days: int, afford: float | None, quotes: Mapping[str, Any], *,
-               structures: bool = False) -> list[dict[str, Any]]:
+               structures: bool = False, per_underlying: int | None = None) -> list[dict[str, Any]]:
         """The option contracts an agent may consider: its underlyings, expiring after today and
         within `days`, within a fifth of the underlying's price, two-sided, and affordable in one
         order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list.
@@ -870,7 +876,8 @@ class House:
         from tomorrow after it) to `days` ahead, and at most `STRUCTURE_CHAIN_PER_UNDERLYING` an
         underlying. The venue's chain is read by `_expiry_chain`, shared by every structure agent for two
         minutes: one ranged request an underlying, split by expiry only where the adapter's one call would
-        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain)."""
+        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain). `per_underlying`: another
+        count than 80 or 40 nearest, the same ranking (`_note_structure_reach`'s 160, G-LOOP's review, Sept 25, 2026)."""
         broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
         if broker is None:
             return []
@@ -880,7 +887,8 @@ class House:
             new_york, hour = _new_york(self.clock)
             first = new_york if hour < self._structure_hours(new_york)[0] else _plus_days(new_york, 1)
             last = _plus_days(new_york, days)
-        per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
+        if per_underlying is None:
+            per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
         rows: list[dict[str, Any]] = []
         for symbol in symbols:
             touch = quotes.get(symbol) or {}
@@ -986,6 +994,55 @@ class House:
         niche = self.niche_of(agent)
         return niche is not None and niche.asset_class == "option"
 
+    def _structure_program(self, agent: Agent | None, needs: Any = None) -> bool:
+        """Whether `agent` trades structures now, or would with a program of these `needs` (a rewrite into one)."""
+        if self.is_structure_agent(agent):
+            return True
+        niche = self.niche_of(agent)
+        return (isinstance(needs, Mapping) and needs.get("structures") is True and niche is not None
+                and niche.asset_class == "option")
+
+    def _note_structure_reach(self, agent: Agent, symbols: list[str], days: int, key: str, quotes: Mapping[str, Any]) -> None:
+        """Keep, for this wake's intents, the contracts a structure agent may open legs on (`_structure_reach_refusal`): the
+        `options_history.STRUCTURE_REACH` (160) of each underlying nearest the money in the chain this wake read, ranked as
+        its 80 are (`_chain`, the venue's chain cached two minutes, so no request more). Called by `_structure_context`,
+        which every wake of a structure agent runs before its decision."""
+        from .options_history import STRUCTURE_REACH
+
+        seen = self.__dict__.setdefault("_structure_reach_seen", {})
+        if not any(family_of(name) == "alpaca" and hasattr(b.broker, "option_chain") for name, b in self.books.items()):
+            seen.pop(agent.id, None)  # no venue here lists a chain (a test's House): there is no reach to hold it to
+            return
+        reach = self._cached(f"structure-reach:{key}", 120,
+                             lambda: frozenset(str(r.get("occ") or r.get("symbol") or "").upper()
+                                               for r in self._chain(symbols[:8], days, None, quotes, structures=True, per_underlying=STRUCTURE_REACH)),
+                             record=False)  # the chain itself is recorded (`_structure_context`); this is only its ranking
+        if len(seen) > 512:
+            seen.clear()
+        seen[agent.id] = reach
+
+    def _structure_reach_refusal(self, agent: Agent, order: Any) -> str:
+        """Why a structure OPEN is refused for its legs (empty when it is not; G-LOOP's review, Sept 25, 2026): a leg outside
+        the `options_history.STRUCTURE_REACH` (160) contracts of its underlying nearest the money in the chain the agent's
+        wake read (`_note_structure_reach`; it is shown the 80 nearest). The options replay refuses such an open alike, at
+        its step (`options_replay`), so live and replay agree -- and a replay tape that keeps only what the chain could
+        reach can never price a leg because the market LATER came near it (the review's look-ahead). A close is never
+        refused for it: it only takes risk off. An intent with no wake behind it in this process (a test's) is not
+        judged by it: every wake of a structure agent reads its chain before its decision."""
+        if order.action != "open":
+            return ""
+        reach = (self.__dict__.get("_structure_reach_seen") or {}).get(agent.id)
+        if reach is None:
+            return ""
+        from .options_history import STRUCTURE_REACH
+
+        outside = sorted({leg.occ for leg in order.spec.legs if str(leg.occ).upper() not in reach})
+        if not outside:
+            return ""
+        return (f"outside the chain's reach: every leg of a structure you open must be among the {STRUCTURE_REACH} contracts of its "
+                f"underlying nearest the money in the chain the House read this wake (you are shown the {STRUCTURE_CHAIN_PER_UNDERLYING} "
+                f"nearest); {', '.join(outside[:4])} {'is' if len(outside) == 1 else 'are'} not. The replay refuses it alike")
+
     def _structure_hours(self, day: str) -> tuple[float, float]:
         """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
         15:30 (`STRUCTURE_ENTRY_CUT_HOUR`, `STRUCTURE_CLOSE_HOUR`), held 90 and 30 minutes before the bell on
@@ -1047,7 +1104,7 @@ class House:
                             limit_price=order.held_limit, reason=order.reason, created_at=now, nonce=f"{now}:{index}")
         if order.action == "open" and self.registry.entries_paused(agent.id):
             return False  # held like any paused buy (X1): not sent, and not a refusal
-        refusal = self._structure_refusal(agent, book, order, instrument, now)
+        refusal = self._structure_refusal(agent, book, order, instrument, now) or self._structure_reach_refusal(agent, order)
         if refusal:
             self._refuse_intent(agent, book, intent, refusal)
             return False
@@ -1236,13 +1293,15 @@ class House:
         from . import structures
 
         asked = agent.needs.get("max_days_to_expiry")
-        days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
+        from .options_history import structure_days
+        days = structure_days(asked, symbols)  # 0 is a 0-DTE strategy's own answer, not "unsaid"; 10 at most on SPY, QQQ, IWM
         today, hour = _new_york(self.clock)
         cut, close = self._structure_hours(today)
         opening = hour < cut
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
                              lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
         ctx["chain"] = chain
+        self._note_structure_reach(agent, symbols, days, f"{','.join(symbols)}:{days}:{today}:{int(opening)}", ctx["quotes"])
         try:
             ctx["structures"] = structures.candidates(chain, max_loss_usd=min(max_order, max_position), today=today)
         except Exception as exc:  # noqa: BLE001 - a candidate that cannot be built costs the list, not the wake
@@ -3829,8 +3888,13 @@ class House:
         strategies (and SPY, QQQ, IWM) at 1Day; then their feature rows. A symbol the store does
         not yet cover over the replay window is backfilled across it first; the chunk journal
         makes that a one-off (six underlyings over three and a half months took about ten
-        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay."""
-        from .options_history import adapter_from, refresh
+        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay.
+
+        SPY, QQQ and IWM are traded by the options desk with EVERY expiry (G-LOOP, Sept 25, 2026:
+        `options_history.DAILY_EXPIRIES`, a weekday expiry read from `DAILY_MAX_DAYS` days before it): one
+        the store holds only weekly is backfilled across the window once, its Fridays' chunks already done
+        (never fetched again), and its weekly coverage stays its replay's until then."""
+        from .options_history import DAILY_EXPIRIES, DAILY_MAX_DAYS, adapter_from, refresh
         options = {n.id for n in self.niches.values() if n.asset_class == "option"}
         replay = sorted({str(s).upper() for a in self.registry.living() if a.specialty in options for s in (a.needs.get("symbols") or [])[:8]})
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
@@ -3842,9 +3906,13 @@ class House:
         done: dict[str, Any] = {"features": {}, "coverage": []}
         for group, timeframes, band in ((replay, ("1Day", "15Min"), 0.2), (wanted, ("1Day",), 0.10)):
             covered = set(self.options_history.covers(group, timeframes[-1], start, end))
+            daily = {"all_expiries": DAILY_EXPIRIES, "daily_max_days": DAILY_MAX_DAYS} if group is replay else {}
+            every = [s for s in group if s in DAILY_EXPIRIES] if daily else []
+            if every:
+                covered -= set(every) - set(self.options_history.covers(every, timeframes[-1], start, end, every_expiry=True))
             for days, symbols in ((10, [s for s in group if s in covered]), (span, [s for s in group if s not in covered])):
                 if symbols:
-                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45)
+                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45, **daily)
                     done["features"].update(ran["features"])
                     done["coverage"] += ran["coverage"]
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
@@ -3863,11 +3931,17 @@ class House:
             oldest = min(self._tapes, key=lambda k: self._tapes[k][0])
             self._tapes.pop(oldest, None)
 
-    def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-        """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
+    def tape_for(self, needs: Mapping[str, Any], *, window: tuple[float, float] | None = None) -> tuple[str, dict[str, Any]]:
+        """The recorded history a strategy with these NEEDS is replayed over (cached for a day).
+
+        `window` (start, end epochs; OPTIONS tapes only, G-LOOP, Sept 25, 2026): the tape of that stretch instead
+        of the replay window, which the lab's forward window of a structure program asks for (its last
+        `forward_days`: a tenth of the whole tape's bars, built on the House's one CPU and never kept)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         structural = option and needs.get("structures") is True  # a structure agent's options tape (Sept 25, 2026)
+        if window is not None and not (option and self.options_history is not None):
+            raise ValueError("unsupported input: only an options tape is built for a window of its own")
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
         # window (the backfilled history feeds cover the live window): a strategy that reads either is
@@ -3876,7 +3950,7 @@ class House:
             deep = self._deep_tape(needs)
             if deep is not None:
                 return deep
-        start, end = self._live_window(needs)
+        start, end = window if window is not None else self._live_window(needs)
         start_iso, end_iso = now_iso(lambda: start), now_iso(lambda: end)
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if option and self.options_history is not None:
@@ -4161,7 +4235,8 @@ class House:
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
                     scale: float = 1.0) -> tuple[dict[str, Any], str]:
         """`scale` sizes the replay's book: the practice rung's stake and caps times it (an in-place edit
-        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's)."""
+        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`, a structure agent's at the full caps,
+        `EDIT_REPLAY_STRUCTURE_NOTIONAL`; everything else at the practice book's)."""
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
@@ -4455,7 +4530,9 @@ class House:
 
         The agent keeps its seat, its record and its code; only numeric PARAMS that `parameters.inspect`
         lists as mutable change, each inside its bounds. The House replays the code with the edited
-        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`), on the
+        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`; a structure
+        agent's at the full practice stake and caps, `EDIT_REPLAY_STRUCTURE_NOTIONAL`: at half, most of its
+        structures cost more than the order cap and its replay could not open one), on the
         tape its replays use -- the development window, never the sealed holdout -- and judges it by
         the replay gate against the line's trials with this look, and every earlier edit look of the
         line, counted in the deflation (`evaluator.replay_gate`, counted=False, `looks`). It records no
@@ -4508,8 +4585,9 @@ class House:
         niche = self.niche_of(current)
         if niche is not None and not self._replayable(niche, current.needs):
             return {"error": "this specialty has no replay to judge an edit by: an edit here waits for one"}
+        scale = EDIT_REPLAY_STRUCTURE_NOTIONAL if self.is_structure_agent(current) else EDIT_REPLAY_NOTIONAL
         try:
-            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=EDIT_REPLAY_NOTIONAL)
+            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=scale)
         except Exception as exc:  # noqa: BLE001 - a replay that cannot run is no look, and changes nothing
             return {"error": f"the edit's replay could not run (not a look; nothing changed): {type(exc).__name__}: {str(exc)[:200]}"}
         crash = self._crashed(result)
@@ -4523,7 +4601,8 @@ class House:
                    "deflated_sharpe": None if deflated is None else deflated["dsr"], "return_pct": result.get("return_pct"),
                    "max_drawdown": result.get("max_drawdown"), "oos_mean_log_growth": oos.get("mean_log_growth"),
                    "fees_usd": result.get("fees_usd"), "tape": tape_id, "tape_source": result.get("tape_source"),
-                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * EDIT_REPLAY_NOTIONAL}
+                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * scale,
+                   "max_order_usd": float(CONSTITUTION["rungs"]["1"]["max_order_usd"]) * scale}
         self.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": passed, "reasons": reasons,
                                               "params": edited, "was": dict(current.params), **numbers}, agent=current.id)
         return {"passed": passed, "reasons": reasons, "params": edited, "was": dict(current.params),
@@ -6020,7 +6099,8 @@ class House:
           displaced only by a newcomer whose forward score beats the resident's own forward record
           (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
           own YET there is nothing to compare, and it keeps its seat -- but a trader the lab can never
-          score (`Lab.can_score`: an options or unreplayed desk, a blocked program) is judged as before,
+          score (`Lab.can_score`: an unreplayed desk, a single-contract program of the options desk -- whose
+          STRUCTURE programs the lab scores since G-LOOP, Sept 25, 2026 -- a blocked program) is judged as before,
           or its desk's waiters would starve for good (the review of #245);
         - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
           displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
@@ -8972,7 +9052,20 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not repair and not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            stuck = traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
+            if stuck and not repair and self._structure_program(agent, candidate.get("needs")):
+                # Never a STRUCTURE program (G-LOOP, Sept 25, 2026): its replay is the only judge of arithmetic that
+                # can cost a structure's whole maximum loss. At 15:34:48Z krasker-22 (options-gap-drift) took this
+                # rule's way out of eleven barren wakes into a credit-spread program whose replay had FAILED at
+                # 15:34:26Z (17 trades), opened a CCL Oct 2 condor on $0.50 wings at 15:42:56Z, and from 15:54Z its
+                # stop tried to buy it back at 1.46, three times the wings: refused as no defined-risk order, the
+                # condor marked at its whole $17.20 maximum loss. A structure agent's new program must pass the
+                # replay gate before it trades; until then its own rules stand, and research goes on.
+                self.ledger.append("agent.research", {"tool": "candidate", "status": "not_adopted",
+                    "reason": (f"its own rules had not fired in {barren} wakes, but a structure program trades only once its "
+                               "replay passes: this one's did not"), "_candidate": candidate}, agent=agent.id)
+                candidate = None
+            elif not repair and not stuck:
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "A specialist wrote this file for it: " + candidate["purpose"]}
@@ -9141,7 +9234,8 @@ class House:
         paused = self.registry.entries_paused(agent.id)
         out: dict[str, Any] = {"state": "paused" if paused else "open",
                                "tools": "pause_entries / resume_entries hold and release your buys (your sells always go on); edit_params "
-                                        "changes your PARAMS in place once its replay at half notional passes"}
+                                        "changes your PARAMS in place once its replay at "
+                                        + ("the full practice caps" if self.is_structure_agent(agent) else "half notional") + " passes"}
         if paused:
             since = str(paused.get("since") or "")
             held = sum(int(e.payload.get("held") or 0) for e in self.ledger.read(kinds="agent.woke", agent=agent.id, limit=2000, newest=True)
