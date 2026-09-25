@@ -970,7 +970,12 @@ watch.
     book now adds each back that way. Added back unrounded (to eighteen places) they moved the
     reading by tenths of a cent at every change of the resting bids, each booked as dust, until the
     cancel of four of eight bids at 02:49Z Sept 25 left "cash differs by 0.0108" and froze the real
-    book, with no fill and no fee behind it, until a restart.
+    book, with no fill and no fee behind it, until a restart. New `book.reconciled` rows carry
+    `holds: "cent"`. The first clean reading after the deploy that ships this also allows exactly the
+    sub-cent error the last reading of the release before left on the bids resting then (read from
+    the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean readings of
+    Sept 24 18:30Z-Sept 25 04:26Z), booked as ordinary dust, so the deploy's watch does not meet a
+    freeze.
   - *A restart.* The first reading after a restart now allows a cent only for each venue fill since
     the last clean reading (the fold reads the `book.reconciled` rows). It had allowed a cent for every
     fill the book ever had, which is what "un-froze" the real Alpaca book at 04:11:50Z Sept 25 ($0.12
