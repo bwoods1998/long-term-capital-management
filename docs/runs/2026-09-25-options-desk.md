@@ -99,6 +99,24 @@ structure-aware practice book; ships today only if built, reviewed and CI-green 
 after 20:05Z with Monday's open as its first session). A config switch says which venue the options
 desk's structures go to, so the choice is made at the deploy and undone by a rollback.
 
+## The owner's decision in the session (Sept 25, about 16:08Z)
+
+At 15:05Z the owner asked whether the agents were close to exponentially profitable options trades and asked
+to make the most of the week's last market hours. Answered in the session: no; one structure founder live, no
+structure trade yet, the eleven others failed the replay on edge (row C). Asked (15:13Z) whether to keep his two
+rules or lift them, the owner chose **"Deploy all 12 on practice now"** (answered about 16:08Z): lift, for today
+only, "no deploy 13:25-20:05Z" and "seat only replay-passed founders", and seat the eleven failed founders on the
+options-shadow PRACTICE book. Real money stays off (O1 absent), no money-digest change. Their replays stay on
+record; whatever they make or lose today is practice evidence, not proof. The other three runs were told at
+16:09Z; the Kalshi run confirmed no real Kalshi family's game in play 16:40-17:00Z (the proven family's MLB totals
+start 22:40Z). Meanwhile (from 15:10Z) a read-only recorder writes one OPRA snapshot a minute of SPY/QQQ/IWM
+(expiries to Oct 2, strikes within 4%) and eleven stocks (expiries Sept 25, Oct 2, Oct 9, within 12%) with sizes,
+last trades and minute bars to `~/Work/.options-history/live-2026-09-25.jsonl`, for the calibration and a forward
+test of every founder on true touches.
+
+- **Deploy V2 (PR #336, `v/founders12`):** the 11 seeds, rows, tests; CI started 16:10Z; the owner deploy follows
+  CI, one House restart, canary and watch; start and release id written here first.
+
 ## Coordination with the forward-first run
 
 Read before every merge and deploy: the forward-first record's "Coordination with the options-desk
