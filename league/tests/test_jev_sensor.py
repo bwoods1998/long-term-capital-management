@@ -4,6 +4,7 @@ import json
 import random
 import tempfile
 import threading
+import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
@@ -242,6 +243,94 @@ class AskStateTest(unittest.TestCase):
         self.assertEqual(stats["completed_lifetime"], 4)
         self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.00007") * 5 + Decimal("0.003"))
         self.assertEqual(sensor.headroom("move"), sensor.daily_calls - 1)
+
+    def test_the_breaker_is_per_purpose_and_doubles_until_a_success(self):
+        jev = FakeJev(fail=True)
+        sensor = self.sensor(jev, cooldown_seconds=1800)
+        opened = []
+        for wait in (0, 61, 121, 241):
+            self.clock.advance(wait)
+            self.assertEqual(sensor.refusal("move"), "", f"closed again after {wait} s")
+            sensor.ask_state("move", f"s{wait}", self.state, {"a": "Question a?"})
+            opened.append(sensor.breakers["move"] - self.clock())
+        self.assertEqual(opened, [60, 120, 240, 480], "60 s, doubling per consecutive failure")
+        self.assertIn("move breaker open", sensor.refusal("move"))
+        self.assertEqual(sensor.refusal("gate"), "", "a move failure never silences the research gate")
+        jev.fail = False
+        self.assertEqual(sensor.ask("gate", {}, {"k": ("t", "q?")}), {"k": 0.9})
+        self.clock.advance(481)
+        self.assertEqual(sensor.ask_state("move", "ok", self.state, {"a": "Question a?"}), {"a": 0.9})
+        self.assertNotIn("move", sensor.breakers)
+        jev.fail = True
+        sensor.ask_state("move", "again", self.state, {"a": "Question a?"})
+        self.assertEqual(sensor.breakers["move"] - self.clock(), 60, "a success resets the doubling")
+        capped = self.sensor(FakeJev(fail=True), "capped.sqlite", cooldown_seconds=100)
+        for _ in range(4):
+            self.clock.advance(1000)
+            capped.ask("gate", {}, {f"k{self.clock()}": ("t", "q?")})
+        self.assertEqual(capped.breakers["gate"] - self.clock(), 100, "never longer than cooldown_seconds")
+
+    def test_a_409_is_a_free_conflict_not_an_outage(self):
+        import sqlite3
+        import urllib.error
+        seen = []
+
+        def client(ident, body):
+            seen.append(ident)
+            if len(seen) == 1:
+                raise urllib.error.HTTPError("https://gateway/v1/typesafe/systemone", 409, "Conflict", {}, None)
+            request = json.loads(body)
+            return {"model": MODEL, "answers": {n: {"type": "noul", "noul": 0.4} for n in request["questions"]}}, Decimal("0.0001")
+
+        sensor = self.sensor(client)
+        receipt = {}
+        self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt), {"a": None})
+        self.assertTrue(receipt["conflict"])
+        self.assertNotIn("failed", receipt)
+        self.assertIn("409", receipt["refused"])
+        self.assertEqual((receipt["calls"], receipt["cost"]), (1, Decimal(0)))
+        self.assertEqual(sensor.refusal("move"), "", "no breaker")
+        self.assertEqual(sensor.spent_today("move"), Decimal(0), "refused before the gateway reserves anything")
+        self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}), {"a": 0.4})
+        self.assertEqual([i.rsplit("-", 1)[1] for i in seen], ["0", "1"], "the next attempt gets a new identity")
+        db = sqlite3.connect(Path(self.dir.name) / "jev.sqlite")
+        self.assertEqual(db.execute("SELECT status, cost FROM calls ORDER BY at, rowid").fetchall(),
+                         [("conflict", "0"), ("completed", "0.0001")])
+        db.close()
+        self.assertEqual(sensor.spent_today(), Decimal("0.0001"))
+
+    def test_day_totals_survive_pruned_calls_and_an_older_store_is_counted_once(self):
+        import sqlite3
+        path = Path(self.dir.name) / "old.sqlite"
+        db = sqlite3.connect(path)
+        db.executescript("""
+            CREATE TABLE calls(ident TEXT PRIMARY KEY, purpose TEXT NOT NULL, at REAL NOT NULL, day TEXT NOT NULL,
+                questions INTEGER NOT NULL, status TEXT NOT NULL, cost TEXT, latency REAL, error TEXT);
+            CREATE TABLE hits(day TEXT NOT NULL, purpose TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(day, purpose));
+            CREATE TABLE answers(key TEXT PRIMARY KEY, purpose TEXT NOT NULL, p REAL NOT NULL, at REAL NOT NULL, call TEXT NOT NULL);
+            CREATE TABLE meta(name TEXT PRIMARY KEY, value TEXT NOT NULL);
+        """)
+        day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        db.executemany("INSERT INTO calls VALUES(?,?,?,?,?,?,?,?,?)", [
+            ("a", "gate", self.clock(), day, 2, "completed", "0.0001", 0.5, None),
+            ("b", "gate", self.clock(), day, 1, "unconfirmed", None, None, "x"),
+            ("c", "triage", self.clock() - 86400 * 40, "2026-08-01", 3, "completed", "0.0002", 0.4, None)])
+        db.commit()
+        db.close()
+        readonly = Sensor(path, None, clock=self.clock, readonly=True)
+        self.assertEqual(readonly.stats()["calls_lifetime"], 3, "a read-only report of an older store counts its calls")
+        sensor = Sensor(path, FakeJev(0.5), clock=self.clock)
+        self.assertEqual((sensor.calls_today("gate"), sensor.spent_today()), (2, Decimal("0.0031")))
+        stats = sensor.stats()
+        self.assertEqual((stats["calls_lifetime"], stats["completed_lifetime"], stats["spent_lifetime_usd"]), (3, 2, "0.0033"))
+        self.assertEqual(Sensor(path, FakeJev(0.5), clock=self.clock).stats()["calls_lifetime"], 3, "built once")
+        self.assertEqual(sensor.prune_calls(), 1, "calls older than 35 days go")
+        self.clock.advance(86400)
+        sensor.ask("gate", {}, {"k": ("t", "q?")})  # a new day: the tally is read from the day totals
+        stats = sensor.stats()
+        self.assertEqual((stats["calls_lifetime"], stats["completed_lifetime"]), (4, 3), "the pruned call still counts")
+        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.0034"))
+        self.assertEqual(stats["today"]["gate"]["calls"], 1)
 
     def test_forget_drops_only_old_answers_under_a_prefix(self):
         sensor = self.sensor(FakeJev(0.6))
