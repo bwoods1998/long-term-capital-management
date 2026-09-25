@@ -31,7 +31,8 @@ ledger) and the owner's ratification. The formulas:
   when the rate at the stake itself is unmeasured or zero, and 1 while the capacity record carries
   no fill curve beyond its own size (a size never measured is never assumed). The curve is the K2
   capacity study's (`scripts/kalshi_capacity.py --json`, the smaller m* of its estimate and its
-  floor) when the report is given one, else the board's `capacity` record, and the report says which.
+  floor) for the report's WHAT-IF when it is given one; the rule itself reads the family records' `capacity` (the
+  board's, and each `family.record` row's), so a study never decides a tranche or a deposit (review of #313).
   capacity_used counts dollars COMMITTED, never dollars earned: no edge enters it, and capacity alone
   unlocks nothing -- (b) below is the guard against a short streak's edge (Sept 25, 2026: the proven
   sports family's `edge_per_dollar` read +0.27 while a market-wide three-week measure of the same
@@ -50,7 +51,8 @@ ledger) and the owner's ratification. The formulas:
 - **Relock** (`replay`): an unlocked tranche is withdrawn the first time the venue's real P&L since
   its unlock, P(t) - P(unlock), falls below `relock_share` x its size, where `relock_share` is the
   allocator's throttle line (`allocator.throttle.halve_below`, -0.30); after a withdrawal the next
-  tranche needs a whole window of days after the day of it. Tranches never lift the envelope above
+  tranche needs a whole window of days after the day of it, and a re-ratification does not erase a withdrawal: the
+  grant's earlier version-2 intervals are replayed first (review of #313). Tranches never lift the envelope above
   the account's equity: unlocked <= max(0, funded - base envelope).
 
 Everything else of the grant is unchanged: the throttle, the kill switch, the order and day caps,
@@ -451,13 +453,16 @@ def evaluate(block: Mapping[str, Any], days: Mapping[str, Day], *, today: str, e
     return {'today': today, 'window': names, 'shares': shares, 'window_pnl_usd': None if window_pnl is None else str(window_pnl),
             'evidence': evidence, 'unlock': evidence and tranche > 0, 'tranche_usd': str(tranche), 'full_tranche_usd': str(full),
             'deposit_left_usd': None if deposit is None else str(deposit),
-            'deposit_to_work_usd': str(_cents(max(ZERO, full - (deposit or ZERO)))) if evidence else '0.00',
+            # Unread equity names no deposit (review of #313): the account may already hold it.
+            'deposit_to_work_usd': ('0.00' if not evidence else None if deposit is None
+                                    else str(_cents(max(ZERO, full - deposit)))),
             'capacity_needed_usd': str(target), 'capacity_gap_usd': str(_cents(max(ZERO, target - (lowest or ZERO)))),
             'fails': fails}
 
 
 def _live(tranche: Mapping[str, Any], t: float) -> bool:
-    return tranche['unlocked_at'] <= t and (tranche['relocked_at'] is None or tranche['relocked_at'] > t)
+    return (tranche['unlocked_at'] <= t and (tranche['relocked_at'] is None or tranche['relocked_at'] > t)
+            and (tranche.get('ended_at') is None or tranche['ended_at'] > t))
 
 
 def unlocked_usd(tranches: Sequence[Mapping[str, Any]], t: float, *, base: Any, funded: Any) -> Decimal:
@@ -470,15 +475,15 @@ def unlocked_usd(tranches: Sequence[Mapping[str, Any]], t: float, *, base: Any, 
     return _cents(min(total, max(ZERO, funded - base)))
 
 
-def _relock(tranches: list[dict[str, Any]], pnl: Sequence[tuple[float, Decimal]], share: Decimal, until: float) -> None:
+def _relock(tranches: list[dict[str, Any]], pnl: Sequence[tuple[float, Decimal]], until: float) -> None:
     for tranche in tranches:
         if tranche['relocked_at'] is not None:
             continue
-        line = share * Decimal(tranche['usd'])
+        line, limit = tranche['line'], min(until, tranche.get('track_until', float('inf')))
         for at, value in pnl:
             if at <= tranche['checked_to']:
                 continue
-            if at > until:
+            if at > limit:
                 break
             tranche['checked_to'] = at
             if value - tranche['pnl_at_unlock'] < line:
@@ -486,65 +491,91 @@ def _relock(tranches: list[dict[str, Any]], pnl: Sequence[tuple[float, Decimal]]
                 tranche['pnl_at_relock'] = value - tranche['pnl_at_unlock']
                 break
         else:
-            tranche['checked_to'] = max(tranche['checked_to'], until)
+            tranche['checked_to'] = max(tranche['checked_to'], limit)
 
 
 def replay(block: Mapping[str, Any], days: Mapping[str, Day], *, pnl: Sequence[tuple[float, Decimal]],
            funded: Sequence[tuple[float, Decimal]], envelopes: Sequence[tuple[float, Decimal]],
-           ratified_at: float, now: float) -> dict[str, Any]:
+           ratified_at: float, now: float, earlier: Sequence[Sequence[Any]] = ()) -> dict[str, Any]:
     """The tranches since the owner's ratification, from the recorded evidence alone (no state is kept, so the same
     ledger always gives the same answer): a decision at the ratification and at every 00:00Z after it (`evaluate`, on
     the window before that day, the envelope in force, the equity then); a relock at the first mark pass after an unlock
     where the venue's real P&L since it is below `relock_share` x its size. `envelopes` is the base envelope (the
-    allocator's, before tranches) at each reading; a day's envelope in force adds every tranche live at any moment of it."""
-    share = Decimal(block['relock_share'])
+    allocator's, before tranches) at each reading; a day's envelope in force adds every tranche live at any moment of it.
+
+    `earlier`: the grant's EARLIER version-2 intervals, [(ratified, switched off, the `scale_tranches` block ratified
+    then)], oldest first (review of #313); each tranche keeps the relock line of the block that unlocked it. They are
+    replayed first, so a re-ratification never erases a withdrawal: a tranche live when version 2 went off ends
+    there (it is not restored; the rule re-earns it), but its relock line is still watched until the next ratification,
+    and a withdrawal in an earlier interval, or in the gap after it, holds the next tranche for a whole window. Without
+    it, the routine re-ratification after a money-rule change unlocked a tranche hours after one was withdrawn, on the
+    same window of days that preceded the loss."""
     tranches: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
-    moments, t = [ratified_at], midnight(day_of(ratified_at)) + DAY_SECONDS
-    while t <= now:
-        moments.append(t)
-        t += DAY_SECONDS
-    for moment in moments:
-        _relock(tranches, pnl, share, moment)
-        today = day_of(moment)
-        base, equity = value_before(envelopes, moment), value_before(funded, moment)
-        if base is None:
-            decisions.append({'at': iso(moment), 'today': today, 'unlock': False, 'tranche_usd': '0.00',
-                              'fails': [{'condition': 'capacity', 'text': 'no allocator reading before the decision'}]})
-            continue
-        names = window_of(today, int(block['window_days']))
-        withdrawn = [x['relocked_at'] for x in tranches if x['relocked_at'] is not None]
-        if withdrawn and names[0] <= day_of(max(withdrawn)):
-            # A withdrawn tranche's evidence is spent: the next one needs a whole window after the day it was withdrawn.
-            decisions.append({'at': iso(moment), 'today': today, 'unlock': False, 'tranche_usd': '0.00', 'window': names,
-                              'fails': [{'condition': 'relock', 'text': f'a tranche was withdrawn on {day_of(max(withdrawn))}: '
-                                         f'the next needs {len(names)} full days after it'}]})
-            continue
-        in_force = {}
-        for name in names:
-            day = days.get(name)
-            if day is not None and day.envelope_usd is not None:
-                start = midnight(name)
-                extra = sum((Decimal(x['usd']) for x in tranches if x['unlocked_at'] < start + DAY_SECONDS
-                             and (x['relocked_at'] is None or x['relocked_at'] > start)), ZERO)
-                day = Day(day.day, day.capacity_usd, day.envelope_usd + extra, day.readings, day.pnl_usd)
-            if day is not None:
-                in_force[name] = day
-        envelope = base + unlocked_usd(tranches, moment, base=base, funded=equity)
-        result = evaluate(block, in_force, today=today, envelope=envelope, funded=equity)
-        result['at'] = iso(moment)
-        decisions.append(result)
-        reference = value_before(pnl, moment)
-        if result['unlock'] and reference is not None:
-            tranches.append({'n': len(tranches) + 1, 'unlocked_at': moment, 'day': today, 'usd': result['tranche_usd'],
-                             'pnl_at_unlock': reference, 'checked_to': moment, 'relocked_at': None, 'pnl_at_relock': None})
-    _relock(tranches, pnl, share, now)
+    intervals = [(float(x[0]), float(x[1]), (x[2] if len(x) > 2 and x[2] else block)) for x in earlier
+                 if float(x[0]) < float(x[1]) <= ratified_at] + [(ratified_at, now, block)]
+    for k, (begin, end, rule) in enumerate(intervals):
+        last = k == len(intervals) - 1
+        moments, t = [begin], midnight(day_of(begin)) + DAY_SECONDS
+        while t <= end if last else t < end:
+            moments.append(t)
+            t += DAY_SECONDS
+        for moment in moments:
+            _decide(rule, days, tranches, decisions, pnl=pnl, funded=funded, envelopes=envelopes, moment=moment)
+        if not last:
+            _relock(tranches, pnl, end)
+            for tranche in tranches:
+                if tranche['relocked_at'] is None and tranche.get('ended_at') is None:
+                    tranche['ended_at'], tranche['track_until'] = end, intervals[k + 1][0]
+    _relock(tranches, pnl, now)
     base, equity = value_before(envelopes, now), value_before(funded, now)
     live = unlocked_usd(tranches, now, base=base, funded=equity)
-    shown = [{'n': x['n'], 'unlocked_at': iso(x['unlocked_at']), 'usd': x['usd'],
-              'relock_line_usd': str(share * Decimal(x['usd'])),
-              'pnl_since_usd': (None if x['relocked_at'] is not None or not pnl
+    shown = [{'n': x['n'], 'unlocked_at': iso(x['unlocked_at']), 'usd': x['usd'], 'relock_line_usd': str(x['line']),
+              'pnl_since_usd': (None if x['relocked_at'] is not None or x.get('ended_at') is not None or not pnl
                                 else str(value_before(pnl, now) - x['pnl_at_unlock'])),
               'relocked_at': None if x['relocked_at'] is None else iso(x['relocked_at']),
-              'pnl_at_relock_usd': None if x['pnl_at_relock'] is None else str(x['pnl_at_relock'])} for x in tranches]
+              'pnl_at_relock_usd': None if x['pnl_at_relock'] is None else str(x['pnl_at_relock']),
+              'switched_off_at': None if x.get('ended_at') is None else iso(x['ended_at'])} for x in tranches]
     return {'tranches': shown, 'unlocked_usd': str(live), 'decisions': decisions}
+
+
+def _decide(block: Mapping[str, Any], days: Mapping[str, Day], tranches: list[dict[str, Any]], decisions: list[dict[str, Any]],
+            *, pnl: Sequence[tuple[float, Decimal]], funded: Sequence[tuple[float, Decimal]],
+            envelopes: Sequence[tuple[float, Decimal]], moment: float) -> None:
+    """One decision of `replay` at `moment` (the ratification, or a 00:00Z while version 2 is in force), under `block`."""
+    _relock(tranches, pnl, moment)
+    today = day_of(moment)
+    base, equity = value_before(envelopes, moment), value_before(funded, moment)
+    if base is None:
+        decisions.append({'at': iso(moment), 'today': today, 'unlock': False, 'tranche_usd': '0.00',
+                          'fails': [{'condition': 'capacity', 'text': 'no allocator reading before the decision'}]})
+        return
+    names = window_of(today, int(block['window_days']))
+    withdrawn = [x['relocked_at'] for x in tranches if x['relocked_at'] is not None and x['relocked_at'] <= moment]
+    if withdrawn and names[0] <= day_of(max(withdrawn)):
+        # A withdrawn tranche's evidence is spent: the next one needs a whole window after the day it was withdrawn.
+        decisions.append({'at': iso(moment), 'today': today, 'unlock': False, 'tranche_usd': '0.00', 'window': names,
+                          'fails': [{'condition': 'relock', 'text': f'a tranche was withdrawn on {day_of(max(withdrawn))}: '
+                                     f'the next needs {len(names)} full days after it'}]})
+        return
+    in_force = {}
+    for name in names:
+        day = days.get(name)
+        if day is not None and day.envelope_usd is not None:
+            start = midnight(name)
+            extra = sum((Decimal(x['usd']) for x in tranches if x['unlocked_at'] < start + DAY_SECONDS
+                         and (x['relocked_at'] is None or x['relocked_at'] > start)
+                         and (x.get('ended_at') is None or x['ended_at'] > start)), ZERO)
+            day = Day(day.day, day.capacity_usd, day.envelope_usd + extra, day.readings, day.pnl_usd)
+        if day is not None:
+            in_force[name] = day
+    envelope = base + unlocked_usd(tranches, moment, base=base, funded=equity)
+    result = evaluate(block, in_force, today=today, envelope=envelope, funded=equity)
+    result['at'] = iso(moment)
+    decisions.append(result)
+    reference = value_before(pnl, moment)
+    if result['unlock'] and reference is not None:
+        tranches.append({'n': len(tranches) + 1, 'unlocked_at': moment, 'day': today, 'usd': result['tranche_usd'],
+                         'pnl_at_unlock': reference, 'checked_to': moment, 'relocked_at': None, 'pnl_at_relock': None,
+                         'ended_at': None, 'track_until': float('inf'),
+                         'line': Decimal(block['relock_share']) * Decimal(result['tranche_usd'])})

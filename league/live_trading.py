@@ -18,9 +18,12 @@ moves switches it off until the owner ratifies again, and a run's own re-ratify 
 three UTC days, the tranche it would unlock today and the deposit that would put it to work.
 
 What reads version 2 at run time: nothing yet. The allocator's envelope (`Allocator.grant_capital`,
-the forward-first run's file) would add `unlocked_usd` from `scale_state`; that line lands with
-that run's agreement after its Deploy B, and until it does a ratified version 2 changes the report
-alone.
+the forward-first run's file) is to add `scale_unlocked(root, venue)` -- $0 unless version 2 is in
+force, $0 on any failure, read at most every five minutes -- and record what it added on the board's
+envelope row (`unlocked_usd`), which `base_envelope` subtracts. That line lands with that run's
+agreement after its Deploy B, and until it does a ratified version 2 changes the report alone.
+K2's capacity study, given to the report, is a what-if beside the rule's own reading (the family
+records' capacity): it never decides a tranche or a deposit.
 """
 from decimal import Decimal, ROUND_DOWN
 import hashlib
@@ -118,10 +121,15 @@ def ratify_version(guard, ident, version):
     from .ledger import canonical
     if version not in GRANT_VERSIONS:
         raise ValueError(f'unknown grant version {version!r}')
+    # The version's policy first (review of #313): a fault in the scale rule's code fails the command before the
+    # ratification writes anything, never after it (the capital and the money digest are the same either side).
+    held = guard.live_trading()
+    if held is None or held['id'] != ident:
+        raise CampaignClosed('no live grant with that identity to ratify')
+    encoded = canonical(policy(held['policy']['venue_capital_usd'], version=version))
     live = guard.ratify_live_trading(ident)
     if not live or not live['active']:
         raise CampaignClosed('the grant is not active under the current money rules; no version can be ratified onto it')
-    encoded = canonical(policy(live['policy']['venue_capital_usd'], version=version))
     with guard.lock:
         guard.db.execute('BEGIN IMMEDIATE')
         try:
@@ -167,6 +175,7 @@ def grant_version(db, *, now):
     except sqlite3.Error:  # no table: the owner never ratified a version
         last = None
     ratified = None if last is None else {'version': int(last[0]), 'at': float(last[1]), 'policy': json.loads(last[2])}
+    earlier = _earlier_intervals(db, ident)
     on = bool(active and ratified and ratified['version'] == 2 and scaled is not None and ratified['policy'] == scaled)
     why = (None if on else 'the grant is not active' if not active else 'the owner never ratified version 2' if ratified is None
            else 'the owner ratified version 1 last' if ratified['version'] != 2
@@ -175,7 +184,30 @@ def grant_version(db, *, now):
             'constitution_digest': stored.get('constitution_digest'),
             'proposed_digest': None if scaled is None else _digest(scaled),
             'scale_policy': scaled if on else None, 'ratified': None if ratified is None else
-            {'version': ratified['version'], 'at': ratified['at'], 'digest': _digest(ratified['policy'])}, 'why_off': why}
+            {'version': ratified['version'], 'at': ratified['at'], 'digest': _digest(ratified['policy'])}, 'why_off': why,
+            'earlier': earlier}
+
+
+def _earlier_intervals(db, ident):
+    """The grant's EARLIER version-2 intervals, [[ratified, switched off, its scale_tranches]], oldest first: each version-2 row but the last,
+    to the next version row or the first re-pin of the grant after it (`live_ratifications`: a money rule moved, which
+    switches version 2 off), whichever came first. `grants.replay` replays them first, so a re-ratification never erases
+    a withdrawal (review of #313)."""
+    try:
+        rows = [(int(v), float(at), policy) for v, at, policy in
+                db.execute(f'SELECT version, at, policy FROM {VERSIONS_TABLE} WHERE id=? ORDER BY rowid', (ident,)).fetchall()]
+    except sqlite3.Error:
+        return []
+    try:
+        repins = [float(r[0]) for r in db.execute('SELECT at FROM live_ratifications WHERE id=? ORDER BY at', (ident,))]
+    except sqlite3.Error:
+        repins = []
+    out = []
+    for (version, at, ratified), (_, following, _) in zip(rows, rows[1:]):
+        if version == 2:
+            out.append([at, min([following] + [r for r in repins if at < r < following]),
+                        json.loads(ratified).get('scale_tranches')])
+    return out
 
 
 def report(guard, *, prepared_capital=None):
@@ -245,14 +277,16 @@ class _LedgerRows:
             if t > until:
                 continue
             for venue, row in (json.loads(envelope) if envelope else {}).items():
-                capital = row.get('capital_usd') if isinstance(row, dict) else None
-                if capital is not None:
-                    out.setdefault(venue, []).append((t, Decimal(str(capital))))
+                base = base_envelope(row)
+                if base is not None:
+                    out.setdefault(venue, []).append((t, base))
         return out
 
     def pnl(self, venues, since, until):
-        """{venue: [(t, P)]}: P at each mark pass, the sum over the venue's real book of equity less what was lent."""
-        marks = {}
+        """{venue: [(t, P)]}: P at each mark pass, the sum over the venue's real book of equity less what was lent. A book's
+        LAST pass with fewer rows than the pass before it is left out: the House was still writing it (`Book.mark` appends
+        one row an account, every account every pass, and a book never drops an account), and a partial sum is not P."""
+        marks, counts = {}, {}
         wanted = tuple(venues)
         if not wanted:
             return {}
@@ -266,7 +300,15 @@ class _LedgerRows:
                 continue
             passes = marks.setdefault(book, {})
             passes[t] = passes.get(t, Decimal(0)) + Decimal(str(equity)) - Decimal(str(staked))
-        return {venue: sorted(passes.items()) for venue, passes in marks.items()}
+            counts.setdefault(book, {})[t] = counts.get(book, {}).get(t, 0) + 1
+        out = {}
+        for venue, passes in marks.items():
+            series = sorted(passes.items())
+            n = counts[venue]
+            if len(series) >= 2 and n[series[-1][0]] < n[series[-2][0]]:
+                series.pop()
+            out[venue] = series
+        return out
 
     def funded(self, since, until):
         """{venue: [(t, equity)]}: the venue account's equity at each `floor.mark` row."""
@@ -280,6 +322,16 @@ class _LedgerRows:
                 if isinstance(row, dict) and row.get('venue') and row.get('equity') is not None and not row.get('stale'):
                     out.setdefault(row['venue'], []).append((t, Decimal(str(row['equity']))))
         return out
+
+
+def base_envelope(row):
+    """A venue's BASE envelope from an `alloc.board` envelope row (the ledger's or the board file's): the allocator's
+    capital less any tranche it records it added (`unlocked_usd`), so that the scale rule never reads its own tranche as
+    base once the allocator applies it (review of #313: without it, base + tranche was read as base, and the tranche's cap
+    at the equity fed back into itself). None when the row carries no capital."""
+    if not isinstance(row, dict) or row.get('capital_usd') is None:
+        return None
+    return Decimal(str(row['capital_usd'])) - Decimal(str(row.get('unlocked_usd') or 0))
 
 
 def _read_grant(root, now):
@@ -320,14 +372,18 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
     ratio = block['fills_halve_ratio']
     today = grants.day_of(now)
     ratified_at = grant['ratified']['at'] if grant.get('version') == 2 and grant.get('ratified') else None
-    first = grants.window_of(grants.day_of(ratified_at) if ratified_at else today, int(block['window_days']))[0]
+    earlier = [tuple(x) for x in (grant.get('earlier') or [])] if ratified_at else []
+    begun = min([ratified_at] + [float(x[0]) for x in earlier]) if ratified_at else None
+    first = grants.window_of(grants.day_of(begun) if begun else today, int(block['window_days']))[0]
     since = grants.midnight(first) - 2 * grants.DAY_SECONDS  # a mark pass before the window's first day: its P&L start
     venues = sorted((board.get('envelope') or {}).keys())
     ledger_path = root / 'ledger.sqlite'
     history = {'board': f"one snapshot (allocator-board.json at {board.get('at')}): the board keeps no history",
-               'curves': (f"Kalshi: the K2 capacity study {study['source']} ({study.get('since')}..{study.get('until')}; "
-                          f"families with a curve: {len(study['families'])}), else the board's capacity record" if study
-                          else "the board's capacity record (fill at the position size; no curve beyond it until C6 or a K2 study)")}
+               'curves': ("the family records' capacity (the board's today, the `family.record` rows' on each day), which is "
+                          "what the rule reads: the fill at the position size, and no curve beyond it until C6"
+                          + (f". K2's capacity study {study['source']} ({study.get('since')}..{study.get('until')}; families with a "
+                             f"curve: {len(study['families'])}) is a WHAT-IF beside it for Kalshi: the rule does not read it, so it "
+                             "never decides a tranche or a deposit here" if study else ''))}
     rows = {'families': [], 'envelopes': {}, 'pnl': {}, 'funded': {}}
     if ledger_path.is_file():
         ledger = _LedgerRows(ledger_path)
@@ -346,10 +402,12 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
     out = {}
     for venue in venues:
         env = board['envelope'][venue]
-        base = Decimal(str(env.get('capital_usd') or 0))
+        base = base_envelope(env) or Decimal(0)
         committed = Decimal(str(env.get('committed_usd') or 0))
         curves = (study or {}).get('families') if venue == 'kalshi' else None
-        used, lines = grants.capacity_used((board.get('families') or {}).get(venue) or {}, ratio, curves)
+        # The rule's own reading: the family records' capacity. K2's study never enters a decision (review of #313: a
+        # decision on it named a tranche and a deposit that the ratified rule, which reads the records, would not unlock).
+        used, lines = grants.capacity_used((board.get('families') or {}).get(venue) or {}, ratio)
         others = sorted(name for name, row in ((board.get('families') or {}).get(venue) or {}).items()
                         if row.get('state') not in grants.PROVEN_STATES)
         pnl, envelopes = rows['pnl'].get(venue, []), rows['envelopes'].get(venue, [])
@@ -363,11 +421,11 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
             funded_basis = 'unread: no floor.mark row'
         equity = grants.value_before(equity_series, now)
         days = grants.build_days(venue, family_rows=rows['families'], envelopes=envelopes, pnl=pnl,
-                                 first_day=first, last_day=today, ratio=ratio, study=curves)
+                                 first_day=first, last_day=today, ratio=ratio)
         state = None
         if ratified_at:
             state = grants.replay(block, days, pnl=pnl, funded=equity_series, envelopes=envelopes or [(now, base)],
-                                  ratified_at=ratified_at, now=now)
+                                  ratified_at=ratified_at, now=now, earlier=earlier)
             unlocked = Decimal(state['unlocked_usd'])
             decision = state['decisions'][-1] if state['decisions'] else None
         else:
@@ -375,13 +433,23 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
             decision = grants.evaluate(block, days, today=today, envelope=base, funded=equity)
         envelope = base + unlocked
         window = grants.window_of(today, int(block['window_days']))
+        what_if = None
+        if curves:
+            s_used, s_lines = grants.capacity_used((board.get('families') or {}).get(venue) or {}, ratio, curves)
+            s_days = grants.build_days(venue, family_rows=rows['families'], envelopes=envelopes, pnl=pnl,
+                                       first_day=window[0], last_day=today, ratio=ratio, study=curves)
+            s_decision = grants.evaluate(block, s_days, today=today, envelope=envelope, funded=equity)
+            what_if = {'basis': "K2's capacity study (a what-if: the rule reads the family records' capacity, not this study)",
+                       'capacity_used_usd': str(s_used), 'capacity_share_today': float(s_used / envelope) if envelope > 0 else None,
+                       'families': s_lines, 'shares': s_decision['shares'], 'unlock': s_decision['unlock'],
+                       'tranche_usd': s_decision['tranche_usd'], 'fails': [f['text'] for f in s_decision['fails']]}
         start, end = grants.value_before(pnl, grants.midnight(window[0]), inclusive=False), grants.value_before(pnl, now)
         out[venue] = {
             'envelope_usd': str(envelope), 'base_envelope_usd': str(base), 'unlocked_usd': str(unlocked),
             'committed_usd': str(committed), 'committed_share': float(committed / envelope) if envelope > 0 else None,
             'funded_usd': None if equity is None else str(equity), 'funded_basis': funded_basis,
             'deposit_left_usd': None if equity is None else str(grants._cents(max(Decimal(0), equity - envelope))),
-            'families': lines, 'families_not_proven': len(others),
+            'families': lines, 'families_not_proven': len(others), 'what_if_study': what_if,
             'capacity_used_usd': str(used), 'capacity_share_today': float(used / envelope) if envelope > 0 else None,
             'capacity_gap_today_usd': str(grants._cents(max(Decimal(0), Decimal(block['min_capacity_share']) * envelope - used))),
             'days': [{'day': d.day, 'capacity_used_usd': str(d.capacity_usd),
@@ -400,6 +468,44 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
             'rule': block, 'history': history, 'venues': out,
             'ratify': f"python scripts/live_trading.py --ratify {grant.get('id') or '<grant-id>'} --grant-version 2",
             'switch_off': f"python scripts/live_trading.py --ratify {grant.get('id') or '<grant-id>'} --grant-version 1"}
+
+
+#: `scale_unlocked` reads the evidence at most this often per state directory (a mark pass: `mark_every_seconds`).
+UNLOCKED_CACHE_SECONDS = 300.0
+_UNLOCKED_CACHE = {}
+
+
+def scale_unlocked(root, venue, *, now=None):
+    """The dollars the version-2 tranches add to `venue`'s envelope now: the ONE reading the allocator's line
+    (`Allocator.grant_capital`, forward-first's file, after its Deploy B) is to take, and nothing else. Never raises:
+
+    - $0 unless version 2 is in force (`grant_version`: the owner ratified it, and it is still the code's version 2 under
+      the money rules now); the ledger is then never read, so an unratified version 2 leaves the envelope as it is;
+    - $0 on ANY failure of the scale rule's code or its reads (never a guess, never the last value);
+    - else `scale_state`'s `unlocked_usd` for the venue: the tranches the ratified `scale_tranches` block unlocked,
+      replayed from the ledger, capped at the account's equity above the base envelope.
+
+    Read at most every `UNLOCKED_CACHE_SECONDS` per state directory. The line must also record what it added on the
+    board's envelope row (`unlocked_usd` beside `capital_usd`): `base_envelope` subtracts it, so the rule never reads
+    its own tranche as base."""
+    try:
+        now = time.time() if now is None else float(now)
+        key = str(Path(root).resolve())
+        hit = _UNLOCKED_CACHE.get(key)
+        if hit is None or not 0 <= now - hit[0] < UNLOCKED_CACHE_SECONDS:
+            values = {}
+            try:
+                grant = _read_grant(root, now)
+                if grant.get('version') == 2 and grant.get('scale_policy'):
+                    state = scale_state(root, now=now, grant=grant)
+                    values = {v: max(Decimal(0), Decimal(str(row['unlocked_usd']))) for v, row in state['venues'].items()}
+            except Exception:  # noqa: BLE001 - $0, and remembered: a failing read is not retried on every envelope call
+                values = {}
+            hit = _UNLOCKED_CACHE[key] = (now, values)
+        value = hit[1].get(venue, Decimal(0))
+        return value if value.is_finite() else Decimal(0)
+    except Exception:  # noqa: BLE001 - the scale rule never costs the envelope a dollar it cannot prove: $0
+        return Decimal(0)
 
 
 def scale_report(root, *, now=None, board_path=None, funded=None, study=None):
@@ -461,6 +567,17 @@ def render_scale_report(report):
         else:
             lines.append('  proven families: none')
         lines.append(f"  families not proven: {v['families_not_proven']}")
+        k2 = v.get('what_if_study')
+        if k2:
+            lines.append("  WHAT-IF on K2's curves (the rule does not read the study; it never decides a tranche or a deposit here):")
+            for f in k2['families']:
+                lines.append(f"    {f['family']}: {f['members_real']} x {_money(f['stake_usd'])} x {f['multiple']} = {_money(f['usd'])}"
+                             + (f"  [curve {', '.join(f'{m}x {r:.2f}' for m, r in f['curve'].items())}" if f.get('curve') else '  [no curve beyond 1x')
+                             + (f"; floor {', '.join(f'{m}x {r:.2f}' for m, r in f['floor_curve'].items())}" if f.get('floor_curve') else '')
+                             + (f"; halves at {f['halves_at']}" if f.get('halves_at') is not None else '') + ']')
+            lines.append(f"    capacity {_money(k2['capacity_used_usd'])} = {_pct(k2['capacity_share_today'])} of the envelope; on those curves the "
+                         + (f"evidence would unlock {_money(k2['tranche_usd'])}" if k2['unlock']
+                            else 'evidence would unlock nothing: ' + '; '.join(k2['fails'])) + '.')
         lines.append(f"  capacity used today (the board's families): {_money(v['capacity_used_usd'])} = {_pct(v['capacity_share_today'])} of the envelope")
         for d in v['days']:
             seen = (f"capacity {_money(d['capacity_used_usd'])} = {_pct(d['share'])} (lowest of {d['readings']} readings)"
@@ -471,16 +588,24 @@ def render_scale_report(report):
         for t in v['tranches']:
             lines.append(f"  tranche {t['n']}: {_money(t['usd'])} unlocked {t['unlocked_at']}; "
                          + (f"withdrawn {t['relocked_at']} (P&L since {_money(t['pnl_at_relock_usd'])})" if t['relocked_at']
+                            else f"ended {t['switched_off_at']} when version 2 went off" if t.get('switched_off_at')
                             else f"P&L since {_money(t['pnl_since_usd'])}, withdrawn below {_money(t['relock_line_usd'])}"))
         d = v['decision'] or {}
+        when = f" (decided {d['at']}, on the equity then)" if grant.get('version') == 2 and d.get('at') else ''
         if d.get('unlock'):
-            lines.append(f"  TODAY: the evidence unlocks a tranche of {_money(d['tranche_usd'])} (full tranche {_money(d['full_tranche_usd'])}).")
+            lines.append(f"  TODAY{when}: the evidence unlocks a tranche of {_money(d['tranche_usd'])} (full tranche {_money(d['full_tranche_usd'])}).")
         else:
-            lines.append('  TODAY: no tranche. ' + '; '.join(f['text'] for f in d.get('fails', [])) + '.')
-        lines.append(f"  deposit that would put it to work: {_money(d.get('deposit_to_work_usd'))}"
-                     + ('' if d.get('evidence') else f" (none until proven capacity reaches {_money(d.get('capacity_needed_usd'))} on "
-                        f"{rule['window_days']} straight UTC days, {_money(v['capacity_gap_today_usd'])} more than today's "
-                        f"{_money(v['capacity_used_usd'])}, with the venue's real P&L positive over them)"))
+            lines.append(f'  TODAY{when}: no tranche. ' + '; '.join(f['text'] for f in d.get('fails', [])) + '.')
+        if d.get('evidence'):
+            to_work = d.get('deposit_to_work_usd')
+            lines.append(f"  deposit that would put it to work: {_money(to_work)}"
+                         + (' (the account equity is unread: no deposit is named)' if to_work is None else ''))
+        elif d.get('capacity_needed_usd') is not None:
+            lines.append(f"  deposit that would put it to work: $0.00 (none until proven capacity reaches {_money(d.get('capacity_needed_usd'))} on "
+                         f"{rule['window_days']} straight UTC days, {_money(v['capacity_gap_today_usd'])} more than today's "
+                         f"{_money(v['capacity_used_usd'])}, with the venue's real P&L positive over them)")
+        else:
+            lines.append('  deposit that would put it to work: $0.00 (none until the conditions above hold)')
     lines += ['', "The owner's ratification (switches the scale rule on; nothing else does):", f"  {report['ratify']}",
               f"Switch it off again: {report['switch_off']}"]
     return '\n'.join(lines)
@@ -506,7 +631,7 @@ def main(argv=None):
     study = parser.add_mutually_exclusive_group()
     study.add_argument('--capacity-json', type=Path, metavar='PATH',
                        help="With --scale-report: the K2 study's output (scripts/kalshi_capacity.py --json); its fill curves "
-                            "give Kalshi's m*, else the board's capacity record.")
+                            "give a what-if m* for Kalshi beside the rule's own reading (the family records'), never a decision.")
     study.add_argument('--capacity-curves', metavar='JSON', help=argparse.SUPPRESS)  # the study, reduced (the owner script)
     args = parser.parse_args(argv)
     if args.grant_version is not None and not args.ratify:
@@ -518,9 +643,14 @@ def main(argv=None):
         for item in args.funded:
             venue, _, amount = item.partition('=')
             try:
-                funded[venue.strip()] = str(Decimal(amount))
+                value = Decimal(amount.strip())
             except ArithmeticError:
-                parser.error(f'--funded {item!r}: VENUE=USD')
+                value = None
+            # A venue the grant names, and a finite, nonnegative amount (review of #313: NaN or Infinity crashed the report,
+            # a misspelt venue was silently ignored).
+            if venue.strip() not in ('alpaca', 'kalshi') or value is None or not value.is_finite() or value < 0:
+                parser.error(f'--funded {item!r}: VENUE=USD, VENUE alpaca or kalshi, USD a finite amount >= 0')
+            funded[venue.strip()] = str(value)
         curves = (capacity_study(json.loads(args.capacity_json.read_text(encoding='utf-8')), args.capacity_json)
                   if args.capacity_json else capacity_study(json.loads(args.capacity_curves), 'given')
                   if args.capacity_curves else None)

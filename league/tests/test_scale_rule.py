@@ -162,14 +162,15 @@ class Tranches(TestCase):
                 self.assertEqual(result['fails'], [])
 
     def test_no_deposit_unlocks_nothing_and_names_the_deposit_that_would_work(self):
-        for funded in ('546.83', '400', None):
+        for funded, to_work in (('546.83', '273.41'), ('400', '273.41'), (None, None)):
             with self.subTest(funded=funded):
                 result = evaluate(BLOCK, days(), today=TODAY, envelope='546.83', funded=funded)
                 self.assertTrue(result['evidence'])
                 self.assertFalse(result['unlock'])
                 self.assertEqual(result['tranche_usd'], '0.00')
                 self.assertEqual([f['condition'] for f in result['fails']], ['deposit'])
-                self.assertEqual(result['deposit_to_work_usd'], '273.41')
+                # Unread equity names no deposit (review of #313): the account may already hold one.
+                self.assertEqual(result['deposit_to_work_usd'], to_work)
 
     def test_capacity_failing_alone_on_one_day_blocks_the_tranche_with_its_number(self):
         result = evaluate(BLOCK, days(_2026_09_23=day('2026-09-23', capacity='382.77')), today=TODAY, envelope='546.83',
@@ -316,38 +317,25 @@ class Relock(TestCase):
 
 
 # ------------------------------------------------------------------ the grant: version 1 pinned, version 2 switched off
+#: main's `league/live_trading.py` before the scale rule, byte for byte (review of #313: the pin compares against MAIN'S
+#: function, not a copy that could be edited to match). Its git blob id is the proof: `git rev-parse
+#: 19c3771:league/live_trading.py` (and 80dd26d's, the same blob) prints MAIN_BLOB, and the test recomputes it.
+MAIN_BLOB = '03973f92222ccfaeab9a5c7947b7ea16e21bf840'
+MAIN_FILE = Path(__file__).resolve().parent / 'fixtures' / 'live_trading_main_03973f9.py.txt'
+
+
+def main_module():
+    data = MAIN_FILE.read_bytes()
+    if hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest() != MAIN_BLOB:
+        raise AssertionError(f'{MAIN_FILE.name} is not main\'s league/live_trading.py (blob {MAIN_BLOB})')
+    namespace = {'__name__': 'league._live_trading_main', '__package__': 'league'}
+    exec(compile(data, str(MAIN_FILE), 'exec'), namespace)  # its imports are relative to league, as on main
+    return namespace
+
+
 def golden_v1(venue_capital):
-    """`league/live_trading.py` `policy` as it stood on main at 80dd26d (Sept 25, 2026), verbatim: version 1."""
-    from league.constitution import CONSTITUTION, money_digest
-    if set(venue_capital) != {'alpaca', 'kalshi'}:
-        raise ValueError('capital must name Alpaca and Kalshi')
-    amounts = {k: Decimal(str(v)) for k, v in venue_capital.items()}
-    if any(not v.is_finite() or v < 0 for v in amounts.values()):
-        raise ValueError('venue capital must be finite and nonnegative')
-    amounts = {k: v.quantize(Decimal('.01'), rounding=ROUND_DOWN) for k, v in amounts.items()}
-    total = sum(amounts.values())
-    stake = Decimal(CONSTITUTION['rungs']['2']['stake_usd'])
-    allocator = CONSTITUTION.get('allocator') or {}
-    probes = allocator.get('probe_bunt_usd') or {}
-    if allocator.get('enabled'):
-        stake = min(Decimal(str(v)) for v in (*allocator['bunt_usd'].values(), *probes.values()))
-    if max(amounts.values()) < stake or not stake <= total <= Decimal('10000'):
-        raise ValueError('live allocation must cover a micro stake and remain within the $10,000 project envelope')
-    return {'version': 1, 'max_rung': 3, 'max_agents': int(total // stake),
-            'max_loss_usd': str(total), 'stake_usd': str(stake),
-            'venue_capital_usd': {k: str(v) for k, v in amounts.items()},
-            'constitution_digest': money_digest(), 'expires': None,
-            'research_funding': 'Only unused original burst allowance within campaign caps; no calendar expiry or replenishment.',
-            'scaling': ((f"Capital is the ladder: "
-                         + (f"probes of {', '.join(f'${v} at {k}' for k, v in sorted(probes.items()))} for an unproven family, " if probes else '')
-                         + f"bunts of {', '.join(f'${v} at {k}' for k, v in sorted(allocator['bunt_usd'].items()))}"
-                         + (" for a proven one" if probes else '') + ", "
-                         f"swings sized by evidence up to {allocator['max_share_of_venue']:g} of a venue; "
-                         'venue and aggregate capital limits include historical losses; realized profit enlarges a venue.')
-                        if allocator.get('enabled') else
-                        (f"Existing performance gates and {CONSTITUTION['rungs']['3']['kelly_fraction']:g} of Kelly on the lower bound; "
-                         'venue and aggregate capital limits include historical losses.')),
-            'capital_source': 'Existing cash only; later deposits do not enlarge this allocation.'}
+    """`policy` as main has it (MAIN_BLOB), run as main's own code."""
+    return main_module()['policy'](venue_capital)
 
 
 #: The money rules on the day of the pin (Sept 25, 2026, digest 535a7f15): what `policy` reads of them.
@@ -366,6 +354,19 @@ def sha(value):
 
 
 class GrantPin(TestCase):
+    def test_the_golden_is_mains_file_by_its_git_blob_id(self):
+        data = MAIN_FILE.read_bytes()
+        self.assertEqual(hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest(), MAIN_BLOB)
+        self.assertIn(b'def policy(venue_capital):', data)
+        # Where the repository's objects are at hand, git agrees (a shallow CI checkout has no history: the id suffices).
+        import subprocess
+        try:
+            shown = subprocess.run(['git', '-C', str(REPO), 'cat-file', 'blob', MAIN_BLOB], capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            shown = None
+        if shown is not None and shown.returncode == 0:
+            self.assertEqual(shown.stdout, data)
+
     def test_version_one_is_byte_for_byte_the_policy_before_the_scale_rule(self):
         for capital in (LIVE_CAPITAL, {'alpaca': '500', 'kalshi': '500'}, {'alpaca': '125.999', 'kalshi': '9000'},
                         {'alpaca': '0', 'kalshi': '30'}):
@@ -378,6 +379,7 @@ class GrantPin(TestCase):
     def test_the_active_grants_digest_is_pinned(self):
         with patch('league.constitution.CONSTITUTION', PIN_CONSTITUTION), \
                 patch('league.constitution.money_digest', return_value=PIN_MONEY_DIGEST):
+            self.assertEqual(sha(golden_v1(LIVE_CAPITAL)), ACTIVE_GRANT_DIGEST)  # main's own function gives the pin
             self.assertEqual(sha(policy(LIVE_CAPITAL)), ACTIVE_GRANT_DIGEST)
         from league.constitution import money_digest
         if money_digest() != PIN_MONEY_DIGEST:
@@ -640,10 +642,17 @@ class CapacityStudy(PhaseCase):
             live_trading.main(['--root', str(self.root), '--scale-report', '--json', '--capacity-json', str(study_path)])
         shown = json.loads(out.getvalue())
         kalshi = shown['venues']['kalshi']
-        self.assertEqual((kalshi['capacity_used_usd'], kalshi['families'][0]['multiple']), ('240.00', 8))  # 1 x $30 x 8
-        self.assertIn('the K2 capacity study', shown['history']['curves'])
+        # The rule's reading is the family records' (1 x $30 x 1); K2's curve is a what-if beside it (1 x $30 x 8).
+        self.assertEqual((kalshi['capacity_used_usd'], kalshi['families'][0]['multiple']), ('30.00', 1))
+        what_if = kalshi['what_if_study']
+        self.assertEqual((what_if['capacity_used_usd'], what_if['families'][0]['multiple'], what_if['unlock']), ('240.00', 8, False))
+        self.assertEqual(what_if['families'][0]['multiple_basis'], 'K2 capacity study (the smaller of its estimate and floor)')
+        self.assertIn("K2's capacity study", shown['history']['curves'])
+        self.assertIn('WHAT-IF', shown['history']['curves'])
         text = render_scale_report(shown)
-        self.assertIn('m* from the K2 capacity study (the smaller of its estimate and floor): fill 0.96 at 1x', text)
+        self.assertIn("WHAT-IF on K2's curves (the rule does not read the study; it never decides a tranche or a deposit here):", text)
+        self.assertIn('sports-central-run-under: 1 x $30.00 x 8 = $240.00  [curve 2x 0.94, 4x 0.91, 8x 0.90', text)
+        self.assertIn('m* from the board capacity record: fill 1.00 at 1x', text)
         self.assertIn('never unlocks a tranche alone', text)
         self.assertIn('edge +0.27', text)
         without = scale_report(self.root, now=NOW)['venues']['kalshi']
@@ -659,9 +668,11 @@ class CapacityStudy(PhaseCase):
                      equity=lambda t: {'kalshi': '5000', 'alpaca': '500'})
         study = live_trading.capacity_study(k2_study(k2_row(floor=(.80, .78, .75, .70))), 'k2.json')
         kalshi = scale_report(self.root, now=NOW, study=study)['venues']['kalshi']
-        self.assertEqual(kalshi['days'][0]['capacity_used_usd'], '3120.00')
+        self.assertEqual(kalshi['days'][0]['capacity_used_usd'], '390.00')  # 71.3% on the records: capacity passes
+        self.assertEqual(kalshi['what_if_study']['capacity_used_usd'], '3120.00')
         self.assertFalse(kalshi['decision']['unlock'])
         self.assertEqual([(f['condition'], f['pnl_usd']) for f in kalshi['decision']['fails']], [('pnl', '-3.00')])
+        self.assertFalse(kalshi['what_if_study']['unlock'])
 
 
 class OwnerScript(TestCase):
@@ -692,7 +703,7 @@ class OwnerScript(TestCase):
         out = io.StringIO()
         with patch('scripts.live_trading.client', side_effect=AssertionError('no box')), patch('sys.stdout', out):
             owner_command(['--scale-report', '--root', tmp.name, '--json', '--capacity-json', str(study)])
-        self.assertEqual(json.loads(out.getvalue())['venues']['kalshi']['families'][0]['multiple'], 4)
+        self.assertEqual(json.loads(out.getvalue())['venues']['kalshi']['what_if_study']['families'][0]['multiple'], 4)
         with patch('scripts.live_trading.client') as api, patch('scripts.live_trading.read_state', return_value={'box_id': 'fake'}), \
                 patch('sys.stdout', new_callable=io.StringIO):
             api.return_value.exec.return_value = result
@@ -722,13 +733,256 @@ class NothingElseReadsIt(TestCase):
     def test_no_module_but_the_grant_and_its_owner_command_names_the_scale_rule(self):
         """Switched off in code as well as in state: the House, the allocator, the book and every other module name
         neither version 2 nor its reader, so a ratification changes the report alone until its wiring is reviewed."""
-        names = re.compile(r'scale_tranches|grant_version|live_grant_versions|scale_state|ratify_version|SCALE_VERSION')
+        names = re.compile(r'scale_tranches|grant_version|live_grant_versions|scale_state|scale_unlocked|base_envelope|'
+                           r'ratify_version|SCALE_VERSION|policy\([^)]*version\s*=')
         allowed = {'league/grants.py', 'league/live_trading.py', 'scripts/live_trading.py'}
         found = []
-        for path in [*REPO.glob('league/**/*.py'), *REPO.glob('scripts/**/*.py')]:
+        for path in [*REPO.glob('league/**/*.py'), *REPO.glob('scripts/**/*.py'), *REPO.glob('ltcm/**/*.py')]:
             rel = path.relative_to(REPO).as_posix()
             if rel in allowed or rel.startswith('league/tests/'):
                 continue
             if names.search(path.read_text(encoding='utf-8', errors='replace')):
                 found.append(rel)
         self.assertEqual(found, [])
+
+
+# ------------------------------------------------------------------ the adversarial review of #313 (Sept 25, 2026)
+ID = 'earned-live-20260921'
+
+
+class ReratificationKeepsWithdrawals(TestCase):
+    """A routine re-ratification (every money-rule change switches version 2 off until the owner ratifies it again) used to
+    restart the replay: a tranche withdrawn at 03:00Z was unlocked again at 06:00Z on the same window of days that
+    preceded the loss. The grant's earlier version-2 intervals are replayed first."""
+
+    def setUp(self):
+        self.window = {n: day(n) for n in ('2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-26', '2026-09-27',
+                                           '2026-09-28', '2026-09-29')}
+        self.base = [(grants.midnight('2026-09-21') + h * 3600.0, Decimal('546.83')) for h in range(24 * 10)]
+        self.funded = [(grants.midnight('2026-09-21'), Decimal('1546.83'))]
+        self.r1 = grants.midnight('2026-09-25') + 3600
+
+    def pnl(self, *moves):
+        out = [(grants.midnight('2026-09-21') + h * 3600.0, Decimal('10')) for h in range(24 * 4 + 1)]
+        return out + [(self.r1 + dt, Decimal(v)) for dt, v in moves]
+
+    def test_a_withdrawal_in_an_earlier_interval_holds_the_next_tranche_a_whole_window(self):
+        pnl = self.pnl((7200, '-90'))  # withdrawn at 03:00Z
+        alone = replay(BLOCK, self.window, pnl=pnl, funded=self.funded, envelopes=self.base, ratified_at=self.r1 + 5 * 3600,
+                       now=self.r1 + 6 * 3600)
+        self.assertEqual(alone['unlocked_usd'], '273.41')  # the defect, as it stood: the re-ratification forgot the loss
+        state = replay(BLOCK, self.window, pnl=pnl, funded=self.funded, envelopes=self.base, ratified_at=self.r1 + 5 * 3600,
+                       now=grants.midnight('2026-09-29') + 60, earlier=[(self.r1, self.r1 + 3 * 3600)])
+        self.assertEqual([(t['unlocked_at'], t['relocked_at']) for t in state['tranches']],
+                         [('2026-09-25T01:00:00Z', '2026-09-25T03:00:00Z'), ('2026-09-29T00:00:00Z', None)])
+        self.assertEqual([(d['at'], d['unlock']) for d in state['decisions']],
+                         [('2026-09-25T01:00:00Z', True), ('2026-09-25T06:00:00Z', False), ('2026-09-26T00:00:00Z', False),
+                          ('2026-09-27T00:00:00Z', False), ('2026-09-28T00:00:00Z', False), ('2026-09-29T00:00:00Z', True)])
+        self.assertIn('withdrawn on 2026-09-25', state['decisions'][1]['fails'][0]['text'])
+
+    def test_a_tranche_live_when_version_two_went_off_ends_and_its_line_is_watched_until_the_next_ratification(self):
+        earlier = [(self.r1, self.r1 + 3600)]  # a money rule moved at 02:00Z
+        gap_loss = replay(BLOCK, self.window, pnl=self.pnl((7200, '-90')), funded=self.funded, envelopes=self.base,
+                          ratified_at=self.r1 + 5 * 3600, now=self.r1 + 6 * 3600, earlier=earlier)
+        first = gap_loss['tranches'][0]
+        self.assertEqual((first['switched_off_at'], first['relocked_at']), ('2026-09-25T02:00:00Z', '2026-09-25T03:00:00Z'))
+        self.assertEqual((len(gap_loss['tranches']), gap_loss['unlocked_usd']), (1, '0.00'))  # the loss in the gap holds it
+        calm = replay(BLOCK, self.window, pnl=self.pnl((7200, '5')), funded=self.funded, envelopes=self.base,
+                      ratified_at=self.r1 + 5 * 3600, now=self.r1 + 6 * 3600, earlier=earlier)
+        self.assertEqual([(t['switched_off_at'], t['relocked_at']) for t in calm['tranches']],
+                         [('2026-09-25T02:00:00Z', None), (None, None)])  # ended, not restored; the rule re-earned it
+        self.assertEqual(calm['unlocked_usd'], '273.41')
+        self.assertIsNone(calm['tranches'][0]['pnl_since_usd'])
+        later = replay(BLOCK, self.window, pnl=self.pnl((5 * 3600 + 60, '-90')), funded=self.funded, envelopes=self.base,
+                       ratified_at=self.r1 + 5 * 3600, now=self.r1 + 6 * 3600, earlier=earlier)
+        self.assertEqual([t['relocked_at'] for t in later['tranches']], [None, '2026-09-25T06:01:00Z'])  # only the live one
+
+
+class ReviewRatification(PhaseCase):
+    grant = Ratification.grant
+
+    def test_the_grant_carries_its_earlier_version_two_intervals_into_the_report(self):
+        start = grants.midnight('2026-09-20')
+        many = family(members=13)  # $390 = 71.3% of $546.83
+
+        def pnl(t):  # +$2 a day, then -$100 at 03:00Z Sept 24
+            value = Decimal('30') + Decimal(2) * Decimal(str((t - start) / DAY)).quantize(Decimal('.01'))
+            return {'kalshi': {'a1': (value - (100 if t >= grants.midnight('2026-09-24') + 3 * 3600 else 0), Decimal('30'))}}
+        board_path = self.root / 'allocator-board.json'
+        board_path.write_text(json.dumps(board({'kalshi': {'sports-central-run-under': dict(many)}})), encoding='utf-8')
+        write_ledger(self.root / 'ledger.sqlite', family_rows=[(start - DAY, many)], pnl=pnl, start=start,
+                     equity=lambda t: {'kalshi': '1546.83', 'alpaca': '500'})
+        from league.tests.test_live_trading import research_policy
+        self.now[0] = start
+        guard = self.budget()
+        burst = guard.activate_burst('original-night', research_policy())
+        self.assertLess(burst['ends'], grants.midnight('2026-09-24'))
+        self.now[0] = grants.midnight('2026-09-24') + 3600
+        guard.activate_live_trading(ID, LIVE_CAPITAL)
+        ratify_version(guard, ID, 2)  # 01:00Z: the window Sept 21-23 passes; a tranche unlocks
+        first = scale_report(self.root, now=grants.midnight('2026-09-24') + 2 * 3600)['venues']['kalshi']
+        self.assertEqual([t['unlocked_at'] for t in first['tranches']], ['2026-09-24T01:00:00Z'])
+        with patch.dict(CONSTITUTION['allocator'], {'throttle': {'halve_below': -0.4, 'restore_above': -0.2}}):
+            self.now[0] = grants.midnight('2026-09-24') + 4 * 3600
+            guard.ratify_live_trading(ID)  # a run's re-pin after a promotion: version 2 goes off
+            self.now[0] = grants.midnight('2026-09-24') + 5 * 3600
+            shown = ratify_version(guard, ID, 2)  # the owner switches it on again
+            self.assertEqual([x[:2] for x in shown['earlier']],
+                             [[grants.midnight('2026-09-24') + 3600, grants.midnight('2026-09-24') + 4 * 3600]])
+            self.assertEqual(shown['earlier'][0][2]['relock_share'], '-0.3')  # the block ratified then
+            again = scale_report(self.root, now=grants.midnight('2026-09-24') + 6 * 3600)['venues']['kalshi']
+        # -$100 crosses the line ratified THEN, -0.30 x $273.41 = -$82.02, at 03:00Z (not the moved -0.40 x $273.41 =
+        # -$109.36): the re-ratification at 05:00Z keeps the withdrawal, and the window Sept 21-23 -- the days before the
+        # loss -- unlocks nothing again.
+        self.assertEqual([(t['relocked_at'], t['switched_off_at']) for t in again['tranches']], [('2026-09-24T03:00:00Z', None)])
+        self.assertEqual([(d['at'], d['unlock']) for d in again['decisions']],
+                         [('2026-09-24T01:00:00Z', True), ('2026-09-24T05:00:00Z', False)])
+        self.assertIn('a tranche was withdrawn on 2026-09-24', again['decisions'][1]['fails'][0])
+        self.assertEqual(again['unlocked_usd'], '0.00')
+        self.assertEqual(again['tranches'][0]['relock_line_usd'], '-82.023')
+
+    def test_a_fault_in_the_scale_rule_fails_the_owners_ratify_before_anything_is_written(self):
+        guard = self.grant()
+        stored = guard.db.execute('SELECT policy FROM live_trading').fetchone()[0]
+        with patch.dict(CONSTITUTION['allocator'], {'throttle': {'halve_below': -0.4, 'restore_above': -0.2}}), \
+                patch('league.grants.scale_tranches', side_effect=KeyError('boom')), self.assertRaises(KeyError):
+            ratify_version(guard, ID, 2)
+        self.assertEqual(guard.db.execute('SELECT policy FROM live_trading').fetchone()[0], stored)  # no re-pin
+        self.assertEqual(guard.db.execute('SELECT COUNT(*) FROM live_ratifications').fetchone()[0], 0)
+        self.assertIsNone(guard.db.execute("SELECT name FROM sqlite_master WHERE name='live_grant_versions'").fetchone())
+
+
+class ReportOnTheRulesReading(PhaseCase):
+    def fixture(self, members, **ledger):
+        start = grants.midnight('2026-09-21')
+        row = family(members=members)
+        (self.root / 'allocator-board.json').write_text(json.dumps(board({'kalshi': {'sports-central-run-under': dict(row)}})),
+                                                        encoding='utf-8')
+        write_ledger(self.root / 'ledger.sqlite', family_rows=[(start - DAY, row)], pnl=rising(), start=start - DAY,
+                     **({'equity': lambda t: {'kalshi': '1546.83', 'alpaca': '500'}} | ledger))
+
+    def test_k2s_curves_never_decide_the_tranche_or_the_deposit(self):
+        self.fixture(2)  # 2 x $30 x 1 = $60 on the records (11.0%); x 8 on K2's curves = $480 (87.8%)
+        study = live_trading.capacity_study(k2_study(k2_row(floor=(.80, .78, .75, .70))), 'k2.json')
+        shown = scale_report(self.root, now=NOW, study=study)
+        kalshi = shown['venues']['kalshi']
+        self.assertFalse(kalshi['decision']['unlock'])
+        self.assertEqual({f['condition'] for f in kalshi['decision']['fails']}, {'capacity'})
+        self.assertEqual((kalshi['what_if_study']['unlock'], kalshi['what_if_study']['tranche_usd']), (True, '273.41'))
+        text = render_scale_report(shown)
+        self.assertIn('TODAY: no tranche. capacity used 11.0% < 70% on 2026-09-22', text)
+        self.assertIn('deposit that would put it to work: $0.00 (none until proven capacity reaches $382.78', text)
+        self.assertIn('on those curves the evidence would unlock $273.41.', text)
+        self.assertNotIn('TODAY: the evidence unlocks', text)
+
+    def test_unread_equity_names_no_deposit(self):
+        self.fixture(13, equity=lambda t: {})
+        text = render_scale_report(scale_report(self.root, now=NOW))
+        self.assertIn('TODAY: no tranche. the account equity is unread (no floor.mark).', text)
+        self.assertIn('deposit that would put it to work: n/a (the account equity is unread: no deposit is named)', text)
+
+    def test_an_incomplete_last_mark_pass_is_left_out(self):
+        self.fixture(13)
+        ledger = Ledger(self.root / 'ledger.sqlite')
+        ledger.append('book.mark', {'book': 'kalshi', 'equity': '-500', 'staked': '30', 'real_money': True, 'cash': '0',
+                                    'realized': '0', 'fees': '0', 'holdings': 0}, agent='a1', at=stamp(NOW + 30))
+        ledger.close()
+        rows = live_trading._LedgerRows(self.root / 'ledger.sqlite')
+        try:
+            series = rows.pnl(['kalshi'], NOW - DAY, NOW + 60)['kalshi']
+        finally:
+            rows.close()
+        self.assertEqual(series[-1][0], grants.midnight(TODAY) + 6 * 3600)  # the 06:00Z pass: one of two rows at 06:00:30 is not P
+        self.assertEqual(scale_report(self.root, now=NOW + 60)['venues']['kalshi']['pnl_window_to_now_usd'],
+                         scale_report(self.root, now=NOW)['venues']['kalshi']['pnl_window_to_now_usd'])
+
+    def test_a_tranche_the_allocator_records_is_never_read_as_base(self):
+        self.assertEqual(live_trading.base_envelope({'capital_usd': '820.24', 'unlocked_usd': '273.41'}), Decimal('546.83'))
+        self.assertEqual(live_trading.base_envelope({'capital_usd': '546.83'}), Decimal('546.83'))
+        self.assertIsNone(live_trading.base_envelope({'committed_usd': '1'}))
+        value = board({'kalshi': {'sports-central-run-under': family(members=13)}}, kalshi=('820.24', '109.23'))
+        value['envelope']['kalshi']['unlocked_usd'] = '273.41'
+        (self.root / 'allocator-board.json').write_text(json.dumps(value), encoding='utf-8')
+        kalshi = scale_report(self.root, now=NOW)['venues']['kalshi']
+        self.assertEqual((kalshi['base_envelope_usd'], kalshi['envelope_usd']), ('546.83', '546.83'))
+
+    def test_funded_must_be_a_venue_and_a_finite_amount(self):
+        self.fixture(1)
+        for wrong in ('kalshi=NaN', 'kalshi=Infinity', 'kalshi=-1', 'kalhsi=100', 'kalshi'):
+            with self.subTest(wrong=wrong), self.assertRaises(SystemExit), patch('sys.stderr', io.StringIO()):
+                live_trading.main(['--root', str(self.root), '--scale-report', '--funded', wrong])
+
+
+class AllocatorLine(PhaseCase):
+    """`scale_unlocked`, the one reading the allocator's line is to take (forward-first's `Allocator.grant_capital`, after
+    its Deploy B): $0 and no read while version 2 is not in force, $0 on any failure, else the ratified rule's tranches."""
+
+    def setUp(self):
+        super().setUp()
+        live_trading._UNLOCKED_CACHE.clear()
+        self.addCleanup(live_trading._UNLOCKED_CACHE.clear)
+
+    def ratified(self, *, version):
+        from league.tests.test_live_trading import research_policy
+        start = grants.midnight('2026-09-21')
+        many = family(members=13)
+        (self.root / 'allocator-board.json').write_text(json.dumps(board({'kalshi': {'sports-central-run-under': dict(many)}})),
+                                                        encoding='utf-8')
+        write_ledger(self.root / 'ledger.sqlite', family_rows=[(start + 1800, many)], pnl=rising(),
+                     equity=lambda t: {'kalshi': '1546.83', 'alpaca': '500'})
+        self.now[0] = start
+        guard = self.budget()
+        burst = guard.activate_burst('original-night', research_policy())
+        self.now[0] = max(burst['ends'] + 3600, grants.midnight('2026-09-24') + 12 * 3600)
+        guard.activate_live_trading(ID, LIVE_CAPITAL)
+        if version:
+            ratify_version(guard, ID, version)
+        guard.close()
+
+    def test_unratified_the_line_adds_nothing_and_reads_nothing(self):
+        self.ratified(version=None)
+        with patch('league.live_trading.scale_state') as state:
+            self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
+        state.assert_not_called()
+        guard = self.budget()
+        ratify_version(guard, ID, 2)
+        ratify_version(guard, ID, 1)  # switched off again
+        guard.close()
+        live_trading._UNLOCKED_CACHE.clear()
+        with patch('league.live_trading.scale_state') as state:
+            self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
+        state.assert_not_called()
+
+    def test_ratified_it_is_the_rules_tranche_and_any_failure_is_zero(self):
+        self.ratified(version=2)
+        unlocked = live_trading.scale_unlocked(self.root, 'kalshi', now=NOW)
+        self.assertEqual(unlocked, Decimal('273.41'))
+        self.assertEqual(unlocked, Decimal(scale_report(self.root, now=NOW)['venues']['kalshi']['unlocked_usd']))
+        self.assertEqual(live_trading.scale_unlocked(self.root, 'alpaca', now=NOW), Decimal(0))
+        with patch('league.live_trading.scale_state', side_effect=AssertionError('cached')):
+            self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW + 299), Decimal('273.41'))
+        for fault in (RuntimeError('boom'), KeyError('venues'), sqlite3_error()):
+            live_trading._UNLOCKED_CACHE.clear()
+            with self.subTest(fault=fault), patch('league.live_trading.scale_state', side_effect=fault) as state:
+                self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
+                self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW + 1), Decimal(0))
+                self.assertEqual(state.call_count, 1)  # a failing read is remembered, never retried on every envelope call
+        live_trading._UNLOCKED_CACHE.clear()
+        with patch('league.live_trading.scale_state', return_value={'venues': {'kalshi': {'unlocked_usd': 'NaN'}}}):
+            self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
+        live_trading._UNLOCKED_CACHE.clear()
+        (self.root / 'ledger.sqlite').rename(self.root / 'ledger.moved')
+        (self.root / 'allocator-board.json').unlink()
+        self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))  # no board: $0, not a guess
+
+
+def sqlite3_error():
+    import sqlite3
+    return sqlite3.OperationalError('database is locked')
+
+
+class GrantsAreProtected(TestCase):
+    def test_the_scale_rules_arithmetic_changes_only_by_the_owners_deploy(self):
+        from league.ci import FORBIDDEN
+        self.assertIn('league/grants.py', FORBIDDEN)
+        self.assertIn('league/live_trading.py', FORBIDDEN)

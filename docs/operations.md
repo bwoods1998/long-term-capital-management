@@ -159,8 +159,14 @@ watch.
   - Switch it on (the owner only): `python3 scripts/live_trading.py --ratify earned-live-20260921 --grant-version 2`.
     Off again: `--grant-version 1`. A plain `--ratify` (a run's re-ratify after a promotion) never switches it on,
     and any later money-rule change switches it off until the owner runs the version-2 ratify again.
-  - Until the allocator reads it (one line in `Allocator.grant_capital`, not yet written), a ratified version 2
-    changes the report alone: the replayed tranches, not the envelope the allocator stakes against.
+  - A re-ratification keeps what came before it: the grant's earlier version-2 intervals are replayed first, so a
+    withdrawal still holds the next tranche for 3 fresh days. `--capacity-json` (K2's curves) is a what-if beside the
+    rule's own reading, the family records' capacity; it never decides a tranche or a deposit.
+  - Until the allocator reads it, a ratified version 2 changes the report alone: the replayed tranches, not the
+    envelope the allocator stakes against. The allocator's line (`Allocator.grant_capital`, not yet written) takes
+    `live_trading.scale_unlocked(root, venue)` -- $0 unless version 2 is in force, $0 on any failure -- and records
+    what it added on the board's envelope row (`unlocked_usd`); `House.tuition` still caps promotions at the grant's
+    venue capital until it reads the same number.
 - **The allocator's deploy (Sept 23, 2026).** The `allocator` section is a money rule. Run
   `floor_box.py deploy` in the background and watch its log. At `promoted`, run
   `python3 scripts/live_trading.py --ratify earned-live-20260921` at once. Until the ratify

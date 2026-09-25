@@ -7,7 +7,7 @@
     python scripts/live_trading.py --ratify earned-live-20260921 --grant-version 2
     python scripts/live_trading.py --scale-report [--json] [--funded kalshi=1046.83]
     python scripts/live_trading.py --scale-report --root ./state-copy [--json]
-    python scripts/live_trading.py --scale-report --capacity-json k2.json   # K2's fill curves for Kalshi
+    python scripts/live_trading.py --scale-report --capacity-json k2.json   # a what-if on K2's Kalshi fill curves
 
 The report only reads balances. Enabling records the current cash allocation, resumes unused
 provider allowance without expiry, and restarts the House to load the accelerated game.
@@ -43,7 +43,8 @@ def main(argv=None):
                         help="With --scale-report: a venue account's equity (default: the ledger's last floor.mark).")
     parser.add_argument('--root', type=Path, help='With --scale-report: a copied state directory, read here, not on the box.')
     parser.add_argument('--capacity-json', type=Path, metavar='PATH',
-                        help="With --scale-report: the K2 study's output (scripts/kalshi_capacity.py --json), read here.")
+                        help="With --scale-report: the K2 study's output (scripts/kalshi_capacity.py --json), read here; "
+                             "a what-if beside the rule's own reading, never a decision.")
     args = parser.parse_args(argv)
     if args.grant_version is not None and not args.ratify:
         parser.error('--grant-version goes with --ratify')

@@ -48,6 +48,9 @@ FORBIDDEN: tuple[str, ...] = (
     "gateway/", ".github/",
     "league/campaigns.json", "league/campaigns.py", "league/funded.py", "league/experiments.py", "league/recordings.py", "league/research_jobs.py", "league/capabilities.py", "league/parameters.py",
     "league/live_trading.py", "league/live_pilot.py", "scripts/live_trading.py", "scripts/live_pilot.py",
+    # The scale rule's arithmetic (K5, review of #313): which tranches the owner's version-2 grant unlocks and when they
+    # are withdrawn. Its constants ride the ratified policy, its functions do not: only the owner's deploy changes them.
+    "league/grants.py",
     # The seal on the agents' boxes (no network, no credential). The box's updater refuses an
     # automatic release that changes any file here (league/updater.py), so this is also the list of
     # what only the owner's deploy may change.
