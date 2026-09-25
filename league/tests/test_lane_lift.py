@@ -173,6 +173,24 @@ class ThePriceAnAgentPays(ResearchCase):
         self.assertIn("paused", self.tool_output(1)["error"])
 
 
+class TheControlArmsPlaybook(ResearchCase):
+    def test_the_researcher_holds_back_what_the_gate_withholds(self):
+        """Review of #311: every session has `playbook_read` (413 calls by 121 agents in the 24 hours to
+        T0), so a control-arm agent read the lesson that named it whenever it researched for any other
+        reason, and the teacher's lift compared two arms that had both read it. The researcher asks the
+        gate (`ResearchGate.withheld`, wired by league/service.py) and leaves out what it holds back."""
+        self.ledger.append("playbook.entry", {"title": "Lesson: 2026-09-25-a", "text": "sports favourites: size down", "source": "teacher"})
+        self.ledger.append("playbook.entry", {"title": "Lesson: 2026-09-25-b", "text": "weather desks: wait for the open", "source": "teacher"})
+        r = self.researcher([[("playbook_read", {"query": ""})]])
+        r.withheld = lambda agent, entry: "sports" in entry.payload["text"]
+        r.research(self.parent, {}, session="s1")
+        titles = [e["title"] for e in self.tool_output(1)["entries"]]
+        self.assertEqual(titles, ["Lesson: 2026-09-25-b"])
+        plain = self.researcher([[("playbook_read", {"query": ""})]])
+        plain.research(self.parent, {}, session="s2")
+        self.assertEqual(len(self.tool_output(1)["entries"]), 2, "no gate wired: the whole playbook, as before")
+
+
 class Lift(LedgerCase):
     def born(self, agent, specialty="alpaca-crypto-alts", family="crypto-alts-reversion"):
         self.ledger.append("agent.born", {"specialty": specialty, "family": family, "founder": None, "reason": "test"}, agent=agent)

@@ -200,8 +200,18 @@ class Commons:
         )
         return entry.id
 
-    def playbook_read(self, query: str = "", limit: int = 8) -> dict[str, Any]:
+    def playbook_read(self, query: str = "", limit: int = 8, *, keep: Callable[[Any], bool] | None = None) -> dict[str, Any]:
+        """The newest `limit` playbook entries matching `query`. `keep` (Sept 25, 2026): the entries this
+        reader may see, when some are held back from it (the teacher's control arm, league/research_gate.py
+        `ResearchGate.withheld`); a `keep` that raises holds nothing back."""
         entries = list(self.ledger.iter(kinds="playbook.entry"))
+        if keep is not None:
+            def kept(entry: Any) -> bool:
+                try:
+                    return bool(keep(entry))
+                except Exception:  # noqa: BLE001 - the control arm must never cost a reader the playbook
+                    return True
+            entries = [e for e in entries if kept(e)]
         wanted = _words(query)
         if wanted:
             entries = [e for e in entries if wanted & (_words(e.payload["title"]) | _words(e.payload["text"]))]

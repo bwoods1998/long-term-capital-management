@@ -312,6 +312,10 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
             # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
             house.researcher.routes.lock = house.jev_floor.gate.lock_profile
+        if house.jev_floor.gate is not None and house.researcher is not None:
+            # Review of #311 (Sept 25, 2026, F4): the teacher's control arm does not read the lesson that
+            # names it during the window the lift measures (`ResearchGate.withheld`).
+            house.researcher.withheld = house.jev_floor.gate.withheld
     if not canary:
         from .frontier import FrontierMonth
 

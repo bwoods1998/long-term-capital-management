@@ -149,6 +149,27 @@ class Outcomes(GateCase):
         self.assertTrue(self.house.research_due(rung0), "on rung 0 research is its only way up")
         self.assertEqual(self.gates(rung0.id)[-1]["reason"], "clock")
 
+    def test_a_replay_only_agent_that_abstained_three_times_keeps_its_clock(self):
+        """Review of #311: the pause (rule 10) did not exempt rung 0 and overrode both its clock and the
+        heartbeat, and a replay-only agent cannot fill, the pause's only way out. Three abstentions
+        left it to the 10%-per-six-hours sample until `replay_deadline_epochs` (72 hours) killed it as
+        'never qualified'. Rung 0 is neither paused nor locked: its clock runs, with the backoff."""
+        self.f2()
+        rung0 = self.house.spawn("rung-zero", "test-family", self.seated("donor").code, reason="a House mutation")
+        self.house._state["last_research"][rung0.id] = self.clock()
+        self.assertEqual(self.house.evaluator.rung(rung0.id), 0)
+        for _ in range(3):
+            summary(self.house.ledger, rung0.id)
+        ran = []
+        for _ in range(72):
+            self.clock.advance(3600)
+            if self.house.research_due(rung0):
+                ran.append(self.gates(rung0.id)[-1]["reason"])
+                self.researched(rung0)
+        self.assertTrue(ran, "research is a replay-only agent's only way up")
+        self.assertEqual(ran[0], "backoff_elapsed", "its clock, backed off for its three empty sessions")
+        self.assertFalse([g for g in self.gates(rung0.id) if str(g["reason"]).startswith(("practice_pause", "abstain_lock"))])
+
     def test_an_idle_program_researches_on_its_barren_outcome_not_on_the_clock(self):
         agent = self.f2()
         self.house._state["idle"][agent.id] = {"barren": 12, "shut": 0, "offered": 4}
@@ -195,6 +216,47 @@ class Outcomes(GateCase):
         self.clock.advance(60)
         self.assertTrue(self.house.research_due(agent))
         self.assertEqual(self.gates()[-1]["trigger"], "book.fill")
+
+    def test_a_paused_agent_hears_news_of_its_own_program_and_its_trading_once_a_day(self):
+        """Review of #311: the pause admitted only fills. On the T0 replay (scripts/gate_replay.py) the
+        fill-woken sessions (452, $5.36) retained 10 candidates and 1 adoption, while news of the agent's
+        own program -- a code change, a repair verdict, a lesson naming it, its idle outcome -- is what
+        the pause blocked: admitting it keeps 5 more adoptions and 6 more candidates a day, and a fill or
+        an active block waking a paused agent at most once per UTC day runs 295 fewer sessions."""
+        agent = self.f2()
+        self.win(agent)
+        for _ in range(3):
+            summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent))
+        self.assertEqual(self.gates()[-1]["reason"], "practice_pause:3")
+        self.house.ledger.append("repair.status", {"key": f"strategy_defect:{agent.id}:abc", "state": "verified"})
+        self.clock.advance(60)
+        self.assertTrue(self.house.research_due(agent), "a repair verdict about its code is news of its program")
+        self.assertEqual(self.gates()[-1]["trigger"], "repair.status")
+        self.researched(agent)
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue"}, agent=agent.id)
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent), "its first fill of the day")
+        self.assertEqual(self.gates()[-1]["trigger"], "book.fill")
+        self.researched(agent)
+        self.house.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue"}, agent=agent.id)
+        self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": 0.001, "active": True, "book": "alpaca-paper",
+                                                "block": "b9"}, agent=agent.id)
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent), "its trading wakes a paused agent once a UTC day")
+        self.assertEqual(self.gates()[-1]["reason"], "practice_pause:3")
+        self.clock.advance(86400)
+        self.assertTrue(self.house.research_due(agent), "and again the next day")
+        self.researched(agent)
+        self.house._state["idle"][agent.id] = {"barren": 0, "shut": 0, "offered": 4}
+        self.clock.advance(60)
+        self.house.research_due(agent)
+        self.house._state["idle"][agent.id] = {"barren": 10, "shut": 0, "offered": 4}
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent), "ten barren wakes are its idle program's outcome, paused or not")
+        self.assertIn("barren:10", self.gates()[-1]["triggers"])
 
     def test_a_real_agent_keeps_the_lock_a_settlement_still_wakes(self):
         agent = self.f2()
@@ -298,6 +360,59 @@ class Outcomes(GateCase):
         self.clock.advance(60)
         self.assertFalse(self.house.research_due(control), "the odd half is the teacher's control")
         self.assertTrue(self.house.jev_floor.state.data.get("lesson_arm_since"))
+
+    def test_jev_is_not_asked_about_the_lesson_that_names_a_control_agent(self):
+        """Review of #311: a control-arm agent skipped the deterministic lesson trigger and fell into
+        `_relevant_notes`, which put every playbook entry in front of Jev: a lesson naming its desk
+        would usually score over 0.35 and run it as `jev_relevant_note`, the wake the control must not
+        have. Before the split 0 of the day's 19 Jev runs came from a teacher's lesson."""
+        self.f2()
+        self.jev.p = 0.9
+        control = self.named("control")
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(control))
+        calls = len(self.jev.calls)
+        self.house.ledger.append("playbook.entry", {"title": "Lesson: 2026-09-25-z", "source": "teacher",
+                                                    "text": f"What {control.family} keeps doing wrong."})
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(control), "the control arm is neither woken by nor asked about its lesson")
+        self.assertEqual(len(self.jev.calls), calls)
+
+    def test_the_gate_withholds_a_lesson_from_the_control_agent_it_names_for_the_teachers_window(self):
+        """Review of #311 (F4's teacher lift compares agents that read a lesson with agents that did not):
+        a lesson naming a control-arm agent is held back from its `playbook_read` for `teacher_days` (3)."""
+        self.f2()
+        control, treated = self.named("control"), self.named("lesson")
+        gate = self.house.jev_floor.gate
+        self.clock.advance(self.interval)
+        self.house.research_due(control)  # the gate splits the arms (`lesson_arm_since`)
+        self.clock.advance(60)
+        about = lambda agent: self.house.ledger.append("playbook.entry", {
+            "title": f"Lesson: {agent.id}", "source": "teacher", "text": f"What {agent.family} keeps doing wrong."})
+        lesson, other = about(control), about(treated)
+        postmortem = self.house.ledger.append("playbook.entry", {"title": "Post-mortem: x", "source": "graveyard",
+                                                                 "text": f"x ({control.family}) died."})
+        self.assertTrue(gate.withheld(control, lesson))
+        self.assertFalse(gate.withheld(treated, lesson), "the lesson arm reads it")
+        self.assertFalse(gate.withheld(control, postmortem), "a post-mortem is not the teacher's")
+        self.assertEqual(gate.withheld(control, other), control.family == treated.family)
+        self.clock.advance(3 * 86400 + 60)
+        self.assertFalse(gate.withheld(control, lesson), "after the teacher's window the lesson is everyone's")
+
+    def test_the_barren_count_restarts_when_the_gate_sees_it_reset(self):
+        """Review of #311: `barren_seen` stayed at the old count after the agent acted, so a count that
+        came back above it was measured from it: seen 40, acted, then 45 barren wakes read as 5."""
+        agent = self.f2()
+        self.house._state["idle"][agent.id] = {"barren": 40, "shut": 0, "offered": 4}
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent), "idle already when the rule began: no burst at deploy")
+        self.house._state["idle"][agent.id] = {"barren": 3, "shut": 0, "offered": 4}  # it acted: a new run
+        self.clock.advance(60)
+        self.assertFalse(self.house.research_due(agent))
+        self.house._state["idle"][agent.id] = {"barren": 45, "shut": 0, "offered": 4}
+        self.clock.advance(60)
+        self.assertTrue(self.house.research_due(agent), "45 barren wakes since it acted")
+        self.assertIn("barren:45", self.gates()[-1]["triggers"])
 
     def test_lesson_words_match_on_word_boundaries(self):
         words = lesson_words("mullins-6", "kalshi-weather", "kalshi-weather", "weather-favourites-no")

@@ -188,6 +188,10 @@ class Researcher:
         #: (`House._edit_replay`): {"passed", "reasons", "params", "was", "code_sha256", "numbers"} or
         #: {"error"}. None: `edit_params` is not available (X1, Sept 24, 2026).
         self.edit_replay = None
+        #: (agent, playbook entry) -> whether `playbook_read` holds the entry back from this agent: the
+        #: research gate's control arm (`ResearchGate.withheld`, set by the service; review of #311, Sept 25,
+        #: 2026). None holds nothing back.
+        self.withheld = None
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -926,7 +930,10 @@ class Researcher:
         if name == "library_write":
             return self.commons.library_write(agent.id, str(args.get("title") or ""), str(args.get("text") or ""), list(args.get("tags") or []), niche=agent.specialty)
         if name == "playbook_read":
-            return self.commons.playbook_read(str(args.get("query") or ""))
+            withheld = self.withheld
+            if withheld is None:
+                return self.commons.playbook_read(str(args.get("query") or ""))
+            return self.commons.playbook_read(str(args.get("query") or ""), keep=lambda entry: not withheld(agent, entry))
         if name == "request_tool":
             return self.commons.request_tool(agent.id, str(args.get("name") or ""), str(args.get("description") or ""))
         if name == "classify":
