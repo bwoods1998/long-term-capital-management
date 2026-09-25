@@ -296,6 +296,23 @@ class TheReleasesLine(unittest.TestCase):
         box = self.read({"restarts_24h": 5})
         self.assertEqual((box["train"]["restarts_24h"], box["train"]["restarts_source"], box["train"]["starts_24h"]), (5, "health.json", 2))
 
+    def test_a_real_game_in_play_is_a_hold_that_names_its_event(self):
+        """H3b (Sept 25, 2026): the release waits while the real Kalshi book holds a position in a
+        game under way, and the releases line says which game and until when."""
+        market = "KXMLBTOTAL-26SEP232140LAAATH-8"  # 21:40 EDT Sept 23 = 01:40Z Sept 24
+        instrument = {"asset_class": "event", "market_id": market, "symbol": market, "venue": "kalshi", "right": "no"}
+        self.clock.advance(-15 * 3600)  # 22:40Z Sept 23
+        self.ledger.append("book.fill", {"book": "kalshi", "instrument": instrument, "position_delta": "14", "quantity": "14",
+                                         "real_money": True, "source": "venue"}, agent="meriwether-h2d625d")
+        self.clock.advance(4 * 3600 + 20 * 60)  # 03:00Z Sept 24
+        box = self.read({})
+        holds = box["train"]["holds"]
+        self.assertEqual([h["hold"] for h in holds], ["in_play"])
+        self.assertEqual(box["train"]["next_eligible_at"], "2026-09-24T06:40:00Z")
+        text = floor_watch.render(box, {}, {})
+        self.assertIn("held now (in_play until 2026-09-24T06:40:00Z): in play: the real Kalshi book holds "
+                      "KXMLBTOTAL-26SEP232140LAAATH (began 2026-09-24T01:40:00Z, 14 contract(s) held)", text)
+
 
 if __name__ == "__main__":
     unittest.main()

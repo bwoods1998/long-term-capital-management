@@ -37,7 +37,7 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
 4. **`real_money` may not change by this path.** Turning real money on is the owner's deploy from
    his own machine, never something `main` does to the box by itself.
 5. **The release train** (H3 of the forward-first run, Sept 25, 2026). A head that passed the walls
-   above waits, before the trusted content checks run, while any of three holds stands (`schedule`):
+   above waits, before the trusted content checks run, while any of four holds stands (`schedule`):
    - *the train*: one updater release every `release_train_hours` (config.json, default 4, bounds
      2-6 in `league/ci.py` `CONFIG_DIALS`), measured from the last updater release that restarted
      the House (its `promote` row in `deploys.jsonl`); a rolled-back attempt counts, a canary
@@ -48,7 +48,15 @@ The walls, in the order they are asked, each one fail-closed (no deploy, a warni
      five when that is wider: 14:25-21:05Z in winter). The 30-minute lead is the deploy itself: the
      canary took 2.2-4.0 minutes from launch to restart on Sept 24-25, then the watch is ten
      minutes, and a rollback restarts the House again inside it;
-   - *a recent start*: none within 30 minutes of the ledger's last `ops.started`, read read-only.
+   - *a recent start*: none within 30 minutes of the ledger's last `ops.started`, read read-only;
+   - *in play* (H3b, Sept 25, 2026): none while the REAL Kalshi book holds a position or a working
+     order in an event under way: from 30 minutes before its start (New York time, from the ticker,
+     where the series carries one: `KXMLBTOTAL-26SEP251840PITDET-8` began 18:40 EDT) to its
+     settlement on the ledger or `IN_PLAY_HOURS` (5) after the start, whichever first. The proven
+     sports family holds MLB totals from before first pitch to settlement (six games on Sept 25-26,
+     22:40Z to about 05:30Z), and a merge to main (strategies, seeds) could otherwise restart the
+     House mid-game. Weather, daily and 15-minute crypto tickers carry no start and never hold. The
+     ledger is read read-only, only its last `IN_PLAY_LOOKBACK_HOURS` of book rows; unreadable, it holds.
    Measured: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day Sept
    20-24), seven of them inside the Sept 24 US session, and every restart kills the research and
    wakes in flight. The updater shipped at 21:16, 22:21, 23:00, 23:39, 00:38 and 01:14Z, 35 to 65
@@ -85,8 +93,10 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, time as clock_time, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # The House's own session calendar: `league/house.py` imports this function (`_session_open`,
 # `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
@@ -135,6 +145,37 @@ SESSION_PAD_SECONDS = 5 * 60
 #: launch to restart on Sept 24-25, 2026 (six updater deploys), the watch is ten minutes, and a
 #: rollback restarts the House a second time inside it.
 DEPLOY_LEAD_SECONDS = 30 * 60
+
+#: In play (H3b of the forward-first run, Sept 25, 2026; wall 5's fourth hold): the REAL Kalshi book.
+#: The practice book (`kalshi-shadow`) never holds a release: no money rides on it.
+IN_PLAY_BOOK = "kalshi"
+#: How long an event counts as under way after its start when the ledger has not seen it settle
+#: first. Measured on the T0 snapshot (Sept 19-25, 2026, start from the ticker): the real book's 14
+#: MLB-total settlements came 1.0-3.2 h after first pitch (median 2.6 h); the practice book's 135 MLB
+#: settlements (totals, spreads, props) 0.7-3.7 h after it, save one postponed game (20.7 h); CS2
+#: matches 2.2-3.1 h, T20 cricket 4.2 h. A one-day international (7.4 h) outlasts it; the real book
+#: has never traded one.
+IN_PLAY_HOURS = 5.0
+#: How far back the ledger's book rows are read. The real book opened its 20 MLB-total positions
+#: 2.0-26.4 h before first pitch (median 17.2 h), so a position in a game that began less than five
+#: hours ago was opened within about 31 hours. The 48 hours to 04:23Z Sept 25 held 18,966 fill, order
+#: and settlement rows of every book (922 of them the real Kalshi book's) of the ledger's 653,550,
+#: found by bisecting `seq` on `at`, never a scan: 0.25 s on the T0 snapshot, the bisection 0.06 s.
+#: Replayed every ten minutes over the 44 hours to then, it held for 14 real MLB-total events: 22:13Z
+#: to 05:13Z on Sept 23-24, 16:13Z to 20:43Z for Sept 24's three day games, and 22:23Z Sept 24 to past
+#: 04:23Z Sept 25, each night one unbroken hold.
+IN_PLAY_LOOKBACK_HOURS = 48.0
+#: A Kalshi event segment that carries its start: year, month and day, then HHMM in New York time,
+#: then the participants' codes -- `26SEP251840PITDET` of `KXMLBTOTAL-26SEP251840PITDET-8`, 18:40 EDT
+#: Sept 25, 2026. What carries no start never matches: a day (`KXHIGHNY-26SEP25-T70`, `KXRAIN-
+#: 26SEP25-SEA`), an hour (`KXBTCD-26SEP2501-...`), a 15-minute window's close with no participants
+#: (`KXBTC15M-26SEP250015-15`), or a date then teams with no time (`KXNFLGAME-26SEP21NYGLAR-NYG`).
+EVENT_START = re.compile(r"^(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})(\d{2})(\d{2})([A-Z][A-Z0-9]+)$")
+MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+EVENT_ZONE = "America/New_York"
+#: An order is working while its last `book.order` row says one of these: `league/book.py`
+#: `OPEN_STATUSES`, which `league/tests/test_updater.py` holds this to.
+OPEN_ORDER_STATUSES = ("new", "accepted", "partially_filled", "unknown")
 
 
 class UpdateError(RuntimeError):
@@ -409,6 +450,130 @@ def last_start(state_dir: str | Path) -> tuple[float | None, str | None]:
     return (epoch(row[0]) if row else None), None
 
 
+def event_start(market: Any, zone: Any = None) -> tuple[str, float] | None:
+    """(event, epoch of its start) of a Kalshi market whose event segment carries a start
+    (`EVENT_START`), in New York time whatever the season (zoneinfo: EDT in September, EST in
+    December), or None. The event is the ticker's first two segments, as `league/evaluator.py`
+    `event_key` counts one bet: a player's prop stays on its game."""
+    parts = str(market or "").strip().upper().split("-")
+    found = EVENT_START.match(parts[1]) if len(parts) >= 2 else None
+    if found is None:
+        return None
+    year, month, day, hour, minute, _ = found.groups()
+    try:
+        start = datetime(2000 + int(year), MONTHS.index(month) + 1, int(day), int(hour), int(minute),
+                         tzinfo=zone if zone is not None else ZoneInfo(EVENT_ZONE))
+    except ValueError:  # a day or an hour that does not exist: not a start
+        return None
+    return "-".join(parts[:2]), start.timestamp()
+
+
+def book_exposure(rows: Iterable[tuple[str, str]], book: str = IN_PLAY_BOOK) -> dict[str, dict[str, Any]]:
+    """market -> {"contracts": held, "orders": working} of one book, folded from its `book.fill`,
+    `book.order` and `book.settle` rows (kind, payload JSON) in ledger order. A market is held while
+    its fills' `position_delta` sum above zero, whoever holds it; an order is working while its last
+    row's status is open (`OPEN_ORDER_STATUSES`); a market with a settlement row holds nothing."""
+    held: dict[str, Decimal] = {}
+    orders: dict[str, tuple[str, str]] = {}
+    settled: set[str] = set()
+    for kind, payload in rows:
+        try:
+            p = json.loads(payload)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(p, dict) or p.get("book") != book or p.get("real_money") is False:
+            continue
+        instrument = p.get("instrument") if isinstance(p.get("instrument"), dict) else {}
+        market = str(instrument.get("market_id") or instrument.get("symbol") or "").strip().upper()
+        if not market:
+            continue  # the House's dust rows name no instrument
+        if kind == "book.settle":
+            settled.add(market)
+        elif kind == "book.fill":
+            try:
+                held[market] = held.get(market, Decimal(0)) + Decimal(str(p.get("position_delta") or 0))
+            except InvalidOperation:
+                continue
+        elif kind == "book.order" and p.get("order_id"):
+            orders[str(p["order_id"])] = (market, str(p.get("status") or ""))
+    exposure: dict[str, dict[str, Any]] = {}
+    for market, contracts in held.items():
+        if contracts > 0 and market not in settled:
+            exposure.setdefault(market, {"contracts": Decimal(0), "orders": 0})["contracts"] = contracts
+    for market, status in orders.values():
+        if status in OPEN_ORDER_STATUSES and market not in settled:
+            exposure.setdefault(market, {"contracts": Decimal(0), "orders": 0})["orders"] += 1
+    return exposure
+
+
+def _first_seq_at(db: sqlite3.Connection, stamp: str) -> int:
+    """The first `seq` whose `at` is at or after `stamp`, by bisection on the primary key: about twenty
+    one-row reads, where `at` (no index) would be a scan of the whole ledger. The ledger's `at` rises
+    with its `seq` to within seconds (at most 9.8 s back on the T0 snapshot's last 153,550 rows),
+    which a lookback of hours does not notice."""
+    low, high = db.execute("SELECT MIN(seq), MAX(seq) FROM ledger").fetchone()
+    if low is None:
+        return 0
+    low, high = int(low), int(high) + 1
+    while low < high:
+        middle = (low + high) // 2
+        row = db.execute("SELECT at FROM ledger WHERE seq >= ? ORDER BY seq LIMIT 1", (middle,)).fetchone()
+        if row is None or str(row[0]) >= stamp:
+            high = middle
+        else:
+            low = middle + 1
+    return low
+
+
+def real_events(state_dir: str | Path, now: float, *, hours: float = IN_PLAY_HOURS,
+                lookback_hours: float = IN_PLAY_LOOKBACK_HOURS) -> tuple[list[dict[str, Any]], str | None]:
+    """(events, problem): the events the REAL Kalshi book holds a position or a working order in,
+    whose ticker carries a start (`event_start`) and whose bounded length has not run out, soonest
+    first, each `{event, start_ts, from_ts, until_ts, markets, contracts, orders}` (`from_ts` is the
+    start less `DEPLOY_LEAD_SECONDS`, `until_ts` the start plus `hours`). Read through a connection
+    that cannot write, and only the last `lookback_hours` of book rows. No ledger: nothing. A ledger
+    that cannot be read is `problem`."""
+    path = Path(state_dir) / "ledger.sqlite"
+    if not path.exists():
+        return [], None
+    try:
+        zone = ZoneInfo(EVENT_ZONE)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        return [], f"New York's time zone cannot be read ({type(exc).__name__}), so no ticker's start can be"
+    try:
+        with _ledger_ro(path) as db:
+            first = _first_seq_at(db, iso(now - lookback_hours * 3600))
+            rows = db.execute("SELECT kind, payload FROM ledger WHERE kind IN ('book.fill', 'book.order', 'book.settle') AND seq >= ? "
+                              "AND payload LIKE ? ORDER BY seq", (first, f'%"book":"{IN_PLAY_BOOK}"%')).fetchall()
+    except sqlite3.Error as exc:
+        return [], f"the ledger could not be read ({type(exc).__name__}: {str(exc)[:120]})"
+    events: dict[str, dict[str, Any]] = {}
+    for market, exposure in sorted(book_exposure(rows).items()):
+        found = event_start(market, zone)
+        if found is None:
+            continue  # weather, daily and 15-minute crypto: the ticker carries no start
+        event, start = found
+        if now >= start + hours * 3600:
+            continue
+        seen = events.setdefault(event, {"event": event, "start_ts": start, "from_ts": start - DEPLOY_LEAD_SECONDS,
+                                         "until_ts": start + hours * 3600, "markets": [], "contracts": Decimal(0), "orders": 0})
+        seen["markets"].append(market)
+        seen["contracts"] += exposure["contracts"]
+        seen["orders"] += exposure["orders"]
+    return sorted(events.values(), key=lambda e: (e["start_ts"], e["event"])), None
+
+
+def _clear_of(moment: float, windows: Iterable[tuple[float, float]]) -> float:
+    """The first moment at or after `moment` inside none of `windows` ([from, until) pairs)."""
+    windows = list(windows)
+    for _ in range(len(windows) + 1):
+        inside = [until for start, until in windows if start <= moment < until]
+        if not inside:
+            break
+        moment = max(inside)
+    return moment
+
+
 def session_window(moment: float) -> dict[str, Any] | None:
     """The no-release window of `moment`'s UTC day, or None on a day the House's calendar calls
     closed (a weekend, an NYSE holiday). The window lies inside one UTC day, 12:55Z at its earliest
@@ -438,7 +603,10 @@ def schedule(base: str | Path, now: float, *, history: list[Mapping[str, Any]] |
     """What holds an updater release at `now`, and when the next one may go. Read-only: the deploy
     record and the ledger are read, nothing is written, so `scripts/floor_watch.py` asks the very
     same question on the box. `holds` is empty when a head may ship now; each hold names its kind
-    (`train`, `session`, `recent_start`), the moment it lifts and why, in the owner's words."""
+    (`train`, `recent_start`, `session`, `in_play`), the moment it lifts and why, in the owner's
+    words. `in_play` also lists its `events`, and lifts at the latest one's end; the next eligible
+    time also clears the windows of the events the real book holds that have not begun (`in_play`
+    is `[]` when none)."""
     base = Path(base)
     rows = list(history) if history is not None else Releases(base).history()
     hours = float(hours) if hours is not None else train_hours(trusted)
@@ -465,17 +633,49 @@ def schedule(base: str | Path, now: float, *, history: list[Mapping[str, Any]] |
                               f"no updater release from {_stamp(window['starts'])} to {_stamp(window['closes'])}: the window opens at "
                               f"{_stamp(window['opens'])[11:16]}Z, and a release's canary, promotion and ten-minute watch take up to "
                               f"{DEPLOY_LEAD_SECONDS // 60} minutes")})
-    # The earliest moment no hold stands: past the train and the quiet, then out of any session window
-    # that moment falls in (a window's end is never inside the next day's).
-    moment = max([now] + [h["until_ts"] for h in holds if h["hold"] != "session"])
-    for _ in range(4):
+    # In play (H3b, Sept 25, 2026): the four runs agreed on no release while a real Kalshi family's
+    # game is under way. The proven sports family holds MLB totals from before first pitch to the
+    # settlement (six games on Sept 25-26, 22:40Z to about 05:30Z), and a restart inside a game is
+    # a promotion, a ten-minute watch and perhaps a rollback while real money waits on the House to
+    # settle and exit. The window is an event's start (from its ticker) less the deploy's own 30
+    # minutes, to the settlement on the ledger or `IN_PLAY_HOURS` after the start, whichever first.
+    events, unread = real_events(base / "state", now)
+    windows = [(e["from_ts"], e["until_ts"]) for e in events]
+    fixed = [h["until_ts"] for h in holds if h["hold"] != "session"]  # the train and the quiet
+    if unread is not None:
+        until = now + DEPLOY_LEAD_SECONDS  # a ledger that cannot be read is no evidence that no game is under way
+        fixed.append(until)
+        holds.append({"hold": "in_play", "until": _stamp(until), "until_ts": until, "events": [],
+                      "why": f"{unread}; no updater release while it cannot say whether a real position's game is under way, "
+                             f"so not before {_stamp(until)}"})
+    playing = [e for e in events if e["from_ts"] <= now < e["until_ts"]]
+    if playing:
+        until = _clear_of(now, windows)  # the latest one's end, and past any held event that begins before it
+        described = "; ".join(
+            f"{e['event']} ({'began' if e['start_ts'] <= now else 'begins'} {_stamp(e['start_ts'])}, "
+            + ", ".join(part for part in (f"{format(e['contracts'].normalize(), 'f')} contract(s) held" if e["contracts"] > 0 else "",
+                                         f"{e['orders']} working order(s)" if e["orders"] else "") if part)
+            + ")" for e in playing)
+        holds.append({"hold": "in_play", "until": _stamp(until), "until_ts": until, "events": [e["event"] for e in playing],
+                      "why": (f"in play: the real Kalshi book holds {described}; no updater release from {DEPLOY_LEAD_SECONDS // 60} minutes "
+                              f"before an event's start (New York time, from its ticker) until it settles or {IN_PLAY_HOURS:g} h after "
+                              f"the start, so not before {_stamp(until)} unless the ledger sees it settle first")})
+    # The earliest moment no hold stands: past the train, the quiet and an unreadable ledger, then out
+    # of any session window and any window of an event the real book holds that the moment falls in
+    # (a session window's end is never inside the next day's).
+    moment = max([now] + fixed)
+    for _ in range(len(windows) + 8):
         inside = session_window(moment)
-        if inside is None or not inside["starts"] <= moment < inside["closes"]:
+        cleared = _clear_of(inside["closes"] if inside is not None and inside["starts"] <= moment < inside["closes"] else moment, windows)
+        if cleared == moment:
             break
-        moment = inside["closes"]
+        moment = cleared
     return {"at": _stamp(now), "train_hours": hours, "holds": holds, "next_eligible_ts": moment, "next_eligible_at": _stamp(moment),
             "last_ship": {k: last.get(k) for k in ("release", "sha", "at", "verdict")} if last else None,
-            "last_start_at": _stamp(started) if started is not None and problem is None else None}
+            "last_start_at": _stamp(started) if started is not None and problem is None else None,
+            "in_play": [{"event": e["event"], "starts": _stamp(e["start_ts"]), "from": _stamp(e["from_ts"]), "until": _stamp(e["until_ts"]),
+                         "markets": list(e["markets"]), "contracts": format(e["contracts"].normalize(), "f"), "orders": e["orders"]}
+                        for e in events]}
 
 
 # ---------------------------------------------------------------------------------- updater
@@ -577,8 +777,8 @@ class Updater:
     def check(self) -> dict[str, Any]:
         """One look at main. Returns what was found and what was done. `new` is True the first
         time a refusal or a block is seen for this commit, which is when the House says so.
-        `held` is a head the release train keeps back: `holds` names why (train, session,
-        recent_start), `reasons` says it with the next eligible time, `next_eligible_at` is when."""
+        `held` is a head the release train keeps back: `holds` names why (train, recent_start,
+        session, in_play), `reasons` says it with the next eligible time, `next_eligible_at` is when."""
         self._last = self.clock()
         current = self.releases.current()
         if current is None:
