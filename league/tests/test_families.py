@@ -292,24 +292,29 @@ class Capacity(AtRiskCase):
         self.assertIn("no bid", cap["why"])
 
 
-def real_record(n=15, bound=0.02, variance=0.5, closes=None, unit="at_risk", proven=True, family="weather-favorites", entry=None):
+def real_record(n=15, bound=0.02, variance=0.5, closes=None, unit="at_risk", proven=True, family="weather-favorites", entry=None,
+                dates=None):
     """A family record whose REAL record is set by the test: `closes` are (first close seq, value). Its entry look
-    (`families.entry_look`) stands at its real count's checkpoint and passes with a positive bound unless `entry` says."""
+    (`families.entry_look`) stands at its real count's checkpoint and passes with a positive bound unless `entry` says.
+    `dates`: the distinct settlement dates its real record spans (M1, Sept 25, 2026), one an event unless the test says;
+    the pooled record spans as many as its count."""
     rec = families.empty_record(family, "kalshi")
     rec.update(unit=unit, n=max(n, 10), proven=proven, state="proven" if proven else "unproven", bound=0.01 if proven else -0.01,
-               real_n=n, members=2, members_living=2, members_counted=2)
+               real_n=n, members=2, members_living=2, members_counted=2, dates=max(n, 10))
     rule = families.swing_rule()
     checkpoint = families.entry_checkpoint(n, rule) if rule else None
     look = {"checkpoint": checkpoint, "next_checkpoint": None, "confidence": (rule or {}).get("entry_confidence"),
             "honest_bound": bound, "ready": (checkpoint is not None and bound is not None and bound > 0) if entry is None else entry}
     rec["real"] = {**rec["real"], "n": n, "bound": bound, "honest_bound": bound, "variance": variance, "entry": look,
-                   "first_closes": closes if closes is not None else [(i + 1, 0.05) for i in range(n)]}
+                   "first_closes": closes if closes is not None else [(i + 1, 0.05) for i in range(n)],
+                   "dates": n if dates is None else dates}
     return rec
 
 
 class SwingRules(unittest.TestCase):
-    """C2's arithmetic: the entry at 15 real settlements with a positive honest bound, the ramp's doubling at every
-    10 further positive ones, the Kelly and venue caps shared by the members, the capacity hold, the bunt floor."""
+    """C2's arithmetic: the entry at 10 real settlements (15 before M1, Sept 25, 2026) with a positive honest bound, the
+    ramp's doubling at every 10 further positive ones, the Kelly and venue caps shared by the members, the capacity hold,
+    the bunt floor."""
 
     def setUp(self):
         self.rule = families.swing_rule()
@@ -319,17 +324,19 @@ class SwingRules(unittest.TestCase):
                                      members_real=members, entered_seq=entered, rates=rates)
 
     def test_the_constitutions_rule(self):
-        self.assertEqual({k: self.rule[k] for k in ("min_real_settlements", "start_multiple", "doubling_every")},
-                         {"min_real_settlements": 15, "start_multiple": 2.0, "doubling_every": 10})
+        self.assertEqual({k: self.rule[k] for k in ("min_real_settlements", "start_multiple", "doubling_every", "min_distinct_dates")},
+                         {"min_real_settlements": 10, "start_multiple": 2.0, "doubling_every": 10, "min_distinct_dates": 5})
         self.assertEqual((self.rule["kelly_fraction"], self.rule["max_share_of_venue"]), (1.0, 0.6))  # rung 3's, the allocator's
         with patch.dict(CONSTITUTION["allocator"]):
             del CONSTITUTION["allocator"]["family_swing"]
             self.assertIsNone(families.swing_rule())  # no key, no family swing
             self.assertFalse(families.swing_ready(real_record(), families.swing_rule()))
 
-    def test_the_entry_needs_15_real_settlements_and_a_positive_honest_bound(self):
-        self.assertFalse(families.swing_ready(real_record(n=14), self.rule))
-        self.assertTrue(families.swing_ready(real_record(n=15), self.rule))
+    def test_the_hold_needs_10_real_settlements_on_5_dates_and_a_positive_honest_bound(self):
+        self.assertFalse(families.swing_ready(real_record(n=9), self.rule))
+        self.assertTrue(families.swing_ready(real_record(n=10), self.rule))
+        self.assertFalse(families.swing_ready(real_record(n=40, dates=4), self.rule))  # M1: a regime is not an edge
+        self.assertTrue(families.swing_ready(real_record(n=40, dates=5), self.rule))
         self.assertFalse(families.swing_ready(real_record(n=40, bound=0.0), self.rule))
         self.assertFalse(families.swing_ready(real_record(n=40, bound=None), self.rule))
 
@@ -441,6 +448,15 @@ def events(values):
     return [(i + 1, value, 1.0) for i, value in enumerate(values)]
 
 
+def dated(values, per_day=1):
+    """Each event's own settlement date (M1, Sept 25, 2026), `per_day` events a date, by first close."""
+    return {i + 1: f"2026-10-{i // per_day + 1:02d}" for i in range(len(values))}
+
+
+def look(values, rule, per_day=1):
+    return families.entry_look(events(values), rule, gate=GATE, days=dated(values, per_day))
+
+
 class EntryLooks(unittest.TestCase):
     """Finding 10 of the review of #242, the main session's decision (Sept 24, 2026): the swing's ENTRY is judged only at
     `min_real_settlements` real settlements and every `entry_every` more, on the first that many real events, at
@@ -458,12 +474,13 @@ class EntryLooks(unittest.TestCase):
             del CONSTITUTION["allocator"]["family_swing"]["entry_confidence"]
             self.assertEqual((families.swing_rule()["entry_every"], families.swing_rule()["entry_confidence"]), (1, 0.8))  # #242's
 
-    def test_the_checkpoints_are_15_then_every_5(self):
+    def test_the_checkpoints_are_10_then_every_5(self):
         c = lambda n: families.entry_checkpoint(n, self.rule)  # noqa: E731
-        self.assertEqual([c(n) for n in (0, 14, 15, 16, 19, 20, 24, 25, 41)], [None, None, 15, 15, 15, 20, 20, 25, 40])
+        self.assertEqual([c(n) for n in (0, 9, 10, 14, 15, 16, 19, 20, 24, 25, 41)],
+                         [None, None, 10, 10, 15, 15, 15, 20, 20, 25, 40])
 
     def test_the_entry_is_the_first_checkpoint_events_at_90_percent(self):
-        look = families.entry_look(events(FIFTEEN), self.rule, gate=GATE)
+        look = families.entry_look(events(FIFTEEN), self.rule, gate=GATE, days=dated(FIFTEEN))
         self.assertEqual((look["checkpoint"], look["next_checkpoint"], look["confidence"]), (15, 20, 0.9))
         self.assertLess(look["honest_bound"], 0)
         self.assertFalse(look["ready"])
@@ -476,24 +493,24 @@ class EntryLooks(unittest.TestCase):
         nineteen = FIFTEEN + [WIN] * 4
         all_19 = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(nineteen)}, 10, 0.9, **GATE)
         self.assertGreater(all_19["honest_bound"], 0)
-        look = families.entry_look(events(nineteen), self.rule, gate=GATE)
-        self.assertEqual((look["checkpoint"], look["ready"]), (15, False))
-        self.assertEqual(look["honest_bound"], families.entry_look(events(FIFTEEN), self.rule, gate=GATE)["honest_bound"])
-        look = families.entry_look(events(nineteen + [WIN]), self.rule, gate=GATE)
-        self.assertEqual((look["checkpoint"], look["ready"]), (20, True))
+        seen = look(nineteen, self.rule)
+        self.assertEqual((seen["checkpoint"], seen["ready"]), (15, False))
+        self.assertEqual(seen["honest_bound"], look(FIFTEEN, self.rule)["honest_bound"])
+        seen = look(nineteen + [WIN], self.rule)
+        self.assertEqual((seen["checkpoint"], seen["ready"]), (20, True))
 
     def test_a_favourites_entry_needs_its_loss_rate_bound_at_90_percent(self):
         """Clean 93c favourites: the loss-rate bound clears zero after 23 at 80% and after 32 at 90%: the look at 30 fails
         and the look at 35 passes, while staying at 80% already holds at 30."""
         win = v(0.07 / 0.93)
-        look = families.entry_look(events([win] * 30), self.rule, gate=GATE)
-        self.assertEqual((look["checkpoint"], look["ready"]), (30, False))
-        self.assertLess(look["loss_gate"], 0)
-        self.assertGreater(look["bound"], 0)  # the t bound alone would have let it in
+        seen = look([win] * 30, self.rule)
+        self.assertEqual((seen["checkpoint"], seen["ready"]), (30, False))
+        self.assertLess(seen["loss_gate"], 0)
+        self.assertGreater(seen["bound"], 0)  # the t bound alone would have let it in
         hold = families.pool({str(i): [(win, 1.0)] for i in range(30)}, 10, 0.8, **GATE)
-        self.assertTrue(families.swing_ready({"real": hold}, self.rule))
-        look = families.entry_look(events([win] * 35), self.rule, gate=GATE)
-        self.assertEqual((look["checkpoint"], look["ready"]), (35, True))
+        self.assertTrue(families.swing_ready({"real": {**hold, "dates": 30}}, self.rule))
+        seen = look([win] * 35, self.rule)
+        self.assertEqual((seen["checkpoint"], seen["ready"]), (35, True))
 
     def test_staying_is_the_whole_record_at_80_percent_at_every_pass(self):
         """The exit side needs no correction: a swinging family stays while its whole record's 80% bound holds, at any
@@ -501,9 +518,9 @@ class EntryLooks(unittest.TestCase):
         for n in (15, 17, 23):
             values = (FIFTEEN + [WIN] * 10)[:n]
             hold = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(values)}, 10, 0.8, **GATE)
-            self.assertTrue(families.swing_ready({"real": hold}, self.rule), n)
+            self.assertTrue(families.swing_ready({"real": {**hold, "dates": n}}, self.rule), n)
         lost = families.pool({str(i): [(x, 1.0)] for i, x in enumerate(FIFTEEN + [LOSS] * 3)}, 10, 0.8, **GATE)
-        self.assertFalse(families.swing_ready({"real": lost}, self.rule))
+        self.assertFalse(families.swing_ready({"real": {**lost, "dates": 18}}, self.rule))
 
 
 class EntryLookOnTheLedger(AtRiskCase):
@@ -1117,13 +1134,15 @@ class Protected(unittest.TestCase):
         self.assertIs(CONSTITUTION["allocator"]["corrected_child_supersedes"], True)
 
     def test_the_family_swing_row_is_inside_the_tables_bounds(self):
-        """The table's row: 15-40 independent real settlements, a start at 2-4x the bunt, doubling every 10."""
+        """The table's row: 15-40 independent real settlements, a start at 2-4x the bunt, doubling every 10. The forward-first
+        run's M1 (Sept 25, 2026): 10-15, with 5 distinct settlement dates at every look."""
         row = CONSTITUTION["allocator"]["family_swing"]
-        self.assertTrue(15 <= row["min_real_settlements"] <= 40)
+        self.assertTrue(10 <= row["min_real_settlements"] <= 15)
+        self.assertEqual(row["min_distinct_dates"], 5)
         self.assertTrue(2 <= row["start_multiple"] <= 4)
         self.assertEqual(row["doubling_every"], 10)
         self.assertEqual(D(row["capacity_fill_ratio"]), D("0.5"))
-        # The entry's looks (the main session's decision on the review of #242): at 15 and every 5 more, at 90%.
+        # The entry's looks (the main session's decision on the review of #242): at 10 (M1) and every 5 more, at 90%.
         self.assertEqual((row["entry_every"], D(row["entry_confidence"])), (5, D("0.9")))
         self.assertEqual(CONSTITUTION["allocator"]["max_share_of_venue"], 0.6)  # unchanged
         self.assertEqual(CONSTITUTION["rungs"]["3"]["kelly_fraction"], 1.0)  # unchanged
@@ -1151,9 +1170,11 @@ class RulesText(unittest.TestCase):
         self.assertIn("weighs what it put at risk against your usual size on that book: scaling every bet up or down proves "
                       "nothing faster, a big losing bet counts for its dollars", text)
         self.assertIn("What proves (or disproves) a family faster is MORE independent events", text)
-        self.assertIn("THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches 15 independent settlements, "
-                      "its entry is judged there and at every 5 more (15, 20, 25, ...): on those first settlements, with their "
-                      "lower bound at 90% above zero", text)
+        self.assertIn("THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches 10 independent settlements, "
+                      "its entry is judged there and at every 5 more (10, 15, 20, ...): on those first settlements, with their "
+                      "lower bound at 90% above zero (the loss-rate test too, for favourites), spanning at least 5 distinct "
+                      "settlement dates", text)
+        self.assertIn("Staying in the swing, and every doubling, needs the whole real record on as many dates.", text)
         self.assertIn("2x the bunt ($60 at Kalshi), doubled after every 10 further WINNING real settlements while the whole "
                       "real record's lower bound at 80% stays above zero", text)
         self.assertIn("60% of the venue for the whole family (shared by its members on real money)", text)

@@ -32,7 +32,21 @@ READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
 
 class ForwardBlocks:
     """A family's pooled forward record set by the test: active `eval.block` rows of a dead member (the House's
-    `family_forward` counts every agent ever born into the family, living or dead)."""
+    `family_forward` counts every agent ever born into the family, living or dead).
+
+    `reseat`: the hold's turn these tests pin. R5's mechanics (each demotion its own hold, a turn for good, the record
+    since a block's beginning, read as a pass finds it) are tested here on its first rule, a positive sum
+    ("gain_since_demotion"); the forward-first run's M5 (Sept 25, 2026: "bound_since_demotion", the constitution's since
+    then) is tested, on the same mechanics, in league/tests/test_capital_follows_proof.py. None: the constitution's."""
+
+    reseat: str | None = "gain_since_demotion"
+
+    def setUp(self):
+        if self.reseat is not None:
+            pinned = patch.dict(CONSTITUTION["allocator"]["family_probe"], {"reseat": self.reseat})
+            pinned.start()
+            self.addCleanup(pinned.stop)
+        super().setUp()
 
     def ghost(self, family, code):
         key = ("ghost", family)
@@ -65,8 +79,11 @@ class TheRule(unittest.TestCase):
         """The run's third money-digest change: the owner's live grant pins the new key."""
         import copy
 
-        self.assertEqual(CONSTITUTION["allocator"]["family_probe"], {"losing_min_blocks": 6, "reseat": "gain_since_demotion"})
-        self.assertEqual(families.probe_rule(), {"losing_min_blocks": 6, "reseat": "gain_since_demotion", "hold": True})
+        # The forward-first run's M5 (Sept 25, 2026): the hold turns on a lower bound (league/tests/test_capital_follows_proof.py).
+        self.assertEqual(CONSTITUTION["allocator"]["family_probe"],
+                         {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "reseat_confidence": "0.8"})
+        self.assertEqual(families.probe_rule(), {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "hold": True, "bound": True,
+                                                 "confidence": 0.8})
         for path in (("family_probe",), ("family_probe", "losing_min_blocks"), ("family_probe", "reseat")):
             changed = copy.deepcopy(CONSTITUTION)
             node = changed["allocator"]

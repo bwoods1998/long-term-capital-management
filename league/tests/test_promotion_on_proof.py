@@ -207,7 +207,10 @@ class MoneySet(unittest.TestCase):
 
     def test_an_unproven_familys_first_real_stake_is_a_probe(self):
         probe, bunt = self.r["probe_bunt_usd"], self.r["bunt_usd"]
-        self.assertEqual(probe, {"kalshi": "10", "alpaca": "25"})
+        # The forward-first run's M4 (Sept 25, 2026): a stock or ETF program's class key, $25-60.
+        self.assertEqual(probe, {"kalshi": "10", "alpaca": "25", "alpaca_equity": "50"})
+        self.assertTrue(D("25") <= D(probe["alpaca_equity"]) <= D("60"))
+        probe = {k: v for k, v in probe.items() if k != "alpaca_equity"}  # a venue's own probe, below
         self.assertTrue(D("5") <= D(probe["kalshi"]) <= D("15"))
         self.assertTrue(D("20") <= D(probe["alpaca"]) <= D("25"))
         # A proven family's bunt is unchanged and never smaller than a probe.
@@ -240,7 +243,9 @@ class MoneySet(unittest.TestCase):
     def test_the_book_side_keys(self):
         self.assertEqual(self.r["longshot_floor_real"], "0.30")
         self.assertTrue(D("0.15") <= D(self.r["longshot_floor_real"]) <= D("0.35"))
-        self.assertEqual(self.r["real_entry_liquidity"], "maker_unless_family_taker_positive")
+        # The forward-first run's M2 (Sept 25, 2026): a probe may take; the taker proof counts from 5.
+        self.assertEqual(self.r["real_entry_liquidity"], "probe_may_take")
+        self.assertTrue(5 <= self.r["taker_proof_min"] <= 10)
 
     def test_the_lines_that_may_only_rise_did_not_fall(self):
         self.assertGreaterEqual(self.r["bunt_at"], 1.01)
