@@ -86,7 +86,7 @@ class TheFile(unittest.TestCase):
         self.assertFalse(options.replay)
         # The two single-leg founders, then the structure founders that passed the House's structure replay
         # (Sept 25, 2026), which only `league/options_desk.py` seats.
-        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback", "options-gap-drift"])
+        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback"] + ['options-gap-drift', 'options-condor-vrp', 'options-putspread-dip', 'options-ironfly-quiet', 'options-strangle-cheap', 'options-calendar-term', 'options-butterfly-pin', 'options-orb', 'options-trend-vertical', 'options-reversal', 'options-skew', 'options-diagonal'])
         self.assertEqual(options.desk, "krasker")
         self.assertIn("LONG PREMIUM ONLY", options.brief)
         call = instrument_for("alpaca", {"occ": "F260925C00013000"})

@@ -1164,9 +1164,53 @@
     {
      "seed": "options-gap-drift",
      "key": "options-gap-drift"
+    },
+    {
+     "seed": "options-condor-vrp",
+     "key": "options-condor-vrp"
+    },
+    {
+     "seed": "options-putspread-dip",
+     "key": "options-putspread-dip"
+    },
+    {
+     "seed": "options-ironfly-quiet",
+     "key": "options-ironfly-quiet"
+    },
+    {
+     "seed": "options-strangle-cheap",
+     "key": "options-strangle-cheap"
+    },
+    {
+     "seed": "options-calendar-term",
+     "key": "options-calendar-term"
+    },
+    {
+     "seed": "options-butterfly-pin",
+     "key": "options-butterfly-pin"
+    },
+    {
+     "seed": "options-orb",
+     "key": "options-orb"
+    },
+    {
+     "seed": "options-trend-vertical",
+     "key": "options-trend-vertical"
+    },
+    {
+     "seed": "options-reversal",
+     "key": "options-reversal"
+    },
+    {
+     "seed": "options-skew",
+     "key": "options-skew"
+    },
+    {
+     "seed": "options-diagonal",
+     "key": "options-diagonal"
     }
    ],
-   "founders_note": "Structure founders (Sept 25, 2026): a founder whose seed's NEEDS carry \"structures\": true is seated only by `league/options_desk.py`, one a tick, never by `House.found`. Of twelve written, options-gap-drift passed the House's structure replay; the eleven others are on branches s4a/founders and s4b/founders with their replays in docs/runs/data/2026-09-25-structure-founders-{a,b}.json. Nothing reads this note.",
+   "founders_note": "Structure founders (Sept 25, 2026): a founder whose seed's NEEDS carry \"structures\": true is seated only by `league/options_desk.py`, one a tick, never by `House.found`. Of twelve written, options-gap-drift passed the House's structure replay; the owner seated the other eleven on practice on Sept 25, 2026 (16:09Z) despite their replays (docs/runs/data/2026-09-25-structure-founders-{a,b}.json), to learn from live structure trades. Nothing reads this note.",
    "replay": false,
    "desk": "krasker",
    "desk_note": "William Krasker, the model builder: nothing is priced here without one",

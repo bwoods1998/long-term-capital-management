@@ -149,7 +149,8 @@ counts, triage groups, the hypothesis index and exposure groups.
 - **Caps.** `config.json` `jev` caps Jev at $0.25 and 400 calls per UTC day, split per purpose
   as gate 150, triage 120, links 60 and exposure 40.
 - **Unconfirmed calls.** A call whose cost is unconfirmed counts as $0.003, the 64k-token worst
-  case.
+  case. (Sept 25, 2026: $0.01, the reservation the gateway keeps for an ambiguous call, and a refusal
+  that states its cost is booked at that cost; see section 7.)
 
 Live probe, Sept 22, from the Mac. The labels were frozen before the calls. There were two
 requests and 16 questions:
@@ -211,3 +212,34 @@ capped triage runs and three link runs:
   `jev.exposure.enabled` each switch one piece off.
 - `daily_usd`, `daily_calls`, `purpose_calls`, `sample_rate`, `backoff_max_multiple` and
   `max_skip_hours` are dials.
+
+## 7. Sept 25, 2026: what Jev earns, measured on held-out data (the Jev run, J0-J4)
+
+`docs/goals/LTCM_JEV_SENSES.md` set out to make Jev the swarm's senses. Every proposed use was measured
+offline on held-out data before anything relied on it (`scripts/jev_lab_eval/README.md`).
+
+- **J1, the move sensor.** Re-run on the lab's own data, the eight Jev features' lift for "the midpoint moves
+  at all" is mostly the market's type: a free five-way category table from the series prefix recovers 98% /
+  84% / 89% of it at 5 / 15 / 60 minutes. A free model with 23 features (the lab's five, time since the mid
+  last changed, the 60-minute range, tight and pinned flags, volume, category and others) scores held-out AUC
+  0.859 / 0.829 / 0.806 against the lab's numeric + 8 Jev at 0.769 / 0.760 / 0.683, and Jev adds nothing on
+  top of it (intervals straddle zero). So `league/jev_features.py` serves the free model and records Jev
+  only as a shadow (six static answers once per market, $0.75 a day at most), to be judged on post-ship
+  events. Direction stays unpredictable (0.52-0.57).
+- **J2, filters in front of expensive calls.** Over 6,846 research sessions, Jev's "is there new
+  decision-relevant evidence?" scored held-out AUC 0.62-0.72 for a replay pass against 0.86-0.90 for free
+  rules (trigger kind, empty streak, record class, previous outcome), and added nothing to them. Over 497
+  Merton passes, the role alone predicts "produced nothing" (0.77) at least as well as Jev (0.74). No Jev
+  pre-filter was built; the free findings went to the research gate's owner.
+- **J4, market discovery.** Jev's `choice` answers classified 1,654 traded Kalshi series by settlement
+  mechanics and pricing feed for $0.14, agreeing with the deterministic prefix rules on 97% of mechanics and
+  89% of feeds and extending them to the series no rule covers
+  (`docs/design/2026-09-25-kalshi-market-map.md`).
+- **Budget.** The daily pool is $1.50 and 25,000 calls (Sept 25), aligned to the funded balance; the
+  breaker is per purpose (a move failure no longer silences the research gate), doubles from 60 s and
+  then lets one probe through; a gateway 409 is a free conflict, not an outage; an unconfirmed call is
+  counted at the gateway's $0.01 reservation; Jev's background jobs hold at most one of the House's three
+  ops slots.
+
+The pattern so far: Jev's measured value is in reading text that has no free structure (the market map);
+where a numeric or categorical signal exists, a free model matches or beats it.

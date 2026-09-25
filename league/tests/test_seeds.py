@@ -14,7 +14,7 @@ from league.seeds import SEEDS as ALL_SEEDS, all_seeds as _all_seeds, load
 # The registry tests below pin the fourteen single-leg founders of Sept 19-20, 2026. The options
 # desk's structure founders (NEEDS `structures`, Sept 25, 2026) carry their own structure builder and
 # exits and are pinned in `test_structure_founders`.
-STRUCTURE_FOUNDERS = {"options-gap-drift"}
+STRUCTURE_FOUNDERS = {"options-gap-drift", "options-condor-vrp", "options-putspread-dip", "options-ironfly-quiet", "options-strangle-cheap", "options-calendar-term", "options-butterfly-pin", "options-orb", "options-trend-vertical", "options-reversal", "options-skew", "options-diagonal"}
 SEEDS = [row for row in ALL_SEEDS if row["name"] not in STRUCTURE_FOUNDERS]
 
 

@@ -385,8 +385,22 @@ class OptionsTapes(HouseCase):
         self.assertEqual(len({single, structural, zero, unsaid, featured}), 5)
         self.assertEqual(len(self.built), 5)
         self.assertTrue(tape["structures"])
-        self.assertEqual(self.house.tape_for({**self.NEEDS, "structures": True})[0], structural)  # and a tape is still shared
+        self.assertEqual(self.house.tape_for({**self.NEEDS, "structures": True})[0], structural)  # one key for one NEEDS
+        self.assertEqual(len(self.built), 6, "an options tape is built for its call and never kept")
+
+    def test_no_options_tape_is_kept_in_memory_and_the_cache_is_bounded(self):
+        """Sept 25, 2026: the House was killed for memory at 14:37:30Z (exit 137): the tape cache had no bound and
+        a structure agent's tape holds up to 2 M option bars."""
+        for days in range(1, 6):
+            self.house.tape_for({**self.NEEDS, "structures": True, "max_days_to_expiry": days})
+        self.assertFalse(any(":option" in k or "option" in k for k in self.house._tapes), list(self.house._tapes))
         self.assertEqual(len(self.built), 5)
+        for n in range(self.house.TAPES_KEPT + 10):
+            self.house._tapes[f"k{n}"] = (float(n), {})
+        self.house._trim_tapes()
+        self.assertEqual(len(self.house._tapes), self.house.TAPES_KEPT)
+        self.assertNotIn("k0", self.house._tapes)
+        self.assertIn(f"k{self.house.TAPES_KEPT + 9}", self.house._tapes)
 
     def test_a_structure_agents_tape_carries_its_feeds_and_a_single_contract_agents_is_refused_them(self):
         class Feeds:
@@ -541,6 +555,28 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual((opened.side, opened.order_type, opened.limit_price, opened.quantity), ("buy", "limit", D("0.62"), D("1")))
         self.assertEqual((closed.side, closed.limit_price), ("sell", D("0.90")))
         self.assertEqual(opened.reason, "a test condor")
+
+    def test_a_limit_further_through_the_touch_than_the_books_band_is_re_priced_to_its_edge(self):
+        """Sept 25, 2026 (17:47-18:14Z): krasker-29's close of an IWM put vertical "at 0.28 or better" against a bid
+        near 0.54 was refused five times by the book's 10% limit band; the House now re-prices a structure order that
+        is further through its touch than the band to the band's edge, which fills at the touch all the same."""
+        from league import structures
+
+        agent = self.structure_agent()
+        book = self.house.book_of(agent)
+        inst = structures.instrument(structures.parse("options-shadow", condor_row()).spec, "options-shadow")
+        self.shadow.set_quote(inst, "0.54", "0.60")
+        row = condor_row(action="close", limit=0.72)   # a credit structure: buying back for at most 0.72 sells S at 0.28
+        (close,), dropped = self.house._intents(agent, book, [row])
+        self.assertEqual(dropped, [])
+        self.assertEqual((close.side, close.limit_price), ("sell", D("0.49")))  # ceil(0.54 x 0.90)
+        self.assertIn("re-priced the limit 0.28 to 0.49", close.reason)
+        within, = self.house._intents(agent, book, [condor_row(action="close", limit=0.50)])[0]
+        self.assertEqual(within.limit_price, D("0.50"))                        # 0.50 is inside the band: unchanged
+        resting, = self.house._intents(agent, book, [condor_row(action="close", limit=0.20)])[0]
+        self.assertEqual(resting.limit_price, D("0.80"))                       # a far target on the resting side: the book's to judge
+        opening, = self.house._intents(agent, book, [condor_row(limit=0.30)])[0]   # a 0.30 credit is S 0.70, over 1.10 x the 0.60 ask
+        self.assertEqual(opening.limit_price, D("0.66"))
 
     def test_a_net_price_is_never_snapped_to_a_single_contracts_grid(self):
         agent = self.structure_agent()

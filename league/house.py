@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_CEILING, ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any, Callable, Collection, Iterator, Mapping, Sequence
 
@@ -954,7 +954,41 @@ class House:
         if refusal:
             self._refuse_intent(agent, book, intent, refusal)
             return False
-        return intent
+        return self._fit_structure_limit(book, intent, nonce=f"{now}:{index}")
+
+    def _fit_structure_limit(self, book: Book, intent: Intent, *, nonce: str) -> Intent:
+        """A structure order priced further THROUGH its touch than the book's limit band re-priced to the band's
+        edge (Sept 25, 2026): a close below (1 - band) x the structure's bid is raised to that, an open above
+        (1 + band) x its ask is lowered to that. The book refuses any limit more than `max_limit_deviation_pct`
+        (10%) from the touch (`ltcm.risk.rule_limit_sanity`), and strategies price an exit that must fill well
+        through the bid: from 17:47Z krasker-29's close of an IWM put vertical bought at 0.46, "at 0.28 a share or
+        better" against a bid near 0.54, was refused five times ("limit price deviates 48-50% from reference").
+        Like every order guard here it only makes an order less aggressive: the re-priced order is still through
+        the touch and fills AT the touch (the shadow book never fills better than the structure's bid or ask), so
+        no fill rule moves. A limit on the resting side of the touch, however far, is left for the book to judge."""
+        try:
+            quote = book.broker.quote(intent.instrument)
+        except Exception:  # noqa: BLE001 - no quote, no fitting: the book judges the order as asked
+            return intent
+        band = money(str((getattr(book, "rules", None) or {}).get("max_limit_deviation_pct", "0.10")))
+        limit = intent.limit_price
+        if limit is None or quote is None:
+            return intent
+        if intent.side == "sell" and quote.bid is not None and quote.bid > 0:
+            floor = (money(quote.bid) * (1 - band)).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+            fitted = floor if limit < floor else None
+        elif intent.side == "buy" and quote.ask is not None and quote.ask > 0:
+            ceiling = (money(quote.ask) * (1 + band)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            fitted = ceiling if limit > ceiling else None
+        else:
+            fitted = None
+        if fitted is None or fitted <= 0:
+            return intent
+        touch = "bid" if intent.side == "sell" else "ask"
+        return Intent.new(agent=intent.agent, instrument=intent.instrument, side=intent.side, quantity=intent.quantity,
+                          order_type=intent.order_type, limit_price=fitted, created_at=intent.created_at, nonce=nonce,
+                          reason=f"{intent.reason} [the House re-priced the limit {limit} to {fitted}, the edge of the book's "
+                                 f"{band:.0%} band from the {touch} {getattr(quote, touch)}; it fills at the {touch}]")
 
     def _structure_refusal(self, agent: Agent, book: Book, order: Any, instrument: Instrument, now: str) -> str:
         """Why the House does not send this structure order (empty when it does): not a structure agent; on real
@@ -3309,6 +3343,15 @@ class House:
             self._state["options_history_day"] = _new_york(self.clock)[0]  # done for today only once it ran through
         return done
 
+    #: The replay tapes kept in memory at most, the oldest dropped first (Sept 25, 2026: the cache had no bound).
+    TAPES_KEPT = 24
+
+    def _trim_tapes(self) -> None:
+        """Keep at most `TAPES_KEPT` tapes, dropping the ones stored longest ago (called under `_tape_lock`)."""
+        while len(self._tapes) > self.TAPES_KEPT:
+            oldest = min(self._tapes, key=lambda k: self._tapes[k][0])
+            self._tapes.pop(oldest, None)
+
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
@@ -3405,9 +3448,20 @@ class House:
                 return tape
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
-            if hit is None or end - hit[0] > 86400:
-                self._tapes[key] = (end, build())
-            return key, self._tapes[key][1]
+            if hit is not None and end - hit[0] <= 86400:
+                return key, hit[1]
+            tape = build()
+            if option:
+                # An OPTIONS tape is built for the call and never kept (Sept 25, 2026): a structure agent's
+                # tape holds up to 2 M option bars (hundreds of MB), every distinct NEEDS is a new key, and a
+                # cache with no eviction held them for the life of the process: the House was killed for
+                # memory mid-session (exit 137 at 14:37:30Z, RSS 4.1 GB of 6.2 GB an hour and a half after
+                # its restart). Rebuilding costs seconds of the box; a kill costs the tick.
+                self._tapes.pop(key, None)
+                return key, tape
+            self._tapes[key] = (end, tape)
+            self._trim_tapes()
+            return key, tape
 
     def _live_window(self, needs: Mapping[str, Any]) -> tuple[float, float]:
         """(start, end) of the recent live tape a strategy with these NEEDS is replayed over."""
@@ -3513,6 +3567,7 @@ class House:
                     if not tape.get("steps"):
                         raise ValueError(f"unsupported input: the development tape {key} has no steps: nothing was recorded in its window")
                     self._tapes[key] = (self.clock(), tape)
+                    self._trim_tapes()
                 return key, self._tapes[key][1]
         except TapeError:
             return None  # not fetched yet: a gap in the store is never a result against the strategy
