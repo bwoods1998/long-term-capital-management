@@ -183,6 +183,22 @@ class ModelTest(unittest.TestCase):
             (Path(tmp) / "bad.json").write_text("{")
             self.assertIn("unreadable", MoveModel.load(Path(tmp) / "bad.json").why_not)
 
+    def test_a_model_is_its_version_and_digest_with_a_training_window(self):
+        import hashlib
+        self.assertEqual(SERVED.digest, hashlib.sha256(MODEL_PATH.read_bytes()).hexdigest())
+        self.assertEqual(SERVED.fitted_to, parse_time("2026-09-22T06:57:00Z"))
+        self.assertEqual(len(SERVED.fit_events), 1059, "every event of the fit's rows")
+        self.assertEqual(SERVED.fit_events, SHADOW.fit_events)
+        for to in (None, "not a time"):
+            data = json.loads(MODEL_PATH.read_text())
+            data["fitted_on"].pop("to")
+            if to is not None:
+                data["fitted_on"]["to"] = to
+            model = MoveModel(data)
+            self.assertFalse(model.ready)
+            self.assertIsNone(model.baseline)
+            self.assertIn("fitted_on.to", model.why_not)
+
     def test_logistic_clips_and_needs_every_input(self):
         block = {"features": ["mid"], "mean": [0.0], "sd": [1.0], "weights": [0.0, 1000.0]}
         self.assertAlmostEqual(logistic(block, {"mid": 1.0}), 1 / (1 + math.exp(-30)))
@@ -194,11 +210,12 @@ class FakeStateJev:
     """A gateway stand-in for lab-shaped states: answers every noul question with p (or p(name, state))."""
 
     def __init__(self, p=0.7, *, fail=False, cost="0.0001", on_call=None):
-        self.p, self.fail, self.cost, self.calls, self.on_call = p, fail, cost, [], on_call
+        self.p, self.fail, self.cost, self.calls, self.on_call, self.timeouts = p, fail, cost, [], on_call, []
 
-    def __call__(self, ident, body):
+    def __call__(self, ident, body, timeout=None):
         request = json.loads(body)
         self.calls.append((ident, request))
+        self.timeouts.append(timeout)
         if self.on_call is not None:
             self.on_call()
         if self.fail:
@@ -215,7 +232,7 @@ def market(ticker, bid=0.40, ask=0.44, *, title="Bitcoin above 60,000 at 5pm EDT
 
 
 class MoveCase(unittest.TestCase):
-    NO_SAMPLE = {"static_reserve_usd": "100"}  # the whole budget held for static labels: no state is sampled
+    NO_SAMPLE = {"new_markets_per_day": 10 ** 9}  # the whole budget held for static labels: no state is sampled
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -296,6 +313,17 @@ class RecorderTest(MoveCase):
             self.assertIsNone(row["why"])
         second = [r for r in rows if r["market"] == tickers[1]][0]
         self.assertAlmostEqual(json.loads(second["numeric"])["rng60"], 0.08, places=6, msg="its own history, not only the state")
+        self.assertTrue(all(r["lag_seconds"] == round(r["recorded_at"] - r["observed"], 3) for r in rows))
+        self.assertEqual({r["model_digest"] for r in rows}, {SERVED.digest})
+        # A market at its close: a row that says the model does not apply, and no Jev ask for it.
+        calls = len(self.jev.calls)
+        self.clock.advance(300)
+        self.show(market("KXBTCD-26SEP10-T99000", hours=0.0))
+        move.run()
+        closed = self.rows(move)[-1]
+        self.assertEqual((closed["move_p15"], closed["numeric_p15"], closed["jev_p15"]), (None, None, None))
+        self.assertIn("does not apply", closed["why"])
+        self.assertEqual(len(self.jev.calls), calls)
 
     def test_the_state_and_questions_are_exactly_the_labs(self):
         move = self.move()  # the default pace samples every state of so few markets
@@ -351,11 +379,19 @@ class RecorderTest(MoveCase):
 
     def test_the_sample_is_paced_and_chosen_by_a_hash_of_market_and_minute(self):
         move = self.move()
-        # $0.75 at ~$0.0001 a call: 7,500 calls; the static reserve ($0.50 x the 98% of the day left)
-        # holds 4,907 of them; the other 2,593 over the 283 cycles left after 00:26:40 UTC.
-        self.assertEqual(move._allowance(self.clock()), (400, math.ceil(2593 / 283), 7500))
-        move = self.move(max_static_per_cycle=1, static_reserve_usd="0.74")
-        self.assertEqual(move._allowance(self.clock())[:2], (1, 1))
+        # $0.75 at ~$0.0001 a call: 7,500 calls. Until today's rate is measured, the rest of the day's
+        # static labels are reserved at 4,500 new markets a day: 4,417 for the 98% of the day left.
+        # The other 3,083 go over the 283 cycles left after 00:26:40 UTC: 11 a cycle.
+        self.assertEqual(move._allowance(self.clock(), 0), (400, 11, 7500))
+        # Measured: 300 static asks in the 13,600 s watched since midnight is ~1,906 a day.
+        self.clock.advance(12000)
+        self.assertEqual(move._allowance(self.clock(), 300), (400, math.ceil((7500 - math.ceil(300 / 13600 * 72800)) / 243), 7500))
+        # Never more than twice an even share: a late start with the whole budget left.
+        self.clock.advance(86400 - 13600 - 600)
+        self.assertEqual(move._allowance(self.clock(), 0)[1], math.ceil(2 * (7500 - 32) / 288))
+        self.clock.advance(-(86400 - 600 - 1600))
+        move = self.move(max_static_per_cycle=1, new_markets_per_day=7400)
+        self.assertEqual(move._allowance(self.clock(), 0)[:2], (1, 1))
         self.started(move)
         tickers = [f"KXBTCD-26SEP10-T6{n}000" for n in range(4)]
         self.show(*[market(t) for t in tickers])
@@ -421,6 +457,7 @@ class RecorderTest(MoveCase):
         move.run()
         rows = self.rows(move)
         self.assertEqual(len(self.jev.calls), 1, "no ask starts after the House begins to close")
+        self.assertLessEqual(self.jev.timeouts[0], 60, "an ask waits at most what the cycle has left")
         self.assertEqual(len(rows), 4, "the rows are still written, numeric")
         self.assertEqual(sum("the House is closing" in (r["why"] or "") for r in rows), 3)
         self.jev.on_call = None
@@ -442,7 +479,7 @@ class RecorderTest(MoveCase):
             self.clock.advance(300)
         self.assertEqual({r["market"] for r in self.rows(move)}, set(tickers))
 
-    def test_corrupt_stale_and_excess_snapshots_are_passed_over(self):
+    def test_every_snapshot_gives_quotes_but_only_fresh_ones_make_rows(self):
         move = self.move(max_snapshots_per_cycle=3, **self.NO_SAMPLE)
         self.started(move)
         db = sqlite3.connect(self.root / "recordings.sqlite")
@@ -458,9 +495,16 @@ class RecorderTest(MoveCase):
         self.show(market("KXBTCD-26SEP10-T60000"))
         last = self.show(market("KXBTCD-26SEP10-T61000"), {"market": "bad", "yes_bid": 0.9, "yes_ask": 0.1}, "junk")
         cycle = move.run()
-        self.assertEqual((cycle["corrupt_snapshots"], cycle["stale_snapshots"], cycle["over_cap_snapshots"]), (1, 1, 2),
-                         "the newest three were read: two good, one corrupt; the two older corrupt ones are over the cap")
+        self.assertEqual((cycle["corrupt_snapshots"], cycle["backlog_snapshots"], cycle["rows"]), (3, 3, 0),
+                         "the oldest three first: all corrupt; the rest wait for the next cycle")
+        self.assertEqual(move.stats()["cursor"], last - 3)
+        cycle = move.run()
+        self.assertEqual((cycle["stale_snapshots"], cycle["backlog_snapshots"], cycle["rows"]), (1, 0, 2))
         self.assertEqual({r["market"] for r in self.rows(move)}, {"KXBTCD-26SEP10-T60000", "KXBTCD-26SEP10-T61000"})
+        db = sqlite3.connect(move.path)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM move_quotes WHERE market='KXBTCD-26SEP10-T10000'").fetchone()[0], 1,
+                         "a stale snapshot still gives its quotes: the history keeps the lab's cadence")
+        db.close()
         self.assertEqual(move.stats()["cursor"], last, "the cursor moves past everything considered")
         # A replaced recordings store starts again at its newest snapshot.
         self.recorder.close()
@@ -522,6 +566,26 @@ class RecorderTest(MoveCase):
         self.assertEqual(stats["last_cycle"]["markets_shown"], 2)
         self.assertIn("labels only", stats["authority"])
 
+    def test_a_changed_model_under_a_known_version_is_refused(self):
+        move = self.move(**self.NO_SAMPLE)
+        self.started(move)
+        data = json.loads(MODEL_PATH.read_text())
+        data["horizons"]["15"]["weights"][0] += 0.5  # the same version, other contents
+        (self.root / "changed.json").write_text(json.dumps(data, indent=1))
+        changed = self.move(model_path=str(self.root / "changed.json"), **self.NO_SAMPLE)
+        self.assertFalse(changed.served.ready)
+        self.assertTrue(any("was recorded as" in a for a in self.alerts))
+        self.assertTrue(any("is not ready" in a for a in self.alerts))
+        self.show(market("KXBTCD-26SEP10-T60000"))
+        changed.run()
+        row = self.rows(changed)[0]
+        self.assertEqual((row["move_p15"], row["numeric_p15"]), (None, None))
+        self.assertIn("a changed model needs a new version", row["why"])
+        self.assertIsNotNone(row["jev_p15"], "the shadow is its own identity")
+        db = sqlite3.connect(move.path)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM move_models WHERE version=?", (SERVED.version,)).fetchone()[0], 1)
+        db.close()
+
     def test_due_follows_the_interval(self):
         move = self.move()
         self.assertTrue(move.due())
@@ -535,56 +599,64 @@ class RecorderTest(MoveCase):
 
 class EvaluateTest(unittest.TestCase):
     """A synthetic store whose AUCs are known. Served move_p15 scores positives 0.9, 0.8, 0.3 and
-    negatives 0.7, 0.2, 0.1 (8 of 9 pairs ordered); numeric_p is its mirror (1 of 9)."""
+    negatives 0.7, 0.2, 0.1 (8 of 9 pairs ordered); numeric_p is its mirror (1 of 9). The served
+    model's fit includes the event KXBTCD-26SEP27; KXBTCD-26SEP26 was observed before the cutoff."""
 
     def setUp(self):
+        import hashlib
         self.dir = tempfile.TemporaryDirectory()
         self.root = Path(self.dir.name)
         self.clock = Clock()
-        self.path = MoveSensor(self.root, None, clock=self.clock).path  # records both models' fitted_on
+        data = json.loads(MODEL_PATH.read_text())
+        data["version"] = "move-test-1"
+        data["fitted_on"]["events_sha256"] = [hashlib.sha256(b"KXBTCD-26SEP27").hexdigest()[:16]]
+        (self.root / "model.json").write_text(json.dumps(data))
+        self.model = MoveModel.load(self.root / "model.json")
+        # Registers both models' identities and fitted_on, as the recorder does.
+        self.path = MoveSensor(self.root, None, clock=self.clock, model_path=self.root / "model.json").path
         self.cutoff = parse_time("2026-09-26T00:00:00Z")
         db = sqlite3.connect(self.path)
-        rows = [  # (market, offset, move_p, moves, jev_p, moves_15m)
-            ("KXBTCD-26SEP26-T1", 0, 0.9, 1, 0.6, 0.9), ("KXBTCD-26SEP26-T2", 60, 0.7, 0, 0.8, 0.1),
-            ("KXBTCD-26SEP27-T1", 120, 0.8, 1, 0.7, 0.8), ("KXHIGHNY-26SEP26-B80", 180, 0.2, 0, 0.2, None),
-            ("KXHIGHNY-26SEP26-B81", 240, 0.3, 1, None, None), ("KXHIGHNY-26SEP27-B80", 300, 0.1, 0, None, None),
+        rows = [  # (market, offset, move_p, moves, jev_p, moves_15m, lag)
+            ("KXBTCD-26SEP26-T1", 0, 0.9, 1, 0.6, 0.9, 30), ("KXBTCD-26SEP26-T2", 60, 0.7, 0, 0.8, 0.1, 30),
+            ("KXBTCD-26SEP27-T1", 120, 0.8, 1, 0.7, 0.8, 30), ("KXHIGHNY-26SEP26-B80", 180, 0.2, 0, 0.2, None, 30),
+            ("KXHIGHNY-26SEP26-B81", 240, 0.3, 1, None, None, 30), ("KXHIGHNY-26SEP27-B80", 300, 0.1, 0, None, None, 200),
         ]
-        for n, (ticker, offset, score, moves, jev, answer) in enumerate(rows):
-            self.insert(db, n, ticker, self.cutoff + offset, score, jev, answer, moves)
-        # Before the cutoff: its event (KXBTCD-26SEP26) is seen, so T1 and T2 are not unseen events.
-        self.insert(db, 90, "KXBTCD-26SEP26-T9", self.cutoff - 3600, 0.99, None, None, 0)
-        # Recorded after its only outcome quote: no outcome.
-        self.insert(db, 91, "KXBTCD-26SEP28-T1", self.cutoff + 30, 0.05, None, None, 1, late=True)
-        # Another served model version: reported apart, never pooled.
-        self.insert(db, 92, "KXETHD-26SEP26-T1", self.cutoff, 0.6, None, None, 1, version="move-test-0")
-        self.insert(db, 93, "KXETHD-26SEP26-T2", self.cutoff + 60, 0.4, None, None, 0, version="move-test-0")
+        for n, (ticker, offset, score, moves, jev, answer, lag) in enumerate(rows):
+            self.insert(db, n, ticker, self.cutoff + offset, score, jev, answer, moves, lag=lag)
+        self.insert(db, 90, "KXBTCD-26SEP26-T9", self.cutoff - 3600, 0.99, None, None, 0)  # before the cutoff
+        self.insert(db, 91, "KXBTCD-26SEP28-T1", self.cutoff + 30, 0.05, None, None, 1, lag=2000)  # read after its outcome
+        # The same version with other contents: its own group, never pooled.
+        self.insert(db, 92, "KXETHD-26SEP26-T1", self.cutoff, 0.6, None, None, 1, digest="0" * 64)
+        self.insert(db, 93, "KXETHD-26SEP26-T2", self.cutoff + 60, 0.4, None, None, 0, digest="0" * 64)
         db.commit()
         db.close()
+        self.key = f"move-test-1@{self.model.digest[:12]} / {SHADOW.version}@{SHADOW.digest[:12]}"
 
     def tearDown(self):
         self.dir.cleanup()
 
-    @staticmethod
-    def insert(db, n, ticker, observed, score, jev, answer, moves, *, late=False, version=SERVED.version):
+    def insert(self, db, n, ticker, observed, score, jev, answer, moves, *, lag=30, digest=None):
         row = dict.fromkeys(ROW_COLUMNS)
         row.update(market=ticker, event=ticker.rsplit("-", 1)[0], series=ticker.split("-")[0], observed=observed,
-                   minute=int(observed // 60) * 60, bid=0.40, ask=0.44, numeric="{}", model_version=version,
-                   shadow_version=SHADOW.version, sampled=int(answer is not None), snapshot=n,
+                   minute=int(observed // 60) * 60, bid=0.40, ask=0.44, numeric="{}", model_version="move-test-1",
+                   model_digest=digest or self.model.digest, shadow_version=SHADOW.version, shadow_digest=SHADOW.digest,
+                   sampled=int(answer is not None), snapshot=n,
                    answers=json.dumps({"moves_15m": answer}) if answer is not None else None,
                    move_p15=score, numeric_p15=1 - score, jev_p15=jev)
-        recorded_at = observed + (2000 if late else 30)
-        db.execute(f"INSERT INTO move_rows({','.join(ROW_COLUMNS)},recorded_at) VALUES({','.join('?' * (len(ROW_COLUMNS) + 1))})",
-                   (*row.values(), recorded_at))
+        db.execute(f"INSERT INTO move_rows({','.join(ROW_COLUMNS)},recorded_at,lag_seconds) "
+                   f"VALUES({','.join('?' * (len(ROW_COLUMNS) + 2))})", (*row.values(), observed + lag, lag))
         db.execute("INSERT OR IGNORE INTO move_quotes VALUES(?,?,?,?)",
                    (ticker, int(observed // 60) * 60 + 960, 0.40 + 0.02 * moves, 0.44))
 
-    def test_known_aucs_per_version_population_and_pairing(self):
+    def test_known_aucs_per_model_identity_population_and_pairing(self):
         report = evaluate(self.path, self.cutoff, (15,), reps=100)
         self.assertEqual(report["rows_after_cutoff"], 9)
-        self.assertEqual(sorted(report["models"]), ["move-test-0", SERVED.version])
-        served = report["models"][SERVED.version]
-        self.assertEqual(served["fitted_on"]["to"], "2026-09-22T06:57:00Z")
-        overall = served["populations"]["all_after_cutoff"]["15"]["overall"]
+        self.assertEqual(len(report["models"]), 2, "one group per (version, digest)")
+        entry = report["models"][self.key]
+        self.assertEqual(entry["served"]["fitted_on"]["to"], "2026-09-22T06:57:00Z")
+        self.assertEqual(entry["served"]["fitted_on"]["events"], 1)
+        self.assertEqual(entry["lag_seconds"], {"p50": 30.0, "p90": 920.0, "p99": 1892.0, "max": 2000.0, "share_le_120s": 0.7143})
+        overall = entry["populations"]["all_after_cutoff"]["15"]["overall"]
         self.assertEqual((overall["rows"], overall["events"], overall["base_rate"]), (6, 4, 0.5))
         self.assertEqual(overall["served"]["auc"], round(8 / 9, 4))
         self.assertEqual(overall["baseline"]["auc"], round(1 / 9, 4))
@@ -592,18 +664,22 @@ class EvaluateTest(unittest.TestCase):
         # The Jev increment on the four rows with a jev_p: shadow 2 of 4 pairs, served 4 of 4.
         increment = overall["jev_increment"]
         self.assertEqual((increment["rows"], increment["shadow"]["auc"], increment["served"]["auc"]), (4, 0.5, 1.0))
-        self.assertEqual(increment["difference"], {"of": "shadow - served", "diff": -0.5, "ci95": increment["difference"]["ci95"]})
+        self.assertEqual((increment["difference"]["of"], increment["difference"]["diff"]), ("shadow - served", -0.5))
         low, high = increment["difference"]["ci95"]
         self.assertLessEqual(low, -0.5)
         self.assertGreaterEqual(high, -0.5)
         self.assertEqual(overall["recorded_only"]["moves_15m"]["alone"]["auc"], 1.0)
         self.assertEqual(overall["recorded_only"]["moves_15m"]["vs_served"]["rows"], 3)
         self.assertTrue(overall["meets_ship_rule"])
-        unseen = served["populations"]["unseen_events"]["15"]["overall"]
-        self.assertEqual((unseen["rows"], unseen["served"]["auc"]), (4, 1.0))
-        self.assertEqual(sorted(served["populations"]["all_after_cutoff"]["15"]["by_category"]), ["crypto", "weather"])
-        other = report["models"]["move-test-0"]["populations"]["all_after_cutoff"]["15"]["overall"]
-        self.assertEqual((other["rows"], other["served"]["auc"]), (2, 1.0))
+        # Unseen: not KXBTCD-26SEP26 (seen before the cutoff), not KXBTCD-26SEP27 (in the fit).
+        unseen = entry["populations"]["unseen_events"]["15"]["overall"]
+        self.assertEqual((unseen["rows"], unseen["events"], unseen["served"]["auc"]), (3, 2, 1.0))
+        fresh = entry["populations"]["lag_le_120s"]["15"]["overall"]
+        self.assertEqual((fresh["rows"], fresh["served"]["auc"]), (5, round(5 / 6, 4)))
+        self.assertEqual(sorted(entry["populations"]["all_after_cutoff"]["15"]["by_category"]), ["crypto", "weather"])
+        other = report["models"][f"move-test-1@{'0' * 12} / {SHADOW.version}@{SHADOW.digest[:12]}"]
+        self.assertIsNone(other["served"]["fitted_on"])
+        self.assertEqual(other["populations"]["all_after_cutoff"]["15"]["overall"]["served"]["auc"], 1.0)
         self.assertEqual(evaluate(self.path, self.cutoff, (15,), reps=100), report, "seeded: the same intervals twice")
 
     def test_a_cutoff_inside_the_training_window_is_refused(self):
@@ -621,7 +697,7 @@ class EvaluateTest(unittest.TestCase):
             self.assertEqual(main(["evaluate", "--store", str(self.path), "--cutoff", "2026-09-26T00:00:00Z", "--json",
                                    "--reps", "20", "--horizons", "15"]), 0)
         printed = json.loads(out.getvalue())
-        self.assertEqual(printed["models"][SERVED.version]["populations"]["all_after_cutoff"]["15"]["overall"]["served"]["auc"],
+        self.assertEqual(printed["models"][self.key]["populations"]["all_after_cutoff"]["15"]["overall"]["served"]["auc"],
                          round(8 / 9, 4))
         self.assertEqual(self.path.read_bytes(), before)
         out = io.StringIO()

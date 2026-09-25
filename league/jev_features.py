@@ -13,27 +13,31 @@ to move so it is not picked off.
 
 Every `interval_seconds` (300) the House runs `MoveSensor.run` as its `jev:move` background job:
 
-1. It reads the `markets:` snapshots the House recorded (`recordings.sqlite`, read-only) past its own
-   cursor, streamed one at a time, at most `max_snapshots_per_cycle` (300), the newest first. The
-   first run only sets the cursor at the newest snapshot; snapshots older than two intervals are
-   passed over as `stale`, as on the first run: nothing is back-filled, and rows from before the
-   recorder existed are unavailable. A corrupt snapshot is counted and passed over. The cursor
-   always moves past everything it considered, in the transaction that keeps the quotes.
-2. It keeps its own minute quotes (`move_quotes`: one per market and minute bucket, first seen wins,
-   from every snapshot, as the lab's `semantic_quotes`). They are each state's earlier quotes, the
-   features' history (`features`, >= 4 hours of it) and the evaluation's outcomes.
+1. It reads every `markets:` snapshot the House recorded (`recordings.sqlite`, read-only) past its
+   own cursor, oldest first, streamed one at a time, at most `max_snapshots_per_cycle` (1,000; a
+   larger backlog waits for the next cycle). The first run only sets the cursor at the newest
+   snapshot: nothing is back-filled, and rows from before the recorder existed are unavailable. A
+   corrupt snapshot is counted and passed over. The cursor moves with the quotes it kept.
+2. Every snapshot read gives its minute quotes (`move_quotes`: one per market and minute bucket,
+   first seen wins, as the lab's `semantic_quotes`), even one too old to make rows, so the features'
+   history keeps the training cadence when the job waited behind the ops lane. They are each
+   state's earlier quotes, the features' history (>= 4 hours of it) and the evaluation's outcomes.
+   Only snapshots newer than two intervals make rows (older ones are `stale`).
 3. It writes a row for every market shown (at most `max_markets_per_cycle`, 800; never-recorded
    markets first, then the one recorded longest ago). The free features cost nothing. The Jev asks
    are the only paced part, inside the move share of the pool (`move.daily_usd`, $0.75): first the
    static labels of markets that have none (the shadow's per-market questions, over the lab's exact
-   state, cached per market text and question set), then, with what the day's static reserve
-   leaves, the two recorded-only questions (`moves_15m`, `moves_60m`) over a sample of states
-   chosen by a hash of market and minute. At most 4 asks run at once; none starts after the House
-   begins to close or after `max_seconds_per_cycle` (60).
+   state, cached per market text and question set), then, with what the rest of the day's static
+   labels leave at today's measured rate of new markets, the two recorded-only questions
+   (`moves_15m`, `moves_60m`) over a sample of states chosen by a hash of market and minute, spread
+   evenly over the day. No ask is made for a market the models do not apply to. At most 4 asks run
+   at once, each waiting at most what the cycle has left; none starts after the House begins to
+   close or after `max_seconds_per_cycle` (60). After a failure the Sensor lets one probe through.
 4. Each row: the features, the answers, `move_p5/15/60` (served), `numeric_p5/15/60` (lab-5
    baseline), `jev_p5/15/60` (shadow, when the market's static answers exist), and `why` for every
-   null. `recorded_at` is taken inside the insert's transaction once its write lock is held, and
-   the commit follows the inserts at once: a row is visible within milliseconds after its
+   null, the models' identities (version and file digest) and `lag_seconds` (recorded_at -
+   observed). `recorded_at` is taken inside the insert's transaction once its write lock is held,
+   and the commit follows the inserts at once: a row is visible within milliseconds after its
    `recorded_at`, never before it. A consumer or replay at time T may see only rows with
    `recorded_at <= T` (`latest`).
 
@@ -41,8 +45,9 @@ Rules:
 - Jev is a label source only. Nothing here places an order, changes a money rule, promotes or
   spends beyond the Sensor's caps (`league/jev.py`).
 - A model file must define every numeric feature it uses exactly as `DEFINITIONS` does (compared
-  ignoring whitespace and case), else it is refused with one alert: coefficients fitted on one
-  definition are never applied to another. A placeholder version counts as no model.
+  ignoring whitespace and case), carry a parseable `fitted_on.to`, and keep its digest for its
+  version (`move_models`), else it is refused with an alert: coefficients fitted on one definition
+  are never applied to another. A placeholder version counts as no model.
 - The feature is not served to strategies here. `latest` is the future `ctx["feeds"]["move"]`
   read. Before a strategy relies on it, `evaluate` (held-out rows after a cutoff no earlier than the
   model's `fitted_on.to`, event-clustered bootstrap, per model version) must show AUC >= 0.70 for
@@ -94,9 +99,9 @@ STATIC_FIELDS = ("market", "series", "title", "subtitle", "rules_primary", "rule
 #: A lab-sized state measured $0.000107 a call (Sept 20-22: $13.67 for 128,179 labels); the pace
 #: assumes this until today's own move calls say otherwise.
 DEFAULT_CALL_USD = Decimal("0.0001")
-#: What a day's static labels are expected to cost (~4,500 new markets at ~$0.0001), held back from
-#: the per-state sample in proportion to the day left.
-DEFAULT_STATIC_RESERVE_USD = Decimal("0.50")
+#: New markets a day needing static labels, until today's own rate is measured (an hour and 20 asks):
+#: the Sept 25 estimate (~4,500 a day, ~$0.48). The per-state sample gets what their reserve leaves.
+DEFAULT_NEW_MARKETS_PER_DAY = 4500
 MIN_FREE_BYTES = 2 * 1024 ** 3  # below this the recorder skips its cycle with an alert
 MAX_WORKERS = 4  # concurrent asks; each holds a gateway reservation while in flight
 HISTORY_SECONDS = 4 * 3600  # the features read at most four hours of a market's own quotes
@@ -291,15 +296,23 @@ class MoveModel:
     feature a block uses must be declared in `numeric` with the canonical definition
     (`DEFINITIONS`); an unknown or differently defined numeric feature refuses the whole file. Its
     Jev features are lab questions named in `questions.per_market` (asked once per market) or
-    `questions.per_state`."""
+    `questions.per_state`. Its identity is (version, sha256 of the file): a model without a
+    parseable `fitted_on.to` cannot be held out honestly and is refused; `fitted_on.events_sha256`
+    lists the fit's events (sha256(event)[:16]), which evaluate never counts as unseen."""
 
-    def __init__(self, data: Any, *, source: str = ""):
+    def __init__(self, data: Any, *, source: str = "", digest: str | None = None):
         self.source = source
         self.problems: list[str] = []
+        self.digest = digest or hashlib.sha256(canonical(data).encode()).hexdigest()
         data = data if isinstance(data, dict) else {}
         self.version = str(data.get("version") or "unknown")
         self.fitted_on = dict(data["fitted_on"]) if isinstance(data.get("fitted_on"), dict) else {}
         self.placeholder = self.version == PLACEHOLDER or bool(self.fitted_on.get("placeholder"))
+        self.fit_events = frozenset(str(e) for e in self.fitted_on.get("events_sha256") or ())
+        try:
+            self.fitted_to: float | None = parse_time(str(self.fitted_on["to"]))
+        except (KeyError, ValueError, TypeError):
+            self.fitted_to = None
         self.per_market: list[str] = []
         self.per_state: list[str] = []
         self.blocks: dict[int, dict[str, Any]] | None = None
@@ -333,17 +346,25 @@ class MoveModel:
             self.blocks = {h: _block((data.get("horizons") or {}).get(str(h)), allowed, f"horizons.{h}") for h in HORIZONS}
         except (ValueError, KeyError, TypeError) as exc:
             self.problems.append(f"model refused: {exc}")
+        if self.fitted_to is None and not self.placeholder:
+            self.refuse("fitted_on.to is missing or unparseable: its held-out rows could not be told from its training rows")
+
+    def refuse(self, reason: str) -> None:
+        """No prediction and no baseline from this file."""
+        self.problems.append(f"model refused: {reason}")
+        self.blocks = self.baseline = None
 
     @classmethod
     def load(cls, path: str | Path) -> "MoveModel":
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            raw = Path(path).read_bytes()
+            data = json.loads(raw)
         except (OSError, ValueError) as exc:
             model = cls({}, source=str(path))
             model.problems = [f"model file unreadable: {type(exc).__name__}: {str(exc)[:120]}"]
             model.blocks = model.baseline = None
             return model
-        return cls(data, source=str(path))
+        return cls(data, source=str(path), digest=hashlib.sha256(raw).hexdigest())
 
     @property
     def ready(self) -> bool:
@@ -406,18 +427,22 @@ CREATE TABLE IF NOT EXISTS move_quotes(market TEXT NOT NULL, minute INTEGER NOT 
 CREATE INDEX IF NOT EXISTS move_quotes_minute ON move_quotes(minute);
 CREATE TABLE IF NOT EXISTS move_rows(id INTEGER PRIMARY KEY, market TEXT NOT NULL, event TEXT NOT NULL, series TEXT,
     observed REAL NOT NULL, minute INTEGER NOT NULL, bid REAL NOT NULL, ask REAL NOT NULL, numeric TEXT NOT NULL,
-    answers TEXT, {', '.join(f'{c} REAL' for c in P_COLUMNS)}, model_version TEXT NOT NULL, shadow_version TEXT,
-    sampled INTEGER NOT NULL DEFAULT 0, snapshot INTEGER NOT NULL, recorded_at REAL NOT NULL, why TEXT,
+    answers TEXT, {', '.join(f'{c} REAL' for c in P_COLUMNS)}, model_version TEXT NOT NULL, model_digest TEXT NOT NULL,
+    shadow_version TEXT, shadow_digest TEXT, sampled INTEGER NOT NULL DEFAULT 0, snapshot INTEGER NOT NULL,
+    recorded_at REAL NOT NULL, lag_seconds REAL NOT NULL, why TEXT,
     UNIQUE(market, snapshot, observed));  -- a replaced recordings store numbers its snapshots from 1 again
 CREATE INDEX IF NOT EXISTS move_rows_market ON move_rows(market, recorded_at);
+CREATE INDEX IF NOT EXISTS move_rows_market_observed ON move_rows(market, observed);
 CREATE INDEX IF NOT EXISTS move_rows_observed ON move_rows(observed);
 CREATE INDEX IF NOT EXISTS move_rows_event ON move_rows(event, observed);
 CREATE TABLE IF NOT EXISTS move_markets(market TEXT PRIMARY KEY, last_row REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS move_markets_last ON move_markets(last_row);
-CREATE TABLE IF NOT EXISTS move_models(version TEXT PRIMARY KEY, fitted_on TEXT NOT NULL, first_seen REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS move_models(version TEXT NOT NULL, digest TEXT NOT NULL, fitted_on TEXT NOT NULL,
+    first_seen REAL NOT NULL, PRIMARY KEY(version, digest));
 """
+#: What a cycle writes per row; `recorded_at` and `lag_seconds` (= recorded_at - observed) are added in the insert.
 ROW_COLUMNS = ("market", "event", "series", "observed", "minute", "bid", "ask", "numeric", "answers", *P_COLUMNS,
-               "model_version", "shadow_version", "sampled", "snapshot", "why")
+               "model_version", "model_digest", "shadow_version", "shadow_digest", "sampled", "snapshot", "why")
 
 
 @contextmanager
@@ -452,20 +477,39 @@ class MoveSensor:
         self.interval = float(s.get("interval_seconds", 300))
         self.max_markets = max(1, int(s.get("max_markets_per_cycle", 800)))
         self.retention_days = float(s.get("retention_days", 14))
-        self.max_snapshots = max(1, int(s.get("max_snapshots_per_cycle", 300)))
+        # Snapshots read a cycle for their quotes (streamed, oldest first; a larger backlog waits for the
+        # next cycle); only those newer than two intervals also make rows.
+        self.max_snapshots = max(1, int(s.get("max_snapshots_per_cycle", 1000)))
         self.workers = max(1, min(MAX_WORKERS, int(s.get("workers", MAX_WORKERS))))
         self.max_seconds = float(s.get("max_seconds_per_cycle", 60))
         self.max_static = max(0, int(s.get("max_static_per_cycle", 400)))
         self.min_free_bytes = int(s.get("min_free_bytes", MIN_FREE_BYTES))
         self.daily_usd = Decimal(str(s["daily_usd"])) if s.get("daily_usd") is not None else None
-        self.static_reserve = Decimal(str(s.get("static_reserve_usd", DEFAULT_STATIC_RESERVE_USD)))
+        self.new_markets_per_day = float(s.get("new_markets_per_day", DEFAULT_NEW_MARKETS_PER_DAY))
         self.recordings = Path(recordings) if recordings is not None else self.root / "recordings.sqlite"
         self.path = self.root / "jev-features.sqlite"
         self.served = MoveModel.load(s.get("model_path") or model_path or MODEL_PATH)
         self.shadow = MoveModel.load(s.get("shadow_model_path") or shadow_path or SHADOW_PATH)
+        self.root.mkdir(parents=True, exist_ok=True)
+        with self._db() as db:
+            db.executescript(SCHEMA)
+            for model in (self.served, self.shadow):
+                # A model's identity is (version, digest): the same version with other contents is refused.
+                other = db.execute("SELECT digest FROM move_models WHERE version=? AND digest<>? LIMIT 1",
+                                   (model.version, model.digest)).fetchone()
+                if other is not None:
+                    model.refuse(f"version {model.version} was recorded as {other[0][:12]}, this file is "
+                                 f"{model.digest[:12]}: a changed model needs a new version")
+                else:
+                    # What `evaluate` needs to know of every model that wrote rows: its fitted_on.
+                    db.execute("INSERT OR IGNORE INTO move_models VALUES(?,?,?,?)",
+                               (model.version, model.digest, canonical(model.fitted_on), self.clock()))
         for model in (self.served, self.shadow):
             for problem in model.problems:
                 self.alert("warning", f"jev move model ({model.source}): {problem}")
+        if not self.served.ready:
+            self.alert("warning", f"the served move model {self.served.version} is not ready "
+                                  f"({self.served.why_not or 'no model'}): move_p stays null")
         # Static questions are about the contract's own text: bought once per market. The rest are
         # about one state: bought only for the sampled states, with the recorded-only pair.
         static = dict.fromkeys(self.served.per_market + self.shadow.per_market)
@@ -479,12 +523,6 @@ class MoveSensor:
         self._last_prune = 0.0
         self._last_error = ""
         self._deadline = float("inf")
-        self.root.mkdir(parents=True, exist_ok=True)
-        with self._db() as db:
-            db.executescript(SCHEMA)
-            # What `evaluate` needs to know of every model that wrote rows: its fitted_on (`to`).
-            db.executemany("INSERT OR IGNORE INTO move_models VALUES(?,?,?)",
-                           [(m.version, canonical(m.fitted_on), self.clock()) for m in (self.served, self.shadow)])
         self._stats: dict[str, Any] = {}
         self._refresh_stats(None)
 
@@ -556,6 +594,15 @@ class MoveSensor:
             self._run_lock.release()
         return None if failed else cycle
 
+    def _today(self, db: sqlite3.Connection, now: float) -> dict[str, Any]:
+        """This UTC day's counts of the recorder's own work (meta `today`), zeroed at a new day."""
+        day = time.strftime("%Y-%m-%d", time.gmtime(now))
+        tally = json.loads(self._meta(db, "today") or "{}")
+        if tally.get("day") != day:
+            tally = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "static_asked": 0, "rows": 0, "move_rows": 0,
+                     "jev_rows": 0, "sampled_rows": 0}
+        return tally
+
     def _cycle(self, now: float) -> dict[str, Any]:
         free = shutil.disk_usage(self.root).free
         if free < self.min_free_bytes:
@@ -574,26 +621,26 @@ class MoveSensor:
             # the inserts at once (see the module docstring).
             db.execute("BEGIN IMMEDIATE")
             recorded_at = self.clock()
-            db.executemany(f"INSERT OR IGNORE INTO move_rows({','.join(ROW_COLUMNS)},recorded_at) "
-                           f"VALUES({','.join('?' * (len(ROW_COLUMNS) + 1))})",
-                           [(*(row[c] for c in ROW_COLUMNS), recorded_at) for row in rows])
+            db.executemany(f"INSERT OR IGNORE INTO move_rows({','.join(ROW_COLUMNS)},recorded_at,lag_seconds) "
+                           f"VALUES({','.join('?' * (len(ROW_COLUMNS) + 2))})",
+                           [(*(row[c] for c in ROW_COLUMNS), recorded_at, round(recorded_at - row["observed"], 3)) for row in rows])
         counts = {"rows": len(rows), "move_rows": sum(r["move_p15"] is not None for r in rows),
                   "jev_rows": sum(r["jev_p15"] is not None for r in rows), "sampled_rows": sum(r["sampled"] for r in rows)}
         with self._db() as db:
             db.executemany("INSERT INTO move_markets VALUES(?,?) ON CONFLICT(market) DO UPDATE SET last_row=excluded.last_row",
                            [(row["market"], row["observed"]) for row in rows])
-            day = time.strftime("%Y-%m-%d", time.gmtime(now))
-            tally = json.loads(self._meta(db, "today") or "{}")
-            if tally.get("day") != day:
-                tally = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "move_rows": 0, "jev_rows": 0,
-                         "sampled_rows": 0}
+            tally = self._today(db, now)
             tally.update(calls=tally["calls"] + int(receipt.get("calls") or 0),
                          bought=tally["bought"] + int(receipt.get("bought") or 0),
+                         static_asked=tally["static_asked"] + int(receipt.get("static") or 0),
                          cost_usd=format(Decimal(tally["cost_usd"]) + Decimal(str(receipt.get("cost") or 0)), "f"),
                          **{k: int(tally.get(k) or 0) + v for k, v in counts.items()})
             self._set(db, today=canonical(tally))
         cycle.update(counts, calls=int(receipt.get("calls") or 0), static_asked=int(receipt.get("static") or 0),
                      cost_usd=format(Decimal(str(receipt.get("cost") or 0)), "f"))
+        if rows:
+            lags = sorted(recorded_at - r["observed"] for r in rows)
+            cycle["lag_seconds"] = {"p50": round(lags[len(lags) // 2], 1), "max": round(lags[-1], 1)}
         if refusal:
             cycle["refusal"] = refusal
         if now - self._last_prune >= 3600:
@@ -602,21 +649,23 @@ class MoveSensor:
         return cycle
 
     def _read_snapshots(self, now: float):
-        """The fresh `markets:` snapshots past the cursor, streamed newest first and parsed one at a
-        time (the payloads are never all in memory). Returns (shown, counts) or a note.
+        """Every `markets:` snapshot past the cursor, oldest first, streamed and parsed one at a time,
+        at most `max_snapshots` a cycle (a larger backlog is read next cycle: the cursor stops at the
+        last one read). Returns (shown, counts) or a note.
 
-        `shown` maps each market to its latest appearance: (snapshot id, received, market row, the
-        first nine rows of its series in that snapshot, which is all `market_state` needs for eight
-        peers). Snapshots older than two intervals are `stale`, those beyond `max_snapshots` are
-        `over_cap`, unreadable ones `corrupt`; all are passed over. The cursor moves to the newest
-        snapshot considered in the transaction that keeps the quotes, whatever happens next."""
+        Every snapshot read gives its minute quotes (first seen in a minute wins), so the features'
+        history keeps the lab's cadence even when this job waited behind the ops lane. Only snapshots
+        newer than two intervals make rows: `shown` maps each market to its latest appearance among
+        them, (snapshot id, received, market row, the first nine rows of its series in that snapshot,
+        which is all `market_state` needs for eight peers). Older ones are `stale`, unreadable ones
+        `corrupt`. The cursor moves with the last batch of quotes, whatever happens next."""
         if not self.recordings.exists():
             return "no market recordings yet"
         fresh_after = now - 2 * self.interval
         source = sqlite3.connect(self.recordings.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
         shown: dict[str, tuple[int, float, dict[str, Any], list[dict[str, Any]]]] = {}
-        quotes: dict[tuple[str, int], tuple[float, float]] = {}
-        read = corrupt = 0
+        batch: list[tuple[str, int, float, float]] = []
+        read = corrupt = stale = 0
         try:
             newest = int(source.execute("SELECT COALESCE(MAX(id),0) FROM snapshots").fetchone()[0])
             with self._db() as db:
@@ -626,51 +675,61 @@ class MoveSensor:
                     note = "started" if cursor is None else "recordings replaced"
                     self._set(db, cursor=newest, **({"started_at": now, "started_cursor": newest} if cursor is None else {}))
                     return f"{note}: cursor at snapshot {newest}, nothing earlier is read"
-            cursor = int(cursor)
+            cursor = last = int(cursor)
             window = "id>? AND id<=? AND source LIKE 'markets:%'"
-            stale, fresh = source.execute(f"SELECT COALESCE(SUM(received<?),0), COALESCE(SUM(received>=?),0) FROM snapshots "
-                                          f"WHERE {window}", (fresh_after, fresh_after, cursor, newest)).fetchone()
-            rows = source.execute(f"SELECT id, received, payload FROM snapshots WHERE {window} AND received>=? "
-                                  f"ORDER BY id DESC LIMIT ?", (cursor, newest, fresh_after, self.max_snapshots))
-            for ident, received, payload in rows:  # newest first
-                read += 1
+            for ident, received, payload in source.execute(
+                    f"SELECT id, received, payload FROM snapshots WHERE {window} ORDER BY id LIMIT ?",
+                    (cursor, newest, self.max_snapshots)):
+                read, last = read + 1, int(ident)
                 try:
                     markets = json.loads(gzip.decompress(payload))
-                    if not isinstance(markets, list):
-                        continue
-                    valid = [m for m in markets if isinstance(m, dict) and isinstance(m.get("market"), str) and point(m)]
+                    valid = [m for m in markets if isinstance(m, dict) and isinstance(m.get("market"), str) and point(m)] \
+                        if isinstance(markets, list) else []
+                except Exception:  # noqa: BLE001 - zlib.error, RecursionError, anything: a corrupt snapshot is skipped
+                    corrupt += 1
+                    continue
+                finally:
+                    payload = None  # noqa: F841 - one payload in memory at a time
+                bucket = int(float(received) // 60) * 60
+                batch.extend((m["market"], bucket, point(m)["bid"], point(m)["ask"]) for m in valid)
+                if float(received) < fresh_after:
+                    stale += 1
+                else:
                     series: dict[Any, list[dict[str, Any]]] = {}
                     for m in valid:
                         group = series.setdefault(m.get("series"), [])
                         if len(group) < 9:
                             group.append(m)
-                    bucket = int(float(received) // 60) * 60
-                    for m in valid:
-                        q = point(m)
-                        quotes[(m["market"], bucket)] = (q["bid"], q["ask"])  # newest first: the earliest in a minute wins
-                        shown.setdefault(m["market"], (int(ident), float(received), m, series[m.get("series")]))
-                except Exception:  # noqa: BLE001 - zlib.error, RecursionError, anything: a corrupt snapshot is skipped
-                    corrupt += 1
-                finally:
-                    payload = markets = None  # noqa: F841 - one payload at a time
+                    for m in valid:  # oldest first: the latest appearance wins
+                        shown[m["market"]] = (int(ident), float(received), m, series[m.get("series")])
+                if len(batch) >= 20_000:
+                    self._keep_quotes(batch)  # oldest first, so INSERT OR IGNORE keeps the first in a minute
+                    batch = []
+            backlog = 0
+            if read >= self.max_snapshots:
+                backlog = int(source.execute(f"SELECT COUNT(*) FROM snapshots WHERE {window}", (last, newest)).fetchone()[0])
+            end = last if backlog else newest
         finally:
             source.close()
-        with self._db() as db:
-            db.executemany("INSERT OR IGNORE INTO move_quotes VALUES(?,?,?,?)",
-                           [(market, minute, bid, ask) for (market, minute), (bid, ask) in quotes.items()])
-            self._set(db, cursor=newest)
-        over_cap = max(0, int(fresh) - read)
-        return shown, {"snapshots": read - corrupt, "stale_snapshots": int(stale), "over_cap_snapshots": over_cap,
-                       "corrupt_snapshots": corrupt, "skipped_snapshots": int(stale) + over_cap + corrupt}
+        self._keep_quotes(batch, cursor=end)
+        return shown, {"snapshots": read - corrupt, "stale_snapshots": stale, "corrupt_snapshots": corrupt,
+                       "backlog_snapshots": backlog}
 
-    def _allowance(self, now: float) -> tuple[int, int, int]:
+    def _keep_quotes(self, batch: list[tuple[str, int, float, float]], *, cursor: int | None = None) -> None:
+        with self._db() as db:
+            db.executemany("INSERT OR IGNORE INTO move_quotes VALUES(?,?,?,?)", batch)
+            if cursor is not None:
+                self._set(db, cursor=cursor)
+
+    def _allowance(self, now: float, static_today: int) -> tuple[int, int, int]:
         """(static labels this cycle may buy, sampled states this cycle may buy, calls left today).
 
         The move budget is the tighter of the Sensor's call headroom and `daily_usd` (else the move
         call cap's share of the pool) at today's measured cost a call. Static labels come first, up
-        to `max_static_per_cycle`: a market's jev_p needs them once. The per-state sample gets what
-        the static reserve (its expected cost over the rest of the day) leaves, spread evenly over
-        the cycles left, so it lasts through US hours and the gate keeps its share of the pool."""
+        to `max_static_per_cycle`: a market's jev_p needs them once. The rest of the day's static
+        labels are reserved at today's measured rate of new markets (`new_markets_per_day` until an
+        hour and 20 asks are measured); the per-state sample gets what that leaves, spread evenly over
+        the cycles left in the UTC day and never more than twice an even share in one cycle."""
         left = int(self.sensor.headroom(PURPOSE))
         budget = self.daily_usd
         cap = getattr(self.sensor, "purpose_calls", {}).get(PURPOSE)
@@ -680,10 +739,17 @@ class MoveSensor:
         per_call = max(spent / calls if calls >= 20 else DEFAULT_CALL_USD, Decimal("0.000001"))
         if budget is not None:
             left = min(left, max(0, int((budget - spent) / per_call)))
-        day_end = (int(now // 86400) + 1) * 86400
-        reserve = int(self.static_reserve * Decimal(str((day_end - now) / 86400)) / per_call)
-        cycles = max(1, math.ceil((day_end - now) / max(1.0, self.interval)))
-        return min(left, self.max_static), math.ceil(max(0, left - reserve) / cycles), left
+        day_start = int(now // 86400) * 86400
+        day_end = day_start + 86400
+        with self._db() as db:
+            started = float(self._meta(db, "started_at") or day_start)
+        watched = now - max(day_start, started)
+        rate = static_today / watched if watched >= 3600 and static_today >= 20 else self.new_markets_per_day / 86400
+        reserve = math.ceil(rate * (day_end - now))
+        cycles_left = max(1, math.ceil((day_end - now) / max(1.0, self.interval)))
+        even = max(0.0, calls + left - static_today - reserve) / max(1, math.ceil(86400 / max(1.0, self.interval)))
+        sample = min(math.ceil(max(0, left - reserve) / cycles_left), math.ceil(2 * even))
+        return min(left, self.max_static), sample, left
 
     def _observe(self, shown, now: float) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
         """Rows for the chosen markets. Returns (rows, the first refusal, receipt)."""
@@ -694,6 +760,7 @@ class MoveSensor:
                 chunk = names[start:start + 500]
                 last.update(db.execute(f"SELECT market, last_row FROM move_markets WHERE market IN ({','.join('?' * len(chunk))})",
                                        chunk).fetchall())
+            static_today = int(self._today(db, now).get("static_asked") or 0)
             # Never-recorded first, then the market recorded longest ago; ties to the most recently shown.
             chosen = sorted(names, key=lambda m: (last.get(m, 0.0), -shown[m][1], m))[:self.max_markets]
             states, feats = {}, {}
@@ -711,11 +778,13 @@ class MoveSensor:
             static = _digest({k: m[k] for k in STATIC_FIELDS if k in m})
             keys[market] = {name: f"move:m:{self._static_version}:{market}:{static}:{name}" for name in self.static}
         known = self.sensor.cached([k for per in keys.values() for k in per.values()]) if self.static else {}
-        static_limit, sample, left = self._allowance(now)
-        need = sorted((m for m in chosen if any(k not in known for k in keys[m].values())), key=lambda m: (-shown[m][1], m))
+        static_limit, sample, left = self._allowance(now, static_today)
+        # No ask for a market the models do not apply to (no two-sided quote, at or after close).
+        usable = [m for m in chosen if feats[m] is not None]
+        need = sorted((m for m in usable if any(k not in known for k in keys[m].values())), key=lambda m: (-shown[m][1], m))
         static_asks = need[:static_limit]
         sample = min(sample, max(0, left - len(static_asks)))
-        sampled = set(sorted(chosen, key=lambda m: (_draw(m, int(shown[m][1] // 60) * 60), m))[:sample])
+        sampled = set(sorted(usable, key=lambda m: (_draw(m, int(shown[m][1] // 60) * 60), m))[:sample])
         asks = {m: dict(self.static) for m in static_asks}
         for m in sampled:
             asks[m] = {**self.static, **self.per_state}
@@ -730,8 +799,10 @@ class MoveSensor:
                 return
             mine: dict[str, Any] = {}
             try:
+                # The request may wait at most what the cycle has left, so a closing House is not held.
                 answers = self.sensor.ask_state(PURPOSE, f"move:s:{self._state_version}:{_digest(states[market], 32)}",
-                                                states[market], asks[market], receipt=mine, keys=keys[market])
+                                                states[market], asks[market], receipt=mine, keys=keys[market],
+                                                timeout=max(1.0, self._deadline - time.monotonic()))
             except Exception as exc:  # noqa: BLE001 - one market's failure is that row's null, not the cycle's
                 answers, mine = {}, {"refused": f"{type(exc).__name__}: {str(exc)[:80]}"}
             with lock:
@@ -782,7 +853,8 @@ class MoveSensor:
                    "numeric": canonical({k: round(v, 9) for k, v in (x or {}).items()}),
                    "answers": canonical({k: (None if v is None else round(v, 6)) for k, v in answers.items()})
                    if any(v is not None for v in answers.values()) else None,
-                   "model_version": self.served.version, "shadow_version": self.shadow.version,
+                   "model_version": self.served.version, "model_digest": self.served.digest,
+                   "shadow_version": self.shadow.version, "shadow_digest": self.shadow.digest,
                    "sampled": int(market in sampled), "snapshot": ident, "why": "; ".join(reasons) or None}
             for kind, found in (("move", move), ("numeric", base), ("jev", jev)):
                 for h in HORIZONS:
@@ -833,8 +905,8 @@ class MoveSensor:
             started_at, cursor = self._meta(db, "started_at"), self._meta(db, "cursor")
         day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
         if today.get("day") != day:
-            today = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "move_rows": 0, "jev_rows": 0,
-                     "sampled_rows": 0}
+            today = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "static_asked": 0, "rows": 0, "move_rows": 0,
+                     "jev_rows": 0, "sampled_rows": 0}
         last = dict(cycle or self._stats.get("last_cycle") or {})
         self._stats = {"model_version": self.served.version, "model_ready": self.served.ready,
                        "shadow_version": self.shadow.version, "shadow_ready": self.shadow.ready,
@@ -947,108 +1019,156 @@ def paired_auc(a: Sequence[float], b: Sequence[float], labels: Sequence[int], ev
     return out
 
 
+def _fit_summary(fitted_on: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if fitted_on is None:
+        return None
+    return {**{k: v for k, v in fitted_on.items() if k != "events_sha256"}, "events": len(fitted_on.get("events_sha256") or ())}
+
+
 def evaluate(store: str | Path, cutoff: float, horizons: Iterable[int] = HORIZONS, *, reps: int = 200,
-             seed: int = 7, fitted_on: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
+             seed: int = 7, fitted_on: Mapping[tuple[str, str], Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """Held-out evaluation of recorded rows observed at or after `cutoff`, read-only.
+
+    It needs nothing but the store, opened read-only, so it can run on a copy (`sqlite3 SRC
+    ".backup COPY"`, or the file with its -wal) off the House box. Rows are streamed once, ordered by
+    market, with each market's quotes read once; what is kept per row is a few numbers in compact
+    arrays, not the rows.
 
     - Outcome: the market's first own minute quote in [observed + h, observed + h + 10 min] whose
       minute is also strictly after the row's `recorded_at` (it must come after the row could be
       read). "Moves at all": |that mid - the row's mid| > 1e-9, the lab's target.
-    - Per served `model_version`, never pooled. A cutoff earlier than the `fitted_on.to` of a model
-      that wrote the rows (served or shadow; the store's `move_models`, or `fitted_on` given here)
-      is refused: rows before it may be in that model's training data.
-    - Two populations: every post-cutoff row, and rows of events never observed before the cutoff
-      in this store (event = ticker minus its last '-' segment).
+    - Groups: (served version, digest) with (shadow version, digest), never pooled. A cutoff earlier
+      than the `fitted_on.to` of any model that wrote the rows (the store's `move_models`, or
+      `fitted_on` keyed by (version, digest) here) is refused: rows before it may be training data.
+    - Populations: every post-cutoff row; rows of `unseen_events`, observed neither before the
+      cutoff in this store nor in the models' fit (`fitted_on.events_sha256`); rows read within two
+      minutes (`lag_le_120s`: recorded_at - observed <= 120 s). Lag quantiles per group.
     - Scores: `served` (move_p, the free model), `shadow` (jev_p, free + static Jev answers),
       `baseline` (numeric_p, the lab's five features), the recorded-only answers; each alone on
       the rows that have it, and paired where they share rows: `served_vs_baseline`,
       `jev_increment` (AUC(jev_p) - AUC(move_p) on the same rows: does Jev add anything?) and each
       recorded-only answer against served. Seeded 95% event-clustered bootstrap intervals, overall
       and per coarse category."""
+    from array import array
+    from bisect import bisect_left, bisect_right
+
     path = Path(store)
     horizons = [int(h) for h in horizons]
+    cutoff = float(cutoff)
+    names = [f"{kind}_p{h}" for kind in ("move", "numeric", "jev") for h in HORIZONS]
     with _connect(path, readonly=True) as db:
-        db.row_factory = sqlite3.Row
-        known: dict[str, dict[str, Any]] = {}
-        try:
-            known = {r["version"]: json.loads(r["fitted_on"] or "{}") for r in db.execute("SELECT version, fitted_on FROM move_models")}
-        except sqlite3.OperationalError:
-            pass
-        known.update({k: dict(v) for k, v in (fitted_on or {}).items()})
-        rows = [dict(r) for r in db.execute("SELECT * FROM move_rows WHERE observed>=? ORDER BY observed, id", (float(cutoff),))]
-        for version in sorted({r["model_version"] for r in rows} | {r["shadow_version"] for r in rows if r["shadow_version"]}):
-            to = known.get(version, {}).get("to")
-            if to is not None and float(cutoff) < parse_time(str(to)):
-                raise ValueError(f"cutoff {_iso(cutoff)} is before model {version}'s fitted_on.to {to}: "
-                                 f"rows before it may be in its training data")
-        seen = {r["event"] for r in db.execute("SELECT DISTINCT event FROM move_rows WHERE observed<?", (float(cutoff),))}
-        for row in rows:
-            row["answers"] = json.loads(row["answers"]) if row["answers"] else {}
-            row["outcome"] = {}
+        known = {(v, d): json.loads(f or "{}") for v, d, f in db.execute("SELECT version, digest, fitted_on FROM move_models")}
+        known.update({tuple(k): dict(v) for k, v in (fitted_on or {}).items()})
+        groups = [tuple(g) for g in db.execute("SELECT DISTINCT model_version, model_digest, shadow_version, shadow_digest "
+                                              "FROM move_rows WHERE observed>=? ORDER BY 1, 2, 3, 4", (cutoff,))]
+        for group in groups:
+            for version, digest in (group[:2], group[2:]):
+                to = (known.get((version, digest)) or {}).get("to") if version else None
+                if to is not None and cutoff < parse_time(str(to)):
+                    raise ValueError(f"cutoff {_iso(cutoff)} is before model {version}'s fitted_on.to {to}: "
+                                     f"rows before it may be in its training data")
+        index = {g: n for n, g in enumerate(groups)}
+        fit = [frozenset((known.get(g[:2]) or {}).get("events_sha256") or ()) | frozenset((known.get(g[2:]) or {}).get("events_sha256") or ())
+               for g in groups]
+        seen = {e for (e,) in db.execute("SELECT DISTINCT event FROM move_rows WHERE observed<?", (cutoff,))}
+        events: dict[str, int] = {}
+        cols = {"group": array("i"), "event": array("i"), "category": array("b"), "unseen": array("b"), "lag": array("d")}
+        scores = {name: array("d") for name in [*names, *RECORDED_ONLY]}
+        outcome = {h: array("b") for h in horizons}
+        market, minutes, quotes = None, [], []
+        for row in db.execute(f"SELECT market, event, series, observed, bid, ask, recorded_at, sampled, answers, {', '.join(names)}, "
+                              f"model_version, model_digest, shadow_version, shadow_digest FROM move_rows WHERE observed>=? "
+                              f"ORDER BY market, observed", (cutoff,)):
+            if row[0] != market:
+                market = row[0]
+                found = db.execute("SELECT minute, bid, ask FROM move_quotes WHERE market=? AND minute>=? ORDER BY minute",
+                                   (market, row[3])).fetchall()
+                minutes, quotes = [q[0] for q in found], [(q[1] + q[2]) / 2 for q in found]
+            _, event, series, observed, bid, ask, recorded_at, sampled, answers = row[:9]
+            g = index[tuple(row[-4:])]
+            cols["group"].append(g)
+            cols["event"].append(events.setdefault(event, len(events)))
+            cols["category"].append(CATEGORY_NAMES.index(category(series or market.split("-", 1)[0])))
+            cols["unseen"].append(int(event not in seen and hashlib.sha256(event.encode()).hexdigest()[:16] not in fit[g]))
+            cols["lag"].append(float(recorded_at) - float(observed))
+            for name, value in zip(names, row[9:9 + len(names)]):
+                scores[name].append(math.nan if value is None else float(value))
+            given = json.loads(answers) if sampled and answers else {}
+            for name in RECORDED_ONLY:
+                scores[name].append(math.nan if given.get(name) is None else float(given[name]))
+            mid = (bid + ask) / 2
             for h in horizons:
-                quote = db.execute("SELECT bid, ask FROM move_quotes WHERE market=? AND minute>=? AND minute<=? AND minute>? "
-                                   "ORDER BY minute LIMIT 1", (row["market"], row["observed"] + 60 * h,
-                                                               row["observed"] + 60 * h + 600, row["recorded_at"])).fetchone()
-                row["outcome"][h] = None if quote is None else int(
-                    abs((quote["bid"] + quote["ask"]) / 2 - (row["bid"] + row["ask"]) / 2) > 1e-9)
+                lo, hi = observed + 60 * h, observed + 60 * h + 600
+                i = max(bisect_left(minutes, lo), bisect_right(minutes, recorded_at))
+                outcome[h].append(-1 if i >= len(minutes) or minutes[i] > hi else int(abs(quotes[i] - mid) > 1e-9))
+    count = len(cols["group"])
 
-    def score(row: Mapping[str, Any], name: str, h: int) -> float | None:
-        if name in RECORDED_ONLY:
-            value = row["answers"].get(name)
-            return None if value is None else float(value)
-        return row.get(f"{name}_p{h}")
+    def score(i: int, name: str, h: int) -> float | None:
+        value = scores[name][i] if name in RECORDED_ONLY else scores[f"{name}_p{h}"][i] if f"{name}_p{h}" in scores else math.nan
+        return None if math.isnan(value) else value
 
-    def alone(subset: list[dict[str, Any]], name: str, h: int) -> dict[str, Any]:
-        found = [(score(r, name, h), r["outcome"][h], r["event"]) for r in subset if score(r, name, h) is not None]
+    def alone(rows: list[int], name: str, h: int) -> dict[str, Any]:
+        found = [(score(i, name, h), outcome[h][i], cols["event"][i]) for i in rows if score(i, name, h) is not None]
         return (auc_with_interval(*zip(*found), reps=reps, seed=seed) if found
                 else {"auc": None, "ci95": None, "rows": 0, "events": 0, "base_rate": None})
 
-    def pair(subset: list[dict[str, Any]], a: str, b: str, h: int, names: tuple[str, str]) -> dict[str, Any]:
-        found = [(score(r, a, h), score(r, b, h), r["outcome"][h], r["event"]) for r in subset
-                 if score(r, a, h) is not None and score(r, b, h) is not None]
+    def pair(rows: list[int], a: str, b: str, h: int, labels: tuple[str, str]) -> dict[str, Any]:
+        found = [(score(i, a, h), score(i, b, h), outcome[h][i], cols["event"][i]) for i in rows
+                 if score(i, a, h) is not None and score(i, b, h) is not None]
         if not found:
-            return {"rows": 0, "events": 0, "base_rate": None, names[0]: {"auc": None, "ci95": None},
-                    names[1]: {"auc": None, "ci95": None}, "difference": {"of": f"{names[0]} - {names[1]}", "diff": None, "ci95": None}}
-        return paired_auc(*zip(*found), names=names, reps=reps, seed=seed)
+            return {"rows": 0, "events": 0, "base_rate": None, labels[0]: {"auc": None, "ci95": None},
+                    labels[1]: {"auc": None, "ci95": None}, "difference": {"of": f"{labels[0]} - {labels[1]}", "diff": None, "ci95": None}}
+        return paired_auc(*zip(*found), names=labels, reps=reps, seed=seed)
 
-    def block(h: int, subset: list[dict[str, Any]]) -> dict[str, Any]:
-        out: dict[str, Any] = {"rows": len(subset), "events": len({r["event"] for r in subset}),
-                               "base_rate": round(sum(r["outcome"][h] for r in subset) / len(subset), 4) if subset else None,
-                               "served": alone(subset, "move", h), "shadow": alone(subset, "jev", h),
-                               "baseline": alone(subset, "numeric", h),
-                               "served_vs_baseline": pair(subset, "move", "numeric", h, ("served", "baseline")),
-                               "jev_increment": pair(subset, "jev", "move", h, ("shadow", "served")),
-                               "recorded_only": {name: {"alone": alone(subset, name, h),
-                                                        "vs_served": pair(subset, name, "move", h, (name, "served"))}
+    def block(h: int, rows: list[int]) -> dict[str, Any]:
+        out: dict[str, Any] = {"rows": len(rows), "events": len({cols["event"][i] for i in rows}),
+                               "base_rate": round(sum(outcome[h][i] for i in rows) / len(rows), 4) if rows else None,
+                               "served": alone(rows, "move", h), "shadow": alone(rows, "jev", h),
+                               "baseline": alone(rows, "numeric", h),
+                               "served_vs_baseline": pair(rows, "move", "numeric", h, ("served", "baseline")),
+                               "jev_increment": pair(rows, "jev", "move", h, ("shadow", "served")),
+                               "recorded_only": {name: {"alone": alone(rows, name, h),
+                                                        "vs_served": pair(rows, name, "move", h, (name, "served"))}
                                                  for name in RECORDED_ONLY}}
         served = out["served"]["auc"]
         out["meets_ship_rule"] = None if served is None else served >= SHIP_AUC
         return out
 
     report: dict[str, Any] = {
-        "store": str(path), "cutoff": _iso(cutoff), "rows_after_cutoff": len(rows),
+        "store": str(path), "cutoff": _iso(cutoff), "rows_after_cutoff": count,
         "target": "the quoted midpoint moves at all (|change| > 1e-9); outcome quote after observed + h and after recorded_at",
-        "ship_rule": f"the served move_p AUC >= {SHIP_AUC} on events never seen before a post-ship cutoff",
+        "ship_rule": f"the served move_p AUC >= {SHIP_AUC} on unseen events after a post-ship cutoff",
         "scores": {"served": "move_p: the free model (no Jev), what latest() serves",
                    "shadow": "jev_p: the free features plus the six static Jev answers, recorded only",
                    "baseline": "numeric_p: the lab's five numeric features",
                    "jev_increment": "shadow minus served on the same rows: whether Jev adds anything",
                    "recorded_only": "the moves_15m / moves_60m answers on the sampled states"},
+        "populations": {"all_after_cutoff": "every row observed at or after the cutoff",
+                        "unseen_events": "rows of events neither observed before the cutoff in this store nor in the fit",
+                        "lag_le_120s": "rows written within 120 s of their observation"},
         "models": {}}
-    for version in sorted({r["model_version"] for r in rows}):
-        mine = [r for r in rows if r["model_version"] == version]
-        shadows = sorted({r["shadow_version"] for r in mine if r["shadow_version"]})
-        entry: dict[str, Any] = {"fitted_on": known.get(version), "shadow_versions": shadows, "populations": {}}
-        for population, keep in (("all_after_cutoff", lambda r: True), ("unseen_events", lambda r: r["event"] not in seen)):
+    for g, (mv, md, sv, sd) in enumerate(groups):
+        mine = [i for i in range(count) if cols["group"][i] == g]
+        lags = sorted(cols["lag"][i] for i in mine)
+        quantile = (lambda q: round(_quantile(lags, q), 1)) if lags else (lambda q: None)
+        entry: dict[str, Any] = {
+            "served": {"version": mv, "digest": md, "fitted_on": _fit_summary(known.get((mv, md)))},
+            "shadow": {"version": sv, "digest": sd, "fitted_on": _fit_summary(known.get((sv, sd)))} if sv else None,
+            "lag_seconds": {"p50": quantile(0.5), "p90": quantile(0.9), "p99": quantile(0.99),
+                            "max": round(lags[-1], 1) if lags else None,
+                            "share_le_120s": round(sum(v <= 120 for v in lags) / len(lags), 4) if lags else None},
+            "populations": {}}
+        for population, keep in (("all_after_cutoff", lambda i: True), ("unseen_events", lambda i: cols["unseen"][i] == 1),
+                                 ("lag_le_120s", lambda i: cols["lag"][i] <= 120)):
             found: dict[str, Any] = {}
             for h in horizons:
-                kept = [r for r in mine if r["outcome"][h] is not None and keep(r)]
-                by: dict[str, list[dict[str, Any]]] = {}
-                for r in kept:
-                    by.setdefault(category(r["series"] or r["market"].split("-", 1)[0]), []).append(r)
+                kept = [i for i in mine if outcome[h][i] >= 0 and keep(i)]
+                by: dict[str, list[int]] = {}
+                for i in kept:
+                    by.setdefault(CATEGORY_NAMES[cols["category"][i]], []).append(i)
                 found[str(h)] = {"overall": block(h, kept), "by_category": {k: block(h, v) for k, v in sorted(by.items())}}
             entry["populations"][population] = found
-        report["models"][version] = entry
+        report["models"][f"{mv}@{md[:12]}" + (f" / {sv}@{sd[:12]}" if sv else "")] = entry
     return report
 
 
@@ -1068,9 +1188,8 @@ def _print(report: Mapping[str, Any], out: Any) -> None:
             return "-"
         return f"{d['diff']:+.3f}" + (f" [{d['ci95'][0]:+.3f},{d['ci95'][1]:+.3f}]" if d["ci95"] else "") + f" n={entry['rows']}"
 
-    for version, entry in report["models"].items():
-        print(f"\nmodel {version} (shadow {', '.join(entry['shadow_versions']) or '-'}; fitted_on "
-              f"{canonical(entry['fitted_on'] or {})})", file=out)
+    for key, entry in report["models"].items():
+        print(f"\nmodels {key}; fit {canonical(entry['served']['fitted_on'] or {})}; lag {canonical(entry['lag_seconds'])}", file=out)
         for population, found in entry["populations"].items():
             for h, blocks in found.items():
                 print(f"  {population}, {h} min", file=out)
@@ -1093,13 +1212,13 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--reps", type=int, default=200, help="bootstrap resamples")
     ev.add_argument("--seed", type=int, default=7)
     ev.add_argument("--model", action="append", default=[],
-                    help="a model file whose fitted_on to use for its version (repeatable; the store keeps its own)")
+                    help="a model file whose fitted_on to use for its (version, digest) (repeatable; the store keeps its own)")
     ev.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     fitted = {}
     for path in args.model:
         model = MoveModel.load(path)
-        fitted[model.version] = model.fitted_on
+        fitted[(model.version, model.digest)] = model.fitted_on
     try:
         report = evaluate(args.store, parse_time(args.cutoff), [int(h) for h in args.horizons.split(",") if h.strip()],
                           reps=args.reps, seed=args.seed, fitted_on=fitted)
