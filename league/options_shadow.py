@@ -558,7 +558,7 @@ class OptionsShadowBroker:
                 in_hand = self._oldest(spec, self._read_legs([leg.occ for leg in spec.legs]))
             except Exception:  # noqa: BLE001 - no quote in hand: the submission time is the floor
                 in_hand = None
-            session = us_equity_session(now)
+            session = us_equity_session(instant(now))  # New York's day: a datetime, never the UTC date of a string
             order.broker_order_id = f"{self.venue}-{self._next_order}"
             self._next_order += 1
             order.submitted_at = order.updated_at = now

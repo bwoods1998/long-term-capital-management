@@ -624,6 +624,39 @@ class ThroughTheBook(ShadowCase):
         self.assertEqual(book.account("alice").holdings, {})
         self.assertEqual(book.account("alice").realized, (D("0.52") - D("0.55")) * 100 - D("0.20"))
 
+    def test_a_partial_fill_is_booked_as_it_comes_and_reconciles_each_time(self):
+        cheap = {"low": ("1.20", "1.30"), "ask_size": "10", "bid_size": "10"}  # ask 1.30 - 1.00 = 0.30; one structure a quote
+        self.quote_vertical(**cheap)
+        [outcome] = self.book.submit([self.wish("buy", "2", "0.30")])
+        self.assertEqual(outcome.status, "resting", outcome.detail)
+        self.requote(**cheap)
+        alice = self.book.account("alice")
+        self.assertEqual(alice.holdings[self.vertical.key].quantity, D(1))
+        self.assertEqual(len(self.book.open_orders("alice")), 1)  # the rest rests
+        self.reconciled()
+        self.requote(**{**cheap, "low": ("1.19", "1.29")})  # the second at 0.29
+        self.assertEqual(alice.holdings[self.vertical.key].quantity, D(2))
+        self.assertEqual(alice.holdings[self.vertical.key].cost, D("30.10") + D("29.10"))
+        self.assertEqual(self.book.open_orders("alice"), [])
+        self.reconciled()
+
+    def test_two_agents_holding_one_structure_are_each_settled_at_expiry(self):
+        self.book.stake("bob", "200")
+        self.book.limits["bob"] = Limits(D(100), D(75), asset_classes=("option",))
+        self.book.submit([self.wish("buy", "1", "0.55")])
+        self.n += 1
+        self.book.submit([Intent.new(agent="bob", instrument=self.vertical, side="buy", quantity="1", order_type="limit",
+                                     limit_price="0.55", reason="bob", created_at=now_iso(self.clock), nonce=str(self.n))])
+        self.requote()
+        self.assertEqual(self.broker.positions()[0].quantity, D(2))
+        self.reconciled()
+        self.clock.now = epoch("2026-09-29T04:30:00Z")
+        self.closes.prices[("SPY", "2026-09-28")] = D("579.00")  # out of the money: worth nothing
+        self.assertEqual(self.book.expire_options(), 2)
+        for agent in ("alice", "bob"):
+            self.assertEqual((self.book.account(agent).holdings, self.book.account(agent).realized), ({}, D("-55.10")))
+        self.reconciled()
+
     def test_the_expiry_safety_net_books_what_the_account_was_paid(self):
         self.book.submit([self.wish("buy", "1", "0.55")])
         self.requote()
@@ -643,6 +676,47 @@ class ThroughTheBook(ShadowCase):
         self.assertEqual((D(settle["payout"]), D(settle["pnl"])), (D("60.00"), D("4.90")))
         self.reconciled()
         self.assertEqual(self.book.expire_options(), 0)
+
+
+class Service(unittest.TestCase):
+    """`service.build` makes the account and its book beside the Kalshi shadow, on a canary too."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)  # registered first, so it runs after every House is closed
+
+    def build(self, root, *, canary):
+        from unittest.mock import patch
+
+        from league import service
+        from league.tests.fakes import FakeBroker
+
+        def no_network(*args, **kwargs):
+            raise OSError("no network in tests")
+
+        config = {**service.load_config(), "feeds": False, "options_history": False, "jev": {"enabled": False}, "real_money": False}
+        with patch.object(service, "load_env"), patch.object(service, "secret", return_value="t" * 40), \
+                patch("league.venues.gateway_broker", side_effect=lambda venue, **_: FakeBroker(venue)), \
+                patch("urllib.request.urlopen", side_effect=no_network):
+            house = service.build(root, config=config, research=False, publish=False, merton=False, local_sandbox=True, canary=canary)
+        self.addCleanup(house.close, wait=None)
+        return house
+
+    def test_the_service_builds_the_account_and_its_practice_book(self):
+        from league import service
+
+        for canary in (True, False):
+            root = Path(self.dir.name) / f"house-{canary}"
+            house = self.build(root, canary=canary)
+            book = house.books[V]
+            self.assertIsInstance(book.broker, OptionsShadowBroker)
+            self.assertEqual(book.broker.state_path, root / "options-shadow.json")
+            self.assertFalse(book.real_money)
+            self.assertEqual((book.fees.family, book.fees.option_clearing), ("alpaca", True))
+            self.assertEqual(book.baseline_cash, D(service.load_config()["options_structures"]["shadow"]["starting_cash"]))
+            self.assertIn("kalshi-shadow", house.books)
+        self.assertIn(service.load_config()["options_structures"]["book"], (V, "alpaca-paper"))
+        self.assertIsNone(service.options_shadow_broker(Path("/nonexistent"), {"options_structures": {"shadow": {"enabled": False}}}, None, None))
 
 
 if __name__ == "__main__":
