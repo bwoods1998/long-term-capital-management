@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| Y | Compute follows yield (lane throttle, trigger skip, unit economics, the contract by section) | built, PR #330 (CI green; built on #311); Deploy C |
 | F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
 | B | Deploy B integration (`b/integration`) | Deploy A + C8/C6 + F1 (+review) + F2/F4/X2 (+review) + F3/C7; money digest `555b7aac` before C-money; C-money and the Wave 1 money review to come |
 | C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
@@ -390,6 +391,20 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   once and its own trading once a UTC day; the multiple decays after 7 days; the barren count restarts on a reset; a
   paused consultant's row is written once. Replay after the fixes: 794 sessions (+44 samples), 259 candidates, 90
   adoptions or forks, $34.58 (T0 day: 2,566, 547, 108, $87.65). The candidates target stays missed (recorded).
+
+- **Y (#330, Wave 2).** Lane throttle (`economy.lane_throttle` 3, bounds 2-5): at each hourly yield row a lane whose
+  24-hour dollars per positive forward block exceed 3x the best lane's (the cheapest with at least 10 positive blocks),
+  or that spent $1 and bought none, is halved until a row finds it back under the line (practice research interval
+  doubled up to one session a day, real agents untouched; the consultant's price doubled; scheduled roles' cadence
+  doubled; the engineer waits two intervals except for a real-money job; audits never). On the T0 day's 24 yield rows:
+  lab $0.038 a positive block (best), foundry $0.052 (1.4x), engineer $0.18 (4.7x, halved), research $0.29 (7.5x,
+  halved), consultant $0.51 (13.2x, halved), architect $7.38 with no positive block (halved). Trigger skip: J2
+  reproduced exactly; on practice agents only, `book.fill` (495 sessions, $0.62 a replay pass) and `book.settle` (62,
+  $0.44) no longer wake research; held out it skips 408 of 1,171 sessions, 13% of dollars, for 2% of replay passes and
+  3% of candidates. Y2: `health.json` `unit_economics` ($118.88 against $21.35 a day at T0, 5.57x). The contract by
+  section for Merton and the engineer: 10.77 MB -> 6.26 MB a day of prompt (-42%), about $1.19-14.83 a day, and $0.73
+  off the average engineer hold. Open: the researcher's prompt (the Kalshi run's file) still sends the whole contract
+  (about 89 KB a turn); the foundry and the lab too.
 
 ## Progress notes
 
