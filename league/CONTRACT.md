@@ -368,7 +368,12 @@ ctx["feeds"] = {
   live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
   the spread is signed from the home side and moneylines are American odds. Esports, cricket,
   tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
-  player props are not supplied.
+  player props are not supplied. Since Sept 25, 2026 a board is the whole slate Kalshi trades:
+  college football is ESPN's FBS and FCS week boards together (its default board is 18 featured
+  games; Kalshi listed 113 spread events that weekend), and a daily league (baseball, soccer, hockey,
+  basketball) is joined by the boards of the New York days the next 36 hours reach, so today's and
+  tomorrow's games are on it before ESPN's own board turns to them. Each team also carries `short`
+  (ESPN's short name: "Red Sox", "Tigres").
 - **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
   open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
   rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
@@ -469,9 +474,18 @@ NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGH
   `4M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `7Y`, `10Y`, `20Y`, `30Y` -- `date`, `yield` %.
 - **odds** (live; ESPN's core API; league keys as for `sports`): each game on the league's
   recorded board that has not started and starts within 36 hours: `id`, `name`, `start`, `home`,
-  `away`, `lines` (every provider: `details`, `spread` signed from the home side, `over_under`,
-  `home_ml`, `away_ml`, `implied_home` with the book's margin taken out, `open` prices) and
-  `win_probability` (ESPN's predictor, football and basketball only, else None).
+  `away`, `fetched`, `lines` (every provider: `details`, `spread` signed from the home side,
+  `over_under`, `home_ml`, `away_ml`, `draw_ml` (soccer's draw), `implied_home`, `implied_away`,
+  `implied_draw` with the book's margin taken out -- three-way where there is a draw price, so a
+  soccer row's three sum to 1 --, `over_odds`, `under_odds`, `implied_over` (the chance the game goes
+  over `over_under`), `home_spread_odds`, `away_spread_odds`, `implied_home_cover` (the chance the
+  home side covers `spread`; baseball's run line included), `open` prices) and `win_probability`
+  (ESPN's predictor, football and basketball only, else None). Since Sept 25, 2026 each game's lines
+  are refreshed on their own clock -- every 30 minutes inside 6 hours of its start, every 2 hours
+  before -- by a pass every 5 minutes, so a row lists every coming game (a college-football Saturday
+  has over a hundred) and each game says when its lines were `fetched` (never after the row's `t`;
+  None, with `lines` [], before the first fetch). Judge a line's age by `fetched`, not by `t`. Measured
+  Sept 25: ESPN answered ONE provider (DraftKings) for every NFL, NCAAF, MLB and MLS game probed.
 - **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
   newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
   House (a bot check) since Sept 24, 2026, so it has no row.

@@ -42,6 +42,24 @@ matchup predictor's win probability. Probed that day:
     GET .../events/{id}/competitions/{id}/predictor
         lastModified, homeTeam / awayTeam .statistics[]: gameProjection (win %), teamChanceTie (%)
         (football and basketball; other sports answer 404)
+
+Sept 25, 2026 (the Kalshi-scale run, K1), probed live that morning:
+
+- The college-football scoreboard with no query is ESPN's FEATURED board: 18 games of week 4, while
+  Kalshi listed 113 KXNCAAFSPREAD events (FBS and FCS). `?groups=80` is the whole FBS week (71
+  games) and `?groups=81` the whole FCS week (65; 13 games are on both), and `limit=300` changes
+  nothing today but keeps a big week whole. The union matched all 346 NCAAF events Kalshi listed for
+  Sept 25-28.
+- A daily league's board (baseball, soccer, hockey, basketball) with no query is ONE day, and not
+  always today: at 06:18Z Sept 25 MLB's was still Sept 24 (every game final), and the Premier
+  League's was its last matchday, Sept 20, during an international break (which is why the `sports`
+  store held one EPL snapshot from Sept 23 on: the board never changed). `?dates=YYYYMMDD` (one New
+  York date; a range answers no events) gives that day's games: MLB listed 17 for Sept 25 and 14 for
+  Sept 26. `Sports.board` reads either and says which day a daily board is (`day`).
+- The core API's odds carry more than `parse_core_odds` kept: `overOdds` / `underOdds` (the total's
+  prices), each side's `spreadOdds` (or, for baseball's run line, `current.spread.american`), and on
+  soccer `drawOdds.moneyLine`, the draw's price: the two sides' moneylines are then three-way prices.
+  ONE provider (DraftKings) answered for every NFL, NCAAF, MLB and MLS game probed.
 """
 
 from __future__ import annotations
@@ -121,6 +139,7 @@ def _competitor(row: Any) -> "dict[str, Any] | None":
             break
     return {
         "team": _text(team.get("displayName")) or _text(team.get("name")),
+        "short": _text(team.get("shortDisplayName")),
         "abbrev": _text(team.get("abbreviation")),
         "location": _text(team.get("location")),
         "nickname": _text(team.get("name")),
@@ -249,10 +268,38 @@ def implied_home(home_ml: "int | None", away_ml: "int | None") -> "float | None"
     return round(home / (home + away), 4) if home is not None and away is not None and home + away > 0 else None
 
 
+def implied(*prices: "int | None") -> "list[float] | None":
+    """The probabilities a set of American prices (two sides, or three with a draw) imply once the
+    book's margin is taken out: each price's implied probability over their sum. None unless every
+    price is there."""
+    raw = []
+    for price in prices:
+        if price is None or price == 0:
+            return None
+        raw.append(100.0 / (price + 100.0) if price > 0 else -price / (-price + 100.0))
+    total = sum(raw)
+    return [round(value / total, 4) for value in raw] if total > 0 else None
+
+
+def _spread_price(side: Mapping[str, Any]) -> "int | None":
+    """One side's price on the spread: `spreadOdds`, or (baseball's run line) `current.spread`."""
+    price = _american(side.get("spreadOdds"))
+    if price is None:
+        current = side.get("current") if isinstance(side.get("current"), Mapping) else {}
+        price = _american(current.get("spread"))
+    return price
+
+
 def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
     """The core API's odds of one competition as one row per provider, best priority first:
     `{provider, details, spread, over_under, home_ml, away_ml, implied_home, open: {spread, home_ml,
-    away_ml}}` -- spreads signed from the home side, moneylines American, `implied_home` de-vigged."""
+    away_ml}}` -- spreads signed from the home side, moneylines American, `implied_home` de-vigged --
+    and since Sept 25, 2026: `draw_ml` (soccer's draw price, else None), `implied_away` and
+    `implied_draw` (with a draw price the three are the THREE-way de-vig and sum to 1; without one
+    `implied_draw` is None and the two sides' are the two-way de-vig, as `implied_home` always was),
+    `over_odds` / `under_odds` and `implied_over` (the total's prices, de-vigged: the chance the game
+    goes over `over_under`), `home_spread_odds` / `away_spread_odds` and `implied_home_cover` (the
+    chance the home side covers `spread`)."""
     items = payload.get("items") if isinstance(payload, Mapping) else None
     require(isinstance(items, list), "espn core odds: no items")
     out = []
@@ -265,7 +312,18 @@ def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
         opened_home = home.get("open") if isinstance(home.get("open"), Mapping) else {}
         opened_away = away.get("open") if isinstance(away.get("open"), Mapping) else {}
         home_ml, away_ml = _american(home.get("moneyLine")), _american(away.get("moneyLine"))
+        draw = item.get("drawOdds") if isinstance(item.get("drawOdds"), Mapping) else {}
+        draw_ml = _american(draw.get("moneyLine"))
         spread = opened_home.get("pointSpread") if isinstance(opened_home.get("pointSpread"), Mapping) else {}
+        current = item.get("current") if isinstance(item.get("current"), Mapping) else {}
+        over_odds = _american(item.get("overOdds"))
+        under_odds = _american(item.get("underOdds"))
+        if over_odds is None and under_odds is None:
+            over_odds, under_odds = _american(current.get("over")), _american(current.get("under"))
+        home_spread, away_spread = _spread_price(home), _spread_price(away)
+        sides = implied(home_ml, away_ml, draw_ml) if draw_ml is not None else implied(home_ml, away_ml)
+        over = implied(over_odds, under_odds)
+        cover = implied(home_spread, away_spread)
         out.append({
             "provider": _text(provider.get("name")),
             "priority": _int(provider.get("priority")),
@@ -274,7 +332,16 @@ def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
             "over_under": _float(item.get("overUnder")),
             "home_ml": home_ml,
             "away_ml": away_ml,
-            "implied_home": implied_home(home_ml, away_ml),
+            "draw_ml": draw_ml,
+            "implied_home": sides[0] if sides else None,
+            "implied_away": sides[1] if sides else None,
+            "implied_draw": sides[2] if sides and draw_ml is not None else None,
+            "over_odds": over_odds,
+            "under_odds": under_odds,
+            "implied_over": over[0] if over else None,
+            "home_spread_odds": home_spread,
+            "away_spread_odds": away_spread,
+            "implied_home_cover": cover[0] if cover else None,
             "open": {"spread": _float(str(spread.get("american") or "").replace("+", "") or None),
                      "home_ml": _american(opened_home.get("moneyLine")), "away_ml": _american(opened_away.get("moneyLine"))},
         })
@@ -334,13 +401,22 @@ class Sports:
         require(isinstance(payload, Mapping), f"{what}: not an object")
         return payload
 
-    def scoreboard(self, league: str) -> list[dict[str, Any]]:
-        """Every game on the league's current scoreboard, in ESPN's order."""
+    def scoreboard(self, league: str, query: str = "") -> list[dict[str, Any]]:
+        """Every game on the league's current scoreboard, in ESPN's order (`board`'s events)."""
+        return self.board(league, query)["events"]
+
+    def board(self, league: str, query: str = "") -> dict[str, Any]:
+        """One scoreboard read: `{"events": [...], "day": "YYYY-MM-DD" | None}`. `query` is the site
+        API's query string as is (`groups=80&limit=300`, `dates=20260926`); `day` is the one day a
+        daily league's board shows (ESPN's `day.date`), None on a weekly board (football)."""
         path = league_path(league)
-        payload = self._get(f"{HOST}/apis/site/v2/sports/{path}/scoreboard", f"espn scoreboard {league}")
+        url = f"{HOST}/apis/site/v2/sports/{path}/scoreboard" + (f"?{query}" if query else "")
+        payload = self._get(url, f"espn scoreboard {league}" + (f" ({query})" if query else ""))
         events = payload.get("events")
         require(isinstance(events, list), f"espn scoreboard {league}: no events list")
-        return [row for row in (event_row(event) for event in events) if row is not None]
+        day = payload.get("day") if isinstance(payload.get("day"), Mapping) else {}
+        return {"events": [row for row in (event_row(event) for event in events) if row is not None],
+                "day": _text(day.get("date"))}
 
     def game(self, league: str, event_id: Any) -> dict[str, Any]:
         """One game's summary as a scoreboard row plus `last_play`, `win_probability`, `predictor`."""
@@ -461,5 +537,5 @@ def _team_position(team: Mapping[str, Any], haystack: str) -> "int | None":
     return min(hits) if hits else None
 
 
-__all__ = ["CORE_HOST", "HOST", "LEAGUES", "Sports", "USER_AGENT", "event_row", "implied_home", "league_path", "parse_core_odds",
-           "parse_predictor"]
+__all__ = ["CORE_HOST", "HOST", "LEAGUES", "Sports", "USER_AGENT", "event_row", "implied", "implied_home", "league_path",
+           "parse_core_odds", "parse_predictor"]
