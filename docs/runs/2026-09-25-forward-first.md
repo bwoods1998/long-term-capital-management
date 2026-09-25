@@ -177,7 +177,7 @@ Alpaca families' maker/taker records mean nothing (crypto-alts-reversion: taker 
 cash" is the second refusal (83 in the day) and names no constitution key; the evidence clocks were last measured at
 08:32Z Sept 24.
 
-## The proven sports family, verified (07:25Z)
+## The proven sports family, verified (07:11Z)
 
 The Kalshi run's study (a public-record test of the family's mechanism) was verified by four independent agents
 (a workflow: reproduce and audit the study; match the family's program; recompute its proof clustered by date; a
@@ -206,7 +206,7 @@ skeptic). Scripts in the session scratchpad (`skeptic/`). What holds:
 - **Members:** -3, -5, -6 run the same code with 0 fills (more exposure on the same slate, no new evidence); -4
   rewrote itself at 02:37Z Sept 25 into a KXWNBAGAME favourite-maker (`26152cae`) and keeps the family's name (C8).
 
-**Decision (07:25Z), inside the table:** M1's entry look moves to 10 real settlements AND every swing look (entry,
+**Decision (07:11Z), inside the table:** M1's entry look moves to 10 real settlements AND every swing look (entry,
 hold, doubling) also needs the family's real record to span at least 5 distinct settlement dates
 (`family_swing.min_distinct_dates` 5, a stricter gate carried in M1's row: the evidence shows a count of events cannot
 tell a regime from an edge). M3 seats a proven family's members only when the family's pooled proof spans at least 5
