@@ -1286,12 +1286,15 @@ class Book:
                 total = held + working + intent.quantity * price * intent.instrument.multiplier
                 if total > share * max(equity, ZERO):
                     cap = share * max(equity, ZERO)  # X3: the cap, what is already in the event and the room left
+                    try:
+                        room = (f"{FIT_MARK} {self._band_words(intent.agent)}: the cap on this event is ${cap:.2f}, "
+                                f"${held + working:.2f} of it is held or working, so {self._fits(intent, cap - held - working, price)}")
+                    except Exception:  # noqa: BLE001 - what a refusal says is never a reason to fail the check
+                        room = ""
                     reasons.append(
                         f"one event may hold at most {float(share):.0%} of the stake: {event} would hold ${total:.2f} of this "
                         f"account's ${equity:.2f} (holdings at cost, working buys on every market of the event, and this order; "
-                        "constitution allocator.max_event_share)"
-                        f"{FIT_MARK} {self._band_words(intent.agent)}: the cap on this event is ${cap:.2f}, ${held + working:.2f} of "
-                        f"it is held or working, so {self._fits(intent, cap - held - working, price)}"
+                        f"constitution allocator.max_event_share){room}"
                     )
         return reasons
 
@@ -1728,8 +1731,11 @@ class Book:
                    for queued, _ in pending):
                 reasons.append("this order could trade against the House's queued market order")
         if reasons and not reducing:
-            reasons = self._to_fit(intent, reasons, limits=limits, account=account, positions=positions, equity=equity,
-                                   cash=ctx.desk_cash, reference=decision.reference_price, working_buys=working_buys)
+            try:
+                reasons = self._to_fit(intent, reasons, limits=limits, account=account, positions=positions, equity=equity,
+                                       cash=ctx.desk_cash, reference=decision.reference_price, working_buys=working_buys)
+            except Exception:  # noqa: BLE001 - what a refusal says is never a reason to fail the check (X3 is text)
+                pass
         return reasons
 
     def _would_cross_own(self, intent: Intent, quote: Quote | None) -> str | None:

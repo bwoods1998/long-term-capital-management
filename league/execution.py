@@ -122,7 +122,7 @@ class FillIndex:
         for key in list(self.orders):
             kept = {oid: o for oid, o in self.orders[key].items() if o.placed >= oldest}
             for oid in set(self.orders[key]) - set(kept):
-                self._owners.pop(oid, None)
+                self._owners[oid] = []  # known and out of the window: a late status row starts no new order
             if kept:
                 self.orders[key] = kept
             else:

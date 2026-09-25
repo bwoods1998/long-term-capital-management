@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from ltcm.broker import Instrument
 
@@ -113,6 +114,15 @@ class FillStatsTest(unittest.TestCase):
         self.assertGreater(index.cursor, cursor)
         self.assertIs(execution._index(self.ledger), index, "one index a ledger")
         self.assertEqual((s["filled"], s["unfilled"]), (1, 0))
+
+    def test_a_late_row_of_an_order_out_of_the_window_starts_no_new_order(self):
+        o = self.orders
+        old = o.place("a1")
+        self.clock.advance(9 * 86400)
+        o.place("a1")  # the refresh that folds it drops the old order from the index
+        self.assertEqual(self.stats()["orders"], 1)
+        o.status(old, "cancelled", "a1")  # a resting order the venue ends nine days on
+        self.assertEqual((self.stats()["orders"], self.stats()["unfilled"]), (1, 0))
 
     def test_a_requote_is_asked_under_a_quarter_on_five_finished_orders(self):
         self.assertFalse(execution.needs_requote(None))
@@ -218,6 +228,18 @@ class CashRefusalsSayWhatFitsTest(BookCase):
         book_cash = next(r for r in reasons if r.startswith("needs $"))
         self.assertIn("under the venue's $10 minimum for AVAX/USD: nothing more fits", book_cash)
         self.assertEqual(sum(1 for r in reasons if "as a probe" in r), 1, "the band once in the joined text")
+
+    def test_text_that_cannot_be_written_never_changes_what_is_refused(self):
+        self.book.reconcile()
+        self.seat("whale", usd="600")
+        self.seat("haghani-56", usd="0.35", position="12.5", order="12.5")
+        self.broker.set_quote(crypto(), "24.00", "24.02")
+        bid = self.intent("haghani-56", crypto(), "buy", "0.5", order_type="limit", limit_price="24.02")
+        told = self.book.check(bid, self.book._quote(crypto()), "2026-09-25T04:00:00.000Z")
+        with patch.object(Book, "_fits", side_effect=ArithmeticError("a test")):
+            bare = self.book.check(bid, self.book._quote(crypto()), "2026-09-25T04:00:00.000Z")
+        self.assertEqual(bare, [r.split(FIT_MARK)[0] for r in told])
+        self.assertTrue(bare)
 
     def test_a_practice_book_names_practice_and_exits_are_never_annotated(self):
         book = Book("alpaca-paper", FakeBroker("alpaca-paper"), self.ledger, fees=Fees("alpaca"), real_money=False, clock=self.clock)
