@@ -1423,6 +1423,11 @@ class Book:
         notional = decision.notional
         if notional is None and reference is not None:
             notional = intent.quantity * reference * intent.instrument.multiplier
+        if structures.is_structure(intent.instrument) and intent.side == "buy" and intent.limit_price is not None:
+            # A structure's cost is its maximum loss, and an open may fill at any ask up to its limit: its order and
+            # position caps (and its cash) are metered at the limit, so no fill can take it over them (review of
+            # Sept 25, 2026: a $0.77 limit counted at a $0.70 ask filled at $0.77, $77 on a $75 cap).
+            notional = intent.quantity * intent.limit_price * intent.instrument.multiplier
         if quote is not None and not reducing:
             age = _age_seconds(quote.as_of, now)
             oldest = self.rules["max_option_quote_age_seconds" if intent.instrument.asset_class == "option" else "max_quote_age_seconds"]

@@ -612,8 +612,8 @@ class Expiry(ShadowCase):
         self.assertIsNone(close("SPY", "2026-09-27"))  # a Sunday has no session
 
 
-class ThroughTheBook(ShadowCase):
-    """A structure bought, marked, sold flat and settled through `Book`, the one path every venue has."""
+class BookShadowCase(ShadowCase):
+    """`Book` over the shadow account: its helpers, no tests of its own (so a subclass runs only its own)."""
 
     cash = "100000"
 
@@ -650,6 +650,10 @@ class ThroughTheBook(ShadowCase):
 
     def fills(self):
         return [row.payload for row in self.ledger.iter(kinds=("book.fill",)) if row.agent == "alice"]
+
+
+class ThroughTheBook(BookShadowCase):
+    """A structure bought, marked, sold flat and settled through `Book`, the one path every venue has."""
 
     def test_bought_marked_sold_flat_one_closed_trade(self):
         self.reconciled()
@@ -887,6 +891,138 @@ class ThroughTheBook(ShadowCase):
         self.assertEqual((D(settle["payout"]), D(settle["pnl"])), (D("60.00"), D("4.90")))
         self.reconciled()
         self.assertEqual(self.book.expire_options(), 0)
+
+
+class ReviewNoBidWing(BookShadowCase):
+    """The review of Sept 25, 2026 (origin/r/shadow 3e6ab4e, `test_review_shadow.NoBidWing`, kept here): a long wing
+    quoted with no bid made a held credit structure unsellable, so it was held into its expiry."""
+
+    def test_a_condor_whose_long_wing_has_no_bid_can_still_be_closed_at_its_conservative_bid(self):
+        self.book.limits["alice"] = Limits(D(100), D(75), asset_classes=("option",))
+        self.legs.set(occ(575, "P"), "0.10", "0.12")
+        self.legs.set(occ(576, "P"), "0.30", "0.32")
+        self.legs.set(occ(585), "0.30", "0.32")
+        self.legs.set(occ(586), "0.10", "0.12")  # ask 1 + .12 + .12 - .30 - .30 = 0.64
+        condor = structures.instrument(CONDOR, V)
+        [opened] = self.book.submit([Intent.new(agent="alice", instrument=condor, side="buy", quantity="1", order_type="limit",
+                                                limit_price="0.64", reason="open", created_at=now_iso(self.clock), nonce="o")])
+        self.assertEqual(opened.status, "resting", opened.detail)
+        self.later()
+        for symbol in (occ(575, "P"), occ(576, "P"), occ(585), occ(586)):
+            self.legs.touch(symbol)
+        self.broker.advance()
+        self.book.poll()
+        self.assertIn(condor.key, self.book.account("alice").holdings)
+        # Late in the day SPY sits between the shorts; the far put wing has no bid (Alpaca: bp 0, bs 0).
+        self.later()
+        self.legs.set(occ(575, "P"), "0", "0.01", bid_size="0")
+        self.legs.set(occ(576, "P"), "0.02", "0.03")
+        self.legs.set(occ(585), "0.05", "0.06")
+        self.legs.set(occ(586), "0.01", "0.02")
+        quote = self.broker.quote(condor)
+        self.assertEqual(quote.bid, D("0.92"))  # the mark: K + 0 + .01 - .03 - .06 (the wing worth nothing)
+        # The House's close (`_structure_expiry_close`): a sale at the bid, re-sent each tick.
+        [sale] = self.book.submit([Intent.new(agent="alice", instrument=condor, side="sell", quantity="1", order_type="limit",
+                                              limit_price=quote.bid, reason="close", created_at=now_iso(self.clock), nonce="c")])
+        self.assertEqual(sale.status, "resting", sale.detail)
+        for _ in range(5):
+            self.later()
+            for symbol in (occ(575, "P"), occ(576, "P"), occ(585), occ(586)):
+                self.legs.touch(symbol)
+            self.broker.advance()
+            self.book.poll()
+        self.assertNotIn(condor.key, self.book.account("alice").holdings,
+                         "the condor was never sold at its conservative bid 0.92: every close waits for a bid on the no-bid wing")
+        self.reconciled()
+
+    def test_the_exception_is_a_closes_long_leg_only(self):
+        self.book.limits["alice"] = Limits(D(100), D(75), asset_classes=("option",))
+        for symbol, bid, ask in ((occ(575, "P"), "0.10", "0.12"), (occ(576, "P"), "0.30", "0.32"), (occ(585), "0.30", "0.32"),
+                                 (occ(586), "0.10", "0.12")):
+            self.legs.set(symbol, bid, ask)
+        condor = structures.instrument(CONDOR, V)
+        self.book.submit([Intent.new(agent="alice", instrument=condor, side="buy", quantity="1", order_type="limit",
+                                     limit_price="0.64", reason="open", created_at=now_iso(self.clock), nonce="o")])
+        self.later()
+        self.legs.set(occ(575, "P"), None, "0.12")  # an OPEN whose long wing has no bid: never filled
+        for symbol in (occ(576, "P"), occ(585), occ(586)):
+            self.legs.touch(symbol)
+        self.assertEqual(self.broker.advance(), 0)
+        self.later()
+        for symbol, bid, ask in ((occ(575, "P"), "0.10", "0.12"), (occ(576, "P"), "0.30", "0.32"), (occ(585), "0.30", "0.32"),
+                                 (occ(586), "0.10", "0.12")):
+            self.legs.set(symbol, bid, ask)
+        self.broker.advance()
+        self.book.poll()
+        self.later()
+        self.book.submit([Intent.new(agent="alice", instrument=condor, side="sell", quantity="1", order_type="limit",
+                                     limit_price="0.56", reason="close", created_at=now_iso(self.clock), nonce="c")])
+        self.later()
+        self.legs.set(occ(576, "P"), "0.30", None)  # a CLOSE whose short leg has no ask: never filled
+        for symbol in (occ(575, "P"), occ(585), occ(586)):
+            self.legs.touch(symbol)
+        self.assertEqual(self.broker.advance(), 0)
+        self.later()
+        self.legs.set(occ(576, "P"), "0.30", "0.32", ask_size="5")  # its ask, but under ten contracts: still never
+        for symbol in (occ(575, "P"), occ(585), occ(586)):
+            self.legs.touch(symbol)
+        self.assertEqual(self.broker.advance(), 0)
+
+
+class ReviewStaleLegAtTheFill(ShadowCase):
+    """The review of Sept 25, 2026 (`test_review_shadow.StaleLegAtTheFill`, kept here): the fill read no quote age."""
+
+    def test_no_fill_on_a_leg_quote_older_than_the_books_age_rule(self):
+        order = self.buy(VERTICAL, "1", "0.55")
+        self.later(1)
+        self.legs.touch(occ(580))  # 580 quoted once just after the order, then never again
+        self.later(40 * 60)
+        self.legs.touch(occ(581))  # 581 quoted now
+        self.broker.advance()
+        self.assertEqual(self.broker.get_order(order.id).filled_quantity, D(0),
+                         "filled on a 2,399-second-old quote of the 580 leg (the book's rule is 1,500 s)")
+        self.legs.touch(occ(580))
+        self.assertEqual(self.broker.advance(), 1)  # quoted again: it fills
+        self.assertEqual(self.broker.max_quote_age_seconds, 1500.0)  # the book's own number, read
+
+
+class ReviewCapAtTheFill(BookShadowCase):
+    """The review of Sept 25, 2026 (`test_review_shadow.CapAtTheFill`, adapted): the caps metered a marketable
+    limit at the ask it saw, and the account could fill it at a later ask up to the limit, over the order cap.
+    Metered at the limit, such an order is refused, and one within the cap can never fill over it."""
+
+    def test_a_structures_maximum_loss_never_exceeds_the_order_cap(self):
+        self.quote_vertical(low=("1.60", "1.70"))  # ask 0.70: $70 at the touch
+        [over] = self.book.submit([self.wish("buy", "1", "0.77")])
+        self.assertEqual(over.status, "refused")
+        self.assertIn("order of $77.00 is over the $75 order cap", over.detail)
+        [outcome] = self.book.submit([self.wish("buy", "1", "0.74")])
+        self.assertEqual(outcome.status, "resting", outcome.detail)
+        self.requote(low=("1.66", "1.74"))  # ask 0.74, the limit
+        paid = self.book.account("alice").holdings[self.vertical.key].cost
+        self.assertLessEqual(paid, D(75))
+        self.reconciled()
+
+
+class ReviewHoldsAsClaimed(ShadowCase):
+    """The review of Sept 25, 2026 (`test_review_shadow.HoldsAsClaimed`, kept here)."""
+
+    def test_fees_agree_for_a_condor_of_four_and_a_ratio_two_butterfly(self):
+        fees = Fees("alpaca", option_clearing=True)
+        for spec_, quantity, expected in ((CONDOR, "4", "0.80"), (BUTTERFLY, "3", "0.60"), (VERTICAL, "7", "0.70")):
+            inst = structures.instrument(spec_, V)
+            self.assertEqual(fees.charge(inst, "buy", D(quantity), D("0.50")).usd, D(expected))
+            self.assertEqual(self.broker._fee(spec_, D(quantity)), D(expected))
+        single = structures.instrument(VERTICAL, V)
+        self.assertEqual(Fees("alpaca", option_clearing=True).charge(
+            structures.spec_of(single).legs[0].instrument, "buy", D(4), D("0.5")).usd, D("0.10"))  # a single contract: as before
+
+    def test_the_entry_cut_is_the_same_minute_in_the_book_and_the_house(self):
+        from league.book import _structure_entry_refusal
+
+        self.assertIsNone(_structure_entry_refusal("2026-09-25", "2026-09-25T18:29:59Z"))
+        self.assertIsNotNone(_structure_entry_refusal("2026-09-25", "2026-09-25T18:30:00Z"))
+        self.assertIsNone(_structure_entry_refusal("2026-09-28", "2026-09-25T19:59:00Z"))
 
 
 class Service(unittest.TestCase):

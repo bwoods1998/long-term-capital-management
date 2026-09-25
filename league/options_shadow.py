@@ -15,7 +15,8 @@ anywhere. Anything that is not a structure is refused with the reason, and no or
 
 **The touch.** A structure's quote is `structures.quote(spec, touches)` over its legs' live quotes (to
 open, long legs at the ask and short legs at the bid; to close, the reverse), and its time is the
-OLDEST leg's, so the book's `max_option_quote_age_seconds` judges it by its stalest leg. The legs come
+OLDEST leg's, so the book's `max_option_quote_age_seconds` judges it by its stalest leg (the book when it
+checks an order, this account when it fills one: rule 3). The legs come
 from Alpaca's `/v1beta1/options/quotes/latest` (`alpaca_leg_quotes`, the OPRA feed on the House box),
 several symbols a request: every leg of every structure an `advance` needs is ONE request (chunks of
 `MAX_SYMBOLS`), and `quote` reads the legs of everything held or resting with the one asked for, held
@@ -36,7 +37,14 @@ this account says it did not. The owner (Sept 25, 2026): never relax them.
    filled in the quote its decision saw would flatter a profit target exactly as an open would flatter
    an entry. After each fill the rest waits for a quote newer than the one that filled.
 3. A BUY (an open) fills when the structure's ask <= its limit, AT that ask; a SELL (a close) when the
-   bid >= its limit, AT that bid. Every leg must be quoted two-sided (0 < bid <= ask).
+   bid >= its limit, AT that bid. Every leg must be quoted two-sided (0 < bid <= ask), with one exception
+   on a close: a LONG leg quoted with an ask and no bid is sold for nothing, and takes no size. That is
+   the worst price it can get, so a close is never flattered by it, and it is needed: a far 0-DTE wing
+   goes to a zero bid late in the day (Alpaca shows `bp` 0, `bs` 0), and a condor whose wing must be
+   bid could then never be closed, only held into its expiry (the review of Sept 25, 2026). A short leg
+   still needs its ask and its size. And no fill is made on a quote whose stalest leg is older than the
+   book's own age rule for an option quote (`book.DEFAULT_RULES["max_option_quote_age_seconds"]`,
+   1,500 s): the book judges a quote's age when it checks an order, this account when it fills one.
 4. No fill takes more than 10% of any leg's shown size on the side it trades (an open takes a long
    leg's ask size and a short leg's bid size; a close the reverse), divided by the leg's ratio: a
    butterfly's body of 30 contracts bid lets one structure through, not one and a half. A leg that
@@ -109,6 +117,7 @@ from ltcm.broker import (
 from ltcm.data import market_open_at, previous_session, us_equity_session
 
 from . import structures
+from .book import DEFAULT_RULES
 from .ledger import now_iso
 from .paper import _at_or_after, _cursor, _fill_from_dict, _order_from_dict, _order_to_dict
 
@@ -249,6 +258,7 @@ class OptionsShadowBroker:
         clock: Callable[[], float] = time.time,
         quote_ttl: float = QUOTE_TTL_SECONDS,
         feed: str = "opra",
+        max_quote_age_seconds: float | None = None,
     ):
         if not callable(leg_quotes):
             raise TypeError("leg_quotes must be a callable: (occ symbols) -> {occ: leg quote}")
@@ -259,6 +269,9 @@ class OptionsShadowBroker:
         self.clock = clock
         self.quote_ttl = float(quote_ttl)
         self.feed = str(feed)
+        #: Rule 3's age: the book's own rule for an option quote (`book.DEFAULT_RULES`), read, never copied.
+        self.max_quote_age_seconds = float(DEFAULT_RULES["max_option_quote_age_seconds"] if max_quote_age_seconds is None
+                                           else max_quote_age_seconds)
         self._lock = threading.RLock()
         self._cache_lock = threading.Lock()
         self._cash = money(starting_cash)
@@ -619,11 +632,14 @@ class OptionsShadowBroker:
             return [fill for fill in self._fills if _at_or_after(fill.at, floor)]
 
     # ---------------------------------------------------------------- advance
-    def _room(self, spec: structures.Spec, side: str, rows: Mapping[str, Mapping[str, Any]]) -> Decimal:
+    def _room(self, spec: structures.Spec, side: str, rows: Mapping[str, Mapping[str, Any]], *, free: frozenset = frozenset()) -> Decimal:
         """Rule 4: how many structures the legs' shown sizes let through now (10% of each leg's size on
-        the side it trades, less what this quote has already given, divided by the leg's ratio)."""
+        the side it trades, less what this quote has already given, divided by the leg's ratio). The legs
+        in `free` (a close's long legs with no bid, sold for nothing: rule 3) take no size."""
         room: Decimal | None = None
         for leg in spec.legs:
+            if leg.occ in free:
+                continue
             takes_ask = (leg.sign > 0) == (side == "buy")
             row = rows.get(leg.occ) or {}
             size = _number(row.get("ask_size" if takes_ask else "bid_size"))
@@ -641,8 +657,11 @@ class OptionsShadowBroker:
         cutoff = instant(now) - timedelta(days=1)
         self._used = {key: row for key, row in self._used.items() if row[0] and instant(row[0]) is not None and instant(row[0]) > cutoff}
 
-    def _take(self, spec: structures.Spec, side: str, rows: Mapping[str, Mapping[str, Any]], units: Decimal) -> None:
+    def _take(self, spec: structures.Spec, side: str, rows: Mapping[str, Mapping[str, Any]], units: Decimal, *,
+              free: frozenset = frozenset()) -> None:
         for leg in spec.legs:
+            if leg.occ in free:
+                continue
             takes_ask = (leg.sign > 0) == (side == "buy")
             key = (leg.occ, "ask" if takes_ask else "bid")
             as_of = (rows.get(leg.occ) or {}).get("as_of")
@@ -677,19 +696,25 @@ class OptionsShadowBroker:
             for order in live if rows is not None else ():
                 spec = specs[order.id]
                 touches = self._touches(spec, rows)
-                if any(bid is None or ask is None or bid > ask for bid, ask in touches.values()):
-                    continue  # every leg two-sided (rule 3)
+                # Rule 3: a close's long leg quoted with an ask and no bid is sold for nothing (and takes no size).
+                free = frozenset(leg.occ for leg in spec.legs if order.side == "sell" and leg.sign > 0
+                                 and touches[leg.occ][0] is None and touches[leg.occ][1] is not None)
+                if any(bid is None or ask is None or bid > ask for occ, (bid, ask) in touches.items() if occ not in free):
+                    continue  # every other leg two-sided (rule 3)
                 as_of = self._oldest(spec, rows)
                 if not _newer(as_of, order._raw.get("quote_floor")):
                     continue  # nothing fills in the quote the decision saw, nor twice in one quote (rule 2)
-                bid, ask = structures.quote(spec, touches)
+                age = (instant(now) - instant(as_of)).total_seconds()
+                if age > self.max_quote_age_seconds:
+                    continue  # its stalest leg is older than the book lets a quote be (rule 3)
+                bid, ask = structures.quote(spec, {occ: (ZERO if occ in free else b, a) for occ, (b, a) in touches.items()})
                 if order.side == "buy":
                     price = ask if ask is not None and ZERO < ask <= order.limit_price else None
                 else:
                     price = bid if bid is not None and ZERO < bid and bid >= order.limit_price else None
                 if price is None:
                     continue
-                units = min(order.remaining, self._room(spec, order.side, rows))
+                units = min(order.remaining, self._room(spec, order.side, rows, free=free))
                 if units < 1:
                     continue
                 refusal = self._refusal(order, spec, units, price)
@@ -697,7 +722,7 @@ class OptionsShadowBroker:
                     self._close(order, "cancelled", refusal, now)
                 else:
                     self._fill(order, spec, units, price, now)
-                    self._take(spec, order.side, rows, units)
+                    self._take(spec, order.side, rows, units, free=free)
                     order._raw["quote_floor"] = as_of  # the rest waits for a newer quote
                 changed += 1
             if changed:
