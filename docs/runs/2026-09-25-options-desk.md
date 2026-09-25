@@ -393,6 +393,18 @@ Nothing here deploys inside the session. Order:
 one test fix g/loop names; ratify within a minute (digest `be1e3ce9`); the gateway (caps/router) deployed before the House. Then
 a config-only release flipping `practice_account` in a quiet slot, so Monday's structures trade on the owner's practice account.
 
+**Deploy G's integration (`g/integration` 2b431e62, draft PR #344), 21:17-21:45Z:** built on `b/integration` + main + the four
+branches; three house.py conflicts resolved as g/trackp's report says; the migration test's reach cleared; a structure named as one
+on the site. Local: 1,025 tests OK, `league.ci` passes, money digest `be1e3ce9`. **Adversarial review of the integration (two
+lenses):** the conflict resolution dropped nothing; the digest differs from B's `acff5c64` in exactly 10 new leaves, all O1-O5 and
+`option_spread_real_types`, each inside its row (the three-plans rule holds); no gateway rebase needed (209/209). To fix before G:
+CI red (the adapter's first account read skipped on a host up under 60 s, so the league suite never ran on #344) and the forward
+harness broken against G's House (BLOCKERs); `record_is_empty` blind to a moved agent's record on its old book (MAJOR: a program
+could inherit another's evidence); the first every-expiry backfill unwatched Saturday ~21:00Z during real MLB positions, after which
+a rollback to B builds tapes of ~930 MB (MAJOR: gate it behind a key, false in G); nothing mechanical stops a rollback past G while
+alpaca-paper holds structures (MAJOR: a floor_box guard); before O1: the real gateway refuses the single-leg buy-back of a broken
+structure's short (MAJOR, fixed now). Fixed by a second workflow (`wf_3a26a0fb-e43`, 21:47Z) on three disjoint branches, each verified.
+
 ## Progress notes
 
 ## Watch log
