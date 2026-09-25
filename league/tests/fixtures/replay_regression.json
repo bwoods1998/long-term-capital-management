@@ -226,5 +226,53 @@
   "refused": 0,
   "steps": 600,
   "trades": 0
+ },
+ "weather-ensemble-central": {
+  "blocks": 50,
+  "errors": 0,
+  "fees_usd": 0.0,
+  "fills": 0,
+  "final_equity": 200.0,
+  "maker_fills": 0,
+  "ok": true,
+  "refused": 0,
+  "steps": 600,
+  "trades": 0
+ },
+ "weather-ensemble-east": {
+  "blocks": 50,
+  "errors": 0,
+  "fees_usd": 0.0,
+  "fills": 0,
+  "final_equity": 200.0,
+  "maker_fills": 0,
+  "ok": true,
+  "refused": 0,
+  "steps": 600,
+  "trades": 0
+ },
+ "weather-ensemble-texas": {
+  "blocks": 50,
+  "errors": 0,
+  "fees_usd": 0.0,
+  "fills": 0,
+  "final_equity": 200.0,
+  "maker_fills": 0,
+  "ok": true,
+  "refused": 0,
+  "steps": 600,
+  "trades": 0
+ },
+ "weather-ensemble-west": {
+  "blocks": 50,
+  "errors": 0,
+  "fees_usd": 0.0,
+  "fills": 0,
+  "final_equity": 200.0,
+  "maker_fills": 0,
+  "ok": true,
+  "refused": 0,
+  "steps": 600,
+  "trades": 0
  }
 }

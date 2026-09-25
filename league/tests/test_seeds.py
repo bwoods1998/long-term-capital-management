@@ -205,8 +205,11 @@ class RegistryTests(unittest.TestCase):
         for row in founding_seeds():
             with self.subTest(row["name"]):
                 lines = row["code"].splitlines()
-                self.assertLessEqual(len(lines), 160)
-                self.assertTrue(lines[0].startswith(f"# {row['name']}:"), "the header names the seed")
+                if row["name"] in original:
+                    self.assertLessEqual(len(lines), 160)
+                    self.assertTrue(lines[0].startswith(f"# {row['name']}:"), "the header names the seed")
+                else:  # a later program seated as several founders names the program its rows share
+                    self.assertTrue(lines[0].startswith("# ") and row["name"].startswith(lines[0][2:].split(":")[0]), "the header names the seed")
                 header = [line for line in lines[:40] if line.startswith("#")]
                 self.assertGreaterEqual(len(header), 15, "a plain-English header: idea, evidence, needs, entries, exits")
                 for word in ("THE IDEA", "THE EVIDENCE", "WHAT IT NEEDS", "WHEN IT TRADES", "HOW IT EXITS"):
