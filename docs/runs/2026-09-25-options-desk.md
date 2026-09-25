@@ -404,6 +404,14 @@ could inherit another's evidence); the first every-expiry backfill unwatched Sat
 a rollback to B builds tapes of ~930 MB (MAJOR: gate it behind a key, false in G); nothing mechanical stops a rollback past G while
 alpaca-paper holds structures (MAJOR: a floor_box guard); before O1: the real gateway refuses the single-leg buy-back of a broken
 structure's short (MAJOR, fixed now). Fixed by a second workflow (`wf_3a26a0fb-e43`, 21:47Z) on three disjoint branches, each verified.
+**The fixes, verified (22:14Z):** `g/fx-adapter` (the account read on a just-booted host; the forward harness on G's House; b/integration's
+#343 merged; CI green in full on the branch, run 36193796115), `g/fx-house` (a moved agent's record read on every practice book it holds
+an account on, in `record_is_empty`, `_standing` and a no-cost death check; the every-expiry backfill behind a config key false in G;
+the structure book name limited to practice books and a structure order on a real book refused below rung 2; a stale move stamp popped),
+`g/fx-gate` (the real gateway admits a single-leg buy-back only of a short the account holds; a floor_box guard against rolling back
+past G while alpaca-paper holds a structure, plus runbook lines): each verifier SHIP. Merged into `g/integration` 22fcd854: 495 tests OK,
+`league.ci` passes, digest `be1e3ce9`. Open for before the practice-account flip (not G): the floor_box deploy guard checks its own
+tree, so it cannot fire on the realistic path; the forward harness does not read the practice switch.
 
 ## Progress notes
 
