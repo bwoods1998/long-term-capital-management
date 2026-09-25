@@ -109,7 +109,9 @@ export function caps(env = {}) {
  * (`admittedStructures(env)`); with none, every multi-leg open is refused. A multi-leg order is always
  * read by the structure rules (`structureNotional`), whatever the list: a priced structure answers
  * `{ micro, structure, opening }`, an open at its maximum loss, a close at zero (the router then admits
- * the close only when the account holds every leg it closes, `closeLegsHeldError`).
+ * the close only when the account holds every leg it closes, `closeLegsHeldError`). A single-leg option
+ * buy_to_close answers `{ micro: 0n, shortClose: true }`: the router admits it only when the account holds
+ * that contract short (`shortCloseBody`, Sept 25, 2026).
  */
 export function notional(venue, body, { reference = null, exit = false, structures = [] } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
@@ -169,19 +171,41 @@ const OPTION_MULTIPLIER = 100n;
 // an option, and the most an option position can lose is what was paid for it. Measured Sept 19,
 // 2026: before this rule an option order was priced at qty x limit with no multiplier, a
 // hundredth of what it spends.
+//
+// ONE exception, a buy with position_intent buy_to_close (Sept 25, 2026, the review of Deploy G, MAJOR 2):
+// the buy-back of a SHORT leg a broken structure left on the real account (an uneven multi-leg fill, a long
+// leg sold alone, an assignment). The book buys it back as one single-leg buy_to_close
+// (`league/book.py` `_close_break_units`, `ltcm/adapters/alpaca.py` `submit`), and until today this rule
+// refused that order as not long premium, so the House retried it every reading and the naked short stayed
+// at the venue. It is answered `{ micro: 0n, shortClose: true }` here, never priced as an entry: the router
+// admits it only after the account's positions show that contract held SHORT for at least `qty`
+// (`shortCloseBody` + `closeLegsHeldError`), and then reserves it as an exit at one micro-dollar. A caller
+// that forwards the zero instead is refused by the gate ("a positive notional"), so it fails closed.
 function optionNotional(body) {
   if (parsePico(body.notional) !== null) return { error: 'An option order is sized in contracts, not dollars.' };
   const intent = String(body.position_intent || '');
   const side = String(body.side || '');
-  if (!((side === 'buy' && intent === 'buy_to_open') || (side === 'sell' && intent === 'sell_to_close'))) {
-    return { error: 'An option order must be buy with position_intent buy_to_open, or sell with sell_to_close: long premium only.' };
+  const shortClose = side === 'buy' && intent === 'buy_to_close';
+  if (!shortClose && !((side === 'buy' && intent === 'buy_to_open') || (side === 'sell' && intent === 'sell_to_close'))) {
+    return { error: 'An option order must be buy with position_intent buy_to_open, or sell with sell_to_close: long premium only. (A buy with buy_to_close goes only to buy back a short leg the real account holds.)' };
   }
   if (String(body.type || '') !== 'limit') return { error: 'An option order must be a limit order.' };
   const qty = parsePico(body.qty);
   if (qty === null || qty <= 0n || qty % PICO !== 0n) return { error: 'Option qty must be a whole number of contracts.' };
   const limit = parsePico(body.limit_price);
   if (limit === null || limit <= 0n) return { error: 'An option order needs a positive limit price.' };
+  // The buy-back's limit is not capped: a naked short must be bought back whatever it costs, and a dollar cap
+  // would strand it exactly as the per-order cap stranded two perp shorts on Sept 18 (PURPOSE_HEADER above).
+  if (shortClose) return { micro: 0n, shortClose: true };
   return { micro: picoToMicro(mulPico(qty, limit) * OPTION_MULTIPLIER) };
+}
+
+/**
+ * A single-leg buy_to_close read as a one-leg close (`closeLegsHeldError`, `closedLegRows`): the contract it
+ * buys back must be held SHORT for at least its `qty` (Sept 25, 2026, the review of Deploy G, MAJOR 2).
+ */
+export function shortCloseBody(body) {
+  return { qty: body.qty, legs: [{ symbol: body.symbol, ratio_qty: '1', side: 'buy', position_intent: 'buy_to_close' }] };
 }
 
 // The only Alpaca order this gateway prices is one instrument named by a top-level `symbol`.
@@ -551,7 +575,8 @@ export function structureNotional(body, admitted = []) {
 /**
  * Why a multi-leg CLOSE may not go to the real account given its `positions` (Alpaca's `GET v2/positions` rows:
  * `{symbol, qty, qty_available, side}`, a short option reported with side "short" and a negative qty), or null when every
- * leg is held. `body` has already passed `structureOrder` as a close.
+ * leg is held. `body` has already passed `structureOrder` as a close, or is a single-leg buy_to_close read as one leg
+ * (`shortCloseBody`, the review of Deploy G).
  *
  * What a leg may close is what is AVAILABLE (the review of g/money, Sept 25, 2026): `qty_available`, the part not already
  * committed to an open order, when the row carries it (never more than `qty`); a row without it counts its `qty`. So a
@@ -589,7 +614,8 @@ export function closeLegsHeldError(body, positions) {
     }
   }
   if (short.length === 0) return null;
-  return `A structure close must close legs the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
+  const what = body.order_class === 'mleg' ? 'A structure close must close legs' : 'A single-leg buy_to_close must buy back a short leg';
+  return `${what} the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
 }
 
 /**

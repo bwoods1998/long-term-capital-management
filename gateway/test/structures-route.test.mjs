@@ -373,7 +373,7 @@ test('a leg committed to a resting order is not available to close again (qty_av
   assert.equal((await call(post('alpaca', close), { settings, positions: unreadable })).response.status, 400);
 });
 
-test('an open, the practice account and every single-leg order read no positions', async () => {
+test('an open, the practice account and every single-leg order but a buy-back read no positions', async () => {
   const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical' };
   const open = await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, positions: [] });
   assert.equal(open.response.status, 200);
@@ -419,4 +419,118 @@ test('REVIEW DEMO 2: with the deployed cache, a second close of legs already clo
   assert.equal(second.calls.length, 0, 'nothing forwarded');
   // A read with the cache off empties the cached reading for the tests that follow.
   await call(post('alpaca', close), { settings: { OPTION_STRUCTURES_REAL: 'debit_vertical' }, positions: [] });
+});
+
+// --- a broken structure's short leg bought back on the real account (Sept 25, 2026; the review of Deploy G, MAJOR 2) ------
+// The book buys a naked short a broken real structure left (an uneven fill, a long leg sold alone) back as ONE single-leg
+// buy_to_close (`league/book.py` `_close_break_units`). Until today the real route refused it as "long premium only", and the
+// short stayed on the owner's account. It is admitted only when the account holds that contract SHORT for its qty.
+
+//: The body the review demonstrated (`ltcm/adapters/alpaca.py` `submit`, an exit buy of a single contract).
+const BUY_BACK = { symbol: 'SPY260911C00586000', qty: '1', side: 'buy', position_intent: 'buy_to_close', type: 'limit', limit_price: '0.30',
+  time_in_force: 'day', client_order_id: 'oi-break-1' };
+const SHORT_HELD = [{ symbol: 'SPY260911C00586000', qty: '-1', qty_available: '-1', side: 'short', asset_class: 'us_option' }];
+
+test('REVIEW: a real single-leg buy_to_close of a contract held short is forwarded as an exit at one micro-dollar, O1 off included', async () => {
+  for (const settings of [{ OPTION_STRUCTURES_REAL: 'off' }, { OPTION_STRUCTURES_REAL: 'debit_vertical' }]) {
+    const gate = gateFor(settings);
+    // The House's own header says exit; one that says entry (or none) is metered the same: the positions decide.
+    for (const headers of [{ 'X-LTCM-Purpose': 'exit' }, { 'X-LTCM-Purpose': 'entry' }, {}]) {
+      const sent = await call(post('alpaca', BUY_BACK, headers), { settings, gate, positions: SHORT_HELD });
+      assert.equal(sent.response.status, 200, JSON.stringify([settings, headers]));
+      assert.equal(sent.calls.length, 1, 'forwarded');
+      assert.equal(sent.calls[0].url, 'https://api.alpaca.markets/v2/orders', 'to the REAL account');
+      assert.deepEqual(JSON.parse(sent.calls[0].body), BUY_BACK, 'exactly as sent');
+      assert.equal(sent.reads.length, 1, 'after one signed positions read');
+      assert.equal(sent.reads[0].headers['APCA-API-KEY-ID'], 'AK-TEST-KEY');
+    }
+    assert.deepEqual((await gate.status()).today, { day: '2026-09-25', orders: 3, notional_usd: '0.01' }, 'one micro-dollar each');
+  }
+  // A short of three admits a buy-back of two, then of three.
+  const three = [{ symbol: BUY_BACK.symbol, qty: '-3', side: 'short' }];
+  for (const qty of ['2', '3']) {
+    assert.equal((await call(post('alpaca', { ...BUY_BACK, qty }), { settings: {}, positions: three })).response.status, 200, qty);
+  }
+});
+
+test('REVIEW: a real buy_to_close of a contract NOT held short is refused before anything is reserved or sent', async () => {
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical' };
+  const gate = gateFor(settings);
+  const cases = [
+    [[], /SPY260911C00586000 short \(1 needed, none held\)/],
+    // Held LONG: a buy "to close" would add to it (the venue's own reading aside, the gateway does not trust it).
+    [[{ symbol: BUY_BACK.symbol, qty: '2', side: 'long' }], /SPY260911C00586000 short \(1 needed, 2 long held\)/],
+    // Another contract held short.
+    [[{ symbol: occ(586, 'P', '260911'), qty: '-1', side: 'short' }], /SPY260911C00586000 short \(1 needed, none held\)/],
+    // Short fewer than the order buys.
+    [[{ symbol: BUY_BACK.symbol, qty: '-1', side: 'short' }], /short \(2 needed, 1 short held\)/, { qty: '2' }],
+    // Every contract already committed to a resting buy-back.
+    [[{ symbol: BUY_BACK.symbol, qty: '-1', qty_available: '0', side: 'short' }], /short \(1 needed, none held\)/],
+    // A row that contradicts itself (side short, a positive qty) holds nothing.
+    [[{ symbol: BUY_BACK.symbol, qty: '1', side: 'short' }], /short \(1 needed, none held\)/],
+  ];
+  for (const [positions, why, extra = {}] of cases) {
+    const refused = await call(post('alpaca', { ...BUY_BACK, ...extra }, { 'X-LTCM-Purpose': 'exit' }), { settings, gate, positions });
+    assert.equal(refused.response.status, 400, JSON.stringify(positions));
+    assert.match(refused.body.error, /^A single-leg buy_to_close must buy back a short leg the real account holds: /);
+    assert.match(refused.body.error, why);
+    assert.match(refused.body.error, /A close of a leg not held would open a position: refused\./);
+    assert.equal(refused.calls.length, 0, 'nothing is forwarded');
+  }
+  assert.equal((await gate.status()).today.orders, 0, 'no refusal reserved anything');
+  // Its shape rules still hold: a buy_to_close that is a sell, or a market order, is refused unread.
+  for (const body of [{ ...BUY_BACK, side: 'sell' }, { ...BUY_BACK, type: 'market', limit_price: undefined }]) {
+    const refused = await call(post('alpaca', body), { settings, positions: SHORT_HELD });
+    assert.equal(refused.response.status, 400);
+    assert.equal(refused.reads.length, 0);
+    assert.equal(refused.calls.length, 0);
+  }
+});
+
+test('REVIEW: positions that cannot be read admit no real buy-back, reserve nothing, and answer the 4xx the House retries', async () => {
+  const settings = { OPTION_STRUCTURES_REAL: 'off' };
+  const gate = gateFor(settings);
+  for (const [positions, why] of [
+    [{ status: 503 }, /venue HTTP 503/],
+    [{ status: 302 }, /venue HTTP 302/],
+    ['{"positions":[]}', /not a list/],
+    ['not json', /unreadable venue answer/],
+    [new TypeError('fetch failed'), /TypeError/],
+  ]) {
+    const answer = await call(post('alpaca', BUY_BACK, { 'X-LTCM-Purpose': 'exit' }), { settings, gate, positions });
+    assert.equal(answer.response.status, 424, String(why));
+    assert.match(answer.body.error, /Cannot check that the real account holds this contract short/);
+    assert.match(answer.body.error, why);
+    assert.equal(answer.calls.length, 0);
+  }
+  assert.equal((await gate.status()).today.orders, 0);
+});
+
+test('REVIEW: a real buy-back passes a spent day and a spent order cap, not the kill switch, and is not sent twice from the cache', async () => {
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_DAY_USD: '100', MAX_ORDER_USD: '1', MAX_ORDER_USD_ALPACA: '1' };
+  const gate = gateFor(settings);
+  // A $0.30 buy-back is $30 of premium, over the $1 order cap: an exit is never trapped by a dollar cap.
+  assert.equal((await call(post('alpaca', BUY_BACK), { settings, gate, positions: SHORT_HELD })).response.status, 200);
+  await gate.setKill(true);
+  const halted = await call(post('alpaca', BUY_BACK), { settings, gate, positions: SHORT_HELD });
+  assert.equal(halted.response.status, 423);
+  assert.equal(halted.calls.length, 0);
+  await gate.setKill(false);
+  // With the deployed cache (5 s), a second buy-back of the one short is read against what is left: refused.
+  const cached = { ...settings, POSITIONS_CACHE_MS: undefined };
+  const first = await call(post('alpaca', BUY_BACK), { settings: cached, gate, positions: SHORT_HELD });
+  assert.deepEqual([first.response.status, first.calls.length, first.reads.length], [200, 1, 1]);
+  const second = await call(post('alpaca', BUY_BACK), { settings: cached, gate, positions: SHORT_HELD });
+  assert.deepEqual([second.response.status, second.calls.length, second.reads.length], [400, 0, 0]);
+  assert.match(second.body.error, /short \(1 needed, none held\)/);
+  // A read with the cache off empties the cached reading for the tests that follow.
+  await call(post('alpaca', BUY_BACK), { settings, positions: [] });
+});
+
+test('REVIEW: the practice account forwards a buy_to_close as before, unmetered and with no positions read', async () => {
+  const practice = await call(post('alpaca-paper', BUY_BACK), { settings: {}, positions: [] });
+  assert.equal(practice.response.status, 200);
+  assert.equal(practice.reads.length, 0);
+  assert.equal(practice.calls[0].url, 'https://paper-api.alpaca.markets/v2/orders');
+  assert.equal((await practice.gate.status()).today.orders, 0);
 });

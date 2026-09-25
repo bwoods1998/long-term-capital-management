@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createsOrder, notional, caps, normalizePath, allowedVenuePath, isOptionSymbol, alpacaShapeError, alpacaSymbolError, ALPACA_ORDER_FIELDS } from '../lib/caps.mjs';
+import { createsOrder, notional, caps, normalizePath, allowedVenuePath, isOptionSymbol, alpacaShapeError, alpacaSymbolError, ALPACA_ORDER_FIELDS, shortCloseBody } from '../lib/caps.mjs';
 import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
@@ -129,9 +129,24 @@ test('an option order is long premium only: it opens by buying and closes by sel
     { side: 'sell', position_intent: 'sell_to_open' },
     { side: 'sell', position_intent: 'buy_to_open' },
     { side: 'sell' , position_intent: undefined },
-    { side: 'buy', position_intent: 'buy_to_close' },
+    { side: 'sell', position_intent: 'buy_to_close' },
     { position_intent: undefined },
   ]) assert.match(notional('alpaca', option(bad)).error, /long premium only/, JSON.stringify(bad));
+});
+
+test('a single-leg buy_to_close is a short leg\'s buy-back: never priced as an entry, admitted by the router only when held short', () => {
+  // Sept 25, 2026, the review of Deploy G (MAJOR 2): this body (the book's buy-back of a broken structure's short
+  // leg) was refused as not long premium, so a naked short would have stayed on the real account.
+  const back = option({ symbol: 'SPY260911C00586000', position_intent: 'buy_to_close', limit_price: '0.30' });
+  assert.deepEqual(notional('alpaca', back), { micro: 0n, shortClose: true });
+  assert.deepEqual(shortCloseBody(back), { qty: '1', legs: [{ symbol: 'SPY260911C00586000', ratio_qty: '1', side: 'buy', position_intent: 'buy_to_close' }] });
+  // Every other single-leg rule still holds for it.
+  assert.match(notional('alpaca', { ...back, type: 'market', limit_price: undefined }).error, /limit order/);
+  assert.match(notional('alpaca', { ...back, limit_price: undefined }).error, /limit price/);
+  assert.match(notional('alpaca', { ...back, qty: '0.5' }).error, /whole number/);
+  assert.match(notional('alpaca', { ...back, qty: undefined, notional: '30' }).error, /contracts, not dollars/);
+  // A zero forwarded to the gate would be refused there: it fails closed if a caller skips the router's check.
+  assert.equal(notional('alpaca', back).micro, 0n);
 });
 
 test('an option order is one leg, a limit order, in whole contracts', () => {
