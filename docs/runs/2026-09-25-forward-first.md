@@ -104,6 +104,14 @@ additions, and after this run's Deploy B the scale rule in `league/live_trading.
 F3 changes desk capacity at run time in `house.py` (the forward record moves a desk's cap), never by editing a Kalshi
 desk's row; S2's `kalshi-open` seats (Wave 2) are the Kalshi run's to change.
 
+**A fourth run (the owner's message, about 06:10Z)** executes `docs/goals/LTCM_JEV_SENSES.md`. It owns only the Jev
+files (`league/jev.py`, `sensors.py`, `triage.py`, `hypothesis_memory.py`, `exposure.py`, `semantic_lab.py`,
+`jev_features.py`, `scripts/jev_lab_eval/`, `gateway/lib/typesafe.mjs`, `config.json`'s `jev` block), changes no money
+rule, and lands small hooks into `research_gate.py` and `lab.py` (this run's Wave 1) and `feeds.py` (the Kalshi run's)
+only after the waves that own them merge. One deploy at a time across four runs; any gateway deploy rebases on the
+others' gateway changes and re-runs every gateway test. This run's Wave 1 writes the merge times of `lab.py` and
+`research_gate.py` here.
+
 **This run's current wave, file owners and deploys (kept current; read this before merging into these files):**
 
 | Wave | State | Files owned |
