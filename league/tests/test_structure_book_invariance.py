@@ -2,8 +2,11 @@
 
 Sept 25, 2026: the forward-first run lets the structure-only hunks land before its H4 on this condition. The
 same scripted scenarios run on two `Book` classes over the same `FakeBroker`: today's `league.book`, and a
-frozen copy of `league/book.py` as it stands on origin/main at 5ff775e (`fixtures/book_main_5ff775e.py`,
-loaded as `league._book_before`, so its relative imports read the same league modules). Each scenario
+frozen copy of `league/book.py` WITHOUT the structure hunks (`league._book_before`, loaded so its relative
+imports read the same league modules). The copy was origin/main at 5ff775e
+while the hunks landed before the forward-first run's H4; since H4 merged over them (Deploy A, Sept 25, 2026)
+it is H4's reviewed book.py (`fixtures/book_h4_b62b215.py`, `h4/review` at b62b215), whose own changes to
+real-book reconciliation (holds at the cent, real dust, the restart's tolerance) are H4's tests' to pin. Each scenario
 records every return value that matters (outcomes, reconciliations, check reasons, marks, frozen flags,
 counts, position keys) and every ledger row it wrote (sequence, id, kind, agent, time, payload); the two
 transcripts must be identical. Only what is random by design is left out: a row appended without an id gets
@@ -34,11 +37,11 @@ from league.ledger import Ledger
 from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
 
 D = Decimal
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "book_main_5ff775e.py"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "book_h4_b62b215.py"
 
 
 def book_before():
-    """origin/main's book.py at 5ff775e, as the module `league._book_before` (package `league`)."""
+    """H4's reviewed book.py (b62b215), without the structure hunks, as the module `league._book_before`."""
     name = "league._book_before"
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, FIXTURE)

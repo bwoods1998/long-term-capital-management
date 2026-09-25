@@ -140,7 +140,13 @@ def main(argv=None) -> int:
                 except Exception as exc:  # noqa: BLE001 - the loop outlives any one tick
                     house.alert("error", f"tick failed: {type(exc).__name__}: {str(exc)[:300]}")
                     print(f"tick failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-                time.sleep(max(1.0, house.settings.tick_seconds - (time.time() - started)))
+                # TERM ends the wait for the next tick too (H2, Sept 25, 2026): `time.sleep` sleeps out its time
+                # through a signal, so a House told to stop just after a tick went on for the rest of the tick's
+                # minute -- still writing rows, a backup's among them, into the watch of the release replacing it.
+                # Slept a second at a time, because a handler that sets a threading.Event can deadlock on its lock.
+                wake_at = time.time() + max(1.0, house.settings.tick_seconds - (time.time() - started))
+                while not stopping["now"] and time.time() < wake_at:
+                    time.sleep(min(1.0, max(0.0, wake_at - time.time())))
             house.sandbox.sleep_all()
     finally:
         house.close()
