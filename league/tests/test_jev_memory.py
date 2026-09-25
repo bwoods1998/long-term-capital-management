@@ -762,6 +762,30 @@ class WiringTest(HouseCase):
         self.assertEqual(floor.shared_memory.stats()["docs"], 0)
         self.assertEqual(self.jev.calls, [])
 
+    def test_the_memory_waits_while_another_jev_job_runs(self):
+        import threading
+
+        floor = self.floor({"memory": {"enabled": True}})
+        release = threading.Event()
+        move = threading.Thread(target=release.wait, daemon=True)
+        move.start()
+        self.house._jobs["jev:move"] = move  # the move sensor's cycle, still running
+        try:
+            self.house.tick()  # no wait: the stand-in cycle is still running
+            self.assertNotIn("jev:memory", self.house._jobs, "one Jev job at a time")
+        finally:
+            release.set()
+            move.join(5)
+        self.house.tick()
+        self.house.wait(10)
+        self.clock.advance(60)
+        for _ in range(4):
+            self.house.tick()
+            self.house.wait(10)
+            self.clock.advance(60)
+        self.assertIn("jev:memory", self.jobs())
+        self.assertGreater(floor.shared_memory.stats()["docs"], 0)
+
     def test_a_memory_that_cannot_start_is_an_alert(self):
         (self.house.root / "jev-memory.sqlite").mkdir()
         floor = self.floor({"memory": {"enabled": True}})

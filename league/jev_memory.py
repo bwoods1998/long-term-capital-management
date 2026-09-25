@@ -92,7 +92,7 @@ DEFAULTS: dict[str, Any] = {
     "interval_seconds": 600,
     "backfill_days": 14,
     "max_docs_per_run": 400,
-    "max_seconds_per_run": 120,
+    "max_seconds_per_run": 60,  # Jev holds one ops slot at a time (JevFloor.tick): a run must not keep the move sensor waiting
     "page_rows": 2000,
     "min_chars": 40,
     "reserve_calls": 1500,  # of the purpose's daily calls, never spent on labels: retrieval's relevance questions
