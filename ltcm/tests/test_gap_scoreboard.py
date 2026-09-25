@@ -672,6 +672,485 @@ class RenderingTest(ScoreboardCase):
         self.assertEqual(gs.epoch("2026-09-23T09:30:00+00:00"), gs.epoch("2026-09-23T09:30:00.000Z"))
 
 
+# ---------------------------------------------------------- the forward-first rows (Sept 25, 2026)
+def lab_store(root: Path, script: str):
+    lab = sqlite3.connect(root / "lab.sqlite")
+    lab.executescript(script)
+    return lab
+
+
+FORWARD_SCHEMA = ("CREATE TABLE forward(candidate TEXT NOT NULL, at REAL NOT NULL, window_start REAL, window_end REAL, tape_id TEXT,"
+                  " ok INTEGER NOT NULL, blocks INTEGER, active_blocks INTEGER NOT NULL, log_growth REAL, mean_log_growth REAL,"
+                  " trades INTEGER, error TEXT, PRIMARY KEY(candidate, at));")
+
+
+class UsSessionTest(unittest.TestCase):
+    def test_the_regular_session_on_the_nyse_calendar(self):
+        # Thursday Sept 24, 2026, New York on daylight time: 13:30-20:00Z.
+        self.assertEqual(gs.us_session(ts(15)), (ts(13.5), ts(20)))
+        self.assertTrue(gs.in_us_session(ts(13.5)))
+        self.assertFalse(gs.in_us_session(ts(13.4)))
+        self.assertFalse(gs.in_us_session(ts(20)))
+        self.assertIsNone(gs.us_session(ts(48 + 15)))  # Saturday
+        # Thanksgiving is shut, and the day after closes at 13:00 New York (18:00Z on standard time).
+        self.assertIsNone(gs.us_session(datetime(2026, 11, 26, 16, tzinfo=timezone.utc).timestamp()))
+        friday = gs.us_session(datetime(2026, 11, 27, 15, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(friday, (datetime(2026, 11, 27, 14, 30, tzinfo=timezone.utc).timestamp(),
+                                  datetime(2026, 11, 27, 18, tzinfo=timezone.utc).timestamp()))
+        # The last session that opened by the clock, cut at it.
+        self.assertEqual(gs.last_session(ts(4), ts(28)), (ts(13.5), ts(20)))
+        self.assertEqual(gs.last_session(ts(4), ts(16)), (ts(13.5), ts(16)))
+        self.assertIsNone(gs.last_session(ts(21), ts(28)))
+
+
+class UnitEconomicsTest(ScoreboardCase):
+    def test_real_settled_profit_net_of_fees_against_compute_a_day(self):
+        f = self.floor
+        f.settle("a-1", 2, "kalshi", "KXA-1", 1.25)  # before the window [4, 28]
+        f.settle("a-1", 10, "kalshi", "KXB-1", 3.0)
+        f.settle("house", 11, "kalshi", "KXC-1", -0.5)  # the House's own settlement of a dead member's holding counts
+        f.settle("a-1", 12, "kalshi-shadow", "KXD-1", 9.0)  # practice: never
+        f.sell("b-1", 13, "alpaca", "BTC-USD", 0.4)  # a closing sale on the real book
+        f.buy("b-1", 13, "alpaca", "ETH-USD")  # an opening fill realizes nothing
+        f.row("book.fill", "house", 14, {"book": "alpaca", "source": "dust", "realized": "-0.01", "cash_delta": "-0.01"})
+        # Compute: Luna verified (one unconfirmed hold is left out), a consultant pass, the Sail meter, a Jev charge.
+        f.row("provider.request", "a-1", 1, {"cost_usd": "7", "cost_verified": True, "session_id": "s0"})  # lifetime only
+        f.row("provider.request", "a-1", 10, {"cost_usd": "1.50", "cost_verified": True, "session_id": "s1"})
+        f.row("provider.request", "a-1", 11, {"cost_usd": "0.50", "cost_verified": True, "session_id": "s1"})
+        f.row("provider.request", "a-1", 11, {"held_usd": "0.9", "cost_verified": False, "session_id": "s1"})
+        f.row("merton.pass", "house", 12, {"role": "consultant", "cost_usd": "2.25"})
+        f.row("ops.budget", "house", 12, {"what": "sail", "spent_usd": "0.75", "balance_usd": "100"})
+        f.row("credit.charge", "a-1", 12, {"what": "jev classification", "usd": "0.10"})
+        # The gateway's meter of the House's OpenAI line, and an hourly yield row: checks, never added.
+        for hours, settled in ((6, "100"), (18, "106")):
+            f.row("ops.budget", "house", hours, {"what": "expedition", "campaign": {"meters": {"openai": {
+                "line": {"settled_usd": settled}, "month": {"month": "2026-09", "total_usd": "400", "cap_usd": "607"}}}}})
+        f.row("ops.budget", "house", 20, {"what": "yield", "hours": 1.0, "total_usd": "3.75", "spend_usd": {"research": "2.0", "consultant": "1.75"}})
+        lab = lab_store(f.root, "CREATE TABLE calls(id TEXT PRIMARY KEY, at REAL NOT NULL, cost_usd TEXT NOT NULL);")
+        lab.execute("INSERT INTO calls VALUES ('c0', ?, '0.30')", (ts(1),))
+        lab.execute("INSERT INTO calls VALUES ('c1', ?, '0.40')", (ts(20),))
+        lab.commit()
+        lab.close()
+        f.row("ops.job", "house", 28, {})  # the clock: 28 h, the window from 4 h
+        one = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["1"]
+        s = one["real_settled"]
+        self.assertEqual((s["settlements"], s["sales"]), (2, 1))
+        self.assertAlmostEqual(s["settled_usd"], 2.5)
+        self.assertAlmostEqual(s["sales_usd"], 0.4)
+        self.assertAlmostEqual(s["per_day_usd"], 2.9)
+        self.assertAlmostEqual(s["house_rows_usd"], -0.5)
+        c = one["compute_per_day"]
+        self.assertEqual({k: c["providers"][k] for k in ("openai-luna", "openai-astra", "sail", "jev", "openai-lab")},
+                         {"openai-luna": 2.0, "openai-astra": 2.25, "sail": 0.75, "jev": 0.1, "openai-lab": 0.4})
+        self.assertAlmostEqual(c["per_day_usd"], 5.5)
+        self.assertAlmostEqual(c["openai_usd"], 4.65)
+        self.assertAlmostEqual(c["lifetime_usd"], 5.5 + 7 + 0.3)  # economics.py's lifetime method, plus every lab call
+        self.assertEqual((c["gateway"]["usd"], c["gateway"]["hours"], c["gateway"]["per_day_usd"]), (6.0, 12.0, 12.0))
+        self.assertEqual((c["yield"]["rows"], c["yield"]["usd"], c["yield"]["by_line"]["consultant"]), (1, 3.75, 1.75))
+        u = one["unit_economics"]
+        self.assertEqual(u["compute_over_profit"], round(5.5 / 2.9, 2))
+        self.assertTrue(u["meets_target"], "no family swings and compute is under $60 a day")
+
+    def test_the_target_twice_the_profit_or_sixty_a_day_while_no_family_swings(self):
+        target = lambda profit, cost, swings: gs.unit_economics({"per_day_usd": profit}, {"per_day_usd": cost}, swings)["meets_target"]  # noqa: E731
+        self.assertFalse(target(21.35, 118.88, False))  # the T0 day: 5.6 times
+        self.assertTrue(target(60.0, 118.88, True))
+        self.assertTrue(target(20.0, 59.0, False))
+        self.assertFalse(target(20.0, 59.0, True), "a swinging family is held to twice the profit")
+        self.assertFalse(target(-3.0, 70.0, False))
+
+
+class CapacityAtSizesTest(ScoreboardCase):
+    def build(self):
+        f = self.floor
+        f.born("w-1", 0, family="wx")
+        f.stake("w-1", 0.5, "kalshi", 50)
+        # Two real markets bid at $9.50 (both filled) and a practice one at $19 (not filled), from 1 h to the clock at 25 h.
+        f.bid("w-1", 1, "kalshi", "KXA-26SEP24-B1", "i1", filled=True)
+        f.bid("w-1", 1, "kalshi", "KXB-26SEP24-B1", "i2", filled=True)
+        f.bid("w-1", 2, "kalshi-shadow", "KXC-26SEP24-B1", "i3", filled=False, quantity=20)
+        f.settle("w-1", 10, "kalshi", "KXA-26SEP24-B1", 0.5)
+        f.settle("w-1", 12, "kalshi", "KXB-26SEP24-B1", 0.3)
+        f.row("ops.job", "house", 25, {})
+        return f.snapshot()
+
+    def test_the_real_size_and_its_multiples_read_the_fill_rate_measured_there(self):
+        snap = self.build()
+        *_, families = self.parts(snap)
+        out = gs.capacity_at_sizes(snap, "kalshi", "wx", families.members[("kalshi", "wx")], families.trades[("kalshi", "wx")],
+                                   gs.intent_outcomes(snap))
+        self.assertEqual((out["size_usd"], out["size_basis"]), (9.5, "the median real bid"))
+        one, two, four = out["sizes"]
+        self.assertEqual((one["bucket"], one["fill_rate"], one["fill_rate_basis"]), ("<=$12", 1.0, "all books"))
+        self.assertAlmostEqual(one["capacity_usd_per_day"], 3 * 1.0 * 0.4)  # 3 markets a day x filled x $0.40 a settlement
+        self.assertEqual((two["size_usd"], two["bucket"], two["fill_rate"]), (19.0, "$12-25", 0.0))  # the $19 bid never filled
+        self.assertEqual(two["capacity_usd_per_day"], 0.0)
+        self.assertEqual((four["bucket"], four["fill_rate"], four["fill_rate_basis"]), ("$25-50", None, "no bid of this size yet"))
+        self.assertIsNone(four["capacity_usd_per_day"], "an unmeasured size is never assumed to fill")
+        self.assertAlmostEqual(four["profit_per_settlement_usd"], 1.6)
+
+    def test_proven_families_with_the_boards_capacity_and_the_boards_disagreements(self):
+        self.floor.write_json("allocator-board.json", {"families": {"kalshi": {
+            "wx": {"state": "proven", "stake_usd": "30", "capacity": {"usd_per_day": 1.1, "size_usd": 6.0}},
+            "other": {"state": "swing"}, "loser": {"state": "unproven"}}}})
+        snap = self.build()
+        *_, families = self.parts(snap)
+        out = gs.proven_capacity(snap, families, gs.intent_outcomes(snap), [{"venue": "kalshi", "family": "wx"}])
+        self.assertEqual(out["count"], 1)
+        row = out["families"][0]
+        self.assertEqual((row["board_state"], row["house_capacity"]["usd_per_day"]), ("proven", 1.1))
+        self.assertEqual(row["sizes"]["size_usd"], 9.5)
+        self.assertEqual(out["board_only"], ["kalshi/other"])
+
+
+class ForwardPositiveTest(ScoreboardCase):
+    def test_graduates_newborns_and_the_baselines_lab_blocks(self):
+        f = self.floor
+        lab = lab_store(f.root, FORWARD_SCHEMA)
+        for cand, hours, active, growth in (("g1", 10, 3, 0.02), ("g1", 20, 4, -0.01),  # its latest window loses
+                                            ("g2", 12, 2, 0.03), ("g2", 31, 2, -0.9),  # a window after the clock is not read
+                                            ("g3", 12, 0, 0.0),  # no active block: not tested
+                                            ("g4", 12, 5, 0.5)):  # graduated before the window
+            lab.execute("INSERT INTO forward VALUES (?, ?, 0, 0, 'fwd', 1, ?, ?, ?, ?, 0, NULL)", (cand, ts(hours), active, active, growth, growth))
+        lab.commit()
+        lab.close()
+        for cand, hours in (("g1", 8), ("g2", 9), ("g3", 9), ("g5", 9), ("g4", 2)):
+            f.row("lab.graduate", "house", hours, {"candidate": cand}, ident=f"lab.graduate:{cand}:passed")
+        f.row("lab.graduate", "house", 9, {"candidate": "g2"}, ident="lab.graduate:g2:waiting_seat")
+
+        def block(agent: str, hours: float, book: str, growth: float, active: bool = True) -> None:
+            f.row("eval.block", agent, hours, {"book": book, "active": active, "log_growth": growth})
+
+        # Newborns in the window [6, 30]: n-1 gains on practice (its real block is not practice), n-2 loses, n-3 has none.
+        f.born("n-1", 8)
+        block("n-1", 10, "kalshi-shadow", 0.02)
+        block("n-1", 11, "kalshi", 1.0)
+        block("n-1", 12, "kalshi-shadow", -0.005)
+        f.born("n-2", 9, venue="alpaca", desk="alpaca-crypto-alts", horizon="hour", founder="lab:x")
+        block("n-2", 10, "alpaca-paper", -0.03)
+        block("n-2", 11, "alpaca-paper", 0.5, active=False)
+        f.born("n-3", 20)
+        # Born the day before: their first practice day ended in the window. l-1 is lab-born.
+        f.born("o-1", 1)
+        block("o-1", 3, "kalshi-shadow", 0.01)
+        block("o-1", 20, "kalshi-shadow", 0.02)
+        f.born("o-2", 2)
+        block("o-2", 27, "kalshi-shadow", -0.1)  # after its first day
+        f.born("l-1", 0, founder="lab:y")
+        block("l-1", 5, "kalshi-shadow", 0.03)  # before the window: not one of the window's lab blocks
+        block("l-1", 7, "kalshi-shadow", 0.01)
+        block("l-1", 8, "kalshi-shadow", 0.02)
+        f.row("ops.job", "house", 30, {})
+        fp = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["2"]["forward_positive"]
+        self.assertEqual(fp["graduates"], {"graduated": 4, "with_window": 3, "tested": 2, "positive": 1, "share": 0.5})
+        self.assertEqual(fp["newborns"], {"born": 3, "tested": 2, "positive": 1, "share": 0.5})
+        self.assertEqual(fp["newborns_first_day_ended"], {"born": 3, "tested": 2, "positive": 2, "share": 1.0})
+        # The baseline's measure: lab-born agents' active blocks in the window (n-2's loss, l-1's two gains).
+        self.assertEqual(fp["lab_blocks"], {"active": 3, "positive": 2, "share": round(2 / 3, 4)})
+
+    def test_the_boards_median_w_paper_and_the_line(self):
+        board = {f"a-{i}": {"evidence": {"W_paper": w, "E": e}} for i, (w, e) in
+                 enumerate(((1.02, 1.01), (1.0, 1.0), (0.99, 0.99), (1.011, 1.0), (1.01, 1.02)))}
+        board["r-1"] = {"band": "replay"}
+        self.floor.write_json("allocator-board.json", {"at": at(1), "agents": board})
+        self.floor.born("a-0", 0)
+        ps = gs.practice_standing(self.floor.snapshot())
+        self.assertEqual((ps["agents"], ps["with_evidence"], ps["median_w_paper"]), (6, 5, 1.01))
+        self.assertEqual(ps["above_line"], 2, "over 1.01, as the plan counted")
+        self.assertEqual((ps["bunt_at"], ps["e_at_bunt"]), (1.01, 2))
+
+
+class CapitalOnProofTest(ScoreboardCase):
+    def test_the_swing_clock_and_alpaca_real_stock_agents(self):
+        f = self.floor
+        f.write_json("allocator-board.json", {"families": {"kalshi": {
+            "sports": {"state": "proven", "swing_clock": {"real_n": 11, "days_to_swing": 0.72, "real_per_day": 5.5,
+                                                          "needs": {"look_at": 15, "real_settlements": 4}}},
+            "other": {"state": "unproven"}}}})
+        for agent, desk in (("s-1", "alpaca-megacaps"), ("s-2", "alpaca-megacaps"), ("s-3", "alpaca-index-etfs"),
+                            ("o-1", "alpaca-open"), ("o-2", "alpaca-open"), ("c-1", "alpaca-crypto-alts")):
+            f.born(agent, 0, venue="alpaca", desk=desk, horizon="day")
+        equity, crypto = {"asset_class": "equity", "symbol": "NVDA"}, {"asset_class": "crypto", "symbol": "SOL-USD"}
+
+        def fill(agent: str, hours: float, book: str, instrument: dict) -> None:
+            f.row("book.fill", agent, hours, {"book": book, "side": "buy", "source": "venue", "instrument": instrument,
+                                              "quantity": "1", "cash_delta": "-10"})
+
+        fill("s-1", 15, "alpaca", equity)  # a real stock fill inside the Sept 24 session
+        fill("s-3", 15, "alpaca-paper", equity)  # practice: never
+        fill("c-1", 15, "alpaca", crypto)
+        for agent in ("s-2", "o-1", "o-2", "c-1"):
+            f.stake(agent, 1, "alpaca", 25)
+        f.row("agent.intent", "o-1", 2, {"id": "i-o1", "side": "buy", "book": "alpaca", "instrument": equity})
+        f.row("agent.intent", "o-2", 2, {"id": "i-o2", "side": "buy", "book": "alpaca", "instrument": crypto})
+        f.row("ops.job", "house", 28, {})
+        cp = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["3"]["capital_on_proof"]
+        self.assertEqual((cp["swinging"], cp["first_swing"]), ([], None))
+        self.assertEqual(cp["swing_clocks"], [{"family": "sports", "venue": "kalshi", "state": "proven", "real_n": 11, "look_at": 15,
+                                               "to_go": 4, "days_to_swing": 0.72, "real_per_day": 5.5}])
+        self.assertEqual((cp["alpaca_stock_filled"], cp["alpaca_stock_filled_in_session"], cp["alpaca_stock_staked"]), (1, 1, 2))
+        self.assertEqual(cp["alpaca_stock_agents"], ["o-1", "s-1", "s-2"])
+
+    def test_the_first_swing_is_the_earliest_row_that_names_one(self):
+        f = self.floor
+        f.born("m-1", 0, family="sports")
+        f.write_json("allocator-board.json", {"families": {"kalshi": {"sports": {"state": "swing"}}}})
+        f.verdict("m-1", 18, "promote", 2, 3, via="allocator", band_from="bunt", band_to="swing")
+        f.row("family.record", "house", 20, {"family": "sports", "venue": "kalshi", "state": "swing"})
+        f.row("ops.job", "house", 28, {})
+        cp = gs.capital_on_proof(f.snapshot(), gs.agents_of(f.snapshot()))
+        self.assertEqual(cp["swinging"], ["kalshi/sports"])
+        self.assertEqual((cp["first_swing"]["at"], cp["first_swing"]["row"], cp["first_swing"]["family"]),
+                         (at(18), "eval.verdict", "sports"))
+
+
+class HarnessTest(ScoreboardCase):
+    def test_restarts_rollbacks_by_cause_and_deploys_in_a_session_from_the_watchdogs_log(self):
+        f = self.floor
+        for hours, release in ((1, "r0"), (15, "r1"), (15.2, "r0"), (22, "r2"), (22.2, "r0"), (26, "r0")):
+            f.row("ops.started", "house", hours, {"release": release})
+        f.row("ops.job", "house", 28, {})  # the clock: the window from 4 h
+        log = [
+            {"deploy": "r5@5", "release": "r5", "stage": "start", "at": at(2)},  # before the window
+            {"deploy": "r1@1", "release": "r1", "stage": "start", "at": at(14.9)},
+            {"deploy": "r1@1", "release": "r1", "stage": "promote", "ok": True, "at": at(15)},
+            {"deploy": "r1@1", "release": "r1", "stage": "verdict", "verdict": "rolled_back", "at": at(15.2),
+             "reasons": ["reading 3: the alpaca-paper book is frozen: cash differs by -0.0269"]},
+            {"deploy": "r2@2", "release": "r2", "stage": "start", "at": at(21.8)},
+            {"deploy": "r2@2", "release": "r2", "stage": "promote", "ok": True, "ts": ts(22)},
+            {"deploy": "r2@2", "release": "r2", "stage": "verdict", "verdict": "rolled_back", "at": at(22.2), "reasons": [
+                "reading 9: 1 error alert(s) since seq 5; the first, at seq 6: The daily backup of the House box failed "
+                "(SailboxError: sailbox api 503: prepare checkpoint warm snapshot ...)"]},
+            {"deploy": "r3@3", "release": "r3", "stage": "start", "at": at(23)},
+            {"deploy": "r3@3", "release": "r3", "stage": "verdict", "verdict": "refused", "reasons": ["canary"], "at": at(23.1)},
+            {"release": "r4", "stage": "vet", "verdict": "refused", "reasons": ["league/allocator.py: ..."], "at": at(24)},
+            {"deploy": "r7@7", "release": "r7", "stage": "verdict", "verdict": "refused", "busy": True, "at": at(24.5),
+             "reasons": ["another deploy or rollback is running (pid 10274)"]},  # never staged: not a deploy
+            {"deploy": "r6@6", "release": "r6", "stage": "start", "at": at(29)},  # after the clock
+        ]
+        (f.root / "deploys.jsonl").write_text("\n".join(json.dumps(r) for r in log) + "\n{torn", encoding="utf-8")
+        four = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["4"]
+        self.assertEqual((four["restarts"]["count"], four["restarts"]["in_session"]), (5, 2))
+        dr = four["deploy_record"]
+        self.assertEqual(dr["source"], "deploys.jsonl")
+        self.assertEqual((dr["deploys"], dr["verdicts"]), (3, {"rolled_back": 2, "refused": 1}))
+        self.assertEqual((dr["rolled_back"], dr["outside"], dr["causes"]), (2, 1, {"house": 1, "backup": 1}))
+        self.assertEqual(dr["in_session"], 1, "r1 started at 14:54Z; r2 after the close")
+        self.assertEqual([r["release"] for r in dr["rows"]], ["r1", "r2", "r3"])
+
+    def test_without_the_log_the_ledger_shows_updater_and_owner_deploys_and_their_rollbacks(self):
+        f = self.floor
+        f.row("ops.started", "house", 1, {"release": "main-a"})  # the first start is no deploy
+        f.row("ops.started", "house", 15, {"release": "20260924T145900Z-abc"})  # an owner's release: nothing announced it
+        f.row("ops.deploy", "house", 22, {"action": "deploying", "release": "main-b"})
+        f.row("ops.started", "house", 22.05, {"release": "main-b"})
+        f.row("ops.alert", "house", 22.1, {"level": "error", "text": "The daily backup of the House box failed (SailboxError: sailbox api 503)"})
+        f.row("ops.started", "house", 22.2, {"release": "20260924T145900Z-abc"})  # main-b rolled back
+        f.row("ops.deploy", "house", 24, {"action": "deploying", "release": "main-c"})  # refused at its canary: never started
+        f.row("ops.started", "house", 25.5, {"release": "20260924T145900Z-abc"})  # a restart 90 minutes on: no rollback
+        f.row("ops.job", "house", 28, {})
+        dr = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["4"]["deploy_record"]
+        self.assertEqual(dr["source"], "ledger")
+        self.assertEqual([(r["release"], r["verdict"], r["cause"], r["in_session"]) for r in dr["rows"]],
+                         [("20260924T145900Z-abc", "promoted", None, True), ("main-b", "rolled_back", "backup", False),
+                          ("main-c", "not started", None, False)])
+        self.assertEqual((dr["rolled_back"], dr["outside"], dr["in_session"]), (1, 1, 1))
+        self.assertIn("sailbox api 503", dr["rows"][1]["reason"])
+
+    def test_a_rollbacks_cause_from_its_reasons(self):
+        self.assertEqual(gs.rollback_cause(["The daily backup of the House box failed (SailboxError: ...)"]), "backup")
+        self.assertEqual(gs.rollback_cause(["tick failed: SailboxError: sailbox api 503: busy"]), "vendor")
+        self.assertEqual(gs.rollback_cause(["publish failed: the site answered 500"]), "site")
+        self.assertEqual(gs.rollback_cause(["reading 3: the alpaca-paper book is frozen: cash differs by -0.0269"]), "house")
+        self.assertEqual(gs.rollback_cause([]), "house")
+
+    def test_tick_intervals_from_the_per_tick_job_and_the_last_tick(self):
+        f = self.floor
+        f.row("ops.started", "house", 0.5, {"release": "r0"})
+
+        def job(hours: float, elapsed: float, key: str = "merton:follow", state: str = "finished") -> None:
+            f.row("ops.job", "house", hours, {"key": key, "job": f"{key}:{ts(hours):.6f}", "state": state, "elapsed_seconds": elapsed})
+
+        job(10.0, 0.01)
+        job(10.0, 0.0, state="started")  # a job's start row is not a tick
+        job(10.02, 30.0)  # it waited 30 s in the lane: the next tick skipped it, so the interval after it is not one tick
+        job(10.05, 0.01)
+        job(10.06, 0.01, key="engineer")  # another job
+        job(10.07, 0.01)
+        f.row("ops.started", "house", 11, {"release": "r1"})  # a restart between 10.07 h and 12 h
+        job(12.0, 0.01)
+        job(12.03, 0.01)
+        f.row("ops.job", "house", 13, {})
+        f.write_json("health.json", {"tick_steps": {"last": {"at": at(12.9), "total_seconds": 33.5}, "ticks_in_hour": 40,
+                                                    "slowest_hour": [{"step": "population", "seconds": 16.0, "at": at(12.5)},
+                                                                     {"step": "wakes", "seconds": 9.0, "at": at(12.6)}]}})
+        tp = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["4"]["tick_p50"]
+        self.assertEqual(tp["intervals"], 3)  # 72 s, 72 s and 108 s
+        self.assertAlmostEqual(tp["p50_s"], 72.0, places=1)
+        self.assertAlmostEqual(tp["p90_s"], 108.0, places=1)
+        self.assertEqual((tp["last_tick_s"], tp["ticks_in_hour"], tp["population_slowest_s"]), (33.5, 40, 16.0))
+
+
+class SeatMarketTest(ScoreboardCase):
+    def build(self, health: bool = True):
+        f = self.floor
+        f.born("s-1", 5, desk="kalshi-sports")
+        f.died("s-1", 7)  # 2 h, displaced
+        f.born("s-2", 6, desk="kalshi-sports")
+        f.died("s-2", 10, cause="evidence")  # 4 h
+        f.born("w-1", -20, desk="kalshi-weather")
+        f.died("w-1", 20)  # 40 h, displaced
+        f.born("d-0", 0, desk="kalshi-weather")
+        f.died("d-0", 2)  # before the window [4, 28]: lifetime only
+        f.born("l-1", 20, desk="kalshi-sports")  # living, 8 h old
+        f.row("ops.job", "house", 28, {})
+        if health:
+            f.write_json("health.json", {"seats": {
+                "at": at(27), "waiters": {"cards": 2, "graduates": 3, "strategies": 4}, "displaceable": 0,
+                "over_two_hours": {"kalshi-sports": {"count": 2, "longest_hours": 5.0}, "kalshi-weather": {"count": 1}},
+                "caps": {"kalshi-sports": {"cap": 19, "members": 18}, "kalshi-weather": {"cap": 17, "members": 17}},
+                "longest_wait": {"class": "cards", "desk": "kalshi-weather", "hours": 60.6, "id": "c1"},
+                "evidence_clocks": {"at": at(3), "hours": {"kalshi-sports": 20.5, "kalshi-weather": 31.8, "kalshi-prices": None}}}})
+        return gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["5"]
+
+    def test_waiters_over_two_hours_life_against_the_clock_and_displacement(self):
+        five = self.build()
+        sq = five["seat_queue"]
+        self.assertEqual((sq["waiters"], sq["over_two_hours"], sq["over_two_hours_on_free_desks"]), (9, 3, 2))
+        self.assertEqual((sq["free_desks"], sq["longest_h"], sq["strategies_waiting"]), (["kalshi-sports"], 60.6, 4))
+        lc = five["life_vs_clock"]
+        self.assertEqual(lc["desks"]["kalshi-sports"], {"deaths": 2, "median_life_h": 3.0, "clock_h": 20.5, "below_clock": True,
+                                                        "living": 1, "median_age_h": 8.0})
+        self.assertFalse(lc["desks"]["kalshi-weather"]["below_clock"])  # 40 h over a 31.8 h clock
+        self.assertEqual((lc["below"], lc["measured"]), (["kalshi-sports"], 2))
+        ds = five["displacement_share"]
+        self.assertEqual(ds["window"], {"deaths": 3, "displaced": 2, "share": round(2 / 3, 4)})
+        self.assertEqual(ds["lifetime"], {"deaths": 4, "displaced": 3, "share": 0.75})
+
+    def test_without_the_houses_seat_market_the_lab_and_the_scoreboards_own_clocks_stand_in(self):
+        five = self.build(health=False)
+        self.assertTrue(five["seat_queue"]["source"].startswith("lab_loop"))
+        self.assertIsNone(five["seat_queue"]["strategies_waiting"])
+        self.assertEqual(five["life_vs_clock"]["clocks"], "evidence_clocks (Kaplan-Meier median)")
+
+
+class ExecutionTest(ScoreboardCase):
+    def test_fill_rate_per_order_refusals_by_rule_and_probe_takers(self):
+        f = self.floor
+        f.born("p-1", 0)
+        f.born("b-1", 0)
+        f.born("a-1", 0, venue="alpaca", desk="alpaca-crypto-alts", horizon="hour")
+        f.verdict("p-1", 1, "promote", 1, 2, via="allocator", band_from="paper", band_to="probe")
+        f.verdict("b-1", 1, "promote", 1, 2, via="allocator", band_from="paper", band_to="bunt")
+        f.verdict("a-1", 1, "promote", 1, 2, via="allocator", band_to="probe")
+
+        def order(hours: float, oid: str, book: str, status: str) -> None:
+            f.row("book.order", "house", hours, {"book": book, "order_id": oid, "side": "buy", "status": status})
+
+        def fill(agent: str, hours: float, book: str, oid: str, liquidity: str, cash: float) -> None:
+            f.row("book.fill", agent, hours, {"book": book, "side": "buy", "source": "venue", "order_id": oid, "liquidity": liquidity,
+                                              "cash_delta": str(-cash), "quantity": "1", "price": "1", "instrument": {"market_id": "KXZ-1"}})
+
+        order(2, "o1", "kalshi", "accepted")  # placed before the window [4, 28]
+        order(5, "o2", "kalshi", "new")
+        order(5, "o2", "kalshi", "accepted")
+        order(6, "o2", "kalshi", "filled")
+        order(7, "o3", "kalshi", "accepted")
+        order(8, "o3", "kalshi", "cancelled")
+        order(9, "o4", "kalshi-shadow", "accepted")  # practice: never
+        order(10, "o5", "alpaca", "accepted")
+        order(10, "o5", "alpaca", "filled")
+        fill("b-1", 5, "kalshi", "o1", "maker", 5.0)
+        fill("p-1", 6, "kalshi", "o2", "taker", 9.5)  # a probe's Kalshi taker entry
+        fill("a-1", 10, "alpaca", "o5", "taker", 12.25)  # Alpaca books every fill a taker
+        fill("b-1", 11, "kalshi", "o9", "taker", 3.0)  # a bunt's
+        f.sell("b-1", 12, "kalshi", "KXZ-1", 0.5)  # an exit: a fill row, never an entry
+        for ident, side, book in (("i0", "buy", "kalshi"), ("i1", "buy", "kalshi"), ("i2", "buy", "kalshi"), ("i3", "sell", "kalshi"),
+                                  ("i4", "buy", "kalshi-shadow"), ("i5", "buy", "alpaca"), ("i6", "buy", "kalshi")):
+            f.row("agent.intent", "p-1", 2.5, {"id": ident, "side": side, "book": book})
+        taking = "a real entry on fam must be a post-only limit until ... (constitution allocator.real_entry_liquidity)"
+        f.row("book.refused", "p-1", 3, {"book": "kalshi", "intent_id": "i0", "reasons": [taking]})  # before the window
+        f.row("book.refused", "p-1", 14, {"book": "kalshi", "intent_id": "i1", "reasons": [taking]})
+        f.row("book.refused", "b-1", 15, {"book": "kalshi", "intent_id": "i2", "reasons": [
+            "one event may hold at most 25% of the stake: ... (constitution allocator.max_event_share)"]})
+        f.row("book.refused", "p-1", 16, {"book": "kalshi", "intent_id": "i3", "reasons": ["a sell"]})
+        f.row("book.refused", "p-1", 16, {"book": "kalshi-shadow", "intent_id": "i4", "reasons": ["practice"]})
+        f.row("book.refused", "a-1", 22, {"intent_id": "i5", "reasons": ["the alpaca book is frozen until it reconciles: cash differs by 0.0108"]})
+        f.row("book.refused", "p-1", 23, {"book": "kalshi", "intent_id": "i6", "reasons": ["insufficient desk cash: 1.20 < 9.50"]})
+        f.row("ops.job", "house", 28, {})
+        six = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["6"]
+        fr = six["real_fill_rate"]
+        self.assertEqual((fr["orders"], fr["filled"], fr["rate"]), (3, 2, round(2 / 3, 4)))
+        self.assertEqual(fr["by_book"], {"kalshi": {"orders": 2, "filled": 1, "rate": 0.5}, "alpaca": {"orders": 1, "filled": 1, "rate": 1.0}})
+        self.assertEqual((fr["order_rows"], fr["fill_rows"]), (7, 5))  # the baseline's measure counts status rows as orders
+        rr = six["real_refusals"]
+        self.assertEqual((rr["refused"], rr["entries"], rr["per_day"]), (5, 4, 4.0))
+        self.assertEqual(rr["by_rule"], {"allocator.real_entry_liquidity": 1, "allocator.max_event_share": 1, "a frozen book": 1,
+                                         "insufficient desk cash": 1})
+        self.assertEqual((rr["session"]["open"], rr["session"]["entries"]), (gs.iso(ts(13.5)), 2))
+        pt = six["probe_taker_entries"]
+        self.assertEqual((pt["taker_entries"], pt["by_band"], pt["probe_taker_entries"]), (3, {"probe": 2, "bunt": 1}, 2))
+        self.assertEqual(pt["probe_taker_by_book"], {"kalshi": {"entries": 1, "usd": 9.5}, "alpaca": {"entries": 1, "usd": 12.25}})
+        self.assertEqual((pt["refused_as_takers"], pt["probe_refused_as_takers"], pt["probes_refused"]), (1, 1, ["p-1"]))
+
+
+class RunwayTest(ScoreboardCase):
+    def test_sail_runway_the_october_cap_and_the_population_ceiling(self):
+        f = self.floor
+        for hours, balance, spent in ((2, 100, 0.5), (6, 90, 1), (18, 80, 6), (28, 76, 4)):
+            f.row("ops.budget", "house", hours, {"what": "sail", "balance_usd": str(balance), "spent_usd": str(spent)})
+        f.row("ops.alert", "house", 10, {"level": "warning", "text": "the league's population is now 112 (was 128): held at 112"})
+        f.row("ops.alert", "house", 20, {"level": "info", "text": "the league's population is now 128 (was 112): toward the ceiling"})
+        f.write_json("health.json", {"seats": {"population": {"ceiling": 128, "max_population": 112, "rule": "held at 112",
+                                                              "sail": {"reserve_usd": 5.0, "runway_days": 6.5}}},
+                                     "campaign": {"meters": {"openai": {"month": {"month": "2026-10", "total_usd": "12.5", "cap_usd": "300"}}},
+                                                  "accounts": {"sail": {"remaining_usd": "70"}}}})
+        rw = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)["forward_first"]["7"]["runway"]
+        # The last day's readings (6, 18 and 28 h): $10 spent after the first over 22 hours.
+        self.assertEqual((rw["sail_balance_usd"], rw["sail_readings"], rw["sail_burn_per_day_usd"]), (76.0, 3, round(10 * 24 / 22, 2)))
+        self.assertAlmostEqual(rw["sail_runway_days"], round(71 / (10 * 24 / 22), 2))
+        self.assertEqual((rw["openai_month"]["month"], rw["october_cap_usd"]), ("2026-10", 300.0))
+        self.assertTrue(rw["population_binds"])
+        self.assertEqual((rw["population_alerts"], rw["population_held_alerts"]), (2, 1))
+        self.assertEqual(rw["sail_campaign_remaining_usd"], 70.0)
+
+    def test_septembers_month_leaves_octobers_cap_unset(self):
+        self.floor.row("ops.job", "house", 1, {})
+        self.floor.write_json("health.json", {"campaign": {"meters": {"openai": {"month": {"month": "2026-09", "total_usd": "529.37", "cap_usd": "607"}}}}})
+        rw = gs.runway(self.floor.snapshot(), ts(-23))
+        self.assertIsNone(rw["october_cap_usd"])
+        self.assertFalse(rw["population_binds"])
+
+
+class ForwardRenderingTest(ScoreboardCase):
+    def test_every_forward_reading_names_its_functions_and_markdown_prints_both_tables(self):
+        f = self.floor
+        f.born("a-1", 0)
+        f.row("ops.job", "house", 1, {})
+        board = gs.scoreboard(f.snapshot(), hosts=(), house_records=False)
+        for number, row in board["forward_first"].items():
+            for name, value in row.items():
+                self.assertEqual(value["fn"], name, f"row {number}")
+                self.assertTrue(callable(getattr(gs, name)), name)
+        parts = gs.forward_parts(board)
+        self.assertEqual(sorted(parts), [str(i) for i in range(1, 8)])
+        for number, rows in parts.items():
+            for fn, _ in rows:
+                self.assertTrue(callable(getattr(gs, fn)), fn)
+        markdown = gs.render_text(board, markdown=True)
+        forward = "| # | Metric | Reading (each number names its function) | Target at the end |"
+        self.assertIn(forward, markdown)
+        self.assertLess(markdown.index(forward), markdown.index("| # | Metric | Reading | Computed by |"), "the forward rows come first")
+        for number, _, reading, target in gs.forward_rows(board, markdown=True):
+            self.assertTrue(all(f"`{fn}`" in reading for fn, _ in parts[number]))
+            self.assertEqual(target, gs.FORWARD_TARGETS[number])
+        self.assertIn("[real_settled]", gs.render_text(board))
+        self.assertEqual(json.loads(json.dumps(board, default=str))["forward_first"]["4"]["deploy_record"]["source"], "ledger")
+
+    def test_a_pipe_in_a_reading_does_not_end_its_cell(self):
+        self.assertEqual(gs._cell("kalshi-open|hour|t3"), "kalshi-open\\|hour\\|t3")
+
+
 # ---------------------------------------------------------------------------------------- take
 class FakeApi:
     """The Sail client's exec and download, scripted: the backup snippet 'writes' what `stored` holds."""
@@ -731,6 +1210,23 @@ class TakeTest(unittest.TestCase):
         self.assertEqual(backup[4:], list(gs.SNAPSHOT_SQLITE))
         self.assertEqual(cleanup, ["rm", "-rf", remote])
         self.assertIn(f"{remote}/ledger.sqlite.gz", api.downloads)
+
+    def test_the_watchdogs_deploy_log_comes_with_the_snapshot(self):
+        log = json.dumps({"deploy": "r1@1", "release": "r1", "stage": "start", "at": at(1)}).encode() + b"\n"
+        api = FakeApi({"ledger.sqlite": self.ledger}, {"deploys.jsonl": log})
+        written = gs.take(self.target, api=api, box="sb_test")
+        self.assertEqual(written, ["ledger.sqlite", "deploys.jsonl"])
+        self.assertIn("/workspace/deploys.jsonl", api.downloads)
+        snap = gs.Snapshot(self.target)
+        self.addCleanup(snap.close)
+        self.assertEqual(snap.deploys, [{"deploy": "r1@1", "release": "r1", "stage": "start", "at": at(1)}])
+        # A log kept elsewhere is named with --deploys; without one the ledger is read.
+        other = Path(self._tmp.name) / "elsewhere.jsonl"
+        other.write_bytes(log + log)
+        snap2 = gs.Snapshot(self.target, deploys=other)
+        self.addCleanup(snap2.close)
+        self.assertEqual(len(snap2.deploys), 2)
+        self.assertIsNone(gs.read_deploys(Path(self._tmp.name) / "missing.jsonl"))
 
     def test_a_failed_backup_still_deletes_the_box_copies(self):
         api = FakeApi({}, {}, backup_ok=False)

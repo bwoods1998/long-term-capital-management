@@ -1,23 +1,99 @@
 #!/usr/bin/env python3
-"""The gap scoreboard: the seven metrics of the close-the-gaps run, read from a snapshot of the House.
+"""The gap scoreboard: the forward-first run's seven rows and the close-the-gaps run's seven metrics, read from a
+snapshot of the House.
 
-    python3 scripts/gap_scoreboard.py --snapshot DIR [--since ISO] [--baseline ISO] [--json | --markdown]
+    python3 scripts/gap_scoreboard.py --snapshot DIR [--since ISO] [--baseline ISO] [--deploys FILE] [--json | --markdown]
     python3 scripts/gap_scoreboard.py --take DIR [--since ISO] [--baseline ISO] [--json | --markdown]
 
-Workstream Z of docs/goals/LTCM_CLOSE_THE_GAPS.md: read at T0, every four hours and at the end of
-the run. Read-only and standard library only (it borrows `league.stats`, itself standard library, so
-its bound is the ladder's own): the sqlite files are opened `mode=ro`, the JSON files are read, and
-nothing is written anywhere except DIR under `--take`. Every number it prints names the function
-that computed it. `--take` runs on the owner's machine like `scripts/floor_watch.py`: it takes a
-sqlite backup of the House's stores on the box into /tmp, gzips it, downloads it through
-`scripts.floor_box.client().download`, deletes the box copies, and then reads what it fetched.
+Workstream Z of docs/goals/LTCM_FORWARD_FIRST.md (and before it of docs/goals/LTCM_CLOSE_THE_GAPS.md): read at
+T0, every four hours and at the end of a run. Read-only and standard library only (it borrows `league.stats`,
+itself standard library, so its bound is the ladder's own; `scripts/economics.py` for compute, as the plan's
+lifetime figures were measured; `ltcm.data`'s NYSE calendar for the US session): the sqlite files are opened
+`mode=ro`, the JSON files are read, and nothing is written anywhere except DIR under `--take`. Every number it
+prints names the function that computed it. `--take` runs on the owner's machine like `scripts/floor_watch.py`:
+it takes a sqlite backup of the House's stores on the box into /tmp, gzips it, downloads it through
+`scripts.floor_box.client().download` with the JSON files and the watchdog's `deploys.jsonl`, deletes the box
+copies, and then reads what it fetched.
 
 A snapshot directory holds `ledger.sqlite`, `lab.sqlite`, `campaigns.sqlite`, `feeds.sqlite` (the
-House's feed store, `league/feeds.py`), `health.json`, `house.json` and `allocator-board.json`;
-only the ledger is required. The clock is the snapshot's newest ledger row, never this machine's:
+House's feed store, `league/feeds.py`), `health.json`, `house.json`, `allocator-board.json` and
+`deploys.jsonl` (the watchdog's record, `/workspace/deploys.jsonl`; `--deploys FILE` names one kept
+elsewhere); only the ledger is required. The clock is the snapshot's newest ledger row, never this machine's:
 windows are measured back from it, and instants are compared as instants, never as strings
 (sqlite's `datetime('now', ...)` puts a space where the ledger puts `T`, which once let a whole day
 into a six-hour window).
+
+THE FORWARD-FIRST ROWS (docs/goals/LTCM_FORWARD_FIRST.md "The scoreboard", Sept 25, 2026; the first table)
+
+Each row is the plan's row of the same number; each number in it names the function that computed it, and the
+plan's target is printed beside it. Windows end at the snapshot's newest ledger row and start at `--since`
+(default 24 hours before it); "a day" is the window's figure scaled to 24 hours.
+
+1. `real_settled`: the real books' realized result net of fees, as `league.merton.RealPnl` reads it for
+   `merton.paused_until_profit` (health.json `research_economy.merton.real_pnl_24h_usd`): each `book.settle`
+   `pnl` (payout less a cost that holds the buy fees) and each closing fill's `realized` on `kalshi` and
+   `alpaca`, dust rows never; settlements and sales apart. `compute_per_day`: the window's spend by
+   `scripts/economics.py` `spend`, the method of the plan's lifetime $562 (Luna: `provider.request`
+   gateway-verified `cost_usd`; Astra: `merton.pass`, `audit.verdict`, research grants and `ops.budget` probes,
+   gateway-metered; Sail: the balance-debit meter, `ops.budget` `what: sail` `spent_usd`; Jev and web search:
+   credit charges), plus the Alpha Lab's model calls, which live in `lab.sqlite` `calls` and never on the ledger
+   ($4.50 in the T0 day). Two checks are printed beside it and never added: the House's OpenAI line as the
+   gateway meters it (`ops.budget` expedition rows, `campaign.meters.openai.line.settled_usd`, lab calls
+   included: $96.41 a day over 21.4 h against the ledger's $98.19 + $4.50 at T0), and the hourly yield rows (`ops.budget`
+   `what: yield`, `league/yield_ledger.py`: research tokens, Merton's roles and audits, which the lines above
+   already carry). `proven_capacity`: each family the House's pooled record proves, with the board's own
+   capacity (`allocator-board.json` `families`), and `capacity_at_sizes`: `family_capacity`'s factors at the
+   family's real size (the median real bid of the last 7 days) and at 2x and 4x of it -- the markets a day
+   are the band's, the fill rate is the one measured at that size's bucket (none when no bid of that size was
+   ever placed), and the profit a settlement is scaled with the size (the same edge a dollar).
+2. `forward_positive`: the window's lab graduates (a `lab.graduate:<id>:passed` row in the window, dated as
+   `Lab.waiting` dates them) whose latest lab forward window (`lab.sqlite` `forward`) has an active block, and
+   the share of them whose log growth is above zero; the window's newborns with an active block on their
+   venue's practice book in their first 24 hours (`eval.block`), and the share whose summed log growth is above
+   zero, with the newborns whose first day already ended beside it; and the plan's own baseline measure (its 118
+   of 224, 53%; 116 of 215 read here at 02:12Z Sept 25): the active `eval.block` rows of lab-born agents
+   (`founder` `lab:`) in the window with positive log growth. `practice_standing`: the board's median `W_paper`
+   and the agents above the 1.01 line (`W_paper` > 1.01, the plan's count: 33 on the 01:41Z board), with those
+   whose E is at the constitution's `bunt_at` beside it.
+3. `real_dollars` (metric 3 below: the board's real stakes on proven and on unproven families);
+   `capital_on_proof`: the first family swing (a board family in state `swing`, or the first `family.record`
+   or `eval.verdict` that names one) and each proven family's swing clock on the board (real settlements, the
+   look it waits for, days to it); Alpaca real stock agents ever: agents with a real `alpaca` buy fill of an
+   `equity` instrument (and how many of them filled inside a US session), and agents ever staked on the real
+   book on an equity desk (league/niches.json `asset_class`).
+4. `restarts`: `ops.started` rows in the window, and inside a US session. `deploy_record`: every deploy and its
+   verdict from the watchdog's log (`deploys.jsonl`), else from the ledger: `ops.deploy` `deploying` rows are
+   the updater's deploys and a first `ops.started` of a release no such row announced an owner's; a start of
+   the release that ran before, within 30 minutes and before the next deploy, is its rollback, and the first
+   error alert between is its reason. A release killed before it wrote `ops.started` is invisible to the
+   ledger (the owner's 00:02Z release of Sept 25 was one), which is why the log comes first. A rollback's
+   cause is read from its reasons' words: `backup` (backup, checkpoint), `vendor` (Sailbox, a 5xx, a timeout,
+   Cloudflare), `site` (publish, the site), else `house`. A deploy is inside a US session when its start or
+   its promotion is (the regular session on the NYSE calendar, `us_session`). `tick_p50`: the median interval
+   between ticks, from the `ops.job` rows of `merton:follow`, which every tick submits once and whose job id
+   carries the moment: intervals whose earlier job ended within 10 s (so no tick between skipped it) and with
+   no restart between. The loop sleeps a tick up to `tick_seconds` (60), so an interval reads a tick's length
+   only above 60 s; health.json's last tick (`tick_steps.last.total_seconds`) and its hour's slowest steps
+   are beside it.
+5. `seat_queue`: health.json `seats` (the House's seat market, refreshed hourly; its `at` is printed): the
+   waiters by class, those over two hours and the longest, those on desks with a free seat, and the merged
+   strategies waiting (class `strategies`). `life_vs_clock`: per desk, the median life of the window's dead
+   beside the desk's evidence clock (`seats.evidence_clocks`, else the scoreboard's own Kaplan-Meier median).
+   `displacement_share`: deaths of cause `displaced`, in the window and over the ledger's life.
+6. `real_fill_rate`: orders first placed on a real book in the window (`book.order`: one order however many
+   status rows it has) and those with a venue fill; the baseline's measure beside it, fill rows over order
+   rows, which counts every status row as an order (the plan's 72 of 694, 10%; on the T0 day 62 fill rows of 695
+   order rows, where 61 of 165 orders filled, 37%). `real_refusals`: refused real entries (`book.refused` on a real book whose intent was a buy), a day
+   and in the last US session, by the constitution key each reason names. `probe_taker_entries`: real buy
+   fills taken as a taker, by the band the agent held then (`eval.verdict` `band_to` or `band`), and probes'
+   entries refused for taking (`allocator.real_entry_liquidity`).
+7. `runway`: Sail's balance, burn and runway from the meter (`ops.budget` `what: sail`) less the reserve,
+   beside the House's own (health.json `seats.population.sail`); the OpenAI month the gateway reports and its
+   cap, October's cap unset until the gateway's month is 2026-10 or later; whether the population ceiling
+   binds on runway (`seats.population` `max_population` under `ceiling`) and the population alerts in the
+   window.
+
+THE CLOSE-THE-GAPS METRICS (docs/goals/LTCM_CLOSE_THE_GAPS.md; kept, the second table)
 
 THE FAMILY RECORD. By default every family record here is the House's own: `HouseRecords` runs
 `league.families.family_record` (Deploy B; `league.allocator.family_record` in Deploy A's code) on the
@@ -56,7 +132,7 @@ The scoreboard's own formula (the definition A-money implemented in `league/allo
   pooled apart by the entry fill's `liquidity` (the first buy fill of the position); a position with
   no entry fill on record (carried in) is in neither.
 
-THE SEVEN METRICS (numbers in brackets: the plan's baseline at 00:50Z Sept 24)
+The seven metrics (numbers in brackets: that plan's baseline at 00:50Z Sept 24)
 
 1. `real_bounds`: families whose REAL-only pooled record has lcb > 0 [1 family], and each one's
    capacity (`family_capacity`, $/day) = markets in the family's band a day x the fill rate at its
@@ -166,9 +242,41 @@ IDLE_DESK_HOURS = 48.0
 RECORDER_HOURS = 24.0
 SNAPSHOT_SQLITE = ("ledger.sqlite", "lab.sqlite", "campaigns.sqlite", "feeds.sqlite")
 SNAPSHOT_JSON = ("health.json", "house.json", "allocator-board.json", "allocator.json")
+#: The watchdog's own record of every deploy (`league/watchdog.py` `Releases.record`), beside the stores.
+DEPLOYS_JSONL = "deploys.jsonl"
 BOX_PYTHON = "/workspace/.venv/bin/python"
 #: The first of the key-free data hosts the owner allowed on Sept 24, 2026 (`LEAGUE_HOSTS`' last block).
 FIRST_ALLOWED_DATA_HOST = "api.open-meteo.com"
+
+# The forward-first rows (Sept 25, 2026).
+#: Every tick submits this job to the ops lane once (`House._tick`); its job id ends in the moment it was queued.
+TICK_JOB = "merton:follow"
+#: An interval counts only when the earlier job ended within this: a job still in the lane at the next tick is
+#: skipped there (`House._background`, one job a key), and that interval would span two ticks. Measured on the T0
+#: day: 1,014 of 1,017 intervals qualify (the lane's longest wait behind a Merton role was 11.3 s) and 25 more
+#: span a restart.
+TICK_JOB_DONE_SECONDS = 10.0
+#: The ledger's reading of a rollback: a start of the release that ran before, this soon after a deploy (the
+#: watchdog's canary and watch take about fifteen minutes).
+ROLLBACK_WATCH_SECONDS = 1800.0
+#: A rollback's cause from the words of its reasons, first match wins; anything else is the House's own.
+ROLLBACK_CAUSES = (
+    ("backup", ("backup", "checkpoint")),
+    ("vendor", ("sailbox", "sail api", "api 5", "http 5", "503", "502", "504", "service unavailable", "timed out",
+                "cloudflare")),
+    ("site", ("publish", "the site", "blakewoods")),
+)
+OUTSIDE_THE_HOUSE = ("backup", "vendor", "site")
+#: Capacity is measured at the real size and at these multiples of it (the plan's target: 1x, 2x and 4x).
+CAPACITY_MULTIPLES = (1, 2, 4)
+#: The plan's "1.01 line": a living agent above it has W_paper over 1.01 (33 of 128 on the 01:41Z board).
+ABOVE_LINE = 1.01
+DISPLACED = "displaced"
+POPULATION_ALERT = "the league's population is now"
+#: The House's Sail reserve when health.json does not say (`economy.sail_reserve_usd`).
+SAIL_RESERVE_USD = 5.0
+#: The US regular session in UTC when the NYSE calendar cannot say (the plan's hours, Eastern daylight time).
+SESSION_HOURS_UTC = (13.5, 20.0)
 
 
 # ------------------------------------------------------------------------------------ time
@@ -188,6 +296,12 @@ def epoch(value: Any) -> float:
 
 def iso(ts: float | None) -> str | None:
     return None if ts is None else datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def iso_ms(ts: float) -> str:
+    """An instant as the ledger writes `at` (milliseconds and `Z`), for readers that compare the text."""
+    moment = datetime.fromtimestamp(ts, timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
 def _r(value: float | None, digits: int = 4) -> float | None:
@@ -214,10 +328,28 @@ def connect(path: Path) -> sqlite3.Connection | None:
     return conn
 
 
+def read_deploys(path: Path) -> list[dict[str, Any]] | None:
+    """The watchdog's `deploys.jsonl` rows, oldest first, or None without the file (a torn line is skipped, as
+    `Releases.history` skips it)."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    rows = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
 class Snapshot:
     """The stores of one snapshot directory, read-only. Ledger rows are read by kind once and kept."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, deploys: str | Path | None = None):
         self.root = Path(root)
         self.ledger = connect(self.root / "ledger.sqlite")
         if self.ledger is None:
@@ -231,6 +363,8 @@ class Snapshot:
                 self.json[name] = json.loads((self.root / name).read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 self.json[name] = None
+        self.deploys_path = Path(deploys) if deploys is not None else self.root / DEPLOYS_JSONL
+        self.deploys = read_deploys(self.deploys_path)
         head = self.ledger.execute("SELECT count(*), max(seq), max(at) FROM ledger").fetchone()
         self.rows_total, self.head_seq, self.newest_at = int(head[0]), int(head[1] or 0), head[2]
         self.now = epoch(self.newest_at) if self.newest_at else time.time()
@@ -260,9 +394,27 @@ class Snapshot:
         row = self.ledger.execute("SELECT at FROM ledger WHERE id = ?", (ident,)).fetchone()
         return epoch(row[0]) if row else None
 
+    def ids(self, kind: str, pattern: str) -> list[tuple[str, float]]:
+        """(id, when) of the ledger rows of `kind` whose id is LIKE `pattern`, in ledger order."""
+        return [(str(ident), epoch(at)) for ident, at in self.ledger.execute(
+            "SELECT id, at FROM ledger WHERE kind = ? AND id LIKE ? ORDER BY seq", (kind, pattern))]
+
+    def lab_rows(self, sql: str, args: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        """Rows from `lab.sqlite`, or [] without the store or the table (a lab from before it)."""
+        if self.lab is None:
+            return []
+        try:
+            return self.lab.execute(sql, tuple(args)).fetchall()
+        except sqlite3.Error:
+            return []
+
     @property
     def board(self) -> dict[str, Any]:
         return self.json.get("allocator-board.json") or {}
+
+    @property
+    def health(self) -> dict[str, Any]:
+        return self.json.get("health.json") or {}
 
 
 def _payload(text: str) -> dict:
@@ -1304,6 +1456,874 @@ def weather_capacity(snap: Snapshot, families: Families, intents: Mapping[str, M
     return out
 
 
+# ======================================================================= the forward-first rows (Sept 25, 2026)
+def _f(value: Any) -> float | None:
+    """A number from a ledger or JSON field (digits in a string, or a number), or None."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _get(value: Any, *keys: str) -> Any:
+    """`value[k1][k2]...`, or None where a level is missing or not a mapping."""
+    for key in keys:
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(key)
+    return value
+
+
+def _per_day(value: float | None, hours: float) -> float | None:
+    return None if value is None or hours <= 0 else value * 24.0 / hours
+
+
+def _share(part: int, whole: int) -> float | None:
+    return _r(part / whole) if whole else None
+
+
+def _quantile(values: Sequence[float], q: float) -> float | None:
+    """The nearest-rank quantile (the value at or below which a share `q` of them lie)."""
+    if not values:
+        return None
+    rows = sorted(values)
+    return rows[max(0, min(len(rows) - 1, math.ceil(q * len(rows)) - 1))]
+
+
+# ----------------------------------------------------------------------------------- the US session
+def us_session(ts: float) -> tuple[float, float] | None:
+    """(open, close) of the regular US equity session on the New York day of `ts`, holidays and early closes
+    included (`ltcm.data.us_equity_session`, the calendar the House's grace reads), or None when the market is
+    shut that day. Where that calendar cannot say (a year it does not compute), Monday to Friday 13:30-20:00Z."""
+    try:
+        from ltcm.data import NEW_YORK, to_datetime, us_equity_session
+
+        day = datetime.fromtimestamp(ts, timezone.utc).astimezone(NEW_YORK).date()
+        session = us_equity_session(day)
+        if session is None:
+            return None
+        return to_datetime(session.open_at).timestamp(), to_datetime(session.close_at).timestamp()
+    except Exception:  # noqa: BLE001 - no calendar (an import, or a year it does not compute): the plan's hours
+        moment = datetime.fromtimestamp(ts, timezone.utc)
+        if moment.weekday() >= 5:
+            return None
+        midnight = moment.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        return midnight + SESSION_HOURS_UTC[0] * HOUR, midnight + SESSION_HOURS_UTC[1] * HOUR
+
+
+def in_us_session(ts: float) -> bool:
+    session = us_session(ts)
+    return session is not None and session[0] <= ts < session[1]
+
+
+def last_session(since: float, now: float) -> tuple[float, float] | None:
+    """The latest regular session that opened by `now` and closed after `since`, cut at `now`; None without one."""
+    t = now
+    for _ in range(10):
+        session = us_session(t)
+        if session is not None and session[0] <= now and session[1] > since:
+            return session[0], min(session[1], now)
+        t -= DAY
+    return None
+
+
+# ------------------------------------------------------------------------------------------- row 1
+def real_settled(snap: Snapshot, since: float) -> dict[str, Any]:
+    """The real books' realized result in the window, net of fees, exactly as `league.merton.RealPnl` reads it for
+    `merton.paused_until_profit` (health.json `research_economy.merton.real_pnl_24h_usd`): each `book.settle` `pnl`
+    and each closing fill's `realized` on `kalshi` and `alpaca`, dust rows and practice books never. A settlement's
+    `pnl` is its payout less the holding's cost, and the cost holds the buy fees (`Book.settle`); a sale's
+    `realized` is net of its own fee. Settlements and sales apart, by book, and the House's own rows (positions of
+    dead members it held to settlement) apart too. On the T0 snapshot: +$21.35 on 57 settlements and 4 sales, to
+    the cent the House's own +$21.34797 on 61."""
+    now = snap.now
+    totals = {"settled": 0.0, "sales": 0.0}
+    counts = {"settled": 0, "sales": 0}
+    by_book: dict[str, dict[str, Any]] = {}
+    house = 0.0
+    for row in snap.rows("book.settle", "book.fill"):
+        if not since <= row.t <= now:
+            continue
+        p = row.p
+        book = str(p.get("book"))
+        if book not in REAL_BOOKS or p.get("real_money") is False or p.get("source") == "dust":
+            continue
+        amount = _f(p.get("pnl") if row.kind == "book.settle" else p.get("realized"))
+        if amount is None:
+            continue  # an opening fill realizes nothing
+        side = "settled" if row.kind == "book.settle" else "sales"
+        totals[side] += amount
+        counts[side] += 1
+        entry = by_book.setdefault(book, {"realized_usd": 0.0, "closes": 0})
+        entry["realized_usd"] += amount
+        entry["closes"] += 1
+        if row.agent == HOUSE:
+            house += amount
+    hours = max((now - since) / HOUR, 0.0)
+    realized = totals["settled"] + totals["sales"]
+    return {"fn": "real_settled", "since": iso(since), "hours": _r(hours, 2),
+            "realized_usd": _r(realized), "per_day_usd": _r(_per_day(realized, hours)),
+            "settled_usd": _r(totals["settled"]), "settlements": counts["settled"],
+            "sales_usd": _r(totals["sales"]), "sales": counts["sales"], "house_rows_usd": _r(house),
+            "by_book": {b: {"realized_usd": _r(r["realized_usd"]), "closes": r["closes"]} for b, r in sorted(by_book.items())}}
+
+
+def lab_calls(snap: Snapshot, since: float | None) -> tuple[float, int]:
+    """The Alpha Lab's own model calls (`lab.sqlite` `calls`, Luna's and Sol's through the gateway on the House's
+    line, never on the ledger, so neither `scripts/economics.py` nor the yield rows see them): (dollars, calls) from
+    `since` (every call with None) to the snapshot's clock. [] of a lab store without the table."""
+    usd, n = 0.0, 0
+    for r in snap.lab_rows("SELECT at, cost_usd FROM calls"):
+        t = _f(r["at"])
+        if t is None or t > snap.now or (since is not None and t < since):
+            continue
+        usd += _f(r["cost_usd"]) or 0.0
+        n += 1
+    return usd, n
+
+
+def gateway_meter(snap: Snapshot, since: float) -> dict[str, Any]:
+    """The House's OpenAI line as the gateway meters it (lab calls included): `campaign.meters.openai.line.
+    settled_usd` on the `ops.budget` expedition rows (about hourly), from the first reading in the window to the
+    last, as dollars a day over the hours they span; and the gateway's month as last reported (`meters.openai.
+    month`). A check on `compute_per_day`'s OpenAI lines, never added to them."""
+    readings: list[tuple[float, float]] = []
+    month = None
+    for row in snap.rows("ops.budget"):
+        if row.p.get("what") != "expedition" or row.t > snap.now:
+            continue
+        meter = _get(row.p, "campaign", "meters", "openai") or {}
+        if isinstance(meter.get("month"), Mapping):
+            month = {"at": row.at, **{k: meter["month"].get(k) for k in ("month", "total_usd", "cap_usd")}}
+        settled = _f(_get(meter, "line", "settled_usd"))
+        if settled is not None and row.t >= since:
+            readings.append((row.t, settled))
+    out: dict[str, Any] = {"fn": "gateway_meter", "readings": len(readings), "month": month,
+                           "usd": None, "hours": None, "per_day_usd": None}
+    if len(readings) >= 2:
+        usd = readings[-1][1] - readings[0][1]
+        hours = (readings[-1][0] - readings[0][0]) / HOUR
+        out.update(usd=_r(usd), hours=_r(hours, 2), first=iso(readings[0][0]), last=iso(readings[-1][0]),
+                   per_day_usd=_r(_per_day(usd, hours)))
+    return out
+
+
+def yield_rows(snap: Snapshot, since: float) -> dict[str, Any]:
+    """The hourly yield rows (`ops.budget` `what: yield`, `league/yield_ledger.py`) written in the window: the hours
+    they cover and the dollars by line. A check on `compute_per_day`, never added to it: every line of them (research
+    tokens, Merton's roles, audits) is on the ledger already, and the Sail meter carries the Sail research tokens
+    again. The House writes one an hour while it runs (31 rows from 21:48Z Sept 23 to T0)."""
+    usd = hours = 0.0
+    n = 0
+    lines: dict[str, float] = defaultdict(float)
+    for row in snap.rows("ops.budget"):
+        p = row.p
+        if p.get("what") != "yield" or not since <= row.t <= snap.now:
+            continue
+        n += 1
+        hours += _f(p.get("hours")) or 0.0
+        usd += _f(p.get("total_usd")) or 0.0
+        for line, value in (p.get("spend_usd") or {}).items():
+            lines[str(line)] += _f(value) or 0.0
+    return {"fn": "yield_rows", "rows": n, "hours": _r(hours, 2), "usd": _r(usd), "per_day_usd": _r(_per_day(usd, hours)),
+            "by_line": {k: _r(v) for k, v in sorted(lines.items())}}
+
+
+def compute_per_day(snap: Snapshot, since: float) -> dict[str, Any]:
+    """The window's model and infrastructure spend a day: `scripts/economics.py` `spend` over the window (the method
+    of the plan's lifetime $562: Luna gateway-verified `provider.request` costs, Astra's gateway-metered `merton.pass`,
+    audits, grants and probes, the Sail balance-debit meter, Jev and web-search credit charges; its estimate lines
+    are left out where it leaves them out) plus the lab's own calls (`lab_calls`); the lifetime total by the same
+    method beside it, and the gateway meter (`gateway_meter`) and the yield rows (`yield_rows`) as checks. Measured on
+    the T0 snapshot: $114.39 by economics.py and $4.50 of lab calls in the day; lifetime $564.70 by economics.py
+    (the plan read $562 at 01:42Z)."""
+    from scripts import economics  # standard library and no league imports: the lifetime method, run as it is
+
+    conn = economics.connect_ro(str(snap.root / "ledger.sqlite"))
+    semantic = snap.root / "semantic.sqlite"
+    semantic_db = str(semantic) if semantic.exists() else None
+    try:
+        window = economics.spend(conn, iso_ms(since), None, semantic_db=semantic_db)
+        life = economics.spend(conn, None, None, semantic_db=semantic_db)
+    finally:
+        conn.close()
+    hours = max((snap.now - since) / HOUR, 0.0)
+    lab_usd, lab_n = lab_calls(snap, since)
+    life_lab_usd, life_lab_n = lab_calls(snap, None)
+    providers = {str(name): float(usd) for name, usd in window["providers"].items()}
+    providers["openai-lab"] = lab_usd
+    total = math.fsum(providers.values())
+    lines = [{"provider": row["provider"], "component": row["component"], "usd": _r(float(row["usd"])),
+              "count": row["count"], "basis": row["basis"]}
+             for row in window["lines"] if row["in_total"] and float(row["usd"])]
+    lines.append({"provider": "openai-lab", "component": "Alpha Lab model calls (lab.sqlite calls)", "usd": _r(lab_usd),
+                  "count": lab_n, "basis": "lab.sqlite cost_usd"})
+    openai = providers.get("openai-luna", 0.0) + providers.get("openai-astra", 0.0) + lab_usd
+    return {"fn": "compute_per_day", "since": iso(since), "hours": _r(hours, 2),
+            "usd": _r(total), "per_day_usd": _r(_per_day(total, hours)),
+            "providers": {k: _r(v) for k, v in sorted(providers.items())}, "openai_usd": _r(openai),
+            "openai_per_day_usd": _r(_per_day(openai, hours)), "lines": lines,
+            "lifetime_usd": _r(float(life["total"]) + life_lab_usd), "lifetime_economics_usd": _r(float(life["total"])),
+            "lifetime_lab_usd": _r(life_lab_usd), "lifetime_lab_calls": life_lab_n,
+            "lifetime_providers": {str(k): _r(float(v)) for k, v in sorted(life["providers"].items())},
+            "gateway": gateway_meter(snap, since), "yield": yield_rows(snap, since)}
+
+
+def unit_economics(settled: Mapping[str, Any], compute: Mapping[str, Any], swinging: bool) -> dict[str, Any]:
+    """Compute a day over real settled profit a day, and the plan's target: compute at most twice the profit, or at
+    most $60 a day while no family swings."""
+    profit, cost = settled.get("per_day_usd"), compute.get("per_day_usd")
+    ratio = cost / profit if profit is not None and cost is not None and profit > 0 else None
+    meets = cost is not None and ((ratio is not None and ratio <= 2.0) or (not swinging and cost <= 60.0))
+    return {"fn": "unit_economics", "profit_per_day_usd": profit, "compute_per_day_usd": cost,
+            "compute_over_profit": _r(ratio, 2), "family_swings": swinging, "meets_target": bool(meets)}
+
+
+def capacity_at_sizes(snap: Snapshot, venue: str, family: str, members: Sequence[Agent], trades: Sequence[Trade],
+                      intents: Mapping[str, Mapping[str, Any]], multiples: Sequence[int] = CAPACITY_MULTIPLES) -> dict[str, Any]:
+    """`family_capacity`'s factors at the family's real size and at multiples of it: the size is the median real bid
+    of the last 7 days (the median of every bid when the family has no real one); the markets a day are the band's
+    and do not move with the size; the fill rate is the one measured at that size's bucket (the real book's once it
+    has bid `MIN_REAL_MARKETS_FOR_FILL_RATE` markets there, every book's before, none when no bid of that size was
+    ever placed: an unmeasured size is never assumed to fill); the profit a settlement is the family's (real where it
+    has real closes) scaled by the multiple, the same edge a dollar."""
+    base = family_capacity(snap, venue, family, members, trades, intents)
+    out: dict[str, Any] = {"fn": "capacity_at_sizes", "family": family, "venue": venue, "base": base, "sizes": []}
+    if base.get("capacity_usd_per_day") is None and base.get("why"):
+        out["why"] = base["why"]
+        return out
+    ids = {a.id for a in members}
+    start = snap.now - CAPACITY_DAYS * DAY
+    real = sorted(i["notional"] for i in intents.values() if i["agent"] in ids and i["placed"] and i["t"] >= start
+                  and i["market"] and i["book"] in REAL_BOOKS and i["notional"] is not None)
+    size = median(real) if real else base.get("current_size_usd")
+    out.update(size_usd=_r(size, 2), size_basis="the median real bid" if real else "the median bid; no real bid yet")
+    if size is None:
+        out["why"] = "no bid carries a size"
+        return out
+    real_rates = (base.get("fill_rates_by_book") or {}).get("real") or {}
+    every = base.get("fill_rates") or {}
+    profit = base.get("profit_per_settlement_usd")
+    for k in multiples:
+        bucket = size_bucket(size * k)
+        at_real = real_rates.get(bucket) or {}
+        if int(at_real.get("markets_bid") or 0) >= MIN_REAL_MARKETS_FOR_FILL_RATE:
+            rate, basis = at_real.get("fill_rate"), "real"
+        elif bucket in every:
+            rate, basis = every[bucket].get("fill_rate"), "all books"
+        else:
+            rate, basis = None, "no bid of this size yet"
+        scaled = profit * k if profit is not None else None
+        capacity = base["markets_per_day"] * rate * scaled if rate is not None and scaled is not None else None
+        out["sizes"].append({"multiple": k, "size_usd": _r(size * k, 2), "bucket": bucket, "fill_rate": rate,
+                             "fill_rate_basis": basis, "profit_per_settlement_usd": _r(scaled),
+                             "capacity_usd_per_day": _r(capacity)})
+    return out
+
+
+def proven_capacity(snap: Snapshot, families: Families, intents: Mapping[str, Mapping[str, Any]],
+                    proven: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Each family the House's pooled record proves (`real_bounds`' `proven`), with the board's own capacity
+    (`allocator-board.json` `families`: size, fill rate, markets and settlements a day, dollars a day) and the
+    scoreboard's at its real size and at 2x and 4x (`capacity_at_sizes`); and any family the board calls proven that
+    this record does not."""
+    board = snap.board.get("families") or {}
+    rows = []
+    for r in proven:
+        venue, family = r["venue"], r["family"]
+        house = _get(board, venue, family) or {}
+        rows.append({"family": family, "venue": venue, "board_state": house.get("state"), "stake_usd": house.get("stake_usd"),
+                     "house_capacity": house.get("capacity"),
+                     "sizes": capacity_at_sizes(snap, venue, family, families.members.get((venue, family)) or [],
+                                                families.trades.get((venue, family)) or [], intents)})
+    listed = {(r["venue"], r["family"]) for r in rows}
+    board_proven = sorted((str(v), str(f)) for v, fams in board.items() if isinstance(fams, Mapping)
+                          for f, rec in fams.items() if isinstance(rec, Mapping) and rec.get("state") in ("proven", "swing"))
+    return {"fn": "proven_capacity", "count": len(rows), "families": rows,
+            "board_only": [f"{v}/{f}" for v, f in board_proven if (v, f) not in listed]}
+
+
+# ------------------------------------------------------------------------------------------- row 2
+def forward_positive(snap: Snapshot, agents: Mapping[str, Agent], since: float) -> dict[str, Any]:
+    """The share of the window's lab graduates and newborns whose first forward evidence is positive, and the plan's
+    baseline measure (the module docstring, row 2). A graduate is measured by its latest lab forward window (tape
+    that arrived after its code was frozen); a newborn by its first practice day's active blocks. On the T0 snapshot
+    110 candidates graduated in the day, 91 carry a forward window and 8 of those an active block; 116 of 215
+    lab-born blocks were positive at 02:12Z against the plan's 118 of 224."""
+    now = snap.now
+    windows: dict[str, dict[str, Any]] = {}
+    for r in snap.lab_rows("SELECT candidate, at, ok, active_blocks, log_growth FROM forward"):
+        t = _f(r["at"])
+        if t is None or t > now:
+            continue
+        cand = str(r["candidate"])
+        if cand not in windows or t > windows[cand]["at"]:
+            windows[cand] = {"at": t, "ok": bool(r["ok"]), "active": int(r["active_blocks"] or 0), "growth": _f(r["log_growth"])}
+    graduated: dict[str, float] = {}
+    for ident, t in snap.ids("lab.graduate", "lab.graduate:%:passed"):
+        parts = ident.split(":")
+        if len(parts) == 3 and since <= t <= now:
+            graduated.setdefault(parts[1], t)
+    carried = [c for c in graduated if c in windows]
+    tested = [c for c in carried if windows[c]["ok"] and windows[c]["active"] > 0]
+    positive = [c for c in tested if (windows[c]["growth"] or 0.0) > 0]
+    blocks: dict[str, list[tuple[float, str, float]]] = defaultdict(list)
+    lab_rows: list[bool] = []
+    for row in snap.rows("eval.block"):
+        if not row.p.get("active") or row.t > now:
+            continue
+        growth = _f(row.p.get("log_growth")) or 0.0
+        blocks[row.agent].append((row.t, str(row.p.get("book")), growth))
+        agent = agents.get(row.agent)
+        if row.t >= since and agent is not None and str(agent.founder or "").startswith("lab:"):
+            lab_rows.append(growth > 0)
+
+    def first_day(agent: Agent) -> list[float]:
+        book = PRACTICE_BOOK.get(agent.venue)
+        return [g for t, b, g in blocks.get(agent.id, ()) if b == book and agent.born <= t <= agent.born + DAY]
+
+    def cohort(rows: Sequence[Agent]) -> dict[str, Any]:
+        measured = [(a, first_day(a)) for a in rows]
+        measured = [(a, g) for a, g in measured if g]
+        good = sum(1 for _, g in measured if math.fsum(g) > 0)
+        return {"born": len(rows), "tested": len(measured), "positive": good, "share": _share(good, len(measured))}
+
+    newborns = cohort([a for a in agents.values() if since <= a.born <= now])
+    ended = cohort([a for a in agents.values() if since - DAY <= a.born <= now - DAY])
+    lab = _get(snap.health, "lab", "forward") or {}
+    return {"fn": "forward_positive", "since": iso(since),
+            "graduates": {"graduated": len(graduated), "with_window": len(carried), "tested": len(tested),
+                          "positive": len(positive), "share": _share(len(positive), len(tested))},
+            "newborns": newborns, "newborns_first_day_ended": ended,
+            "lab_blocks": {"active": len(lab_rows), "positive": sum(lab_rows), "share": _share(sum(lab_rows), len(lab_rows))},
+            "lab_ranked": {"ranked": lab.get("ranked"), "positive": lab.get("positive")}}
+
+
+def bunt_line() -> float:
+    """The constitution's `allocator.bunt_at` in this checkout (1.01 since Sept 20, 2026)."""
+    try:
+        from league.constitution import CONSTITUTION
+
+        return float((CONSTITUTION.get("allocator") or {}).get("bunt_at", ABOVE_LINE))
+    except Exception:  # noqa: BLE001 - a checkout without it reads the plan's line
+        return ABOVE_LINE
+
+
+def practice_standing(snap: Snapshot) -> dict[str, Any]:
+    """The board's living agents (`allocator-board.json` `agents`, the allocator's own evidence): the median `W_paper`,
+    how many are above the 1.01 line (W_paper over 1.01, as the plan counted its 33), and how many have E at or over
+    the bunt line (`bunt_at`), the line the allocator promotes on."""
+    board = snap.board.get("agents") or {}
+    w_paper, e = [], []
+    for row in board.values():
+        evidence = row.get("evidence") if isinstance(row, Mapping) else None
+        if not isinstance(evidence, Mapping):
+            continue
+        if _f(evidence.get("W_paper")) is not None:
+            w_paper.append(float(evidence["W_paper"]))
+        if _f(evidence.get("E")) is not None:
+            e.append(float(evidence["E"]))
+    line = bunt_line()
+    return {"fn": "practice_standing", "board_at": snap.board.get("at"), "agents": len(board), "with_evidence": len(w_paper),
+            "median_w_paper": _r(median(w_paper), 5) if w_paper else None, "line": ABOVE_LINE,
+            "above_line": sum(1 for w in w_paper if w > ABOVE_LINE), "bunt_at": line, "e_at_bunt": sum(1 for x in e if x >= line)}
+
+
+# ------------------------------------------------------------------------------------------- row 3
+def desk_asset_classes() -> dict[str, tuple[str, ...]]:
+    """Desk id -> the asset classes it trades (league/niches.json `asset_class` or `asset_classes`; a Kalshi desk
+    trades events)."""
+    try:
+        niches = json.loads((REPO_ROOT / "league" / "niches.json").read_text(encoding="utf-8"))["niches"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    out = {}
+    for n in niches:
+        if isinstance(n, dict):
+            classes = n.get("asset_classes") or ([n["asset_class"]] if n.get("asset_class") else ["event"])
+            out[str(n.get("id"))] = tuple(str(c) for c in classes)
+    return out
+
+
+def capital_on_proof(snap: Snapshot, agents: Mapping[str, Agent]) -> dict[str, Any]:
+    """The first family swing and the swing clocks of the proven families (the board's `families`: `state`,
+    `swing_clock`); and the Alpaca real stock agents ever (an `equity` buy fill on the real `alpaca` book, and how
+    many of them filled inside a US session; and agents ever staked on the real book on an equity desk -- an open
+    desk's member counts once it asked the real book for an equity)."""
+    now = snap.now
+    board = snap.board.get("families") or {}
+    swinging, clocks = [], []
+    for venue, fams in sorted(board.items()):
+        if not isinstance(fams, Mapping):
+            continue
+        for family, rec in sorted(fams.items()):
+            if not isinstance(rec, Mapping) or rec.get("state") not in ("proven", "swing"):
+                continue
+            if rec.get("state") == "swing":
+                swinging.append(f"{venue}/{family}")
+            clock = rec.get("swing_clock") or {}
+            clocks.append({"family": family, "venue": venue, "state": rec.get("state"), "real_n": clock.get("real_n"),
+                           "look_at": _get(clock, "needs", "look_at"), "to_go": _get(clock, "needs", "real_settlements"),
+                           "days_to_swing": clock.get("days_to_swing"), "real_per_day": clock.get("real_per_day")})
+    first = None
+    for row in snap.rows("family.record"):
+        if row.p.get("state") == "swing" and row.t <= now:
+            first = {"at": row.at, "family": row.p.get("family"), "venue": row.p.get("venue"), "row": "family.record"}
+            break
+    for row in snap.rows("eval.verdict"):
+        if row.p.get("band_to") == "swing" and row.t <= now:
+            if first is None or row.t < epoch(first["at"]):
+                first = {"at": row.at, "agent": row.agent, "family": agents[row.agent].family if row.agent in agents else None,
+                         "row": "eval.verdict"}
+            break
+    classes = desk_asset_classes()
+    filled: dict[str, str] = {}
+    in_session: set[str] = set()
+    for row in snap.rows("book.fill"):
+        p = row.p
+        if (p.get("book") != "alpaca" or p.get("side") != "buy" or p.get("source") not in ("venue", "cross") or row.t > now
+                or _get(p, "instrument", "asset_class") != "equity"):
+            continue
+        filled.setdefault(row.agent, row.at)
+        if in_us_session(row.t):
+            in_session.add(row.agent)
+    asked = {row.agent for row in snap.rows("agent.intent")
+             if row.p.get("book") == "alpaca" and _get(row.p, "instrument", "asset_class") == "equity" and row.t <= now}
+    staked = set()
+    for row in snap.rows("book.stake"):
+        agent = agents.get(row.agent)
+        if row.p.get("book") != "alpaca" or (_f(row.p.get("usd")) or 0.0) <= 0 or agent is None or row.t > now:
+            continue
+        desk = classes.get(agent.desk, ())
+        if desk == ("equity",) or ("equity" in desk and row.agent in asked):
+            staked.add(row.agent)
+    return {"fn": "capital_on_proof", "swinging": swinging, "first_swing": first, "swing_clocks": clocks,
+            "alpaca_stock_filled": len(filled), "alpaca_stock_filled_in_session": len(in_session),
+            "alpaca_stock_staked": len(staked), "alpaca_stock_agents": sorted(set(filled) | staked)}
+
+
+# ------------------------------------------------------------------------------------------- row 4
+def restarts(snap: Snapshot, since: float) -> dict[str, Any]:
+    """House restarts in the window (`ops.started`), a day, and those inside a US session (`us_session`)."""
+    rows = [r for r in snap.rows("ops.started") if since <= r.t <= snap.now]
+    hours = max((snap.now - since) / HOUR, 0.0)
+    return {"fn": "restarts", "since": iso(since), "count": len(rows), "per_day": _r(_per_day(len(rows), hours), 1),
+            "in_session": sum(1 for r in rows if in_us_session(r.t)),
+            "releases": dict(Counter(str(r.p.get("release")) for r in rows)), "at": [r.at for r in rows]}
+
+
+def rollback_cause(reasons: Iterable[Any]) -> str:
+    """`backup`, `vendor` or `site` when a rollback's reasons name a cause outside the House (`ROLLBACK_CAUSES`, first
+    match wins), else `house`. Sept 24-25, 2026: six releases in a row went back on "The daily backup of the House
+    box failed (SailboxError: sailbox api 503: prepare checkpoint warm snapshot ...)"; one on a practice book frozen
+    on a two-cent cash difference, which is the House's."""
+    text = " ".join(str(r) for r in reasons or ()).lower()
+    for cause, words in ROLLBACK_CAUSES:
+        if any(word in text for word in words):
+            return cause
+    return "house"
+
+
+def deploys_from_log(rows: Sequence[Mapping[str, Any]], since: float, now: float) -> list[dict[str, Any]]:
+    """Every deploy the watchdog staged (`deploys.jsonl`: one `deploy` id a deploy, with its `start`, `promote` and
+    `verdict` rows) that started in the window. A `vet` or `attest` refusal has no deploy id: the updater stopped it
+    before the watchdog staged anything, and it is not a deploy; nor is a `busy` refusal (another deploy held the
+    lock: 20260924T082644Z, re-sent three minutes later) or an `unjudged` one, which `Updater` does not count either."""
+    deploys: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ident = row.get("deploy")
+        if not ident or row.get("busy") or row.get("unjudged"):
+            continue
+        try:
+            t = epoch(row["ts"]) if row.get("ts") is not None else epoch(row["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if t > now:
+            continue
+        d = deploys.setdefault(str(ident), {"deploy": str(ident), "release": row.get("release"), "by": None, "start": None,
+                                             "promoted_at": None, "verdict": None, "reasons": [], "ended": None})
+        stage = row.get("stage")
+        if stage == "start":
+            d["start"] = t
+        elif stage == "promote" and row.get("ok", True):
+            d["promoted_at"] = t
+        elif stage == "verdict":
+            d.update(verdict=row.get("verdict"), reasons=[str(r) for r in row.get("reasons") or []], ended=t)
+    out = []
+    for d in deploys.values():
+        began = next((x for x in (d["start"], d["promoted_at"], d["ended"]) if x is not None), None)
+        if began is not None and since <= began <= now:
+            out.append({**d, "at": began})
+    return sorted(out, key=lambda d: d["at"])
+
+
+def deploys_from_ledger(snap: Snapshot, since: float) -> list[dict[str, Any]]:
+    """Deploys as the ledger shows them, without the watchdog's log (the module docstring, row 4): the updater's
+    `ops.deploy` `deploying` rows and owners' releases first seen on an `ops.started` no such row announced; a start
+    of the release that ran before, within `ROLLBACK_WATCH_SECONDS` and before the next deploy, is its rollback, and
+    the first error alert between the deploy and that start is its reason."""
+    now = snap.now
+    starts = [(r.seq, r.t, str(r.p.get("release") or "")) for r in snap.rows("ops.started")]
+    announced = [(r.seq, r.t, str(r.p.get("release") or "")) for r in snap.rows("ops.deploy") if r.p.get("action") == "deploying"]
+    errors = [(r.seq, str(r.p.get("text") or "")) for r in snap.rows("ops.alert") if r.p.get("level") == "error"]
+    names = {release for _, _, release in announced}
+    events = [{"seq": s, "t": t, "release": release, "by": "updater"} for s, t, release in announced]
+    seen: set[str] = set()
+    for i, (s, t, release) in enumerate(starts):
+        if i and release not in seen and release not in names:
+            events.append({"seq": s, "t": t, "release": release, "by": "owner"})
+        seen.add(release)
+    events.sort(key=lambda e: e["seq"])
+    out = []
+    for i, e in enumerate(events):
+        before = [release for s, _, release in starts if s < e["seq"]]
+        running = before[-1] if before else None
+        until = events[i + 1]["seq"] if i + 1 < len(events) else math.inf
+        later = [(s, t, release) for s, t, release in starts if e["seq"] <= s < until and t <= e["t"] + ROLLBACK_WATCH_SECONDS]
+        started = next((t for _, t, release in later if release == e["release"]), None)
+        back = next(((s, t) for s, t, release in later if running and release == running != e["release"]), None)
+        reasons = []
+        if back is not None:
+            first = next((text for s, text in errors if e["seq"] <= s < back[0]), None)
+            reasons = [first] if first else []
+        verdict = "rolled_back" if back is not None else "promoted" if started is not None else "not started"
+        out.append({"deploy": f"{e['release']}@{int(e['t'])}", "release": e["release"], "by": e["by"], "start": e["t"],
+                    "promoted_at": started, "verdict": verdict, "reasons": reasons,
+                    "ended": back[1] if back is not None else None, "at": e["t"]})
+    return [d for d in out if since <= d["at"] <= now]
+
+
+def deploy_record(snap: Snapshot, since: float) -> dict[str, Any]:
+    """Deploys that started in the window, their verdicts, the rollbacks by cause (`rollback_cause`: those outside
+    the House are `backup`, `vendor` and `site`) and the deploys whose start or promotion fell inside a US session.
+    Read from the watchdog's `deploys.jsonl` when the snapshot has it (`deploys_from_log`), else from the ledger
+    (`deploys_from_ledger`)."""
+    if snap.deploys is not None:
+        source, rows = "deploys.jsonl", deploys_from_log(snap.deploys, since, snap.now)
+    else:
+        source, rows = "ledger", deploys_from_ledger(snap, since)
+    for d in rows:
+        d["in_session"] = in_us_session(d["at"]) or (d.get("promoted_at") is not None and in_us_session(d["promoted_at"]))
+        d["cause"] = rollback_cause(d["reasons"]) if d["verdict"] == "rolled_back" else None
+    rolled = [d for d in rows if d["verdict"] == "rolled_back"]
+    causes = Counter(str(d["cause"]) for d in rolled)
+    return {"fn": "deploy_record", "source": source, "path": str(snap.deploys_path) if snap.deploys is not None else None,
+            "since": iso(since), "deploys": len(rows), "verdicts": dict(Counter(str(d["verdict"]) for d in rows)),
+            "rolled_back": len(rolled), "outside": sum(causes[c] for c in OUTSIDE_THE_HOUSE), "causes": dict(causes),
+            "in_session": sum(1 for d in rows if d["in_session"]),
+            "rows": [{"release": d["release"], "at": iso(d["at"]), "promoted_at": iso(d.get("promoted_at")),
+                      "verdict": d["verdict"], "cause": d["cause"], "in_session": d["in_session"],
+                      "reason": (d["reasons"][0] if d["reasons"] else "")[:200]} for d in rows]}
+
+
+def tick_p50(snap: Snapshot, since: float) -> dict[str, Any]:
+    """The median interval between ticks in the window, from the `ops.job` rows of `TICK_JOB` (one a tick; the job
+    id ends in the moment the tick queued it): intervals whose earlier job ended within `TICK_JOB_DONE_SECONDS` and
+    with no restart between. The loop sleeps a tick up to `tick_seconds` (60), so an interval of about 60 s is a
+    tick of 60 s or less. health.json's last tick and its hour's slowest steps beside it. On the T0 day: p50 73.6 s
+    over 989 intervals, p90 122 s; the last tick 30.4 s, in the first quarter hour of a new release."""
+    jobs: list[tuple[float, float | None]] = []
+    for row in snap.rows("ops.job"):
+        p = row.p
+        if p.get("key") != TICK_JOB or p.get("state") == "started":
+            continue
+        try:
+            queued = float(str(p.get("job")).rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        jobs.append((queued, _f(p.get("elapsed_seconds"))))
+    jobs.sort()
+    starts = sorted(r.t for r in snap.rows("ops.started"))
+    intervals = []
+    for (a, done), (b, _) in zip(jobs, jobs[1:]):
+        if a < since or b > snap.now or done is None or done >= TICK_JOB_DONE_SECONDS:
+            continue
+        i = bisect_right(starts, a)
+        if i < len(starts) and starts[i] <= b:
+            continue  # the House restarted between: not one tick
+        intervals.append(b - a)
+    steps = snap.health.get("tick_steps") or {}
+    last = steps.get("last") or {}
+    slowest = [s for s in steps.get("slowest_hour") or [] if isinstance(s, Mapping)]
+    return {"fn": "tick_p50", "since": iso(since), "intervals": len(intervals),
+            "p50_s": _r(median(intervals), 1) if intervals else None, "p90_s": _r(_quantile(intervals, 0.9), 1),
+            "last_tick_s": _f(last.get("total_seconds")), "last_tick_at": last.get("at"), "ticks_in_hour": steps.get("ticks_in_hour"),
+            "slowest_hour": [{"step": s.get("step"), "seconds": s.get("seconds")} for s in slowest[:4]],
+            "population_slowest_s": next((s.get("seconds") for s in slowest if s.get("step") == "population"), None)}
+
+
+# ------------------------------------------------------------------------------------------- row 5
+def seat_queue(snap: Snapshot, lab: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The House's seat market (health.json `seats`, refreshed hourly): waiters by class, those over two hours and
+    the longest, those on desks with a free seat (a desk's `caps` cap over its members: the league's ceiling holds
+    them), and the merged strategies waiting (class `strategies`). Without it, the lab's own count (`lab_loop`)."""
+    seats = snap.health.get("seats")
+    if not isinstance(seats, Mapping):
+        lab = lab or {}
+        return {"fn": "seat_queue", "at": None, "source": "lab_loop (health.json has no seats)",
+                "waiters": lab.get("waiters"), "by_class": {}, "over_two_hours": None, "over_two_hours_by_desk": {},
+                "over_two_hours_on_free_desks": None, "free_desks": [], "longest_h": lab.get("longest_wait_h"),
+                "longest": {}, "strategies_waiting": None, "displaceable": None}
+    waiters = {str(k): int(v or 0) for k, v in (seats.get("waiters") or {}).items()}
+    over = {str(d): r for d, r in (seats.get("over_two_hours") or {}).items() if isinstance(r, Mapping)}
+    caps = seats.get("caps") or {}
+    free = sorted(d for d, c in caps.items() if isinstance(c, Mapping) and int(c.get("cap") or 0) > int(c.get("members") or 0))
+    longest = seats.get("longest_wait") if isinstance(seats.get("longest_wait"), Mapping) else {}
+    return {"fn": "seat_queue", "at": seats.get("at"), "source": "health.json seats",
+            "waiters": sum(waiters.values()), "by_class": waiters,
+            "over_two_hours": sum(int(r.get("count") or 0) for r in over.values()),
+            "over_two_hours_by_desk": {d: int(r.get("count") or 0) for d, r in sorted(over.items())},
+            "over_two_hours_on_free_desks": sum(int(r.get("count") or 0) for d, r in over.items() if d in free),
+            "free_desks": free, "longest_h": _f(longest.get("hours")),
+            "longest": {k: longest.get(k) for k in ("class", "desk", "id", "since", "reason")},
+            "strategies_waiting": waiters.get("strategies"), "displaceable": seats.get("displaceable")}
+
+
+def life_vs_clock(snap: Snapshot, agents: Mapping[str, Agent], since: float, clocks: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Per desk: the median life (born to died, hours) of the window's dead beside the desk's evidence clock (health.json
+    `seats.evidence_clocks.hours`, the House's own; else `clocks`, the scoreboard's `evidence_clocks`, its Kaplan-Meier
+    median), whether the median life is under the clock, and the living's median age. The plan's target: a median
+    life at or over the clock on every desk."""
+    now = snap.now
+    house = _get(snap.health, "seats", "evidence_clocks") or {}
+    hours = house.get("hours") if isinstance(house.get("hours"), Mapping) else None
+    source = "health.json seats.evidence_clocks" if hours else "evidence_clocks (Kaplan-Meier median)"
+    if not hours:
+        hours = {d: r.get("km_median_h") for d, r in ((clocks or {}).get("desks") or {}).items()}
+    dead: dict[str, list[float]] = defaultdict(list)
+    living: dict[str, list[float]] = defaultdict(list)
+    for a in agents.values():
+        if a.died is not None and since <= a.died <= now:
+            dead[a.desk].append((a.died - a.born) / HOUR)
+        elif (a.died is None or a.died > now) and a.born <= now:
+            living[a.desk].append((now - a.born) / HOUR)
+    desks = {}
+    for desk in sorted(set(dead) | set(hours)):
+        life = median(dead[desk]) if dead.get(desk) else None
+        clock = _f(hours.get(desk))
+        desks[desk] = {"deaths": len(dead.get(desk, ())), "median_life_h": _r(life, 1), "clock_h": clock,
+                       "below_clock": life is not None and clock is not None and life < clock,
+                       "living": len(living.get(desk, ())), "median_age_h": _r(median(living[desk]), 1) if living.get(desk) else None}
+    ages = [h for rows in living.values() for h in rows]
+    return {"fn": "life_vs_clock", "since": iso(since), "clocks": source, "clocks_at": house.get("at"), "desks": desks,
+            "below": [d for d, r in desks.items() if r["below_clock"]],
+            "measured": sum(1 for r in desks.values() if r["median_life_h"] is not None and r["clock_h"] is not None),
+            "median_age_h": _r(median(ages), 1) if ages else None}
+
+
+def displacement_share(agents: Mapping[str, Agent], since: float, now: float) -> dict[str, Any]:
+    """Deaths of cause `displaced` (a newcomer took the seat) over all deaths, in the window and over the ledger's
+    life (the plan: 464 of 513, 91%, at 04:06Z Sept 25)."""
+    dead = [a for a in agents.values() if a.died is not None and a.died <= now]
+    window = [a for a in dead if a.died >= since]
+
+    def share(rows: Sequence[Agent]) -> dict[str, Any]:
+        n = sum(1 for a in rows if a.cause == DISPLACED)
+        return {"deaths": len(rows), "displaced": n, "share": _share(n, len(rows))}
+
+    return {"fn": "displacement_share", "since": iso(since), "window": share(window), "lifetime": share(dead),
+            "causes": dict(Counter(str(a.cause) for a in window).most_common())}
+
+
+# ------------------------------------------------------------------------------------------- row 6
+def real_fill_rate(snap: Snapshot, since: float) -> dict[str, Any]:
+    """Orders first placed on a real book in the window (`book.order`: an order is one `order_id`, whatever status rows
+    follow it: accepted, new, cancelled, filled) and those with a venue fill (`book.fill` `source: venue`), overall, by
+    book and for buys; and the baseline's rows measure (fill rows over order rows in the window), which counts every
+    status row as an order: 695 rows of 165 orders on the T0 day."""
+    now = snap.now
+    first: dict[str, dict[str, Any]] = {}
+    order_rows = 0
+    for row in snap.rows("book.order"):
+        p = row.p
+        if p.get("book") not in REAL_BOOKS or row.t > now:
+            continue
+        if row.t >= since:
+            order_rows += 1
+        oid = str(p.get("order_id") or "")
+        if oid and oid not in first:
+            first[oid] = {"t": row.t, "book": str(p.get("book")), "side": str(p.get("side") or "")}
+    placed = {oid: o for oid, o in first.items() if o["t"] >= since}
+    filled: set[str] = set()
+    fill_rows = 0
+    for row in snap.rows("book.fill"):
+        p = row.p
+        if p.get("book") not in REAL_BOOKS or p.get("source") != "venue" or row.t > now:
+            continue
+        if row.t >= since:
+            fill_rows += 1
+        oid = str(p.get("order_id") or "")
+        if oid in placed:
+            filled.add(oid)
+    by_book = {}
+    for book in REAL_BOOKS:
+        ids = [oid for oid, o in placed.items() if o["book"] == book]
+        n = sum(1 for oid in ids if oid in filled)
+        by_book[book] = {"orders": len(ids), "filled": n, "rate": _share(n, len(ids))}
+    buys = [oid for oid, o in placed.items() if o["side"] == "buy"]
+    buys_filled = sum(1 for oid in buys if oid in filled)
+    return {"fn": "real_fill_rate", "since": iso(since), "orders": len(placed), "filled": len(filled),
+            "rate": _share(len(filled), len(placed)), "buy_orders": len(buys), "buys_filled": buys_filled,
+            "buy_rate": _share(buys_filled, len(buys)), "by_book": by_book,
+            "order_rows": order_rows, "fill_rows": fill_rows, "rows_rate": _share(fill_rows, order_rows)}
+
+
+CONSTITUTION_KEY = re.compile(r"constitution ((?:[a-z_]+\.)*[a-z_]+)")
+
+
+def refusal_rule(reasons: Iterable[Any]) -> str:
+    """The rule a refusal names: the constitution key its reason cites ("... (constitution allocator.max_event_share)"),
+    "a frozen book", or the reason's first clause."""
+    texts = [str(r) for r in reasons or ()]
+    match = CONSTITUTION_KEY.search("; ".join(texts))
+    if match:
+        return match.group(1)
+    if any("is frozen" in t for t in texts):
+        return "a frozen book"
+    return (texts[0].split(":")[0][:60] if texts else "") or "no reason given"
+
+
+def intent_books(snap: Snapshot) -> dict[str, tuple[str, str]]:
+    """Intent id -> (side, book), from `agent.intent`."""
+    return {str(r.p.get("id")): (str(r.p.get("side") or ""), str(r.p.get("book") or "")) for r in snap.rows("agent.intent") if r.p.get("id")}
+
+
+def real_refusals(snap: Snapshot, since: float) -> dict[str, Any]:
+    """Real entries refused: `book.refused` rows on a real book (the row's `book`, else its intent's) whose intent was a
+    buy, in the window and a day, and in the last US session (`last_session`), by the rule each names
+    (`refusal_rule`). The plan counted 116 in the Sept 24 session."""
+    now = snap.now
+    intents = intent_books(snap)
+    rows = []
+    for r in snap.rows("book.refused"):
+        if not since <= r.t <= now:
+            continue
+        side, book = intents.get(str(r.p.get("intent_id")), ("", ""))
+        if str(r.p.get("book") or book) in REAL_BOOKS:
+            rows.append((r, side))
+    entries = [r for r, side in rows if side == "buy"]
+    hours = max((now - since) / HOUR, 0.0)
+    session = last_session(since, now)
+    inside = [r for r in entries if session is not None and session[0] <= r.t <= session[1]]
+    return {"fn": "real_refusals", "since": iso(since), "refused": len(rows), "entries": len(entries),
+            "per_day": _r(_per_day(len(entries), hours), 1), "unknown_side": sum(1 for _, side in rows if not side),
+            "by_rule": dict(Counter(refusal_rule(r.p.get("reasons")) for r in entries).most_common()),
+            "session": None if session is None else {
+                "open": iso(session[0]), "until": iso(session[1]), "entries": len(inside),
+                "by_rule": dict(Counter(refusal_rule(r.p.get("reasons")) for r in inside).most_common())}}
+
+
+class Bands:
+    """Each agent's allocator band over time: the `eval.verdict` rows that name one (`band_to` on a promotion or a
+    demotion, `band` on a sizing), in ledger order."""
+
+    def __init__(self, snap: Snapshot):
+        self.changes: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for row in snap.rows("eval.verdict"):
+            band = row.p.get("band_to") or row.p.get("band")
+            if band:
+                self.changes[row.agent].append((row.seq, str(band)))
+        self._seqs = {a: [s for s, _ in rows] for a, rows in self.changes.items()}
+
+    def at(self, agent: str, seq: int) -> str | None:
+        rows = self.changes.get(agent) or []
+        i = bisect_right(self._seqs.get(agent, []), seq)
+        return rows[i - 1][1] if i else None
+
+
+def probe_taker_entries(snap: Snapshot, since: float) -> dict[str, Any]:
+    """Real buy fills taken as a taker in the window (`book.fill` `liquidity: taker` on a real book), by the band the
+    agent held then (`Bands`), with the probes' own count and dollars by book; and the real entries refused for
+    taking (a reason citing `allocator.real_entry_liquidity`), the probes' among them. The maker rule is Kalshi's:
+    Alpaca reports no fee, so its book books every order at the taker's fee and labels every Alpaca fill a taker
+    (`Book._liquidity`), post-only dip bids included -- the T0 day's three Alpaca probe "taker" entries were resting
+    crypto bids. The plan's baseline: none allowed on Kalshi."""
+    now = snap.now
+    bands = Bands(snap)
+    taker = []
+    for row in snap.rows("book.fill"):
+        p = row.p
+        if (p.get("book") not in REAL_BOOKS or p.get("side") != "buy" or p.get("source") != "venue"
+                or not since <= row.t <= now or p.get("liquidity") != "taker"):
+            continue
+        taker.append((row, bands.at(row.agent, row.seq) or "unknown"))
+    probes = [row for row, band in taker if band == "probe"]
+    by_book = {}
+    for book in REAL_BOOKS:
+        rows = [r for r in probes if r.p.get("book") == book]
+        by_book[book] = {"entries": len(rows), "usd": _r(math.fsum(abs(_f(r.p.get("cash_delta")) or 0.0) for r in rows), 2)}
+    refused = [r for r in snap.rows("book.refused") if since <= r.t <= now
+               and any("real_entry_liquidity" in str(reason) for reason in r.p.get("reasons") or ())]
+    probe_refused = [r for r in refused if bands.at(r.agent, r.seq) == "probe"]
+    return {"fn": "probe_taker_entries", "since": iso(since), "taker_entries": len(taker),
+            "by_band": dict(Counter(band for _, band in taker)), "probe_taker_entries": len(probes),
+            "probe_taker_by_book": by_book, "refused_as_takers": len(refused), "probe_refused_as_takers": len(probe_refused),
+            "probes_refused": sorted({r.agent for r in probe_refused})}
+
+
+# ------------------------------------------------------------------------------------------- row 7
+def runway(snap: Snapshot, since: float) -> dict[str, Any]:
+    """Sail's runway from its meter (`ops.budget` `what: sail`: the latest `balance_usd`, and the burn a day from the
+    `spent_usd` of the last 24 hours of readings over the hours they span) less the House's reserve, beside the House's
+    own (health.json `seats.population.sail`); the OpenAI month the gateway reports (`campaign.meters.openai.month`:
+    health.json's, else the ledger's latest), and October's cap: unset until that month is 2026-10 or later; whether the
+    population ceiling binds on runway (`seats.population`: `max_population` under `ceiling`) and the population alerts
+    in the window."""
+    now = snap.now
+    sail = [(row.t, _f(row.p.get("balance_usd")), _f(row.p.get("spent_usd"))) for row in snap.rows("ops.budget")
+            if row.p.get("what") == "sail" and row.t <= now]
+    day = [s for s in sail if s[0] >= now - DAY]
+    balance = next((b for _, b, _ in reversed(sail) if b is not None), None)
+    burn = None
+    if len(day) >= 2:
+        burn = _per_day(math.fsum(s[2] or 0.0 for s in day[1:]), (day[-1][0] - day[0][0]) / HOUR)
+    population = _get(snap.health, "seats", "population") or {}
+    house = population.get("sail") if isinstance(population.get("sail"), Mapping) else {}
+    reserve = _f(house.get("reserve_usd"))
+    reserve = SAIL_RESERVE_USD if reserve is None else reserve
+    days = (balance - reserve) / burn if balance is not None and burn else None
+    month = _get(snap.health, "campaign", "meters", "openai", "month")
+    if not isinstance(month, Mapping):
+        month = gateway_meter(snap, since).get("month")
+    month = {k: (month or {}).get(k) for k in ("month", "total_usd", "cap_usd")}
+    october = _f(month.get("cap_usd")) if str(month.get("month") or "") >= "2026-10" else None
+    alerts = [r for r in snap.rows("ops.alert") if since <= r.t <= now and str(r.p.get("text") or "").startswith(POPULATION_ALERT)]
+    ceiling, target = population.get("ceiling"), population.get("max_population")
+    return {"fn": "runway", "sail_balance_usd": balance, "sail_burn_per_day_usd": _r(burn, 2), "sail_reserve_usd": reserve,
+            "sail_runway_days": _r(days, 2), "sail_readings": len(day),
+            "house": {k: house.get(k) for k in ("at", "balance_usd", "burn_usd_per_day", "runway_days", "reserve_usd")} if house else None,
+            "sail_campaign_remaining_usd": _f(_get(snap.health, "campaign", "accounts", "sail", "remaining_usd")),
+            "openai_month": month, "october_cap_usd": october,
+            "population": {"ceiling": ceiling, "max_population": target, "rule": population.get("rule")} if population else None,
+            "population_binds": ceiling is not None and target is not None and int(target) < int(ceiling),
+            "population_alerts": len(alerts), "population_held_alerts": sum(1 for r in alerts if r.p.get("level") == "warning")}
+
+
+# -------------------------------------------------------------------------------------- the rows together
+def forward_first(snap: Snapshot, *, since: float, agents: Mapping[str, Agent], families: Families,
+                  intents: Mapping[str, Mapping[str, Any]], metrics: Mapping[str, Any], extras: Mapping[str, Any]) -> dict[str, Any]:
+    """The seven rows of docs/goals/LTCM_FORWARD_FIRST.md's scoreboard, each a dict of the functions that compute it."""
+    settled = real_settled(snap, since)
+    compute = compute_per_day(snap, since)
+    capital = capital_on_proof(snap, agents)
+    return {
+        "1": {"real_settled": settled, "compute_per_day": compute,
+              "unit_economics": unit_economics(settled, compute, bool(capital["swinging"])),
+              "proven_capacity": proven_capacity(snap, families, intents, metrics["1"].get("proven") or [])},
+        "2": {"forward_positive": forward_positive(snap, agents, since), "practice_standing": practice_standing(snap)},
+        "3": {"real_dollars": metrics["3"], "capital_on_proof": capital},
+        "4": {"restarts": restarts(snap, since), "deploy_record": deploy_record(snap, since), "tick_p50": tick_p50(snap, since)},
+        "5": {"seat_queue": seat_queue(snap, metrics["5"]), "life_vs_clock": life_vs_clock(snap, agents, since, extras["evidence_clocks"]),
+              "displacement_share": displacement_share(agents, since, snap.now)},
+        "6": {"real_fill_rate": real_fill_rate(snap, since), "real_refusals": real_refusals(snap, since),
+              "probe_taker_entries": probe_taker_entries(snap, since)},
+        "7": {"runway": runway(snap, since)},
+    }
+
+
 # ----------------------------------------------------------------------------------- the board
 def scoreboard(snap: Snapshot, *, since: float | None = None, baseline: float | None = None,
                hosts: Sequence[str] | None = None, house_records: bool = True) -> dict[str, Any]:
@@ -1317,25 +2337,30 @@ def scoreboard(snap: Snapshot, *, since: float | None = None, baseline: float | 
     families = Families(agents, trades, HouseRecords.open(snap, agents) if house_records else None)
     intents = intent_outcomes(snap)
     health = snap.json.get("health.json") or {}
+    metrics = {
+        "1": real_bounds(snap, families, intents),
+        "2": allocator_promotions(snap, agents, rungs, trades, still_open, families, baseline),
+        "3": real_dollars(snap, agents, families),
+        "4": deaths_in_window(agents, fills, since, snap.now, rungs),
+        "5": lab_loop(snap, agents, rungs, since),
+        "6": {"self_cross": self_cross_exits(snap), "stacked": stacked_promotions(snap, agents, trades, baseline)},
+        "7": {"recorders": recorders_live(snap, hosts), "idle_desks": idle_desks(snap, agents)},
+    }
+    extras = {
+        "evidence_clocks": evidence_clocks(snap, agents, trades, fills),
+        "family_records": family_records(snap, agents, families),
+        "weather_capacity": weather_capacity(snap, families, intents),
+    }
     return {
         "snapshot": {"dir": str(snap.root), "ledger_rows": snap.rows_total, "newest": snap.newest_at,
                      "since": iso(since), "baseline": iso(baseline), "release": health.get("release"),
                      "board_at": snap.board.get("at"), "feeds_store": snap.feeds is not None,
+                     "deploys_log": str(snap.deploys_path) if snap.deploys is not None else None,
                      "trades": len(trades), "open_positions": len(still_open), "skipped": skipped},
-        "metrics": {
-            "1": real_bounds(snap, families, intents),
-            "2": allocator_promotions(snap, agents, rungs, trades, still_open, families, baseline),
-            "3": real_dollars(snap, agents, families),
-            "4": deaths_in_window(agents, fills, since, snap.now, rungs),
-            "5": lab_loop(snap, agents, rungs, since),
-            "6": {"self_cross": self_cross_exits(snap), "stacked": stacked_promotions(snap, agents, trades, baseline)},
-            "7": {"recorders": recorders_live(snap, hosts), "idle_desks": idle_desks(snap, agents)},
-        },
-        "extras": {
-            "evidence_clocks": evidence_clocks(snap, agents, trades, fills),
-            "family_records": family_records(snap, agents, families),
-            "weather_capacity": weather_capacity(snap, families, intents),
-        },
+        "forward_first": forward_first(snap, since=since, agents=agents, families=families, intents=intents,
+                                       metrics=metrics, extras=extras),
+        "metrics": metrics,
+        "extras": extras,
     }
 
 
@@ -1405,6 +2430,264 @@ def summary_rows(board: Mapping[str, Any]) -> list[tuple[str, str, str, str]]:
     ]
 
 
+#: The forward-first plan's rows and targets (docs/goals/LTCM_FORWARD_FIRST.md, "The scoreboard"), word for word.
+FORWARD_METRICS = {
+    "1": "Real settled profit a day (24 h) against compute a day (24 h); proven families and each one's capacity at its real size",
+    "2": "Forward-positive share of the last day's graduates and newborns (lab forward windows, first practice day); "
+         "living median W_paper; agents above the 1.01 line",
+    "3": "Real dollars on proven families / on unproven (stake); the first family swing; Alpaca real stock agents (ever)",
+    "4": "House restarts a day; releases rolled back by causes outside the House (vendor, backup, site); tick p50; "
+         "deploys inside a US session",
+    "5": "Waiters over 2 h and the longest; merged strategies never born; median life against each desk's evidence clock; "
+         "displacement share of deaths",
+    "6": "Real fill rate (fills / orders, 24 h); real entries refused a day; taker entries by probes",
+    "7": "Sail runway; the October OpenAI cap; the population ceiling binding on runway",
+}
+FORWARD_TARGETS = {
+    "1": "compute <= 2 x real settled profit, or <= $60/day while no family swings; >= 3 proven families, capacity "
+         "measured at 1x, 2x and 4x the stake",
+    "2": ">= 60%; >= 1.005; >= 50",
+    "3": "proven >= unproven; the swing reached at the sports family's 10th settlement, or the exact count why not; "
+         ">= 2 during a session",
+    "4": "<= 6; 0; <= 40 s; 0",
+    "5": "0 with free capacity, longest < 2 h; 0; >= the clock on every desk; < 50%",
+    "6": ">= 25%; < 30; allowed and measured",
+    "7": ">= 5 days throughout; set from funded money at the owner's word; never",
+}
+
+
+def _v(value: Any) -> str:
+    """A value as printed, `-` for none."""
+    return "-" if value is None else str(value)
+
+
+def _n(value: Any, digits: int = 1) -> str:
+    number = _f(value)
+    return "-" if number is None else f"{number:.{digits}f}"
+
+
+def _sizes_line(sizes: Mapping[str, Any]) -> str:
+    """`capacity_at_sizes` in one phrase: dollars a day at each multiple of the real size."""
+    rows = sizes.get("sizes") or []
+    if not rows:
+        return f"`capacity_at_sizes` - ({sizes.get('why') or 'no size'})"
+    caps = " / ".join(_usd(r["capacity_usd_per_day"]) for r in rows)
+    multiples = "/".join(f"{r['multiple']}x" for r in rows)
+    return f"`capacity_at_sizes` {caps} a day at {multiples} of {_usd(sizes.get('size_usd'))} ({sizes.get('size_basis')})"
+
+
+def forward_parts(board: Mapping[str, Any]) -> dict[str, list[tuple[str, str]]]:
+    """Each forward-first row's reading as (function, what it says) parts, in the plan's order of the row."""
+    ff = board["forward_first"]
+    parts: dict[str, list[tuple[str, str]]] = {}
+
+    s, c, u, pc = (ff["1"][k] for k in ("real_settled", "compute_per_day", "unit_economics", "proven_capacity"))
+    p, g = c["providers"], c["gateway"]
+    families = "; ".join(
+        f"{r['family']} {_usd(_f(_get(r, 'house_capacity', 'usd_per_day')))}/day at {_usd(_f(_get(r, 'house_capacity', 'size_usd')))} "
+        f"(the board), {_sizes_line(r['sizes'])}" for r in pc["families"]) or "none"
+    ratio = u["compute_over_profit"]
+    parts["1"] = [
+        ("real_settled", f"{_usd(s['per_day_usd'])} a day realized ({s['settlements']} settlements {_usd(s['settled_usd'])}, "
+                         f"{s['sales']} closing sales {_usd(s['sales_usd'])})"),
+        ("compute_per_day", f"{_usd(c['per_day_usd'])} a day (OpenAI {_usd(c['openai_per_day_usd'])}: Luna {_usd(p.get('openai-luna'))}, "
+                            f"Astra {_usd(p.get('openai-astra'))}, lab {_usd(p.get('openai-lab'))}; Sail {_usd(p.get('sail'))}; "
+                            f"Jev {_usd(p.get('jev'))}); lifetime {_usd(c['lifetime_usd'])} ({_usd(c['lifetime_economics_usd'])} "
+                            f"by scripts/economics.py + {_usd(c['lifetime_lab_usd'])} lab)"),
+        ("gateway_meter", f"the gateway metered the OpenAI line at {_usd(g['per_day_usd'])} a day over {_n(g['hours'])} h"),
+        ("unit_economics", f"compute {'-' if ratio is None else f'{ratio:.1f}x'} the profit: "
+                           f"{'meets' if u['meets_target'] else 'short of'} the target"),
+        ("proven_capacity", f"{pc['count']} proven: {families}"),
+    ]
+
+    fp, ps = ff["2"]["forward_positive"], ff["2"]["practice_standing"]
+    gr, nb, ended, lb = fp["graduates"], fp["newborns"], fp["newborns_first_day_ended"], fp["lab_blocks"]
+    parts["2"] = [
+        ("forward_positive", f"graduates {gr['positive']} of {gr['tested']} with an active forward block ({_pct(gr['share'])}; "
+                             f"{gr['graduated']} graduated, {gr['with_window']} with a window); newborns {nb['positive']} of "
+                             f"{nb['tested']} on their first practice day so far ({_pct(nb['share'])}; {nb['born']} born), "
+                             f"first day ended {ended['positive']} of {ended['tested']} ({_pct(ended['share'])}); lab-born active "
+                             f"blocks {lb['positive']} of {lb['active']} ({_pct(lb['share'])}, the baseline's measure)"),
+        ("practice_standing", f"median W_paper {_n(ps['median_w_paper'], 5)} over {ps['with_evidence']}; {ps['above_line']} above "
+                              f"the 1.01 line (E at bunt_at {ps['bunt_at']:g}: {ps['e_at_bunt']})"),
+    ]
+
+    rd, cp = ff["3"]["real_dollars"], ff["3"]["capital_on_proof"]
+    if cp["swinging"]:
+        swing = f"swinging: {', '.join(cp['swinging'])}"
+    elif cp["first_swing"]:
+        swing = f"first swing {cp['first_swing'].get('at')} ({cp['first_swing'].get('family')}), none swinging now"
+    else:
+        swing = "no family swing yet: " + ("; ".join(
+            f"{k['family']} {k['real_n']} real settlements, {k['to_go']} to go (look at {k['look_at']}, "
+            f"{'-' if k['days_to_swing'] is None else k['days_to_swing']} days)" for k in cp["swing_clocks"]) or "no proven family")
+    parts["3"] = [
+        ("real_dollars", f"{_usd(rd['proven_usd'])} proven / {_usd(rd['unproven_usd'])} unproven"),
+        ("capital_on_proof", f"{swing}; Alpaca real stock agents ever: {cp['alpaca_stock_filled']} filled "
+                             f"({cp['alpaca_stock_filled_in_session']} in a session), {cp['alpaca_stock_staked']} staked on a stock desk"),
+    ]
+
+    rs, dr, tp = ff["4"]["restarts"], ff["4"]["deploy_record"], ff["4"]["tick_p50"]
+    causes = ", ".join(f"{k} {v}" for k, v in sorted(dr["causes"].items())) or "none"
+    parts["4"] = [
+        ("restarts", f"{rs['count']} in the window ({_n(rs['per_day'])} a day), {rs['in_session']} inside a US session"),
+        ("deploy_record", f"{dr['rolled_back']} releases rolled back, {dr['outside']} by causes outside the House ({causes}); "
+                          f"{dr['in_session']} of {dr['deploys']} deploys inside a US session (from {dr['source']})"),
+        ("tick_p50", f"interval p50 {_n(tp['p50_s'])} s over {tp['intervals']} ticks (p90 {_n(tp['p90_s'])} s); the last tick "
+                     f"{_n(tp['last_tick_s'])} s"),
+    ]
+
+    sq, lc, ds = ff["5"]["seat_queue"], ff["5"]["life_vs_clock"], ff["5"]["displacement_share"]
+    longest = sq.get("longest") or {}
+    below = ", ".join(f"{d} {lc['desks'][d]['median_life_h']} h < {lc['desks'][d]['clock_h']} h" for d in lc["below"]) or "none"
+    parts["5"] = [
+        ("seat_queue", f"{sq['over_two_hours'] if sq['over_two_hours'] is not None else '-'} of {sq['waiters']} waiters over 2 h "
+                       f"({sq['over_two_hours_on_free_desks'] if sq['over_two_hours_on_free_desks'] is not None else '-'} on desks "
+                       f"with a free seat), the longest {_n(sq['longest_h'])} h ({longest.get('class') or '-'} on "
+                       f"{longest.get('desk') or '-'}); {sq['strategies_waiting'] if sq['strategies_waiting'] is not None else '-'} "
+                       f"merged strategies waiting (the seat market at {sq['at'] or '-'})"),
+        ("life_vs_clock", f"median life under the desk's clock on {len(lc['below'])} of {lc['measured']} desks ({below})"),
+        ("displacement_share", f"{_pct(ds['window']['share'])} of {ds['window']['deaths']} deaths in the window "
+                               f"({_pct(ds['lifetime']['share'])} of {ds['lifetime']['deaths']} lifetime)"),
+    ]
+
+    fr, rr, pt = ff["6"]["real_fill_rate"], ff["6"]["real_refusals"], ff["6"]["probe_taker_entries"]
+    books = ", ".join(f"{b} {r['filled']} of {r['orders']}" for b, r in fr["by_book"].items())
+    top = ", ".join(f"{k} {v}" for k, v in list(rr["by_rule"].items())[:3]) or "none"
+    session = rr.get("session") or {}
+    kalshi, alpaca = pt["probe_taker_by_book"].get("kalshi") or {}, pt["probe_taker_by_book"].get("alpaca") or {}
+    parts["6"] = [
+        ("real_fill_rate", f"{fr['filled']} of {fr['orders']} orders filled ({_pct(fr['rate'])}; {books}); the baseline's rows "
+                           f"measure {fr['fill_rows']} of {fr['order_rows']} ({_pct(fr['rows_rate'])})"),
+        ("real_refusals", f"{rr['entries']} real entries refused ({_n(rr['per_day'], 0)} a day), {session.get('entries', '-')} in the "
+                          f"last session ({(session.get('open') or '-')[:10]}); the most: {top}"),
+        ("probe_taker_entries", f"{kalshi.get('entries', 0)} Kalshi taker entries by probes ({_usd(kalshi.get('usd'))}), "
+                                f"{pt['probe_refused_as_takers']} probe entries refused for taking; Alpaca books every fill a "
+                                f"taker ({alpaca.get('entries', 0)} probe entries, {_usd(alpaca.get('usd'))})"),
+    ]
+
+    rw = ff["7"]["runway"]
+    month = rw["openai_month"] or {}
+    house = rw.get("house") or {}
+    population = rw.get("population") or {}
+    october = "unset" if rw["october_cap_usd"] is None else _usd(rw["october_cap_usd"])
+    parts["7"] = [
+        ("runway", f"Sail {_n(rw['sail_runway_days'], 2)} days ({_usd(rw['sail_balance_usd'])} less {_usd(rw['sail_reserve_usd'])} "
+                   f"reserve at {_usd(rw['sail_burn_per_day_usd'])} a day; the House reads {house.get('runway_days', '-')}); the "
+                   f"OpenAI month {month.get('month') or '-'} at {_usd(_f(month.get('total_usd')))} of {_usd(_f(month.get('cap_usd')))}, "
+                   f"October's cap {october}; the population ceiling {'binds' if rw['population_binds'] else 'does not bind'} on "
+                   f"runway ({population.get('max_population', '-')} of {population.get('ceiling', '-')}; "
+                   f"{rw['population_alerts']} population alerts in the window)"),
+    ]
+    return parts
+
+
+def forward_rows(board: Mapping[str, Any], *, markdown: bool = False) -> list[tuple[str, str, str, str]]:
+    """(#, metric, reading, target) for the forward-first rows; each part of a reading names its function."""
+    rows = []
+    for number, parts in forward_parts(board).items():
+        if markdown:
+            reading = "; ".join(f"`{fn}` {text}" for fn, text in parts)
+        else:
+            reading = "; ".join(f"[{fn}] {text}" for fn, text in parts)
+        rows.append((number, FORWARD_METRICS[number], reading, FORWARD_TARGETS[number]))
+    return rows
+
+
+def forward_sections(board: Mapping[str, Any], pre: str, section: Any, out: list[str]) -> None:
+    """The forward-first rows in detail, below the tables."""
+    ff = board["forward_first"]
+
+    section("F1. unit economics and capacity [real_settled, compute_per_day, gateway_meter, yield_rows, unit_economics, "
+            "proven_capacity, capacity_at_sizes]")
+    s, c = ff["1"]["real_settled"], ff["1"]["compute_per_day"]
+    books = ", ".join(f"{book} {_usd(row['realized_usd'])} on {row['closes']}" for book, row in s["by_book"].items()) or "-"
+    out.append(f"{pre}realized over {s['hours']} h since {s['since']}: {_usd(s['realized_usd'])} ({books}); the House's own rows "
+               f"{_usd(s['house_rows_usd'])}")
+    out.append(f"{pre}compute over {c['hours']} h: {_usd(c['usd'])}, by line:")
+    for line in c["lines"]:
+        out.append(f"{pre}  {line['provider']} {line['component']}: {_usd(line['usd'])} on {line['count']} ({line['basis']})")
+    lifetime = ", ".join(f"{k} {_usd(v)}" for k, v in c["lifetime_providers"].items())
+    out.append(f"{pre}lifetime by scripts/economics.py: {_usd(c['lifetime_economics_usd'])} ({lifetime}); lab calls "
+               f"{_usd(c['lifetime_lab_usd'])} on {c['lifetime_lab_calls']}")
+    g, y = c["gateway"], c["yield"]
+    month = g.get("month") or {}
+    out.append(f"{pre}check, the gateway: the House's OpenAI line settled {_usd(g['usd'])} from {g.get('first', '-')} to "
+               f"{g.get('last', '-')} ({g['readings']} readings) = {_usd(g['per_day_usd'])} a day, against the ledger's OpenAI "
+               f"{_usd(c['openai_per_day_usd'])} a day; the month {month.get('month') or '-'} read {month.get('total_usd') or '-'} "
+               f"of {month.get('cap_usd') or '-'}")
+    lines = ", ".join(f"{k} {_usd(v)}" for k, v in y["by_line"].items()) or "-"
+    out.append(f"{pre}check, the yield rows: {y['rows']} rows over {y['hours']} h, {_usd(y['usd'])} ({lines})")
+    for r in ff["1"]["proven_capacity"]["families"]:
+        house = r.get("house_capacity") or {}
+        out.append(f"{pre}{r['venue']}/{r['family']} ({r['board_state']}, stake {r['stake_usd']}): the board's capacity "
+                   f"{_usd(_f(house.get('usd_per_day')))}/day at {_usd(_f(house.get('size_usd')))}, fill rate "
+                   f"{house.get('fill_rate_at_size')}, {house.get('markets_per_day')} markets and {house.get('settlements_per_day')} "
+                   f"settlements a day")
+        base = r["sizes"].get("base") or {}
+        out.append(f"{pre}  {_capacity_line(base)}")
+        for z in r["sizes"].get("sizes") or []:
+            out.append(f"{pre}  at {z['multiple']}x ({_usd(z['size_usd'])}, bids {z['bucket']}): fill rate {z['fill_rate']} "
+                       f"({z['fill_rate_basis']}) x {_usd(z['profit_per_settlement_usd'])} a settlement = "
+                       f"{_usd(z['capacity_usd_per_day'])}/day")
+    board_only = ff["1"]["proven_capacity"]["board_only"]
+    if board_only:
+        out.append(f"{pre}the board calls proven, this record does not: {', '.join(board_only)}")
+
+    section("F2. forward evidence [forward_positive, practice_standing]")
+    fp, ps = ff["2"]["forward_positive"], ff["2"]["practice_standing"]
+    lab = fp["lab_ranked"]
+    out.append(f"{pre}the lab's own ranking (health.json lab.forward): {lab.get('positive', '-')} positive of "
+               f"{lab.get('ranked', '-')} ranked")
+    out.append(f"{pre}the board at {ps['board_at']}: {ps['agents']} agents, {ps['with_evidence']} with evidence")
+
+    section("F3. capital on proof [real_dollars, capital_on_proof]")
+    cp = ff["3"]["capital_on_proof"]
+    for k in cp["swing_clocks"]:
+        out.append(f"{pre}{k['venue']}/{k['family']} ({k['state']}): {k['real_n']} real settlements, look at {_v(k['look_at'])}, "
+                   f"{_v(k['to_go'])} to go, {_v(k['real_per_day'])} a day, {_v(k['days_to_swing'])} days to the swing")
+    out.append(f"{pre}first swing ever: {cp['first_swing'] or 'none'}; Alpaca stock agents: {', '.join(cp['alpaca_stock_agents']) or 'none'}")
+
+    section("F4. the harness [restarts, deploy_record, rollback_cause, tick_p50]")
+    rs, dr, tp = ff["4"]["restarts"], ff["4"]["deploy_record"], ff["4"]["tick_p50"]
+    releases = ", ".join(f"{k} {v}" for k, v in rs["releases"].items()) or "-"
+    out.append(f"{pre}restarts since {rs['since']} by release: {releases}")
+    out.append(f"{pre}deploys read from {dr['source']}{' (' + dr['path'] + ')' if dr.get('path') else ''}: {dr['verdicts']}")
+    for d in dr["rows"]:
+        tail = f"; {d['cause']}: {d['reason']}" if d["verdict"] == "rolled_back" else ""
+        out.append(f"{pre}{d['at']} {d['release']} {d['verdict']}{' (inside a US session)' if d['in_session'] else ''}{tail}")
+    slowest = ", ".join(f"{r['step']} {r['seconds']} s" for r in tp["slowest_hour"]) or "-"
+    out.append(f"{pre}the last tick {tp['last_tick_s']} s at {tp['last_tick_at']}; {tp['ticks_in_hour']} ticks in its hour; the "
+               f"hour's slowest steps: {slowest}")
+
+    section("F5. the seat market [seat_queue, life_vs_clock, displacement_share]")
+    sq, lc, ds = ff["5"]["seat_queue"], ff["5"]["life_vs_clock"], ff["5"]["displacement_share"]
+    waiters = ", ".join(f"{k} {v}" for k, v in sq["by_class"].items()) or "-"
+    over = ", ".join(f"{k} {v}" for k, v in sq["over_two_hours_by_desk"].items()) or "-"
+    out.append(f"{pre}waiters by class: {waiters}; over 2 h by desk: {over}; desks with a free seat: {', '.join(sq['free_desks']) or '-'}")
+    out.append(f"{pre}the longest: {sq.get('longest')}")
+    out.append(f"{pre}evidence clocks from {lc['clocks']} (measured {lc['clocks_at'] or '-'}); the living's median age {lc['median_age_h']} h")
+    for desk, r in lc["desks"].items():
+        out.append(f"{pre}{desk}: {r['deaths']} deaths, median life {_v(r['median_life_h'])} h, clock {_v(r['clock_h'])} h"
+                   f"{' (UNDER THE CLOCK)' if r['below_clock'] else ''}; {r['living']} living, median age {_v(r['median_age_h'])} h")
+    out.append(f"{pre}causes of death in the window: {ds['causes']}")
+
+    section("F6. execution [real_fill_rate, real_refusals, probe_taker_entries]")
+    fr, rr, pt = ff["6"]["real_fill_rate"], ff["6"]["real_refusals"], ff["6"]["probe_taker_entries"]
+    out.append(f"{pre}orders by book: {fr['by_book']}; buys {fr['buys_filled']} of {fr['buy_orders']} ({_pct(fr['buy_rate'])})")
+    out.append(f"{pre}refused real entries by rule in the window: {rr['by_rule'] or '-'} ({rr['unknown_side']} refusals of unknown side)")
+    if rr.get("session"):
+        out.append(f"{pre}in the session {rr['session']['open']} to {rr['session']['until']}: {rr['session']['by_rule'] or '-'}")
+    out.append(f"{pre}real taker entries by band: {pt['by_band'] or '-'}; refused for taking: {pt['refused_as_takers']} "
+               f"({pt['probe_refused_as_takers']} by probes: {', '.join(pt['probes_refused']) or '-'})")
+
+    section("F7. runway [runway]")
+    rw = ff["7"]["runway"]
+    out.append(f"{pre}Sail meter: {rw['sail_readings']} readings in the last day; campaign's Sail remaining "
+               f"{_usd(rw['sail_campaign_remaining_usd'])}; the House: {rw['house']}")
+    out.append(f"{pre}population: {rw['population']}")
+
+
 def _capacity_line(c: Mapping[str, Any]) -> str:
     if c.get("capacity_usd_per_day") is None and c.get("why"):
         return f"capacity - ({c['why']})"
@@ -1415,16 +2698,39 @@ def _capacity_line(c: Mapping[str, Any]) -> str:
             f"real seats earn {_usd(c.get('real_earning_usd_per_day'))}/day now")
 
 
+def _cell(text: str) -> str:
+    """A markdown table cell: a pipe inside it would end the cell."""
+    return str(text).replace("|", "\\|")
+
+
 def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
-    """The table (text, or markdown for the run record), then each metric's rows and the extras."""
+    """Both tables (text, or markdown for the run record): the forward-first rows, then the close-the-gaps metrics;
+    then each forward-first row in detail, each metric's rows and the extras."""
     s = board["snapshot"]
     m = board["metrics"]
     x = board["extras"]
     out = []
     head = (f"gap scoreboard: ledger {s['ledger_rows']:,} rows to {s['newest']}; window since {s['since']}; "
             f"baseline {s['baseline'] or '-'}; release {s['release'] or '-'}; board {s['board_at'] or '-'}; "
-            f"feeds store {'yes' if s['feeds_store'] else 'no'}")
+            f"feeds store {'yes' if s['feeds_store'] else 'no'}; deploy log {s.get('deploys_log') or 'none (read from the ledger)'}")
     out.append(("# " if markdown else "") + head)
+    pre = "- " if markdown else "   "
+
+    def section(title: str) -> None:
+        out.append("")
+        out.append(("## " if markdown else "== ") + title)
+
+    if "forward_first" in board:
+        section("the forward-first scoreboard (docs/goals/LTCM_FORWARD_FIRST.md)")
+        out.append("")
+        rows = forward_rows(board, markdown=markdown)
+        if markdown:
+            out.append("| # | Metric | Reading (each number names its function) | Target at the end |")
+            out.append("|---|---|---|---|")
+            out += [f"| {a} | {_cell(b)} | {_cell(c)} | {_cell(d)} |" for a, b, c, d in rows]
+        else:
+            out += [f"{a}  {b}\n   {c}\n   target: {d}" for a, b, c, d in rows]
+    section("the close-the-gaps scoreboard (docs/goals/LTCM_CLOSE_THE_GAPS.md; kept)")
     out.append("")
     rows = summary_rows(board)
     if markdown:
@@ -1433,11 +2739,8 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
         out += [f"| {a} | {b} | {c} | `{d}` |" for a, b, c, d in rows]
     else:
         out += [f"{a}  {b}\n   {c}   [{d}]" for a, b, c, d in rows]
-    pre = "- " if markdown else "   "
-
-    def section(title: str) -> None:
-        out.append("")
-        out.append(("## " if markdown else "== ") + title)
+    if "forward_first" in board:
+        forward_sections(board, pre, section, out)
 
     section("1. families with a positive real lower bound [real_bounds, family_capacity]")
     out.append(f"{pre}the family record read: {m['1'].get('record', 'scoreboard')} "
@@ -1558,7 +2861,7 @@ def take(directory: str | Path, api: Any = None, box: str | None = None) -> list
     """Snapshot the House's stores into `directory`: a sqlite backup of each store on the box (read
     `mode=ro`) into a /tmp directory there, gzipped and downloaded, the JSON files downloaded as they
     are; the box copies are deleted whatever happens. Returns the files written."""
-    from scripts.floor_box import STATE_DIR, client, read_state, require_box
+    from scripts.floor_box import DEPLOYS_JSONL as DEPLOYS_JSONL_ON_BOX, STATE_DIR, client, read_state, require_box
 
     api = api if api is not None else client()
     box = box if box is not None else require_box(read_state())
@@ -1584,6 +2887,15 @@ def take(directory: str | Path, api: Any = None, box: str | None = None) -> list
                 continue
             (directory / name).write_bytes(bytes(data))
             written.append(name)
+        # The watchdog's own record of every deploy (about 3 MB on Sept 25, 2026): the rollbacks and their reasons,
+        # which the ledger cannot show for a release killed before its first `ops.started`.
+        try:
+            data = api.download(box, DEPLOYS_JSONL_ON_BOX, timeout=300)
+        except Exception:  # noqa: BLE001 - a box that never deployed through the watchdog has none
+            pass
+        else:
+            (directory / DEPLOYS_JSONL).write_bytes(bytes(data))
+            written.append(DEPLOYS_JSONL)
     finally:
         api.exec(box, ["rm", "-rf", remote], timeout=120, on_output=None)
     return written
@@ -1597,13 +2909,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     where.add_argument("--take", metavar="DIR", help="take a snapshot from the House box into DIR, then read it")
     parser.add_argument("--since", help="start of the windowed rows (ISO; default 24 h before the newest ledger row)")
     parser.add_argument("--baseline", help="count promotions only after this moment (ISO), e.g. Deploy A")
+    parser.add_argument("--deploys", metavar="FILE", help="the watchdog's deploys.jsonl kept outside the snapshot "
+                                                          "(default: DIR/deploys.jsonl; without one, deploys are read from the ledger)")
     form = parser.add_mutually_exclusive_group()
     form.add_argument("--json", action="store_true", help="machine output")
-    form.add_argument("--markdown", action="store_true", help="the table for the run record")
+    form.add_argument("--markdown", action="store_true", help="both tables for the run record")
     args = parser.parse_args(argv)
     if args.take:
         take(args.take)
-    snap = Snapshot(args.take or args.snapshot)
+    snap = Snapshot(args.take or args.snapshot, deploys=args.deploys)
     try:
         board = scoreboard(snap, since=epoch(args.since) if args.since else None,
                            baseline=epoch(args.baseline) if args.baseline else None)
