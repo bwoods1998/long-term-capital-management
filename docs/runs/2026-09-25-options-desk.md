@@ -383,5 +383,11 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
 - **17:01Z (16:30-17:01, the first half hour with all twelve founders):** 32 wakes, 3 intents, 3 structure fills, 0
   refusals, 0 alerts. krasker-29 (IWM Sept 28 282/283 put debit vertical at 0.46), krasker-32 (AAL Oct 2 14/13.5 put
   debit vertical at 0.27; RIVN Oct 2 15.5/15 at 0.24). No structure closed yet. Singles on the day -$41.15.
+- **17:31Z (17:00-17:31):** 47 wakes, 1 intent (a single contract), no fills, 0 refusals, 0 alerts. The founders'
+  own reasons, their latest wakes: condor-vrp "SPY implied move 0.27% is 0.98x the realized 0.27%, under 1.10; QQQ
+  0.81x" (the variance risk premium is not there today); ironfly-quiet "SPY's last 6 bars ran at 3.38x the usual
+  variance (quiet is 0.70x)"; putspread-dip "SPY only 0.14% under its high (a dip is 0.40%)"; calendar-term "IWM Sept
+  28 at 12.8% against Oct 5 at 16.4% (0.78x; a kink is 1.10x)"; trend-vertical and diagonal "no pullback inside a
+  trend"; orb holding IWM at +$0.05 a share; skew holding AAL and RIVN at -$0.05 each. House RSS 2,147 MB (17:30Z).
 
 ## Report
