@@ -132,6 +132,8 @@ test of every founder on true touches.
   research replays ran 12:59-13:30Z. A harness incident this run most likely helped cause. **Hotfix PR #337**
   (`v/tapecache`): an options tape is built for its call and never kept; the cache keeps at most 24 tapes; test
   added; CI started 16:22Z; owner deploy after V2's watch (the owner's lifted rule for today).
+  **Deploy V3 (the hotfix) started 16:36:30Z:** CI green 16:36:05Z (3 of 3); House RSS 2,363 MB at 16:35:48Z
+  and rising about 250 MB every two minutes with seven of eleven founders born.
 
 ## Coordination with the forward-first run
 
