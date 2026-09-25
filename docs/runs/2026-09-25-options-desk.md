@@ -415,5 +415,6 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   1.1 x ask), which fills at the touch all the same; a resting-side limit is left to the book. CI from 18:22Z; an owner
   deploy in the session under the owner's lifted rule for today. (Merton's architect had merged #338 at about 18:10Z, a
   corrected child of krasker-29 with touch-priced exits: the loop found the same defect in that strategy by itself.)
+  **Deploy V4 (PR #339) started 18:30:30Z**, CI green 18:29:52Z; it also carries main's #338.
 
 ## Report
