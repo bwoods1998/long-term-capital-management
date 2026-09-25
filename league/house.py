@@ -1088,18 +1088,50 @@ class House:
                                  f"{band:.0%} band from the {touch} {getattr(quote, touch)}; it fills at the {touch}]")
 
     def _structure_refusal(self, agent: Agent, book: Book, order: Any, instrument: Instrument, now: str) -> str:
-        """Why the House does not send this structure order (empty when it does): not a structure agent; on real
-        money (O1: the owner's switch); not on the structure book; an open outside the specialty, outside the
-        session, or on its earliest expiry day from `STRUCTURE_ENTRY_CUT_HOUR` New York (or after that expiry)."""
+        """Why the House does not send this structure order (empty when it does): not a structure agent; not on the
+        structure book (practice) or its venue's real book; on real money, an OPEN while the owner's switch is off (O1,
+        `allocator.option_spreads_real`) or of a type `allocator.option_spread_real_types` does not admit; an open outside
+        the specialty, outside the session, or on its earliest expiry day from `STRUCTURE_ENTRY_CUT_HOUR` New York (or
+        after that expiry).
+
+        On real money (G of the options-desk run, Sept 25, 2026) an admitted open goes to the real Alpaca book as the ONE
+        held instrument, by the same `Book` and broker path as practice: the venue's adapter sends it as one multi-leg
+        order, and the gateway admits exactly the constitution's types (`league.ci` holds `OPTION_STRUCTURES_REAL` to them).
+        A CLOSE is never refused for the switch or the type: it only takes risk off, and a structure held when the switch
+        went off must still be sold (the gateway checks that the account holds its legs, and admits a close of any type).
+
+        Since the review of g/money (Sept 25, 2026): NO real structure order, open or close, goes through an adapter that
+        cannot send it as one multi-leg order (`_structure_unsendable`: a close sent leg by leg would leave a naked short
+        leg), and a real open whose leg would net at the venue against a contract the real book holds or bids on the other
+        side is refused (`_real_netting_refusal`: the venue nets contracts across the account, and a netted leg can no
+        longer be closed as the structure's)."""
         if not self.is_structure_agent(agent):
             return ("a structure intent comes only from a structure agent: an agent of the options desk whose NEEDS "
                     "carry \"structures\": true")
         if book.real_money:
-            return "structures on real money wait for the owner's switch (O1): nothing is sent to a real account"
-        wanted = self._structure_book_name()
-        if book.name != wanted:
-            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
-                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+            if book.name != REAL_BOOK.get(agent.venue):
+                return f"a structure agent's real book is {REAL_BOOK.get(agent.venue)}, not {book.name}: nothing is sent"
+            if order.action == "open":
+                admitted = allocator_module.spread_types_real()
+                if not admitted:
+                    return ("structures on real money wait for the owner's switch (O1: allocator.option_spreads_real is off): "
+                            "no structure is opened on a real account")
+                if order.spec.type not in admitted:
+                    article = "an" if order.spec.type[:1] in "aeiou" else "a"
+                    return (f"{article} {order.spec.type} is not admitted on real money: allocator.option_spread_real_types "
+                            f"admits {', '.join(admitted)} (a credit type waits for the owner's explicit confirmation)")
+            unsendable = self._structure_unsendable(book, agent.id, instrument, order.action)
+            if unsendable:
+                return unsendable
+            if order.action == "open":
+                netting = self._real_netting_refusal(book, [(leg.occ, leg.sign) for leg in order.spec.legs])
+                if netting:
+                    return netting
+        else:
+            wanted = self._structure_book_name()
+            if book.name != wanted:
+                return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
+                        if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
         if order.action != "open":
             return ""
         niche = self.niche_of(agent)
@@ -1126,12 +1158,81 @@ class House:
         except LedgerConflict:
             pass  # this very intent was refused already
 
+    def _structure_unsendable(self, book: Book, agent_id: str, inst: Instrument, action: str) -> str:
+        """Why a structure order may not go to this REAL book's venue adapter, open or close (empty when it may, and on every
+        practice book): the adapter must say it sends a structure as ONE multi-leg order (`mleg`, Track P's adapter). One
+        without it would spell the held instrument as its first leg's OCC code and send that leg alone: legging in on an
+        open, and on a close legging OUT, which leaves the structure's short leg naked (the review of g/money, Sept 25, 2026;
+        until then only opens were held back). A close held back here is an error on the record, said once a structure a
+        day: a held real structure the House cannot close needs the owner (restore the adapter; never a leg by hand)."""
+        if not book.real_money:
+            return ""
+        try:
+            whole = "mleg" in set(book.broker.capabilities() or ())
+        except Exception:  # noqa: BLE001 - an adapter that cannot say is one that cannot
+            whole = False
+        if whole:
+            return ""
+        why = (f"the {book.name} book's venue adapter cannot send a structure as one multi-leg order (no `mleg` capability): no "
+               "structure order, open or close, is sent to it, never leg by leg")
+        if action != "open":
+            told = self.__dict__.setdefault("_structure_unsendable_told", set())
+            key = (agent_id, inst.key, _new_york(self.clock)[0])
+            if key not in told:
+                told.add(key)
+                try:
+                    self.alert("error", f"{agent_id}: the real structure {inst.market_id} on {book.name} cannot be closed: {why}. "
+                                        "Restore an adapter that sends one multi-leg order; never close it leg by leg")
+                except Exception:  # noqa: BLE001 - the refusal stands whether or not the alert is written
+                    pass
+        return why
+
+    def _real_netting_refusal(self, book: Book, legs: Sequence[tuple[str, int]]) -> str:
+        """Why an option OPEN on a REAL book would net against a contract the book already holds or bids on the other side
+        (empty when it would not, and on every practice book). `legs` are (OCC code, +1 long | -1 short); a single contract
+        is one long leg. The venue nets contracts across the account: two structures sharing a strike on opposite sides, or a
+        single contract bought on a structure's short leg, leave the account without one of the legs, and each structure's
+        close is then refused at the gateway as closing a leg not held -- into expiry (the review of g/money, Sept 25, 2026).
+        Every account's holdings and working buys on the book are read (the House knows them before the venue does)."""
+        if not book.real_money:
+            return ""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        wanted = {str(occ): int(sign) for occ, sign in legs}
+        sides: dict[str, set[int]] = {}
+
+        def add(inst: Instrument) -> None:
+            if is_structure(inst):
+                for leg in structures.spec_of(inst).legs:
+                    sides.setdefault(leg.occ, set()).add(leg.sign)
+            elif inst.asset_class == "option":
+                sides.setdefault(alpaca_symbol(inst), set()).add(1)  # a book never holds a single contract short
+
+        try:
+            for agent_id in book.agents():
+                for holding in list(book.account(agent_id).holdings.values()):
+                    if holding.quantity > 0:
+                        add(holding.instrument)
+            for working in book.open_orders():
+                if working.side == "buy":
+                    add(working.instrument)
+        except Exception as exc:  # noqa: BLE001 - a book that cannot be read opens nothing
+            return f"the {book.name} book's holdings could not be read to rule out netting ({type(exc).__name__}): no option is opened"
+        clash = sorted(occ for occ, sign in wanted.items() if -sign in sides.get(occ, ()))
+        if not clash:
+            return ""
+        return (f"{', '.join(clash)} is held or bid on the other side on {book.name}: the venue nets one account's contracts, "
+                "and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
+
     def _structure_context(self, agent: Agent, ctx: dict[str, Any], symbols: list[str], max_order: Decimal,
-                           max_position: Decimal) -> None:
+                           max_position: Decimal, *, book: Book | None = None) -> None:
         """A structure agent's options block (`snapshot`): `ctx["chain"]`, not filtered by a single contract's
         affordability, 0 to `max_days_to_expiry` days (today until 14:30 New York), at most 80 contracts an
         underlying; `ctx["structures"]`, the ready-made candidates within its caps (`structures.candidates`,
-        the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee."""
+        the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee.
+        On real money (`book`, G of Sept 25, 2026) only the types real money admits now are offered, and the rules
+        say which (none while the owner's switch, O1, is off)."""
         from . import structures
 
         asked = agent.needs.get("max_days_to_expiry")
@@ -1151,8 +1252,13 @@ class House:
             "entry_cut_new_york": f"{_clock_text(cut)} on the structure's earliest expiry day (today's hours)",
             "house_close_new_york": f"{_clock_text(close)} on the structure's earliest expiry day, at its bid, re-priced each tick",
             "fee_per_contract_leg_usd": float(structures.FEE_PER_CONTRACT),
-            "book": self._structure_book_name(),
+            "book": book.name if book is not None else self._structure_book_name(),
         }
+        if book is not None and book.real_money:
+            admitted = allocator_module.spread_types_real()
+            ctx["structures"] = [row for row in ctx["structures"] if row.get("structure") in admitted]
+            ctx["structure_rules"]["real_money_opens"] = (list(admitted) if admitted else
+                                                          "none: the owner's switch (O1, allocator.option_spreads_real) is off")
 
     def _structure_row(self, inst: Instrument, *, average_cost: Decimal | None = None, mark: Decimal | None = None,
                        quantity: Decimal | None = None, limit: Decimal | None = None, side: str | None = None) -> dict[str, Any]:
@@ -1265,6 +1371,8 @@ class House:
         if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < self._structure_hours(today)[1] \
                 or market_hours(inst, now) is False:
             return None
+        if self._structure_unsendable(book, agent_id, inst, "close"):
+            return None  # never leg by leg (the review of g/money, Sept 25, 2026): an error on the record, once a day
         limit = self._structure_bid(book, inst)
         if limit is None:
             return None
@@ -2270,7 +2378,11 @@ class House:
         rung = self.evaluator.rung(agent.id)
         if rung >= 2 and REAL_BOOK[agent.venue] in self.books:
             return self.books[REAL_BOOK[agent.venue]]
-        # A structure agent practises on the structure book (`_structure_book`, Sept 25, 2026).
+        return self.practice_book(agent)
+
+    def practice_book(self, agent: Agent) -> Book | None:
+        """The book an agent practises on (rung 1): a structure agent's structure book (`_structure_book`, Sept 25,
+        2026), else its venue's practice book. The allocator reads the same (`allocator.practice_book`)."""
         return self._structure_book(agent) or self.books.get(PRACTICE_BOOK[agent.venue])
 
     def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
@@ -2293,8 +2405,10 @@ class House:
             classes = ("option",)
             if rung == 2 and not allocated:  # one contract cannot be cut smaller: the micro rung's option cap
                 position = order = Decimal(row["option_max_position_usd"])
-            elif allocated:
+            elif allocated and not self.is_structure_agent(agent):
                 position = order = max(position, Decimal(row["option_max_position_usd"]))
+            # A structure agent's real caps are the allocator's as they are (O3, Sept 25, 2026): a position of
+            # `spread_position_share` of its stake in maximum loss, every order within the gateway's $75.
         return Limits(position, order, asset_classes=classes, max_hours_to_resolve=self.horizon_hours(agent))
 
     def _real_limits(self, agent: Agent, book: Book, limits: Limits) -> tuple[Decimal, Decimal]:
@@ -2528,7 +2642,7 @@ class House:
                                                        lambda: self.options_history.features_at(symbols, self.clock()))
             niche = self.niche_of(agent)
             if niche is not None and niche.asset_class == "option" and self.is_structure_agent(agent):
-                self._structure_context(agent, ctx, symbols, max_order, max_position)  # its chain and ctx["structures"]
+                self._structure_context(agent, ctx, symbols, max_order, max_position, book=book)  # its chain and ctx["structures"]
             elif niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
                 # A contract is 100 shares: what one contract may cost a share, by the same number the
@@ -3282,6 +3396,14 @@ class House:
                 if (book.real_money and side == "buy" and self.campaigns
                         and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
                     raise ValueError("this phase permits exits but no new real-money entries")
+                if book.real_money and side == "buy" and instrument.asset_class == "option":
+                    # A single contract bought on a real structure's short leg would net it away at the venue (the review
+                    # of g/money, Sept 25, 2026): `_real_netting_refusal`.
+                    from ltcm.adapters.alpaca import alpaca_symbol
+
+                    netting = self._real_netting_refusal(book, [(alpaca_symbol(instrument), 1)])
+                    if netting:
+                        raise ValueError(netting)
                 niche = self.niche_of(agent)
                 if niche is not None and side == "buy" and not niche.holds(instrument):
                     raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
@@ -3369,7 +3491,42 @@ class House:
                     adjusted.extend(f"{shown} {side}: {note}" for note in notes)
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+        if book.real_money and intents:
+            intents = self._net_within_decision(agent, book, intents, dropped)
         return intents, dropped
+
+    def _net_within_decision(self, agent: Agent, book: Book, intents: list[Intent], dropped: list[str]) -> list[Intent]:
+        """`_real_netting_refusal` within one decision on a REAL book (the review of g/money, Sept 25, 2026): its option
+        buys in order, a later one whose leg meets an earlier one's opposite leg is refused (a structure's as the book's own
+        refusal row, a single contract's as a dropped row), since neither is on the book yet when the other is checked."""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        kept: list[Intent] = []
+        sides: dict[str, set[int]] = {}
+        for intent in intents:
+            inst = intent.instrument
+            if intent.side != "buy" or inst.asset_class != "option":
+                kept.append(intent)
+                continue
+            try:
+                legs = [(leg.occ, leg.sign) for leg in structures.spec_of(inst).legs] if is_structure(inst) else [(alpaca_symbol(inst), 1)]
+            except Exception as exc:  # noqa: BLE001 - an open whose legs cannot be read is not sent
+                dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                continue
+            clash = sorted(occ for occ, sign in legs if -sign in sides.get(occ, ()))
+            if clash:
+                why = (f"{', '.join(clash)} is opened on the other side by this same decision on {book.name}: the venue nets one "
+                       "account's contracts, and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
+                if is_structure(inst):
+                    self._refuse_intent(agent, book, intent, why)
+                else:
+                    dropped.append(f"ValueError: {why[:160]}")
+                continue
+            for occ, sign in legs:
+                sides.setdefault(occ, set()).add(sign)
+            kept.append(intent)
+        return kept
 
     def _fit_order_type(self, book: Book, instrument: Instrument, side: str, order_type: str, limit: Decimal | None,
                         post_only: bool) -> tuple[str, Decimal | None, str] | None:
@@ -5316,7 +5473,10 @@ class House:
                 # A structure is sold whole, at its bid (at least a cent), in the session (Sept 25, 2026): its
                 # bid can be zero while its legs still trade, and a debit structure worth nothing is sold for a cent.
                 # A sale of it resting at or under the bid is kept across passes (it fills there, and `quantity` is
-                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`).
+                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`). Never
+                # through an adapter that would send it leg by leg (`_structure_unsendable`, the review of g/money).
+                if self._structure_unsendable(book, agent.id, holding.instrument, "close"):
+                    continue
                 sale = self._structure_sale(agent.id, holding.instrument, quantity, structure_bids.get(holding.instrument.key), now,
                                             nonce=f"wind-down:{now}", reason="the House is closing this account: the whole structure at its bid")
                 if sale is not None:
@@ -9048,6 +9208,17 @@ class House:
         if not allocator_module.enabled():
             return None
         r = allocator_module.rules()
+        if self.is_structure_agent(agent) and "spread_probe_line" in r:
+            # G of the options-desk run (Sept 25, 2026): a structure agent reaches real money by its FAMILY's spread probe
+            # line (O4), while the owner's switch (O1) is on, never by E: its family's numbers against the line.
+            board = self.allocator.board()
+            spread = board.get("spread") or {}
+            return {"band": ((board.get("agents") or {}).get(agent.id) or {}).get("band"), "route": "allocator.spread_probe_line",
+                    "option_spreads_real": bool(spread.get("on")), "line": dict(r["spread_probe_line"]),
+                    "family": (spread.get("families") or {}).get(agent.family),
+                    "note": ("Real money follows your FAMILY's closed practice structures (or one of them and a passed replay "
+                             "with positive growth out of sample), judged by the allocator at every pass while the owner's "
+                             "switch is on; the numbers are its last pass's, and nothing here moves a band.")}
         at, trades_needed = float(r["bunt_at"]), int(r["bunt_min_trades"])
         settled_needed = int(r.get("bunt_min_settled") or 0)
         weight = float((r.get("evidence") or {}).get("paper_weight", 0.5))
@@ -9067,7 +9238,7 @@ class House:
         # E = W_paper ** weight x W_real, so with the real record as it stands the line is this W_paper.
         needed = (at / w_real) ** (1.0 / weight) if weight > 0 and w_real > 0 else math.inf
         gain = max(0.0, needed / w_paper - 1.0) if w_paper > 0 else math.inf
-        paper = self.books.get(PRACTICE_BOOK[agent.venue])
+        paper = self.practice_book(agent)  # a structure agent's is its structure book (G, Sept 25, 2026)
         equity = float(paper.equity(agent.id)) if paper is not None and agent.id in paper.accounts else None
         out.update(measured=True, measured_at=board.get("at"), E=e, W_paper=w_paper, W_real=w_real,
                    closed_trades=trades, **({"settled": settled} if agent.venue == "kalshi" else {}),
@@ -9133,7 +9304,7 @@ class House:
             changes = [e for e in self.ledger.iter(kinds='eval.verdict', agent=agent.id)
                        if e.seq < entered and e.payload.get('decision') in ('seat', 'promote', 'demote')
                        and e.payload.get('to_rung') == 1]
-            paper = self.books.get(PRACTICE_BOOK[agent.venue])
+            paper = self.practice_book(agent)  # a structure agent's practice record is on its structure book (G)
             old = self._reward_evidence(agent, paper, prior, changes[-1].seq if changes else 0,
                                         until=entered) if paper else (0.0, 0)
             if old[0] > 0 and old[1] >= minimum:
