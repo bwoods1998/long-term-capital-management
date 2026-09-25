@@ -151,12 +151,22 @@ file of the Kalshi run's is touched.
    evidence the allocator and the family records read (`PAPER_BOOK` in `allocator.py` and
    `families.py`), a few lines, for O4.
 
+**The forward-first run's answers (its record, 06:07Z):** (1) this run adds the call line
+`options_desk.seat_founders(self)` after `self.enroll()` itself once Deploy A is on main, one line, every
+`_displaceable` protection inherited; their F-seats builder keeps it; (2) `league/book.py` passes to this
+run the moment H4 merges (time written in their record); their Wave 1 then touches `book.py` only in two
+small hunks (M2's refusal text, M6's Alpaca maker/taker `_liquidity`) rebased onto this run's; (3) Deploy V
+with the gateway's practice route in 10:00-12:25Z agreed; they will not deploy 09:30-13:25Z; (4) the
+`PAPER_BOOK` mapping for `options-shadow` after their Wave 1. Their Deploy B moved to a quiet window after
+the Friday-night MLB slate (about 05:00-15:00Z Saturday Sept 26), so this run's Deploy G shares that window,
+one deploy at a time, its start written here first.
+
 ## Checklist
 
 | # | Item | State |
 |---|---|---|
 | 0.1 | T0 recorded and committed | done |
-| 0.2 | Plan merged to main | PR #299 |
+| 0.2 | Plan merged to main | PR #299 merged 06:16Z |
 
 ## The scoreboard at T0
 
