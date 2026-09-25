@@ -70,6 +70,8 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
+| B | Deploy B integration (`b/integration`) | Deploy A + C8/C6 + F1 (+review) + F2/F4/X2 (+review) + F3/C7; money digest `555b7aac` before C-money; C-money and the Wave 1 money review to come |
 | C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
 | W | The site's flywheel strip | site #8 merged and DEPLOYED 12:35:10Z (version `2b780c2c`; the next checkpoint, 12:35:58Z, accepted); publisher #325 (CI green) merges in Deploy C |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
@@ -361,6 +363,33 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   curve at 1x/2x/4x. The schema's new fields are optional and exact; every older checkpoint still passes. The
   publisher sends each field only when its source has it and falls back to the checkpoint without them on a 400 from
   an older site. Site tests 84 pass (3 new, failing on main); deployed 12:35:10Z, before the session.
+
+- **F-seats (#329, Wave 1).** The "18 merged strategies waiting" were 13 corrected children whose card had passed
+  replay (also counted among the cards) and 5 whose card had failed (never to be born): each is now counted once, and
+  a failed card leaves the queue. Quota: one merged strategy born a births pass (real-money parents' fixes first, e.g.
+  `hilibrand-event-budget-child`), never into a trader's seat; expiry at 24 h back to the lab with the forward record
+  kept; desk capacity moves one seat every 12 hours at run time (negative 7-day record on 100+ active blocks shrinks to
+  a floor of 4; positive on 30+ grows up to the file's cap + 4), never editing niches.json; a trader keeps its seat
+  until its desk's evidence clock has run from its first fill; `seats.deaths` counts `desk_closed` apart; C7 splits a
+  proven family's real members' Kalshi events by a hash of `evaluator.event_key` (a real entry on another member's
+  event is refused; exits never split). Replayed on T0 with the clock run forward: 13 ready strategies, 1 seated at
+  T0 (every resident protected), 4 by +1 h, 9 by +4 h, 11 by +8 h; displaceable 0 / 3 / 11 / 28 at T0 / +1 / +4 / +24 h.
+- **F-lab review (`f-lab/review`).** Seven of nine findings fixed with tests: residents keep a quarter of every
+  forward run (the new order starved re-scoring), a young window is re-scored only once a block has closed, tried
+  candidates are not asked for, parameter children keep their third of the asks, a daily desk's cell asks the next
+  program after 24 h of data, a losing program no longer deadlocks its agent's submissions, a blocked lineage places
+  as a losing one; re-placing T0 moves 46 of 83 cells. **Open (owner / Wave 2 X):** graduation selects on a forward
+  window that lies inside the House's replay's out-of-sample third on Kalshi and the non-deep Alpaca desks (the same
+  `tape_for` tape), so that replay is no longer independent; X cuts the House's replay tape at the candidate's
+  freeze. The plan's ">= 60% forward-positive graduates" becomes 100% by construction: the run reads the newborns'
+  first practice day instead (the scoreboard's `forward_positive` second number).
+- **F-research review (`f-research/review`).** Seven of nine fixed with tests: the consult price multiple could take
+  an agent's balance to zero (4 of 90 consults at 4x on T0): the surcharge is now capped; rung-0 agents keep their
+  clock after three abstentions; the teacher's control arm no longer reads the lesson that names it (3 days,
+  `teacher_days`; also for control agents on real money); a paused practice agent hears news of its own program at
+  once and its own trading once a UTC day; the multiple decays after 7 days; the barren count restarts on a reset; a
+  paused consultant's row is written once. Replay after the fixes: 794 sessions (+44 samples), 259 candidates, 90
+  adoptions or forks, $34.58 (T0 day: 2,566, 547, 108, $87.65). The candidates target stays missed (recorded).
 
 ## Progress notes
 
