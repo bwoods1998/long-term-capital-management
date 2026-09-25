@@ -56,7 +56,7 @@ NEEDS = {
         "notional_usd": [2.0, 50.0], "bid_min": [0.30, 0.90], "bid_max": [0.60, 0.97], "min_edge": [0.02, 0.25],
         "min_edge_tail": [0.03, 0.30], "take_edge": [0.08, 0.50], "model_weight": [0.2, 1.0], "bias_high_f": [-3.0, 3.0],
         "bias_low_f": [-3.0, 3.0], "spread_mult": [0.7, 2.0], "kernel_f": [0.5, 3.0], "nws_weight": [0.0, 0.6],
-        "max_run_age_hours": [8.0, 36.0], "cutoff_hour_high": [-6, 12], "cutoff_hour_low": [-8, 4], "min_members": [10, 82],
+        "max_run_age_hours": [8.0, 36.0], "cutoff_hour_high": [-6, 12], "cutoff_hour_low": [-8, 0], "min_members": [10, 82],
         "max_new": [1, 8], "max_open": [1, 24], "requote_minutes": [30, 600], "improve_ticks": [0, 2]}},
 }
 PARAMS = {
@@ -74,7 +74,7 @@ PARAMS = {
     "nws_weight": 0.25,         # the NWS point forecast as a quarter of the mixture: unmeasured here
     "max_run_age_hours": 18.0,  # GEFS runs every 6 h and is out 5.7 h later: one run missed is stale
     "cutoff_hour_high": 6,      # hours after the climate day's start: before the morning's heating
-    "cutoff_hour_low": -1,      # the evening before: the first reading of the day caps the low
+    "cutoff_hour_low": -1,      # the evening before: the first reading of the day caps the low (bounded at 0, midnight)
     "min_members": 20,
     "max_new": 4,
     "max_open": 12,             # one event per station-day: six stations, highs and lows
@@ -99,6 +99,10 @@ MONTHS = {m: i + 1 for i, m in enumerate("JAN FEB MAR APR MAY JUN JUL AUG SEP OC
 TICK = 0.01
 MAKER_RATE = 0.0175  # a quarter of the taker rate: weather pays no maker fee today; charged anyway
 EPS = 1e-9
+# The last climate day in STATIONS' sample (settlements Aug 1-Sep 24, 2026). A day on or before it is never priced:
+# the weather feed was recorded from Sep 24 08:33Z, so a replay could otherwise trade Sep 24's highs on a table
+# that already holds their settlement. Live days are all after it; this keeps every replay out of sample.
+FITTED_THROUGH = "2026-09-24"
 
 
 def num(value, default=None):
@@ -107,6 +111,16 @@ def num(value, default=None):
     except (TypeError, ValueError):
         return default
     return out if math.isfinite(out) else default
+
+
+def obj(value):
+    """A mapping as given, or {} for anything else (a feed row, a field of one, a ctx field)."""
+    return value if isinstance(value, dict) else {}
+
+
+def seq(value):
+    """A list as given, or [] for anything else."""
+    return value if isinstance(value, (list, tuple)) else []
 
 
 def when(text):
@@ -145,12 +159,15 @@ def parse_market(row, siblings):
         low, high = (int(pair.group(1)), int(pair.group(2))) if pair else (math.floor(s), math.ceil(s))
         low, high = (low, high) if low <= s <= high else (math.floor(s), math.ceil(s))
         return station, kind, day, low - 0.5, high + 0.5, False
-    greater = ">" in title or "above" in title.lower()
-    if not greater and "<" not in title and "below" not in title.lower():
-        centers = [c for c in siblings if c is not None]
-        if not centers or min(centers) <= s <= max(centers):
-            return None  # no title says which way, and the brackets do not either
-        greater = s > max(centers)
+    above, under = ">" in title or "above" in title.lower(), "<" in title or "below" in title.lower()
+    titled = None if above == under else above  # a title naming both ways, or neither, does not say
+    centers = [c for c in siblings if c is not None]
+    bracketed = None if not centers or min(centers) <= s <= max(centers) else s > max(centers)
+    if titled is not None and bracketed is not None and titled != bracketed:
+        return None  # the title and the event's brackets disagree: not guessed
+    greater = titled if titled is not None else bracketed
+    if greater is None:
+        return None  # no title says which way, and the brackets do not either
     if greater:
         return station, kind, day, math.floor(s) + 0.5, None, True
     return station, kind, day, None, math.ceil(s) - 0.5, True
@@ -175,12 +192,12 @@ def model(p, row, nws, day, kind, station, now):
     """(points, kernel sd, NWS point or None, station sd) for a station-day, or why it cannot be priced."""
     if not isinstance(row, dict):
         return "no ensemble row"
-    runs = [when(r.get("init")) for r in (row.get("runs") or {}).values() if isinstance(r, dict)]
+    runs = [when(r.get("init")) for r in obj(row.get("runs")).values() if isinstance(r, dict)]
     runs = [r for r in runs if r is not None] or [when(row.get("t"))]
     if runs[0] is None or now is None or (now - max(runs)).total_seconds() / 3600.0 > p["max_run_age_hours"]:
         return "a stale ensemble"
-    dist = ((row.get("dates") or {}).get(day) or {}).get(kind) or {}
-    members = [v for v in (num(x) for x in dist.get("members") or []) if v is not None]
+    dist = obj(obj(obj(row.get("dates")).get(day)).get(kind))
+    members = [v for v in (num(x) for x in seq(dist.get("members"))) if v is not None]
     if len(members) < p["min_members"]:
         return "too few members"
     offset, hb, hs, lb, ls = STATIONS[station]
@@ -191,47 +208,59 @@ def model(p, row, nws, day, kind, station, now):
     kernel = max(p["kernel_f"], math.sqrt(max(0.0, floor * floor - (p["spread_mult"] * spread) ** 2)))
     point = None
     if isinstance(nws, dict) and when(nws.get("issued")) and (now - when(nws["issued"])).total_seconds() < p["max_run_age_hours"] * 3600:
-        for period in nws.get("periods") or []:
+        for period in seq(nws.get("periods")):
             if isinstance(period, dict) and bool(period.get("daytime")) == (kind == "high"):
                 if str(period.get("start" if kind == "high" else "end") or "")[:10] == day:
                     point = num(period.get("temperature"))
                     break
-        for entry in nws.get("days") or []:
+        for entry in seq(nws.get("days")):
             if point is None and isinstance(entry, dict) and entry.get("date") == day and (num(entry.get("hours"), 0) or 0) >= 18:
                 point = num(entry.get("hourly_max" if kind == "high" else "hourly_min"))
     return points, kernel, point, floor
 
 
 def decide(ctx):
-    p = {k: num((ctx.get("params") or {}).get(k), v) for k, v in PARAMS.items()}
+    p = {k: num(obj(ctx.get("params")).get(k), v) for k, v in PARAMS.items()}
     now = when(ctx.get("now"))
     memory = ctx.get("memory") if isinstance(ctx.get("memory"), dict) else {}
-    feeds = ctx.get("feeds") if isinstance(ctx.get("feeds"), dict) else {}
-    weather, nws = feeds.get("weather") or {}, feeds.get("nws") or {}
-    markets = [m for m in ctx.get("markets") or [] if isinstance(m, dict) and m.get("market")]
-    positions = [x for x in ctx.get("positions") or [] if isinstance(x, dict) and (num(x.get("quantity"), 0) or 0) > 0]
-    orders = [o for o in ctx.get("open_orders") or [] if isinstance(o, dict) and o.get("side") == "buy"]
+    feeds = obj(ctx.get("feeds"))
+    weather, nws = obj(feeds.get("weather")), obj(feeds.get("nws"))
+    markets = [m for m in seq(ctx.get("markets")) if isinstance(m, dict) and m.get("market")]
+    positions = [x for x in seq(ctx.get("positions")) if isinstance(x, dict) and (num(x.get("quantity"), 0) or 0) > 0]
+    orders = [o for o in seq(ctx.get("open_orders")) if isinstance(o, dict) and str(o.get("side") or "").lower() == "buy"]
+    taker_rate = num(obj(ctx.get("fees")).get("kalshi_taker_rate"), 0.07)
     event = lambda ticker: "-".join(str(ticker).upper().split("-")[:2])
     centers = {}
     for m in markets:
         if re.search(r"-B-?\d", str(m["market"]).upper()):
             centers.setdefault(event(m["market"]), []).append(num(m.get("strike")))
     fairs, skipped, cache = {}, {}, {}
+
+    def status(key):
+        """A station-day's pricing inputs, or why it cannot be priced now; once a wake."""
+        if key not in cache:
+            station, kind, day = key
+            start = datetime.fromisoformat(day + "T00:00:00+00:00") - timedelta(hours=STATIONS[station][0])
+            cutoff = start + timedelta(hours=p["cutoff_hour_high" if kind == "high" else "cutoff_hour_low"])
+            if day <= FITTED_THROUGH:
+                cache[key] = "inside the calibration sample"
+            elif now >= cutoff:
+                cache[key] = "past the cutoff"
+            else:
+                cache[key] = model(p, weather.get(station), nws.get(station), day, kind, station, now)
+            if isinstance(cache[key], str):
+                skipped[key] = cache[key]
+        return cache[key]
+
     for m in markets:
         info = parse_market(m, centers.get(event(m["market"]), []))
         bid, ask = num(m.get("yes_bid")), num(m.get("yes_ask"))
         if info is None or bid is None or ask is None or not 0 < bid < ask < 1 or now is None:
             continue
         station, kind, day, low, high, tail = info
-        start = datetime.fromisoformat(day + "T00:00:00+00:00") - timedelta(hours=STATIONS[station][0])
-        cutoff = start + timedelta(hours=p["cutoff_hour_high" if kind == "high" else "cutoff_hour_low"])
-        key = (station, kind, day)
-        if key not in cache:
-            cache[key] = "past the cutoff" if now >= cutoff else model(p, weather.get(station), nws.get(station), day, kind, station, now)
-        if isinstance(cache[key], str):
-            skipped[key] = cache[key]
+        if isinstance(status((station, kind, day)), str):
             continue
-        points, kernel, point, floor = cache[key]
+        points, kernel, point, floor = status((station, kind, day))
         fair = mass(points, kernel, low, high)
         if point is not None:
             fair = (1 - p["nws_weight"]) * fair + p["nws_weight"] * mass([point], floor, low, high)
@@ -251,7 +280,7 @@ def decide(ctx):
         cost = max(0.0, (num(o.get("quantity"), 0) or 0) - (num(o.get("filled"), 0) or 0)) * price
         busy.add(event(ticker))
         info = station_day(ticker)
-        stale = info is not None and info[:3] in skipped
+        stale = info is not None and now is not None and isinstance(status(info[:3]), str)
         why = None
         if ticker in fairs:
             fair, bid, ask, tail, m = fairs[ticker]
@@ -268,7 +297,7 @@ def decide(ctx):
         reserved += cost
 
     until = when(memory.get("taker_off_until"))
-    for row in ctx.get("recent_order_outcomes") or []:
+    for row in seq(ctx.get("recent_order_outcomes")):
         text = str(row.get("reason") or "").lower() if isinstance(row, dict) else ""
         if now and text and row.get("status") == "refused" and ("post-only" in text or "post_only" in text or "real_entry_liquidity" in text):
             until = max(until or now, now + timedelta(hours=24))  # the real book wants a maker: rest for a day
@@ -286,12 +315,12 @@ def decide(ctx):
                 if gap >= (p["min_edge_tail"] if tail else p["min_edge"]) - EPS:
                     candidates.append((1, -gap / price, ticker, leg, price, gap, False))
             if takers and p["bid_min"] - EPS <= la <= p["bid_max"] + EPS:
-                gap = edge(ticker, leg, la, num((ctx.get("fees") or {}).get("kalshi_taker_rate"), 0.07))
+                gap = edge(ticker, leg, la, taker_rate)
                 if gap >= p["take_edge"] - EPS:
                     candidates.append((0, -gap / la, ticker, leg, la, gap, True))
     candidates.sort()  # a taker first (its edge is there now), then the best return per dollar
 
-    limits, risk = ctx.get("limits") or {}, (ctx.get("event_risk") or {}).get("remaining_by_market_usd") or {}
+    limits, risk = obj(ctx.get("limits")), obj(obj(ctx.get("event_risk")).get("remaining_by_market_usd"))
     equity = num(ctx.get("equity"), 0.0) or 0.0
     free = max(0.0, (num(ctx.get("cash"), 0.0) or 0.0) - reserved) * 0.98
     slots = min(int(p["max_new"]), int(p["max_open"]) - len(busy), 8)
@@ -301,7 +330,7 @@ def decide(ctx):
             continue
         room = [p["notional_usd"], free, 0.25 * equity - committed.get(event(ticker), 0.0)]
         room += [v for v in (num(limits.get("max_order_usd")), num(limits.get("max_position_usd")), num(risk.get(ticker))) if v is not None]
-        fee_rate = num((ctx.get("fees") or {}).get("kalshi_taker_rate"), 0.07) if take else MAKER_RATE
+        fee_rate = taker_rate if take else MAKER_RATE
         quantity = int(min(room) / (price * (1 + fee_rate * (1 - price))) + EPS)
         fee = math.ceil(100 * fee_rate * quantity * price * (1 - price) - EPS) / 100 if take else 0.0
         if quantity < 1 or quantity * price < 1.0 or (take and quantity * (gap + fee_rate * price * (1 - price)) - fee < quantity * p["take_edge"]):

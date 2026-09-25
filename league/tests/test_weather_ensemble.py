@@ -166,6 +166,19 @@ class HowKalshiStrikesThem(unittest.TestCase):
         self.assertEqual(parse({"market": "KXLOWTPHIL-26SEP25-B55.5", "title": "be 55-56°"}, [])[:3], ("KPHL", "low", DAY))
         self.assertEqual(parse({"market": "KXHIGHTSATX-26OCT01-B90.5"}, [])[:3], ("KSAT", "high", "2026-10-01"))
 
+    def test_a_threshold_whose_title_and_brackets_disagree_is_not_guessed(self):
+        """Review of K3: where both the title and the event's brackets say which way a threshold pays, they must agree;
+        a title naming both ways says nothing, and a title alone (no brackets in view) is read as before."""
+        parse = SEEDNS["parse_market"]
+        brackets = [67.5, 69.5, 71.5, 73.5]
+        self.assertIsNone(parse({"market": "KXHIGHNY-26SEP25-T74", "title": "Will the maximum temperature be <74°?"}, brackets))
+        self.assertIsNone(parse({"market": "KXHIGHNY-26SEP25-T67", "title": "Will the maximum temperature be >67°?"}, brackets))
+        both = {"market": "KXHIGHNY-26SEP25-T74", "title": "Will it be >74° or below?"}
+        self.assertEqual(parse(both, brackets)[3:], (74.5, None, True), "an ambiguous title defers to the brackets")
+        self.assertIsNone(parse(both, []), "an ambiguous title and no brackets: not guessed")
+        self.assertEqual(parse({"market": "KXHIGHNY-26SEP25-T74", "title": ">74°"}, [])[3:], (74.5, None, True))
+        self.assertEqual(parse({"market": "KXHIGHNY-26SEP25-T67", "title": "66° or below"}, brackets)[3:], (None, 66.5, True))
+
     def test_one_events_markets_partition_the_line(self):
         points, kernel, _, _ = priced()
         edges = [None, 66.5, 68.5, 70.5, 72.5, 74.5, None]  # T67 less, B67.5, B69.5, B71.5, B73.5, T74 greater
@@ -247,7 +260,9 @@ class Decisions(SeedCase):
         self.assertEqual(out["memory"], {"taker_off_until": None})
 
     def test_a_low_is_priced_before_its_cutoff(self):
-        out = self.run_seed(make_ctx(params={"cutoff_hour_low": 4}))
+        # 22:30 EST on Sept 24, before New York's low cutoff (23:00 EST, 04:00Z), on the 18Z run: every knob at its default.
+        early = "2026-09-25T03:30:00Z"
+        out = self.run_seed(make_ctx(now=early, markets=fixture_markets(early), weather=ensemble_row(runs_at="2026-09-24T18:00:00Z")))
         self.assertEqual({i["market"].split("-")[0] for i in out["intents"]}, {"KXHIGHNY", "KXLOWTNYC"})
         low = next(i for i in out["intents"] if i["market"].startswith("KXLOWTNYC"))
         self.assertTrue(low["post_only"] and low["limit_price"] >= 0.30)
@@ -331,7 +346,7 @@ class Decisions(SeedCase):
                     "filled": 0.0, "submitted_at": at}
         keep = bid("ord-keep", "KXHIGHNY-26SEP25-B71.5", "no", 0.57)
         flipped = bid("ord-flip", "KXHIGHNY-26SEP25-B69.5", "yes", 0.33)       # the model puts 69-70 under a third
-        outbid = bid("ord-old", "KXLOWTNYC-26SEP25-B55.5", "no", 0.30, at="2026-09-25T03:00:00Z")
+        outbid = bid("ord-old", "KXHIGHNY-26SEP25-B71.5", "no", 0.55, at="2026-09-25T03:00:00Z")  # NO bid is 0.57
         out = self.run_seed(make_ctx(orders=[keep, flipped]))
         self.assertEqual(out["cancels"], ["ord-flip"])
         self.assertEqual(out["intents"], [], "a cancel is not confirmed by asking: the event waits for the next wake")
@@ -341,10 +356,10 @@ class Decisions(SeedCase):
         stale = make_ctx(orders=[keep], weather=ensemble_row(runs_at="2026-09-24T10:00:00Z"))
         self.assertEqual(self.run_seed(stale)["cancels"], ["ord-keep"])
         # Outbid and older than requote_minutes: cancelled, to be bid again at the new touch next wake.
-        out = self.run_seed(make_ctx(orders=[outbid], params={"cutoff_hour_low": 4, "min_edge": 0.02}))
+        out = self.run_seed(make_ctx(orders=[outbid]))
         self.assertEqual(out["cancels"], ["ord-old"])
         fresh = dict(outbid, submitted_at="2026-09-25T06:40:00Z")
-        self.assertEqual(self.run_seed(make_ctx(orders=[fresh], params={"cutoff_hour_low": 4, "min_edge": 0.02}))["cancels"], [])
+        self.assertEqual(self.run_seed(make_ctx(orders=[fresh]))["cancels"], [])
 
     def test_never_under_the_real_books_longshot_floor(self):
         # 69-70 F: the model's likeliest bracket, offered at 10 cents. The YES would be a huge edge, and costs under 30.
@@ -390,11 +405,82 @@ class Decisions(SeedCase):
             rows.append(market(f"{series}-26SEP25-T{center - 4}", 0.04, 0.06, f"<{center - 4}°", center - 4))
         for station in needs["feeds"]["weather"]:
             weather[station] = base
-        ctx = {**make_ctx(markets=rows, params={"cutoff_hour_low": 4}), "feeds": {"weather": weather, "nws": {"KNYC": nws_row()}}}
+        early = "2026-09-25T03:30:00Z"  # before every station's low cutoff, so all 72 markets are priced
+        ctx = {**make_ctx(markets=rows, now=early), "feeds": {"weather": weather, "nws": {"KNYC": nws_row()}}}
         out = self.run_seed(ctx)
         self.assertLess(out["seconds"], 1.0, "72 markets on six stations: far inside the box's 5 seconds")
         self.assertLessEqual(len(out["intents"]), PARAMS["max_new"])
         self.assertEqual(len({"-".join(i["market"].split("-")[:2]) for i in out["intents"]}), len(out["intents"]))
+
+    def test_malformed_feed_rows_and_ctx_fields_never_crash(self):
+        """Review of K3: a feed row is an outside source's answer; one malformed row (or ctx field) is a skipped
+        station-day, never a crashed wake for every station."""
+        row = ensemble_row()
+        day = lambda value: {**row, "dates": {DAY: value}}
+        junk_feeds = {
+            "weather a list": {"weather": ["x"]}, "row a list": {"weather": {"KNYC": ["x"]}},
+            "dates a list": {"weather": {"KNYC": {**row, "dates": ["x"]}}}, "day a list": {"weather": {"KNYC": day(["x"])}},
+            "high a number": {"weather": {"KNYC": day({"high": 5})}}, "members a string": {"weather": {"KNYC": day({"high": {"members": "70"}})}},
+            "members NaN": {"weather": {"KNYC": day({"high": {"members": [float("nan")] * 82}})}},
+        }
+        for label, value in junk_feeds.items():
+            with self.subTest(label):
+                out = self.run_seed({**make_ctx(), "feeds": value})
+                self.assertEqual(out["intents"], [])
+        wanted = [("KXHIGHNY-26SEP25-B71.5", "no", 0.57)]
+        junk_ctx = {
+            "runs a list": {"feeds": {"weather": {"KNYC": {**row, "runs": ["x"]}}}},  # freshness falls back to the row's t
+            "nws a list": {"feeds": {"weather": {"KNYC": row}, "nws": ["x"]}},
+            "nws fields junk": {"feeds": {"weather": {"KNYC": row}, "nws": {"KNYC": {"issued": NOW, "periods": "x", "days": 5}}}},
+            "outcomes a number": {"recent_order_outcomes": 5},
+            "event_risk a list": {"event_risk": {"remaining_by_market_usd": ["x"]}}, "fees junk": {"fees": {"kalshi_taker_rate": "x"}},
+        }
+        for label, extra in junk_ctx.items():
+            with self.subTest(label):
+                out = self.run_seed({**make_ctx(), **extra})
+                self.assertEqual([(i["market"], i["leg"], i["limit_price"]) for i in out["intents"]], wanted)
+
+    def test_a_resting_bid_is_judged_even_when_its_day_is_out_of_view(self):
+        """Review of K3: past its cutoff, or on a stale or missing ensemble, a resting bid is cancelled whether or not any
+        market of its station-day is in this wake's view (a day whose books went one-sided kept its bids before)."""
+        keep = {"order_id": "ord-keep", "market": "KXHIGHNY-26SEP25-B71.5", "leg": "no", "side": "buy", "quantity": 10,
+                "limit_price": 0.57, "filled": 0.0, "submitted_at": "2026-09-25T06:30:00Z"}
+        self.assertEqual(self.run_seed(make_ctx(markets=[], orders=[keep], now="2026-09-25T11:30:00Z"))["cancels"], ["ord-keep"])
+        stale = make_ctx(markets=[], orders=[keep], weather=ensemble_row(runs_at="2026-09-24T10:00:00Z"))
+        self.assertEqual(self.run_seed(stale)["cancels"], ["ord-keep"])
+        self.assertEqual(self.run_seed(make_ctx(markets=[], orders=[keep], feeds_absent=True))["cancels"], ["ord-keep"])
+        out = self.run_seed(make_ctx(markets=[], orders=[keep]))
+        self.assertEqual((out["cancels"], out["intents"]), ([], []), "a priceable day out of view: the bid stays")
+        # and a bid on another of the event's markets, out of view, still holds the event
+        other = dict(keep, market="KXHIGHNY-26SEP25-B73.5", limit_price=0.93)
+        rows = [m for m in fixture_markets() if m["market"] != "KXHIGHNY-26SEP25-B73.5"]
+        self.assertEqual(self.run_seed(make_ctx(markets=rows, orders=[other]))["intents"], [])
+
+    def test_a_buy_holds_its_event_whatever_the_case_of_its_side(self):
+        resting = {"order_id": "ord-9", "market": "KXHIGHNY-26SEP25-B69.5", "leg": "yes", "side": "BUY", "quantity": 5,
+                   "limit_price": 0.33, "filled": 0.0, "submitted_at": "2026-09-25T06:30:00Z"}
+        out = self.run_seed(make_ctx(orders=[resting]))
+        self.assertEqual(out["intents"], [], "one market per event: an upper-case buy still holds KXHIGHNY-26SEP25")
+        self.assertEqual(out["cancels"], ["ord-9"], "and it is judged like any buy (the model puts 69-70 under a third)")
+        sell = dict(resting, side="sell", order_id="ord-s")
+        self.assertEqual(self.run_seed(make_ctx(orders=[sell]))["cancels"], [], "a sell is never cancelled")
+
+    def test_a_climate_day_inside_the_calibration_sample_is_never_priced(self):
+        """Review of K3: STATIONS was fitted on settlements through Sept 24 and the weather feed was recorded from
+        Sept 24 08:33Z, so a replay could trade Sept 24's highs (before each station's cutoff) on a table holding their
+        settlements. The same book one day earlier trades nothing; its resting bids are cancelled."""
+        self.assertEqual(SEEDNS["FITTED_THROUGH"], "2026-09-24")
+        earlier = lambda text: text.replace("26SEP25", "26SEP24").replace("Sep 25", "Sep 24")
+        rows = [dict(m, market=earlier(m["market"]), title=earlier(m["title"])) for m in fixture_markets()]
+        base = ensemble_row(runs_at="2026-09-24T00:00:00Z")
+        weather = {**base, "dates": {"2026-09-24": base["dates"][DAY]}, "t": "2026-09-24T06:40:02.000Z"}
+        resting = {"order_id": "ord-in", "market": "KXHIGHNY-26SEP24-B71.5", "leg": "no", "side": "buy", "quantity": 5,
+                   "limit_price": 0.57, "filled": 0.0, "submitted_at": "2026-09-24T06:30:00Z"}
+        out = self.run_seed(make_ctx(markets=rows, weather=weather, now="2026-09-24T06:45:44Z", orders=[resting]))
+        self.assertEqual((out["intents"], out["cancels"]), ([], ["ord-in"]))
+        self.assertIn("inside the calibration sample", out["thought"])
+        control = self.run_seed(make_ctx())  # the same book and ensemble on Sept 25
+        self.assertEqual([i["market"] for i in control["intents"]], ["KXHIGHNY-26SEP25-B71.5"])
 
     def test_it_never_sells(self):
         held = [{"market": "KXHIGHNY-26SEP25-B71.5", "leg": "no", "quantity": 17, "average_cost": 0.57, "mark": 0.2}]
@@ -476,6 +562,20 @@ class Founders(unittest.TestCase):
                 self.assertGreaterEqual(min(row["high"]["n"], row["low"]["n"]), 54)
                 self.assertEqual(SEEDNS["CODES"][row["high"]["series"].replace("KXHIGHT", "KXHIGH").replace("KXHIGH", "")], station)
                 self.assertEqual(city_for_series(row["low"]["series"]).station, station)
+
+    def test_the_low_cutoff_can_never_reach_into_the_climate_day(self):
+        """Review of K3: after local-standard midnight the day's first readings cap its low, which the market sees and
+        the model does not; the bound stops a mutation at midnight (it allowed 04:00 LST)."""
+        for founder in self.rows:
+            with self.subTest(founder["key"]):
+                info = runner.needs_of(niches.founder_code(seeds.load(founder["seed"]), self.desk, founder))
+                needs, params = info["needs"], info["params"]
+                self.assertTrue(parameters.inspect({**params, "cutoff_hour_low": 0}, needs)["valid"])
+                self.assertFalse(parameters.inspect({**params, "cutoff_hour_low": 1}, needs)["valid"])
+                for trial in range(40):
+                    child = parameters.mutate(params, seed=f"k3-low-{trial}", needs=needs)
+                    self.assertLessEqual(child["cutoff_hour_low"], 0)
+                    self.assertGreaterEqual(child["take_edge"], 0.08, "no mutation takes at a zero edge")
 
     def test_mutations_stay_valid(self):
         info = runner.needs_of(seeds.load(SEED))
