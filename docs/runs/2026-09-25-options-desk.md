@@ -157,6 +157,16 @@ run's `config.json` change is its own new `options_structures` key).
    the merge time in your record.
 3. **Deploy V** may include a gateway deploy (the multi-leg route for `alpaca-paper` only; no money
    digest change), in the same 10:00-12:25Z window, never within 30 minutes of your Deploy A.
+5. **(06:40Z, after the Kalshi run's finding that health's `seats.displaceable` is 0 even for an evidenced
+   newcomer: 128/128 living, 71 waiters at 05:43Z)** an explicit seat rule inside `options_desk.py`: one
+   practice resident retired per tick while a structure founder is owed, at most 12 in all; first the
+   options desk's own practice residents on a family with a negative pooled forward record whose own
+   7-day practice record is <= 0 (krasker-10 -0.174, krasker-21 -0.145, krasker-13 -0.111, krasker-19
+   -0.051; options-pullback pooled -0.598), then practice residents of Alpaca desks whose desk 7-day
+   practice record is negative (alpaca-crypto-majors -0.059, alpaca-index-etfs -0.032, alpaca-open
+   -0.023 at 06:36Z) whose own record is <= 0 or who never traded, weakest first; never real money, a
+   winner, a proven family's member, one holding a position while its market is shut, one under 2 hours
+   old, or a Kalshi desk. Consent asked on PR #297 by 10:00Z.
 4. **After your Wave 1** (not before): Wave 2 here maps the `options-shadow` practice book into the
    evidence the allocator and the family records read (`PAPER_BOOK` in `allocator.py` and
    `families.py`), a few lines, for O4.
