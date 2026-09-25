@@ -249,6 +249,8 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 
 ## Progress notes
 
+- **14:45Z Sept 25 (a reading during the US session; no deploy).** Release `20260925T114915Z-007e06151f53` (the Jev run's D-J1). `kalshi_watch` 10:00-14:42Z: a live real-money Kalshi desk every hour; real settled −$1.58 (weather favourites +$0.58 on 4 events, crypto strikes +$0.62 on 5, a new crypto-15m probe `huang-l9abdce-3` of the lab family `crypto-15m-btc-5m-continuation-8c83cc` −$2.78 on 2: the allocator's promotion, forward-first's domain; this run's seat hook never takes a real-money agent); real refusals 47 per-event cap, 9 maker-only; shards 0 $333.90, 2 $66.24, 3 $76.98. GDELT now answers the box 429 (rate-limited from Sail's IP): I2's per-host backoff holds it off. #320 green at `d05e391`, waiting for Deploy A (20:10Z).
+
 ## Watch log
 
 ## Report
