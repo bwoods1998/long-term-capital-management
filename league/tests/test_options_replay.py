@@ -879,6 +879,11 @@ class Structures(unittest.TestCase):
         self.assertEqual(r["options"]["structures"]["not_evaluated"], 1)
         self.assertEqual(r["trades"], 0)
         self.assertAlmostEqual(r["final_equity"], 1000.0 - 0.1, places=6)  # the fee stays paid
+        # a far leg the history never saw at all: the calendar is not evaluated (refused), never a loss
+        later = [{"occ": near, "role": "short"}, {"occ": socc(585, expiry="261023"), "role": "long"}]
+        r = srun(steps, [near, far], structure="calendar", legs=later, open_at="2026-09-25T13:45:00Z", limit=2.20, limits=wide)
+        self.assertEqual((r["fills"], r["trades"], r["options"]["structures"]["unseen_leg_refusals"]), (0, 0, 1))
+        self.assertIn("not evaluated: the history holds no prints of a leg", " ".join(r["refusal_reasons"]))
 
     def test_the_context_is_the_houses_structure_context(self):
         cheap, dear, today_call = socc(585), socc(575), socc(586)
@@ -893,6 +898,20 @@ class Structures(unittest.TestCase):
         self.assertNotIn(socc(586, "C", "260922"), cut)  # and not from 14:30
         self.assertGreater(seen["2026-09-22T18:15:00Z"]["structures"], 0)  # ctx["structures"]: structure_core.candidates
         self.assertGreater(r["options"]["structures"]["candidates_shown"], 0)
+
+    def test_the_features_and_feeds_it_declares_as_a_live_wake_sees_them(self):
+        strategy = STRUCTURE_STRATEGY.replace('"max_days_to_expiry": 7,', '"max_days_to_expiry": 7, "options_features": True, "feeds": {"earnings": ["SPY"]},')
+        strategy = strategy.replace('"held": held,', '"held": held, "iv": (ctx.get("options_features") or {}).get("SPY", {}).get("atm_iv"), '
+                                    '"feed": sorted(((ctx.get("feeds") or {}).get("earnings") or {}).get("SPY", {}).items()),')
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-23T13:45:00Z", VPRICES)]
+        tape = stape(steps, VERTICAL, options_features={"SPY": [{"t": "2026-09-22T04:00:00Z", "atm_iv": 0.11}, {"t": "2026-09-23T04:00:00Z", "atm_iv": 0.13}]},
+                     feeds={"earnings": {"SPY": [{"t": "2026-09-23T12:00:00Z", "filed": "8-K"}]}})
+        r = run_replay(strategy, {"open_at": "never"}, tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertTrue(r["ok"], r)
+        seen = r["final_memory"]
+        self.assertEqual((seen["2026-09-22T13:45:00Z"]["iv"], seen["2026-09-23T13:45:00Z"]["iv"]), (0.11, 0.13))  # never a row before it existed
+        self.assertEqual((seen["2026-09-22T13:45:00Z"]["feed"], seen["2026-09-23T13:45:00Z"]["feed"]),
+                         ([], [["filed", "8-K"], ["t", "2026-09-23T12:00:00Z"]]))
 
     def test_the_chain_shows_at_most_eighty_an_underlying_nearest_the_money(self):
         codes = [socc(k, right) for k in range(560, 611) for right in ("C", "P")]  # 102 contracts

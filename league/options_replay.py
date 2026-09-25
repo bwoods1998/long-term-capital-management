@@ -60,6 +60,7 @@ rules (`league/options_shadow.py`), each HELD AS ONE POSITION at S = net value +
 
 from __future__ import annotations
 
+import bisect
 import copy
 import math
 import random
@@ -69,12 +70,12 @@ from zoneinfo import ZoneInfo
 
 try:
     from league.replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,
-                               _clean_memory, _mean, _num, _parse_ts, digest)
+                               _clean_memory, _feed_index, _feeds_until, _mean, _num, _parse_ts, digest)
     from league.options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to
     from league import structure_core as core
 except ImportError:  # in the agent's box the files sit side by side
     from replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,  # type: ignore
-                        _clean_memory, _mean, _num, _parse_ts, digest)
+                        _clean_memory, _feed_index, _feeds_until, _mean, _num, _parse_ts, digest)
     from options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to  # type: ignore
     import structure_core as core  # type: ignore
 
@@ -107,7 +108,7 @@ class _Book:
         self.held: dict[str, dict[str, Any]] = {}     # structures held, by code (the held instrument's market_id)
         self.sorders: dict[str, dict[str, Any]] = {}  # structure orders, by order id
         self.seq = self.fills = self.refused = self.expired_orders = self.written_off = self.forced = 0
-        self.settled = self.not_evaluated = self.structures_opened = self.structures_closed = 0
+        self.settled = self.not_evaluated = self.structures_opened = self.structures_closed = self.unseen = 0
         self.fees_usd = 0.0
         self.reasons: dict[str, int] = {}
         self.trade_returns: list[float] = []
@@ -267,6 +268,14 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     last_exec: dict[str, dict[str, Any]] = {}
     day_close: dict[tuple[str, str], float] = {}
     house_offers = 0
+    # A structure agent's wake also carries the options-derived features and the recorded feeds it
+    # declares (`House.snapshot`): each row stamped with when it became available, the latest at or
+    # before the step, as `replay.py` shows them to every other desk.
+    features = feeds = None
+    if structural and needs.get("options_features") and isinstance(tape.get("options_features"), dict):
+        features = _feed_index({"options_features": tape["options_features"]}).get("options_features") or {}
+    if structural and needs.get("feeds") and isinstance(tape.get("feeds"), dict):
+        feeds = _feed_index(tape["feeds"])
     quote_fills = 0
     memory: dict[str, Any] = {}
     errors, last_error = 0, ""
@@ -547,7 +556,12 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                                    "what is still held from 15:30 and nothing is held into an expiry")
             for leg in spec.legs:
                 info = contracts.get(leg.occ)
-                if info is None or (_parse_ts(info.get("first_print")) or 9e18) > now_ts:
+                if info is None:
+                    # A leg the history never saw (a far leg past the tape's expiries, say): the structure
+                    # cannot be valued here, so it is not evaluated -- refused, never a loss made up.
+                    book.unseen += 1
+                    return book.refuse("not evaluated: the history holds no prints of a leg of this structure")
+                if (_parse_ts(info.get("first_print")) or 9e18) > now_ts:
                     return book.refuse("not listed at this step: a leg had not printed yet (point-in-time)")
                 if quote(leg.occ, now_ts) is None:
                     return book.refuse("no quote for a leg at this step: no qualifying print or recorded quote within the quote age")
@@ -751,6 +765,11 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                     ctx["structures"] = core.candidates(ctx["chain"], max_loss_usd=core.dec(cap), today=today)
                 except (ValueError, ArithmeticError):
                     ctx["structures"] = []
+                if features is not None:
+                    ctx["options_features"] = {s: dict(rows[found - 1]) for s, (stamps, rows) in features.items()
+                                               for found in (bisect.bisect_right(stamps, now_ts),) if found and s in symbols}
+                if feeds is not None:
+                    ctx["feeds"] = _feeds_until(feeds, now_ts)
                 ctx["structure_rules"] = {"entry_cut_new_york": "14:30 on the structure's earliest expiry day",
                                           "house_close_new_york": "15:30 on the structure's earliest expiry day, at its bid, re-priced each tick",
                                           "fee_per_contract_leg_usd": fee, "book": "replay"}
@@ -817,7 +836,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         # A structure is one trade: `trades` above counts closed structures (settled ones included).
         result["options"]["structures"] = {
             "opened": book.structures_opened, "closed": book.structures_closed, "settled_at_expiry": book.settled,
-            "not_evaluated": book.not_evaluated, "house_close_offers": house_offers, "candidates_shown": structures_shown,
+            "not_evaluated": book.not_evaluated, "unseen_leg_refusals": book.unseen, "house_close_offers": house_offers,
+            "candidates_shown": structures_shown,
             "execution": ("structures: later bars only; every leg printed in the bar or quoted after the decision; long legs at "
                           "the conservative ask and short legs at the conservative bid to open, the reverse to close; "
                           "quantity x ratio within max_participation of each leg's bar volume; all or nothing; "

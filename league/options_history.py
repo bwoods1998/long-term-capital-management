@@ -881,6 +881,9 @@ class OptionsHistory:
                            "recorded_quotes": "OPRA quotes the House read for live chains, where they exist (Sept 22, 2026 on)",
                            "underlying": "the House's underlier bars adapter", "history_starts": HISTORY_STARTS},
             "coverage": {s: [{k: r.get(k) for k in ("status", "start", "end", "contracts", "with_bars", "bars")} for r in rows] for s, rows in coverage.items()},
+            # What a live wake of these NEEDS is handed besides (`House.snapshot`), stamped with when each
+            # row became available: the options-derived features it declares (Sept 25, 2026).
+            **({"options_features": self.feature_series(symbols)} if needs.get("options_features") else {}),
         }
 
 
