@@ -333,6 +333,9 @@ class TheMigration(PracticeCase):
         ctx = self.house.snapshot(agent, shadow)
         self.assertEqual(ctx["structure_rules"]["book"], SHADOW)
         self.assertIn("alpaca-paper", ctx["structure_rules"]["moving_to"])
+        # This fake venue serves an empty chain, so the wake's reach (g/loop: a structure opens only on legs among the 160
+        # nearest the money its wake was shown) would refuse the condor: this test is about the move, not the reach.
+        self.house._structure_reach_seen.pop(agent.id, None)
         # 2. For a day it keeps trading there, opens included; nothing reaches the practice account.
         opens, _ = self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])
         self.assertEqual([i.instrument.venue for i in opens], [SHADOW])
