@@ -488,6 +488,161 @@ class ShadowExpiry(unittest.TestCase):
                 ledger.close()
 
 
+class FakeAlpaca:
+    """Alpaca's practice account as the adapter reads it, in the documented shapes: a multi-leg order
+    (`order_class: "mleg"`) fills every leg at once when its signed net limit (a debit positive, a
+    credit negative) meets the legs' touches; each leg pays the OCC clearing fee at its fill ($0.025 a
+    contract, rounded up to the cent); cash moves by what each leg paid or received (a credit ADDS);
+    positions are one row a contract, a short with `side: "short"` and a negative `qty`; orders are read
+    back nested, legs with their own ids. Single-leg option orders fill at the touch too."""
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.cash = D("98000")
+        self.held: dict[str, D] = {}
+        self.quotes: dict[str, tuple[D, D]] = {}
+        self.orders: dict[str, dict] = {}
+        self.posted: list[dict] = []
+        self.n = 0
+
+    def fee(self, contracts):
+        from decimal import ROUND_CEILING
+        return (D("0.025") * contracts).quantize(D("0.01"), rounding=ROUND_CEILING)
+
+    def __call__(self, method, url, body):
+        import urllib.parse
+        from ltcm.adapters.alpaca import DATA_BASE
+        parts = urllib.parse.urlsplit(url)
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        path = parts.path
+        if url.startswith(DATA_BASE):
+            symbols = query["symbols"].split(",")
+            return {"quotes": {s: {"bp": float(self.quotes[s][0]), "ap": float(self.quotes[s][1]), "t": iso(self.clock)}
+                               for s in symbols if s in self.quotes}}
+        if path == "/v2/account":
+            return {"cash": str(self.cash), "equity": str(self.cash), "buying_power": str(self.cash), "currency": "USD"}
+        if path == "/v2/positions":
+            return [{"symbol": s, "asset_class": "us_option", "qty": str(q), "side": "short" if q < 0 else "long",
+                     "avg_entry_price": "0", "current_price": str(self.quotes.get(s, (D(0), D(0)))[0])}
+                    for s, q in self.held.items() if q != 0]
+        if path.startswith("/v2/account/activities"):
+            return []
+        if method == "POST" and path == "/v2/orders":
+            self.posted.append(body)
+            return self.place(body)
+        if method == "GET" and path.startswith("/v2/orders/"):
+            return self.orders[path.rsplit("/", 1)[1]]
+        if method == "GET" and path == "/v2/orders":
+            return [o for o in self.orders.values() if o["status"] not in ("filled", "canceled")]
+        raise AssertionError(f"FakeAlpaca: no route for {method} {url}")
+
+    def place(self, body):
+        self.n += 1
+        oid = f"order-{self.n}"
+        qty = D(body["qty"])
+        legs = body.get("legs") or [{"symbol": body["symbol"], "ratio_qty": "1", "side": body["side"],
+                                      "position_intent": body.get("position_intent")}]
+        net = D(0)
+        for leg in legs:
+            bid, ask = self.quotes[leg["symbol"]]
+            net += (ask if leg["side"] == "buy" else -bid) * D(leg["ratio_qty"])
+        limit = D(body["limit_price"])
+        fills = net <= limit if body.get("order_class") == "mleg" or legs[0]["side"] == "buy" else -net >= limit
+        rows = []
+        for i, leg in enumerate(legs):
+            bid, ask = self.quotes[leg["symbol"]]
+            price = ask if leg["side"] == "buy" else bid
+            contracts = qty * D(leg["ratio_qty"])
+            if fills:
+                signed = contracts if leg["side"] == "buy" else -contracts
+                self.held[leg["symbol"]] = self.held.get(leg["symbol"], D(0)) + signed
+                self.cash += -signed * price * 100 - self.fee(contracts)
+            rows.append({"id": f"{oid}-leg{i}", "symbol": leg["symbol"], "side": leg["side"], "position_intent": leg["position_intent"],
+                         "ratio_qty": leg["ratio_qty"], "qty": str(contracts), "filled_qty": str(contracts if fills else 0),
+                         "filled_avg_price": str(price) if fills else None, "status": "filled" if fills else "new",
+                         "asset_class": "us_option"})
+        row = {"id": oid, "client_order_id": body["client_order_id"], "qty": body["qty"], "type": "limit",
+               "limit_price": body["limit_price"], "time_in_force": "day", "status": "filled" if fills else "new",
+               "filled_qty": body["qty"] if fills else "0", "submitted_at": iso(self.clock)}
+        if body.get("order_class") == "mleg":
+            row.update(order_class="mleg", legs=rows)
+        else:
+            row.update(order_class="", symbol=body["symbol"], side=body["side"], asset_class="us_option",
+                       filled_avg_price=rows[0]["filled_avg_price"], position_intent=body.get("position_intent"))
+        self.orders[oid] = row
+        return row
+
+
+class AlpacaEndToEnd(unittest.TestCase):
+    """The adapter and the book together over `FakeAlpaca`: what the practice account will see."""
+
+    def setUp(self):
+        from ltcm.adapters import AlpacaCredentials
+        from ltcm.adapters.alpaca import AlpacaBroker
+        from ltcm.tests.fakes import FakeTransport
+
+        self._rules = without_real_entry_rules()
+        self._rules.start()
+        self.addCleanup(self._rules.stop)
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.clock = Clock(SESSION)
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
+        self.addCleanup(self.ledger.close)
+        self.venue = FakeAlpaca(self.clock)
+        for strike, right, bid, ask in ((580, "P", "0.09", "0.11"), (581, "P", "0.29", "0.31"), (590, "C", "0.34", "0.36"),
+                                        (591, "C", "0.11", "0.13")):
+            self.venue.quotes[occ(strike, right)] = (D(bid), D(ask))
+        self.broker = AlpacaBroker(AlpacaCredentials("PKTESTKEYID", "supersecretvalue", paper=True),
+                                   transport=FakeTransport(default=self.venue), venue=V)
+        self.book = Book(V, self.broker, self.ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=self.clock)
+        self.book.reconcile()
+        self.book.limits["a1"] = Limits(D("100"), D("75"), asset_classes=("equity", "option"))
+        self.book.stake("a1", "200")
+
+    def trade(self, side, limit):
+        intent = Intent.new(agent="a1", instrument=CONDOR, side=side, quantity="1", order_type="limit", limit_price=limit,
+                            time_in_force="day", reason="e2e", created_at=iso(self.clock), nonce=side + limit)
+        return self.book.submit([intent])[0]
+
+    def test_a_condor_opens_and_closes_on_the_practice_account_and_reconciles_to_the_cent(self):
+        opened = self.trade("buy", "0.62")
+        self.assertEqual(opened.status, "filled", opened.detail)
+        sent = self.venue.posted[-1]
+        self.assertEqual((sent["order_class"], sent["limit_price"], len(sent["legs"])), ("mleg", "-0.38", 4))
+        self.assertEqual(self.venue.held, {occ(580, "P"): D(1), occ(581, "P"): D(-1), occ(590, "C"): D(-1), occ(591, "C"): D(1)})
+        holding = self.book.account("a1").holdings[CONDOR.key]
+        self.assertEqual((holding.quantity, holding.cost), (D(1), D("61.12")))  # 0.61 x 100 and four legs' $0.03
+        opened_reading = self.book.reconcile()
+        self.assertTrue(opened_reading.ok, opened_reading.detail)
+        self.assertEqual(opened_reading.cash_diff, D(0))
+        self.assertEqual(self.book.equity("a1"), D("200") - D("61.12") + D("53"))  # marked at the bid: 0.53
+        closed = self.trade("sell", "0.53")
+        self.assertEqual(closed.status, "filled", closed.detail)
+        self.assertEqual(self.venue.posted[-1]["limit_price"], "0.47")  # the buy-back's most, a debit: positive
+        sale = [e.payload for e in self.ledger.iter(kinds="book.fill") if e.agent == "a1"][-1]
+        self.assertEqual((D(sale["realized"]), sale["flat"]), (D("-8.24"), True))  # (0.53 - 0.61) x 100, $0.24 of fees
+        final = self.book.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+
+    def test_a_long_leg_gone_at_the_venue_is_closed_by_single_buy_backs_first(self):
+        self.assertEqual(self.trade("buy", "0.62").status, "filled")
+        self.assertTrue(self.book.reconcile().ok)
+        self.venue.held[occ(580, "P")] = D(0)  # exercised away
+        self.book.reconcile()
+        self.book.reconcile()
+        singles = [b for b in self.venue.posted if "legs" not in b]
+        self.assertEqual(sorted((b["symbol"], b["side"], b["position_intent"]) for b in singles),
+                         [(occ(590, "C"), "buy", "buy_to_close"), (occ(581, "P"), "buy", "buy_to_close")])
+        for _ in range(2):
+            self.book.poll()
+            final = self.book.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+
+
 class VenueAnswers(StructureBookCase):
     def test_the_venues_answers_are_written_for_the_owner(self):
         self.broker.answers = [{"stage": "submit", "structure": "iron_condor", "venue": V, "detail": {"answer": {"status": "new"}}},
