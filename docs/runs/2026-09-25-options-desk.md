@@ -276,5 +276,6 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   put), krasker-21 -$6.09 on 2 (AAL calls), krasker-14 -$11.00 (REAL: its draining AAL call sold at $0.04, R5's
   drain of a probe on the losing options-pullback family); singles -$34.15. Structures: none (krasker-22 has no
   signal). krasker-11 bought a SOFI put at $0.31.
+- **14:31Z (14:00-14:31):** desk 10 wakes, 0 intents; no fills, refusals or alerts. Day: singles -$34.15 on 5 closes; structures none.
 
 ## Report
