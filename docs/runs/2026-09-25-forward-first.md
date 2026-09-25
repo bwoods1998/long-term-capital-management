@@ -70,7 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
 | Z | The scoreboard | built, PR #298 (CI green); merges with Deploy A |
 | H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
-| A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:28Z; H5 and H4 after their reviews |
+| A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
 
 ## Findings before Wave 0 reports
 
