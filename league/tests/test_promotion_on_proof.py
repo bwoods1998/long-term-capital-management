@@ -795,8 +795,9 @@ class ProbesAndBunts(KalshiHouse):
     def test_the_book_reads_the_familys_taker_record(self):
         a = self.agent()
         alloc = self.house.allocator
+        # The forward-first run's M2 (Sept 25, 2026) adds the agent's band, whether it may take, and the proof's count.
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 4,
-                                                   "mean_log": 0.01, "bound": -0.01})
+                                                   "mean_log": 0.01, "bound": -0.01, "band": None, "may_take": False, "proof_min": 5})
         self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.002, taker_positive=True)
         alloc.rebalance()
         self.assertTrue(alloc.family_taker(a.id)["positive"])
@@ -812,7 +813,7 @@ class ProbesAndBunts(KalshiHouse):
         alloc.rebalance()
         self.assertEqual(alloc.tier(a), "bunt")
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                   "mean_log": 0.0, "bound": None})
+                                                   "mean_log": 0.0, "bound": None, "band": None, "may_take": False, "proof_min": 5})
 
     def test_the_audit_judges_a_probe_as_a_probe(self):
         a = self.agent()
@@ -854,7 +855,9 @@ class GrantSeats(unittest.TestCase):
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual((grant["stake_usd"], grant["max_agents"]), ("10", 101))  # floor($1,017.75 / $10)
-        self.assertIn("probes of $25 at alpaca, $10 at kalshi for an unproven family", grant["scaling"])
+        # The forward-first run's M4 (Sept 25, 2026): a stock program's probe is its own class key; the seat count still
+        # follows the smallest real stake, the $10 Kalshi probe.
+        self.assertIn("probes of $25 at alpaca, $50 at alpaca_equity, $10 at kalshi for an unproven family", grant["scaling"])
 
 
 class OneLossTrial(unittest.TestCase):
@@ -1072,8 +1075,10 @@ class TrialOnTheFloor(KalshiHouse):
             self.assertEqual(out.get("agent"), a.id)
             self.assertIn(out.get("skipped"), (None, "no data"))  # past its seat: the fake venue lists no market
             self.assertEqual(self.house.books["kalshi"].limits[a.id].max_position_usd, D("2.00"))  # a probe's
+            # An unreadable record is an unproven family's: its PROBE may take (M2, one position at its cap), no bunt could.
             self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                       "mean_log": 0.0, "bound": None})
+                                                       "mean_log": 0.0, "bound": None, "band": "probe", "may_take": True,
+                                                       "proof_min": 5})
             with self.evidence_of({a.id: dict(self.READY, **self.SWING_READY)}):
                 summary = alloc.rebalance()
                 alloc.rebalance()
@@ -1154,8 +1159,12 @@ class RulesText(unittest.TestCase):
             game = json.load(f)
         text = " ".join(rules_text(game).split())
         self.assertIn("REAL MONEY AT KALSHI. Entries:", text)
-        self.assertIn("an entry must be a POST-ONLY LIMIT", text)
-        self.assertIn("until your family's pooled TAKER record is proven positive", text)
+        # The forward-first run's M2 (Sept 25, 2026): a probe may take; a bunt's or a swing's entry is post-only until the proof.
+        self.assertIn("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap; a bunt's or a "
+                      "swing's entry must be a POST-ONLY LIMIT until your family's pooled TAKER record is proven positive (5 or more "
+                      "independent taker events with the lower bound above zero)", text)
+        old = {**CONSTITUTION, "allocator": {**CONSTITUTION["allocator"], "real_entry_liquidity": "maker_unless_family_taker_positive"}}
+        self.assertIn("an entry must be a POST-ONLY LIMIT", " ".join(rules_text(game, old).split()))
         self.assertIn("no entry under 30c", text)
         self.assertIn("holds at most 25% of your equity on the book", text)
         self.assertIn("Exits are never refused for meeting another agent's resting order", text)

@@ -305,6 +305,7 @@ def real_record(n=15, bound=0.02, variance=0.5, closes=None, unit="at_risk", pro
     checkpoint = families.entry_checkpoint(n, rule) if rule else None
     look = {"checkpoint": checkpoint, "next_checkpoint": None, "confidence": (rule or {}).get("entry_confidence"),
             "honest_bound": bound, "ready": (checkpoint is not None and bound is not None and bound > 0) if entry is None else entry}
+    look["dates_so_far"] = n if dates is None else dates  # the dates its events span now (M1)
     rec["real"] = {**rec["real"], "n": n, "bound": bound, "honest_bound": bound, "variance": variance, "entry": look,
                    "first_closes": closes if closes is not None else [(i + 1, 0.05) for i in range(n)],
                    "dates": n if dates is None else dates}
