@@ -207,6 +207,17 @@ legs already committed to a resting close are not closed twice, and a close admi
 reading takes its legs out of it. The read never follows a redirect (it carries the real account's keys).
 The practice account is unchanged.
 
+**A short leg bought back alone** (Sept 25, 2026, the review of Deploy G, MAJOR 2). A single-leg option
+order is long premium only on the real account (`buy_to_open`, `sell_to_close`), with one exception: a
+`buy` with `buy_to_close`, the book's buy-back of a short leg a broken real structure left (an uneven
+fill, a long leg sold alone, an assignment). It is admitted by the same rule as a structure close, read as
+a one-leg close: the account's signed positions must show that contract held **short** for at least `qty`
+(available), or it is a `400` ("A single-leg buy_to_close must buy back a short leg the real account
+holds: ..."), and unread positions are a `424`. Admitted, it is an exit whatever `X-LTCM-Purpose` says,
+reserved at one micro-dollar (the kill switch and the order count stop it, the dollar caps do not), its
+limit uncapped, and it leaves the cached reading. Before this, the real route refused it as not long
+premium and the naked short stayed on the account while the House retried it every reading.
+
 **The list gates opens only** (the review of g/money, Sept 25, 2026). A real CLOSE of **any** defined-risk
 type goes whatever `OPTION_STRUCTURES_REAL` says -- `off` included -- once the account's positions show
 every leg held: it only takes risk off, and every shape rule (no legging, no naked short, the sign of the

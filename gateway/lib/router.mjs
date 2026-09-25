@@ -42,6 +42,7 @@ import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import {
   createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
   admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError, closedLegRows,
+  shortCloseBody,
 } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
@@ -310,12 +311,30 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
         if (refusal) return fail(refusal, 400);
       }
     }
+    // A single-leg option buy_to_close (Sept 25, 2026, the review of Deploy G, MAJOR 2): the book's buy-back of a
+    // short leg a broken structure left on the real account (`league/book.py` `_close_break_units`). Until today
+    // it was refused as "long premium only", so the naked short stayed at the venue while the House retried it
+    // every reading. It is an exit whatever the header says, metered at one micro-dollar like a structure close
+    // (the kill switch and the day's order count still stop it), and admitted ONLY when the account's signed
+    // positions show that contract held SHORT for at least its qty: read as a one-leg close (`caps.shortCloseBody`)
+    // by the same rule as a structure's legs, so a buy "to close" of a contract not held short, which would open a
+    // long position under another name, is refused before anything is reserved. Unread positions admit nothing (a
+    // 4xx the House retries). The practice account is unchanged: it never reaches this block.
+    const shortClose = priced.shortClose ? shortCloseBody(parsed) : null;
+    if (shortClose) {
+      exit = true;
+      micro = 1n;
+      const held = await realPositions(env, { fetcher, now });
+      if (held.error) return fail(`Cannot check that the real account holds this contract short: ${held.error}.`, POSITIONS_UNREAD_STATUS);
+      const refusal = closeLegsHeldError(shortClose, held.positions);
+      if (refusal) return fail(refusal, 400);
+    }
     const decision = await gate.reserve({ micro: String(micro), exit, venue: target.venue });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
-    if (priced.structure && !priced.opening && positionsCache) {
+    if (((priced.structure && !priced.opening) || shortClose) && positionsCache) {
       // The close goes: its legs leave the cached reading, so a second close of them within the cache is refused.
-      positionsCache = { ...positionsCache, positions: [...positionsCache.positions, ...closedLegRows(parsed)] };
+      positionsCache = { ...positionsCache, positions: [...positionsCache.positions, ...closedLegRows(shortClose ?? parsed)] };
     }
   }
 
