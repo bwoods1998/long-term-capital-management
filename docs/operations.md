@@ -127,6 +127,37 @@ watch.
   took 9-14 minutes on the day's later heads); a change to `.github/workflows/` re-pins
   `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` in the same commit (a test fails otherwise) and
   reaches the box only by the owner's deploy, after which the updater trusts the new workflow.
+- **The release train (Sept 25, 2026).** A head that may ship waits while any of three holds
+  stands, and ships at the first look after they all lift (the updater looks again the moment the
+  last one lifts, not up to half an hour later):
+  - *The train:* one updater release every `release_train_hours` (`league/config.json`, default 4;
+    `league/ci.py` `CONFIG_DIALS` bounds it 2-6, so the operator may move it inside that). It is
+    measured from the last updater release that restarted the House (its `promote` row in
+    `deploys.jsonl`). A rolled-back attempt counts; a canary refusal does not, because nothing
+    restarted. A head rolled back once is tried once more at the next train; twice, never again.
+  - *The US session:* no launch on a day the House's calendar (`ltcm.data.us_equity_session`, the
+    one `league/house.py` uses) calls a trading day, from 12:55Z to 20:05Z. The window is 13:25Z to
+    20:05Z, or the session's own open and close with five minutes each side when that is wider
+    (14:25-21:05Z in winter). The launch stops 30 minutes before it opens, because the canary
+    (2.2-4.0 minutes to the restart on Sept 24-25), the ten-minute watch and any rollback all
+    restart the House. Weekends and NYSE holidays have no window.
+  - *A recent start:* none within 30 minutes of the ledger's last `ops.started`, whatever caused it.
+
+  Why: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day on Sept 20-24),
+  and seven of those restarts fell inside the Sept 24 session. The updater alone launched 14
+  releases in the day from 02:15Z Sept 24, one of them at 14:58Z, inside the session. Every restart
+  kills the research and wakes in flight.
+
+  A held head is `held` in the updater's answer, with `holds` (train, session, recent_start), the
+  reasons and `next_eligible_at`. It is written once per head per reason: a `stage: train` row in
+  `deploys.jsonl` and an `ops.deploy` row with `action: held` on the ledger. It raises no warning.
+  A protected head is still refused at once, whatever holds. `scripts/floor_watch.py` prints all of
+  it on its `## releases` line: restarts in the last day (health.json `restarts_24h` when present,
+  else the ledger's `ops.started`), the last updater ship and launch, the holds now, the last hold
+  on the ledger and the next eligible time.
+
+  The owner's deploy (`floor_box.py deploy`) is not held by the train. Deploy outside the session
+  anyway: the plan's rule is no deploy between 13:25Z and 20:05Z on a trading day, except a rollback.
 - **The owner's deploy.** `python3 scripts/floor_box.py deploy` sends the working tree.
   - Use it for protected changes.
   - Only one deploy runs at a time. If you see `REFUSED: another deploy or rollback is running

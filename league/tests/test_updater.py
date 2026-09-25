@@ -76,7 +76,7 @@ class UpdaterCase(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.base = Path(self.dir.name)
         self.clock = Clock()
-        self.releases = Releases(self.base)
+        self.releases = Releases(self.base, clock=self.clock)
         source = self.base / "src"
         unpack(tarball(tree()), source)
         self.releases.stage(source, "first-release")
@@ -257,11 +257,19 @@ class ABusyLockDoesNotRetireACommit(UpdaterCase):
         updater = self.updater()
         self.assertEqual(updater.check()["action"], "deploying")
         _, release_id = self.launched[0]
-        self.releases.record({"release": release_id, "stage": "verdict", "verdict": "rolled_back",
-                              "reasons": ["the alpaca-paper book is frozen"]})
+        self.releases.record({"release": release_id, "stage": "verdict", "verdict": "refused",
+                              "reasons": ["canary: the alpaca-paper book is frozen"]})
         self.assertIn(release_id, updater.tried())
         self.assertEqual(updater.check()["action"], "none")
         self.assertEqual(len(self.launched), 1)
+        # A release rolled back once is not retired (the release train retries it once, at the next
+        # train: `TheReleaseTrain`); rolled back twice, it is.
+        self.releases.record({"release": "main-twice", "stage": "start"})
+        self.releases.record({"release": "main-twice", "stage": "verdict", "verdict": "rolled_back"})
+        self.assertNotIn("main-twice", updater.tried())
+        self.releases.record({"release": "main-twice", "stage": "start"})
+        self.releases.record({"release": "main-twice", "stage": "verdict", "verdict": "rolled_back"})
+        self.assertIn("main-twice", updater.tried())
 
 
 class ExactCommitAttestation(UpdaterCase):
@@ -547,3 +555,301 @@ class AnUnreadableAttestationIsNoAttestation(unittest.TestCase):
             rows = Releases(base).history()
             self.assertEqual(rows[-1]["verdict"], "refused")
             self.assertNotIn("main-abcdef123456", U(base).tried())
+
+
+def utc(text: str) -> float:
+    from datetime import datetime, timezone
+
+    return datetime.strptime(text, "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc).timestamp()
+
+
+class TheReleaseTrain(unittest.TestCase):
+    """H3 of the forward-first run (Sept 25, 2026): the House restarted 26 times in the 24 hours to
+    04:23Z (24-37 a day Sept 20-24), seven of them inside the Sept 24 US session, and each restart
+    kills the research and wakes in flight. The updater shipped main whenever it had a green run: at
+    21:16, 22:21, 23:00, 23:39, 00:38 and 01:14Z that night. Now a head that may ship waits for the
+    train (one every `release_train_hours`), for the end of the session on a trading day, and for 30
+    quiet minutes after a start; it says why and when, once per head per reason."""
+
+    # UpdaterCase's fixture, not its tests (a subclass would run them all again).
+    attest, updater = UpdaterCase.attest, UpdaterCase.updater
+
+    def setUp(self):
+        UpdaterCase.setUp(self)
+        self.main = tarball(tree(extra={"league/house.py": "# the house, improved\n"}))
+        self.ledger = None
+
+    def tearDown(self):
+        if self.ledger is not None:
+            self.ledger.close()
+        UpdaterCase.tearDown(self)
+
+    def at(self, text):
+        self.clock.now = utc(text)
+
+    def started(self):
+        """The House's `ops.started`, on the ledger the updater reads read-only (`<base>/state`)."""
+        from league.ledger import Ledger
+
+        if self.ledger is None:
+            (self.base / "state").mkdir(exist_ok=True)
+            self.ledger = Ledger(self.base / "state" / "ledger.sqlite", clock=self.clock)
+        self.ledger.append("ops.started", {"release": "first-release"})
+
+    def shipped(self, release_id, sha=SHA_B, *, verdict="promoted", promoted=True):
+        """The rows `Watchdog._deploy` writes for an attested (updater) deploy, at the clock's time."""
+        base = {"deploy": f"{release_id}@{int(self.clock())}", "release": release_id, "sha": sha}
+        self.releases.record({**base, "stage": "start", "attestation": {"sha": sha}})
+        self.releases.record({**base, "stage": "canary", "ok": True})
+        if promoted:
+            self.releases.record({**base, "stage": "promote", "ok": True})
+        self.releases.record({**base, "stage": "verdict", "verdict": verdict})
+
+    def train_rows(self):
+        return [row for row in self.releases.history() if row.get("stage") == "train"]
+
+    def test_a_head_inside_the_us_session_waits_for_its_close(self):
+        self.at("2026-09-24T15:00Z")  # a Thursday; the session is 13:30-20:00Z
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["session"], []))
+        self.assertEqual(out["next_eligible_at"], "2026-09-24T20:05:00Z")
+        self.assertIn("2026-09-24 is a trading day", " ".join(out["reasons"]))
+        self.assertIn("next eligible 2026-09-24T20:05:00Z", out["reasons"])
+        self.assertEqual(list((self.base / "incoming").iterdir()), [])
+        self.at("2026-09-24T20:04Z")
+        self.assertEqual(updater.check()["action"], "held")
+        self.at("2026-09-24T20:05Z")
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_a_launch_that_would_restart_the_house_inside_the_session_waits_too(self):
+        # The canary took 2.2-4.0 minutes from launch to restart on Sept 24-25, then a ten-minute
+        # watch that may roll back: a launch at 13:00Z restarts the House inside the session.
+        self.at("2026-09-24T13:00Z")
+        self.assertEqual(self.updater().check()["holds"], ["session"])
+        self.at("2026-09-24T12:54Z")
+        self.assertEqual(self.updater().check()["action"], "deploying")
+
+    def test_the_winter_session_is_the_calendars_own_hours(self):
+        # December: EST, the session 14:30-21:00Z. The window is its own, five minutes each side.
+        self.at("2026-12-01T20:30Z")
+        out = self.updater().check()
+        self.assertEqual((out["action"], out["next_eligible_at"]), ("held", "2026-12-01T21:05:00Z"))
+
+    def test_a_weekend_and_an_nyse_holiday_are_not_a_session(self):
+        for moment in ("2026-09-26T15:00Z", "2026-09-27T15:00Z", "2026-09-07T15:00Z", "2026-11-26T15:00Z"):
+            # Saturday, Sunday, Labor Day, Thanksgiving: the House's calendar calls them closed.
+            with self.subTest(moment=moment):
+                self.launched.clear()
+                self.at(moment)
+                self.assertEqual(self.updater().check()["action"], "deploying")
+                self.assertEqual(len(self.launched), 1)
+
+    def test_a_head_three_hours_after_the_last_ship_waits_for_the_train(self):
+        self.at("2026-09-24T21:00Z")
+        self.shipped("main-000000000001")
+        self.at("2026-09-25T00:00Z")
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["train"], []))
+        self.assertEqual(out["next_eligible_at"], "2026-09-25T01:00:00Z")
+        self.assertIn("main-000000000001 (promoted)", out["reasons"][0])
+        self.at("2026-09-25T01:00Z")
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_the_train_is_the_running_releases_dial_inside_the_checkers_bounds(self):
+        from league import ci
+        from league.updater import RELEASE_TRAIN_HOURS, train_hours
+
+        self.assertEqual(ci.CONFIG_DIALS["release_train_hours"], (2, 6))
+        repository = Path(__file__).resolve().parents[2]
+        self.assertEqual(json.loads((repository / "league" / "config.json").read_text())["release_train_hours"], RELEASE_TRAIN_HOURS)
+        self.assertEqual(train_hours(repository), 4.0)
+        trusted = self.base / "trusted"
+        (trusted / "league").mkdir(parents=True)
+        for value, hours in ((3, 3.0), (9, 6.0), (1, 2.0), ("x", 4.0), (None, 4.0)):
+            config = {"real_money": False} if value is None else {"real_money": False, "release_train_hours": value}
+            (trusted / "league" / "config.json").write_text(json.dumps(config))
+            self.assertEqual(train_hours(trusted), hours, value)
+        # Two hours: the same ship holds a head at 1 h and lets it go at 2 h.
+        self.at("2026-09-26T02:00Z")
+        self.shipped("main-000000000001")
+        self.at("2026-09-26T03:00Z")
+        (trusted / "league" / "config.json").write_text(json.dumps({"release_train_hours": 2}))
+        updater = Updater(self.base, head=lambda: self.sha, fetch=lambda sha: self.main, trusted=trusted,
+                          launch=lambda source, rid, record=None: self.launched.append((source, rid)), clock=self.clock,
+                          judge=lambda incoming, running: [], attest=self.attest, workflows_pin=workflows_digest(tarball(tree())))
+        self.assertEqual(updater.check()["next_eligible_at"], "2026-09-26T04:00:00Z")
+        # And the operator's checker holds a pull request to the same bounds.
+        (trusted / "league" / "config.json").write_text(json.dumps({"real_money": False, "release_train_hours": 7}))
+        self.assertIn("release_train_hours", " ".join(ci.check_config(None, trusted)))
+
+    def test_a_head_twenty_minutes_after_a_start_waits(self):
+        self.at("2026-09-26T10:00Z")
+        self.started()
+        self.at("2026-09-26T10:20Z")
+        updater = self.updater()
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["recent_start"], []))
+        self.assertEqual(out["next_eligible_at"], "2026-09-26T10:30:00Z")
+        self.assertIn("the House started at 2026-09-26T10:00:00Z", out["reasons"][0])
+        self.at("2026-09-26T10:30Z")
+        self.assertEqual(updater.check()["action"], "deploying")
+
+    def test_a_head_outside_all_three_ships(self):
+        self.at("2026-09-25T00:00Z")
+        self.shipped("main-000000000001")
+        self.at("2026-09-25T05:00Z")  # five hours on, before the Friday session's lead
+        self.started()
+        self.at("2026-09-25T06:00Z")  # an hour after the House started
+        out = self.updater().check()
+        self.assertEqual(out["action"], "deploying")
+        self.assertEqual(len(self.launched), 1)
+
+    def test_the_next_eligible_time_clears_every_hold(self):
+        # A ship at 11:00Z on a trading day: the train lifts at 15:00Z, inside the session, so the
+        # next release is the session's end, not the train's.
+        self.at("2026-09-24T11:00Z")
+        self.shipped("main-000000000001")
+        self.at("2026-09-24T12:00Z")
+        out = self.updater().check()
+        self.assertEqual((out["holds"], out["next_eligible_at"]), (["train"], "2026-09-24T20:05:00Z"))
+        self.at("2026-09-24T14:00Z")
+        self.started()
+        self.at("2026-09-24T14:10Z")
+        out = self.updater().check()
+        self.assertEqual((sorted(out["holds"]), out["next_eligible_at"]), (["recent_start", "session", "train"], "2026-09-24T20:05:00Z"))
+
+    def test_a_protected_head_is_still_refused_at_once(self):
+        self.at("2026-09-24T15:00Z")  # inside the session and the train: the refusal does not wait
+        self.shipped("main-000000000001")
+        self.main = tarball(tree(extra={"league/constitution.py": "MONEY = 'mine'\n"}))
+        out = self.updater().check()
+        self.assertEqual(out["action"], "refused")
+        self.assertIn("league/constitution.py", " ".join(out["reasons"]))
+        self.assertIn("owner's deploy", " ".join(out["reasons"]))
+        self.assertEqual((self.launched, self.train_rows()), ([], []))
+
+    def test_a_held_head_is_judged_once_when_it_goes_not_at_every_look(self):
+        judged = []
+        self.at("2026-09-24T15:00Z")
+        updater = self.updater(judge=lambda incoming, running: judged.append(incoming) or [])
+        updater.check()
+        updater.check()
+        self.assertEqual(judged, [])
+        self.at("2026-09-24T20:10Z")
+        self.assertEqual(updater.check()["action"], "deploying")
+        self.assertEqual(len(judged), 1)
+
+    def test_a_skip_is_told_once_per_head_per_reason_across_restarts(self):
+        self.at("2026-09-24T15:00Z")
+        updater = self.updater()
+        self.assertTrue(updater.check()["new"])
+        self.assertFalse(updater.check()["new"])
+        self.assertFalse(self.updater().check()["new"])  # a restarted House reads deploys.jsonl
+        rows = self.train_rows()
+        self.assertEqual([(r["sha"], r["holds"], r["verdict"], r.get("unjudged")) for r in rows], [(SHA_A, ["session"], "held", True)])
+        self.assertEqual(rows[0]["next_eligible_at"], "2026-09-24T20:05:00Z")
+        # A new reason for the same head is told once more; a new head is told afresh.
+        self.shipped("main-000000000001")
+        self.assertTrue(self.updater().check()["new"])
+        self.assertFalse(self.updater().check()["new"])
+        self.sha = "c" * 40
+        self.main = tarball(tree(extra={"league/house.py": "# the house, improved twice\n"}), sha=self.sha)
+        self.assertTrue(self.updater().check()["new"])
+        self.assertEqual(len(self.train_rows()), 3)
+        held = {row["release"] for row in self.train_rows()}
+        self.assertEqual(len(held), 2)
+        self.assertEqual(held & self.updater().tried(), set())  # a held head is never retired
+
+    def test_the_house_writes_one_row_per_new_hold_and_no_warning(self):
+        """`House._update` (unchanged) writes `ops.deploy` when `new` and alerts only a refusal, a
+        block or a wait: a held head is a row with its reasons, not an alert."""
+        from types import SimpleNamespace
+
+        from league.house import House
+
+        self.at("2026-09-24T15:00Z")
+        rows, alerts = [], []
+        house = SimpleNamespace(updater=self.updater(), ledger=SimpleNamespace(append=lambda kind, payload: rows.append((kind, payload))),
+                                alert=lambda level, text: alerts.append(level), _state={}, _state_lock=__import__("threading").Lock(), clock=self.clock)
+        House._update(house)
+        House._update(house)
+        self.assertEqual([(kind, payload["action"]) for kind, payload in rows], [("ops.deploy", "held")])
+        self.assertIn("next eligible 2026-09-24T20:05:00Z", rows[0][1]["reasons"])
+        self.assertEqual((alerts, house._state), ([], {}))
+
+    def test_the_sites_news_calls_a_held_head_a_wait_not_a_refusal(self):
+        from league.publish import league_news
+
+        self.at("2026-09-24T15:00Z")
+        out = self.updater().check()
+        payload = {k: v for k, v in out.items() if k in ("action", "release", "reasons", "files", "sha", "attestation")}  # House._update's row
+        news = league_news("ops.deploy", "house", payload)
+        self.assertIn("waits for the release train", news)
+        self.assertIn("next eligible 2026-09-24T20:05:00Z", news)
+        self.assertNotIn("refused", news)
+
+    def test_a_rolled_back_attempt_counts_for_the_train_and_is_retried_once(self):
+        self.at("2026-09-26T02:00Z")
+        updater = self.updater()
+        self.assertEqual(updater.check()["action"], "deploying")
+        _, release_id = self.launched[0]
+        self.shipped(release_id, SHA_A, verdict="rolled_back")
+        self.at("2026-09-26T03:00Z")
+        out = updater.check()
+        self.assertEqual((out["action"], out["holds"]), ("held", ["train"]))
+        self.assertIn("(rolled_back)", out["reasons"][0])
+        self.at("2026-09-26T06:00Z")
+        self.assertEqual(updater.check()["action"], "deploying")  # the same tree, once more
+        self.assertEqual([rid for _, rid in self.launched], [release_id, release_id])
+        self.shipped(release_id, SHA_A, verdict="rolled_back")
+        self.at("2026-09-26T11:00Z")
+        self.assertEqual(updater.check()["action"], "none")  # twice rolled back: retired
+        self.assertEqual(len(self.launched), 2)
+
+    def test_a_canary_refusal_restarted_nothing_and_does_not_hold_the_train(self):
+        self.at("2026-09-26T02:00Z")
+        self.shipped("main-000000000001", verdict="refused", promoted=False)
+        self.at("2026-09-26T02:30Z")
+        self.assertEqual(self.updater().check()["action"], "deploying")
+
+    def test_an_owner_deploy_is_not_a_train_ship_but_its_start_is_a_start(self):
+        self.at("2026-09-26T02:00Z")
+        base = {"deploy": "20260926T020000Z-abc@1", "release": "20260926T020000Z-abc"}  # no sha: floor_box.py's
+        for stage in ("start", "promote", "verdict"):
+            self.releases.record({**base, "stage": stage, "ok": True, "verdict": "promoted"})
+        self.started()
+        self.at("2026-09-26T02:40Z")
+        self.assertEqual(self.updater().check()["action"], "deploying")
+
+    def test_an_in_flight_deploy_holds_the_next_head(self):
+        self.at("2026-09-26T02:00Z")
+        self.releases.record({"deploy": "main-000000000001@1", "release": "main-000000000001", "sha": SHA_B, "stage": "start"})
+        self.at("2026-09-26T02:05Z")
+        self.assertEqual(self.updater().check()["holds"], ["train"])
+
+    def test_the_next_look_is_when_the_hold_lifts(self):
+        self.at("2026-09-24T19:50Z")
+        updater = self.updater()
+        self.assertEqual(updater.check()["action"], "held")
+        self.at("2026-09-24T20:00Z")
+        self.assertFalse(updater.due())
+        self.at("2026-09-24T20:05Z")
+        self.assertTrue(updater.due())  # fifteen minutes on, not thirty
+        self.assertEqual(updater.check()["action"], "deploying")
+        self.at("2026-09-24T20:10Z")
+        self.assertFalse(updater.due())
+
+    def test_the_calendar_is_the_houses(self):
+        from league import house, updater
+
+        self.assertIs(updater.us_equity_session, house.us_equity_session)
+
+    def test_an_unreadable_ledger_holds_as_a_fresh_start(self):
+        self.at("2026-09-26T10:00Z")
+        (self.base / "state").mkdir()
+        (self.base / "state" / "ledger.sqlite").write_bytes(b"not a database, " * 64)
+        out = self.updater().check()
+        self.assertEqual((out["action"], out["holds"]), ("held", ["recent_start"]))
+        self.assertIn("the ledger could not be read", out["reasons"][0])
