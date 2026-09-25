@@ -627,6 +627,34 @@ class AlpacaEndToEnd(unittest.TestCase):
         self.assertEqual(final.cash_diff, D(0))
         self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
 
+    def test_a_restart_while_a_structure_order_rests_books_its_fill_from_the_legs(self):
+        from ltcm.adapters import AlpacaCredentials
+        from ltcm.adapters.alpaca import AlpacaBroker
+        from ltcm.tests.fakes import FakeTransport
+
+        rested = self.trade("buy", "0.58")  # the ask is 0.61: it rests
+        self.assertEqual(rested.status, "resting", rested.detail)
+        # A new process: a new adapter that never saw the order, and a book folded from the ledger.
+        self.broker = AlpacaBroker(AlpacaCredentials("PKTESTKEYID", "supersecretvalue", paper=True),
+                                   transport=FakeTransport(default=self.venue), venue=V)
+        self.book = Book(V, self.broker, self.ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=self.clock)
+        self.assertTrue(self.book.reconcile().ok)
+        order = next(iter(self.venue.orders.values()))  # the venue fills it while the House is away
+        for leg in order["legs"]:
+            leg.update(filled_qty=leg["qty"], status="filled",
+                       filled_avg_price=str(self.venue.quotes[leg["symbol"]][1 if leg["side"] == "buy" else 0] - D("0.01")
+                                            if leg["side"] == "buy" else self.venue.quotes[leg["symbol"]][0] + D("0.01")))
+            signed = D(leg["qty"]) if leg["side"] == "buy" else -D(leg["qty"])
+            self.venue.held[leg["symbol"]] = self.venue.held.get(leg["symbol"], D(0)) + signed
+            self.venue.cash += -signed * D(leg["filled_avg_price"]) * 100 - self.venue.fee(D(leg["qty"]))
+        order.update(status="filled", filled_qty="1")
+        self.book.poll()
+        holding = self.book.account("a1").holdings[CONDOR.key]
+        self.assertEqual((holding.quantity, holding.cost), (D(1), D("57.12")))  # 1 + 0.10 + 0.12 - 0.30 - 0.35 = 0.57
+        final = self.book.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+
     def test_a_long_leg_gone_at_the_venue_is_closed_by_single_buy_backs_first(self):
         self.assertEqual(self.trade("buy", "0.62").status, "filled")
         self.assertTrue(self.book.reconcile().ok)
