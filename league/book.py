@@ -77,6 +77,7 @@ from ltcm.broker import (
 )
 from ltcm.risk import RiskContext, RiskEngine, add_event_exposure, cluster_at_risk, event_cluster, gross_exposure
 
+from . import structures
 from .constitution import CONSTITUTION
 from .fees import QTY_PLACES, Charge, Fees, received
 from .ledger import HOUSE, Ledger, now_iso
@@ -1474,7 +1475,11 @@ class Book:
         if intent.instrument.asset_class == "option":
             if intent.order_type != "limit" or intent.limit_price is None:
                 reasons.append("an option order must be a limit order")
-            if intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
+            if intent.side == "buy" and structures.is_structure(intent.instrument):
+                cut = _structure_entry_refusal(str(intent.instrument.expiry or ""), now)
+                if cut:
+                    reasons.append(cut)
+            elif intent.side == "buy" and str(intent.instrument.expiry or "") <= _new_york_date(now):
                 reasons.append("an option entry must expire after today: what expires today is a coin held to the bell")
         if intent.side == "buy" and intent.instrument.asset_class == "event" and limits.max_hours_to_resolve is not None:
             try:
@@ -1522,6 +1527,12 @@ class Book:
         space for Kalshi legs), best price for the intent first -- a sell meets the highest bid first,
         as at the venue -- then the earliest, then by id; an unpriced order (a market order in flight)
         last."""
+        if structures.is_structure(intent.instrument) and "shadow" in self.broker.capabilities():
+            # A structure on the options shadow book (`league/options_shadow.py`, Sept 25, 2026) never meets one of
+            # the House's own orders: that account fills each order against the market alone. Crossed inside the
+            # House, the bidder would buy under the market's ask and the seller sell in the quote its decision saw,
+            # which the account's fill rules never allow; the sell goes to the account as asked.
+            return []
         side, price = yes_space(intent.instrument, intent.side, intent.limit_price)
         key = market_key(intent.instrument)
         found: list[tuple[tuple[Any, ...], Working]] = []
@@ -1954,7 +1965,11 @@ class Book:
             quote = self.broker.quote(instrument)
         except Exception:  # noqa: BLE001 - a venue that cannot quote is a refusal, not a crash
             return None
-        if quote is not None and quote.bid is not None and quote.bid > 0:
+        if quote is not None and quote.bid is not None and (quote.bid > 0 or structures.is_structure(instrument)):
+            # A structure whose legs are quoted and whose bid comes to nothing is worth nothing to sell, and is marked
+            # so (Sept 25, 2026): kept at its last bid it flattered its holder's equity while it died. Only a quote
+            # that is missing (a leg unquoted, no bid computable: `bid` None) keeps the last mark. A single contract
+            # keeps the old rule: Alpaca reports its empty bid as no bid at all, which cannot be told from no quote.
             self.marks[instrument.key] = quote.bid
         return quote
 
@@ -2868,7 +2883,8 @@ class Book:
     def expire_options(self, *, at: str | None = None) -> int:
         """Write off long options that have expired and that the venue no longer shows: they paid
         nothing. One the venue still shows is left alone (it clears overnight); one that was
-        exercised into shares shows up as a position the book does not know, and freezes it."""
+        exercised into shares shows up as a position the book does not know, and freezes it. A
+        structure is settled at the value its venue paid for it (below), never written off."""
         now = at or now_iso(self.clock)
         today = _new_york_date(now)
         with self._lock:
@@ -2876,18 +2892,34 @@ class Book:
                    if holding.instrument.asset_class == "option" and str(holding.instrument.expiry or "9999") < today]
             if not due:
                 return 0
+            # A structure held as one position (`league/structures.py`, Sept 25, 2026) is never written off at
+            # zero: the venue settles it at its value at expiry (`OptionsShadowBroker.structure_settlements`) and
+            # the book books that same value. One the venue has not settled yet waits for it.
+            codes = {str(h.instrument.market_id) for _, _, h in due if structures.is_structure(h.instrument)}
+            settle = getattr(self.broker, "structure_settlements", None)
+            valued = settle(codes) if codes and settle is not None else {}
             shown = {position_key(p.instrument) for p in self.broker.positions() if money(p.quantity) != 0}
             expired = 0
             for agent, key, holding in due:
                 inst = holding.instrument
-                if position_key(inst) in shown:
+                payout = ZERO
+                if structures.is_structure(inst) and settle is not None:
+                    if str(inst.market_id) not in valued:
+                        continue
+                    payout = q_cash(money(valued[str(inst.market_id)]) * inst.multiplier * holding.quantity)
+                elif position_key(inst) in shown:
                     continue
                 payload = {
                     "book": self.name, "instrument": inst.to_dict(), "result": "expired", "quantity": text(holding.quantity),
-                    "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)),
+                    "cost": text(q_cash(holding.cost)), "payout": text(payout), "pnl": text(q_cash(payout - holding.cost)),
                     "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
                 }
-                entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
+                entry_id = f"expire:{self.name}:{agent}:{key}"
+                if len(entry_id) > 200:
+                    # A structure's key names every leg (about 140 characters for a condor), and a ledger id
+                    # is at most 200: such an id is hashed, as deterministic as the one it replaces.
+                    entry_id = f"expire:{self.name}:" + hashlib.sha256(f"{agent}|{key}".encode()).hexdigest()[:32]
+                entry = self.ledger.append("book.settle", payload, agent=agent, id=entry_id, at=at)
                 self._apply(entry.kind, agent, entry.payload, entry.at)
                 self.marks.pop(key, None)
                 expired += 1
@@ -3182,7 +3214,8 @@ class Book:
                 # Dust: under a cent of value, or no more than one quantity step for each venue fill
                 # since the last reconciliation (the venue rounds each in-kind fee its own way).
                 crumbs = step_of(instrument) * max(1, self._fills_since_reconcile) if instrument is not None else ZERO
-                small = instrument is not None and (
+                # A structure is whole units, and one marked at nothing would pass any difference as "under a cent".
+                small = instrument is not None and not structures.is_structure(instrument) and (
                     (mark is not None and abs(diff) * mark * instrument.multiplier < DUST_USD)
                     or (step_of(instrument) < ONE and abs(diff) <= crumbs)
                 )
@@ -3339,6 +3372,41 @@ def _epoch_seconds(now: str) -> float:
     if moment is None:
         raise ValueError(f"not a timestamp: {now!r}")
     return moment.timestamp()
+
+
+#: The last minute a structure may be opened on its earliest expiry day (the spec's section 4): 14:30 New York,
+#: ninety minutes before the bell, and on an early-close day ninety minutes before that close (11:30 on a
+#: 13:00 close), so a structure bought on its last day always has the same time to be closed before it.
+STRUCTURE_ENTRY_CUT_NY = (14, 30)
+STRUCTURE_ENTRY_BEFORE_CLOSE_SECONDS = 90 * 60
+
+
+def _structure_entry_refusal(expiry: str, now: str) -> str | None:
+    """Why a structure whose earliest expiry is `expiry` may not be opened at `now`, or None (Sept 25, 2026):
+    any day before its expiry; on the expiry day itself until the cut (`STRUCTURE_ENTRY_CUT_NY`, earlier on an
+    early close, by the House's calendar `ltcm.data.us_equity_session`); never once expired. A single option
+    keeps its own rule (no entry expiring today)."""
+    from datetime import datetime, time as clock_time
+    from zoneinfo import ZoneInfo
+
+    from ltcm.data import us_equity_session
+
+    today = _new_york_date(now)
+    if expiry > today:
+        return None
+    if expiry < today:
+        return "this structure's earliest leg has expired"
+    new_york = ZoneInfo("America/New_York")
+    session = us_equity_session(today)
+    if session is None:
+        return "a structure is not opened on its expiry day: the market has no session today"
+    cut = min(datetime.combine(datetime.strptime(today, "%Y-%m-%d").date(), clock_time(*STRUCTURE_ENTRY_CUT_NY), new_york).timestamp(),
+              _epoch_seconds(session.close_at) - STRUCTURE_ENTRY_BEFORE_CLOSE_SECONDS)
+    if _epoch_seconds(now) < cut:
+        return None
+    at = datetime.fromtimestamp(cut, new_york).strftime("%H:%M")
+    early = " (ninety minutes before today's early close)" if session.early_close else ""
+    return f"a structure is not opened after {at} New York on its expiry day{early}"
 
 
 def _new_york_date(now: str) -> str:
