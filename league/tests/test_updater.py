@@ -851,5 +851,190 @@ class TheReleaseTrain(unittest.TestCase):
         (self.base / "state").mkdir()
         (self.base / "state" / "ledger.sqlite").write_bytes(b"not a database, " * 64)
         out = self.updater().check()
-        self.assertEqual((out["action"], out["holds"]), ("held", ["recent_start"]))
+        # Nor can it say whether a real position's game is under way (H3b): that holds too, as long.
+        self.assertEqual((out["action"], out["holds"]), ("held", ["recent_start", "in_play"]))
         self.assertIn("the ledger could not be read", out["reasons"][0])
+        self.assertIn("the ledger could not be read", out["reasons"][1])
+        self.assertEqual(out["next_eligible_at"], "2026-09-26T10:30:00Z")
+
+
+def instrument(market, book="kalshi"):
+    return {"asset_class": "event", "currency": "USD", "expiry": None, "market_id": market, "multiplier": "1", "right": "no",
+            "strike": None, "symbol": market, "venue": book}
+
+
+class TheGameInPlay(unittest.TestCase):
+    """H3b of the forward-first run (Sept 25, 2026): the four runs agreed on no deploy while a real
+    Kalshi family's game is in play. The proven sports family holds MLB totals from before first
+    pitch to settlement (on Sept 25-26 six games from 22:40Z to about 05:30Z), but the train held only
+    for the US session, the train and a recent start, so a merge to main (strategies, seeds) could ship
+    in the middle of a game. Now the REAL `kalshi` book's position or working order in an event whose
+    ticker carries its start holds a release from 30 minutes before the start to its settlement on the
+    ledger, or five hours after the start, whichever comes first."""
+
+    attest, updater = UpdaterCase.attest, UpdaterCase.updater
+    setUp, tearDown, at, train_rows = TheReleaseTrain.setUp, TheReleaseTrain.tearDown, TheReleaseTrain.at, TheReleaseTrain.train_rows
+
+    GAME = "KXMLBTOTAL-26SEP251840PITDET-8"  # 18:40 EDT Sept 25, 2026 = 22:40Z
+    LATE = "KXMLBTOTAL-26SEP252210SDLAD-8"  # 22:10 EDT = 02:10Z Sept 26
+
+    def row(self, kind, payload):
+        from league.ledger import Ledger
+
+        if self.ledger is None:
+            (self.base / "state").mkdir(exist_ok=True)
+            self.ledger = Ledger(self.base / "state" / "ledger.sqlite", clock=self.clock)
+        self.ledger.append(kind, payload, agent="meriwether-h2d625d")
+
+    def fill(self, market, contracts=5, *, book="kalshi"):
+        """A `book.fill` as the book writes it for a venue fill (`league/book.py`); a sale is negative."""
+        self.row("book.fill", {"book": book, "instrument": instrument(market, book), "position_delta": str(contracts),
+                               "quantity": str(abs(contracts)), "price": "0.4900", "cash_delta": str(-0.49 * contracts),
+                               "side": "buy" if contracts > 0 else "sell", "order_id": f"ord-{market}", "source": "venue",
+                               "real_money": book == "kalshi"})
+
+    def order(self, market, status, *, order_id="ord-resting"):
+        self.row("book.order", {"book": "kalshi", "instrument": instrument(market), "order_id": order_id, "status": status,
+                                "side": "buy", "quantity": "5", "limit_price": "0.48", "order_type": "limit", "post_only": True,
+                                "real_money": True, "shares": []})
+
+    def settle(self, market, *, book="kalshi"):
+        self.row("book.settle", {"book": book, "instrument": instrument(market, book), "quantity": "5", "payout": "5.00000000",
+                                 "cost": "2.45", "pnl": "2.55", "result": "no", "real_money": book == "kalshi"})
+
+    def look(self, moment):
+        self.launched.clear()
+        self.at(moment)
+        return self.updater().check()
+
+    def test_the_start_is_new_yorks_time_in_the_ticker_summer_and_winter(self):
+        from league.updater import event_start
+
+        for market, event, starts in (
+                (self.GAME, "KXMLBTOTAL-26SEP251840PITDET", "2026-09-25T22:40Z"),  # EDT, UTC-4
+                ("KXMLBTOTAL-26NOV012008LADNYY-8", "KXMLBTOTAL-26NOV012008LADNYY", "2026-11-02T01:08Z"),  # EST from 06:00Z Nov 1
+                ("KXMLBSPREAD-26MAR071905NYYBOS-NYY2", "KXMLBSPREAD-26MAR071905NYYBOS", "2026-03-08T00:05Z"),  # EST, the evening before
+                ("KXMLBSPREAD-26MAR081905NYYBOS-NYY2", "KXMLBSPREAD-26MAR081905NYYBOS", "2026-03-08T23:05Z"),  # EDT from 07:00Z Mar 8
+                ("KXMLBHIT-26SEP222140LAAATH-LAAZNETO9-3", "KXMLBHIT-26SEP222140LAAATH", "2026-09-23T01:40Z"),  # a prop stays on its game
+                ("KXMLBTOTAL-26SEP221905TBNYYG2-6", "KXMLBTOTAL-26SEP221905TBNYYG2", "2026-09-22T23:05Z"),  # a doubleheader's second game
+                ("KXCS2GAME-26SEP230600EAC100T-100T", "KXCS2GAME-26SEP230600EAC100T", "2026-09-23T10:00Z")):
+            with self.subTest(market=market):
+                self.assertEqual(event_start(market), (event, utc(starts)))
+        for market in ("KXHIGHNY-26SEP25-T70", "KXRAIN-26SEP25-SEA", "KXBTCD-26SEP2501-T84399.99", "KXETH-26SEP2420-B2682",
+                       "KXBTC15M-26SEP250015-15", "KXCRYPTOLEAD15M-26SEP232130-BTC", "KXNFLGAME-26SEP21NYGLAR-NYG", "KXRAINDNYC-260919-0",
+                       "KXRT-RES-94", "KXMLBTOTAL-26SEP252540PITDET-8", "KXMLBTOTAL-26FEB301840PITDET-8", "", None, "AAPL"):
+            with self.subTest(market=market):
+                self.assertIsNone(event_start(market))  # no start in the ticker, or none that exists: never a hold
+
+    def test_a_real_position_in_a_game_under_way_holds_until_the_latest_ones_end(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill(self.GAME)  # the sports family buys before play (2.0-26.4 h before first pitch on Sept 20-25)
+        out = self.look("2026-09-25T23:30Z")
+        self.assertEqual((out["action"], out["holds"], self.launched), ("held", ["in_play"], []))
+        self.assertEqual(out["next_eligible_at"], "2026-09-26T03:40:00Z")
+        self.assertIn("in play: the real Kalshi book holds KXMLBTOTAL-26SEP251840PITDET (began 2026-09-25T22:40:00Z, 5 contract(s) held)",
+                      out["reasons"][0])
+        hold = out["schedule"]["holds"][0]
+        self.assertEqual((hold["events"], hold["until"]), (["KXMLBTOTAL-26SEP251840PITDET"], "2026-09-26T03:40:00Z"))
+        self.assertEqual(out["schedule"]["in_play"][0]["markets"], [self.GAME])
+        # What the owner reads on the box after the deploy: one `stage: train` row that says `in_play`.
+        self.assertEqual([(r["sha"], r["holds"], r["verdict"]) for r in self.train_rows()], [(SHA_A, ["in_play"], "held")])
+        self.assertEqual(self.look("2026-09-26T03:39Z")["holds"], ["in_play"])
+        self.assertEqual(self.look("2026-09-26T03:40Z")["action"], "deploying")  # five hours on, with no settlement seen
+
+    def test_before_first_pitch_it_ships_and_the_deploys_own_half_hour_holds(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill(self.GAME)
+        self.assertEqual(self.look("2026-09-25T20:30Z")["action"], "deploying")  # after the session, 2 h 10 min before
+        self.assertEqual(self.look("2026-09-25T22:09Z")["action"], "deploying")
+        out = self.look("2026-09-25T22:10Z")  # a launch now restarts the House (and may roll back) inside the game
+        self.assertEqual(out["holds"], ["in_play"])
+        self.assertIn("KXMLBTOTAL-26SEP251840PITDET (begins 2026-09-25T22:40:00Z", out["reasons"][0])
+
+    def test_the_settlement_on_the_ledger_ends_it_first(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill(self.GAME)
+        self.assertEqual(self.look("2026-09-26T01:15Z")["holds"], ["in_play"])
+        self.settle(self.GAME)
+        self.assertEqual(self.look("2026-09-26T01:20Z")["action"], "deploying")
+
+    def test_a_working_order_holds_until_it_is_cancelled(self):
+        self.at("2026-09-25T21:00Z")
+        self.order(self.GAME, "new")
+        self.order(self.GAME, "accepted")
+        out = self.look("2026-09-25T23:00Z")
+        self.assertEqual(out["holds"], ["in_play"])
+        self.assertIn("(began 2026-09-25T22:40:00Z, 1 working order(s))", out["reasons"][0])
+        self.order(self.GAME, "cancelled")
+        self.assertEqual(self.look("2026-09-25T23:05Z")["action"], "deploying")
+
+    def test_a_position_sold_before_play_and_the_practice_book_never_hold(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill(self.GAME, 5)
+        self.fill(self.GAME, 7, book="kalshi-shadow")  # practice: no money rides on it
+        self.at("2026-09-25T20:00Z")
+        self.fill(self.GAME, -5)
+        self.assertEqual(self.look("2026-09-25T23:30Z")["action"], "deploying")
+
+    def test_weather_and_crypto_positions_never_hold(self):
+        self.at("2026-09-25T10:00Z")
+        for market in ("KXHIGHNY-26SEP25-T70", "KXRAIN-26SEP25-SEA", "KXBTCD-26SEP2519-T84399.99", "KXBTC15M-26SEP251845-45"):
+            self.fill(market)
+        for moment in ("2026-09-25T22:40Z", "2026-09-25T23:10Z", "2026-09-26T02:00Z"):
+            with self.subTest(moment=moment):
+                self.assertEqual(self.look(moment)["action"], "deploying")
+                self.assertEqual(self.updater().schedule()["in_play"], [])
+
+    def test_a_winter_game_is_read_in_eastern_standard_time(self):
+        self.at("2026-11-01T12:00Z")
+        self.fill("KXMLBTOTAL-26NOV012008LADNYY-8")  # 20:08 EST Nov 1 = 01:08Z Nov 2 (as EDT it would be 00:08Z)
+        self.assertEqual(self.look("2026-11-02T00:37Z")["action"], "deploying")
+        self.assertEqual(self.look("2026-11-02T00:38Z")["holds"], ["in_play"])
+        out = self.look("2026-11-02T05:30Z")  # read as EDT, the five hours would have ended at 05:08Z
+        self.assertEqual((out["holds"], out["next_eligible_at"]), (["in_play"], "2026-11-02T06:08:00Z"))
+        self.assertEqual(self.look("2026-11-02T06:08Z")["action"], "deploying")
+
+    def test_the_next_eligible_time_clears_the_held_games_not_yet_begun(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill(self.GAME)
+        self.fill(self.LATE)
+        out = self.look("2026-09-25T23:00Z")
+        hold = out["schedule"]["holds"][0]
+        # Only the game under way is named; the late one begins (less its half hour) before the first ends.
+        self.assertEqual((hold["events"], hold["until"], out["next_eligible_at"]),
+                         (["KXMLBTOTAL-26SEP251840PITDET"], "2026-09-26T07:10:00Z", "2026-09-26T07:10:00Z"))
+        self.assertEqual([e["event"] for e in out["schedule"]["in_play"]], ["KXMLBTOTAL-26SEP251840PITDET", "KXMLBTOTAL-26SEP252210SDLAD"])
+
+    def test_a_game_that_begins_as_the_session_ends_holds_from_its_close(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill("KXMLBTOTAL-26SEP251610CHCSTL-8")  # 16:10 EDT = 20:10Z: its window opens at 19:40Z
+        out = self.look("2026-09-25T19:00Z")
+        self.assertEqual((out["holds"], out["next_eligible_at"]), (["session"], "2026-09-26T01:10:00Z"))
+
+    def test_a_day_game_inside_the_session_holds_past_its_close(self):
+        self.at("2026-09-25T10:00Z")
+        self.fill("KXMLBTOTAL-26SEP251305MIACHC-8")  # 13:05 EDT = 17:05Z (Sept 24's three day games: 16:13Z-20:43Z)
+        out = self.look("2026-09-25T17:30Z")
+        self.assertEqual((sorted(out["holds"]), out["next_eligible_at"]), (["in_play", "session"], "2026-09-25T22:05:00Z"))
+
+    def test_only_recent_rows_are_read(self):
+        from league.updater import _first_seq_at, real_events
+        from league.watchdog import _ledger_ro
+
+        self.at("2026-09-23T12:00Z")
+        self.fill(self.GAME)  # 58 h before first pitch: older than any position the real book has opened
+        self.at("2026-09-25T11:00Z")
+        self.fill(self.LATE)
+        state, now = self.base / "state", utc("2026-09-25T23:00Z")
+        self.assertEqual([e["event"] for e in real_events(state, now)[0]], ["KXMLBTOTAL-26SEP252210SDLAD"])
+        self.assertEqual([e["event"] for e in real_events(state, now, lookback_hours=72)[0]],
+                         ["KXMLBTOTAL-26SEP251840PITDET", "KXMLBTOTAL-26SEP252210SDLAD"])
+        with _ledger_ro(state / "ledger.sqlite") as db:
+            self.assertEqual([_first_seq_at(db, stamp) for stamp in ("2026-09-23T00:00:00.000Z", "2026-09-24T00:00:00.000Z",
+                                                                       "2026-09-25T11:00:00.000Z", "2026-09-26T00:00:00.000Z")], [1, 2, 2, 3])
+        self.assertEqual(real_events(self.base / "nothing-here", now), ([], None))
+
+    def test_the_open_statuses_are_the_books(self):
+        from league import book, updater
+
+        self.assertEqual(tuple(updater.OPEN_ORDER_STATUSES), tuple(book.OPEN_STATUSES))

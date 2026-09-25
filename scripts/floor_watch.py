@@ -14,7 +14,8 @@ the ledger writes `T`; a space sorts before `T`, so that form admitted the whole
 
 The `## releases` line (H3 of the forward-first run, Sept 25, 2026) is the harness row: the House's
 restarts in the last day, the updater's last ship and launch, what holds the next one (the release
-train, a US session, a recent start: `league/updater.py` `schedule`) and when it may go.
+train, a US session, a recent start, a real Kalshi position's game in play: `league/updater.py`
+`schedule`) and when it may go.
 """
 from __future__ import annotations
 
@@ -60,7 +61,8 @@ out['costs'] = {'openai_left': (acc.get('openai') or {}).get('remaining_usd'), '
 # (health.json `restarts_24h` when the House writes it, else the ledger's `ops.started` rows: 26 in the
 # 24 hours to 04:23Z Sept 25), the updater's last launch and last hold on the ledger, and the running
 # release's own `league.updater.schedule` (read-only: deploys.jsonl and the ledger) for the last ship,
-# the holds and the next eligible time. A third argument is the moment to read at (the tests' clock).
+# the holds (an `in_play` hold names the real book's events under way, H3b) and the next eligible time.
+# A third argument is the moment to read at (the tests' clock).
 now = float(sys.argv[3]) if len(sys.argv) > 3 else time.time()
 base = root.parent
 day_ago = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(now - 86400))

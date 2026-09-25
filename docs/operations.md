@@ -172,7 +172,7 @@ ORDER BY seq DESC LIMIT 20`.
   took 9-14 minutes on the day's later heads); a change to `.github/workflows/` re-pins
   `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` in the same commit (a test fails otherwise) and
   reaches the box only by the owner's deploy, after which the updater trusts the new workflow.
-- **The release train (Sept 25, 2026).** A head that may ship waits while any of three holds
+- **The release train (Sept 25, 2026).** A head that may ship waits while any of four holds
   stands, and ships at the first look after they all lift (the updater looks again the moment the
   last one lifts, not up to half an hour later):
   - *The train:* one updater release every `release_train_hours` (`league/config.json`, default 4;
@@ -187,13 +187,24 @@ ORDER BY seq DESC LIMIT 20`.
     (2.2-4.0 minutes to the restart on Sept 24-25), the ten-minute watch and any rollback all
     restart the House. Weekends and NYSE holidays have no window.
   - *A recent start:* none within 30 minutes of the ledger's last `ops.started`, whatever caused it.
+  - *In play (H3b):* none while the real `kalshi` book holds a position or a working order in an
+    event under way. The event's start comes from its ticker, in New York time, where the series
+    carries one (`KXMLBTOTAL-26SEP251840PITDET-8` is 18:40 EDT Sept 25, 22:40Z). The hold runs from
+    30 minutes before the start (the deploy's own length, as for the session) until the ledger
+    shows the market settled, or 5 hours after the start, whichever comes first. Tickers with no
+    start (weather, daily crypto, 15-minute crypto, and date-only games such as the NFL's) never
+    hold, and nor does the practice book. The proven sports family holds MLB totals from before
+    first pitch to settlement, so on a night of games the train waits from about 22:10Z to 05:30Z.
+    The hold names the events and lifts at the latest one's end; the next eligible time also
+    skips the games the book holds that have not begun. The updater reads only the last 48 hours
+    of the ledger's book rows, read-only. If it cannot read the ledger, it holds for 30 minutes.
 
   Why: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day on Sept 20-24),
   and seven of those restarts fell inside the Sept 24 session. The updater alone launched 14
   releases in the day from 02:15Z Sept 24, one of them at 14:58Z, inside the session. Every restart
   kills the research and wakes in flight.
 
-  A held head is `held` in the updater's answer, with `holds` (train, session, recent_start), the
+  A held head is `held` in the updater's answer, with `holds` (train, recent_start, session, in_play), the
   reasons and `next_eligible_at`. It is written once per head per reason: a `stage: train` row in
   `deploys.jsonl` and an `ops.deploy` row with `action: held` on the ledger. It raises no warning.
   A protected head is still refused at once, whatever holds. `scripts/floor_watch.py` prints all of

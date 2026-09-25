@@ -336,6 +336,15 @@ def read_health(  # noqa: PLR0913 - one reading, one place
         reasons.append(f"health.json cannot be read ({type(exc).__name__}: {str(exc)[:120]})")
 
     living = seq = None
+    # A book already frozen before a release was promoted is not that release's doing, and blaming it
+    # makes a release that REPAIRS a freeze impossible to deploy (found Sept 19, 2026: the fix for a
+    # frozen paper book was rolled back by the freeze it fixed). Only the watch after a promotion
+    # inherits anything; a canary runs a House of its own, so every book it freezes is its own doing
+    # and `inherited_frozen` is left None. Set before the file is read, because the ledger's alerts
+    # below read it too: until Sept 25, 2026 it was set only when health.json could be read, and a
+    # missing or unreadable file beside an error alert after `since_seq` raised UnboundLocalError
+    # instead of giving a bad reading (found by the H4 review of the forward-first run).
+    inherited = set(inherited_frozen or ())
     if raw is not None:
         at = epoch(raw.get("at"))
         living = raw.get("living") if isinstance(raw.get("living"), int) and not isinstance(raw.get("living"), bool) else None
@@ -353,12 +362,6 @@ def read_health(  # noqa: PLR0913 - one reading, one place
             elif age < -max(60.0, float(max_age_seconds)):
                 reasons.append(f"health.json is dated {int(-age)}s in the future")
     if raw is not None:
-        # A book already frozen before a release was promoted is not that release's doing, and
-        # blaming it makes a release that REPAIRS a freeze impossible to deploy (found Sept 19,
-        # 2026: the fix for a frozen paper book was rolled back by the freeze it fixed). Only the
-        # watch after a promotion inherits anything; a canary runs a House of its own, so every
-        # book it freezes is its own doing and `inherited_frozen` is left None.
-        inherited = set(inherited_frozen or ())
         frozen_at = len(reasons)  # where the freezes go once the ledger says whose process wrote them
         for name, book in sorted(books.items()):
             frozen = book.get("frozen") if isinstance(book, dict) else None

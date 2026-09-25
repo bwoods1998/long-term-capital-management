@@ -909,6 +909,45 @@ class InheritedFreeze(ReadHealthTest):
         self.assertTrue(watch().ok)
 
 
+class NoHealthFileBesideAnErrorAlert(ReadHealthTest):
+    """Found by the H4 review (the forward-first run, Sept 25, 2026): with `health.json` missing or
+    unreadable and an error-level `ops.alert` after `since_seq`, `read_health` raised
+    `UnboundLocalError: cannot access local variable 'inherited'` (it was set only inside the block
+    that reads the file), so the reading was an exception, not a bad reading with its reasons. A House
+    that died before its first tick writes exactly that: an error alert and no health file."""
+
+    def alerting_ledger(self):
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})
+        since = ledger.head()[0]
+        ledger.append("ops.alert", {"level": "error", "text": "tick failed: KeyError: 'settled'"})
+        ledger.append("ops.alert", {"level": "error", "text": "alpaca-paper does not reconcile: cash differs by -40.0000"})
+        return since
+
+    def test_a_missing_health_file_and_an_error_alert_are_two_reasons(self):
+        since = self.alerting_ledger()
+        for label, kw in (("a canary", {}), ("the watch", {"inherited_before": self.clock() - 600})):
+            with self.subTest(label):
+                health = self.read(since_seq=since, **kw)
+                self.assertFalse(health.ok)
+                self.assertIn("there is no health.json", health.reasons[0])
+                self.assertIn("2 error alert(s) since seq 1; the first, at seq 2: tick failed", health.reasons[1])
+                self.assertEqual(health.detail["error_alerts"], 2)
+
+    def test_an_unreadable_health_file_and_an_error_alert_are_two_reasons(self):
+        since = self.alerting_ledger()
+        (self.root / "health.json").write_text("{half a fi", encoding="utf-8")
+        health = self.read(since_seq=since)
+        self.assertEqual(len(health.reasons), 2, health.reasons)
+        self.assertIn("health.json cannot be read", health.reasons[0])
+
+    def test_the_alerts_of_a_book_frozen_before_the_promotion_stay_inherited_without_the_file(self):
+        since = self.alerting_ledger()
+        health = self.read(since_seq=since, inherited_frozen=["alpaca-paper"])
+        self.assertEqual((health.detail["error_alerts"], health.detail["inherited_alerts"]), (1, 1))
+        self.assertEqual(len(health.reasons), 2, health.reasons)  # the missing file and the tick's own error
+
+
 class FrozenByThePreviousProcess(ReadHealthTest):
     """Sept 24, 2026, 15:37-15:39Z: Deploy C was rolled back on a freeze the OLD House recorded in its
     last tick, 30 s before the promotion, in a health.json the new House had not yet replaced. The watch
