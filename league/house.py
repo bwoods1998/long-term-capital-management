@@ -1020,6 +1020,39 @@ class House:
         bid = getattr(quote, "bid", None) if quote is not None else None
         return max(money(bid), CENT) if bid is not None else CENT
 
+    def _structure_resting(self, book: Book, agent_id: str, inst: Instrument, limit: Decimal) -> Decimal:
+        """Before the House sells a structure at `limit` (its bid): the agent's resting buys of it are cancelled,
+        and so is a resting sale of it OVER the bid (it would never fill); a resting sale at or under the bid is
+        KEPT, and its unfilled quantity is returned, so the House sends only the rest. Kept, because the options
+        shadow account fills an order only on a quote strictly newer than the one it was accepted in: a sale
+        cancelled and sent again each tick would never have a newer quote to fill on."""
+        resting = ZERO
+        for working in book.open_orders(agent_id):
+            if working.instrument.key != inst.key:
+                continue
+            if working.side == "sell" and working.limit_price is not None and working.limit_price <= limit:
+                resting += sum((share.quantity - share.filled for share in working.shares if share.agent == agent_id), ZERO)
+                continue
+            book.cancel(agent_id, working.order_id)
+        return resting
+
+    def _structure_wind_down_bids(self, agent: Agent, book: Book) -> dict[str, Decimal]:
+        """A dead agent's structures in the session, by key: the bid the wind-down sells each at (`_structure_bid`),
+        after cancelling a resting sale of it over that bid (`_structure_resting`), so the wind-down's own
+        reservation of what is already being sold counts only a sale that can fill. Outside the session, none:
+        the wind-down holds them for the open."""
+        now = now_iso(self.clock)
+        out: dict[str, Decimal] = {}
+        for holding in list(book.account(agent.id).holdings.values()):
+            inst = holding.instrument
+            if not is_structure(inst) or holding.quantity <= 0 or market_hours(inst, now) is False:
+                continue
+            limit = self._structure_bid(book, inst)
+            if limit is not None:
+                self._structure_resting(book, agent.id, inst, limit)
+                out[inst.key] = limit
+        return out
+
     def _structure_sale(self, agent_id: str, inst: Instrument, quantity: Decimal, limit: Decimal | None, now: str, *,
                         reason: str, nonce: str) -> Intent | None:
         """The House's sale of `quantity` of a held structure, whole, at `limit` (`_structure_bid`): the expiry-day
@@ -1047,14 +1080,7 @@ class House:
         limit = self._structure_bid(book, inst)
         if limit is None:
             return None
-        resting = ZERO
-        for working in book.open_orders(agent_id):
-            if working.instrument.key != inst.key:
-                continue
-            if working.side == "sell" and working.limit_price is not None and working.limit_price <= limit:
-                resting += sum((share.quantity - share.filled for share in working.shares if share.agent == agent_id), ZERO)
-                continue
-            book.cancel(agent_id, working.order_id)
+        resting = self._structure_resting(book, agent_id, inst, limit)
         held = book.account(agent_id).holdings.get(inst.key)
         intent = self._structure_sale(
             agent_id, inst, (held.quantity if held is not None else ZERO) - resting, limit, now,
@@ -4446,55 +4472,73 @@ class House:
         for book in self.books.values():
             if family_of(book.name) != "alpaca":
                 continue
-            exits = []
-            now = now_iso(self.clock)
-            for agent_id in book.agents():
-                for holding in list(book.account(agent_id).holdings.values()):
-                    if holding.instrument.asset_class != "crypto" or not holding.opened_at or holding.quantity <= 0:
-                        continue
-                    held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
-                    if held <= hours:
-                        continue
-                    for working in book.open_orders(agent_id):
-                        if working.instrument.key == holding.instrument.key:
-                            book.cancel(agent_id, working.order_id)
-                    quantity = book.account(agent_id).holdings.get(holding.instrument.key)
-                    if quantity is None or quantity.quantity <= 0:
-                        continue
-                    exits.append(Intent.new(
-                        agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
-                        reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
-                        created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
-                    ))
-            # A long option is sold before it can expire: in the money at the bell it would be
-            # exercised into a hundred shares this account cannot carry. From 14:30 New York on
-            # its last day the House sells it at the bid, again each tick until it is gone; one
-            # with no bid left is worthless and is written off once the venue has cleared it.
-            today, hour = _new_york(self.clock)
-            for agent_id in book.agents():
-                for holding in list(book.account(agent_id).holdings.values()):
-                    inst = holding.instrument
-                    if is_structure(inst):  # a structure's own rule, from 15:30 on its earliest expiry day (Sept 25, 2026)
+            # One book at a time, each on its own (Sept 25, 2026): a quote or a venue that raises on one book is a
+            # warning, and the books after it still have their exits (a structure's quote reads four legs).
+            try:
+                closed += self._horizon_exits(book, hours)
+            except Exception as exc:  # noqa: BLE001 - one book's failure never costs the others their exits
+                self.alert("warning", f"{book.name}: the House's horizon and expiry exits could not run this pass "
+                                      f"({type(exc).__name__}: {str(exc)[:160]})")
+        return closed
+
+    def _horizon_exits(self, book: Book, hours: float) -> int:
+        """`_enforce_horizon` on one book: the crypto horizon, the single contract's 14:30 sale and a structure's
+        own close (`_structure_expiry_close`), then the book's write-off of what has expired."""
+        closed = 0
+        exits = []
+        now = now_iso(self.clock)
+        for agent_id in book.agents():
+            for holding in list(book.account(agent_id).holdings.values()):
+                if holding.instrument.asset_class != "crypto" or not holding.opened_at or holding.quantity <= 0:
+                    continue
+                held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
+                if held <= hours:
+                    continue
+                for working in book.open_orders(agent_id):
+                    if working.instrument.key == holding.instrument.key:
+                        book.cancel(agent_id, working.order_id)
+                quantity = book.account(agent_id).holdings.get(holding.instrument.key)
+                if quantity is None or quantity.quantity <= 0:
+                    continue
+                exits.append(Intent.new(
+                    agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
+                    reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
+                    created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
+                ))
+        # A long option is sold before it can expire: in the money at the bell it would be
+        # exercised into a hundred shares this account cannot carry. From 14:30 New York on
+        # its last day the House sells it at the bid, again each tick until it is gone; one
+        # with no bid left is worthless and is written off once the venue has cleared it.
+        today, hour = _new_york(self.clock)
+        for agent_id in book.agents():
+            for holding in list(book.account(agent_id).holdings.values()):
+                inst = holding.instrument
+                if is_structure(inst):  # a structure's own rule, from 15:30 on its earliest expiry day (Sept 25, 2026)
+                    try:
                         close = self._structure_expiry_close(book, agent_id, holding, today, hour, now)
-                        if close is not None:
-                            exits.append(close)
+                    except Exception as exc:  # noqa: BLE001 - one structure's failure never costs the others their close
+                        self.alert("warning", f"{agent_id}: the House's close of {inst.market_id} on {book.name} could not run this "
+                                              f"pass ({type(exc).__name__}: {str(exc)[:160]})")
                         continue
-                    if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
-                        continue
-                    for working in book.open_orders(agent_id):
-                        if working.instrument.key == inst.key:
-                            book.cancel(agent_id, working.order_id)
-                    quote = book.broker.quote(inst)
-                    if quote.bid is None or quote.bid <= 0:
-                        continue
-                    exits.append(Intent.new(
-                        agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
-                        reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
-                        created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
-                    ))
-            if exits:
-                closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
-            closed += book.expire_options()
+                    if close is not None:
+                        exits.append(close)
+                    continue
+                if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
+                    continue
+                for working in book.open_orders(agent_id):
+                    if working.instrument.key == inst.key:
+                        book.cancel(agent_id, working.order_id)
+                quote = book.broker.quote(inst)
+                if quote.bid is None or quote.bid <= 0:
+                    continue
+                exits.append(Intent.new(
+                    agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
+                    reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
+                    created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
+                ))
+        if exits:
+            closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
+        closed += book.expire_options()
         return closed
 
     # ---------------------------------------------------------------- tuition
@@ -4662,6 +4706,7 @@ class House:
         for working in book.open_orders(agent.id):
             if working.side == "buy":
                 book.cancel(agent.id, working.order_id)
+        structure_bids = self._structure_wind_down_bids(agent, book)  # a structure's sale over its bid is re-priced (Sept 25, 2026)
         reserved: dict[str, Decimal] = {}
         for working in book.open_orders(agent.id):
             if working.side == "sell":
@@ -4698,9 +4743,10 @@ class House:
             if is_structure(holding.instrument):
                 # A structure is sold whole, at its bid (at least a cent), in the session (Sept 25, 2026): its
                 # bid can be zero while its legs still trade, and a debit structure worth nothing is sold for a cent.
-                sale = self._structure_sale(agent.id, holding.instrument, quantity, self._structure_bid(book, holding.instrument), now,
-                                            nonce=f"wind-down:{now}",
-                                            reason="the House is closing this account: the whole structure at its bid")
+                # A sale of it resting at or under the bid is kept across passes (it fills there, and `quantity` is
+                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`).
+                sale = self._structure_sale(agent.id, holding.instrument, quantity, structure_bids.get(holding.instrument.key), now,
+                                            nonce=f"wind-down:{now}", reason="the House is closing this account: the whole structure at its bid")
                 if sale is not None:
                     exits.append(sale)
                 continue

@@ -673,6 +673,7 @@ class StructuresInTheHouse(StructureHouseCase):
         self.at(THURSDAY_11_NY + 86400 + 3.75 * 3600)  # Friday 14:45 New York: the single contract's rule would sell it now
         self.house._enforce_horizon()
         self.assertIn(inst.key, book.account(agent.id).holdings)
+        self.assertEqual([o.order_id for o in book.open_orders(agent.id)], [own.order_id])  # nor cancel its own sale
         self.assertFalse([e for e in self.house.ledger.iter(kinds="agent.intent", agent=agent.id) if "expiry rule" in e.payload.get("reason", "")])
         self.at(THURSDAY_11_NY + 86400 + 4.6 * 3600)  # 15:36 New York
         self.shadow.set_quote(inst, "0.58", "0.66")
@@ -746,6 +747,57 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertTrue(ids)
         self.assertLessEqual(max(len(i) for i in ids), 200)
         self.assertTrue(self.refusals(agent))
+
+    def test_a_dead_agents_resting_sale_at_or_under_the_bid_is_kept_across_passes_and_one_over_it_re_priced(self):
+        agent = self.structure_agent()
+        book, inst = self.held_condor(agent)
+        own = book.submit(self.house._intents(agent, book, [condor_row(action="close", limit=0.40)])[0])[0]
+        self.assertEqual(own.status, "resting", own.detail)  # 0.60, over the bid of 0.55
+        self.shadow.set_quote(inst, "0.62", "0.70")  # the bid rises through it: at or under the bid now, it fills there
+        submitted = len(self.shadow.submitted)
+        self.house.kill(self.house.registry.get(agent.id), "test")
+        self.house._retry_wind_down(self.house.registry.get(agent.id), book)
+        self.assertEqual([o.order_id for o in book.open_orders(agent.id)], [own.order_id])  # kept, and nothing more sent
+        self.assertEqual(len(self.shadow.submitted), submitted)
+        self.shadow.set_quote(inst, "0.52", "0.60")  # the bid falls under it: cancelled and re-priced at the bid
+        self.house._retry_wind_down(self.house.registry.get(agent.id), book)
+        self.assertIn(own.order_id, self.shadow.cancelled)
+        sold = [e.payload for e in self.house.ledger.iter(kinds="book.fill", agent=agent.id) if e.payload["side"] == "sell"]
+        self.assertEqual((len(sold), D(sold[0]["price"])), (1, D("0.52")))
+        self.assertEqual(book.account(agent.id).holdings, {})
+
+    def test_one_books_failure_in_the_expiry_pass_is_a_warning_and_the_next_book_still_closes(self):
+        agent = self.structure_agent()
+        book, inst = self.held_condor(agent)
+        self.at(THURSDAY_11_NY + 86400 + 4.6 * 3600)  # 15:36 New York on the Friday
+        self.shadow.set_quote(inst, "0.58", "0.66")
+        with mock.patch.object(self.house.books["alpaca-paper"], "expire_options", side_effect=RuntimeError("the venue is down")):
+            self.house._enforce_horizon()  # alpaca-paper comes first
+        self.assertEqual(book.account(agent.id).holdings, {})
+        warned = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "alpaca-paper: the House's horizon" in str(e.payload)]
+        self.assertEqual(len(warned), 1)
+
+    def test_one_structures_failure_is_a_warning_and_the_others_still_close(self):
+        agent = self.structure_agent()
+        book, inst = self.held_condor(agent)
+        other = self.structure_agent("krasker")
+        self.house.seat(other)
+        self.assertEqual(book.submit(self.house._intents(other, book, [condor_row()])[0])[0].status, "filled")  # the same condor
+        real = self.house._structure_expiry_close
+
+        def flaky(book_, agent_id, *args, **kw):
+            if agent_id == agent.id:
+                raise RuntimeError("its legs have no quote")
+            return real(book_, agent_id, *args, **kw)
+
+        self.at(THURSDAY_11_NY + 86400 + 4.6 * 3600)  # 15:36 New York on the Friday
+        self.shadow.set_quote(inst, "0.58", "0.66")
+        with mock.patch.object(self.house, "_structure_expiry_close", side_effect=flaky):
+            self.house._enforce_horizon()
+        self.assertIn(inst.key, book.account(agent.id).holdings)  # its close failed this pass...
+        self.assertEqual(book.account(other.id).holdings, {})  # ...and the other's still went
+        warned = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "could not run this pass" in str(e.payload)]
+        self.assertEqual(len(warned), 1)
 
     def test_a_dead_agents_structure_waits_for_the_open(self):
         agent = self.structure_agent()
