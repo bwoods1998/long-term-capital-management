@@ -860,13 +860,20 @@ class OptionsHistory:
                 flush(current, kept)
         # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
         # one of each contract in (previous step, step] rides on the step; nothing is carried.
-        recorded = self.quotes(list(contracts), iso(start_ts), end)
+        # Streamed from the store onto the steps (never held as one list: a structure tape's
+        # contracts have up to hundreds of thousands of them, and the local copy is read on a laptop).
         times = sorted(by_time)
-        for occ, rows in recorded.items():
-            for q in rows:
-                index = bisect.bisect_left(times, q["t"])  # the first step at or after the quote
+        recorded = 0
+        names = list(contracts)
+        for i in range(0, len(names), 500):
+            group = names[i:i + 500]
+            marks = ",".join("?" * len(group))
+            for occ, t, bid, ask in self.db.execute(f"SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? AND occ IN ({marks}) ORDER BY occ, t",
+                                                    (iso(start_ts), end, *group)):
+                recorded += 1
+                index = bisect.bisect_left(times, t)  # the first step at or after the quote
                 if index < len(times):
-                    by_time[times[index]].setdefault("quotes", {})[occ] = q
+                    by_time[times[index]].setdefault("quotes", {})[occ] = {"t": t, "bid": bid, "ask": ask}
         steps = []
         cursors = {s: 0 for s in symbols}
         for t in sorted(by_time):
@@ -904,7 +911,7 @@ class OptionsHistory:
                             if structural else {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford}),
             "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": live,
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
-            "recorded_quotes": sum(len(r) for r in recorded.values()),
+            "recorded_quotes": recorded,
             "provenance": {"options": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "quotes": SPREAD_MODEL["kind"],
                            "recorded_quotes": "OPRA quotes the House read for live chains, where they exist (Sept 22, 2026 on)",
                            "underlying": "the House's underlier bars adapter", "history_starts": HISTORY_STARTS},
