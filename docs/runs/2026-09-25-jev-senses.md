@@ -273,4 +273,12 @@ Kalshi run at 10:31Z.
 
 ## Deploy log
 
+- **D-J1 (House owner deploy; J0 + J1; no money rule).** Pre-checks: CI green on `18d4b3f` (rebased on the
+  options run's V, `0d46e90`); a pre-deploy blocker check found none (93 touched tests pass; the model
+  coefficients byte-identical to the analysed fit); the live grant active, pinned and running money digest both
+  `535a7f15` (read-only, 11:25Z). #319 merged 11:29:26Z (`2ee015b`, on top of Merton's #321, a Hilibrand child
+  strategy merged 11:28:05Z that the updater had not shipped: it rides this deploy). Merged ahead of the start on
+  purpose: the updater's next check would otherwise launch #321 alone inside the slot; with the `jev` block on
+  main it refuses the head instead, and the owner deploy ships both.
+
 ## Report
