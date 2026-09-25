@@ -26,25 +26,34 @@ input is a leg-quote source serving each leg's quote AS OF the simulated minute 
 no quote in it is later than that. The simulated clock moves from one snapshot's time to the next; a decision at time
 t sees only snapshots available at or before t; the broker's quote source refuses to serve a snapshot from after the
 clock (`LegSource`). Since an order is accepted at the clock of the snapshot its decision saw, and the broker fills
-only on a leg quote newer than that, every fill is on a strictly newer snapshot (`--check` counts both, and
-`league/tests/test_forward_structures.py` pins them).
+only on a leg quote newer than that, every fill is on a strictly newer snapshot. The output's `checks` count both, and
+re-derive every fill from the raw snapshot it was made on, apart from the broker's code (`audit_fill`: the touch, legs
+quoted after the acceptance, sizes); `league/tests/test_forward_structures.py` pins them.
 
 **What is not the House's** (said in the output): the chain rows carry Black-Scholes IV and delta from each contract's
 mid (r 4%, `options_history.implied_vol`), where the live chain carries Alpaca's greeks (the recorder did not keep
-them); the recorded bands (4% of spot on the ETFs, 12% on the stocks) are narrower than the chain's 20%; the
+them; measured against the House's recorded chains, within 0.003 of delta at the median), and none on a contract
+expiring today, as live; the recorded bands (4% of spot on the ETFs, 12% on the stocks) are narrower than the chain's 20%; the
 underlying bars are the House's own recordings of the day (`recordings.sqlite`, read-only, `--house-bars`), completed
 from the local history (`underlier_bars`) and, failing both, from the snapshots' mids; the tick is one a snapshot (60 s;
 the live House's ticks ran 60-200 s); all twelve wake on one clock from the first snapshot with sizes.
 
-Usage (ONE process at a time on the shared machine; it streams the file, about 150 MB of memory):
-    python3 scripts/forward_structures.py --snapshots ~/Work/.options-history/live-2026-09-25.jsonl \
-        --house-bars house_bars.json --out docs/runs/data/forward-structures-2026-09-25.json
+The comparison with the live House: the live structure founders' own rows (`LIVE_QUERY`), a second run from each
+live founder's first wake (`--from-birth`), and the chains the House recorded against the forward chain
+(`CHAINS_QUERY`, `compare_chains`). A labelled what-if (`--what-if-sane-limits`, never the House) sends the orders the
+book's 10% limit-sanity rule refuses at the rule's line. `calibrate` refits s3/calibration's fill half-spread table
+with the day's recorded quotes.
+
+Usage (ONE process at a time on the shared machine; it streams the file, about 100 MB of memory, 25 s a run):
+    python3 scripts/forward_structures.py query-bars|query-live|query-chains   # the read-only queries' text (rx.py)
+    python3 scripts/forward_structures.py --house-bars bars.json --live live.json --from-birth --what-if-sane-limits \
+        --house-chains chains.json --until 2026-09-25T20:00:00Z --out forward.json
+    python3 scripts/forward_structures.py calibrate --fit-from s3_options_history.py --out calibration.json
 """
 
 from __future__ import annotations
 
 import argparse
-import gzip
 import importlib.util
 import json
 import math
@@ -70,7 +79,7 @@ from league import structures  # noqa: E402
 from league.book import Book, Limits  # noqa: E402
 from league.fees import Fees  # noqa: E402
 from league.house import House  # noqa: E402
-from league.ledger import Ledger, now_iso  # noqa: E402
+from league.ledger import Ledger  # noqa: E402
 from league.options_history import implied_vol, bs_delta, years_to  # noqa: E402
 from league.options_shadow import NEW_YORK, OptionsShadowBroker, stamp  # noqa: E402
 from league.venues import market_hours  # noqa: E402
@@ -85,7 +94,6 @@ BOOK = "options-shadow"
 STAKE = Decimal(200)
 LIMITS = (Decimal(100), Decimal(75))
 MARK_EVERY = 300.0  # `config.json` mark_every_seconds
-DEFAULT_HOUSE_BARS = None
 
 
 def parse_ts(text: Any) -> float | None:
