@@ -794,11 +794,16 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
             mine: dict[str, list[Any]] = {}
             for row in closed:
                 lent = staked_base(stakes, row["seq"])  # `trade_returns` read through this trade's position
-                if lent <= 0 or not within(where, row["seq"]):
-                    continue  # (a trade closed outside the member's stretch in the family is another family's: C8)
+                opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
+                if lent <= 0 or not within(where, opened):
+                    # A trade ENTERED outside the member's stretch in the family is another family's (C8): it counts for
+                    # the family whose program opened it, wherever it closes -- as the at-risk entries above and
+                    # `Allocator.proven_code` read it (the Deploy B money review, Sept 25, 2026: read by its close, a
+                    # real member sent back to practice and rewritten in place before its contracts settled took their
+                    # settlements, dates and dollars out of the proven family's real record into its new program's).
+                    continue
                 key = (event_key(row["instrument"]) if by_event else None) or f"{book}:{member}:{row['seq']}"
                 unit = mine.setdefault(key, [0.0, 0.0, 0.0, (math.inf, "taker"), row["seq"], row["seq"]])
-                opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
                 paid = math.fsum(ch for seq, ch in charges.get(row["key"], ()) if opened <= seq <= row["seq"])
                 made = row["made"] - paid
                 made_by_book["real" if book == REAL_BOOK[venue] else "practice"] += row["made"]

@@ -1166,10 +1166,20 @@ class RulesText(unittest.TestCase):
     def test_the_agents_are_told_the_mechanism_ledger(self):
         text = self.text()
         self.assertIn("80% lower bound on what their events made per dollar put at risk is above zero", text)
-        # Every lab graduate is born into a `-lab-<lineage>` family, a nudge of a member's parameters included (`Lab._names`).
+        # C8 (Sept 25, 2026; the Deploy B review): under `allocator.family_key` "mechanism" the text says the House's rule --
+        # a params-only child (a lab nudge included) stays, any other code, venue, series or symbols founds its own.
+        self.assertIn("A FAMILY IS ONE MECHANISM: a program's code beyond its PARAMS, with the venue, series and symbols it "
+                      "trades. A child that changes only your PARAMS (an Alpha Lab nudge of your parameters included) stays in "
+                      "your family", text)
+        self.assertIn("founds (or joins) the family of ITS mechanism and proves itself there from zero", text)
+        self.assertNotIn("whatever they change", text)
+        # The label's rule (`family_key` "label", or absent): every lab graduate is born into a `-lab-<lineage>` family, a
+        # nudge of a member's parameters included (`Lab._names`), and research children keep the label.
+        labels = {**CONSTITUTION, "allocator": {**CONSTITUTION["allocator"], "family_key": "label"}}
+        old = self.text(labels)
         self.assertIn("A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every "
-                      "foundry card starts a family of its own", text)
-        self.assertIn("your research children stay in your family, whatever they change", text)
+                      "foundry card starts a family of its own", old)
+        self.assertIn("your research children stay in your family, whatever they change", old)
         self.assertIn("SIZE ON PRACTICE IS YOURS, AND PRACTICE MONEY IS FREE.", text)
         self.assertIn("weighs what it put at risk against your usual size on that book: scaling every bet up or down proves "
                       "nothing faster, a big losing bet counts for its dollars", text)

@@ -177,7 +177,7 @@ or never swings at all.
                 "  seated from it, and a probe seated on it goes back to practice at the next pass (at Alpaca once it\n"
                 "  holds nothing that demotion would sell: its bids are cancelled, and nothing is sold for it).\n"
                 f"{held}"
-                "  A proven family's members are bunts and are never held. (Sept 24, 2026: 11 of 21 promotions went to\n"
+                "  A proven family's members are bunts and are never held (a thin proof's are probes). (Sept 24, 2026: 11 of 21 promotions went to\n"
                 "  such families and lost $8.12 on 22 closes, no stay positive; the other 10 made $28.96.)\n")
         swing_rule = alloc.get("family_swing") if isinstance(alloc.get("family_swing"), dict) else None
         family_swing_text = ""
@@ -215,7 +215,28 @@ or never swings at all.
                        f"  practice trades and a practice wealth multiple of {float(member.get('min_w_paper', 1.0)):g} or more, running the code that entered\n  most of the"
                        f" family's settled events, is seated as a bunt without E {float(alloc['bunt_at']):g} -- while the family holds fewer than\n"
                        f"  its seats on real money and its proof spans {int(member.get('min_distinct_dates') or 0)} or more distinct settlement dates.\n"
+                       # The Deploy B review (Sept 25, 2026; `Allocator.thin_proof`): a thin proof stakes probes.
+                       + (f"  A proof on fewer dates whose REAL record is under {proof.get('min_independent_settlements', 10)} settlements of its own is THIN: its\n"
+                          "  members are staked, held and let take as PROBES, not bunts.\n"
+                          if int(member.get('min_distinct_dates') or 0) > 0 else "")
                        if member else "")
+        if alloc.get("family_key") == "mechanism":
+            # C8 of the forward-first run (Sept 25, 2026; `families.MechanismIndex`): a family is its program's mechanism. The
+            # Deploy B review found the text below still said the label's rule, the opposite of what the House now does.
+            mechanism_text = ("  A FAMILY IS ONE MECHANISM: a program's code beyond its PARAMS, with the venue, series and symbols it\n"
+                              "  trades. A child that changes only your PARAMS (an Alpha Lab nudge of your parameters included) stays\n"
+                              "  in your family, and its trades add to its record; a research child, a rewrite, a lab graduate or a\n"
+                              "  foundry card whose code differs beyond PARAMS, or that trades another venue, series or symbols,\n"
+                              "  founds (or joins) the family of ITS mechanism and proves itself there from zero -- it neither uses\n"
+                              "  nor adds to your family's proof. Rewriting your own program moves you to its family from that\n"
+                              "  moment on; what you did before stays in the family you did it in. Maker and taker entries are pooled\n"
+                              "  apart, and the taker record decides whether a real entry may take.\n")
+        else:
+            mechanism_text = ("  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every\n"
+                              "  foundry card starts a family of its own and proves itself from zero; your research children stay in\n"
+                              "  your family, whatever they change, and their trades add to its record (its maker and taker entries are\n"
+                              "  pooled apart: a child that makes the market where you took it builds the maker record, and the taker\n"
+                              "  record decides whether a real entry may take).\n")
         proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
   Alpaca{equity}) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
@@ -224,12 +245,7 @@ or never swings at all.
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
-{member_text}{probe_gate_text}  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
-  foundry card starts a family of its own and proves itself from zero; your research children stay in
-  your family, whatever they change, and their trades add to its record (its maker and taker entries are
-  pooled apart: a child that makes the market where you took it builds the maker record, and the taker
-  record decides whether a real entry may take).
-{sizing}{family_swing_text}""" if alloc.get("probe_bunt_usd") else "")
+{member_text}{probe_gate_text}{mechanism_text}{sizing}{family_swing_text}""" if alloc.get("probe_bunt_usd") else "")
         # The real book's entry rules and exits (Deploy A, Sept 24, 2026: X0 and D3 in league/book.py,
         # read through the constitution's allocator keys): what an agent on real money must know before
         # it sends an order, so a refusal is never a surprise.
@@ -241,7 +257,8 @@ or never swings at all.
         elif alloc.get("real_entry_liquidity") == "probe_may_take":
             # M2 of the forward-first run (Sept 25, 2026): pocket change may take the price.
             taker_min = int(alloc.get("taker_proof_min") or proof.get("min_independent_settlements", 10))
-            entry_rules.append("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap;\n"
+            entry_rules.append("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap in\n"
+                               "    all (what it holds that it took and its crossing buys count);\n"
                                "    a bunt's or a swing's entry must be a POST-ONLY LIMIT until your family's pooled TAKER record\n"
                                f"    is proven positive ({taker_min} or more independent taker events with the lower bound above zero)")
         if alloc.get("longshot_floor_real"):

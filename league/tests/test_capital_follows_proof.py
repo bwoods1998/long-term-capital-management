@@ -183,7 +183,7 @@ class TheAgentLevelSwingAsksTheDatesToo(KalshiHouse):
         room = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"})
         room.start()
         self.addCleanup(room.stop)
-        proof = {**canned("weather-favorites", proven=True, n=25, bound=0.03), "dates": 3}
+        proof = {**canned("weather-favorites", proven=True, n=25, bound=0.03), "dates": 3, "real_n": 11}  # the sports family at T0
         self.families["weather-favorites"] = {**proof, "real": {**families.empty_record("weather-favorites", "kalshi")["real"], "n": 11, "dates": 2}}
         a = self.agent("meriwether")
         with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)}):
@@ -296,20 +296,61 @@ class PrePack(KalshiHouse):
         self.assertIn("prepared AHEAD of that look (game.json audit.pre_pack)", verdict.reason)
         self.assertIn("on at least 5 distinct settlement dates", verdict.reason)
         self.rebalance()
-        self.assertEqual((self.audits()["status"], self.audits()["approve"], self.audits()["look"]), ("done", True, 10))
+        self.assertEqual((self.audits()["status"], self.audits()["approve"], self.audits()["look"]), ("prepared", True, 10))
         self.assertEqual(self.house.allocator.family_state(self.a), "proven")  # approved ahead: no look has passed
         self.families["weather-favorites"] = real_record(n=10, bound=0.05)  # the look at 10 passes
         self.rebalance()
         self.assertEqual(self.house.allocator.family_state(self.a), "swing")  # the same pass: no audit to wait for
         self.assertEqual(len(self.verdicts), 1)
         self.assertEqual(self.house.books["kalshi"].account(self.a.id).staked, D("60.00"))
+        self.assertEqual(self.audits()["status"], "done")  # it licensed its look: the entry's approval now
+
+    def test_a_prepared_approval_licenses_nothing_to_a_release_without_the_pre_pack(self):
+        """The Deploy B money review (Sept 25, 2026): Deploy A reads an audit "done" and approved as its license at ANY
+        passing look (its `_swing_approval` reads status and approve only), and its look has no dates gate. An approval
+        prepared ahead of a look is kept "prepared" until that look passes, so after a rollback A asks its own auditor
+        (its `_request_family_audit` waits only on "running" and "done") instead of entering on it."""
+        self.families["weather-favorites"] = ahead(8)
+        self.rebalance()
+        self.house.wait(5)
+        self.rebalance()
+        audit = self.audits()
+        a_licensed = audit.get("status") == "done" and audit.get("approve") is True  # Deploy A's `_swing_approval`
+        a_waits = audit.get("status") in ("running", "done")  # Deploy A's `_request_family_audit`
+        self.assertEqual((a_licensed, a_waits), (False, False))
+        # A restart that finds the audit's own row on the ledger keeps it prepared (`_family_verdict_on_ledger`).
+        running = {**audit, "status": "running"}
+        found = self.house.allocator._family_verdict_on_ledger("weather-favorites@kalshi", running)
+        self.assertEqual((found["status"], found["approve"], found["look"]), ("prepared", True, 10))
+
+    def test_a_veto_ahead_of_its_look_is_asked_again_when_the_look_passes(self):
+        """The Deploy B money review (Sept 25, 2026): a veto of the packet prepared at the 8th settlement held the look at
+        10, when it passed, for the audit's whole cooldown: the pre-pack delayed the look it was meant to hurry."""
+        self.auditor.approve = False
+        self.families["weather-favorites"] = ahead(8)
+        self.rebalance()
+        self.house.wait(5)
+        self.rebalance()
+        self.assertEqual((self.audits()["status"], self.audits()["approve"]), ("prepared", False))
+        self.families["weather-favorites"] = ahead(9)  # still ahead of its look: the veto waits out its cooldown
+        self.rebalance()
+        self.house.wait(5)
+        self.assertEqual(len(self.verdicts), 1)
+        self.auditor.approve = True
+        self.families["weather-favorites"] = real_record(n=10, bound=0.05)  # the look at 10 passes: asked again at once
+        self.rebalance()
+        self.house.wait(5)
+        self.assertEqual(len(self.verdicts), 2)
+        self.assertNotIn("pre_pack", self.verdicts[1].numbers)
+        self.rebalance()
+        self.assertEqual(self.house.allocator.family_state(self.a), "swing")
 
     def test_an_approval_prepared_for_a_look_that_does_not_pass_lapses(self):
         self.families["weather-favorites"] = ahead(9)
         self.rebalance()
         self.house.wait(5)
         self.rebalance()
-        self.assertEqual((self.audits()["status"], self.audits()["look"]), ("done", 10))
+        self.assertEqual((self.audits()["status"], self.audits()["look"]), ("prepared", 10))
         self.families["weather-favorites"] = real_record(n=10, bound=-0.01, entry=False)  # the look at 10 fails
         self.rebalance()
         self.assertEqual(self.audits()["status"], "lapsed")
@@ -376,6 +417,25 @@ class ProbeMayTake(RealEntryCase):
         self.assertEqual(more.status, "refused")  # one position at its cap: position_share_event of the stake
         self.assertNotIn("post-only", more.detail)
 
+    def test_a_probe_takes_one_position_in_all_not_one_on_every_event(self):
+        """The Deploy B money review (Sept 25, 2026): the per-market cap alone let this $10 probe take $2 on each of
+        KXMLBTOTAL-26SEP251840TBPHI-8, -1905PITDET-8 and -2010TEXMIN-8 (all three filled), and five events would take its
+        whole stake at the ask. A probe takes one position at its cap, in all; making is not taking."""
+        self.taker_record = {"family": "sports-central-run-under", "positive": False, "n": 3, "mean_log": 0.1, "bound": None,
+                             "band": "probe", "may_take": True, "proof_min": 5, "probe_cap_usd": "2.00"}
+        self.assertEqual(self.book.submit([self.intent("kay", self.inst, "buy", "4")])[0].status, "filled")
+        games = ("KXMLBTOTAL-26SEP251905PITDET-8", "KXMLBTOTAL-26SEP252010TEXMIN-8")
+        for game in games:
+            self.quote(game, "0.48", "0.50")
+        out = self.book.submit([self.intent("kay", event(games[0], "no", self.venue), "buy", "2")])[0]
+        self.assertEqual(out.status, "refused")
+        self.assertIn("a probe takes the price for one position at its cap: it holds or bids $2.", out.detail)
+        self.assertIn("over its $2.00", out.detail)
+        resting = self.bid("kay", games[0], "2", "0.48")
+        self.assertEqual(resting.status, "resting", resting.detail)  # a post-only bid is not taking
+        self.taker_record = {**self.taker_record, "positive": True, "n": 5, "bound": 0.01}  # the family's taker proof
+        self.assertEqual(self.book.submit([self.intent("kay", event(games[1], "no", self.venue), "buy", "2")])[0].status, "filled")
+
     def test_a_bunt_does_not_take_without_the_familys_taker_proof(self):
         self.taker_record = {"family": "sports-central-run-under", "positive": False, "n": 3, "mean_log": 0.1, "bound": None,
                              "band": "bunt", "may_take": False, "proof_min": 5}
@@ -402,6 +462,25 @@ class ProbeMayTake(RealEntryCase):
 class TakerRecordForTheBook(KalshiHouse):
     """The allocator's `family_taker`: a probe may take; a bunt only on its family's taker proof."""
 
+    def test_a_probe_takes_only_as_a_probe(self):
+        """The Deploy B money review (Sept 25, 2026): `may_take` read the band's label alone. A family record that cannot be
+        read counts as an unproven family's, so its $30 bunts read "probe" and could take $6 positions (the fallback was
+        post-only before M2), and a family that loses its proof leaves its bunts staked by free cash only."""
+        a = self.agent("kay")
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)}):
+            self.tick()
+        alloc = self.house.allocator
+        row = alloc.family_taker(a.id)
+        self.assertEqual((row["band"], row["may_take"], row["probe_cap_usd"]), ("probe", True, "2.00"))  # $2 of a $10 probe
+        with patch.object(allocator, "family_record", side_effect=ValueError("unreadable")):
+            alloc._families.clear()
+            row = alloc.family_taker(a.id)
+        self.assertEqual((row["band"], row["may_take"]), ("probe", False))  # unreadable: post-only, as the alert says
+        alloc._families.clear()
+        self.house.books["kalshi"].account(a.id).staked = D("30")  # a bunt of a family that lost its proof, still lent $30
+        row = alloc.family_taker(a.id)
+        self.assertEqual((row["band"], row["may_take"]), ("probe", False))
+
     def test_may_take_by_band(self):
         a = self.agent("kay")
         with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)}):
@@ -417,6 +496,7 @@ class TakerRecordForTheBook(KalshiHouse):
         self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.002, taker_positive=True)
         alloc._families.clear()
         self.assertEqual(alloc.family_taker(a.id)["may_take"], True)
+        self.assertIsNone(alloc.family_taker(a.id)["probe_cap_usd"])  # a bunt on the proof: no probe's cap
         with patch.dict(CONSTITUTION["allocator"], {"real_entry_liquidity": "maker_unless_family_taker_positive"}):
             self.families["weather-favorites"] = canned("weather-favorites")
             alloc._families.clear()
@@ -448,6 +528,47 @@ class TakerProofFromFive(AtRiskCase):
         with patch.dict(CONSTITUTION["allocator"]):
             del CONSTITUTION["allocator"]["taker_proof_min"]
             self.assertFalse(self.record()["taker"]["positive"])  # without the key: the proof's own count
+
+
+class ThinProofsStakeProbes(KalshiHouse):
+    """The Deploy B review (Sept 25, 2026; `Allocator.thin_proof`): a family proven on fewer than M3's 5 distinct settlement
+    dates while its real record alone is short of the proof's count stakes its members as probes. C8's re-key of the T0
+    snapshot made two single-program 15-minute BTC taker families proven on 2 practice dates, and the first pass seated
+    both agents as $30 Kalshi bunts; sports-central-run-under (3 dates, real n 11) keeps its bunt as decided at 07:11Z."""
+
+    READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
+
+    def seat(self, **proof):
+        self.families["weather-favorites"] = {**canned("weather-favorites", proven=True, n=20, bound=0.0927, taker_positive=True),
+                                              **proof}
+        a = self.agent("huang")
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        return a, self.house.books["kalshi"].account(a.id).staked
+
+    def test_a_practice_proof_on_two_dates_seats_a_probe_not_a_bunt(self):
+        a, staked = self.seat(dates=2)  # crypto-15m-btc-15m-taker-momentum-7fd732 on the re-keyed T0 snapshot
+        self.assertEqual(staked, D("10"))
+        alloc = self.house.allocator
+        self.assertTrue(alloc.thin_proof("weather-favorites", "kalshi"))
+        self.assertEqual((alloc.tier(a), alloc.rung2_band(a), alloc.family_state(a)), ("probe", "probe", "proven"))
+        self.assertEqual(self.promote_row(a)["band_to"], "probe")
+
+    def test_a_real_record_of_the_proofs_count_keeps_the_bunt(self):
+        a, staked = self.seat(dates=3, real_n=11)  # sports-central-run-under at T0
+        self.assertEqual(staked, D("30"))
+        self.assertEqual(self.house.allocator.tier(a), "bunt")
+
+    def test_a_proof_on_five_dates_is_a_bunts(self):
+        a, staked = self.seat(dates=5)
+        self.assertEqual(staked, D("30"))
+
+    def test_without_the_members_rule_the_proof_alone_decides(self):
+        with patch.dict(CONSTITUTION["allocator"]):
+            del CONSTITUTION["allocator"]["proven_family_member"]
+            a, staked = self.seat(dates=2)
+        self.assertEqual(staked, D("30"))
 
 
 # ------------------------------------------------------------------------------------------ M3: members on the proof
@@ -747,14 +868,36 @@ class ReseatByBoundInTheHouse(ForwardBlocks, KalshiHouse):
             self.hourly(*[("2026-09-24T20", 0.0017)] * 6)
             with self.evidence_of({a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36)}):
                 self.tick()
-            self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])  # turned for good
-            self.assertEqual(self.house.allocator.state["probe_holds"]["reseat"], "gain_since_demotion")
+            self.assertNotIn("weather-favorites", self.house.allocator.holds()["families"])  # turned for good
+            self.assertEqual(self.house.allocator.holds()["reseat"], "gain_since_demotion")
         b = self.agent("hawk")
         with self.evidence_of({a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}):
             self.tick()
-        holds = self.house.allocator.state["probe_holds"]
+        holds = self.house.allocator.holds()
         self.assertEqual((holds["reseat"], [d["agent"] for d in holds["families"]["weather-favorites"]]), ("bound_since_demotion", [a.id]))
         self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
+
+
+    def test_the_holds_keyed_by_mechanism_leave_the_label_holds_for_a_rollback(self):
+        """The Deploy B money review (Sept 25, 2026): Deploy A reads `probe_holds` from its own cursor and looks a hold up by
+        the family LABEL. Had Deploy B replaced it with holds keyed by mechanism and its cursor at the ledger's head, a
+        rollback would never fold the demotions made meanwhile and would seat probes from a family its own R5 holds."""
+        left_by_a = {"cursor": 7, "families": {"crypto-alts-reversion": [{"seq": 5, "at": "2026-09-24T18:47:39Z",
+                                                                         "agent": "haghani-58", "why": "hysteresis"}]},
+                     "states": {}}
+        self.house.allocator.state["probe_holds"] = json.loads(json.dumps(left_by_a))
+        a = self.seated()
+        self.drawdown(a)
+        self.tick()
+        alloc = self.house.allocator
+        self.assertEqual(alloc.holds_key(), "probe_holds_mechanism")
+        self.assertEqual([d["agent"] for d in alloc.holds()["families"]["weather-favorites"]], [a.id])
+        self.assertEqual(alloc.state["probe_holds"], left_by_a, "Deploy A's holds and cursor as it left them")
+        saved = json.loads(alloc.path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["probe_holds"], left_by_a)
+        self.assertIn(a.id, [d["agent"] for d in saved["probe_holds_mechanism"]["families"]["weather-favorites"]])
+        with patch.dict(CONSTITUTION["allocator"], {"family_key": "label"}):
+            self.assertEqual(alloc.holds_key(), "probe_holds")  # the label's rule reads the label's holds
 
 
 # ------------------------------------------------------------------------------------------ M6: the Alpaca maker record

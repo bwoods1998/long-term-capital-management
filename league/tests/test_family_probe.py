@@ -246,7 +246,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.blocks("weather-favorites", *[0.01] * 6)
         a = self.seated()
         self.drawdown(a)
-        demoted_at = self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["at"]
+        demoted_at = self.house.allocator.holds()["families"]["weather-favorites"][-1]["at"]
         b = self.agent("hawk")
         table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
         self.blocks("weather-favorites", *[0.01] * 5)  # five positive blocks since: not yet
@@ -277,17 +277,17 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36), b.id: READY}
         path = self.house.allocator.path
         self.house.allocator = allocator.Allocator(self.house, path.parent)  # the House restarted: allocator.json read back
-        self.assertIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.assertIn("weather-favorites", self.house.allocator.holds()["families"])
         with self.evidence_of(table):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
         path.unlink()  # a restart that lost allocator.json: the ledger's rows alone
         self.house.allocator = allocator.Allocator(self.house, path.parent)
-        self.assertEqual(self.house.allocator.state["probe_holds"], {})
+        self.assertEqual(self.house.allocator.holds(), {})
         with self.evidence_of(table):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
+        self.assertEqual(self.house.allocator.holds()["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_a_demotion_that_names_no_band_holds_an_unproven_family_by_the_mechanism_ledger(self):
         """The House's drift demotion writes no `band_from`: the family's state in its last `family.record` row decides."""
@@ -303,7 +303,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
         self.assertNotIn("band_from", self.demotions(a)[-1])
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
+        self.assertEqual(self.house.allocator.holds()["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_a_stake_that_was_never_lent_holds_nothing(self):
         from league.book import Book, BookError
@@ -320,7 +320,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(a.id), 1)
         self.assertTrue(self.demotions(a)[-1]["unfunded"])
-        self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"].get("families", {}))
+        self.assertNotIn("weather-favorites", self.house.allocator.holds().get("families", {}))
         self.clock.advance(3600)  # past its own re-entry cooldown
         with self.evidence_of({a.id: READY}):
             self.tick()
@@ -345,7 +345,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         with self.evidence_of(table):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(a.id), self.house.evaluator.rung(c.id)), (1, 2))
-        self.assertEqual(self.house.allocator.state["probe_holds"]["families"]["weather-favorites"][-1]["agent"], a.id)
+        self.assertEqual(self.house.allocator.holds()["families"]["weather-favorites"][-1]["agent"], a.id)
 
     def test_the_gate_reads_the_houses_own_forward_record(self):
         """`House.family_forward` is the definition; the allocator reads the same rows from its tape."""
@@ -383,12 +383,12 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         self.assertEqual(status["stage"], "family_held")
         self.assertTrue(status["reason"].startswith(f"{a.id}, a probe of its family weather-favorites"), status["reason"])
         self.assertIn("(it is -0.0900 over 9;", status["reason"])
-        self.assertEqual([d["agent"] for d in self.house.allocator.state["probe_holds"]["families"]["weather-favorites"]], [a.id])
+        self.assertEqual([d["agent"] for d in self.house.allocator.holds()["families"]["weather-favorites"]], [a.id])
         self.blocks("weather-favorites", 0.10)  # since a: +0.01 over 10: turned
         with self.evidence_of(table):
             self.tick()
         self.assertEqual(self.house.evaluator.rung(c.id), 2)
-        self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.assertNotIn("weather-favorites", self.house.allocator.holds()["families"])
 
     def test_a_turn_is_for_good(self):
         """"Until the family's record turns" (the R5 review, Sept 24, 2026): once the record since a demotion has turned, the hold is over,
@@ -401,7 +401,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
         table = {a.id: dict(READY, e=0.9, w_real=0.64, real_drawdown=0.36)}
         with self.evidence_of(table):
             self.tick()
-        self.assertNotIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.assertNotIn("weather-favorites", self.house.allocator.holds()["families"])
         self.blocks("weather-favorites", -0.50)  # the record since the demotion is -0.44 now; the whole record +0.16
         table[b.id] = READY
         with self.evidence_of(table):
@@ -447,7 +447,7 @@ class ProbeGateOnKalshi(ForwardBlocks, KalshiHouse):
             self.tick()
         self.assertEqual((self.house.evaluator.rung(b.id), self.status(b)["stage"]), (1, "family_held"))
         self.assertIn("(it is -0.0400 over 7;", self.status(b)["reason"])
-        self.assertIn("weather-favorites", self.house.allocator.state["probe_holds"]["families"])
+        self.assertIn("weather-favorites", self.house.allocator.holds()["families"])
         self.blocks("weather-favorites", 0.05)  # +0.01 over eight: turned
         with self.evidence_of(table):
             self.tick()

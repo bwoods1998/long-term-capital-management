@@ -361,7 +361,12 @@ CONSTITUTION: dict[str, Any] = {
         # desk trades equities (`niches.json` asset_class "equity"), or an open desk's program whose NEEDS name only
         # stocks -- is this much, probe or bunt: a proven family's bunt is never staked less than an unproven family's
         # probe of its class, as `option_bunt_usd` holds for an options bunt. The position cap stays half the stake
-        # ($25), under the gateway's $68.18 Alpaca order cap. Evidence (the plan's gap 3, Sept 25, 2026): no real stock
+        # ($25), under the gateway's $68.18 Alpaca order cap. As with options (`Allocator.target_stake` rebinds the class's
+        # bunt), the $50 is also the base a stock program's bunt grows from (`bunt_growth`: up to $62.50) and its agent-level
+        # swing is sized on (`swing_stake`, $50 x E^2: $112.50 at E 1.5 against $56.25 on $25), under `max_share_of_venue`
+        # and the gateway's order cap; a stock FAMILY's swing still starts at `start_multiple` x the $25 `bunt_usd`
+        # (`_family_base_stake`), so its first step is no raise over the $50 bunt (disclosed by the Deploy B money review,
+        # Sept 25, 2026: the swing needs 8 real stock trades, E 1.25 and 5 real dates, and no real stock has ever traded). Evidence (the plan's gap 3, Sept 25, 2026): no real stock
         # has ever traded on this floor; equity practice fills are measured 0.21 bps adverse (A8, 136 fills), so the
         # 2 bps haircut on a $25 fractional position cannot move W, and the proven megacaps-chip-demand-relay's
         # capacity was measured at a $12.50 position that understates liquid names.
@@ -432,6 +437,12 @@ CONSTITUTION: dict[str, Any] = {
         # +0.0010), all 13 entered by mcentee-hddb4ae's current code, at W_paper 1.0036 -- on 2 trading dates (Sept 23
         # and 24), so it waits for 3 more; sports-central-run-under's pooled proof spans 3 slate dates, and its members
         # -3, -5 and -6 (the proven code) have no closed practice trade. Nobody is seated by it at T0.
+        # The same `min_distinct_dates` holds the STAKE of a thin proof (the Deploy B money review, Sept 25, 2026; no new
+        # key, `Allocator.thin_proof`): a family proven on fewer dates while its REAL record alone is short of
+        # `family_proven.min_independent_settlements` stakes, gates and lets take its members as probes, not bunts. C8's
+        # re-key of the T0 snapshot made two single-program 15-minute BTC taker families proven on 2 practice dates (n 20,
+        # bound +0.0927; n 14, +0.0182), and Deploy B's first pass seated both agents as $30 Kalshi bunts; with it they are
+        # probes. sports-central-run-under (3 dates, real n 11) keeps its bunt, as decided at 07:11Z.
         "proven_family_member": {"min_practice_closed": 1, "min_w_paper": "1.0", "min_distinct_dates": 5, "same_code": True},
         # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a
         # PROVEN family (`family_proven`, the pooled record: the table's one proof) whose REAL record has
@@ -526,7 +537,10 @@ CONSTITUTION: dict[str, Any] = {
         # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
         # Row M2 of the forward-first run (Sept 25, 2026; C2): "probe_may_take" -- a PROBE, the smallest stake, may enter
         # as a taker, one position of at most `position_share_event` of its stake ($2 of a $10 probe: the book's position
-        # cap, `allocator.limits_for`); a bunt and a swing stay post-only until the family's pooled taker record is
+        # cap, `allocator.limits_for`) -- in all, what it holds that it took and its crossing buys counted
+        # (`Book._probe_taker_room`), and only as a probe: not while its family's record cannot be read, nor while its
+        # account is sized above a probe's (the Deploy B money review, Sept 25, 2026: the per-market cap alone let a $10
+        # probe take $2 on each of five events) -- a bunt and a swing stay post-only until the family's pooled taker record is
         # positive. `taker_proof_min` (the same row, 5-10): that record is positive from this many independent taker
         # events with its honest lower bound above zero (`families.family_record`'s taker side; the proof's 10 before).
         # Evidence: in the Sept 25 01:42-02:12Z watch the over-under family's taker entry was refused on a taker record
