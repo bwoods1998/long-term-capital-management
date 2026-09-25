@@ -71,6 +71,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
 | C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
+| W | The site's flywheel strip | site #8 merged and DEPLOYED 12:35:10Z (version `2b780c2c`; the next checkpoint, 12:35:58Z, accepted); publisher #325 (CI green) merges in Deploy C |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`, draft PR #323) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; 630 targeted tests OK after re-pointing the structure-invariance test to H4's book.py; CI running; Deploy A 20:10Z |
@@ -353,6 +354,13 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   release `20260925T114915Z-007e06151f53` (main `2ee015b`: #319 and Merton's #321), promoted 11:50:48Z, verdict promoted
   12:00:50Z with 0 error alerts, grant active on `535a7f15`. Deploy A's integration contains both (merged 11:52Z; PR
   #323, CI re-running).
+
+- **W (site #8, publisher #325).** The capital page gains a "Last 24 hours" strip (compute a day and its multiple of
+  real profit, winning forward blocks, graduates and proofs a day, real profit, restarts a day; hidden when older than
+  30 minutes) and, per proven family, its clock to compounding (with the distinct days still lacking) and its capacity
+  curve at 1x/2x/4x. The schema's new fields are optional and exact; every older checkpoint still passes. The
+  publisher sends each field only when its source has it and falls back to the checkpoint without them on a 400 from
+  an older site. Site tests 84 pass (3 new, failing on main); deployed 12:35:10Z, before the session.
 
 ## Progress notes
 
