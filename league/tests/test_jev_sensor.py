@@ -1121,6 +1121,26 @@ class FloorTickTest(HouseCase):
         self.assertIn("jev:move", {e.payload["key"] for e in self.house.ledger.iter(kinds="ops.job")})
         self.assertIn("move", health["jev"]["sensor"]["today"])
 
+    def test_the_move_sensor_is_handed_the_feed_store_and_serves_nothing_until_switched_on(self):
+        from league.feeds import FeedRecorder
+        store = FeedRecorder(self.house, self.house.root / "feeds.sqlite", keys={})
+        self.addCleanup(store.close)
+        self.house.feeds = store
+        floor = JevFloor(self.house, Sensor(self.house.root / "jev.sqlite", FakeJev(0.4), clock=self.clock),
+                         {"move": {"enabled": True, "interval_seconds": 300, "min_free_bytes": 0}})
+        self.assertIs(floor.move.feeds, store)
+        floor.move.run()  # the first run only sets the cursor
+        market = {"market": "KXBTCD-26SEP25-T60000", "series": "KXBTCD", "title": "Bitcoin above 60,000?", "yes_bid": 0.4,
+                  "yes_ask": 0.44, "hours_to_close": 3.0, "open_interest": 100.0}
+        self.house.recorder.record("markets:KXBTCD:24", [market], started=self.clock())
+        self.clock.advance(300)
+        self.assertEqual(floor.move.run()["move_rows"], 1)
+        self.assertEqual(store.latest({"move": ["KXBTCD"]}, self.clock()), {})  # the model file says "serve": false
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM polls").fetchone()[0], 0)
+        health = floor.health()["move"]
+        self.assertEqual(health["serving"], False)
+        self.assertIn("ship rule has not passed", health["serving_why"])
+
     def test_jev_holds_at_most_one_ops_slot(self):
         floor = self.floor()
         self.house.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding feed for BTC and ETH"}, agent="r-1")

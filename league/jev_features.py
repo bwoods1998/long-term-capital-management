@@ -48,10 +48,19 @@ Rules:
   ignoring whitespace and case), carry a parseable `fitted_on.to`, and keep its digest for its
   version (`move_models`), else it is refused with an alert: coefficients fitted on one definition
   are never applied to another. A placeholder version counts as no model.
-- The feature is not served to strategies here. `latest` is the future `ctx["feeds"]["move"]`
-  read. Before a strategy relies on it, `evaluate` (held-out rows after a cutoff no earlier than the
-  model's `fitted_on.to`, event-clustered bootstrap, per model version) must show AUC >= 0.70 for
-  "moves at all" on post-ship events.
+- Serving (`ctx["feeds"]["move"]`, the feeds store's `move` entry, `league/feeds.py` `MoveFeature`)
+  is OFF until the Jev run's ship rule passes (docs/runs/2026-09-25-jev-senses.md: `evaluate` on
+  held-out rows after a cutoff no earlier than the model's `fitted_on.to`, event-clustered
+  bootstrap, per model version, the 95% lower bound of the 15-minute AUC for "moves at all" on
+  unseen post-ship events at or above 0.70). The switch is the served model file's own `"serve"`
+  line, not a config dial: a one-line PR turns it on. The file's identity digest is taken without
+  that line, so the switch never changes the model's (version, digest); a refit is a new file,
+  written without the switch, so off until its own evaluation. When on and the model is ready,
+  each cycle records per Kalshi series `{"markets": {ticker: {move_p5, move_p15, move_p60}},
+  "model": version}` (rounded to 4 decimals, so an unchanged series is stored once), stamped with
+  its rows' `recorded_at`: a live wake or a replay sees it only from then on, and nothing from before
+  serving began exists. A series whose markets the model does not apply to is not recorded (absent,
+  never zero). A record that fails is an alert. `latest` is the same read per market.
 
     python -m league.jev_features evaluate --store /workspace/state/jev-features.sqlite --cutoff 2026-09-26T00:00:00Z [--json]
 """
@@ -81,7 +90,12 @@ from .ledger import canonical
 from .semantic_lab import FEATURES, QUESTION_GUARD, market_state, point, questions
 
 PURPOSE = "move"
+#: The feeds store's entry the feature is served as (`ctx["feeds"]["move"][series]`).
+FEED = "move"
 MODEL_PATH = Path(__file__).with_name("jev_move_model.json")
+#: The serve switch in a model file: a top-level line of its own (` "serve": false,`). It is policy,
+#: not the fit, so the file's identity digest is taken with this line removed.
+SERVE_LINE = re.compile(rb'^[ \t]*"serve"[ \t]*:[ \t]*(?:true|false)[ \t]*,[ \t]*\r?\n', re.M)
 SHADOW_PATH = Path(__file__).with_name("jev_move_model_jev_shadow.json")
 #: A model file with this version (or `fitted_on.placeholder`) is no model.
 PLACEHOLDER = "move-v0-placeholder"
@@ -298,13 +312,22 @@ class MoveModel:
     Jev features are lab questions named in `questions.per_market` (asked once per market) or
     `questions.per_state`. Its identity is (version, sha256 of the file): a model without a
     parseable `fitted_on.to` cannot be held out honestly and is refused; `fitted_on.events_sha256`
-    lists the fit's events (sha256(event)[:16]), which evaluate never counts as unseen."""
+    lists the fit's events (sha256(event)[:16]), which evaluate never counts as unseen.
+
+    `serve` is the file's serve switch (only a literal true turns it on); it is not part of the
+    identity (`SERVE_LINE`). A malformed switch is a problem that keeps serving off, never a refusal
+    of the model: the recorder goes on recording."""
 
     def __init__(self, data: Any, *, source: str = "", digest: str | None = None):
         self.source = source
         self.problems: list[str] = []
-        self.digest = digest or hashlib.sha256(canonical(data).encode()).hexdigest()
+        fit = {k: v for k, v in data.items() if k != "serve"} if isinstance(data, dict) else data
+        self.digest = digest or hashlib.sha256(canonical(fit).encode()).hexdigest()
         data = data if isinstance(data, dict) else {}
+        switch = data.get("serve", False)
+        self.serve = switch is True
+        if not isinstance(switch, bool):
+            self.problems.append(f"serve switch refused: {str(switch)[:40]!r} is not true or false; not served")
         self.version = str(data.get("version") or "unknown")
         self.fitted_on = dict(data["fitted_on"]) if isinstance(data.get("fitted_on"), dict) else {}
         self.placeholder = self.version == PLACEHOLDER or bool(self.fitted_on.get("placeholder"))
@@ -364,7 +387,22 @@ class MoveModel:
             model.problems = [f"model file unreadable: {type(exc).__name__}: {str(exc)[:120]}"]
             model.blocks = model.baseline = None
             return model
-        return cls(data, source=str(path), digest=hashlib.sha256(raw).hexdigest())
+        # The identity is the file's bytes without its serve line, so switching serving on or off
+        # keeps the digest the store recorded (and the ship rule read). A switch that is not such a
+        # line leaves the bytes whole: a new digest, and serving off.
+        body, misplaced = raw, False
+        if isinstance(data, dict) and "serve" in data:
+            body, removed = SERVE_LINE.subn(b"", raw, count=1)
+            try:
+                misplaced = removed != 1 or json.loads(body) != {k: v for k, v in data.items() if k != "serve"}
+            except ValueError:
+                misplaced = True
+            body = raw if misplaced else body
+        model = cls(data, source=str(path), digest=hashlib.sha256(body).hexdigest())
+        if misplaced:
+            model.serve = False
+            model.problems.append('serve switch refused: it must be a top-level line of its own (` "serve": false,`); not served')
+        return model
 
     @property
     def ready(self) -> bool:
@@ -463,14 +501,19 @@ def _connect(path: Path, *, readonly: bool = False):
 
 # --------------------------------------------------------------------------- the recorder
 class MoveSensor:
-    """J1's recorder: point-in-time move features for every Kalshi market the House shows."""
+    """J1's recorder: point-in-time move features for every Kalshi market the House shows.
+
+    `feeds` is the House's feed store (`league/feeds.py` `FeedRecorder`); the feature is served
+    through it only while `serving` (the served model's file says "serve": true and the model is
+    ready: its version recorded with this digest). Otherwise nothing reaches it."""
 
     def __init__(self, root: str | Path, sensor: Any, *, clock: Callable[[], float] = time.time,
                  alert: Callable[[str, str], Any] | None = None, settings: Mapping[str, Any] | None = None,
                  model_path: str | Path | None = None, shadow_path: str | Path | None = None,
-                 recordings: str | Path | None = None, closing: Callable[[], bool] | None = None):
+                 recordings: str | Path | None = None, closing: Callable[[], bool] | None = None, feeds: Any = None):
         self.root = Path(root)
         self.sensor, self.clock = sensor, clock
+        self.feeds = feeds
         self._alert = alert
         self._closing = closing or (lambda: False)
         s = dict(settings or {})
@@ -510,6 +553,10 @@ class MoveSensor:
         if not self.served.ready:
             self.alert("warning", f"the served move model {self.served.version} is not ready "
                                   f"({self.served.why_not or 'no model'}): move_p stays null")
+        self.serving, self.serving_why = self._serving()
+        if self.served.serve and not self.serving:
+            self.alert("warning", f"the move feature is switched on in {self.served.source} but not served: {self.serving_why}")
+        self._publish_error = ""
         # Static questions are about the contract's own text: bought once per market. The rest are
         # about one state: bought only for the sampled states, with the recorded-only pair.
         static = dict.fromkeys(self.served.per_market + self.shadow.per_market)
@@ -554,6 +601,17 @@ class MoveSensor:
 
     def due(self) -> bool:
         return self.clock() - self._last_run >= self.interval
+
+    def _serving(self) -> tuple[bool, str]:
+        """(whether the feature is served through the feeds store, why): the model file's switch,
+        then the model itself (a version recorded under another digest is not ready), then a store."""
+        if not self.served.serve:
+            return False, "off: the served model's file says serve false (the Jev run's ship rule has not passed)"
+        if not self.served.ready:
+            return False, f"off: the served model {self.served.version} is not ready ({self.served.why_not or 'no model'})"
+        if self.feeds is None:
+            return False, "off: this House keeps no feed store"
+        return True, f"on: {self.served.version}@{self.served.digest[:12]}, per Kalshi series"
 
     def _stop(self) -> str:
         """Why no further ask may start this cycle, or ""."""
@@ -638,6 +696,8 @@ class MoveSensor:
             self._set(db, today=canonical(tally))
         cycle.update(counts, calls=int(receipt.get("calls") or 0), static_asked=int(receipt.get("static") or 0),
                      cost_usd=format(Decimal(str(receipt.get("cost") or 0)), "f"))
+        if self.serving and rows:
+            cycle["served"] = self._publish(rows, started=now, recorded_at=recorded_at)
         if rows:
             lags = sorted(recorded_at - r["observed"] for r in rows)
             cycle["lag_seconds"] = {"p50": round(lags[len(lags) // 2], 1), "max": round(lags[-1], 1)}
@@ -714,6 +774,40 @@ class MoveSensor:
         self._keep_quotes(batch, cursor=end)
         return shown, {"snapshots": read - corrupt, "stale_snapshots": stale, "corrupt_snapshots": corrupt,
                        "backlog_snapshots": backlog}
+
+    def _publish(self, rows: Sequence[Mapping[str, Any]], *, started: float, recorded_at: float) -> dict[str, int]:
+        """Serve a cycle's rows through the feeds store: one `record` per Kalshi series, its payload
+        the markets the served model applied to ({ticker: {move_p5, move_p15, move_p60}}, 4 decimals)
+        and the model's version, stamped with the rows' `recorded_at` (the cycle's start is `started`).
+        A series with no such market is not recorded. Never raises: a failure is an alert, once until
+        a clean publish."""
+        out = {"series": 0, "stored": 0, "failed": 0}
+        problems: list[str] = []
+        try:
+            from .feeds import RECORDERS
+
+            key_of = RECORDERS[FEED].key_of
+            by_series: dict[str, dict[str, dict[str, float]]] = {}
+            for row in rows:
+                values = [row[f"move_p{h}"] for h in HORIZONS]
+                series = key_of(row.get("series") or row["market"])
+                if series is not None and all(v is not None for v in values):
+                    by_series.setdefault(series, {})[row["market"]] = {f"move_p{h}": round(v, 4) for h, v in zip(HORIZONS, values)}
+            out["series"] = len(by_series)
+            for series in sorted(by_series):
+                payload = {"markets": dict(sorted(by_series[series].items())), "model": self.served.version}
+                try:
+                    out["stored"] += int(bool(self.feeds.record(FEED, series, started=started, finished=recorded_at, payload=payload)))
+                except Exception as exc:  # noqa: BLE001 - one series' record is not the cycle's
+                    out["failed"] += 1
+                    problems.append(f"{series}: {type(exc).__name__}: {str(exc)[:120]}")
+        except Exception as exc:  # noqa: BLE001 - serving is a side path: the rows are already kept
+            out["failed"] += 1
+            problems.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+        if problems and not self._publish_error:
+            self.alert("warning", f"jev move feature: {out['failed']} record(s) into the feeds store failed ({'; '.join(problems[:3])})")
+        self._publish_error = "; ".join(problems[:3])
+        return out
 
     def _keep_quotes(self, batch: list[tuple[str, int, float, float]], *, cursor: int | None = None) -> None:
         with self._db() as db:
@@ -911,6 +1005,7 @@ class MoveSensor:
         self._stats = {"model_version": self.served.version, "model_ready": self.served.ready,
                        "shadow_version": self.shadow.version, "shadow_ready": self.shadow.ready,
                        "model_problems": list(self.served.problems) + list(self.shadow.problems),
+                       "serving": self.serving, "serving_why": self.serving_why,
                        "rows": int(rows), "markets": int(markets),
                        "started_at": _iso(float(started_at)) if started_at else None,
                        "cursor": int(cursor) if cursor is not None else None, "today": today,
