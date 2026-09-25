@@ -336,6 +336,11 @@ def seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
 def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
     from .house import PROBE_BOX
 
+    # No structure book open, nothing to seat: a structure founder trades only structures, so a House
+    # built without its structure book (a test House, a canary that has none) births none of them.
+    book_name = house._structure_book_name() if callable(getattr(house, "_structure_book_name", None)) else "options-shadow"
+    if book_name not in (getattr(house, "books", None) or {}):
+        return []
     wanted = owed(house)
     if not wanted:
         return []
