@@ -155,3 +155,42 @@ test('question schema cannot smuggle unpriced model settings or arbitrary result
   }
   assert.equal(actualCost({ input_tokens: 1 }), 1n);
 });
+
+test('score questions are admitted as 2 to 10 ordered levels and their answers are checked', async () => {
+  const rubric = { model: MODEL, state: { note: 'An 8-K withdrew full-year guidance.' },
+    questions: { severity: { type: 'score', instructions: 'How material is this filing to the stock?',
+      criteria: ['Routine', 'Notable', 'Material'] } } };
+  const scored = { model: MODEL, answers: { severity: { type: 'score', score: 1.9, legend: { 0: 'Routine', 1: 'Notable', 2: 'Material' },
+    probabilities: { 0: 0.0, 1: 0.1, 2: 0.9 }, confidence: 0.88 } }, usage: { input_tokens: 300, output_tokens: 12 } };
+  assert.equal(admit(rubric), null);
+  assert.match(admit({ ...rubric, questions: { s: { ...rubric.questions.severity, criteria: ['Only one'] } } }), /2 to 10/);
+  assert.match(admit({ ...rubric, questions: { s: { ...rubric.questions.severity, criteria: Array(11).fill('level') } } }), /2 to 10/);
+  assert.match(admit({ ...rubric, questions: { s: { ...rubric.questions.severity, criteria: { a: 'not ordered' } } } }), /2 to 10/);
+  assert.match(admit({ ...rubric, questions: { s: { ...rubric.questions.severity, criteria: ['Fine', ' '] } } }), /2 to 10/);
+  assert.match(admit({ ...rubric, questions: { s: { type: 'number', instructions: 'How many?' } } }), /choice, noul or score/);
+  assert.equal(validAnswers(rubric, scored), true);
+  for (const change of [
+    a => { a.score = 2.5; },                                   // outside [0, n-1]
+    a => { a.score = 0.4; },                                   // not the probability-weighted level
+    a => { a.probabilities[2] = 0.5; },                        // does not sum to 1
+    a => { delete a.probabilities[1]; a.probabilities[2] = 1; a.score = 2; },  // a level missing
+    a => { a.probabilities[3] = 0; },                          // a level that was not asked
+    a => { a.confidence = 1.2; },
+    a => { a.type = 'noul'; },
+  ]) {
+    const bad = structuredClone(scored); change(bad.answers.severity);
+    assert.equal(validAnswers(rubric, bad), false);
+  }
+  const x = setup(settings, { body: JSON.stringify(scored) });
+  const res = await x.call(request('score:1', rubric));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), scored);
+});
+
+test('the lifetime Jev line is set at or below funded money', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const config = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const cap = Number(config.match(/"TYPESAFE_PILOT_USD":\s*"([0-9.]+)"/)[1]);
+  // Sept 25, 2026: $16.23 metered + the owner's ~$25 funded = $41.23.
+  assert.ok(cap <= 41.23, `TYPESAFE_PILOT_USD ${cap} is above funded money`);
+});

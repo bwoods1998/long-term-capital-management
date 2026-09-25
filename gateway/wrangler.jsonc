@@ -75,8 +75,9 @@
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
     // Sept 23 06:40 UTC: $16.14 metered and the owner reports $26 funded at Jev -> metered +
-    // funded, rounded down: $42.
-    "TYPESAFE_PILOT_USD": "42",
+    // funded, rounded down: $42. Sept 25 06:22 UTC: $16.23 metered and the owner reports about $25
+    // funded -> $41.23, rounded down: $41, so the line never exceeds funded money.
+    "TYPESAFE_PILOT_USD": "41",
     "TYPESAFE_PILOT_END": "2026-09-21T11:01:16.977Z",
     // Continue unused original allowance after the owner resumed the game. No resets or refills.
     "TYPESAFE_PERSISTENT": "true",

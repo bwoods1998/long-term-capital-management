@@ -1,4 +1,4 @@
-// A one-off, funded Jev shadow pilot. No trading or release authority is attached to answers.
+// Funded Jev judgments (choice, noul and score). No trading or release authority is attached to answers.
 // https://docs.typesafe.ai/models and /api, checked September 20, 2026.
 import { parseUsdMicro, formatUsdMicro } from './money.mjs';
 
@@ -37,7 +37,12 @@ export function admit(body) {
     } else if (q.type === 'noul') {
       if (q.criteria !== undefined && (!object(q.criteria) || !keysOnly(q.criteria, ['true', 'false'])
           || Object.values(q.criteria).some(v => !text(v)))) return 'Noul criteria must describe true/false.';
-    } else return 'The shadow pilot supports choice and noul questions.';
+    } else if (q.type === 'score') {
+      // A rubric: 2 to 10 ordered levels, lowest first (docs.typesafe.ai/api, checked Sept 25, 2026).
+      if (!Array.isArray(q.criteria) || q.criteria.length < 2 || q.criteria.length > 10 || !q.criteria.every(text)) {
+        return 'A score needs 2 to 10 ordered level descriptions.';
+      }
+    } else return 'Jev questions are choice, noul or score.';
   }
   return null;
 }
@@ -56,6 +61,16 @@ export function validAnswers(body, response) {
     const a = response.answers[name];
     if (!object(a) || a.type !== q.type) return false;
     if (q.type === 'noul') return probability(a.noul);
+    if (q.type === 'score') {
+      // Levels are keyed "0".."n-1"; the score is the probability-weighted level, so it lies in
+      // [0, n-1] and equals the sum of index x probability (a small rounding allowance either way).
+      const levels = q.criteria.map((_, i) => String(i));
+      if (!probability(a.confidence) || !object(a.probabilities) || typeof a.score !== 'number' || !Number.isFinite(a.score)) return false;
+      if (Object.keys(a.probabilities).length !== levels.length || !levels.every(n => probability(a.probabilities[n]))) return false;
+      if (Math.abs(levels.reduce((sum, n) => sum + a.probabilities[n], 0) - 1) > 0.001) return false;
+      const expected = levels.reduce((sum, n) => sum + Number(n) * a.probabilities[n], 0);
+      return a.score >= -0.01 && a.score <= levels.length - 1 + 0.01 && Math.abs(a.score - expected) <= 0.02;
+    }
     if (!Object.hasOwn(q.criteria, a.choice) || !probability(a.confidence) || !object(a.probabilities)) return false;
     const names = Object.keys(q.criteria);
     if (Object.keys(a.probabilities).length !== names.length || !names.every(n => probability(a.probabilities[n]))) return false;
