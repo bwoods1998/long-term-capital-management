@@ -291,7 +291,8 @@ def left_real_at(house: Any, agent: str) -> float | None:
 
 
 def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[str, str],
-                   family_of: Callable[[str], tuple[str, str] | None]) -> int | None:
+                   family_of: Callable[[str], tuple[str, str] | None],
+                   family_at: Callable[[str, int], str | None] | None = None) -> int | None:
     """Fold `eval.verdict` and `family.record` rows, oldest first, into the probe gate's holds (R5, Sept 24, 2026):
     EVERY demotion of a probe from real money, by family, in ledger order ({"seq", "at", "agent", "why"}), whatever the
     reason -- hysteresis, the stay drawdown, displacement, drift, an audit's veto, the losing line itself -- except a
@@ -304,7 +305,11 @@ def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[s
     family's state before the mechanism ledger's first rows (Deploy B, 08:31Z Sept 24, 2026), and the allocator's rows
     before Deploy A (05:37Z) name every rung-2 agent a bunt. Pure over its inputs, and a row folded twice is kept once,
     so a restart that lost `allocator.json` folds the ledger again to the same holds. Returns the last ledger position
-    folded, or None."""
+    folded, or None.
+
+    `family_at` (C8 of the forward-first run, Sept 25, 2026: `TradeTape.family_at`): the family the demoted agent was in
+    at the demotion's ledger position, where its `agent.family` rows say one; else the family it carries now (`family_of`).
+    A probe demoted in a family it has since left by a rewrite holds the family it was demoted from."""
     last = None
     for entry in entries:
         last = entry.seq
@@ -319,6 +324,7 @@ def fold_demotions(entries: Iterable[Any], holds: dict[str, Any], states: dict[s
         if not known or not known[0]:
             continue
         family, venue = known
+        family = (family_at(entry.agent, entry.seq) if family_at is not None else None) or family
         band = p.get("band_from")
         if (band == "probe") if band else states.get(families.key_of(family, venue)) == "unproven":
             kept = holds.get(family)
@@ -1441,20 +1447,34 @@ class Allocator:
         agent ever born into it, living or dead, from the mechanism ledger's tape: a drop-in for
         `House.family_forward` (what `House._losing_family` -- the House's births, `_refill` and the foundry --
         reads), so they read the one source (`families.losing` is the rule)."""
+        out: dict[str, list[float]] = {}
+        for _, family, _, growth, _ in self._family_blocks():
+            row = out.setdefault(family, [0, 0.0])
+            row[0] += 1
+            row[1] += growth
+        return {family: (int(n), float(growth)) for family, (n, growth) in out.items()}
+
+    def _family_blocks(self, family: str | None = None) -> list[tuple[str, str, int, float, int]]:
+        """Every ACTIVE block on the pass's tape as (agent, the family it counts for, its ledger position, its log growth,
+        where it began), or only `family`'s. Since C8 (the forward-first run, Sept 25, 2026: `allocator.family_key` "mechanism") an agent's
+        stretches belong to the families its `agent.family` rows give them: a block counts for the family its agent was in
+        when the block BEGAN (`TradeTape.family_at`, as `families.family_record` counts a member's blocks), else for the
+        family the agent carries (an agent with no such row, all of its life)."""
         registry = self.house.registry
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
-            family_of = {a.id: a.family for a in list(registry.agents.values())}
-        out: dict[str, list[float]] = {}
+            label = {a.id: a.family for a in list(registry.agents.values())}
+        at = getattr(self._tape, "family_at", None)
+        out = []
         for agent_id, blocks in list(self._tape.blocks.items()):
-            family = family_of.get(agent_id)
-            if not family:
+            if agent_id not in label:
                 continue
-            row = out.setdefault(family, [0, 0.0])
-            for _, _, active, growth, _ in blocks:
-                if active:
-                    row[0] += 1
-                    row[1] += growth
-        return {family: (int(n), float(growth)) for family, (n, growth) in out.items()}
+            for seq, _, active, growth, began in blocks:
+                if not active:
+                    continue
+                credited = (at(agent_id, began) if at is not None else None) or label[agent_id]
+                if credited and (family is None or credited == family):
+                    out.append((agent_id, credited, seq, growth, began))
+        return out
 
     def family_score(self, family: str, venue: str) -> int:
         """+1 proven or swinging, -1 a negative pooled record past the proof's count, else 0 (`families.score`):
@@ -1491,7 +1511,16 @@ class Allocator:
         tape, through = self._tape, self._through
         events: set[str] = set()
         by_code: dict[str, set[str]] = {}
-        for agent in self._members(family, venue):
+        registry = self.house.registry
+        with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
+            everyone = [a for a in list(registry.agents.values()) if a.venue == venue]
+        spans_of = getattr(tape, "spans", None)
+        for agent in everyone:
+            # C8 (Sept 25, 2026): the family's members are the agents whose rows were ever its, each for its stretch in it,
+            # as `families.family_record` reads them (`TradeTape.spans`: None for an agent with no `agent.family` row).
+            where = spans_of(agent.id, family, through=through) if spans_of is not None else None
+            if (where is None and agent.family != family) or where == []:
+                continue
             rows = tape.rows.get(agent.id) or []
             if not rows:
                 continue
@@ -1506,7 +1535,7 @@ class Allocator:
                                               until_seq=through)
                 by_event = per_event(book)
                 for row in closed:
-                    if staked_base(stakes, row["seq"]) <= 0:
+                    if staked_base(stakes, row["seq"]) <= 0 or not families.within(where, row["seq"]):
                         continue
                     event = (event_key(row["instrument"]) if by_event else None) or f"{book}:{agent.id}:{row['seq']}"
                     opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
@@ -1620,11 +1649,7 @@ class Allocator:
         cached = self._since.get(key)
         if cached is not None:
             return cached
-        registry = self.house.registry
-        with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
-            members = [a.id for a in list(registry.agents.values()) if a.family == family]
-        rows = [(member, block, value) for member in members for block, _, active, value, began in self._tape.blocks.get(member) or ()
-                if active and began > seq]
+        rows = [(member, block, value) for member, _, block, value, began in self._family_blocks(family) if began > seq]
         blocks, growth = len(rows), math.fsum(value for _, _, value in rows)
         rule = families.probe_rule()
         if rule is not None and rule.get("bound"):
@@ -1652,7 +1677,10 @@ class Allocator:
             return
         with self._lock:
             kept = dict(self.state.get("probe_holds") or {})
-        if kept.get("reseat", "gain_since_demotion") != rule["reseat"]:
+        keyed = families.family_key_rule()
+        if kept.get("reseat", "gain_since_demotion") != rule["reseat"] or kept.get("family_key", "label") != keyed:
+            # M5's rule, or C8's keys (the one-time re-key at the start moves stretches of agents to other families,
+            # `House._key_families_at_start`, before this first pass): every demotion is folded again from the ledger.
             kept = {}
         holds = {family: (list(v) if isinstance(v, list) else [dict(v)]) for family, v in (kept.get("families") or {}).items() if v}
         states = dict(kept.get("states") or {})
@@ -1663,12 +1691,12 @@ class Allocator:
             return (agent.family, agent.venue) if agent is not None else None
 
         last = fold_demotions(self.house.ledger.iter(kinds=("eval.verdict", "family.record"), after=int(kept.get("cursor") or 0)),
-                              holds, states, family_of)
+                              holds, states, family_of, getattr(self._tape, "family_at", None))
         if last is None and kept:
             return
         with self._lock:
             self.state["probe_holds"] = {"cursor": last if last is not None else int(kept.get("cursor") or 0), "families": holds,
-                                         "states": states, "reseat": rule["reseat"]}
+                                         "states": states, "reseat": rule["reseat"], "family_key": keyed}
 
     def _prune_holds(self) -> None:
         """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
