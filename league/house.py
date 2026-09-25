@@ -3668,11 +3668,17 @@ class House:
             oldest = min(self._tapes, key=lambda k: self._tapes[k][0])
             self._tapes.pop(oldest, None)
 
-    def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-        """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
+    def tape_for(self, needs: Mapping[str, Any], *, window: tuple[float, float] | None = None) -> tuple[str, dict[str, Any]]:
+        """The recorded history a strategy with these NEEDS is replayed over (cached for a day).
+
+        `window` (start, end epochs; OPTIONS tapes only, G-LOOP, Sept 25, 2026): the tape of that stretch instead
+        of the replay window, which the lab's forward window of a structure program asks for (its last
+        `forward_days`: a tenth of the whole tape's bars, built on the House's one CPU and never kept)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         structural = option and needs.get("structures") is True  # a structure agent's options tape (Sept 25, 2026)
+        if window is not None and not (option and self.options_history is not None):
+            raise ValueError("unsupported input: only an options tape is built for a window of its own")
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
         # window (the backfilled history feeds cover the live window): a strategy that reads either is
@@ -3681,7 +3687,7 @@ class House:
             deep = self._deep_tape(needs)
             if deep is not None:
                 return deep
-        start, end = self._live_window(needs)
+        start, end = window if window is not None else self._live_window(needs)
         start_iso, end_iso = now_iso(lambda: start), now_iso(lambda: end)
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if option and self.options_history is not None:
