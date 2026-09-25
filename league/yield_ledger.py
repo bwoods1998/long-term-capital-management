@@ -34,7 +34,10 @@ Over the last `merton.lift.days` (7):
 - the teacher: forward growth per active block over `teacher_days` (3) after each lesson, of the agents
   the lesson names (desk, specialty or family), split by `research_gate.lesson_arm`: under the gate's
   `lesson_arm: parity` a lesson wakes the research of the even half only, so the odd half is a control
-  that was not steered to it. Counted from `lesson_since`, when the gate first split the arms.
+  that was not steered to it; since the review of #311 the control is also neither asked Jev about nor
+  shown by `playbook_read` the lesson that names it for `teacher_days` (`ResearchGate.withheld`), so the
+  arms are agents that read the lesson and agents that did not. Counted from `lesson_since`, when the
+  gate first split the arms.
 - the consultant: a `consult.outcome` row for each paid consult at two stages -- `sessions`, whether the
   agent retained a candidate or changed its strategy within two sessions (`merton.consult_verdict`; an
   unproductive one doubles its next consult's price, `Merton.consult_price_multiple`), and `blocks`,
@@ -348,7 +351,9 @@ def consult_outcomes(ledger: Any, *, now: float, settings: Mapping[str, Any]) ->
                     verdict = {"productive": False, "by": None, "sessions": done, "expired": True}
                 if verdict is not None:
                     out.append({"id": f"consult-outcome:{consult.seq}:sessions", "agent": agent,
-                                "payload": {**base, "stage": "sessions", **verdict, "doubles_next_price": not verdict["productive"]}})
+                                # An expired consult is not judged by `Merton.consult_price_multiple`: it doubles nothing.
+                                "payload": {**base, "stage": "sessions", **verdict,
+                                            "doubles_next_price": not verdict["productive"] and not verdict.get("expired")}})
             if (consult.seq, "blocks") not in judged:
                 before, after = consult_blocks(ledger, consult, n=n, rows=blocks)
                 partial = len(after) < n

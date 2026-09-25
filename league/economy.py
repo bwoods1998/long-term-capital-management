@@ -58,6 +58,13 @@ def check_bounds(game: Mapping[str, Any]) -> None:
         value = float(game["horizon"][key])
         if not float(low) <= value <= float(high):
             raise ValueError(f"game.json: horizon.{key} = {value:g} is outside [{low}, {high}]")
+    # M1 of the forward-first run (Sept 25, 2026): the audit's dials inside `audit_bounds` (`audit.pre_pack`, 5-9).
+    for key, bound in (game.get("audit_bounds") or {}).items():
+        if str(key).startswith("_") or key not in (game.get("audit") or {}):
+            continue
+        value = float(game["audit"][key])
+        if not float(bound[0]) <= value <= float(bound[1]):
+            raise ValueError(f"game.json: audit.{key} = {value:g} is outside [{bound[0]}, {bound[1]}]")
     if int(economy["min_population"]) > int(economy["max_population"]):
         raise ValueError("game.json: min_population is above max_population")
     # The Alpha Lab's dials the close-the-gaps plan bounds (Sept 24, 2026): `lab_bounds`, each checked
@@ -100,6 +107,21 @@ def check_bounds(game: Mapping[str, Any]) -> None:
                 raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not one of {bound}")
         elif not float(bound[0]) <= float(gate[key]) <= float(bound[1]):
             raise ValueError(f"game.json: research.gate.{key} = {gate[key]} is outside [{bound[0]}, {bound[1]}]")
+    # The foundry's dials (Sept 25, 2026, the forward-first run's S1): `hypotheses_bounds`, each checked where the
+    # hypotheses section sets it (a range a key for a dict dial), and the five route shares at most the whole window.
+    foundry, bounds = game.get("hypotheses") or {}, game.get("hypotheses_bounds") or {}
+    for key, bound in bounds.items():
+        if str(key).startswith("_") or key not in foundry:
+            continue
+        for sub, (low, high) in (bound.items() if isinstance(bound, Mapping) else [(None, bound)]):
+            value = float(foundry[key] if sub is None else (foundry[key] or {}).get(sub, low))
+            if not float(low) <= value <= float(high):
+                name = key if sub is None else f"{key}.{sub}"
+                raise ValueError(f"game.json: hypotheses.{name} = {value:g} is outside [{low}, {high}]")
+    if bounds:
+        shares = sum(float(foundry.get(f"{route}_share") or 0) for route in ("capacity", "model", "transfer", "fast", "exploration"))
+        if shares > 1 + 1e-9:
+            raise ValueError(f"game.json: the foundry's route shares add up to {shares:g}, more than the whole call window")
     lock = ((game.get("research") or {}).get("gate") or {}).get("abstain_lock_profile")
     if lock is not None:
         from ltcm.provider import PROFILES

@@ -20,7 +20,9 @@ class ConstitutionTest(unittest.TestCase):
         self.assertEqual(CONSTITUTION["ladder"]["promotion_alpha"], 0.20)  # promotion's budget, swing and bunt
         self.assertEqual(CONSTITUTION["ladder"]["replay"]["min_oos_growth"], -0.0005)  # swing and bunt
         # No probe on a losing family (R5, the close-the-gaps run, Sept 24, 2026: the run's third money-digest change).
-        self.assertEqual(CONSTITUTION["allocator"]["family_probe"], {"losing_min_blocks": 6, "reseat": "gain_since_demotion"})
+        # The forward-first run's M5 (Sept 25, 2026): the hold turns on an 80% bound, one observation a block period.
+        self.assertEqual(CONSTITUTION["allocator"]["family_probe"],
+                         {"losing_min_blocks": 6, "reseat": "bound_since_demotion", "reseat_confidence": "0.8"})
 
     def test_sizing_stays_on_the_lower_bound_and_death_keeps_its_budget(self):
         """Whatever the owner's appetite, two properties hold: the scaled rung is never sized above

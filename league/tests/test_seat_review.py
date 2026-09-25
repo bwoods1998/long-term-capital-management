@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from league.constitution import CONSTITUTION
 from league.house import Newcomer
 from league.tests.test_house import BUYER, HouseCase
 from league.tests.test_hypotheses import FoundryCase
@@ -159,6 +160,7 @@ class GraduateWhoseWindowStopsLosing(LabCase):
     def test_a_graduate_whose_forward_window_no_longer_loses_is_a_waiter_again(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")
         self.house.evaluator.promote(resident.id, 2, "test: real money")  # nobody may be displaced: the graduate waits
@@ -295,6 +297,12 @@ class AProvenFamilysNameFollowsItsProgram(ReviewCase):
     with meriwether-h2d625d dead and -2 trading, the House would breed -2's moneyline program as the proven family's."""
 
     def setUp(self):
+        # The Sept 24 rule this class pins is the label rule: C8 (the forward-first run, Sept 25, 2026; the constitution's
+        # `allocator.family_key` "mechanism") keys every birth by its mechanism instead, which league/tests/test_family_key.py
+        # tests. Without the key a birth keeps its label, with this rule for a research fork: the rollback form.
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         super().setUp()
         self.house.close(wait=None)  # a House with a Kalshi practice book too (test_seat_capacity's NewCodeFamilies)
         from pathlib import Path
@@ -409,7 +417,9 @@ class StaleSeatsOnADeskThatKeepsHours(HouseCase):
         self.fill(agent, "2026-09-23T14:11:00Z", closed=True)  # one closed trade: short of the bunt line's record
         self.at("2026-09-24T07:00:00Z")  # 17.5 h: inside the desk's clock
         self.assertIsNone(self.stale_pick(desk.id))
-        self.at("2026-09-24T09:00:00Z")  # 19.5 h and Wednesday's session closed: stale, and flat
+        self.at("2026-09-24T09:00:00Z")  # 19.5 h from its seat, but 18.8 h from its first fill: F3's tenure keeps it
+        self.assertIsNone(self.stale_pick(desk.id), "F3: never before the desk's clock has run from its first fill (14:10Z)")
+        self.at("2026-09-24T09:30:00Z")  # 19.3 h from its first fill and Wednesday's session closed: stale, and flat
         self.assertEqual(self.stale_pick(desk.id), agent.id)
         self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "without a forward score: the trading protection")
         self.fill(agent, "2026-09-24T19:30:00Z")  # Thursday's basket, held overnight

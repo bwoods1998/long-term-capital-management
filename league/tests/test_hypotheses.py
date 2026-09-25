@@ -113,6 +113,10 @@ class FoundryCase(HouseCase):
             candidate("idle", "a mechanism that never finds a trade worth its fee", IDLE),
             candidate("unsafe", "a mechanism whose file reaches for the operating system", UNSAFE),
         ])
+        # The capacity and model routes and the capacity floor (S1 of the forward-first run, Sept 25, 2026) are off for
+        # the tests of what came before them, which state no capacity; league/tests/test_foundry_capacity.py has theirs.
+        self.house.game["hypotheses"] = {**self.house.game.get("hypotheses", {}), "capacity_share": 0, "model_share": 0,
+                                         "min_capacity_usd": 0}
         self.foundry = Foundry(self.house, self.frontier)
         self.house.hypotheses = self.foundry
         self.rules = self.house.game["economy"]
@@ -499,6 +503,14 @@ class Transfer(FoundryCase):
         return out
 
     def test_an_earning_family_goes_to_every_untried_desk_of_its_venue_and_never_where_it_has_lived(self):
+        # The family "lived" on sports and prices through members running OTHER programs under its label, which the label
+        # rule allows. Under C8 (Sept 25, 2026; `allocator.family_key` "mechanism") those members are families of their
+        # own, and a family's program on another desk trades other series: it is another mechanism there too.
+        from unittest.mock import patch
+
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         self.settings(transfer_share=1.0, fast_share=0, exploration_share=0)
         weather = self.member("mullins", "weather-favorites", WEATHER, specialty="kalshi-weather",
                               why="resting maker bids on daily weather favourites above 90 cents")
@@ -629,10 +641,12 @@ class Transfer(FoundryCase):
 
     def test_shares_adding_up_to_more_than_the_window_are_scaled_down(self):
         self.settings(transfer_share=0.6, fast_share=0.6, exploration_share=0.3)
-        self.assertEqual({k: round(v, 9) for k, v in self.foundry.shares().items()}, {"transfer": 0.4, "fast": 0.4, "exploration": 0.2})
-        self.assertEqual(load_game()["hypotheses"]["transfer_share"], 0.3)
+        self.assertEqual({k: round(v, 9) for k, v in self.foundry.shares().items()},
+                         {"capacity": 0.0, "model": 0.0, "transfer": 0.4, "fast": 0.4, "exploration": 0.2})
+        # Sept 25, 2026 (S1): the game file's calls go to capacity, model and exploration (test_foundry_capacity).
+        self.assertEqual(load_game()["hypotheses"]["transfer_share"], 0)
         self.settings(transfer_share=0.3, fast_share=0.5, exploration_share=0.2)
-        self.assertEqual(self.foundry.shares(), {"transfer": 0.3, "fast": 0.5, "exploration": 0.2})
+        self.assertEqual(self.foundry.shares(), {"capacity": 0.0, "model": 0.0, "transfer": 0.3, "fast": 0.5, "exploration": 0.2})
 
     def test_with_no_transfer_share_nothing_is_ported_and_the_routes_are_as_before(self):
         self.assertEqual(DEFAULTS["transfer_share"], 0)
@@ -640,7 +654,7 @@ class Transfer(FoundryCase):
         self.earn_on(etf, "alpaca-paper")
         # An older game file, without the dial.
         older = {k: v for k, v in self.house.game["hypotheses"].items() if k not in ("transfer_share", "_about_sept23b")}
-        self.house.game["hypotheses"] = {**older, "fast_desks": [self.DESK, "alpaca-crypto-alts"]}
+        self.house.game["hypotheses"] = {**older, "fast_desks": [self.DESK, "alpaca-crypto-alts"], "fast_share": 0.5}
         self.foundry = Foundry(self.house, self.frontier)
         self.house.hypotheses = self.foundry
         self.assertEqual(self.foundry.shares()["transfer"], 0)
@@ -761,6 +775,7 @@ class Gates(FoundryCase):
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
+        self.clock.advance(float(self.house.settings.house_job_seconds))  # the foundry steps once a minute (H5), inside its cadence
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
@@ -987,3 +1002,46 @@ class FoldsReadTheirOwnRows(FoundryCase):
         self.assertIn("a-new-family", after["families"])
         self.house.game.setdefault("hypotheses", {})["fast_lane_min_blocks"] = 1  # its settings, too
         self.assertEqual(self.foundry.desk_forward(), Foundry(self.house, self.frontier).desk_forward())
+
+
+class BesideTheTick(FoundryCase):
+    """The review of #297 (Sept 25, 2026): since H5 the foundry's step runs on the House lane, beside the tick's births,
+    the lab's thread and the research admissions, and its reads of the registry walked `registry.agents` live -- a
+    birth landing mid-walk raised "dictionary changed size during iteration" and failed the step."""
+
+    class Landing:
+        """An agent whose record is read while another thread's birth lands in the registry."""
+
+        def __init__(self, registry, desk):
+            object.__setattr__(self, "_registry", registry)
+            object.__setattr__(self, "_desk", desk)
+
+        def __getattr__(self, name):
+            from types import SimpleNamespace
+
+            self._registry.agents.setdefault("newborn", SimpleNamespace(
+                id="newborn", founder="", line=None, name="newborn", family="newborn-family", specialty=None, code="", alive=True))
+            return {"id": "landing", "founder": "card:c1", "line": None, "name": "landing", "family": "landing-family",
+                    "specialty": self._desk, "code": "", "alive": True}[name]
+
+    def test_every_read_of_the_registry_is_a_copy(self):
+        reads = {
+            "born": lambda: self.foundry.born(),
+            "_retired_niche": lambda: self.foundry._retired_niche("family:no-such-family", {}),
+            "_retired_mechanisms": lambda: self.foundry._retired_mechanisms({"family:landing-family": {}}),
+            "desk_forward": lambda: self.foundry.desk_forward(),
+            "_families": lambda: self.foundry._families(),
+        }
+        failed = {}
+        for name, read in reads.items():
+            self.house.registry.agents.pop("newborn", None)
+            self.house.registry.agents["landing"] = self.Landing(self.house.registry, self.DESK)
+            try:
+                read()
+            except RuntimeError as exc:
+                failed[name] = str(exc)
+            finally:
+                self.house.registry.agents.pop("landing", None)
+                self.house.registry.agents.pop("newborn", None)
+            self.foundry._memo.clear()
+        self.assertEqual(failed, {})

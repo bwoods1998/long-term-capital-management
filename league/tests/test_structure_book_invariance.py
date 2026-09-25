@@ -2,8 +2,11 @@
 
 Sept 25, 2026: the forward-first run lets the structure-only hunks land before its H4 on this condition. The
 same scripted scenarios run on two `Book` classes over the same `FakeBroker`: today's `league.book`, and a
-frozen copy of `league/book.py` as it stands on origin/main at 5ff775e (`fixtures/book_main_5ff775e.py`,
-loaded as `league._book_before`, so its relative imports read the same league modules). Each scenario
+frozen copy of `league/book.py` WITHOUT the structure hunks (`league._book_before`, loaded so its relative
+imports read the same league modules). The copy was origin/main at 5ff775e
+while the hunks landed before the forward-first run's H4; since H4 merged over them (Deploy A, Sept 25, 2026)
+it is H4's reviewed book.py (`fixtures/book_h4_b62b215.py`, `h4/review` at b62b215), whose own changes to
+real-book reconciliation (holds at the cent, real dust, the restart's tolerance) are H4's tests' to pin. Each scenario
 records every return value that matters (outcomes, reconciliations, check reasons, marks, frozen flags,
 counts, position keys) and every ledger row it wrote (sequence, id, kind, agent, time, payload); the two
 transcripts must be identical. Only what is random by design is left out: a row appended without an id gets
@@ -34,11 +37,11 @@ from league.ledger import Ledger
 from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
 
 D = Decimal
-FIXTURE = Path(__file__).resolve().parent / "fixtures" / "book_main_5ff775e.py"
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "book_h4_b62b215.py"
 
 
 def book_before():
-    """origin/main's book.py at 5ff775e, as the module `league._book_before` (package `league`)."""
+    """H4's reviewed book.py (b62b215), without the structure hunks, as the module `league._book_before`."""
     name = "league._book_before"
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, FIXTURE)
@@ -115,7 +118,10 @@ class Run:
         return out
 
     def check(self, label, intent):
-        self.note(label, self.book.check(intent, self.book._quote(intent.instrument), iso(self.clock)))
+        # X3 of the forward-first run (Sept 25, 2026): a refused entry's cap says after `book.FIT_MARK` the band, the cap and the
+        # room left, text the pinned copy never had; every reason, and each one's text before the mark, is compared.
+        reasons = self.book.check(intent, self.book._quote(intent.instrument), iso(self.clock))
+        self.note(label, [reason.split(book_now.FIT_MARK)[0] for reason in reasons])
 
     def quote(self, label, instrument):
         quote = self.book._quote(instrument)
@@ -123,9 +129,12 @@ class Run:
 
     def transcript(self):
         # A row appended without an id gets a random one (`le-<uuid4>`), and the hash chain -- each row's digest, and
-        # the `ledger_digest` a reconciliation records -- follows the ids: those are the only parts not compared.
+        # the `ledger_digest` a reconciliation records -- follows the ids: those are the only parts not compared. And the
+        # forward-first run's M6 (C-money, Sept 25, 2026): an Alpaca order's and fill's `liquidity_role`, a field the
+        # frozen copy predates (`Book._liquidity_role`, tested in league/tests/test_capital_follows_proof.py); every other
+        # field of those rows is still compared.
         rows = [(e.seq, "le-*" if e.id.startswith("le-") else e.id, e.kind, e.agent, e.at, e.public,
-                 {k: v for k, v in e.payload.items() if k != "ledger_digest"}) for e in self.ledger.iter()]
+                 {k: v for k, v in e.payload.items() if k not in ("ledger_digest", "liquidity_role")}) for e in self.ledger.iter()]
         accounts = {name: (a.staked, a.cash, a.realized, a.fees, sorted(a.holdings)) for name, a in self.book.accounts.items()}
         return {"log": self.log, "rows": rows, "accounts": accounts, "frozen": self.book.frozen, "marks": dict(self.book.marks)}
 

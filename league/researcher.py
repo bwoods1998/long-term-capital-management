@@ -188,6 +188,10 @@ class Researcher:
         #: (`House._edit_replay`): {"passed", "reasons", "params", "was", "code_sha256", "numbers"} or
         #: {"error"}. None: `edit_params` is not available (X1, Sept 24, 2026).
         self.edit_replay = None
+        #: (agent, playbook entry) -> whether `playbook_read` holds the entry back from this agent: the
+        #: research gate's control arm (`ResearchGate.withheld`, set by the service; review of #311, Sept 25,
+        #: 2026). None holds nothing back.
+        self.withheld = None
 
     # ------------------------------------------------------------------ prompt
     def _system(self) -> str:
@@ -238,6 +242,7 @@ class Researcher:
             + (f"YOUR JOURNAL (your and your ancestors' notes, oldest first; conclusions are unverified claims. Compare them with the current qualification_policy, runtime capabilities and peer evidence before relying on them; add with `journal_write`):\n{pages}\n\n" if pages else
                "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
+            + execution_brief(getattr(self, "ledger", None), agent, getattr(self, "clock", time.time)())
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
                "end this pass with the same rules you started it with.\n"
@@ -658,15 +663,30 @@ class Researcher:
                                                   "wrote_code": False, "error": True, "charged": False}, agent=agent.id)
             return {"error": f"the consultation failed and you were not charged: {str(reply.get('answer') or '')[:300]}",
                     "cost_usd": "0", "charged": False, "note": "ask again later; the cooldown counts this attempt"}
+        # The surcharge is capped at what the balance can bear (review of #311, Sept 25, 2026): the
+        # admission check above asks for min_credits_usd x the multiple ($0.35 x 8 = $2.80), but the cost
+        # is only known now and a charge is never refused. At T0 prices (median $0.525, p90 $0.73, max
+        # $0.92), replaying the consults since Sept 23, 8 of the 83 that clear the 8x check would have
+        # taken the balance to zero or below -- a dead agent, whose real book the House winds down. The
+        # consult's own cost is always charged, as before the multiple; the multiple never takes the
+        # balance under the 1x consult price, nor under research's floor (`House.research_due`).
+        charged, capped = cost, False
+        if cost > 0 and multiple > 1:
+            floor = max(Decimal(str(rules.get("min_credits_usd", "1.00"))), Decimal(str(self.settings.get("min_credits_usd", "0.10"))) * 2)
+            surcharge = cost * (multiple - 1)
+            room = max(ZERO, self.economy.balance(agent.id) - cost - floor)
+            capped = surcharge > room
+            charged = cost + min(surcharge, room)
         if cost > 0:
-            self.economy.charge(agent.id, cost * multiple, "merton's time", detail={"session": session}, id=f"merton:{session}")
+            self.economy.charge(agent.id, charged, "merton's time", detail={"session": session}, id=f"merton:{session}")
             out.cost_usd += cost
         code = str(reply.get("code") or "")
         self.ledger.append("agent.research", {"tool": "merton", "session": session, "at_epoch": self.clock(),
                                               "question": question[:600], "answer": str(reply.get("answer") or "")[:2000],
                                               "confidence": reply.get("confidence"), "cost_usd": format(cost, "f"),
                                               "wrote_code": bool(code.strip()),
-                                              **({"price_multiple": multiple, "charged_usd": format(cost * multiple, "f")} if multiple > 1 else {})},
+                                              **({"price_multiple": multiple, "charged_usd": format(charged, "f"),
+                                                  **({"surcharge_capped": True} if capped else {})} if multiple > 1 else {})},
                            agent=agent.id)
         if code.strip():
             try:
@@ -911,7 +931,10 @@ class Researcher:
         if name == "library_write":
             return self.commons.library_write(agent.id, str(args.get("title") or ""), str(args.get("text") or ""), list(args.get("tags") or []), niche=agent.specialty)
         if name == "playbook_read":
-            return self.commons.playbook_read(str(args.get("query") or ""))
+            withheld = self.withheld
+            if withheld is None:
+                return self.commons.playbook_read(str(args.get("query") or ""))
+            return self.commons.playbook_read(str(args.get("query") or ""), keep=lambda entry: not withheld(agent, entry))
         if name == "request_tool":
             return self.commons.request_tool(agent.id, str(args.get("name") or ""), str(args.get("description") or ""))
         if name == "classify":
@@ -978,6 +1001,51 @@ class Researcher:
                     # Where it won and lost: by series or symbol, by how long before the end it got in, and its worst trades.
                     "digest": outcome.get("digest"), "note": numbers.get("note")}
         return {"error": f"no such tool {name!r}"}
+
+
+def execution_brief(ledger: Any, agent: Agent, now: float) -> str:
+    """X1 of the forward-first run (Sept 25, 2026): the agent's own fill rate and time to fill on its venue's REAL book
+    over seven days (`league/execution.py`), and, where it is under `REQUOTE_BELOW` (25%) on at least
+    `REQUOTE_MIN_ORDERS` (5) finished orders, the ask for a requote rule. At T0 four crypto-alts probes met it
+    (haghani-56 2 of 23 filled, haghani-r42c38c 0 of 18, haghani-62 2 of 17, haghani-63 4 of 22): dip bids left
+    resting under the touch for a median 29-52 minutes and cancelled, the edge never traded. Nothing for an agent
+    with no real order in the window; a rate that cannot be read never costs the pass. `Researcher._state` passes the
+    ledger it has, or None: the cache-layout tests read `_state` on a bare namespace."""
+    from .constitution import CONSTITUTION
+    from .execution import REQUOTE_BELOW, needs_requote, real_fill_stats
+
+    if ledger is None:
+        return ""
+    try:
+        stats = real_fill_stats(ledger, agent.id, agent.venue, now)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not stats or not stats.get("orders"):
+        return ""
+
+    def minutes(value: Any) -> str:
+        return "-" if value is None else f"{float(value):g}"
+
+    finished = int(stats["filled"]) + int(stats["unfilled"])
+    rate = "no order has finished yet" if stats.get("fill_rate") is None else f"{float(stats['fill_rate']):.0%}"
+    text = (f"YOUR REAL EXECUTION (the {stats['book']} book, the last {float(stats['days']):g} days; `execution` in every "
+            f"snapshot): {stats['filled']} of {finished} finished orders filled ({rate}), {stats['resting']} still resting; "
+            f"a filled order took a median {minutes(stats.get('median_minutes_to_fill'))} minutes, an unfilled one was left "
+            f"for a median {minutes(stats.get('median_minutes_unfilled'))} before it ended.\n")
+    if needs_requote(stats):
+        if agent.venue == "kalshi":
+            taking = ("A PROBE may take the price for one position at its cap (constitution allocator.real_entry_liquidity "
+                      "probe_may_take); a bunt or a swing takes only on its family's taker proof. "
+                      if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") == "probe_may_take" else "")
+        else:
+            taking = "A marketable limit takes the price at the taker's fee (0.25% on crypto against 0.15% resting). "
+        text += (f"REQUOTE: fewer than {REQUOTE_BELOW:.0%} of your real orders fill, so most of the edge you bid for is never "
+                 "traded. Decide a requote rule this pass and write it into your strategy: after how many minutes a resting "
+                 "entry that has not filled is cancelled (your own `open_orders` carry `submitted_at`), where it is quoted "
+                 "again -- toward the touch, never past the price at which your edge after fees is gone -- how many times, "
+                 f"and when it stands aside instead. {taking}Replay the rule before you rely on it: the replay fills a "
+                 "resting limit only when a later step trades through it.\n")
+    return text + "\n"
 
 
 def _candidate_rank(candidate: Mapping[str, Any] | None) -> int:

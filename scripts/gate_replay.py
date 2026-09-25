@@ -23,8 +23,11 @@ It is an approximation, and it says where:
 - Samples are not replayed row by row: the new rule draws at most once per `sample_hours` window per
   agent, so the expected samples are 10% of the (agent, 6-hour) windows in which the agent had a skip,
   priced at the day's own sampled sessions' mean cost and candidate rate.
-- Rung 0 (whose clock the rules keep) is not visible on the ledger rows read here; at T0 three agents
-  were in the replay band.
+- Rung 0 (whose clock the rules keep, unpaused and unlocked) is not visible on the ledger rows read
+  here; at T0 three agents were in the replay band.
+- A paused agent (rule 10) runs on news of its program (`PAUSE_NEWS`) and on its own trading
+  (`PAUSE_DAILY`) once a UTC day; an active forward block can wake it where the gate of the day's
+  lock did not, and those sessions never ran, so they are not here (at most one a paused agent a day).
 - A session the new rules would add is not in `would`: the only ones are a teacher's lesson waking an
   agent the gate of the day did not match (`lessons.named_in_arm` is their upper bound) and the new
   sample draws (`samples.expected`).
@@ -45,7 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from league.research_gate import lesson_arm, lesson_terms, lesson_words, refusal_class  # noqa: E402
+from league.research_gate import PAUSE_DAILY, PAUSE_NEWS, lesson_arm, lesson_terms, lesson_words, refusal_class  # noqa: E402
 from league.ledger import Entry  # noqa: E402
 
 REAL = ("kalshi", "alpaca")
@@ -158,6 +161,7 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
             continue
         outcome = _outcome(p)
         run = seq < start
+        paused, kept = False, []
         if seq >= start:
             g = s["gate"]
             real = s["book"] in REAL
@@ -182,8 +186,8 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
                     continue
                 if trigger == "lesson" and (s["lessons"] == 0 or (parity and lesson_arm(agent) != "lesson")):
                     continue
-                if paused and trigger != "book.fill":
-                    continue
+                if paused and trigger not in PAUSE_NEWS and not (trigger in PAUSE_DAILY and s.get("trade_day") != at[:10]):
+                    continue  # rule 10: news of its program, or its own trading once a UTC day
                 if locked and trigger not in ("book.fill", "book.settle", "book.refused"):
                     continue
                 kept.append(trigger)
@@ -199,7 +203,7 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
                 reason = "clock:real"
             elif not (paused or locked) and idle == "clock" and g is not None and g.get("record") == "idle" and due:
                 reason = "clock:idle"
-            elif not (paused or locked) and idle == "barren" and s["barren_seen"] is not None and \
+            elif not locked and idle == "barren" and s["barren_seen"] is not None and \
                     (s["barren"] - s["barren_seen"] if s["barren"] >= s["barren_seen"] else s["barren"]) >= barren_wakes:
                 reason = "trigger:barren"
             elif not paused and t - base >= (real_heartbeat if real else practice_heartbeat) * 3600:
@@ -236,6 +240,8 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
             s["last_run"] = t
             s["barren_seen"] = s["barren"]
             s["lessons"] = 0
+            if paused and any(k in PAUSE_DAILY for k in kept):
+                s["trade_day"] = at[:10]
     expected = len(windows) * sample_percent / 100
     per_sample_usd = sampled["usd_micro"] / 1e6 / sampled["sessions"] if sampled["sessions"] else 0.0
     per_sample_candidates = sampled["candidates"] / sampled["sessions"] if sampled["sessions"] else 0.0

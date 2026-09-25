@@ -25,7 +25,7 @@ shown only what its own NEEDS name, twelve at most, exactly as on any desk; a st
 nothing it may trade is shown a capped discovery list (on Kalshi the daily survey's busiest series,
 those no desk covers first), never the venue. `match` seats a program on a specific desk whenever one
 desk holds most of what it names, and on the open desk only when it spans desks or names markets no
-desk lists (`spanning`). Its seats are few (8) and crowding is the allocator's to price.
+desk lists (`spanning`). Its seats are few (8 on Kalshi; 12 on Alpaca from Sept 25, 2026) and crowding is the allocator's to price.
 """
 
 from __future__ import annotations

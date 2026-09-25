@@ -25,7 +25,7 @@ from league.ledger import Ledger, now_iso
 from league.merton import (CONTRACT, Merton, ask_with_contract, asked_sections, contract_for, contract_sections,
                            contract_topics)
 from league.tests.fakes import Clock
-from league.tests.test_jev_sensor import GateCase
+from league.tests.test_jev_sensor import GateCase, summary
 from league.tests.test_research_outcomes import RealBook
 from league.worklist import Worklist
 from league.yield_ledger import (THROTTLE_WHAT, UnitEconomics, YieldLedger, lane_prices, plan_throttle, throttle_state,
@@ -307,6 +307,24 @@ class PracticeTriggerSkip(F2Case):
         self.clock.advance(self.interval)
         self.assertTrue(self.house.research_due(real), "a real fill is what real research is for")
         self.assertEqual(self.gates(real.id)[-1]["trigger"], "book.fill")
+
+    def test_a_paused_agent_s_fill_does_not_spend_its_trade_of_the_day(self):
+        """The review of #311 wakes a paused practice agent on its own trading once a UTC day; rule 13 takes
+        its fills out first, so what remains of that is its active forward block (the merge into
+        c/integration, Sept 25, 2026)."""
+        agent = self.seen(self.f2(practice_skip_triggers=["book.fill", "book.settle"]))
+        for _ in range(3):
+            summary(self.house.ledger, agent.id)
+        self.fill(agent)
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent), "paused, and its fill is not news")
+        self.assertEqual(self.gates()[-1]["reason"], "practice_pause:3")
+        self.assertIsNone(self.house.jev_floor.gate.state.agent(agent.id).get("pause_trade_day"), "the fill spent nothing")
+        self.house.ledger.append("eval.block", {"agent": agent.id, "log_growth": -0.01, "active": True, "book": "alpaca-paper", "block": "b"},
+                                 agent=agent.id)
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent), "its active block is its trade of the day")
+        self.assertEqual(self.gates()[-1]["triggers"], ["eval.block:1"])
 
     def test_the_dial_empty_is_f2(self):
         agent = self.seen(self.f2(practice_skip_triggers=[]))

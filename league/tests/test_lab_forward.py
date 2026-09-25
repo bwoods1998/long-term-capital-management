@@ -59,6 +59,7 @@ class Batches(LabCase):
 
     def test_llm_children_are_evaluated_within_two_batches_behind_forty_mutants_and_a_queue_of_seeds(self):
         self.house.game["lab"]["max_tapes_per_step"] = 1
+        self.house.game["lab"]["reserved_share"] = 0.5  # E1's turns (F1's game file keeps a third: test_lab_forward_first)
         elite = self.queue(KNOB)
         self.lab.evaluate_batch()  # the elite: its tape built and kept by the lab
         for n in range(40):  # its parameter mutants, oldest, all on its tape
@@ -79,7 +80,7 @@ class Batches(LabCase):
         self.assertEqual([self.candidate(c)["status"] for c in children], ["evaluated"] * 3, sizes)
         self.assertGreaterEqual(max(sizes), 32)  # the mutants ran with the children on the elite's tape
         # The seeds still have their turn, once the mutants left over have had the largest group's (since
-        # Sept 24, 2026 one batch in four is the queue's at the default share, E1: `batch_turn`).
+        # Sept 24, 2026 one batch in four is the queue's at the half, E1: `batch_turn`).
         self.lab._tapes_built = 0
         self.assertEqual(self.lab.evaluate_batch()["candidates"], 1)
 
@@ -142,6 +143,7 @@ class Rationing(LabCase):
 
         with patch.object(self.house, "tape_for", side_effect=development):
             self.lab.evaluate_batch()
+        self.forward_wins(ident)  # F1: a winning forward window of its own before the House's replay
         row = self.candidate(ident)
         self.assertEqual(json.loads(row["summary"])["tape_source"], "history-dev")
         lineage = row["lineage"]
@@ -176,7 +178,7 @@ class ForwardWindows(ForwardCase):
         self.assertTrue(all(_ts(s["t"]) > cut for s in tape["steps"]))
         self.assertTrue(tape["warmup_bars"]["BTC/USD"])  # the bars before the cut are history, not steps
         self.assertTrue(all(_ts(b["t"]) <= cut for b in tape["warmup_bars"]["BTC/USD"]))
-        self.assertEqual(tape["forward_cut"], "2026-09-10T01:00:00Z")
+        self.assertEqual(tape["forward_cut"], "2026-09-11T12:00:00Z")  # `test_lab.LAB_CLOCK_OFFSET` into the fake tape
         record = self.lab.forward_record(ident)
         self.assertEqual(record["window_start"], cut)
         self.assertGreaterEqual(record["window_start"], frozen)

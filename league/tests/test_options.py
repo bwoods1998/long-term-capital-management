@@ -329,6 +329,80 @@ class InTheHouse(HouseCase):
         self.assertIn("expiry rule", sold[0]["reason"])
         self.assertTrue(book.reconcile().ok)
 
+    def expiring_holding(self):
+        """An options agent holding one call on its last afternoon, 15:00 in New York (as the test above)."""
+        from league.book import Intent
+
+        agent = self.options_agent()
+        self.house.seat(agent)
+        self.house._state["next_wake"][agent.id] = self.clock() + 10**9
+        book = self.house.books["alpaca-paper"]
+        expiring = call(occ="F260911C00013000")
+        self.broker.set_quote(expiring, "0.40", "0.44")
+        self.clock.now = 1789048800.0  # Thursday Sept 10, 14:00 UTC
+        self.broker.clock_iso = now_iso(self.clock)
+        bought = book.submit([Intent.new(agent=agent.id, instrument=expiring, side="buy", quantity="1", order_type="limit", limit_price="0.44", reason="t", created_at=now_iso(self.clock), nonce="b")])[0]
+        self.assertEqual(bought.status, "filled", bought.detail)
+        self.clock.now += 86400 + 5 * 3600  # Friday 19:00 UTC: 15:00 in New York
+        self.broker.clock_iso = now_iso(self.clock)
+        return agent, book, expiring
+
+    def seen_bid(self, expiring, bid):
+        """The bid the House reads; the fake venue still crosses only at its own 0.40, so a sell above it rests."""
+        from ltcm.broker import Quote
+
+        real = self.broker.quote
+        return mock.patch.object(self.broker, "quote", side_effect=lambda inst: Quote(inst, Decimal(bid), Decimal("0.46"), None, self.broker.clock_iso,
+                                                                                     "fake", delayed=False) if inst.key == expiring.key else real(inst))
+
+    def sells(self, agent):
+        return [e.payload for e in self.house.ledger.iter(kinds="agent.intent", agent=agent.id) if e.payload["side"] == "sell"]
+
+    def test_the_houses_resting_expiry_sell_stands_while_the_bid_is_where_it_was(self):
+        """The review of #297 (Sept 25, 2026): each pass cancelled the House's own resting sell and sent it again at the same
+        bid under the same ten-minute nonce -- the same intent id, refused as a duplicate -- and the option had no exit."""
+        agent, book, expiring = self.expiring_holding()
+        with self.seen_bid(expiring, "0.45"):
+            self.house._enforce_horizon()
+            (resting,) = book.open_orders(agent.id)
+            self.assertEqual(resting.limit_price, Decimal("0.45"))
+            self.house._enforce_horizon()  # the next tick: the same bid
+        self.assertEqual(self.broker.cancelled, [])
+        self.assertEqual([w.order_id for w in book.open_orders(agent.id)], [resting.order_id])
+        self.assertEqual(len(self.sells(agent)), 1)
+        self.assertIn(expiring.key, book.account(agent.id).holdings)
+
+    def test_a_sell_above_a_fallen_bid_is_sent_again_only_after_the_venue_confirms_its_cancel(self):
+        agent, book, expiring = self.expiring_holding()
+        with self.seen_bid(expiring, "0.45"):
+            self.house._enforce_horizon()
+        (resting,) = book.open_orders(agent.id)
+        real_cancel = self.broker.cancel
+        with mock.patch.object(self.broker, "cancel", side_effect=lambda order_id: self.broker.get_order(order_id)):
+            self.house._enforce_horizon()  # the bid fell to 0.40; the venue has not confirmed the cancel
+        self.assertEqual([w.order_id for w in book.open_orders(agent.id)], [resting.order_id])
+        self.assertEqual(len(self.sells(agent)), 1)  # never a second sell while the first may still fill
+        self.broker.cancel = real_cancel
+        self.house._enforce_horizon()  # confirmed now: the sell goes again, at the bid
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertEqual([s["limit_price"] for s in self.sells(agent)], ["0.45", "0.40"])
+        self.assertTrue(book.reconcile().ok)
+
+    def test_a_sell_sent_again_at_an_earlier_price_is_not_that_orders_duplicate(self):
+        agent, book, expiring = self.expiring_holding()
+        with self.seen_bid(expiring, "0.45"):
+            self.house._enforce_horizon()
+        with self.seen_bid(expiring, "0.43"):
+            self.house._enforce_horizon()  # 0.45 cancelled, 0.43 resting
+        self.assertEqual([w.limit_price for w in book.open_orders(agent.id)], [Decimal("0.43")])
+        (second,) = book.open_orders(agent.id)
+        self.broker.orders[second.order_id].status = "cancelled"  # the venue cancels it
+        book.poll()
+        with self.seen_bid(expiring, "0.45"):
+            self.house._enforce_horizon()  # 0.45 again, inside the same ten minutes
+        self.assertEqual([w.limit_price for w in book.open_orders(agent.id)], [Decimal("0.45")])
+        self.assertEqual(len(self.sells(agent)), 3)
+
     def test_a_candidate_in_a_specialty_without_replay_is_smoke_run_not_replayed(self):
         agent = self.options_agent()
         self.house.seat(agent)

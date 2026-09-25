@@ -687,9 +687,14 @@ class Merton:
         consult after which the agent retained no candidate and changed no strategy within
         `consult_sessions` (2) sessions doubles its next consult's price, again for each in a row, up to
         `consult_max_multiple` (8); a productive one resets it. A consult whose sessions have not yet
-        run is not judged and moves nothing."""
+        run is not judged and moves nothing. Only the consults of the last `days` (7) count (review of
+        #311): an agent whose balance fell under the multiplied floor could never buy the productive
+        consult that resets it, and stayed at 8x until its consults left the newest 3,000 rows."""
         k = 0
-        for _, verdict in reversed(consult_verdicts(self.ledger, agent_id, sessions=int(self.lift["consult_sessions"]))):
+        start = self.clock() - float(self.lift["days"]) * 86400
+        for consult, verdict in reversed(consult_verdicts(self.ledger, agent_id, sessions=int(self.lift["consult_sessions"]))):
+            if _epoch(consult.at) < start:
+                break
             if verdict is None:
                 continue
             if verdict["productive"]:
@@ -755,7 +760,9 @@ class Merton:
         if self._paused is None:
             self._paused = {}
             for entry in self.ledger.read(kinds="ops.budget", limit=2000, newest=True):
-                if entry.payload.get("what") == "merton pause" and entry.payload.get("role") in ROLES:
+                # Every lane the pause may hold, the consultant too (review of #311): seeded from ROLES alone,
+                # each restart recorded the consultant's pause again.
+                if entry.payload.get("what") == "merton pause" and entry.payload.get("role") in PAUSABLE:
                     self._paused[entry.payload["role"]] = bool(entry.payload.get("paused"))
         for role in sorted(self.paused_until_profit):
             if self._paused.get(role, False) == paused:

@@ -20,6 +20,13 @@ from league.tests.test_hypotheses import PASSER
 
 D = Decimal
 DESK = "alpaca-crypto-majors"
+#: Where a lab test's clock starts inside the fake House tape (`test_house.FakeAlpacaData`: 2026-09-10T00:00Z to
+#: 2026-09-12T11:55Z): 35 hours in, so a candidate frozen now has a day and a half of tape before its freeze for the House's
+#: replay and a day after it for its forward window, as on the floor, where the House's tape is the last week and a
+#: graduate's forward window its last hours. The House replays a lab graduate only up to the hour its code was frozen (the
+#: F-lab review's open finding 2, Sept 25, 2026: `House._lab_freeze_cut`); frozen at the tape's first half hour, as these
+#: tests' clock once started, a graduate had one hour of tape to pass the replay gate on.
+LAB_CLOCK_OFFSET = 35 * 3600
 
 #: The sawtooth passer with a knob: it buys the low leg with `notional` dollars.
 KNOB = PASSER.replace("PARAMS = {}", 'PARAMS = {"notional": 50.0}').replace('"notional_usd": 50', '"notional_usd": ctx["params"]["notional"]')
@@ -68,6 +75,7 @@ class FakeModel:
 class LabCase(HouseCase):
     def setUp(self):
         super().setUp()
+        self.clock.advance(LAB_CLOCK_OFFSET)
         self.house.pacer.may_spend = lambda kind: True  # the test clock is outside the expedition's calendar
         self.house.game["lab"] = {**(self.house.game.get("lab") or {}), "enabled": True, "step_seconds": 600,
                                   "stats_every_minutes": 0, "leap_every": 1000}
@@ -84,6 +92,20 @@ class LabCase(HouseCase):
 
     def candidate(self, ident):
         return self.lab._q("SELECT * FROM candidates WHERE id=?", (ident,))[0]
+
+    def forward_wins(self, *idents, mean=0.002, active=3):
+        """A winning forward window (F1, Sept 25, 2026: what every graduate needs of its own) for `idents`, or for every
+        gate-passing program that has no ranked window yet: the tests of what happens after it."""
+        if not idents:
+            ranked = self.lab.ranked_windows()
+            idents = tuple(r["id"] for r in self.lab._q("SELECT id FROM candidates WHERE gate=1 AND status='evaluated'") if r["id"] not in ranked)
+        for ident in idents:
+            # Scored a second ago, so a test's own window written now is the latest.
+            self.lab._x("INSERT OR REPLACE INTO forward(candidate, at, window_start, window_end, tape_id, ok, blocks, active_blocks, log_growth,"
+                        " mean_log_growth, trades, error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (ident, self.clock() - 1, self.clock() - 3600, self.clock() - 1, "fwd:test", 1, 6, active, mean * 6, mean, 4, None))
+        self.lab._weights = None
+        return idents
 
 
 class Helpers(unittest.TestCase):
@@ -336,8 +358,11 @@ class Graduation(LabCase):
         self.assertTrue(self.candidate(seed)["gate"] and self.candidate(child)["gate"])
 
     def evolve(self, *codes):
+        """Programs written, evaluated, and each with a winning forward window of its own: since F1 (Sept 25, 2026) what a
+        candidate needs before the House's replay (`test_lab_forward_first`)."""
         ids = [self.queue(code, origin="luna") for code in codes]
         self.lab.evaluate_batch()
+        self.forward_wins(*ids)
         return ids
 
     def test_seeds_to_mutations_to_the_archive_to_a_graduate_born_on_paper(self):
@@ -352,6 +377,16 @@ class Graduation(LabCase):
         self.assertGreaterEqual(out["archived"], 1)
         self.assertGreaterEqual(out["calls"], 1)  # Luna was asked once the seeds were in the archive
         self.assertTrue(self.luna.asked)
+        # F1 (Sept 25, 2026): nobody graduates on the search tape alone. The step's graduation pass asked for the
+        # rewrite's forward window, and the step's forward run scored it on the data after its code was frozen ...
+        self.assertEqual([a for a in self.house.registry.living() if str(a.founder or "").startswith("lab:")], [])
+        rewrite = self.lab._q("SELECT id FROM candidates WHERE origin='luna'")[0]["id"]
+        self.assertEqual(self.lab.forward_wanted()[0], rewrite)
+        self.assertGreater(self.lab.forward_score(rewrite), 0)
+        # ... so the next step graduates it.
+        self.clock.advance(60)
+        self.lab.step()
+        self.house.wait()
         born = [a for a in self.house.registry.living() if str(a.founder or "").startswith("lab:")]
         self.assertEqual(len(born), 1)
         child = born[0]
@@ -456,6 +491,7 @@ class Graduation(LabCase):
         self.assertEqual(len(self.house.evaluator.family_trials(agent.family, self.house.registry.lineage(agent.id))), 20)
         out = self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant I already replayed"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         grads = self.lab.graduate()
         self.assertEqual(len(grads), 1)
         line = self.lab._q("SELECT line FROM graduations WHERE candidate=?", (out["queued"][0],))[0]["line"]
@@ -481,6 +517,7 @@ class Graduation(LabCase):
                                                         "window": ["a", "b"]}, agent=agent.id, id=f"holdout:v{n}:opened")
         self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay:
             out = self.lab.graduate()
         replay.assert_not_called()  # no trial spent on a program that could never reach the holdout
@@ -521,6 +558,7 @@ class Graduation(LabCase):
         self.opened(agent.id, budget - 2)  # the line's own forks have spent one of three
         self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         calls = []
         with patch.object(self.lab, "_deep", return_value=True), \
                 patch.object(self.house, "_candidate_replay", return_value=self.passing_replay()) as replay, \
@@ -542,6 +580,7 @@ class Graduation(LabCase):
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
         self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_candidate_replay") as replay, \
                 patch.object(self.house, "_holdout") as holdout:
             out = self.lab.graduate()
@@ -556,6 +595,7 @@ class Graduation(LabCase):
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 2)
         self.lab.submit(agent, [{"code": REWRITTEN, "idea": "a variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
 
         def replay_while_the_house_forks(*args, **kwargs):
             self.opened(agent.id, 1, tag="fork")
@@ -575,6 +615,7 @@ class Graduation(LabCase):
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
         self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}, {"code": SPARSE, "idea": "a sparser variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         # A line whose forks are never replayed on the history store needs no reserve ...
         calls = []
         with patch.object(self.lab, "_deep", return_value=True), patch.object(self.house, "_seal_applies", return_value=False), \
@@ -597,6 +638,7 @@ class Graduation(LabCase):
         self.opened(agent.id, self.house.settings.holdout_lineage_budget - 1)
         self.lab.submit(agent, [{"code": SMALLER, "idea": "a variant"}])
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1: a winning forward window of its own
         self.house.kill(agent, "credits", "a test death")
         calls = []
         with patch.object(self.lab, "_deep", return_value=True), \
@@ -931,6 +973,12 @@ class BelowTheAllTier(LabCase):
             self.house.kill(agent, "credits", "a test death: its program stays in the lab")
             out = self.lab.step()
             self.house.wait()
+            # F1 (Sept 25, 2026): a candidate graduates on a winning forward window of its own; the next step does.
+            self.assertEqual([a for a in self.house.registry.living() if str(a.founder or "").startswith("lab:")], [])
+            self.forward_wins()
+            self.clock.advance(60)
+            self.lab.step()
+            self.house.wait()
         self.assertGreaterEqual(out["evaluated"], 2)
         self.assertGreaterEqual(out["archived"], 1)
         self.assertEqual(out["calls"], 0)
@@ -1012,6 +1060,7 @@ class Invariants(LabCase):
             return [a for a in self.alerts("warning") if "for a seat" in a]
         ident = self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins(ident)
         self.niche.max_members = 1
         self.seated("resident", IDLE)
         with patch.object(self.house, "_weakest", return_value=None), patch.object(self.lab, "step"):
