@@ -158,6 +158,31 @@ class Harness(unittest.TestCase):
         self.assertEqual(close["held_price"], 0.48)  # at the bid of a newer snapshot, never the 0.25 asked
         self.assertEqual(now["checks"]["fills_failing_audit"], 0)
 
+    def test_the_houses_reach_and_book_rules_of_deploy_g_apply(self):
+        # Deploy G (Sept 25, 2026): the harness borrows G's reach rule (an open with a leg outside the 160 contracts nearest
+        # the money in the chain the wake read is refused, as live and the replay refuse it) and its practice-account switch,
+        # off as G ships it (the wake's book is options-shadow, nothing moving).
+        far = "SPY260925C00900000"  # never in the chain: outside a fifth of the underlying's price
+        rules = []
+
+        def probe(ctx):
+            rules.append(dict(ctx["structure_rules"]))
+            if (ctx.get("memory") or {}).get("sent"):
+                return {"intents": [], "cancels": [], "memory": ctx["memory"]}
+            return {"intents": [{"structure": "debit_vertical", "action": "open", "quantity": 1, "type": "limit", "limit_price": 0.60,
+                                 "legs": [{"occ": LOW, "role": "long"}, {"occ": far, "role": "short"}], "reason": "probe"}],
+                    "cancels": [], "memory": {"sent": 1}}
+
+        self.write([line(f"2026-09-25T15:0{m}:00Z", [row(LOW, 1.00, 1.05, f"2026-09-25T15:0{m}:00Z"), row(HIGH, 0.50, 0.52, f"2026-09-25T15:0{m}:00Z")])
+                    for m in range(3)])
+        result = self.run_probe(probe)
+        [founder] = result["founders"]
+        self.assertEqual(founder["opens"], 0)
+        self.assertEqual(len(founder["refusals"]), 1, founder["refusals"])
+        self.assertIn("outside the chain's reach", next(iter(founder["refusals"])))
+        self.assertEqual(rules[0]["book"], "options-shadow")
+        self.assertNotIn("moving_to", rules[0])
+
     def test_nothing_starts_on_a_snapshot_without_sizes(self):
         calls = []
 
