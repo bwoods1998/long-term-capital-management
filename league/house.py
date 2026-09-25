@@ -3634,8 +3634,13 @@ class House:
         strategies (and SPY, QQQ, IWM) at 1Day; then their feature rows. A symbol the store does
         not yet cover over the replay window is backfilled across it first; the chunk journal
         makes that a one-off (six underlyings over three and a half months took about ten
-        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay."""
-        from .options_history import adapter_from, refresh
+        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay.
+
+        SPY, QQQ and IWM are traded by the options desk with EVERY expiry (G-LOOP, Sept 25, 2026:
+        `options_history.DAILY_EXPIRIES`, a weekday expiry read from `DAILY_MAX_DAYS` days before it): one
+        the store holds only weekly is backfilled across the window once, its Fridays' chunks already done
+        (never fetched again), and its weekly coverage stays its replay's until then."""
+        from .options_history import DAILY_EXPIRIES, DAILY_MAX_DAYS, adapter_from, refresh
         options = {n.id for n in self.niches.values() if n.asset_class == "option"}
         replay = sorted({str(s).upper() for a in self.registry.living() if a.specialty in options for s in (a.needs.get("symbols") or [])[:8]})
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
@@ -3647,9 +3652,13 @@ class House:
         done: dict[str, Any] = {"features": {}, "coverage": []}
         for group, timeframes, band in ((replay, ("1Day", "15Min"), 0.2), (wanted, ("1Day",), 0.10)):
             covered = set(self.options_history.covers(group, timeframes[-1], start, end))
+            daily = {"all_expiries": DAILY_EXPIRIES, "daily_max_days": DAILY_MAX_DAYS} if group is replay else {}
+            every = [s for s in group if s in DAILY_EXPIRIES] if daily else []
+            if every:
+                covered -= set(every) - set(self.options_history.covers(every, timeframes[-1], start, end, every_expiry=True))
             for days, symbols in ((10, [s for s in group if s in covered]), (span, [s for s in group if s not in covered])):
                 if symbols:
-                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45)
+                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45, **daily)
                     done["features"].update(ran["features"])
                     done["coverage"] += ran["coverage"]
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
