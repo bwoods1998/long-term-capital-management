@@ -324,6 +324,95 @@ class AVendorsOutageNeverRollsBackARelease(unittest.TestCase):
         self.assertEqual(world.releases.current(), "rel-0001")
 
 
+def raised_from(make, cause):
+    """`make()` raised from `cause`, the way the House's clients wrap a failure (`raise X from exc`)."""
+    try:
+        try:
+            raise cause
+        except BaseException as exc:  # noqa: BLE001
+            raise make() from exc
+    except BaseException as exc:  # noqa: BLE001
+        return exc
+
+
+class TheTradingPathStillRollsBack(unittest.TestCase):
+    """Review of H2 (Sept 25, 2026): a release can make a service fail on the trading path -- more wake workers than
+    Sail's API allows answer 429, a shorter order-path timeout times out -- and a run of those failures is the only
+    thing the watch sees of a release that stops every agent's trading and exits (health.json, the ledger's head and
+    the living count go on). So a wake's box run, a wake that raises and a venue's poll stay unmarked, and roll back."""
+
+    def test_a_release_whose_every_box_run_sail_refuses_with_429_is_rolled_back(self):
+        from league.sandbox import SandboxError
+        from ltcm.sailbox import SailboxError
+
+        world = AHouseCase(self)
+        agent = world.case.seated()
+        refused = []
+
+        def decide(agent_id, *_args, **_kw):  # what `SailSandbox.decide` raises when Sail answers 429
+            refused.append(agent_id)
+            raise raised_from(lambda: SandboxError(f"{agent_id}: SailboxError: sailbox api 429: too many requests"),
+                              SailboxError("sailbox api 429: too many requests", status=429))
+
+        def during(n):
+            if n == 0:
+                world.house.sandbox.decide = decide
+                for _ in range(10):  # Sept 25, 2026: about 5.5 wakes a minute, so ten inside two minutes
+                    world.house.wake(agent)
+
+        result = world.deploy(during)
+        self.assertGreaterEqual(len(refused), 10)
+        escalated = [e.payload for e in world.house.ledger.read(kinds="ops.alert", limit=500) if "a warning repeated" in str(e.payload.get("text"))]
+        self.assertTrue(escalated and "its box did not run" in escalated[0]["text"], escalated)
+        self.assertNotIn("environment", escalated[0])
+        self.assertEqual(result["verdict"], "rolled_back", result)
+        self.assertIn("a warning repeated 10 times in 30 minutes", result["reasons"][0])
+        self.assertEqual(world.releases.current(), "rel-0001")
+
+    def test_a_wake_that_times_out_on_the_gateway_rolls_back_in_the_watch_and_the_canary(self):
+        from unittest import mock
+
+        from league.watchdog import read_health
+        from ltcm.data import TransportError
+
+        world = AHouseCase(self)
+        agent = world.case.seated()
+        seen = {}
+
+        def times_out(_agent):  # Sept 23, 2026, 07:35:14Z: haghani-52's wake, on the gateway's read timeout
+            raise raised_from(lambda: TransportError("GET https://ltcm-gateway/v1/alpaca-paper/v2/orders/x failed: The read operation "
+                                                     "timed out"), TimeoutError("The read operation timed out"))
+
+        def during(n):
+            if n == 0:
+                seen["since"] = world.house.ledger.head()[0]
+                with mock.patch.object(world.house, "wake", side_effect=times_out):
+                    world.house._wake_safely(agent)
+
+        result = world.deploy(during)
+        failed = next(e.payload for e in world.house.ledger.read(kinds="ops.alert", limit=500) if "its wake failed" in str(e.payload.get("text")))
+        self.assertEqual(failed["level"], "error")
+        self.assertNotIn("environment", failed)
+        self.assertEqual(result["verdict"], "rolled_back", result)
+        self.assertIn("its wake failed (TransportError", result["reasons"][0])
+        canary = read_health(world.house.root, now=world.clock(), since_seq=seen["since"], max_age_seconds=10 ** 9)
+        self.assertFalse(canary.ok, "a canary refuses it too")
+
+    def test_a_venue_poll_that_times_out_is_unmarked(self):
+        from unittest import mock
+
+        from ltcm.data import TransportError
+
+        world = AHouseCase(self)
+        timeout = raised_from(lambda: TransportError("GET https://ltcm-gateway/v1/alpaca-paper/v2/orders failed: timed out"),
+                              TimeoutError("timed out"))
+        with mock.patch.object(world.house.books["alpaca-paper"], "poll", side_effect=timeout):
+            world.house.tick()
+        polled = [e.payload for e in world.house.ledger.read(kinds="ops.alert", limit=500) if "could not poll or settle" in str(e.payload.get("text"))]
+        self.assertEqual(len(polled), 1, polled)
+        self.assertNotIn("environment", polled[0])
+
+
 class TheShutdownNeverWaitsOnSail(unittest.TestCase):
     """Graceful shutdown waits at most `House.SHUTDOWN_WAIT_SECONDS` (5 s) for background work in flight, and a
     backup the shutdown cut off writes nothing: no row, and no error alert."""

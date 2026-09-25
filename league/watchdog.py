@@ -110,6 +110,18 @@ def epoch(value: Any) -> float | None:
 #: (73 failed backups, each an error alert), and the watch rolled back all six releases promoted in
 #: those hours on them -- the updater's at 22:21, 23:00, 23:39, 00:38 and 01:14Z and the owner's at
 #: 00:02Z, that one on the OLD House's backup, in flight at the promotion and failed 73 s later.
+#:
+#: Never on the trading path: an agent's wake (its market data and box run in `House.wake`, and what
+#: `House._wake_safely` catches) and a venue's poll or settlement stay unmarked, whoever failed. A release can make a service fail there
+#: (more wake workers than Sail's API allows answer 429; a shorter order-path timeout times out), and
+#: a run of those failures -- a warning that repeats into an error, or a wake that raises -- is the
+#: only thing in the watch that sees a release stop every agent's trading and exits; health.json, the
+#: ledger's head and the living count go on as before (review of H2, Sept 25, 2026). A rollback is the
+#: cure there, and it is cheap: from 21:13Z Sept 19 to 04:15Z Sept 25 the floor wrote 5 wake errors of
+#: a gateway timeout (Sept 23 07:35-07:52Z), 7 box runs Sail did not answer and 16 failed venue polls,
+#: and no run of them escalated. Mark only what a rollback cannot mend and no trade waits on: the
+#: backup, the site publish, the updater's GitHub, feeds and recorded data, replays, research, forks,
+#: retirements, Sail's runway and the gateway's meters.
 ENVIRONMENT = "environment"
 
 #: HTTP statuses that are the service's failure, not the request's: every 5xx, and 408, 425 and 429
@@ -147,7 +159,11 @@ def service_failed(exc: BaseException | None) -> bool:
     file). A wrapper that is neither -- `SailboxError("sailbox transport failed: ...")`, `SandboxError`,
     `TransportError`, urllib's `URLError` -- is judged by what it wraps (`reason`, `__cause__`, else
     `__context__`: raised `from` the failure or `from None` inside its handler), so a Sail 503 inside a
-    `SandboxError` is the environment's and a TypeError inside one is the House's."""
+    `SandboxError` is the environment's and a TypeError inside one is the House's.
+
+    A bare `TimeoutError` is the builtin one that `concurrent.futures` and `asyncio` raise too (3.11
+    on): this cannot tell a pool's own timeout from a socket's, one more reason nothing on the trading
+    path is marked (`ENVIRONMENT`)."""
     import http.client
     import socket
     import urllib.error

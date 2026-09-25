@@ -121,14 +121,21 @@ releases promoted in those hours were rolled back on one (the updater's at 22:21
 failed 73 s later). Now:
 
 - An error alert the House raised because a call to a service outside its process failed on the
-  service's side carries `environment: "<service>"` in its payload: `sail` (the backup, a box that
-  did not run, a replay box, a fork or retire, Sail's runway), `site` (the publish), `gateway` (a
-  venue poll, a wake that raised, the frontier month), `data` (underlier bars), or a background
-  job's name (`update` for GitHub, `feeds`, `research`, ...). Only the service's failure is marked
+  service's side carries `environment: "<service>"` in its payload: `sail` (the backup, a replay
+  box, a fork or retire, Sail's runway), `site` (the publish), `gateway` (the frontier month, the
+  profit-indexed raise), `data` (underlier bars), or a background job's name (`update` for GitHub,
+  `feeds`, `research`, ...). Only the service's failure is marked
   (`league.watchdog.service_failed`): an HTTP 5xx, 408, 425 or 429, a timeout, a refused, reset or
   unreachable connection, a name that did not resolve. A 4xx (a payload the House built, its
   credential, a box it named) and every exception of the House's own (TypeError, KeyError,
   ValueError, a local file or database error), even one raised while handling a 503, is not.
+- Nothing on the trading path is ever marked, whoever failed: an agent's wake ("its wake failed",
+  "its box did not run", "no market data this wake") and a venue's poll ("could not poll or
+  settle"). A release can make a service fail there (more wake workers than Sail's API allows answer
+  429; a shorter order-path timeout times out), and those alerts are the only thing the watch sees
+  of a release that stops every agent's trading and exits. So a gateway timeout in a wake still
+  rolls a release back, as before H2 (5 wake errors, 7 box runs Sail did not answer and 16 failed
+  venue polls from Sept 19 to 25, and no run of them escalated).
 - The watch and the canary count marked errors in the reading's detail and never make them a
   reason: `detail.environment_alerts` (how many since the reading before the promotion) and
   `detail.environment_first` (`{seq, service, text}` of the first). A tick that raises ("tick
