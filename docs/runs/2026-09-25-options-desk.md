@@ -139,7 +139,7 @@ run's `config.json` change is its own new `options_structures` key).
   the gateway's practice multi-leg route, the gateway first) between 10:00Z and 12:25Z Sept 25, never
   within 30 minutes of the forward-first run's Deploy A; its exact start and end are written here.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
-  otherwise Saturday after Deploy B and Deploy G. State: pending V. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
+  otherwise Saturday after Deploy B and Deploy G. State (10:33Z): **Saturday** (the outage below delayed V). Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
@@ -180,6 +180,18 @@ with the gateway's practice route in 10:00-12:25Z agreed; they will not deploy 0
 `PAPER_BOOK` mapping for `options-shadow` after their Wave 1. Their Deploy B moved to a quiet window after
 the Friday-night MLB slate (about 05:00-15:00Z Saturday Sept 26), so this run's Deploy G shares that window,
 one deploy at a time, its start written here first.
+
+## The outage (Sept 25, 07:23-10:30Z)
+
+At about 07:23Z the account's usage limit stopped every agent of this session (the builders of S4a, S4b
+and P2 and both reviews of the shadow book and the House hooks) until it reset at 10:30Z; the other runs
+appear to have stopped too (the forward-first record's last entry is 07:23Z; its Deploy A has not run).
+The box's updater shipped Merton's merges (#314-#316) as `main-47c52e860764`, promoted 10:10:36Z; no book
+frozen at 10:28Z. At 10:33Z: the founders' replays and both reviews resumed with an 11:15-11:20Z deadline;
+Track P (the practice account's structure book) moves to after 20:05Z, the owner's fallback; the forward-
+first run is asked for two exceptions so Deploy V can carry the founders' seat call line and the
+structure-only `book.py` hunks before its Deploy A (answer asked by 11:30Z); the Jev run's D-J1 slot moves
+to Saturday. Deploy V is re-planned: integration 11:30-11:45Z, CI, the gateway, then the House by 12:25Z.
 
 ## Checklist
 
