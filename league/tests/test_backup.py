@@ -371,6 +371,46 @@ class TheShutdownNeverWaitsOnSail(unittest.TestCase):
         self.assertEqual((alert["level"], alert["environment"]), ("warning", "sail"))
 
 
+class TermEndsTheLoopsWait(unittest.TestCase):
+    """`python3 -m league run` on TERM: the loop ends after the tick in hand. Until Sept 25, 2026 it then slept out the
+    rest of the tick's minute (`time.sleep` sleeps through a signal); TERM-to-exit took 24-82 s over the 13 restarts
+    from 18:43Z Sept 24, the old House writing rows -- a backup's error among them -- into the new release's watch."""
+
+    def test_a_term_after_a_tick_ends_the_loop_at_once(self):
+        import os
+        import signal
+        import threading
+        import time
+        from unittest import mock
+
+        import league.__main__ as entry
+
+        previous = signal.getsignal(signal.SIGTERM)
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        house = mock.MagicMock()
+        house.registry.living.return_value = ["an agent"]
+        house.settings.tick_seconds = 60
+        ticks = []
+
+        def tick():
+            ticks.append(time.monotonic())
+            if len(ticks) == 1:  # TERM lands while the loop waits for the next tick
+                threading.Timer(0.2, os.kill, (os.getpid(), signal.SIGTERM)).start()
+            return {"at": "now", "woke": [], "orders": 0, "deaths": [], "reconciled": {}, "budget": "open"}
+
+        house.tick.side_effect = tick
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(entry, "build", return_value=house), \
+                mock.patch.object(entry, "load_config", return_value={}), mock.patch("sys.stdout"):
+            started = time.monotonic()
+            self.assertEqual(entry.main(["run", "--root", root]), 0)
+            took = time.monotonic() - started
+        self.assertEqual(len(ticks), 1)
+        self.assertLess(took, 5.0, "the loop slept out the tick's minute after TERM")
+        house.begin_close.assert_called_once()
+        house.sandbox.sleep_all.assert_called_once()
+        house.close.assert_called_once()
+
+
 class TheRepeatEscalationCarriesTheMarker(unittest.TestCase):
     """`House.alert` escalates a warning that repeats 10 times in 30 minutes into one error (L3, Sept 24, 2026). A run of
     a service's failures escalates marked, so the watch never rolls back on it; a run that mixes in the House's own
