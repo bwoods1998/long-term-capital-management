@@ -127,7 +127,7 @@ class EvidencedNewcomers(SeatCase):
         self.assertIsNone(self.house._weakest(self.rules))
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, young.id)
         self.house.kill(young, "displaced", "test")
-        self.clock.advance(float(self.house.settings.tick_seconds) + 1)  # one displacement a desk a tick
+        self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)  # one displacement a desk a minute
         # Sept 24, 2026: a never-traded paper seat first has its fair chance (an hour on a desk with no clock) --
         # after Deploy B evidenced waiters took each other's seats 33 s to 14 min after birth.
         self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "inside its fair chance")
@@ -165,7 +165,7 @@ class EvidencedNewcomers(SeatCase):
         loser = self.house._weakest(self.rules)
         self.house.kill(loser, "displaced", "test")
         self.assertIsNone(self.house._weakest(self.rules))
-        self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+        self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)
         self.assertEqual(self.house._weakest(self.rules).id, (second if loser.id == first.id else first).id)
 
 

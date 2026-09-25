@@ -234,7 +234,7 @@ class StaleSeats(EvidenceCase):
             loser = self.house._weakest(self.rules, evidenced=True, newcomer=scored)
             self.house.kill(loser, "displaced", "test")
             self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=scored))
-            self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+            self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)
             self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=scored).id, (second if loser.id == first.id else first).id)
 
     def test_a_desk_with_no_clock_measured_keeps_the_plain_grace_and_the_fair_chance_holds_everywhere(self):
