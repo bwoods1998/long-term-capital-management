@@ -309,6 +309,30 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
 
 ## Progress notes
 
+### T+6.2 h (10:36Z Sept 25; the 08:23Z note was lost to the usage-limit outage)
+
+Snapshot taken 10:36:08-10:38:03Z (, ledger to 10:36:11Z, release : the
+updater shipped Merton's #314-#316 during the outage). Nothing of this run is deployed yet: the rows move with the floor.
+
+| # | Metric | Reading (each number names its function) | Target at the end |
+|---|---|---|---|
+| 1 | Real settled profit a day (24 h) against compute a day (24 h); proven families and each one's capacity at its real size | `real_settled` $19.38 a day realized (66 settlements $19.15, 6 closing sales $0.23); `compute_per_day` $122.31 a day (OpenAI $104.99: Luna $41.59, Astra $57.87, lab $5.53; Sail $17.27; Jev $0.04); lifetime $607.44 ($599.97 by scripts/economics.py + $7.47 lab); `gateway_meter` the gateway metered the OpenAI line at $105.98 a day over 22.4 h; `unit_economics` compute 6.3x the profit: short of the target; `proven_capacity` 2 proven: megacaps-chip-demand-relay $0.11/day at $12.50 (the board), `capacity_at_sizes` $0.25 / $0.51 / - a day at 1x/2x/4x of $25.00 (the median bid; no real bid yet); sports-central-run-under $29.36/day at $6.00 (the board), `capacity_at_sizes` $32.33 / $64.65 / - a day at 1x/2x/4x of $5.39 (the median real bid) | compute <= 2 x real settled profit, or <= $60/day while no family swings; >= 3 proven families, capacity measured at 1x, 2x and 4x the stake |
+| 2 | Forward-positive share of the last day's graduates and newborns (lab forward windows, first practice day); living median W_paper; agents above the 1.01 line | `forward_positive` graduates 4 of 10 with an active forward block (40%; 100 graduated, 87 with a window); newborns 7 of 30 on their first practice day so far (23%; 99 born), first day ended 42 of 71 (59%); lab-born active blocks 112 of 223 (50%, the baseline's measure); `practice_standing` median W_paper 1.00083 over 125; 32 above the 1.01 line (E at bunt_at 1.01: 21) | >= 60%; >= 1.005; >= 50 |
+| 3 | Real dollars on proven families / on unproven (stake); the first family swing; Alpaca real stock agents (ever) | `real_dollars` $16.62 proven / $258.21 unproven; `capital_on_proof` no family swing yet: megacaps-chip-demand-relay 0 real settlements, 15 to go (look at 15, - days); sports-central-run-under 12 real settlements, 3 to go (look at 15, 0.56 days); Alpaca real stock agents ever: 0 filled (0 in a session), 0 staked on a stock desk | proven >= unproven; the swing reached at the sports family's 10th settlement, or the exact count why not; >= 2 during a session |
+| 4 | House restarts a day; releases rolled back by causes outside the House (vendor, backup, site); tick p50; deploys inside a US session | `restarts` 24 in the window (24.0 a day), 7 inside a US session; `deploy_record` 7 releases rolled back, 6 by causes outside the House (backup 6, house 1); 5 of 19 deploys inside a US session (from deploys.jsonl); `tick_p50` interval p50 72.4 s over 1007 ticks (p90 121.1 s); the last tick 134.7 s | <= 6; 0; <= 40 s; 0 |
+| 5 | Waiters over 2 h and the longest; merged strategies never born; median life against each desk's evidence clock; displacement share of deaths | `seat_queue` 73 of 78 waiters over 2 h (11 on desks with a free seat), the longest 66.8 h (cards on kalshi-weather); 21 merged strategies waiting (the seat market at 2026-09-25T09:44:54.675Z); `life_vs_clock` median life under the desk's clock on 4 of 9 desks (alpaca-megacaps 4.5 h < 22.3 h, kalshi-open 1.1 h < 2.0 h, kalshi-prices 0.1 h < 46.1 h, kalshi-sports 12.1 h < 21.6 h); `displacement_share` 81% of 83 deaths in the window (90% of 550 lifetime) | 0 with free capacity, longest < 2 h; 0; >= the clock on every desk; < 50% |
+| 6 | Real fill rate (fills / orders, 24 h); real entries refused a day; taker entries by probes | `real_fill_rate` 75 of 202 orders filled (37%; kalshi 62 of 89, alpaca 13 of 113); the baseline's rows measure 77 of 858 (9%); `real_refusals` 372 real entries refused (372 a day), 116 in the last session (2026-09-24); the most: allocator.max_event_share 168, insufficient desk cash 84, allocator.real_entry_liquidity 67; `probe_taker_entries` 0 Kalshi taker entries by probes ($0.00), 71 probe entries refused for taking; Alpaca books every fill a taker (7 probe entries, $95.49) | >= 25%; < 30; allowed and measured |
+| 7 | Sail runway; the October OpenAI cap; the population ceiling binding on runway | `runway` Sail 8.32 days ($148.21 less $5.00 reserve at $17.20 a day; the House reads 8.32); the OpenAI month 2026-09 at $560.89 of $607.00, October's cap unset; the population ceiling does not bind on runway (128 of 128; 0 population alerts in the window) | >= 5 days throughout; set from funded money at the owner's word; never |
+
+State: Wave 0 is built and reviewed except H4's fixes and H2's review (both running); H3 and Z merged at 10:33Z and ship
+in the options run's Deploy V; Deploy A (H2, H4, H5) is set for 20:10Z. Wave 1: F1 (#306) and F2/F4/X2 (#311) built,
+C-family building, C-money and F-seats next. **Runway:** the OpenAI month reads 60.89 of 07.00 and the House's line
+0.14 at about 05 a day: the House's own tiers ( ) move it to "earned" under 0 (cheap
+research to Sail, unearned roles paused; about 16:30Z) and to "audits" under  (about 19:00Z), where it stays until
+the month resets on Oct 1 unless the owner raises September's cap. Sail 48.21, 8.32 days. The sports family has 12
+real settlements (the look at 15 is 3 away under the live rules).
+
+
 ## Watch log
 
 ## Report
