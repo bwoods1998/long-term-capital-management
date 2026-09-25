@@ -350,4 +350,9 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   episodes opened before the restart under the old 150-call cap, flushed after it. **The recorder's post-ship
   clock starts at 11:52:51Z** (`started_at`): no row before it exists, and none will be back-filled.
 
+- **The options run's mid-session owner deploy (the owner's choice; 16:09Z notice):** practice structure
+  founders, about 16:40-17:00Z, carrying main as it is (nothing of this run's is unshipped on main). One House
+  restart: the move sensor resumes from its cursor (snapshots older than two intervals give quotes, not rows).
+  This run checks the sensor after it.
+
 ## Report
