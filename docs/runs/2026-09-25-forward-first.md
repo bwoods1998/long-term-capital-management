@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
 | Z | The scoreboard | built, PR #298 (CI green); merges with Deploy A |
 | H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
+| F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
 
 ## Findings before Wave 0 reports
@@ -266,6 +267,19 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   books polled at most every 60 s (a flaky venue's warnings must not reach the 10-in-30-minutes error inside a watch),
   `_enforce_horizon` cancelling the House's own resting exit and re-sending it with the same nonce (rejected as a
   duplicate: the position had no exit), and `hypotheses.py` iterating the registry while other threads add agents.
+
+- **F-research (#311, Wave 1).** Replayed on the T0 day (`scripts/gate_replay.py`): sessions 2,566 -> 1,038 plus about
+  44 samples (-58%), adoptions or forks 108 -> 85 (-21%), candidates 547 -> 253 (-54%), dollars $87.65 -> $34.48
+  (-61%). The candidates target ("unchanged or up") is missed on purpose: 350 of the clock's 387 runs were idle agents
+  re-running every 12 minutes (mcentee-hfadaea 33 times in the day), and the clock's 201 candidates produced 9
+  adoptions or forks; adoptions per dollar double. Keeping the idle clock (`idle_runs: clock`) keeps 397 candidates but
+  only cuts dollars 32%. X2: 670 refusals from 86 distinct reasons had bought 544 sessions; now one per agent, reason
+  and day. F4: the yield row gains `lift`; at T0 the consultant reads `no_lift` ($35.44 for 62 answers; 50 of 110 judged
+  consults led to nothing; $0.45 a positive block against research's $0.29), the engineer 22 verified repairs for
+  $27.54; the lesson count had been counting desk-mates' post-mortems (111 of 117). The consultant's pause is decided
+  on 24 h of live lift after Deploy B.
+- **The Kalshi run's K5 (07:23Z):** its one line in `Allocator.grant_capital` (a ratified version-2 tranche's
+  `unlocked_usd`, 0 until the owner ratifies) goes in as its own small PR after Deploy B, reviewed here.
 
 ## Progress notes
 
