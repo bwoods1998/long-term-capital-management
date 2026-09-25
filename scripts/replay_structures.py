@@ -119,9 +119,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED by the safety check: {exc}")
         return 2
     needs, defaults = declared(code)
-    needs = constrain(needs, load_niches()[args.niche])
     params = {**defaults, **(json.loads(args.params) if args.params else {})}
-    parameters.require_valid(params, needs)
+    try:
+        needs = constrain(needs, load_niches()[args.niche])  # as the House seats it: e.g. alpaca-options is judged by the day
+        parameters.require_valid(params, needs)  # as `House._run_replay` checks them first
+    except ValueError as exc:
+        print(f"REFUSED before any replay: {exc}")
+        return 2
     mutable = parameters.inspect(params, needs)["mutable"]
     _, horizon, _ = niche_of(needs)
 
