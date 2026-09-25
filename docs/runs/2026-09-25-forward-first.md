@@ -80,7 +80,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | W | The site's flywheel strip | site #8 merged and DEPLOYED 12:35:10Z (version `2b780c2c`; the next checkpoint, 12:35:58Z, accepted); publisher #325 (CI green) merges in Deploy C |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
-| A | Deploy A integration (`a/integration`, draft PR #323) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; 630 targeted tests OK after re-pointing the structure-invariance test to H4's book.py; CI running; Deploy A 20:10Z |
+| A | **Deploy A: LIVE** (release `20260925T201002Z-1fdb97fd591f`, main `d6f8acd5`, promoted 20:11:44Z, ratified 20:11:48Z on `d7d910fe`, watch passed 20:21:56Z) | was: integration branch `a/integration`, PR #323 | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; 630 targeted tests OK after re-pointing the structure-invariance test to H4's book.py; CI running; Deploy A 20:10Z |
 
 ## Findings before Wave 0 reports
 
@@ -160,7 +160,9 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 
 **Deploy A's exact start: 20:10Z Sept 25** (pre-flight 19:54Z: only H4's key changes against main; CI green on
 `b8cc986d`; no deploy in flight; the proven family's first open game starts 22:40Z; #323 merged 19:55:01Z, main
-`d6f8acd5`). Its end is written here when its watch ends.
+`d6f8acd5`). **Done:** release `20260925T201002Z-1fdb97fd591f` staged 20:10:09Z, promoted 20:11:44.6Z, grant
+`earned-live-20260921` ratified 20:11:48Z on `d7d910fe` (active), `ops.started` 20:13:21Z, watch verdict promoted, **watch
+ended 20:21:56Z** (the Kalshi run's K1 may start from 20:52Z).
 
 **Proposed Saturday Sept 26 deploy order (15:00Z Sept 25; each starts only after the previous one's watch ends plus 30
 minutes, and only when no real Kalshi family's game is in play; the Friday MLB slate's last start is 02:15Z, so play ends
@@ -496,6 +498,17 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   run also shipped V2 (#336, the owner's call at 16:09Z: 11 structure founders on practice; promoted 16:21:29Z). Both
   were mid-session owner deploys on the owner's word in that run. Deploy A, B and C's branches merged main at
   `9d8b1d3` (16:53Z; Deploy A 296 targeted tests OK, Deploy C's replay cut under the cache bound 148 OK).
+
+- **Deploy A verified on the box (20:21Z).** Grant active on `d7d910fe`; no book frozen. H5: the tick's own steps 16.6-17.9 s
+  (60.8 s at p50 before); the `house` lane runs the hypotheses step (1.2 s). H6: `restarts_24h` 22, 4 in the session,
+  `last_start` the deploy's own; the restart named its lost research sessions in warnings (krasker-27 with its candidate
+  recovered; five more in one warning at 20:14:59Z) instead of losing them silently. H4: the first real Alpaca reading
+  after the restart (20:13:23Z) took back the old bids' rounding as plain dust (0.0105, `holds: cent`, no alert); the
+  next (20:17:58Z) read a cash difference of exactly 0.00000000. The frontier tier moved to "earned" at 20:13:44Z ($18.36
+  left). Still to verify in their windows: H2 at the next vendor failure; H3 over the next 4 h (the updater's holds).
+- **A live bug found in the verification: the site has refused every checkpoint since 15:50:21Z** ("HTTP 400 Invalid
+  checkpoint", 197 warnings to 20:21Z; the last accepted checkpoint is from 15:48:18Z; no deploy between them): a data
+  value crossing a validator bound is the likely cause. A builder is on it (`fix/site-400`).
 
 ## Progress notes
 
