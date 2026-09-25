@@ -118,6 +118,36 @@ class Harness(unittest.TestCase):
         self.assertEqual(founder["fills"][0]["held_price"], 0.57)
         self.assertEqual(founder["fills"][0]["fee_usd"], 0.10)  # $0.05 a contract a leg
 
+    def test_a_close_far_under_the_bid_is_refused_by_the_book_and_the_what_if_sends_it_at_the_rule_line(self):
+        def probe(ctx):
+            memory = ctx.get("memory") or {}
+            legs = [{"occ": LOW, "role": "long"}, {"occ": HIGH, "role": "short"}]
+            if not memory.get("sent"):
+                return {"intents": [{"structure": "debit_vertical", "action": "open", "quantity": 1, "type": "limit", "limit_price": 0.55,
+                                     "legs": legs, "reason": "probe open"}], "cancels": [], "memory": {"sent": 1}}
+            if ctx["positions"] and not ctx["open_orders"]:  # a stop at half the mark, as the founders' exits price it
+                return {"intents": [{"structure": "debit_vertical", "action": "close", "quantity": 1, "type": "limit", "limit_price": 0.25,
+                                     "legs": legs, "reason": "probe stop"}], "cancels": [], "memory": memory}
+            return {"intents": [], "cancels": [], "memory": memory}
+
+        lines = []
+        for m in range(12):  # the same touch every minute, each leg quoted again a second before the minute
+            at, quoted = f"2026-09-25T15:{m:02d}:00Z", f"2026-09-25T{14 + (m > 0)}:{(m - 1) % 60:02d}:59Z"
+            lines.append(line(at, [row(LOW, 1.00, 1.05, quoted), row(HIGH, 0.50, 0.52, quoted)]))
+        self.write(lines)  # the structure: ask 1.05 - 0.50 = 0.55, bid 1.00 - 0.52 = 0.48
+        house = self.run_probe(probe)
+        [founder] = house["founders"]
+        self.assertEqual((founder["opens"], founder["closes"]), (1, 0))
+        self.assertTrue(any("limit price deviates" in reason for reason in founder["refusals"]), founder["refusals"])
+        what_if = fwd.run(self.path, house_bars=None, local_store=None, founders=["options_condor_vrp"], work=self.dir.name,
+                          decide_override={"options_condor_vrp": probe}, sane_limits=True)
+        [founder] = what_if["founders"]
+        self.assertEqual((founder["opens"], founder["closes"], founder["refusals"]), (1, 1, {}))
+        close = founder["fills"][1]
+        self.assertEqual(close["action"], "close")
+        self.assertEqual(close["held_price"], 0.48)  # at the bid of a newer snapshot, never the 0.25 asked
+        self.assertEqual(what_if["checks"]["fills_failing_audit"], 0)
+
     def test_nothing_starts_on_a_snapshot_without_sizes(self):
         calls = []
 
@@ -160,6 +190,7 @@ class CalibrationBars(unittest.TestCase):
             # o and l from minute 15 as last seen (1.01, 1.00), h and c from minute 29; v 6 + 1; n the three trades seen
             self.assertEqual(bars, [(LOW, "15Min", "2026-09-25T15:30:00Z", 1.01, 1.05, 1.0, 1.04, 7.0, 3)])
             self.assertEqual(built["store"].db.execute("SELECT count(*) FROM quotes").fetchone()[0], 5)
+            built["store"].close()
 
 
 if __name__ == "__main__":

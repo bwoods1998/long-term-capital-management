@@ -489,16 +489,55 @@ class Tally:
     dropped: list[str] = field(default_factory=list)
     thoughts: list[tuple[str, str]] = field(default_factory=list)
     decisions: list[dict[str, Any]] = field(default_factory=list)
+    touched: int = 0  # limits the what-if sent at the book's 10% line instead (`sane_limit`)
+
+
+def sane_limit(row: Mapping[str, Any], snap: Snapshot, tally: Tally | None = None, *, deviation: Decimal = Decimal("0.10")) -> Mapping[str, Any]:
+    """WHAT-IF (not the House): a structure intent priced through the structure's touch in `snap` by more than the
+    book's limit-sanity rule allows (`book.DEFAULT_RULES["max_limit_deviation_pct"]`, 10% of the held price: a stop
+    sold at half the mark, a condor opened with a slip on each leg) sent at the rule's line instead: an open at most
+    10% over the held ask, a close at least 10% under the held bid, in whole cents inside the line. The shadow account
+    fills a marketable limit AT the touch of a newer quote, so this never improves a fill; it only lets an order the
+    book refuses as "a typo" through, as marketable as the rule allows."""
+    try:
+        order = core.parse(row)
+    except (ValueError, ArithmeticError):
+        return row
+    opening = order.action == "open"
+    touches = {}
+    for leg in order.spec.legs:
+        quote = snap.rows.get(leg.occ) or {}
+        bid = Decimal(str(quote["bid"])) if quote.get("bid") not in (None, 0, 0.0) else None
+        ask = Decimal(str(quote["ask"])) if quote.get("ask") not in (None, 0, 0.0) else None
+        touches[leg.occ] = (bid, ask)
+    bid, ask = core.quote(order.spec, touches)
+    held = order.held_limit
+    if opening:
+        if ask is None or ask <= 0 or held <= ask * (1 + deviation):
+            return row
+        line = (ask * (1 + deviation)).quantize(core.CENT, rounding="ROUND_FLOOR")
+    else:
+        if bid is None or bid <= 0 or held >= bid * (1 - deviation):
+            return row
+        line = (bid * (1 - deviation)).quantize(core.CENT, rounding="ROUND_CEILING")
+    natural = core.natural_price(order.spec, line)
+    if natural <= 0 or (order.spec.credit and natural >= order.spec.collateral):
+        return row
+    if tally is not None:
+        tally.touched += 1
+    return {**row, "limit_price": float(natural)}
 
 
 # ------------------------------------------------------------------------------------------ the run
 def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: str | Path | None, founders: Sequence[str] = FOUNDERS,
         work: str | Path | None = None, start: float | None = None, until: float | None = None, starts: Mapping[str, float] | None = None,
         mark_every: float = MARK_EVERY, keep_thoughts: int = 6, log: Callable[[str], None] | None = None,
-        decide_override: Mapping[str, Callable[[dict], dict]] | None = None) -> dict[str, Any]:
+        decide_override: Mapping[str, Callable[[dict], dict]] | None = None, sane_limits: bool = False) -> dict[str, Any]:
     """The forward test. `start`/`until` bound the simulated session (epoch seconds); `starts` holds a founder back
     until its own first wake (the live birth, for the comparison); `decide_override` replaces a founder's decide (the
-    tests). Returns the result document (`summarize`)."""
+    tests). `sane_limits` is a WHAT-IF, not the House: a structure limit through the touch of the snapshot its decision
+    saw by more than the book's 10% limit-sanity rule allows is sent at the rule's line (`sane_limit`).
+    Returns the result document (`summarize`)."""
     say = log or (lambda text: None)
     clock = SimClock()
     source = LegSource(clock)
@@ -602,6 +641,8 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
                     if isinstance(order_id, str):
                         book.cancel(agent.id, order_id)
                 rows = [r for r in (answer.get("intents") or []) if isinstance(r, Mapping)]
+                if sane_limits:
+                    rows = [sane_limit(r, snap, tally) for r in rows]
                 intents, dropped = shim._intents(agent, book, rows)
                 tally.intents += len(rows)
                 tally.dropped += dropped
@@ -718,6 +759,7 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
         out.append({
             "founder": agent.founder, "seed": agent.seed, "wake_minutes": agent.wake_minutes, "wakes": tally.wakes, "decide_errors": tally.errors,
             "last_error": tally.last_error, "intents_asked": tally.intents, "dropped": tally.dropped[:10], "refusals": reasons,
+            "limits_moved_to_the_rule_line": tally.touched,
             "opens": sum(1 for t in trades if t["action"] == "open"), "closes": sum(1 for t in trades if t["action"] == "close"),
             "closed_structures": len(closes), "realized_usd": _money(account.realized), "fees_usd": _money(account.fees),
             "closed_realized_usd": [t["realized_usd"] for t in closes],
@@ -1136,6 +1178,7 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
         zero = [p for p in pairs if p["expiry"] == day]
         if zero:
             out["held_out_zero_dte"] = {"s3_table": judge(fit, zero, fit.CALIBRATED_SPREADS), "current_estimate": judge(fit, zero, None)}
+        store.close()
         return out
     finally:
         tmp.cleanup()
@@ -1147,6 +1190,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, when main has no fit")
     parser.add_argument("--live", default=None, help="the live founders' day (JSON of LIVE_QUERY's output): compared, and --from-birth reads it")
     parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake (the comparison run)")
+    parser.add_argument("--what-if-sane-limits", action="store_true", help="also run the session with limits the book's 10%% rule refuses sent at its line (a what-if)")
     parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
     parser.add_argument("--house-bars", default=None, help="the House's recorded bars of the day (JSON from a read-only query)")
     parser.add_argument("--local-store", default=str(Path("~/Work/.options-history/options_history.sqlite").expanduser()))
@@ -1192,6 +1236,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             result["from_birth"]["run"] = {"label": "from each live founder's first wake", "seconds": round(time.time() - began, 1),
                                            "starts": {k: iso(v) for k, v in births.items() if v}}
         result["comparison"] = compare(session, result.get("from_birth"), live)
+    if args.what_if_sane_limits:
+        result = {"session": result} if not args.live else result
+        result["what_if_sane_limits"] = {}
+        runs = {"session": starts}
+        if args.live and args.from_birth:
+            runs["from_birth"] = {founder: parse_ts(row["first_wake_today"]) for founder, row in result["live"].items() if row.get("first_wake_today")}
+        for name, begin in runs.items():
+            began = time.time()
+            what_if = run(args.snapshots, starts=begin, sane_limits=True, **common)
+            what_if["run"] = {"label": f"WHAT-IF, not the House ({name}): limits through the touch by more than the book's 10% sent at the 10% line",
+                              "seconds": round(time.time() - began, 1)}
+            result["what_if_sane_limits"][name] = what_if
     result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live}
     text = json.dumps(result, indent=1, default=str)
     if args.out:
