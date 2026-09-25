@@ -41,7 +41,7 @@ from ltcm.broker import Instrument, money
 from . import seeds as seeds_module
 from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
-from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, shards as shards_module
+from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, research_gate, shards as shards_module
 from . import parameters
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
@@ -4755,7 +4755,8 @@ class House:
         refusal = self.ledger.last('book.refused', agent=agent.id)
         book = self.book_of(agent)
         prompt = (refusal is not None and book is not None and refusal.payload.get('book') == book.name
-                  and _epoch(refusal.at) > last and self.clock() - last >= 60)
+                  and _epoch(refusal.at) > last and self.clock() - last >= 60
+                  and research_gate.refusal_news(self, agent, refusal))  # X2: once per agent, reason and day
         interval = 0.0
         if not prompt:
             interval = self.research_interval_hours(agent) * 3600
@@ -4765,7 +4766,7 @@ class House:
             return False
         if kind == "sail" and self._sail_research_capped():
             return False  # no NEW Sail session while the last hour's Sail research spend is at the cap (L2)
-        return True if prompt else self._gate(agent, last, interval)
+        return research_gate.refusal_news(self, agent, refusal, take=True) if prompt else self._gate(agent, last, interval)
 
     def _gate(self, agent: Agent, last: float, interval: float) -> bool:
         """Back off research that keeps coming back empty while nothing about the agent has changed.
