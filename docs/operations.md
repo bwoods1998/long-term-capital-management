@@ -243,9 +243,12 @@ ORDER BY seq DESC LIMIT 20`.
   O1-O5 -- `option_spreads_real` false, `option_spread_real_types` ["debit_vertical"], `spread_probe_usd` $150,
   `spread_position_share` 1.0, `spread_probe_line`, `evidence.alpaca_paper_haircut_bps.option_spread` 60) moves them to
   constitution `63b65b34…`, money `be1e3ce9…` on g/money over b/integration (recompute on the tree deployed): its deploy
-  needs the ratify (the grant's seats unchanged). Flipping O1 to true is its digest change 2 of 2 and must set the
-  gateway's `OPTION_STRUCTURES_REAL` to exactly `option_spread_real_types` in the same deploy (`league.ci`
-  `check_structures` refuses a tree where they disagree). The gateway's list gates real OPENS only: a close of any
+  needs the ratify (the grant's seats unchanged). **O5 = 60 bps is provisional** (the review of Deploy G, Sept 25,
+  2026): it is the top of its row (24-60, the most conservative), set before any shadow spread had closed, where the
+  row asks for the rate measured from the first 30 shadow spread fills. Measure it (as A8 measured the other classes)
+  once 30 have filled, and move it inside the row; that is a money rule and needs the ratify. Flipping O1 to true is
+  its digest change 2 of 2 and must set the gateway's `OPTION_STRUCTURES_REAL` to exactly `option_spread_real_types`
+  in the same deploy (`league.ci` `check_structures` refuses a tree where they disagree). The gateway's list gates real OPENS only: a close of any
   defined-risk type goes at `off` too once the account holds its legs, so the gateway can go back to `off` at any time
   (the review of g/money). Never roll the House back past Deploy G or past Track P's Alpaca adapter while the real book
   holds a structure: an older House refuses its real closes (or holds them back, without one multi-leg order). The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
@@ -259,16 +262,47 @@ ORDER BY seq DESC LIMIT 20`.
   learn-and-unblock run (17:34Z, Sept 23, 2026) had set `52c6c7e5…` / `1d63a56e…`, the grant
   re-ratified at 17:34:36Z. Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
   line); that day's Deploys 2-7 changed no money rule and needed no ratify.
-- **Roll back by hand (on the box):**
+- **Roll back by hand:** `python3 scripts/floor_box.py rollback --reason "why"` from the owner's machine. It
+  asks the in-box watchdog (`league.watchdog rollback`, run from `/workspace/previous`) after the structures guard
+  below, and prints the re-ratify step. Only when floor_box cannot reach the box, on the box and with no guard:
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
+  (check by hand first that `alpaca-paper` holds no structure: no holding on the book whose position key
+  contains `|`).
+- **After any manual rollback of Deploy G, re-ratify at once on the restored release:**
+  `python3 scripts/live_trading.py --ratify earned-live-20260921`. G's ratify pins the grant to money `be1e3ce9…`;
+  the release before G (Deploy B) is `acff5c64…`, so after the rollback the grant reads inactive (real entries
+  refused, nobody promoted to real money) until it is re-ratified. `deploy_ratify.sh` re-ratifies only on a
+  rollback it saw in its own deploy's log, never on one made by hand. The same holds for any manual rollback past a
+  release that changed the money digest.
 - **Never roll back past Deploy G while `alpaca-paper` holds a structure** (the options desk's Wave 2, Sept 25,
-  2026). Deploy G ships `league/config.json` `options_structures.practice_account` false; it is turned on only by a
-  later release that changes nothing but that key, so a rollback of that release (the watch's included) lands on
-  G's code with the switch off, and G moves each structure agent back to the options shadow book once it is flat.
-  A release older than G cannot fold the account's legs into the structures (alpaca-paper then freezes for every
-  agent on it, for good), and its wind-down sells a held structure as its FIRST LEG alone, which for a debit
-  vertical leaves a naked short. To undo the switch, release the key false; before any rollback past G, check that
-  `alpaca-paper` holds no structure (no holding on the book whose position key contains `|`).
+  2026). A release older than G cannot fold the account's legs into the structures (alpaca-paper then freezes for
+  every agent on it, for good), and its wind-down sells a held structure as its FIRST LEG alone, which for a debit
+  vertical leaves a naked short. **The guard** (the review of Deploy G): `floor_box.py rollback` and
+  `floor_box.py deploy` read the target release (the box's `previous`, or the tree being sent) for
+  `House._structure_practice_account` and `Book._fold_structure_legs`; when it lacks either, they read the box's
+  ledger read-only and refuse while it shows a structure held, or a structure order open, on `alpaca-paper`, or
+  cannot be read. `--force-structures-risk` overrides it with a loud warning: use it only when the venue itself
+  shows `alpaca-paper` flat of option legs and the ledger is what is wrong. The in-box watchdog's automatic
+  rollback during a deploy's watch is not guarded: it returns to the release that was current before that deploy,
+  which already ran with whatever the book holds.
+- **The practice-account flip** (`options_structures.practice_account`). Deploy G ships it false. It is turned on
+  only by **an owner deploy (`floor_box.py deploy`) of a release that changes nothing but that key**, never through
+  the updater's train (`league/config.json` is not protected, so a flip merged to `main` would otherwise ship at a
+  time the train picks): so a rollback of that release (the watch's included) lands on G's code with the switch
+  off, and G moves each structure agent back to the options shadow book once it is flat. **To undo it, deploy a
+  forward release setting it false**, never a rollback past G; then wait until `alpaca-paper` is flat of
+  structures: opens go on through the first full session after each agent is found moving
+  (`_structure_move_opens_until`), then closes only, bounded by each structure's earliest expiry (up to 10 days on
+  SPY/QQQ/IWM). Until then G cannot be rolled back (the guard above refuses it).
+- **The daily-expiry backfill** (`options_history_daily_expiries`, the review of Deploy G). Deploy G ships it false:
+  the options-history refresh keeps the weekly expiries. Flip it the same way, **an owner deploy of a release that
+  changes nothing but that key**, in an announced, watched quiet slot: outside the US session, with no real Kalshi
+  game in play (the first every-expiry backfill holds one of the 3 ops slots for 25-45+ minutes and makes about
+  4-5k unpaced gateway GETs; each SPY/QQQ/IWM structure tape then costs about 3x the CPU under `_tape_lock`).
+  Record House RSS and tick time during the backfill and at the first every-expiry structure tape. Undo it with a
+  forward release setting it false. Once the store holds every expiry, **never roll back past Deploy G without
+  first deleting the non-weekly SPY/QQQ/IWM bars**: the older code's tape has no weekly filter and caps only after
+  building (measured on a synthetic every-expiry copy: 930 MB peak against G's 217 MB).
 - **The gateway.** Deploy with
   `cd gateway && node --test test/*.test.mjs && npx --yes wrangler@4 deploy --config wrangler.jsonc`;
   roll it back with `npx wrangler rollback`. After a deploy that touches the frontier month, read
