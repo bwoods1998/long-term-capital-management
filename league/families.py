@@ -70,6 +70,7 @@ import contextlib
 import hashlib
 import json
 import math
+import re
 import threading
 from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal
@@ -155,6 +156,9 @@ class TradeTape:
         #: ledger position is written after it (`Evaluator.blocks(since_seq=...)` reads a record since by `began` too;
         #: the R5 adversarial review, Sept 24, 2026). A row without it began where it was written.
         self.blocks: dict[str, list[tuple[int, str, bool, float, int]]] = {}
+        #: (agent, the block's ledger position) -> its period `key` (an hour or a day): the probe gate's record since a
+        #: demotion is one observation per period (`allocator.family_probe` `reseat: "bound_since_demotion"`, M5).
+        self.periods: dict[tuple[str, int], str] = {}
         self.filled: dict[str, float] = {}  # order id -> when a buy fill named it
         self.last_seq: dict[str, int] = {}  # agent -> the newest row folded for it: a family's version
         self.programs: dict[str, int] = {}  # agent -> the ledger position of its last program change (`agent.strategy`)
@@ -207,8 +211,14 @@ class TradeTape:
                         (entry.seq, str(p.get("book") or ""), bool(p.get("active")), float(p.get("log_growth") or 0.0),
                          int(p.get("first_mark_seq") or entry.seq)))
                     self._touch(entry.agent, entry.seq)
+                    if p.get("key"):  # the block's period (an hour or a day): one observation of a family per period (M5)
+                        self.periods[(str(entry.agent), entry.seq)] = str(p["key"])
         elif entry.agent != HOUSE:
             keep = {k: p[k] for k in _TAPE_FIELDS if k in p}
+            if p.get("liquidity_role") in ("maker", "taker"):
+                # M6 (Sept 25, 2026): an Alpaca fill's own role, the book's reading of its order when it was placed
+                # (`Book._liquidity_role`); its `liquidity` stays the fee it was charged at. Rows before it keep theirs.
+                keep["liquidity"] = p["liquidity_role"]
             instrument = p.get("instrument")
             if isinstance(instrument, Mapping):
                 keep["instrument"] = {k: instrument[k] for k in _TAPE_INSTRUMENT if k in instrument}
@@ -297,6 +307,10 @@ def swing_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] 
             # every settlement, at the proof's own confidence (the rule as #242 had it).
             "entry_every": max(1, int(rule.get("entry_every", 1))),
             "entry_confidence": float(rule.get("entry_confidence", proof_rule(c)["confidence"])),
+            # M1 of the forward-first run (Sept 25, 2026): every swing look -- the entry on its first events, the hold and
+            # so every doubling on the whole real record -- needs the real events to span this many distinct settlement
+            # dates (`event_day`). Without the key: no dates are asked (the rule as Deploy B had it).
+            "min_distinct_dates": max(0, int(rule.get("min_distinct_dates", 0))),
             # Full Kelly on the lower bound, as the constitution's scaled rung (`rungs.3.kelly_fraction`).
             "kelly_fraction": float((c.get("rungs") or {}).get("3", {}).get("kelly_fraction", 1.0)),
             "max_share_of_venue": float(allocator.get("max_share_of_venue", 0.6))}
@@ -311,8 +325,13 @@ def probe_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] 
     rule = allocator.get("family_probe")
     if not isinstance(rule, Mapping):
         return None
-    return {"losing_min_blocks": int(rule.get("losing_min_blocks", 6)), "reseat": str(rule.get("reseat") or ""),
-            "hold": str(rule.get("reseat") or "") == "gain_since_demotion"}
+    reseat = str(rule.get("reseat") or "")
+    # M5 of the forward-first run (Sept 25, 2026): `reseat: "bound_since_demotion"` holds too, and a hold turns only when
+    # the record since the demotion has a one-sided `reseat_confidence` (80%) lower bound above zero over
+    # `losing_min_blocks` or more block periods (`bound_gaining`), not on a positive sum (`gaining`).
+    return {"losing_min_blocks": int(rule.get("losing_min_blocks", 6)), "reseat": reseat,
+            "hold": reseat in ("gain_since_demotion", "bound_since_demotion"), "bound": reseat == "bound_since_demotion",
+            "confidence": float(rule.get("reseat_confidence", 0.8))}
 
 
 def position_share(venue: str, constitution: Mapping[str, Any] | None = None) -> float:
@@ -589,6 +608,8 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     real_units: dict[str, list[tuple[float, float]]] = {}
     real_first: dict[str, int] = {}
     real_at: dict[str, float] = {}
+    days: dict[str, str] = {}  # observation -> its own settlement date (`event_day`): M1 and M3 ask how many dates a proof spans
+    real_days: dict[str, str] = {}
     edges: dict[str, list[tuple[float, float]]] = {}
     risked: list[float] = []  # each entry's cash over what had been lent then, as `trade_returns` reads its risk
     without_risk = 0
@@ -649,10 +670,15 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 size = dollars if at_risk_unit else 1.0
                 units.setdefault(key, []).append((value, weight * size, liquidity, member))
                 edges.setdefault(key, []).append((max(made / risk, -1.0) if risk > 0 else (-1.0 if made < 0 else 0.0), weight * dollars))
+                day = event_day(key, when.get(last))
+                if day is not None:
+                    days[key] = min(days.get(key, day), day)
                 if book == REAL_BOOK[venue]:
                     real_units.setdefault(key, []).append((value, size))
                     real_first[key] = min(real_first.get(key, first), first)
                     real_at[key] = max(real_at.get(key, 0.0), when.get(last, 0.0))
+                    if day is not None:
+                        real_days[key] = min(real_days.get(key, day), day)
     minimum, confidence = rule["min_independent_settlements"], rule["confidence"]
     win_rate = float(c["ladder"]["lopsided_win_rate"]) if rule["lopsided_gate"] else None
     risk_per_entry = math.fsum(risked) / len(risked) if risked else 1.0  # with no entry seen, all of it was at risk
@@ -660,9 +686,15 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     # family's mean cash an entry at risk; in the at-risk unit, the reference bet (`reference_share`).
     gate = {"win_rate": win_rate, "risk": share if at_risk_unit else risk_per_entry, "scale": share if at_risk_unit else 1.0}
 
+    # M2 of the forward-first run (Sept 25, 2026): the TAKER record, which lets a family's bunts take on the real book
+    # (`allocator.real_entry_liquidity`), is positive from `allocator.taker_proof_min` independent taker events with its
+    # honest bound above zero; without the key, from the proof's own count.
+    taker_min = int((c.get("allocator") or {}).get("taker_proof_min") or minimum)
+
     def side(liquidity: str | None) -> dict[str, Any]:
         chosen = {k: [u for u in group if liquidity is None or (u[2] == "taker") == (liquidity == "taker")] for k, group in units.items()}
-        pooled = pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()}, minimum, confidence, **gate)
+        pooled = pool({k: [(u[0], u[1]) for u in group] for k, group in chosen.items()},
+                      taker_min if liquidity == "taker" else minimum, confidence, **gate)
         pooled["members"] = len({u[3] for group in chosen.values() for u in group})
         return pooled
 
@@ -675,9 +707,10 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                     for k, group in real_units.items() if group)
     real["first_closes"] = [(seq, value) for seq, value, _ in events]
     real["closed_at"] = sorted(real_at.values())
+    real["dates"] = len(set(real_days.values()))  # M1: the distinct settlement dates the real record spans
     swing = swing_rule(c)
-    # The family swing's ENTRY look (`entry_look`): at the real count's checkpoint, on its first events.
-    real["entry"] = entry_look(events, swing, gate=gate) if swing else None
+    # The family swing's ENTRY look (`entry_look`): at the real count's checkpoint, on its first events and their dates.
+    real["entry"] = entry_look(events, swing, gate=gate, days={real_first[k]: d for k, d in real_days.items()}) if swing else None
     weight_sum = math.fsum(max(w for _, w in group) for group in edges.values())
     edge = (math.fsum(max(w for _, w in group) * math.fsum(r * w for r, w in group) / math.fsum(w for _, w in group)
                       for group in edges.values()) / weight_sum) if weight_sum > 0 else None
@@ -690,7 +723,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     record = {"family": family, "venue": venue, "through": through, "unit": rule["unit"], "members": len(members),
               "members_living": living, "members_counted": whole.pop("members"), "n": whole["n"], "n_eff": whole["n_eff"],
               "mean_log": whole["mean_log"], "sd": whole["sd"], "bound": whole["bound"], "proven": whole["positive"],
-              "state": "proven" if whole["positive"] else "unproven", "real_n": len(real_units),
+              "state": "proven" if whole["positive"] else "unproven", "real_n": len(real_units), "dates": len(set(days.values())),
               "lopsided": whole.get("lopsided"), "loss_gate": whole.get("loss_gate"), "honest_bound": whole["honest_bound"],
               "risk_per_entry": risk_per_entry, "rows_without_risk": without_risk, "edge_per_dollar": edge,
               "maker": side("maker"), "taker": side("taker"), "real": real, "blocks": blocks, "rule": rule}
@@ -712,7 +745,7 @@ def empty_record(family: str, venue: str, *, through: int | None = None, error: 
             "honest_bound": None, "variance": None}
     out = {"family": family, "venue": venue, "through": through, "unit": rule["unit"], "members": 0, "members_living": 0,
            "members_counted": 0, "n": 0, "n_eff": 0.0, "mean_log": 0.0, "sd": None, "bound": None, "proven": False,
-           "state": "unproven", "real_n": 0, "lopsided": None, "loss_gate": None, "honest_bound": None, "risk_per_entry": None,
+           "state": "unproven", "real_n": 0, "dates": 0, "lopsided": None, "loss_gate": None, "honest_bound": None, "risk_per_entry": None,
            "rows_without_risk": 0, "edge_per_dollar": None, "maker": dict(side), "taker": dict(side),
            "real": {**side, "first_closes": [], "closed_at": [], "entry": None}, "blocks": {"practice": 0, "real": 0, "growth": 0.0},
            "rule": rule}
@@ -731,7 +764,10 @@ def swing_ready(record: Mapping[str, Any], rule: Mapping[str, Any] | None) -> bo
         return False
     real = record.get("real") or {}
     bound = real.get("honest_bound")
-    return int(real.get("n") or 0) >= int(rule["min_real_settlements"]) and bound is not None and bound > 0
+    # M1 (Sept 25, 2026): and the real record spans `min_distinct_dates` distinct settlement dates. The ramp doubles only
+    # while the family holds, so every doubling's look asks it too.
+    return (int(real.get("n") or 0) >= int(rule["min_real_settlements"]) and bound is not None and bound > 0
+            and int(real.get("dates") or 0) >= int(rule.get("min_distinct_dates") or 0))
 
 
 def entry_checkpoint(n: int, rule: Mapping[str, Any]) -> int | None:
@@ -745,7 +781,7 @@ def entry_checkpoint(n: int, rule: Mapping[str, Any]) -> int | None:
 
 
 def entry_look(events: Sequence[tuple[int, float, float]], rule: Mapping[str, Any] | None, *,
-               gate: Mapping[str, Any]) -> dict[str, Any]:
+               gate: Mapping[str, Any], days: Mapping[int, str] | None = None) -> dict[str, Any]:
     """The family swing's ENTRY look (C2; the main session's decision on the review of #242, Sept 24, 2026). A
     one-sided 80% bound re-read at every settlement is crossed by an edgeless family far more often than one time in
     five (37% by 30 real settlements and 44% by 50 in the main session's simulation, 61% by 200; and eventually always).
@@ -754,23 +790,33 @@ def entry_look(events: Sequence[tuple[int, float, float]], rule: Mapping[str, An
     honest bound at `entry_confidence`: the t bound AND, for a lopsided record, the loss-rate bound (`gate`), both at
     that confidence (19% and 22% by 30 and 50 at every 5th settlement at 90%). Between checkpoints the look stands:
     a failed look waits for the next checkpoint, and a restart looks at the same events. Staying in the swing and each
-    doubling are `swing_ready`, at the table's 80% at every pass."""
+    doubling are `swing_ready`, at the table's 80% at every pass.
+
+    M1 of the forward-first run (Sept 25, 2026): the looked-at events must also span `min_distinct_dates` distinct
+    settlement dates (`days`: each event's own date by its first close, `event_day`), or the look does not pass, whatever
+    its bound. The one proven family's first 10 real events lay on 2 slate dates (T0, Sept 25): a count of events cannot
+    tell a regime from an edge. `dates_so_far` is how many dates the first events up to the next look span now."""
     confidence = float((rule or {}).get("entry_confidence", 0.8))
     ordered = sorted(events)
+    days = days or {}
+    minimum_dates = int((rule or {}).get("min_distinct_dates") or 0)
     out: dict[str, Any] = {"checkpoint": None, "next_checkpoint": None, "confidence": confidence, "n": len(ordered),
-                           "bound": None, "loss_gate": None, "honest_bound": None, "ready": False}
+                           "bound": None, "loss_gate": None, "honest_bound": None, "ready": False,
+                           "dates": None, "min_dates": minimum_dates}
     if rule is None:
         return out
     checkpoint = entry_checkpoint(len(ordered), rule)
     first = int(rule["min_real_settlements"])
     out["next_checkpoint"] = first if checkpoint is None else checkpoint + max(1, int(rule.get("entry_every", 1)))
+    out["dates_so_far"] = len({days[e[0]] for e in ordered[:out["next_checkpoint"]] if days.get(e[0])})
     if checkpoint is None:
         return out
     looked = pool({str(i): [(value, weight)] for i, (_, value, weight) in enumerate(ordered[:checkpoint])}, checkpoint,
                   confidence, **gate)
     honest = looked["honest_bound"]
+    spanned = len({days[e[0]] for e in ordered[:checkpoint] if days.get(e[0])})
     out.update(checkpoint=checkpoint, bound=looked["bound"], loss_gate=looked.get("loss_gate"), honest_bound=honest,
-               ready=honest is not None and honest > 0)
+               dates=spanned, ready=honest is not None and honest > 0 and spanned >= minimum_dates)
     return out
 
 
@@ -877,12 +923,15 @@ def row_of(record: Mapping[str, Any], state: Mapping[str, Any], *, swing: Mappin
             "since": state.get("since"), "n": int(record.get("n") or 0), "n_eff": r(record.get("n_eff"), 3),
             "mean_log": r(record.get("mean_log")), "bound": r(record.get("bound")), "loss_gate": r(record.get("loss_gate")),
             "proven": bool(record.get("proven")), "edge_per_dollar": r(record.get("edge_per_dollar")),
+            # M1 and M3 (Sept 25, 2026): the distinct settlement dates the pooled proof and the real record span.
+            "dates": int(record.get("dates") or 0),
             "real": {"n": int(real.get("n") or 0), "mean_log": r(real.get("mean_log")), "bound": r(real.get("bound")),
                      "loss_gate": r(real.get("loss_gate")), "honest_bound": r(real.get("honest_bound")),
+                     "dates": int(real.get("dates") or 0),
                      # The swing's entry look at the real count's checkpoint, and the count that looks next.
                      "entry": {"checkpoint": entry.get("checkpoint"), "next_checkpoint": entry.get("next_checkpoint"),
                                "confidence": entry.get("confidence"), "honest_bound": r(entry.get("honest_bound")),
-                               "ready": bool(entry.get("ready"))} if entry else None},
+                               "dates": entry.get("dates"), "ready": bool(entry.get("ready"))} if entry else None},
             "maker": {"n": int((record.get("maker") or {}).get("n") or 0), "bound": r((record.get("maker") or {}).get("bound")),
                       "positive": bool((record.get("maker") or {}).get("positive"))},
             "taker": {"n": int((record.get("taker") or {}).get("n") or 0), "bound": r((record.get("taker") or {}).get("bound")),
@@ -947,6 +996,48 @@ def gaining(blocks: int, growth: float, minimum: int) -> bool:
     return blocks >= minimum and growth >= 1e-9
 
 
+def bound_gaining(values: Sequence[float], minimum: int, confidence: float) -> tuple[bool, float | None]:
+    """M5 of the forward-first run (Sept 25, 2026; `allocator.family_probe` `reseat: "bound_since_demotion"`): (whether a
+    record has turned, its lower bound). `values` is one observation per block PERIOD (`Allocator._turned`: the mean of
+    the family's active blocks of that hour or day), and the record has turned when there are `minimum` or more of them
+    and their one-sided `confidence` lower bound on Student's t is above zero -- not when their sum is (`gaining`). The
+    evidence: the zero-edge crypto-alts-reversion (its whole pooled forward record +0.0570 over 423 active blocks at T0,
+    an 80% bound of -0.00006 a block) was let back in at 21:00:53Z Sept 24 on six blocks since the 18:47Z demotion that
+    summed to +0.0101 -- one hour's blocks of its members, five of them written in the same second. Read one a period,
+    those six blocks are two observations; the turn waited until 01:02Z Sept 25 (6 periods, bound +0.0012)."""
+    n = len(values)
+    if n < 2:
+        return False, None
+    mean = math.fsum(values) / n
+    sd = math.sqrt(math.fsum((v - mean) ** 2 for v in values) / (n - 1))
+    bound = mean - stats.t_quantile(confidence, n - 1) * sd / math.sqrt(n)
+    return n >= minimum and bound > 1e-12, bound
+
+
+#: A Kalshi event ticker's date code: YYMONDD at the start of its second segment (`KXMLBTOTAL-26SEP231840MILPHI`,
+#: `KXHIGHNY-26SEP24`, `KXBTCD-26SEP2401`).
+_DATE_CODE = re.compile(r"^(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})")
+_MONTHS = {m: i for i, m in enumerate(("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), 1)}
+
+
+def event_day(key: str | None, closed_at: float | None) -> str | None:
+    """An observation's OWN settlement date, "YYYY-MM-DD" (M1 and M3 of the forward-first run, Sept 25, 2026): the date code
+    of its Kalshi event (`evaluator.event_key`: the day the game was played, the city's weather day, the strike's hour's
+    day), else the UTC date of its last close (an Alpaca trade: a US stock's session is inside one UTC date), else None
+    (counted toward no date). The event's own date, not the UTC date it settled on: a night MLB slate settles across two
+    UTC dates (on the T0 snapshot the real Sept 24 slate settled one event on Sept 24 UTC and five on Sept 25), and one
+    slate -- one regime's day -- must count once."""
+    parts = str(key or "").upper().split("-")
+    if len(parts) >= 2:
+        found = _DATE_CODE.match(parts[1])
+        if found:
+            with contextlib.suppress(ValueError):
+                return datetime(2000 + int(found.group(1)), _MONTHS[found.group(2)], int(found.group(3))).strftime("%Y-%m-%d")
+    if closed_at:
+        return datetime.fromtimestamp(float(closed_at), tz=timezone.utc).strftime("%Y-%m-%d")
+    return None
+
+
 def first_real_at(tape: TradeTape, members: Iterable[str], venue: str) -> float | None:
     """When the family's first real dollar was lent (the earliest `book.stake` above zero on the venue's real book, any
     member, living or dead), in epoch seconds, or None: where the family's real life starts."""
@@ -987,6 +1078,7 @@ def swing_clock(record: Mapping[str, Any], rule: Mapping[str, Any] | None, *, fi
     proven = bool(record.get("proven"))
     days = max(now - first_real, 0.0) / DAY if first_real is not None else None
     rate = (n / days if n > 0 else 0.0) if days is not None and days >= 1 / 24 else None
+    dates = 0  # M1 (Sept 25, 2026): the distinct settlement dates the next look's events still lack
     if swinging:
         needed, look = 0, None
     elif entry.get("ready"):
@@ -994,16 +1086,17 @@ def swing_clock(record: Mapping[str, Any], rule: Mapping[str, Any] | None, *, fi
     else:
         look = int(entry.get("next_checkpoint") or rule["min_real_settlements"])
         needed = max(look - n, 0)
-    if swinging or (needed == 0 and proven):
+        dates = max(int(rule.get("min_distinct_dates") or 0) - int(entry.get("dates_so_far") or 0), 0)
+    if swinging or (needed == 0 and dates == 0 and proven):
         to_swing = 0.0
-    elif needed == 0 or not rate or int(record.get("members_real") or 0) <= 0:
+    elif (needed == 0 and dates == 0) or not rate or int(record.get("members_real") or 0) <= 0:
         to_swing = None
     else:
-        to_swing = needed / rate
+        to_swing = max(needed / rate, float(dates))  # a new settlement date comes at most once a day
     return {"real_n": n, "real_since": None if first_real is None else datetime.fromtimestamp(first_real, tz=timezone.utc)
             .strftime("%Y-%m-%dT%H:%M:%SZ"), "real_days": None if days is None else round(days, 3),
             "real_per_day": None if rate is None else round(rate, 3),
-            "needs": {"real_settlements": needed, "look_at": look, "confidence": float(rule["entry_confidence"]),
+            "needs": {"real_settlements": needed, "look_at": look, "confidence": float(rule["entry_confidence"]), "distinct_dates": dates,
                       "proof": not proven, "audit": not swinging,
                       "grant": None if released is None or swinging else not released},
             "days_to_swing": None if to_swing is None else round(to_swing, 2)}
