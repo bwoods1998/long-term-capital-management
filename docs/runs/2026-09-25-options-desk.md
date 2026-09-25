@@ -157,6 +157,13 @@ run's `config.json` change is its own new `options_structures` key).
   11:13:43Z (86 blocks, deflated Sharpe 0.80); the seat rule retired krasker-13 (options-pullback, 7-day -0.111,
   nothing held) with cause `options_seat`, one retirement. H3 on the floor: the updater held (release train until
   14:00:29Z, session hold to 20:05Z; next eligible 20:05Z). Harness incidents caused by this run: 0.
+  **Saturday Sept 26 (the forward-first run's proposed order, accepted 14:35Z):** 06:00Z its Deploy B (#334,
+  digest `acff5c64`); about 07:00Z this run's **Deploy G** (the post-session fixes, Track P switched off, the
+  history's daily expiries if ready, the O1-O5 money rows and the `PAPER_BOOK` mapping: digest change 1 of 2 for
+  this run); about 08:00Z its Deploy C; about 09:00Z the Jev run's J3; then the Kalshi run's before about 15:30Z.
+  Each only after the previous watch plus 30 minutes and with no real Kalshi family's game in play; a run not ready
+  passes its slot on. Tonight: the forward-first run's Deploy A 20:10Z, the Kalshi run's K1 about 21:05Z; nothing of
+  this run's deploys tonight.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
   otherwise Saturday after Deploy B and Deploy G. State (10:33Z): Saturday; **reopened 11:20Z**: V's watch ended 11:18:45Z, so the slot is open from 11:48:45Z if finished before 12:55Z. The Jev run took it (11:22Z): D-J1 (PR #319, no money rule) from 11:50Z, finished before 12:55Z or not started; its release carries V (built on main), a rollback returns to V. D-J1 promoted 11:50:48Z, watched to 12:00:50Z (promoted); `ops.started` 11:51:59Z with all five books incl. options-shadow, none frozen at 11:57Z. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
