@@ -158,7 +158,7 @@ run's `config.json` change is its own new `options_structures` key).
   nothing held) with cause `options_seat`, one retirement. H3 on the floor: the updater held (release train until
   14:00:29Z, session hold to 20:05Z; next eligible 20:05Z). Harness incidents caused by this run: 0.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
-  otherwise Saturday after Deploy B and Deploy G. State (10:33Z): Saturday; **reopened 11:20Z**: V's watch ended 11:18:45Z, so the slot is open from 11:48:45Z if finished before 12:55Z. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
+  otherwise Saturday after Deploy B and Deploy G. State (10:33Z): Saturday; **reopened 11:20Z**: V's watch ended 11:18:45Z, so the slot is open from 11:48:45Z if finished before 12:55Z. The Jev run took it (11:22Z): D-J1 (PR #319, no money rule) from 11:50Z, finished before 12:55Z or not started; its release carries V (built on main), a rollback returns to V. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
