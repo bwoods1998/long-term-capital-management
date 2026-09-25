@@ -170,7 +170,7 @@ def alert_key(text: Any) -> str:
     return re.sub(r"\s+", " ", folded).strip()[:300]
 
 
-def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str, environment: Any = None) -> dict[str, Any]:
+def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str, service: Any = None) -> dict[str, Any]:
     """Count one warning of `text`, written at `now` (`stamp` in ISO), into its run of repeats: runs
     quiet for the window are dropped first, and a run keeps the times inside the window. A run keeps
     the `environment` marker (H2, Sept 25, 2026) only while every warning of it carried the same one:
@@ -178,7 +178,7 @@ def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str, envir
     with the House's own escalates unmarked."""
     for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
         runs.pop(quiet)
-    marker = environment if isinstance(environment, str) and environment else None
+    marker = service if isinstance(service, str) and service else None  # the warning's `environment`, if any
     run = runs.setdefault(alert_key(text), {"first_seen": stamp, "count": 0, "times": [], "escalated": None, "environment": marker})
     if "environment" not in run or run["environment"] != marker:
         run["environment"] = None  # a run of mixed kinds, or one counted before the marker existed
