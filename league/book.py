@@ -2868,7 +2868,8 @@ class Book:
     def expire_options(self, *, at: str | None = None) -> int:
         """Write off long options that have expired and that the venue no longer shows: they paid
         nothing. One the venue still shows is left alone (it clears overnight); one that was
-        exercised into shares shows up as a position the book does not know, and freezes it."""
+        exercised into shares shows up as a position the book does not know, and freezes it. A
+        structure is settled at the value its venue paid for it (below), never written off."""
         now = at or now_iso(self.clock)
         today = _new_york_date(now)
         with self._lock:
