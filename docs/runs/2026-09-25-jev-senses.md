@@ -121,6 +121,30 @@ Read-only on the box at 06:17-06:25Z Sept 25: `jev.sqlite`, `health.json` `jev`,
 | 5 | Research + Astra dollars a day | $98.19 (Luna $38.58 + Astra $59.61, the forward-first scoreboard's 24 h to 04:23Z); the plan's reading $77.34 (research lane $48.62 + consultant $28.72, the Sept 25 gap review) | ≥ 30% lower, yield not lower |
 | 6 | Research sessions handed Jev-retrieved prior results; their abstention against control | 0; 2,561 finished research sessions in 24 h, 566 with a candidate (22%) | all; lower |
 
+**Row 4's baseline: what adverse selection costs the Kalshi makers now** (06:32Z; buy fills of event
+contracts Sept 22 00:00Z to 06:31Z Sept 25 from `book.fill`, marked with the held side's midpoint from the
+recorded market snapshots the strategies were shown, `recordings.sqlite` `markets:*`, 14,522 snapshots; a
+markout is value 15 minutes after the fill (first snapshot 15-25 minutes later) less the fill price, times
+the contracts; fills with no snapshot in that window are not marked, e.g. most 15-minute crypto markets,
+which settle first):
+
+| Book | Liquidity | Category | Fills | Marked at 15 min | 15-min markout | Per marked fill |
+|---|---|---|---:|---:|---:|---:|
+| practice | maker | crypto | 134 | 36 | −$100.01 | −$2.78 |
+| practice | maker | weather | 127 | 118 | −$41.39 | −$0.35 |
+| practice | maker | sports | 34 | 22 | −$5.47 | −$0.25 |
+| practice | maker | other | 104 | 64 | −$38.24 | −$0.60 |
+| practice | taker | sports | 150 | 115 | −$9.99 | −$0.09 |
+| real | maker | crypto | 60 | 35 | −$0.54 | −$0.02 |
+| real | maker | weather | 35 | 31 | +$0.22 | +$0.01 |
+| real | maker | other | 5 | 5 | −$1.08 | −$0.22 |
+| real | taker | sports | 22 | 15 | −$0.83 | −$0.06 |
+
+Practice makers gave back $185 in 15 minutes on 240 marked fills (the practice book fills a resting quote
+when a venue trade prints through it, so its makers are picked off by construction); real makers, at
+$5-10 stakes, $1.40 on 71. That is the pool the move sensor can shrink, and the comparison J1's acceptance
+makes (users against their parents) uses this same markout.
+
 Other J0 readings: the gate's lifetime totals run 6,182, sample 1,350, skip 11,994 (Jev cost $0.023); in
 the 24 h window `abstain_lock` skipped 2,590 sessions without asking Jev at all (the lock admits only the
 agent's own venue outcomes). Triage reads 1,768 ledger rows behind the head (cursor 672,259 of 674,027);
