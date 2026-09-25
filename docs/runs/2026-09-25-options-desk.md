@@ -271,5 +271,10 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   order.
 - **13:38Z (krasker-22's first wake, 13:32:37Z):** woke without error, its six underlyings offered, "Options gap
   drift. nothing to do." (no 2-sigma, 3% move to ride); options-shadow marked it at $200.
+- **14:01Z (13:30-14:01):** desk 10 wakes, 6 intents (5 wakes with intents), all single contracts: 6 fills (5
+  practice, 1 real), 0 refusals, 0 alerts. Closes on the day: krasker-11 +$8.97 (F put), krasker-10 -$26.03 (BAC
+  put), krasker-21 -$6.09 on 2 (AAL calls), krasker-14 -$11.00 (REAL: its draining AAL call sold at $0.04, R5's
+  drain of a probe on the losing options-pullback family); singles -$34.15. Structures: none (krasker-22 has no
+  signal). krasker-11 bought a SOFI put at $0.31.
 
 ## Report
