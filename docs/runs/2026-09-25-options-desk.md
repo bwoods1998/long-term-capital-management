@@ -337,5 +337,13 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   krasker-22 tried a credit-spread rewrite (no trades in replay) and a momentum debit-vertical rewrite (-93.32% in
   replay), both refused. The agents reach for structures from the brief and CONTRACT.md; the replay judges them as it
   judged the founders.
+- **15:31Z (15:00-15:31):** desk 10 wakes, 1 intent; krasker-14 (REAL, draining) sold a second AAL call, -$7.00;
+  singles on the day -$41.15.
+- **16:01Z (15:30-16:01):** **the first structure trade.** krasker-22 rewrote itself at 15:34:48Z by the House's
+  stuck-agent rule ("its own rules had not fired in 11 wakes with a live market in front of them, it had no record to
+  protect, and this file at least trades"), adopting a short-dated defined-risk credit-spread program whose replay had
+  failed at 15:34:26Z (17 trades, not passed). At 15:42:56Z it opened a CCL Oct 2 iron condor ($0.50 wings) on
+  options-shadow: accepted, filled 15:48:59Z at a held price of 0.17 (a $0.33 credit, $17 at risk), no refusal or
+  alert. From 15:54Z it has tried to close it; no close fill by 16:05Z.
 
 ## Report
