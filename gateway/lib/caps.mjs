@@ -105,15 +105,17 @@ export function caps(env = {}) {
 /**
  * What one order is worth, in micro-dollars.
  * `{ micro }` when it can be priced, `{ error }` when it cannot -- which is a refusal, not a pass.
- * `structures` is the list of structure types the real Alpaca account admits
- * (`admittedStructures(env)`); with none, a multi-leg order is refused as it always was. A priced
- * structure answers `{ micro, structure, opening }`: an open at its maximum loss, a close at zero.
+ * `structures` is the list of structure types the real Alpaca account may OPEN
+ * (`admittedStructures(env)`); with none, every multi-leg open is refused. A multi-leg order is always
+ * read by the structure rules (`structureNotional`), whatever the list: a priced structure answers
+ * `{ micro, structure, opening }`, an open at its maximum loss, a close at zero (the router then admits
+ * the close only when the account holds every leg it closes, `closeLegsHeldError`).
  */
 export function notional(venue, body, { reference = null, exit = false, structures = [] } = {}) {
   if (!body || typeof body !== 'object') return { error: 'An order body is required.' };
   if (venue === 'kalshi') return kalshiNotional(body, exit);
   if (venue === 'alpaca') {
-    return structures.length > 0 && isMultiLegOrder(body) ? structureNotional(body, structures) : alpacaNotional(body, reference);
+    return isMultiLegOrder(body) ? structureNotional(body, structures) : alpacaNotional(body, reference);
   }
   return { error: `Cannot price an order for an unknown venue: ${String(venue)}.` };
 }
@@ -520,13 +522,18 @@ export function structureOrder(body) {
 
 /**
  * A multi-leg order on the REAL account, priced: an open at its maximum loss (a debit type
- * `limit x 100 x qty`, a credit type `(K - credit) x 100 x qty`), a close at zero; a type the account
- * does not admit is refused.
+ * `limit x 100 x qty`, a credit type `(K - credit) x 100 x qty`), a close at zero. An OPEN of a type the
+ * account does not admit is refused. A CLOSE of any defined-risk type is priced whatever `admitted`
+ * says (Sept 25, 2026, the review of g/money, MAJOR): it only takes risk off, and the router admits it
+ * only when the account holds every leg it closes (`closeLegsHeldError`). Until then a close of a type
+ * not listed was refused, so a gateway deployed back to "off" -- which `league.ci` makes the only
+ * configuration while the constitution's O1 is off -- could never close a structure the account still
+ * held, and it was carried into expiry.
  */
 export function structureNotional(body, admitted = []) {
   const read = structureOrder(body);
   if (read.error) return { error: read.error };
-  if (!admitted.includes(read.type)) {
+  if (read.opening && !admitted.includes(read.type)) {
     return { error: `${named(read.type).replace(/^a/, 'A')} is not admitted on the real account: OPTION_STRUCTURES_REAL admits ${admitted.length ? admitted.join(', ') : 'none'}.` };
   }
   return { micro: read.maxLossMicro, structure: read.type, opening: read.opening };
@@ -543,8 +550,12 @@ export function structureNotional(body, admitted = []) {
 
 /**
  * Why a multi-leg CLOSE may not go to the real account given its `positions` (Alpaca's `GET v2/positions` rows:
- * `{symbol, qty, side}`, a short option reported with side "short" and a negative qty), or null when every leg is held.
- * `body` has already passed `structureOrder` as a close.
+ * `{symbol, qty, qty_available, side}`, a short option reported with side "short" and a negative qty), or null when every
+ * leg is held. `body` has already passed `structureOrder` as a close.
+ *
+ * What a leg may close is what is AVAILABLE (the review of g/money, Sept 25, 2026): `qty_available`, the part not already
+ * committed to an open order, when the row carries it (never more than `qty`); a row without it counts its `qty`. So a
+ * second close of legs a resting close already sells is refused here, not only at the venue.
  */
 export function closeLegsHeldError(body, positions) {
   if (!Array.isArray(positions)) return 'The account\'s positions could not be read as a list: a real close is not admitted unread.';
@@ -556,7 +567,14 @@ export function closeLegsHeldError(body, positions) {
     if (amount === null || amount === 0n) continue;
     const sign = row.side === 'short' ? -1n : row.side === 'long' ? 1n : (amount < 0n ? -1n : 1n);
     if ((row.side === 'short' || row.side === 'long') && (amount < 0n) !== (sign < 0n)) continue;  // a row that contradicts itself holds nothing
-    const magnitude = amount < 0n ? -amount : amount;
+    let magnitude = amount < 0n ? -amount : amount;
+    if (row.qty_available !== undefined && row.qty_available !== null) {
+      // Its sign is not relied on (only its size); one that cannot be read leaves nothing available.
+      const available = parsePico(row.qty_available);
+      const free = available === null ? 0n : (available < 0n ? -available : available);
+      if (free < magnitude) magnitude = free;
+    }
+    if (magnitude === 0n) continue;
     held.set(row.symbol, (held.get(row.symbol) ?? 0n) + sign * magnitude);
   }
   const short = [];
@@ -572,6 +590,20 @@ export function closeLegsHeldError(body, positions) {
   }
   if (short.length === 0) return null;
   return `A structure close must close legs the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
+}
+
+/**
+ * The position rows a CLOSE admitted just now takes out of a cached reading (the review of g/money, Sept 25, 2026): each
+ * leg's `qty x ratio_qty`, long legs down and short legs up, as side-less rows `closeLegsHeldError` reads by their sign. A
+ * second close of the same legs within the cache's few seconds is then read against what is left, not what was there.
+ */
+export function closedLegRows(body) {
+  const qty = parsePico(body.qty);
+  return body.legs.map(raw => {
+    const need = qty * (parsePico(raw.ratio_qty) / PICO);
+    const units = need / PICO;
+    return { symbol: raw.symbol, qty: String(LEG_INTENTS[raw.position_intent].sign > 0 ? -units : units) };
+  });
 }
 
 // --- the practice account ------------------------------------------------------------------------

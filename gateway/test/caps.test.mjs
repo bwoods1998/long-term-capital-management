@@ -135,8 +135,9 @@ test('an option order is long premium only: it opens by buying and closes by sel
 });
 
 test('an option order is one leg, a limit order, in whole contracts', () => {
-  assert.match(notional('alpaca', option({ order_class: 'mleg' })).error, /Multi-leg/);
-  assert.match(notional('alpaca', option({ legs: [] })).error, /Multi-leg/);
+  // A multi-leg order is read by the structure rules (Sept 25, 2026), which refuse these shapes.
+  assert.match(notional('alpaca', option({ order_class: 'mleg' })).error, /multi-leg/i);
+  assert.match(notional('alpaca', option({ legs: [] })).error, /multi-leg/i);
   assert.match(notional('alpaca', option({ type: 'market', limit_price: undefined })).error, /limit order/);
   assert.match(notional('alpaca', option({ limit_price: undefined })).error, /limit price/);
   assert.match(notional('alpaca', option({ qty: '0.5' })).error, /whole number/);
@@ -185,12 +186,17 @@ const WRITTEN_PUT = {
   legs: [{ symbol: PUT, ratio_qty: '1', side: 'sell', position_intent: 'sell_to_open' }],
 };
 
+//: Since Sept 25, 2026 (the review of g/money) every multi-leg order to the real account is read by the structure rules,
+//: whatever OPTION_STRUCTURES_REAL admits: a malformed one is refused as a multi-leg order, an open of a type not admitted
+//: as not admitted. Neither is ever priced as a stock.
+const REFUSED_MLEG = /multi-leg|not admitted on the real account/i;
+
 test('a multi-leg order is never priced as a stock: the $210 spread and the written put are refused', () => {
   // On main these were metered at $2.10 and $0.25.
   for (const [name, body] of [['debit spread', DEBIT_SPREAD], ['written put', WRITTEN_PUT]]) {
     for (const extra of [{}, { symbol: 'SPY' }, { symbol: CALL }]) {
       const priced = notional('alpaca', { ...body, ...extra }, { reference: '500' });
-      assert.match(priced.error ?? '', /Multi-leg/, `${name} ${JSON.stringify(extra)}`);
+      assert.match(priced.error ?? '', REFUSED_MLEG, `${name} ${JSON.stringify(extra)}`);
       assert.equal(priced.micro, undefined, `${name} ${JSON.stringify(extra)} was priced`);
     }
   }
@@ -198,14 +204,14 @@ test('a multi-leg order is never priced as a stock: the $210 spread and the writ
   // order_class other than "simple" are all refused.
   const { order_class: _, ...legsAlone } = WRITTEN_PUT;
   for (const body of [legsAlone, { ...legsAlone, order_class: 'simple' }, { ...legsAlone, symbol: PUT, side: 'buy', position_intent: 'buy_to_open' }]) {
-    assert.match(notional('alpaca', body).error ?? '', /Multi-leg/, JSON.stringify(body));
+    assert.match(notional('alpaca', body).error ?? '', REFUSED_MLEG, JSON.stringify(body));
   }
   for (const legs of [[], {}, null, 'x']) {
-    assert.match(notional('alpaca', { symbol: 'AAPL', qty: '1', limit_price: '1', legs }).error ?? '', /Multi-leg/, JSON.stringify(legs));
+    assert.match(notional('alpaca', { symbol: 'AAPL', qty: '1', limit_price: '1', legs }).error ?? '', REFUSED_MLEG, JSON.stringify(legs));
   }
   for (const orderClass of ['mleg', 'bracket', 'oco', 'oto', 'MLEG', '', null, 0]) {
     const body = { symbol: 'AAPL', qty: '1', side: 'buy', type: 'limit', limit_price: '1', order_class: orderClass };
-    assert.match(notional('alpaca', body).error ?? '', /Multi-leg/, JSON.stringify(orderClass));
+    assert.match(notional('alpaca', body).error ?? '', REFUSED_MLEG, JSON.stringify(orderClass));
   }
 });
 
