@@ -702,6 +702,61 @@ class ThroughTheBook(ShadowCase):
         self.assertEqual(book.account("alice").holdings, {})
         self.assertEqual(book.account("alice").realized, (D("0.52") - D("0.55")) * 100 - D("0.20"))
 
+    def entry(self, instrument, limit="0.55"):
+        self.n += 1
+        return Intent.new(agent="alice", instrument=instrument, side="buy", quantity="1", order_type="limit", limit_price=limit,
+                          reason=f"test {self.n}", created_at=now_iso(self.clock), nonce=str(self.n))
+
+    def test_a_structure_is_opened_on_its_expiry_day_until_14_30_new_york_and_a_single_option_is_not(self):
+        self.clock.now = epoch("2026-09-28T14:00:00Z")  # 10:00 New York on the vertical's expiry day
+        self.quote_vertical()
+        [single] = self.book.submit([self.entry(instrument_for(V, {"occ": occ(580)}), "1.55")])
+        self.assertEqual(single.status, "refused")
+        self.assertIn("an option entry must expire after today", single.detail)  # a single contract: as before
+        self.clock.now = epoch("2026-09-28T18:29:00Z")  # 14:29
+        self.quote_vertical()
+        [early] = self.book.submit([self.entry(self.vertical)])
+        self.assertEqual(early.status, "resting", early.detail)
+        self.clock.now = epoch("2026-09-28T18:30:00Z")  # 14:30
+        self.quote_vertical()
+        [late] = self.book.submit([self.entry(self.vertical, "0.54")])
+        self.assertEqual(late.status, "refused")
+        self.assertIn("a structure is not opened after 14:30 New York on its expiry day", late.detail)
+        self.clock.now = epoch("2026-09-29T14:00:00Z")
+        self.quote_vertical()
+        [gone] = self.book.submit([self.entry(self.vertical, "0.53")])
+        self.assertIn("this structure's earliest leg has expired", gone.detail)
+
+    def test_on_an_early_close_the_last_entry_is_ninety_minutes_before_it(self):
+        friday = structures.instrument(spec("debit_vertical", (580, "long", "C", "261127", 1), (581, "short", "C", "261127", 1)), V)
+        for at, limit in (("2026-11-27T16:29:00Z", "0.55"), ("2026-11-27T16:30:00Z", "0.54")):  # 11:29 and 11:30 New York
+            self.clock.now = epoch(at)
+            self.legs.set(occ(580, expiry="261127"), "1.50", "1.55")
+            self.legs.set(occ(581, expiry="261127"), "1.00", "1.04")
+            [outcome] = self.book.submit([self.entry(friday, limit)])
+            if limit == "0.55":
+                self.assertEqual(outcome.status, "resting", outcome.detail)  # the day after Thanksgiving closes at 13:00
+            else:
+                self.assertEqual(outcome.status, "refused")
+                self.assertIn("a structure is not opened after 11:30 New York on its expiry day "
+                              "(ninety minutes before today's early close)", outcome.detail)
+
+    def test_a_structure_whose_bid_comes_to_nothing_is_marked_at_nothing(self):
+        self.book.submit([self.wish("buy", "1", "0.55")])
+        self.requote()
+        self.book.mark()
+        self.assertEqual(self.book.marks[self.vertical.key], D("0.46"))
+        self.later(10)
+        self.legs.rows.pop(occ(581))  # a leg unquoted: no quote at all, and the last mark stands
+        self.book.mark()
+        self.assertEqual(self.book.marks[self.vertical.key], D("0.46"))
+        self.later(10)
+        self.quote_vertical(low=("1.00", "1.10"), high=("1.02", "1.06"))  # every leg two-sided; the bid 1.00 - 1.06 is nothing
+        self.book.mark()
+        self.assertEqual(self.book.marks[self.vertical.key], D(0))
+        self.assertEqual(self.book.equity("alice"), D(200) - D("55.10"))
+        self.reconciled()
+
     def test_a_structure_is_never_crossed_inside_the_house(self):
         """Both orders go to the account and each fills against the market alone (review of Sept 25, 2026: the
         House's D3 cross filled the bidder under the ask and the seller in the quote its decision saw)."""
