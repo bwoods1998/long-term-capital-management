@@ -237,6 +237,14 @@ class Days(TestCase):
         self.assertEqual(out['2026-09-24'].pnl_usd, Decimal('-5'))
         self.assertIsNone(build_days('kalshi', family_rows=rows, envelopes=envelopes, pnl=pnl[2:], first_day='2026-09-23',
                                      last_day='2026-09-23', ratio='0.5')['2026-09-23'].pnl_usd)  # no pass before the day
+        # A day with the allocator's readings and no mark pass inside it is unmeasured, never $0 (review of #313).
+        dark = build_days('kalshi', family_rows=rows, envelopes=envelopes, pnl=[pnl[0], pnl[3]], first_day='2026-09-23',
+                          last_day='2026-09-24', ratio='0.5')
+        self.assertEqual((dark['2026-09-23'].readings, dark['2026-09-23'].pnl_usd), (24, None))
+        self.assertEqual(dark['2026-09-24'].pnl_usd, Decimal('-3'))  # 1 at 00:01Z Sept 24 less 4 before Sept 23
+        lit = Day('2026-09-23', Decimal('400'), Decimal('546.83'), 24, dark['2026-09-23'].pnl_usd)  # capacity passing
+        result = evaluate(BLOCK, days(_2026_09_23=lit), today=TODAY, envelope='546.83', funded='2000')
+        self.assertEqual([(f['condition'], f['pnl_usd']) for f in result['fails']], [('pnl', None)])
 
     def test_losses_count_in_full_realized_and_marked_on_every_real_account(self):
         tmp = tempfile.TemporaryDirectory()

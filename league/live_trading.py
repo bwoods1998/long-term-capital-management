@@ -189,9 +189,9 @@ def grant_version(db, *, now):
 
 
 def _earlier_intervals(db, ident):
-    """The grant's EARLIER version-2 intervals, [[ratified, switched off, its scale_tranches]], oldest first: each version-2 row but the last,
-    to the next version row or the first re-pin of the grant after it (`live_ratifications`: a money rule moved, which
-    switches version 2 off), whichever came first. `grants.replay` replays them first, so a re-ratification never erases
+    """The grant's EARLIER version-2 intervals, [[ratified, switched off, the scale_tranches block ratified]], oldest
+    first: each version-2 row but the last, to the next version row or the first re-pin of the grant after it
+    (`live_ratifications`: a money rule moved, which switches version 2 off), whichever came first. `grants.replay` replays them first, so a re-ratification never erases
     a withdrawal (review of #313)."""
     try:
         rows = [(int(v), float(at), policy) for v, at, policy in

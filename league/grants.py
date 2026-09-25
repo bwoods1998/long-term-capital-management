@@ -398,6 +398,11 @@ def build_days(venue: str, *, family_rows: Sequence[tuple[float, Mapping[str, An
             i += 1
         seen = [value for at, value in envelopes if start <= at < end]
         before, after = value_before(pnl, start, inclusive=False), value_before(pnl, end, inclusive=False)
+        k = bisect.bisect_left(pnl, (start, Decimal('-Infinity')))
+        if not (k < len(pnl) and pnl[k][0] < end):
+            # No mark pass inside the day (review of #313): its P&L is unmeasured, not $0 -- the books were dark (a venue
+            # whose poll failed all day, the House down) while the allocator may still have published readings.
+            after = None
         out[day] = Day(day, min(values), max(seen) if seen else None, len(seen),
                        None if before is None or after is None else after - before)
         day = day_of(end)
