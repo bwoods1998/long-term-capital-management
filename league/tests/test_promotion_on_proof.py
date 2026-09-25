@@ -799,9 +799,11 @@ class ProbesAndBunts(KalshiHouse):
     def test_the_book_reads_the_familys_taker_record(self):
         a = self.agent()
         alloc = self.house.allocator
-        # The forward-first run's M2 (Sept 25, 2026) adds the agent's band, whether it may take, and the proof's count.
+        # The forward-first run's M2 (Sept 25, 2026) adds the agent's band, whether it may take, and the proof's count (and,
+        # for a probe that may take, its one position's cap: the Deploy B review).
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 4,
-                                                   "mean_log": 0.01, "bound": -0.01, "band": None, "may_take": False, "proof_min": 5})
+                                                   "mean_log": 0.01, "bound": -0.01, "band": None, "may_take": False,
+                                                   "probe_cap_usd": None, "proof_min": 5})
         self.families["weather-favorites"] = canned("weather-favorites", proven=True, n=12, bound=0.002, taker_positive=True)
         alloc.rebalance()
         self.assertTrue(alloc.family_taker(a.id)["positive"])
@@ -817,7 +819,8 @@ class ProbesAndBunts(KalshiHouse):
         alloc.rebalance()
         self.assertEqual(alloc.tier(a), "bunt")
         self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                   "mean_log": 0.0, "bound": None, "band": None, "may_take": False, "proof_min": 5})
+                                                   "mean_log": 0.0, "bound": None, "band": None, "may_take": False,
+                                                   "probe_cap_usd": None, "proof_min": 5})
 
     def test_the_audit_judges_a_probe_as_a_probe(self):
         a = self.agent()
@@ -1079,10 +1082,11 @@ class TrialOnTheFloor(KalshiHouse):
             self.assertEqual(out.get("agent"), a.id)
             self.assertIn(out.get("skipped"), (None, "no data"))  # past its seat: the fake venue lists no market
             self.assertEqual(self.house.books["kalshi"].limits[a.id].max_position_usd, D("2.00"))  # a probe's
-            # An unreadable record is an unproven family's: its PROBE may take (M2, one position at its cap), no bunt could.
+            # An unreadable record is an unproven family's, and its entries are post-only, as the alert says: not even a
+            # probe takes on it (the Deploy B review, Sept 25, 2026: its bunts would have read "probe" and taken).
             self.assertEqual(alloc.family_taker(a.id), {"family": "weather-favorites", "positive": False, "n": 0,
-                                                       "mean_log": 0.0, "bound": None, "band": "probe", "may_take": True,
-                                                       "proof_min": 5})
+                                                       "mean_log": 0.0, "bound": None, "band": "probe", "may_take": False,
+                                                       "probe_cap_usd": None, "proof_min": 5})
             with self.evidence_of({a.id: dict(self.READY, **self.SWING_READY)}):
                 summary = alloc.rebalance()
                 alloc.rebalance()
@@ -1164,7 +1168,8 @@ class RulesText(unittest.TestCase):
         text = " ".join(rules_text(game).split())
         self.assertIn("REAL MONEY AT KALSHI. Entries:", text)
         # The forward-first run's M2 (Sept 25, 2026): a probe may take; a bunt's or a swing's entry is post-only until the proof.
-        self.assertIn("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap; a bunt's or a "
+        self.assertIn("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap in all (what it "
+                      "holds that it took and its crossing buys count); a bunt's or a "
                       "swing's entry must be a POST-ONLY LIMIT until your family's pooled TAKER record is proven positive (5 or more "
                       "independent taker events with the lower bound above zero)", text)
         old = {**CONSTITUTION, "allocator": {**CONSTITUTION["allocator"], "real_entry_liquidity": "maker_unless_family_taker_positive"}}

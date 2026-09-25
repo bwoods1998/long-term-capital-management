@@ -1237,7 +1237,8 @@ class Book:
           mechanisms were the loss engine of the allocator's nine promotions to real money (15-minute
           crypto momentum at 182 bps, MLB-total takers at a 7% fee; settled -$18.62 on 16). Under
           "probe_may_take" (M2, Sept 25, 2026) the allocator's `may_take` decides: a PROBE may take, one
-          position at its cap; a bunt or a swing on the taker record. The refusal names the band.
+          position at its cap in all (`_probe_taker_room`); a bunt or a swing on the taker record. The
+          refusal names the band.
         - `max_event_share`: the agent's exposure to one event -- its holdings there at cost, its
           working buys on every market of the event, and this order -- at most that share of its
           equity on the book. meriwether-h7d7702 held NO at strikes 6, 7 and 8 of one MLB total, which
@@ -1252,6 +1253,8 @@ class Book:
             # may; a bunt or a swing on its family's taker proof). A probe's taker entry is one position, its cap.
             allowed = record is not None and (record.get("may_take") if liquidity == PROBE_MAY_TAKE and "may_take" in record
                                                else record.get("positive")) is True
+            if allowed and liquidity == PROBE_MAY_TAKE and record.get("positive") is not True:
+                reasons.extend(self._probe_taker_room(intent, quote, account, record))  # a probe's taking: one position
             if not allowed:
                 family = str((record or {}).get("family") or "").strip()
                 band = str((record or {}).get("band") or "").strip()
@@ -1287,6 +1290,53 @@ class Book:
                         "constitution allocator.max_event_share)"
                     )
         return reasons
+
+    def _probe_taker_room(self, intent: Intent, quote: Quote | None, account: Account, record: Mapping[str, Any]) -> list[str]:
+        """M2 (Sept 25, 2026; the Deploy B money review): a PROBE that may take only because it is a probe (its family's
+        taker record is not proven) takes one position at its cap, in all -- what it holds that it bought at the price, its
+        working buys that were not post-only, and this order at most `probe_cap_usd` (`Allocator.family_taker`:
+        `position_share_event` of a probe's stake, $2 of a $10 Kalshi probe), else the book's position cap. The per-market
+        cap alone let a $10 probe take $2 on each of five events, its whole stake at the ask (three filled in the review's
+        run). A taker order the book cannot price is refused: unmeasured is not room."""
+        cap = record.get("probe_cap_usd")
+        if cap is None:
+            limits = self.limits.get(intent.agent)
+            cap = limits.max_position_usd if limits is not None else None
+        rule = "(constitution allocator.real_entry_liquidity: probe_may_take)"
+        price = intent.limit_price if intent.order_type == "limit" and intent.limit_price else (quote.ask if quote is not None else None)
+        if cap is None or price is None or price <= 0:
+            return [f"a probe's taker entry cannot be priced against its one position's cap here: send a limit with post_only {rule}"]
+        cap = money(cap)
+        order = intent.quantity * price * intent.instrument.multiplier
+        taken = self._taker_exposure(intent.agent, account)
+        if taken + order <= cap:
+            return []
+        return [f"a probe takes the price for one position at its cap: it holds or bids ${taken:.2f} it took, and this order's "
+                f"${order:.2f} would make ${taken + order:.2f}, over its ${cap:.2f} (position_share_event of a probe's stake); "
+                f"send a limit with post_only, or take again once what it took has settled {rule}"]
+
+    def _taker_exposure(self, agent: str, account: Account) -> Decimal:
+        """What `agent` holds at cost on event markets it bought at the price (a buy that was not post-only filled there;
+        the whole holding counts, the safe side), plus what is left of its open buys that are not post-only, at their
+        limit: M2's probe taker room (`_probe_taker_room`)."""
+        taken: set[str] = set()
+        working = ZERO
+        with self._lock:
+            for order in list(self.orders.values()):
+                if order.side != "buy" or order.post_only or order.instrument.asset_class != "event":
+                    continue
+                shares = [share for share in order.shares if share.agent == agent]
+                if not shares:
+                    continue
+                if any(share.filled > 0 for share in shares) or order.filled > 0:
+                    taken.add(order.instrument.key)
+                if order.open:
+                    price = order.limit_price or order.reference_price or ZERO
+                    left = sum((share.quantity - share.filled for share in shares), ZERO)
+                    working += max(left, ZERO) * price * order.instrument.multiplier
+            held = sum((h.cost for key, h in account.holdings.items()
+                        if key in taken and h.cost > 0 and h.instrument.asset_class == "event"), ZERO)
+        return held + working
 
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules

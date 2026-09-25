@@ -226,6 +226,45 @@ class ReKey(Scenario):
         self.assertNotEqual(self.record(self.ledger, self.registry, FAMILY)["n"], self.record(other, clean_registry, FAMILY)["n"])
 
 
+class CreditAtEntry(Scenario):
+    """The Deploy B money review (Sept 25, 2026): a trade counts for the family whose program ENTERED it. Read by its close,
+    a real member sent back to practice and rewritten in place before its contracts settled (meriwether-h2d625d always
+    holds open run-unders, 2-27 h before the first pitch) moved their settlements, dates and dollars out of the proven
+    family's real record into its new program's, while its at-risk entries and `Allocator.proven_code` stayed with the old."""
+
+    def test_a_position_entered_under_the_program_and_settled_after_a_rewrite_stays_with_the_program(self):
+        ledger, registry = self.ledger, self.registry
+        founder = self.born(registry, "meriwether", PROGRAM)
+
+        def stake(usd, book):
+            ledger.append("book.stake", {"book": book, "usd": str(usd), "note": "t", "real_money": book == "kalshi"}, agent=founder.id)
+
+        def buy(ticker):
+            inst = self.inst(ticker, venue="kalshi")
+            ledger.append("book.fill", {"book": "kalshi", "source": "venue", "side": "buy", "realized": None, "flat": None,
+                                        "instrument": inst, "quantity": "10", "price": "0.50", "cash_delta": "-5.0",
+                                        "liquidity": "taker"}, agent=founder.id)
+            return inst
+
+        def settle(inst, pnl):
+            ledger.append("book.settle", {"book": "kalshi", "instrument": inst, "pnl": str(pnl), "cost": "1", "payout": "1",
+                                          "quantity": "10", "result": "no"}, agent=founder.id)
+
+        stake(200, "kalshi-shadow")
+        stake(30, "kalshi")
+        settle(buy("KXMLBTOTAL-26SEP241310TBPHI-8"), "4.65")
+        still_open = buy("KXMLBTOTAL-26SEP251310TBPHI-8")  # entered by the run-under program, open at the rewrite
+        registry.adopt(founder.id, code=WNBA, needs=needs(WNBA), params={}, reason="rewritten in place")
+        self.rekey(ledger, registry)
+        settle(still_open, "5.00")
+        wnba = registry.get(founder.id).family
+        self.assertNotEqual(wnba, FAMILY)
+        old, new = self.record(ledger, registry, FAMILY), self.record(ledger, registry, wnba)
+        self.assertEqual((old["real"]["n"], new["real"]["n"]), (2, 0))
+        self.assertAlmostEqual(old["dollars"]["real"], 9.65, places=6)
+        self.assertEqual(new["dollars"]["real"], 0)
+
+
 class Place(Scenario):
     """`MechanismIndex.place`: the family a program is born into."""
 

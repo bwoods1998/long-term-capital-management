@@ -657,7 +657,8 @@ class Allocator:
         state.setdefault("family_rows_at", 0.0)
         # The probe gate's holds (R5, Sept 24, 2026; `fold_demotions`): the ledger position folded to ("cursor"; none: the
         # whole ledger is folded at the first pass), each family's latest probe demotion ("families") and the mechanism
-        # ledger's state per family and venue as its `family.record` rows said it ("states").
+        # ledger's state per family and venue as its `family.record` rows said it ("states"). Under C8's mechanism keys they
+        # are "probe_holds_mechanism" (`holds_key`), and "probe_holds" stays as a label-keyed release left it.
         state.setdefault("probe_holds", {})
         return state
 
@@ -989,12 +990,14 @@ class Allocator:
                 self._lapse_approval(key, f"the family left the swing ({state})")
             elif lapse:
                 self._lapse_approval(key, lapse)
+            elif state == "swing" and before != "swing":
+                self._confirm_prepared(key)  # a prepared approval licensed its look: it is the entry's approval now
             # The audit is asked for at a passing look, or ahead of the next look (`audit.pre_pack`, M1 of the forward-first
             # run): the look it is prepared for rides on its state (`_swing_approval`).
             look = self._audit_look(record, rule, entry) if proven and released and state != "swing" else None
             if look is not None:
                 try:
-                    self._request_family_audit(key, out, members_real, look=look)
+                    self._request_family_audit(key, out, members_real, look=look, ahead=not entry)
                 except Exception as exc:  # noqa: BLE001 - asking for the audit is not the record (review of #242)
                     # A failure here (the member's evidence unreadable, say) used to make the whole family unreadable
                     # for money: its proven members were swept to probes at every pass it lasted. It is told once and
@@ -1100,24 +1103,45 @@ class Allocator:
 
         M2 of the forward-first run (Sept 25, 2026): `positive` is the family's taker proof -- `taker_proof_min` (5)
         independent taker events with the honest bound above zero (`families.family_record`) -- and `may_take` whether
-        this agent may enter as a taker now: under `real_entry_liquidity: "probe_may_take"` a PROBE always may (its one
-        position is the book's cap, `position_share_event` of its stake), a bunt or a swing only on the family's proof.
-        `band` is the agent's real band ("probe", "bunt" or "swing"; None below real money), so the book's refusal names
-        it."""
+        this agent may enter as a taker now: under `real_entry_liquidity: "probe_may_take"` a PROBE may (one position at
+        its cap, `position_share_event` of a probe's stake: `probe_cap_usd`, which the book holds its taker exposure to), a
+        bunt or a swing only on the family's proof. `band` is the agent's real band ("probe", "bunt" or "swing"; None below
+        real money), so the book's refusal names it.
+
+        A probe takes only as a probe (the Deploy B money review, Sept 25, 2026): never while its family's record could not
+        be read this pass (an unreadable record counts as an unproven family's, whose bunts would otherwise have become
+        "probes" that take: the fallback is post-only, as `_family_error` says), and never while its account is sized above
+        a probe's (`_probe_sized`: a family that lost its proof leaves its $30 bunts staked by free cash only, with $6
+        positions, while their contracts are open)."""
         if not enabled():
             return None
         agent = self.house.registry.get(agent_id)
         if agent is None:
             return None
-        taker = self.family(agent.family, agent.venue)["taker"]
+        record = self.family(agent.family, agent.venue)
+        taker = record["taker"]
         positive = bool(taker["positive"])
         rung = self.house.evaluator.rung(agent_id)
         band = ("swing" if rung >= 3 else self.rung2_band(agent)) if rung >= 2 else None
         probes_take = str(rules().get("real_entry_liquidity") or "") == "probe_may_take"
+        probe_take, cap = False, None
+        if probes_take and band == "probe" and not record.get("error"):
+            probe_take, cap = self._probe_sized(agent)
         return {"family": agent.family, "positive": positive, "n": int(taker["n"]),
                 "mean_log": float(taker["mean_log"]), "bound": taker["bound"], "band": band,
-                "may_take": positive or (probes_take and band == "probe"),
+                "may_take": positive or probe_take, "probe_cap_usd": None if cap is None else str(cap),
                 "proof_min": int(rules().get("taker_proof_min") or families.proof_rule()["min_independent_settlements"])}
+
+    def _probe_sized(self, agent: Any) -> tuple[bool, Decimal]:
+        """(whether the agent's real account is held to a probe's position cap, that cap): the position `limits` gives its
+        account now against `limits_for` of a probe's own stake (`target_stake(agent, "probe")`: `probe_bunt_usd`, its
+        class's, grown by its own W_real). M2's probe takes at most that, in all (`Book._real_entry_reasons`)."""
+        book = self.house.book_of(agent)
+        account = (getattr(book, "accounts", None) or {}).get(agent.id) if book is not None else None
+        staked = account.staked if account is not None else _d("0")
+        position, _ = self.limits(agent, staked)
+        cap, _ = limits_for(self.target_stake(agent, "probe", self._evidence.get(agent.id)), agent.venue)
+        return position <= cap, cap
 
     def _family_note(self, agent: Any) -> str:
         r = self.family(agent.family, agent.venue)
@@ -1186,14 +1210,19 @@ class Allocator:
         An audit asked for a LOOK (`look` on its state: M1's pre-pack, Sept 25, 2026, `_audit_look`) licenses that look and
         later ones, and lapses at a look at or after it that does not pass (`look`: the record's entry look now): an
         approval prepared at the 8th real settlement for the look at 10 is not carried to the look at 15 over a failed
-        look at 10; the next look's packet is prepared again."""
+        look at 10; the next look's packet is prepared again. One asked AHEAD of its look is kept as "prepared", not
+        "done" (the Deploy B money review, Sept 25, 2026): it licenses nothing until that look passes, and a release
+        that knows no pre-pack (Deploy A, after a rollback) reads no approval in it and asks its own auditor at its own
+        passing look, rather than entering on an approval given for a look with a dates gate it does not have."""
         with self._lock:
             audit = dict((self.state.get("family_audits") or {}).get(key) or {})
-        if audit.get("status") != "done" or audit.get("approve") is not True:
+        if audit.get("status") not in ("done", "prepared") or audit.get("approve") is not True:
             return False, None
         prepared, at = audit.get("look"), (look or {}).get("checkpoint")
         if prepared is not None and at is not None and int(at) >= int(prepared) and not (look or {}).get("ready"):
             return False, f"its approval was prepared for the look at {prepared} real settlements, and the look at {at} did not pass"
+        if audit.get("status") == "prepared" and not (prepared is not None and at is not None and int(at) >= int(prepared)):
+            return False, None  # prepared ahead: its look has not come
         since = int(audit.get("started_seq") or 0)
         members = self._members(family, venue)
         changed = sorted(a.id for a in members if self._tape.programs.get(a.id, 0) > since)
@@ -1213,7 +1242,7 @@ class Allocator:
         with self._lock:
             audits = self.state.setdefault("family_audits", {})
             was = dict(audits.get(key) or {})
-            if was.get("status") != "done" or was.get("approve") is not True:
+            if was.get("status") not in ("done", "prepared") or was.get("approve") is not True:
                 return
             audits[key] = {"status": "lapsed", "why": why, "agent": was.get("agent"), "approved_at": was.get("at"),
                            "started_seq": was.get("started_seq"), "at": now_iso(self.house.clock), "at_epoch": self.house.clock()}
@@ -1222,14 +1251,27 @@ class Allocator:
         except Exception:  # noqa: BLE001 - a courtesy
             pass
 
+    def _confirm_prepared(self, key: str) -> None:
+        """A "prepared" approval whose look passed and entered the swing is the entry's approval ("done") from now on."""
+        with self._lock:
+            audits = self.state.setdefault("family_audits", {})
+            was = audits.get(key) or {}
+            if was.get("status") == "prepared" and was.get("approve") is True:
+                audits[key] = {**was, "status": "done"}
+
     def _audit_hours(self, error: bool) -> float:
         rules_ = (getattr(self.house, "game", None) or {}).get("audit") or {}
         return float(rules_.get("error_cooldown_hours", 0.5) if error else rules_.get("cooldown_hours", 72))
 
-    def _request_family_audit(self, key: str, record: Mapping[str, Any], members_real: int, *, look: int | None = None) -> None:
+    def _request_family_audit(self, key: str, record: Mapping[str, Any], members_real: int, *, look: int | None = None,
+                              ahead: bool = False) -> None:
         """Start the family's swing audit unless one runs, has approved, or waits out its cooldown. Without an
         auditor there is no family swing: a gate that fails open is not a gate. `look`: the entry look it is asked for
-        (`_audit_look`: a look that passed, or the next one ahead of it, M1's pre-pack), kept on its state."""
+        (`_audit_look`: a look that passed, or the next one ahead of it, M1's pre-pack), kept on its state with `ahead`
+        (asked before its look passed: its verdict is kept "prepared"). A veto given ahead of a look does not wait out the
+        cooldown once that look (or a later one) has PASSED: it is asked again there, as it would have been with no
+        pre-pack (the Deploy B money review, Sept 25, 2026: a veto at the 8th settlement held the passing look at 10 for
+        the whole `audit.cooldown_hours`, the opposite of the pre-pack's purpose)."""
         house = self.house
         if getattr(house, "auditor", None) is None or not hasattr(house, "_background"):
             return
@@ -1247,17 +1289,20 @@ class Allocator:
                 with self._lock:
                     self.state["family_audits"][key] = found
                 return
-        elif audit.get("status") == "done":
+        elif audit.get("status") in ("done", "prepared"):
             if audit.get("approve") is True:
                 return
-            if house.clock() - float(audit.get("at_epoch") or 0) < self._audit_hours(bool(audit.get("error"))) * 3600:
+            prepared = audit.get("look")
+            passed = (audit.get("status") == "prepared" and not ahead and look is not None and prepared is not None
+                      and int(look) >= int(prepared))
+            if not passed and house.clock() - float(audit.get("at_epoch") or 0) < self._audit_hours(bool(audit.get("error"))) * 3600:
                 return
         agent = self._family_representative(record)
         if agent is None:
             return
         verdict = self._family_swing_verdict(agent, record, key, members_real, look=look)
         running = {"status": "running", "agent": agent.id, "started_seq": int(house.ledger.head()[0]),
-                   "started_at": now_iso(house.clock), "at_epoch": house.clock(), "look": look}
+                   "started_at": now_iso(house.clock), "at_epoch": house.clock(), "look": look, "ahead": bool(ahead)}
         with self._lock:
             self.state["family_audits"][key] = running
         if not house._background(self.FAMILY_AUDIT + key, self._run_family_audit, key, agent.id, verdict):
@@ -1304,6 +1349,8 @@ class Allocator:
             # was asked for (M1's pre-pack): a look at or after it that does not pass lapses it (`_swing_approval`).
             done["started_seq"] = (audits.get(key) or {}).get("started_seq")
             done["look"] = (audits.get(key) or {}).get("look")
+            if (audits.get(key) or {}).get("ahead"):
+                done.update(status="prepared", ahead=True)  # asked ahead of its look: it licenses nothing until the look passes
             audits[key] = done
         try:
             house.alert("info", f"allocator: the {key} family swing's audit {'approved' if done['approve'] else 'did not approve'} "
@@ -1322,10 +1369,11 @@ class Allocator:
             p = entry.payload
             if p.get("family_swing") == key:
                 parsed = instant(entry.at)
-                return {"status": "done", "agent": agent, "approve": p.get("approve") is True and not p.get("error"),
+                return {"status": "prepared" if audit.get("ahead") else "done", "agent": agent,
+                        "approve": p.get("approve") is True and not p.get("error"),
                         "error": bool(p.get("error")), "summary": str(p.get("summary") or "")[:300], "at": entry.at,
                         "at_epoch": parsed.timestamp() if parsed else self.house.clock(), "started_seq": audit.get("started_seq"),
-                        "look": audit.get("look")}
+                        "look": audit.get("look"), **({"ahead": True} if audit.get("ahead") else {})}
         return None
 
     def _family_swing_verdict(self, agent: Any, record: Mapping[str, Any], key: str, members_real: int, *,
@@ -1586,10 +1634,10 @@ class Allocator:
                                               until_seq=through)
                 by_event = per_event(book)
                 for row in closed:
-                    if staked_base(stakes, row["seq"]) <= 0 or not families.within(where, row["seq"]):
-                        continue
-                    event = (event_key(row["instrument"]) if by_event else None) or f"{book}:{agent.id}:{row['seq']}"
                     opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
+                    if staked_base(stakes, row["seq"]) <= 0 or not families.within(where, opened):
+                        continue  # a trade counts for the family whose program ENTERED it (`families.family_record`)
+                    event = (event_key(row["instrument"]) if by_event else None) or f"{book}:{agent.id}:{row['seq']}"
                     code = next((c for s, c in reversed(history) if s <= opened), None)
                     events.add(event)
                     if code:
@@ -1716,8 +1764,22 @@ class Allocator:
         self._since[key] = (turned, blocks, growth)
         return self._since[key]
 
+    def holds_key(self) -> str:
+        """Where `allocator.json` keeps the probe gate's holds: "probe_holds" for holds keyed by the family label a birth
+        carries (Deploy A's), "probe_holds_mechanism" under C8's `allocator.family_key` "mechanism" (the Deploy B money
+        review, Sept 25, 2026). Kept apart so a rollback to a release that keys by label finds its own holds and cursor
+        as it left them and folds every demotion since by label: had the mechanism-keyed holds replaced them, with the
+        cursor at the ledger's head, it would never see the demotions made meanwhile, and would seat probes from a
+        family its own R5 holds (a probe that goes back to practice for ANY reason holds its family)."""
+        return "probe_holds_mechanism" if families.family_key_rule() == "mechanism" else "probe_holds"
+
+    def holds(self) -> dict[str, Any]:
+        """The probe gate's holds as `allocator.json` keeps them under the family key in force (`holds_key`)."""
+        with self._lock:
+            return dict(self.state.get(self.holds_key()) or {})
+
     def _fold_demotions(self) -> None:
-        """Fold the ledger's probe demotions since the last fold into `state["probe_holds"]` (`fold_demotions`); the first
+        """Fold the ledger's probe demotions since the last fold into `state[holds_key()]` (`fold_demotions`); the first
         fold reads the whole ledger, so the holds are the ledger's and a restart forgets nothing. The holds were pruned
         under the `reseat` rule they carry: under another (M5's deploy, Sept 25, 2026: "gain_since_demotion" to
         "bound_since_demotion") the whole ledger is folded again, so every demotion a turn under the old rule released is
@@ -1726,8 +1788,9 @@ class Allocator:
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return
+        key = self.holds_key()
         with self._lock:
-            kept = dict(self.state.get("probe_holds") or {})
+            kept = dict(self.state.get(key) or {})
         keyed = families.family_key_rule()
         if kept.get("reseat", "gain_since_demotion") != rule["reseat"] or kept.get("family_key", "label") != keyed:
             # M5's rule, or C8's keys (the one-time re-key at the start moves stretches of agents to other families,
@@ -1746,8 +1809,8 @@ class Allocator:
         if last is None and kept:
             return
         with self._lock:
-            self.state["probe_holds"] = {"cursor": last if last is not None else int(kept.get("cursor") or 0), "families": holds,
-                                         "states": states, "reseat": rule["reseat"], "family_key": keyed}
+            self.state[key] = {"cursor": last if last is not None else int(kept.get("cursor") or 0), "families": holds,
+                               "states": states, "reseat": rule["reseat"], "family_key": keyed}
 
     def _prune_holds(self) -> None:
         """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
@@ -1756,8 +1819,9 @@ class Allocator:
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return
+        key = self.holds_key()
         with self._lock:
-            holds = dict(((self.state.get("probe_holds") or {}).get("families")) or {})
+            holds = dict(((self.state.get(key) or {}).get("families")) or {})
         kept = {}
         for family, demotions in holds.items():
             pending = [d for d in (demotions if isinstance(demotions, list) else [demotions])
@@ -1766,7 +1830,7 @@ class Allocator:
                 kept[family] = pending
         if kept != holds:
             with self._lock:
-                self.state.setdefault("probe_holds", {})["families"] = kept
+                self.state.setdefault(key, {})["families"] = kept
 
     def probe_hold(self, family: str) -> dict[str, Any] | None:
         """The hold on `family` (R5, Sept 24, 2026), or None: the EARLIEST of its probe demotions from real money whose
@@ -1778,7 +1842,7 @@ class Allocator:
         if rule is None or not rule["hold"]:
             return None
         with self._lock:
-            demotions = ((self.state.get("probe_holds") or {}).get("families") or {}).get(family) or []
+            demotions = ((self.state.get(self.holds_key()) or {}).get("families") or {}).get(family) or []
             demotions = [dict(d) for d in (demotions if isinstance(demotions, list) else [demotions])]
         pending = []
         for demotion in demotions:
