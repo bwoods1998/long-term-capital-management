@@ -879,11 +879,25 @@ class Foundry:
                          + (f"; mechanism: {words[:160]}" if words else ""))
         return lines
 
+    @staticmethod
+    def _same_program(parent: Agent, child: Agent) -> bool:
+        """Whether `child` runs its parent's program: the same code, or -- under C8 (Sept 25, 2026; the constitution's
+        `allocator.family_key` "mechanism") -- the same family, which a child keeps only while its program is its
+        parent's beyond PARAMS (`families.MechanismIndex.place`). A research child that changed only its PARAMS
+        literal ran its parent's mechanism and was still read as a new one (its purpose, "tighten the band", stood for
+        the family's mechanism); one born into its own family is a mechanism of its own, whatever its label said."""
+        from .families import family_key_rule
+
+        if family_key_rule() == "mechanism":
+            return parent.family == child.family and parent.venue == child.venue
+        return parent.code_sha256 == child.code_sha256
+
     def _mechanism(self, agent: Agent) -> tuple[str, str]:
         """(words, where they came from): what an agent's program does, stated where that program was
         written -- its card's `mechanism`, the purpose it was adopted or born with (an architect's why,
         a research candidate's purpose), its founding seed's `why` -- walking up past parameter
-        mutations, which run their parent's program. Never the code."""
+        mutations, which run their parent's program (`_same_program`: under C8, past every child in its
+        parent's family). Never the code."""
         house = self.house
         seeds = {f.get("key"): f.get("seed") for niche in house.niches.values() for f in niche.founders}
         current, seen = agent, set()
@@ -901,7 +915,7 @@ class Foundry:
             if seed and SEED_WHY.get(seed):
                 return SEED_WHY[seed], f"founding seed {seed}"
             parent = house.registry.get(current.parent) if current.parent else None
-            if parent is None or parent.code_sha256 != current.code_sha256:
+            if parent is None or not self._same_program(parent, current):
                 born = house.ledger.get(f"born:{current.id}")
                 reason = str((born.payload if born is not None else {}).get("reason") or "").strip()
                 if reason and not reason.startswith(_MUTATION_REASONS):

@@ -793,6 +793,7 @@ class House:
         # when none has been born yet (see there for why this must outlive a restart).
         self._state.setdefault("last_newcomer", {}).setdefault("since", self._born_at)
         self._record_start()
+        self._key_families_at_start()  # C8: before the allocator's first pass reads a family
         # Every book's baseline is taken now, before anything can trade: what the venue holds at
         # this moment is what is not the book's. (Taken later, a resting order's reserved cash or a
         # first fill would be folded into the baseline and come back as a mismatch.)
@@ -2004,12 +2005,117 @@ class House:
         return self._markets_and_style(needs if isinstance(needs, Mapping) else {})
 
     def _candidate_family(self, parent: Agent, candidate: Mapping[str, Any], niche: Any) -> str:
-        """The family a research candidate of `parent` will be born into (`_program_family`), read from the NEEDS it was
-        replayed on: what it asks for a seat as, and what a retained one waits as (a proven family's first)."""
+        """The family a research candidate of `parent` will be born into (`_program_family`; C8's `_placed_family`), read
+        from the NEEDS it was replayed on: what it asks for a seat as, and what a retained one waits as (a proven family's
+        first)."""
+        from .families import family_key_rule
+
         code, needs = candidate.get("code"), candidate.get("needs")
         if not code or not isinstance(needs, Mapping) or code_sha(str(code)) == parent.code_sha256:
             return parent.family
+        if family_key_rule() == "mechanism":
+            return self._placed_family(parent.family, str(code), needs, niche, parent=parent.id)[0]
         return self._program_family(parent, parent.family, needs, niche)
+
+    # ------------------------------------------------------------------ C8: the family is the mechanism
+    #: One look at the family keys at a time (`_family_keys`): the index folds each row once, and the rows a look finds
+    #: are written by that look alone.
+    _family_key_lock = threading.RLock()
+
+    def _family_keys(self) -> Any:
+        """The House's `families.MechanismIndex` (C8, Sept 25, 2026), folded to the ledger's head, with every program that
+        took effect since it last looked CHECKED and each misfiled one re-keyed by an `agent.family` row, written here.
+        A House's first look checks from where the last House stopped (house.json `family_key_through`, or the re-key's
+        own row, `families.REKEY_ID`), and on a ledger that has neither, every program ever born: the ONE re-key of the
+        labels born before C8, recorded by that row with what it moved. No older row is edited."""
+        from . import families as families_module
+
+        with self._family_key_lock:
+            index = getattr(self, "_family_index", None)
+            first = index is None
+            if first:
+                index = families_module.MechanismIndex()
+                marker = self.ledger.get(families_module.REKEY_ID)
+                with self._state_lock:
+                    stopped = int(self._state.get("family_key_through") or 0)
+                check = max(int((marker.payload if marker is not None else {}).get("through") or 0), stopped)
+            else:
+                marker, check = None, index.cursor
+            try:
+                rows = index.refresh(self.ledger, check_after=check)
+                for row in rows:
+                    if self.ledger.get(row["id"]) is None:
+                        self.ledger.append("agent.family", row["payload"], agent=row["agent"], id=row["id"])
+            except BaseException:
+                # A look that fails part of the way may have filed programs in the index that no row records yet: the next
+                # look builds the index again and checks from where the last complete look stopped.
+                self._family_index = None
+                raise
+            if first and check == 0 and rows and marker is None:
+                moved: dict[str, dict[str, list[str]]] = {}
+                for row in rows:
+                    p = row["payload"]
+                    moved.setdefault(f"{p['was']}@{p['venue']}", {}).setdefault("out", []).append(row["agent"])
+                    moved.setdefault(f"{p['family']}@{p['venue']}", {}).setdefault("in", []).append(row["agent"])
+                self.ledger.append("agent.family", {"rekey": True, "through": index.cursor, "rows": len(rows),
+                                                    "agents": len({r["agent"] for r in rows}), "families": moved,
+                                                    "rule": "allocator.family_key"}, id=families_module.REKEY_ID)
+            self._family_index = index
+            with self._state_lock:
+                self._state["family_key_through"] = index.cursor
+        if rows:
+            self.registry.refresh()
+            agents = sorted({r["agent"] for r in rows})
+            self.alert("info", f"C8: {len(rows)} program{'s' if len(rows) != 1 else ''} of {len(agents)} agent{'s' if len(agents) != 1 else ''} "
+                               f"filed under the family of their mechanism ({', '.join(agents[:5])}{' ...' if len(agents) > 5 else ''}), "
+                               "each by an agent.family row" + (" (the one-time re-key of the labels born before C8)" if first and check == 0 else ""))
+        return index
+
+    def _key_families_at_start(self) -> None:
+        """C8 at a start (`_family_keys`): on the first start under `allocator.family_key` "mechanism", the one re-key of
+        the labels born before it, before the allocator's first pass reads a family. A look that fails is an error alert
+        (the deploy's watch reads it) and the floor goes on with the families as the rows had them."""
+        from .families import family_key_rule
+
+        if family_key_rule() != "mechanism":
+            return
+        try:
+            self._family_keys()
+        except Exception as exc:  # noqa: BLE001 - the floor must still start; the watch reads the error
+            self.alert("error", f"C8: the families could not be keyed by their mechanism at the start ({type(exc).__name__}: "
+                                f"{str(exc)[:200]}); every agent keeps the family its rows give it until the next look")
+
+    def _rekey_rewrite(self) -> None:
+        """C8 after an in-place rewrite (`_commit_research`): the look that files the new program under its mechanism's
+        family from the rewrite's own row on (`MechanismIndex` checks it: meriwether-h2d625d-4 rewrote itself into a
+        KXWNBAGAME favourite maker at 02:37Z Sept 25 and kept the proven run-unders' name). A look that fails leaves the
+        family as it was until the next one, with a warning."""
+        from .families import family_key_rule
+
+        if family_key_rule() != "mechanism":
+            return
+        try:
+            self._family_keys()
+        except Exception as exc:  # noqa: BLE001 - the rewrite stands; the next look files it
+            self.alert("warning", f"C8: a rewrite could not be filed under its mechanism's family now ({type(exc).__name__}: "
+                                  f"{str(exc)[:200]}); the next birth, rewrite or start looks again")
+
+    def _placed_family(self, label: str, code: str, needs: Mapping[str, Any], niche: Any, *,
+                       parent: str | None = None) -> tuple[str, str]:
+        """(family, why) of a program about to be born with `label` (C8, `families.MechanismIndex.place`): its parent's
+        family when it runs its parent's mechanism beyond PARAMS, its label when it founds it or runs its mechanism,
+        else the family its own mechanism names."""
+        from .families import program_needs
+
+        try:
+            index = self._family_keys()
+            lite = program_needs(needs)
+            desk = niche.id.split("-", 1)[-1] if niche is not None else lite["venue"]
+            return index.place(label, lite["venue"], index.key_of(code, needs), parent=parent, desk=desk, style=lite["style"])
+        except Exception as exc:  # noqa: BLE001 - a birth is not refused for it: the next look checks this birth and re-keys it
+            self.alert("warning", f"C8: a birth could not be placed by its mechanism now ({type(exc).__name__}: {str(exc)[:200]}); "
+                                  f"it is born into {label} and the next look files it")
+            return label, "the family keys could not be read"
 
     def spawn(self, name: str, family: str, code: str, *, parent: str | None = None, reason: str = "",
               # `name` is the line the agent is numbered from. Empty means "the desk its NEEDS put
@@ -2048,7 +2154,17 @@ class House:
             if keep_probe_awake:
                 self.sandbox.rest(PROBE_BOX)
             raise ValueError(f"{name}: {exc}") from exc
-        if new_code_of is not None and code_sha(code) != new_code_of.code_sha256:
+        from .families import family_key_rule
+
+        if family_key_rule() == "mechanism":
+            # C8 (Sept 25, 2026): the family is the program's mechanism (`_placed_family`), for a founder as for a child.
+            placed, why = self._placed_family(family, code, needs, niche, parent=parent)
+            if placed != family:
+                home = self.registry.get(parent).family if parent and self.registry.get(parent) else None
+                whose = "its parent's family" if placed == home else "its own family"
+                reason = f"{reason} [born into {whose} {placed}, not {family}: {why}]".strip()
+                family = placed
+        elif new_code_of is not None and code_sha(code) != new_code_of.code_sha256:
             own = self._program_family(new_code_of, family, needs, niche)
             if own != family:
                 reason = (f"{reason} [born into its own family {own}, not {family}: its NEEDS name other markets or another "
@@ -7892,6 +8008,7 @@ class House:
                 # its first real trade has created a record in the current book.
                 was = self.registry.get(agent.id).code_sha256
                 self.registry.adopt(agent.id, code=candidate["code"], needs=candidate["needs"], params=candidate["params"], reason=candidate["purpose"])
+                self._rekey_rewrite()  # C8: a rewrite into another mechanism takes the agent to that mechanism's family
                 self._state["tried"][agent.id] = self.registry.get(agent.id).code_sha256
                 self._state["idle"].pop(agent.id, None)  # new rules, a fresh count of the wakes they sit out
                 if repair and not candidate.get('passed', True):
