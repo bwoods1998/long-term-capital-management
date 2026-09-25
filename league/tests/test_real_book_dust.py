@@ -22,8 +22,10 @@ The evidence, read on the House box and the real Alpaca account (GET only):
   fill; the book froze on -0.0308, then -0.0324, until the restart above.
 """
 
+import json
 import unittest
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 from ltcm.broker import Instrument
@@ -35,6 +37,7 @@ from league.ledger import HOUSE, now_iso
 from league.tests.fakes import FakeBroker
 from league.tests.test_book import BookCase
 from league.venues import instrument_for
+from league.watchdog import HouseHealth
 
 D = Decimal
 SOL = Instrument("crypto", "SOL-USD", "alpaca", market_id="SOL/USD")
@@ -143,6 +146,40 @@ class TransitionTest(RestingBids):
         self.broker.cash -= D("0.0131")  # and only once: the next reading has its cent a fill, no more
         self.assertFalse(self.book.reconcile().ok)
 
+    def test_the_transition_allows_its_own_sign_only(self):
+        """The ledger stands 0.0131 BELOW the venue after the old reading. Before, the transition was
+        allowed either way: a real 3.5-cent shortfall nothing explains read -0.0219 against a tolerance
+        of 0.0231 and was booked as plain dust, with no alert."""
+        self.rest("haghani-62", STAYED)
+        self.rest("haghani-63", CANCELLED)
+        self.assertTrue(self.book.reconcile().ok)
+        self.old_reading()
+        self.book = self.new_book()
+        self.broker.cash -= D("0.035")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok, f"booked {result.dust_booked} as dust")
+        self.assertIn("cash differs by -0.0219", result.detail)
+
+    def test_no_listing_is_booked_against_the_transition(self):
+        """Bids whose old rounding left the ledger 0.0134 ABOVE the venue: the first H4 reading reads
+        -0.0134, which is that rounding, not a fee. Before, the stale CAT $0.01 was booked against it (as
+        live at 02:20:33Z Sept 25 against -0.0147) and only the rest taken back as dust."""
+        bids = [(SOL, "0.1", "116.0449"), (SOL, "0.1", "116.0448"), (SOL, "0.1", "116.0447")]
+        self.rest("haghani-62", bids)
+        self.assertTrue(self.book.reconcile().ok)
+        error = sum((D(q) * D(p) - (D(q) * D(p)).quantize(D("0.01"), rounding=ROUND_HALF_UP) for _, q, p in bids), D(0))
+        self.assertEqual(error, D("0.01344"))
+        self.ledger.append("book.fill", {"book": "alpaca", "source": "dust", "instrument": None, "quantity": "0", "price": "0",
+                                         "fee_usd": "0", "cash_delta": str(error), "position_delta": "0", "real_money": True}, agent=HOUSE)
+        self.ledger.append("book.reconciled", {"book": "alpaca", "ok": True, "cash_diff": "0.00000000", "position_diffs": {},
+                                               "dust_booked": "0", "detail": "", "real_money": True})
+        self.book = self.new_book()
+        self.broker.fee_activities = lambda since=None: [
+            {"id": "20260924::cat", "usd": D("0.01"), "date": "2026-09-24", "description": "CAT fee for proceed of 2 trades"}]
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, -error), result.detail)
+        self.assertEqual([e for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue-fee"], [])
+
     def test_a_reading_at_the_cent_leaves_nothing_to_take_back(self):
         self.rest("haghani-62", STAYED)
         self.assertTrue(self.book.reconcile().ok)
@@ -193,8 +230,8 @@ class RestartTest(RealAlpaca):
         self.assertEqual(result.dust_booked, D("-0.035"))
 
 
-class RealOptionFeesTest(RealAlpaca):
-    """The Sept 24 freeze: an option's fees on the real account, taken at the fill and listed later."""
+class RealOptions(RealAlpaca):
+    """The real Alpaca account of 18:19:57Z Sept 24, 2026, before its first option buy."""
 
     cash = "499.73"
 
@@ -213,6 +250,10 @@ class RealOptionFeesTest(RealAlpaca):
     def buy(self, contracts="1", price="0.19", instrument=None):
         return self.book.submit([self.intent("krasker-14", instrument or self.call, "buy", contracts, order_type="limit",
                                              limit_price=price)])[0]
+
+
+class RealOptionFeesTest(RealOptions):
+    """The Sept 24 freeze: an option's fees on the real account, taken at the fill and listed later."""
 
     def test_the_real_fill_pays_the_occ_fee_and_the_regulators_cents_are_dust_with_an_alert(self):
         self.assertEqual(self.buy().status, "filled")
@@ -340,6 +381,191 @@ class RealOptionFeesTest(RealAlpaca):
         self.clock.advance(UNLISTED_FEE_HOURS * 3600 + 60)
         self.broker.cash -= D("0.03")
         self.assertFalse(self.book.reconcile().ok)
+
+
+class ReviewedTest(RealOptions):
+    """What the adversarial review of H4 found (Sept 25, 2026), each case failing on the builder's head
+    2c9114d: a fee listing already paid as real dust that later explains an unrelated shortfall, an old
+    fill's dust that outlives its room, and the dust alert of a fill before a promotion that rolled the
+    release back."""
+
+    def twenty(self, occ="AAL261002C00020000"):
+        """A 20-contract option buy: room for $0.44 of the regulators' fees."""
+        option = instrument_for("alpaca", {"occ": occ})
+        self.broker.clock_iso = now_iso(self.clock)
+        self.broker.set_quote(option, "0.02", "0.02")  # marked at the price paid: no daily loss to refuse the next
+        outcome = self.buy("20", "0.02", option)
+        self.assertEqual(outcome.status, "filled", outcome.detail)
+
+    def list_fees(self, *rows):
+        self.broker.fee_activities = lambda since=None: [dict(row) for row in rows]
+
+    def venue_fees(self):
+        return [e.payload for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue-fee"]
+
+    def test_a_listing_paid_as_dust_at_the_fill_explains_no_later_shortfall(self):
+        """The ORF cents leave the cash at the fill and are booked as dust; their listing that evening
+        moves no cash. Before: 6 h later that listing, never booked by id, took an unexplained $0.31
+        real shortfall to zero -- ok, no alert, no freeze."""
+        self.twenty()
+        self.broker.cash -= D("0.31")  # ORF on 20 contracts, taken at the fill
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, D("-0.31")), result.detail)
+        self.list_fees({"id": "20260924::orf", "usd": D("0.31"), "date": "2026-09-24", "description": "ORF fee for proceed of 20 contracts"})
+        self.assertTrue(self.book.reconcile().ok)
+        self.book = self.new_book()  # a restart remembers what the dust paid
+        self.clock.advance(UNLISTED_FEE_HOURS * 3600 + 60)
+        self.broker.cash -= D("0.31")  # a real loss nothing explains, every position agreeing
+        result = self.book.reconcile()
+        self.assertFalse(result.ok, "an unexplained real shortfall was booked as a fee already paid as dust")
+        self.assertIn("cash differs by -0.3100", result.detail)
+        # The listing is marked paid, at no cash: it can explain nothing again.
+        self.assertEqual([(p["cash_delta"], p["fee_usd"], p["covered_usd"]) for p in self.venue_fees()], [("0", "0", "0.31")])
+        self.assertIn("real-book dust", self.venue_fees()[0]["detail"])
+
+    def test_a_days_listing_over_the_key_hides_nothing(self):
+        """Three fills' ORF dusted at each fill, listed as one $0.92 activity: a later $0.92 shortfall
+        (over the $0.50 key) booked silently as that listing before."""
+        for occ in ("AAL261002C00020000", "AAL261002C00021000", "AAL261002C00022000"):
+            self.twenty(occ)
+            self.broker.cash -= D("0.31")
+            self.assertTrue(self.book.reconcile().ok)
+        self.list_fees({"id": "20260924::orf", "usd": D("0.92"), "date": "2026-09-24", "description": "ORF fee for proceed of 60 contracts"})
+        self.assertTrue(self.book.reconcile().ok)
+        self.clock.advance(UNLISTED_FEE_HOURS * 3600 + 60)
+        self.broker.cash -= D("0.92")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok)
+        self.assertIn("cash differs by -0.9200", result.detail)
+
+    def test_the_next_fills_cents_are_its_own_dust_not_yesterdays_listing(self):
+        """Sept 24's ORF $0.03 was paid at the fill; the next option buy's own cents are dust on its own
+        room, with its alert, and not labelled as that listing (which left this fill's room unspent)."""
+        self.assertEqual(self.buy().status, "filled")
+        self.broker.cash -= D("0.03")
+        self.assertTrue(self.book.reconcile().ok)
+        self.list_fees({"id": "20260924::orf", "usd": D("0.03"), "date": "2026-09-24", "description": "ORF fee for proceed of 2 contracts"})
+        self.assertTrue(self.book.reconcile().ok)
+        self.clock.advance(20 * 3600)
+        self.broker.clock_iso = now_iso(self.clock)
+        later = instrument_for("alpaca", {"occ": "AAL261009C00015000"})
+        self.broker.set_quote(later, "0.16", "0.16")
+        self.assertEqual(self.buy("1", "0.16", later).status, "filled")
+        self.broker.cash -= D("0.03")
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, D("-0.03")), result.detail)
+        self.assertEqual([(p["cash_delta"], p["covered_usd"]) for p in self.venue_fees()], [("0", "0.03")])
+        self.assertEqual(len(self.alerts()), 2)
+
+    def test_a_stale_listing_that_takes_a_fills_cents_pays_that_fills_listing(self):
+        """The live ledger's Sept 24 ORF $0.03: its cash left at the 18:19Z fill and was absorbed before
+        H4, so the listing stands unbooked. At the next option fill it takes $0.03 of that fill's cents
+        (the rest is dust): the fill's own listings are then paid by both. Before, the dust alone paid
+        $0.29 of the day's $0.31 ORF listing, which stood unpaid and later took an unexplained $0.31
+        real shortfall to zero: the pool of stale listings grew from $0.03 to a day's fees."""
+        self.list_fees({"id": "20260924::orf", "usd": D("0.03"), "date": "2026-09-24", "description": "ORF fee for proceed of 2 contracts"})
+        self.twenty()
+        self.broker.cash -= D("0.32")  # ORF $0.31 and CAT $0.01 on 20 contracts, taken at the fill
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, D("-0.29")), result.detail)
+        self.assertEqual([(p["cash_delta"], p["unlisted_fees_usd"]) for p in self.venue_fees()], [("-0.03", "0.03")])
+        self.list_fees({"id": "20260924::orf", "usd": D("0.03"), "date": "2026-09-24", "description": "ORF fee for proceed of 2 contracts"},
+                       {"id": "20260925::orf", "usd": D("0.31"), "date": "2026-09-25", "description": "ORF fee for proceed of 20 contracts"},
+                       {"id": "20260925::cat", "usd": D("0.01"), "date": "2026-09-25", "description": "CAT fee for proceed of 1 trades"})
+        self.clock.advance(UNLISTED_FEE_HOURS * 3600 + 60)
+        self.broker.cash -= D("0.31")
+        result = self.book.reconcile()
+        self.assertFalse(result.ok, "the day's ORF listing, paid at the fill, took an unexplained shortfall")
+        self.assertEqual([(p["cash_delta"], p.get("covered_usd")) for p in self.venue_fees()], [("-0.03", None), ("0", "0.31"), ("0", "0.01")])
+
+    def test_a_listing_whose_cash_leaves_when_it_is_listed_is_still_booked(self):
+        """A fee the dust never paid (the paper account's overnight TAF, say) books against its own
+        shortfall as before, dust or no dust earlier: only what the dust paid is marked."""
+        self.assertEqual(self.buy().status, "filled")
+        self.broker.cash -= D("0.03")
+        self.assertTrue(self.book.reconcile().ok)  # $0.03 paid as dust
+        self.clock.advance(UNLISTED_FEE_HOURS * 3600 + 60)
+        self.list_fees({"id": "20260924::taf", "usd": D("0.05"), "date": "2026-09-24", "description": "OPT TAF fee for proceed of 11 contracts"})
+        self.broker.cash -= D("0.05")  # taken when listed
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual([(p["cash_delta"], p["fee_usd"], p.get("covered_usd")) for p in self.venue_fees()], [("-0.05", "0.05", None)])
+
+    def test_an_old_fills_dust_ages_out_with_that_fills_room(self):
+        """Fill A's room lapsed 6 h after it while the dust booked on it did not, and ate fill B's room:
+        B's own $0.16 froze the book (10 contracts each, 6 h apart)."""
+        a = instrument_for("alpaca", {"occ": "AAL261002C00020000"})
+        self.broker.set_quote(a, "0.02", "0.02")
+        self.assertEqual(self.buy("10", "0.02", a).status, "filled")  # A: room $0.24
+        self.clock.advance(300)
+        self.broker.cash -= D("0.17")
+        self.assertTrue(self.book.reconcile().ok)
+        self.clock.advance(UNLISTED_FEE_HOURS * 3600 - 400)
+        self.broker.clock_iso = now_iso(self.clock)
+        b = instrument_for("alpaca", {"occ": "AAL261002C00021000"})
+        self.broker.set_quote(b, "0.02", "0.02")
+        self.assertEqual(self.buy("10", "0.02", b).status, "filled")  # B: room $0.24 of its own
+        self.clock.advance(130)  # A has lapsed
+        self.broker.cash -= D("0.16")
+        result = self.book.reconcile()
+        self.assertTrue(result.ok, result.detail)  # before: "cash differs by -0.1600" and a freeze
+        self.assertEqual(result.dust_booked, D("-0.16"))
+        self.book = self.new_book()  # and a restart folds the same room
+        self.assertEqual(self.book._unlisted_room()[0], D("0.08"))
+
+    def write_health(self):
+        root = Path(self.dir.name)
+        (root / "health.json").write_text(json.dumps({"at": now_iso(self.clock), "living": 10, "ledger_seq": self.ledger.head()[0],
+                                                      "books": {"alpaca": {"frozen": self.book.frozen}}}))
+        return root
+
+    def watch_readings(self, watch):
+        readings = []
+        for _ in range(4):
+            self.clock.advance(30)
+            self.write_health()
+            readings.append(watch())
+        return readings
+
+    def test_the_dust_of_a_fill_before_the_promotion_is_inherited_by_the_watch(self):
+        """A real option fill in the minutes between the old House's last reading and the promotion:
+        the new House books its cents as dust with an error alert, and the watch rolled the release
+        back on it ("1 error alert(s) since seq N ... alpaca: -0.0300 of cash booked as dust"). The
+        venue took the fee at the fill, before the promotion: the alert's `began_at` says so."""
+        self.assertTrue(self.book.reconcile().ok)  # the old House's last clean reading
+        self.assertEqual(self.buy().status, "filled")  # a fill it never read
+        fill_at = [e.at for e in self.ledger.iter(kinds="book.fill") if e.payload.get("source") == "venue"][-1]
+        self.broker.cash -= D("0.03")
+        self.clock.advance(60)
+        watch = HouseHealth(self.write_health(), clock=self.clock, restart_within=None)
+        self.assertTrue(watch().ok)  # the reading just before the promotion
+        self.ledger.append("ops.started", {"release": "h4"})
+        self.clock.advance(31)
+        self.book = self.new_book()  # the new House
+        result = self.book.reconcile()
+        self.assertEqual((result.ok, result.dust_booked), (True, D("-0.03")), result.detail)
+        self.assertEqual(self.alerts()[-1]["began_at"], fill_at)
+        readings = self.watch_readings(watch)
+        self.assertEqual([r.reasons for r in readings if not r.ok], [])
+        self.assertEqual((readings[-1].detail["error_alerts"], readings[-1].detail.get("inherited_alerts")), (0, 1))
+
+    def test_cents_after_a_clean_reading_still_count_in_the_watch(self):
+        """A shortfall that appears after the fill was read clean is not the fill's cents taken at the
+        fill: its alert carries no `began_at`, and the watch still counts it."""
+        self.assertEqual(self.buy().status, "filled")
+        self.clock.advance(60)
+        self.assertTrue(self.book.reconcile().ok)  # the old House read the fill clean
+        self.clock.advance(60)
+        watch = HouseHealth(self.write_health(), clock=self.clock, restart_within=None)
+        self.assertTrue(watch().ok)
+        self.ledger.append("ops.started", {"release": "h4"})
+        self.clock.advance(31)
+        self.book = self.new_book()
+        self.broker.cash -= D("0.03")
+        self.assertTrue(self.book.reconcile().ok)  # still dust on the fill's room, with its alert
+        self.assertNotIn("began_at", self.alerts()[-1])
+        readings = self.watch_readings(watch)
+        self.assertTrue(any("error alert" in reason for r in readings for reason in r.reasons), [r.reasons for r in readings])
 
 
 class KeyTest(unittest.TestCase):

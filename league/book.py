@@ -56,6 +56,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -130,6 +131,10 @@ UNLISTED_FEE_PER_SHARE_USD = Decimal("0.0002")
 #: and the book reads the venue every five minutes, so the first clean reading after the fill meets
 #: them; six hours (a US session) covers a book held frozen for another reason meanwhile, no longer.
 UNLISTED_FEE_HOURS = 6
+#: The FEE activities that list the regulators' fees above (the real account's "ORF fee for proceed of
+#: 2 contracts", "CAT fee for proceed of 2 trades"; the paper account's "OPT TAF fee ...", "OPT REG fee
+#: ..."). Real dust booked on their room has PAID them already (`Book._book_venue_fees`).
+REGULATORS_FEE = re.compile(r"\b(ORF|CAT|TAF|REG|SEC)\b")
 #: How long an event position the venue no longer shows may wait for its settlement row.
 SETTLEMENT_GRACE_SECONDS = 300
 
@@ -656,13 +661,19 @@ class Book:
         self._fee_slack_usd = ZERO
         self._fee_slack_units: dict[str, Decimal] = {}
         #: H4 (Sept 25, 2026): the room for the regulators' fees Alpaca takes at each option or stock
-        #: fill and lists only later (`UNLISTED_FEE_PER_FILL_USD`), and the real dust booked on that room
-        #: (negative): `(when, dollars, what)`, read over the last `UNLISTED_FEE_HOURS`. Folded from the
-        #: fill and dust rows' own times, so a restart neither forgets a fill's room nor spends it twice.
-        self._unlisted_fees: list[tuple[float, Decimal, str]] = []
-        #: H4's one transition: how far the book's cash may stand from the venue's at its first clean
-        #: reading because the last clean reading before it added resting bids back unrounded
-        #: (`_bid_rounding`, set by the fold from a `book.reconciled` row without `holds`).
+        #: fill and lists only later (`UNLISTED_FEE_PER_FILL_USD`), one `[when, room left, what, at, read
+        #: clean since]` a fill, read over the last `UNLISTED_FEE_HOURS`. Real dust spends it oldest fill
+        #: first, so a fill's room and the dust booked on it lapse together (the review of H4: an old
+        #: fill's dust outlived its room and ate a newer fill's). Folded from the fill and dust rows' own
+        #: times, so a restart neither forgets a fill's room nor spends it twice.
+        self._unlisted_fees: list[list[Any]] = []
+        #: What real dust has PAID of the regulators' fees before Alpaca lists them (`unlisted_fees_usd`
+        #: on the dust rows), less the listings since marked as paid (`covered_usd`): a listing it covers
+        #: is booked at no cash and can explain no later shortfall (`_book_venue_fees`).
+        self._prepaid_fees = ZERO
+        #: H4's one transition: where the book's cash should stand from the venue's at its first clean
+        #: reading, signed, because the last clean reading before it added resting bids back unrounded
+        #: (minus `_bid_rounding`, set by the fold from a `book.reconciled` row without `holds`).
         self._holds_transition = ZERO
         #: The working crypto bids the ledger shows open (`_apply_order`): what `_bid_rounding` reads, so
         #: the fold need not walk every order the book ever sent at each reading it replays.
@@ -807,9 +818,11 @@ class Book:
                 self._reset_since_clean()
                 if p.get("holds") != "cent":
                     # Written before H4: its reading added the bids resting then back unrounded and
-                    # booked their sub-cent errors as dust, so the ledger's cash stands that far from
-                    # the venue's as the next process reads it (`self.orders` is as of this row here).
-                    self._holds_transition = abs(self._bid_rounding())
+                    # booked their sub-cent errors as dust, so the ledger's cash stands that far ABOVE
+                    # the venue's (below, when negative) as the next process reads it (`self.orders` is
+                    # as of this row here). Signed: the review of H4 found that allowing it either way let
+                    # a real shortfall of up to twice it plus a cent be booked as plain dust.
+                    self._holds_transition = -self._bid_rounding()
         elif kind == "book.cross_plan":
             if p.get("complete"):
                 plan = self._cross_plans.get(p["plan_id"])
@@ -2160,11 +2173,17 @@ class Book:
     def _apply_house(self, p: Mapping[str, Any], at: str = "") -> None:
         """The House row carries balancing cash and units; its units net to dust, never a position
         it meant to take, so they are held without cost-basis bookkeeping. A real book's dust that the
-        regulators' unlisted fees explained (H4) spends that much of their room."""
+        regulators' unlisted fees explained (H4), or a stale listing booked against them, spends that
+        much of their room and has paid that much of their later listings (`unlisted_fees_usd`); a
+        listing marked as so paid (`covered_usd`) uses it up."""
         account = self._account(HOUSE)
         account.cash += money(p["cash_delta"])
         if p.get("unlisted_fees_usd"):
-            self._note_unlisted(at, -money(p["unlisted_fees_usd"]), "real-book dust")
+            paid = money(p["unlisted_fees_usd"])
+            self._spend_unlisted(at, paid)
+            self._prepaid_fees += paid
+        if p.get("covered_usd"):
+            self._prepaid_fees = max(ZERO, self._prepaid_fees - money(p["covered_usd"]))
         delta = money(p["position_delta"])
         if delta != 0 and p.get("instrument"):
             instrument = Instrument.from_dict(p["instrument"])
@@ -3052,7 +3071,17 @@ class Book:
         lists it the next morning, and booked again then it only ever explained some other shortfall
         (Sept 21-24, 2026: every one of the 46 was booked a day late, against an unrelated shortfall);
         the real account takes it at the fill too and lists it seconds later (Sept 24, 2026: 11 s and
-        8 s after its two AAL call buys)."""
+        8 s after its two AAL call buys).
+
+        A regulators' fee listing (`REGULATORS_FEE`) that real dust has already paid (`_prepaid_fees`:
+        the real account takes ORF and CAT at the fill, H4 books them as dust at the next reading, and
+        Alpaca lists them hours later with no cash moving) is marked paid instead: a `venue-fee` row at
+        no cash, `covered_usd` its amount, so it can explain no later shortfall. The review of H4 (Sept
+        25, 2026) found such listings standing unbooked by id and taking any later shortfall they fit to
+        zero, with no alert and no freeze -- over the key when a day's fees are listed as one row. Sept
+        25, 02:20:33Z: the CAT $0.01 of Sept 24, its cash gone at the 18:52Z fill, was booked against
+        -0.0147 of the resting bids' rounding. Half a cent of slack takes the dust's sub-cent noise;
+        a listing larger than what the dust paid is booked as before, against its own shortfall."""
         read = getattr(self.broker, "fee_activities", None)
         if read is None:
             return ZERO
@@ -3063,26 +3092,49 @@ class Book:
             return ZERO
         booked = ZERO
         for row in rows:
-            if self.fees.option_clearing and str(row.get("description") or "").lower().startswith("occ clearing fee"):
+            description = str(row.get("description") or "")
+            if self.fees.option_clearing and description.lower().startswith("occ clearing fee"):
                 continue  # the option fill paid it, in the cash the venue took then
             fee = money(row["usd"])
             entry_id = f"venue-fee:{self.name}:{row['id']}"
-            if fee <= 0 or self.ledger.get(entry_id) is not None or booked + fee > shortfall + DUST_USD:
+            if fee <= 0 or self.ledger.get(entry_id) is not None:
+                continue
+            if self._prepaid_fees > 0 and fee <= self._prepaid_fees + DUST_USD / 2 and REGULATORS_FEE.search(description):
+                payload = {"book": self.name, "source": "venue-fee", "side": "fee", "instrument": None, "quantity": "0", "price": "0",
+                           "cash_delta": "0", "position_delta": "0", "fee_usd": "0", "realized": None, "covered_usd": text(fee),
+                           "detail": f"{row.get('date')} {description}: paid at the fill, booked then as real-book dust".strip(),
+                           "real_money": self.real_money}
+                entry = self.ledger.append("book.fill", payload, agent=HOUSE, id=entry_id)
+                self._apply(entry.kind, HOUSE, entry.payload, entry.at)
+                continue
+            if booked + fee > shortfall + DUST_USD:
                 continue
             payload = {"book": self.name, "source": "venue-fee", "side": "fee", "instrument": None, "quantity": "0", "price": "0",
                        "cash_delta": text(-fee), "position_delta": "0", "fee_usd": text(fee), "realized": None,
-                       "detail": f"{row.get('date')} {row.get('description') or 'regulatory fees'}".strip(), "real_money": self.real_money}
+                       "detail": f"{row.get('date')} {description or 'regulatory fees'}".strip(), "real_money": self.real_money}
+            unread = self._unread_room() if self.real_money and REGULATORS_FEE.search(description) else ZERO
+            if unread > 0:
+                # Beside option or stock fills no clean reading has followed, a real shortfall is their
+                # regulators' cents, taken at the fill: a listing booked against it carries its name but
+                # their cash, so it pays their own listings ahead as real dust would, and spends their room.
+                # Else the Sept 24 ORF $0.03, absorbed before H4 and still unbooked, would take $0.03 of
+                # the next option fill's cents and leave that day's listing $0.03 short of paid, standing
+                # to take an unrelated shortfall of its whole size (the review of H4, Sept 25, 2026).
+                payload["unlisted_fees_usd"] = text(min(fee, unread))
             entry = self.ledger.append("book.fill", payload, agent=HOUSE, id=entry_id)
             self._apply(entry.kind, HOUSE, entry.payload, entry.at)
             booked += fee
         return booked
 
     def _reset_since_clean(self) -> None:
-        """A clean reading (reconciled, no settlement awaited): the counts since the last one start again."""
+        """A clean reading (reconciled, no settlement awaited): the counts since the last one start
+        again, and every option or stock fill so far has been read (`_unlisted_began`)."""
         self._fills_since_reconcile = 0
         self._fee_slack_usd = ZERO
         self._fee_slack_units = {}
         self._holds_transition = ZERO
+        for row in self._unlisted_fees:
+            row[4] = True
 
     def _bid_rounding(self) -> Decimal:
         """What the book's working crypto bids add back unrounded beyond what Alpaca holds for them at
@@ -3095,32 +3147,64 @@ class Book:
                 out += held - held.quantize(CENT, rounding=ROUND_HALF_UP)
         return out
 
-    def _note_unlisted(self, at: str, usd: Decimal, what: str) -> None:
-        """Add (or, negative, spend) room for the regulators' unlisted fees at the row's own time."""
+    def _row_seconds(self, at: str) -> float:
         try:
-            when = _epoch_seconds(at)
+            return _epoch_seconds(at)
         except ValueError:
-            when = float(self.clock())
-        if when >= float(self.clock()) - UNLISTED_FEE_HOURS * 3600:
-            self._unlisted_fees.append((when, usd, what))
+            return float(self.clock())
+
+    def _note_unlisted(self, at: str, usd: Decimal, what: str) -> None:
+        """A fill's room for the regulators' unlisted fees, at the fill row's own time. Rooms that had
+        lapsed by then can be spent by no later dust, and go (so the fold keeps a few hours of fills)."""
+        when = self._row_seconds(at)
+        self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= when - UNLISTED_FEE_HOURS * 3600]
+        self._unlisted_fees.append([when, usd, what, at, False])
+
+    def _spend_unlisted(self, at: str, usd: Decimal) -> None:
+        """Real dust booked at `at` spends the rooms still open then, oldest fill first."""
+        when = self._row_seconds(at)
+        self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= when - UNLISTED_FEE_HOURS * 3600]
+        for row in self._unlisted_fees:
+            if usd <= 0:
+                break
+            take = min(row[1], usd)
+            row[1] -= take
+            usd -= take
 
     def _unlisted_room(self) -> tuple[Decimal, list[str]]:
         """The regulators' fees the last `UNLISTED_FEE_HOURS` of option and stock fills may still have
         taken unlisted, less the real dust already booked on them, and the fills that make the room."""
         cutoff = float(self.clock()) - UNLISTED_FEE_HOURS * 3600
         self._unlisted_fees = [row for row in self._unlisted_fees if row[0] >= cutoff]
-        room = sum((usd for _, usd, _ in self._unlisted_fees), ZERO)
-        return max(ZERO, room), [what for _, usd, what in self._unlisted_fees if usd > 0]
+        room = sum((row[1] for row in self._unlisted_fees), ZERO)
+        return max(ZERO, room), [row[2] for row in self._unlisted_fees if row[1] > 0]
 
-    def _explain_real_cents(self, cash_diff: Decimal, tolerance: Decimal) -> tuple[str, Decimal, Decimal] | None:
+    def _unread_room(self) -> Decimal:
+        """The room still open on option and stock fills that no clean reading has followed yet."""
+        cutoff = float(self.clock()) - UNLISTED_FEE_HOURS * 3600
+        return max(ZERO, sum((row[1] for row in self._unlisted_fees if row[0] >= cutoff and not row[4]), ZERO))
+
+    def _unlisted_began(self) -> str | None:
+        """When the cents of a real shortfall began, if an option or stock fill that no clean reading
+        has followed yet (still in the window) can have taken them: the newest such fill's row time.
+        The venue takes the regulators' fees AT the fill, so a fill in the minutes before a release's
+        promotion that the old process never read makes cents only the new process books (`began_at`
+        on the dust alert, which the watchdog inherits when it is before the promotion). None when a
+        clean reading has followed every fill in the window: those cents appeared after it, and count
+        against whichever process is running. Kept in ledger order (`_reset_since_clean` marks the
+        fills read), so the fold and the live book agree."""
+        unread = [row for row in self._unlisted_fees if not row[4]]
+        return max(unread, key=lambda row: row[0])[3] if unread else None
+
+    def _explain_real_cents(self, cash_diff: Decimal, tolerance: Decimal) -> tuple[str, Decimal, Decimal, str | None] | None:
         """Why a REAL book's cash difference is the venue's own fees, or None: then it freezes (H4).
 
         Called only once every position agrees (after position dust), no order's outcome is unknown,
         no settlement is awaited, every venue fee activity that fits the shortfall has been booked
         (`_book_venue_fees`), and the difference is still over the per-fill tolerance (a cent for each
         venue fill since the last clean reading, the venue's rounding) and the maker's fee slack. It
-        is EXPLAINED, and returned as `(why, dollars booked on the unlisted fees' room, the key)`,
-        only when all of these hold:
+        is EXPLAINED, and returned as `(why, dollars booked on the unlisted fees' room, the key, when the
+        cents began or None)` (`_unlisted_began`), only when all of these hold:
 
         1. `allocator.real_book_dust_usd` is set inside its bounds ($0.25-1.00) and the difference is
            under it;
@@ -3136,10 +3220,9 @@ class Book:
         Nothing else explains: with no option or stock fill in the window a shortfall over the
         tolerance freezes (crypto fees are the book's own model, charged at the fill), and so does
         anything at or over the key, beside a position difference or an order in doubt, or larger
-        than the fees could be. When the fees are listed (that evening, or the next night) they find
-        no shortfall and are not booked; should a later shortfall meet one, `_book_venue_fees` books
-        it then, and the House row still pays each dollar the venue took once, under one name or the
-        other: every row here follows a reading of the venue."""
+        than the fees could be. What is booked here has PAID the fees (`_prepaid_fees`): when they are
+        listed (that evening, or the next night) the next shortfall's `_book_venue_fees` marks each
+        listing it covers as paid at no cash, so a listing explains no second shortfall."""
         key = real_book_dust_usd()
         if key is None or cash_diff >= 0 or -cash_diff >= key:
             return None
@@ -3152,7 +3235,7 @@ class Book:
         why = (f"regulatory fees (ORF, CAT, TAF, SEC) that Alpaca takes at option and stock fills and lists as FEE activities "
                f"only later: room for ${room:.2f} from the fills of the last {UNLISTED_FEE_HOURS} h ({shown}), and a cent of "
                f"rounding for each of the {self._fills_since_reconcile} venue fill(s) since the last clean reading")
-        return why, spent, key
+        return why, spent, key, self._unlisted_began()
 
     def _ledger_totals(self) -> tuple[Decimal, dict[str, Decimal], dict[str, Instrument]]:
         """The book's own cash (profit and loss, fees, dust: stakes are slices, not deposits) and
@@ -3383,7 +3466,10 @@ class Book:
                 if key not in awaiting and key not in diffs:
                     del self._awaiting_settlement[key]
             pending = any(w.status in ("new", "unknown") for w in self.orders.values())
-            if cash_diff <= -DUST_USD and not diffs and not awaiting and not pending:
+            # What the resting bids' old rounding explains at H4's one transition (`_holds_transition`,
+            # zero at every other reading) is no fee: no listing is booked against it (Sept 25, 2026,
+            # 02:20:33Z: the CAT $0.01 of Sept 24 was booked against -0.0147 of that rounding).
+            if cash_diff - self._holds_transition <= -DUST_USD and not diffs and not awaiting and not pending:
                 # The venue holds less than the book says. Alpaca passes on the regulators' fees
                 # (on equity sales and on every option contract) as one FEE activity at the end of
                 # the day, which no fill ever showed: book the ones that explain the shortfall.
@@ -3393,7 +3479,7 @@ class Book:
                 # $0.87 of the day before's fee rows -- their cash long gone, at their fills -- were
                 # booked against it; the fill landed seven seconds later and the book froze on
                 # +0.8700 for ten minutes, until it adopted the venue.
-                booked = self._book_venue_fees(-cash_diff)
+                booked = self._book_venue_fees(self._holds_transition - cash_diff)
                 if booked:
                     cash, _, _ = self._ledger_totals()
                     expected = self.baseline_cash + cash
@@ -3402,13 +3488,15 @@ class Book:
             # of drift for each venue fill since the last reconciliation, and book it as dust.
             tolerance = DUST_USD * max(1, self._fills_since_reconcile)
             # H4's transition (Sept 25, 2026): the first clean reading after the restart into this code
-            # also allows the sub-cent errors the last reading before it booked on the bids resting then,
-            # measured from the ledger's own orders (`_holds_transition`). On the snapshot of 04:26Z Sept
-            # 25, 3 of the real Alpaca book's 101 clean readings since 18:30Z Sept 24 left 1.1-1.3 cents
-            # of them: without this, a restart just after one would freeze the book and roll back the
-            # deploy that ships the fix.
-            tolerance += self._holds_transition
-            within = abs(cash_diff) < tolerance or ZERO < cash_diff <= self._fee_slack_usd + tolerance
+            # expects the book to stand from the venue by exactly the sub-cent errors the last reading
+            # before it booked on the bids resting then, measured from the ledger's own orders
+            # (`_holds_transition`, signed), and judges only what is left over (`drift`); the dust booked
+            # is the whole difference, which takes those errors back. On the snapshot of 04:26Z Sept 25,
+            # 3 of the real Alpaca book's 101 clean readings since 18:30Z Sept 24 left 1.1-1.3 cents of
+            # them: without this, a restart just after one would freeze the book and roll back the
+            # deploy that ships the fix. Zero at every other reading.
+            drift = cash_diff - self._holds_transition
+            within = abs(drift) < tolerance or ZERO < drift <= self._fee_slack_usd + tolerance
             if awaiting and not within and -tolerance < cash_diff <= sum(awaiting.values(), ZERO) + tolerance:
                 within = True  # the venue has paid a settlement the ledger has not recorded yet
             if not within and self.fees.family == "alpaca":
@@ -3417,8 +3505,8 @@ class Book:
                 # resting crypto bid. If it does, the shortfall is exactly that premium.
                 held = sum((money(o.remaining) * money(o.limit_price) * o.instrument.multiplier for o in self.broker.open_orders()
                             if o.instrument.asset_class == "option" and o.side == "buy" and o.limit_price is not None), ZERO)
-                if held > 0 and abs(cash_diff + held) < tolerance:
-                    within, cash_diff = True, ZERO
+                if held > 0 and abs(drift + held) < tolerance:
+                    within, cash_diff = True, self._holds_transition
             # A practice book is never frozen by cents (`PRACTICE_DUST_USD`): with every position
             # agreeing and no order in doubt, a difference under a dollar either way is the venue's
             # fees and rounding, and is booked as dust now, not after three frozen readings.
@@ -3435,7 +3523,7 @@ class Book:
             # Anything else keeps the freeze for the owner.
             real_dust = None
             if not within and self.real_money and not diffs and not pending and not awaiting:
-                real_dust = self._explain_real_cents(cash_diff, tolerance)
+                real_dust = self._explain_real_cents(drift, tolerance)
                 within = real_dust is not None
             ok = within and not diffs and not pending
             problems = []
@@ -3458,7 +3546,7 @@ class Book:
                                       f"no order in doubt, booked at once instead of freezing entries ({self._fills_since_reconcile} "
                                       f"fill(s) since the last reconciliation allowed {tolerance:.2f})"}
                 elif real_dust is not None:
-                    explained, spent, key = real_dust
+                    explained, spent, key, began = real_dust
                     said = {"detail": f"real book: a cash difference of {cash_diff:+.4f} under allocator.real_book_dust_usd (${key}) "
                                       f"with every position agreeing and no order in doubt, explained by {explained}; booked to the "
                                       "House row instead of freezing entries",
@@ -3481,11 +3569,16 @@ class Book:
                 )
                 self._apply(entry.kind, HOUSE, entry.payload, entry.at)
                 if real_dust is not None:
-                    # The owner is told, as the freeze used to tell them, but nothing stops.
+                    # The owner is told, as the freeze used to tell them, but nothing stops. `began_at`: the
+                    # fill whose fees the venue took before any reading saw them (`_unlisted_began`). The
+                    # watchdog counts every error alert after a promotion that did not begin before it, so
+                    # the fees of a fill in the minutes before a promotion rolled that release back (the
+                    # review of H4, Sept 25, 2026); cents that appear after a clean reading still count.
                     self.ledger.append("ops.alert", {
-                        "level": "error", "book": self.name, "dust_usd": text(dust), "real_book_dust_usd": text(real_dust[2]),
+                        "level": "error", "book": self.name, "dust_usd": text(dust), "real_book_dust_usd": text(key),
+                        **({"began_at": began} if began else {}),
                         "text": (f"{self.name}: {dust:+.4f} of cash booked as dust on the House row, not a freeze (under "
-                                 f"allocator.real_book_dust_usd ${real_dust[2]}): {explained}")[:1000]})
+                                 f"allocator.real_book_dust_usd ${key}): {explained}")[:1000]})
             self.frozen = None if ok else detail
             if ok and not awaiting:
                 self._reset_since_clean()
