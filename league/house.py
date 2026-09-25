@@ -2513,7 +2513,7 @@ class House:
                 for key in ('max_position_usd', 'max_order_usd'):
                     ctx['limits'][key] = min(ctx['limits'][key], *caps)
         if book.real_money and ctx.get("markets"):
-            self._split_events(agent, ctx)  # C7: a proven family's real members take disjoint events
+            self._split_events(agent, ctx, book)  # C7: a proven family's real members take disjoint events
         return self._stamped(ctx)
 
     def _stamped(self, ctx: dict[str, Any]) -> dict[str, Any]:
@@ -3041,67 +3041,133 @@ class House:
     # ------------------------------------------------ C7: a proven family's members on disjoint events
     def _event_members(self, agent: Agent) -> list[str]:
         """C7 (the forward-first run, Sept 25, 2026): the members of a PROVEN family (`_family_proven`) on real money (rung 2
-        or above) on one Kalshi desk, by id -- the order the events are split in (`event_share`). [] unless the agent is one
-        of at least two: a family's only real member takes every event, and a practice member trades what it likes. Kept a
-        minute (every wake of the desk asks). Works for any number of members: the House's births into the proven
-        run-under family, the allocator's proven family members (M3) and the Kalshi-scale run's children on disjoint games
-        all join the same split."""
+        or above) on one Kalshi desk, by id, read afresh at every ask; [] unless the agent is one of them (a practice member
+        trades what it likes). Works for any number of members: the House's births into the proven run-under family, the
+        allocator's proven family members (M3) and the Kalshi-scale run's children on disjoint games all join the same split.
+
+        Not cached (the Deploy B review, Sept 25, 2026): a list kept a minute left a member promoted inside it out of the
+        split, and a lone member sees every event, so for up to a minute it could enter any of them. Only real-money wakes
+        and real entries ask, and only the family's own members' rungs are read."""
         if family_of(agent.venue) != "kalshi" or not agent.family or not agent.specialty:
             return []
-        key = f"event-members:{agent.family}:{agent.venue}:{agent.specialty}"
-        now = self.clock()
-        hit = self._data_cache.get(key)
-        if hit is not None and now - hit[0] < 60:
-            members = list(hit[1])
-        else:
-            members = []
-            if self._family_proven(agent.family, agent.venue):
-                members = sorted(a.id for a in self.registry.living()
-                                 if a.family == agent.family and a.venue == agent.venue and a.specialty == agent.specialty
-                                 and self.evaluator.rung(a.id) >= 2)
-            self._data_cache[key] = (now, tuple(members))
-        return members if agent.id in members and len(members) >= 2 else []
+        if not self._family_proven(agent.family, agent.venue):
+            return []
+        members = sorted(a.id for a in self.registry.living()
+                         if a.family == agent.family and a.venue == agent.venue and a.specialty == agent.specialty
+                         and self.evaluator.rung(a.id) >= 2)
+        return members if agent.id in members else []
 
-    def _split_events(self, agent: Agent, ctx: dict[str, Any]) -> None:
-        """C7: a proven family's real member is shown only the markets of its own share of the desk's events
-        (`event_share` of `evaluator.event_key`, the ticker's first two segments: one game, one day's strike ladder), so
-        the family's members on real money never bet the same event and each settlement is one more independent
-        observation of the family's pooled record rather than more weight on one. Sept 24, 2026: the House's births into
-        sports-central-run-under traded the same games as their anchor, which the pooled record counts once. Its own
-        positions and orders are always shown (an exit is never split); `ctx["event_share"]` says how many members share
-        the desk and how many markets fell to the others."""
+    def _event_holders(self, agent: Agent, book: Any) -> dict[str, set[str]]:
+        """C7: event (`evaluator.event_key`) -> the agents of `agent`'s family on its desk -- the agent included, any rung, living
+        or not: a member sent back to practice keeps its real contracts to settlement (`_wind_down`) -- that hold a position
+        in it or work a buy on it on the real `book`. What makes the split sticky (`_event_owner`)."""
+        from .evaluator import event_key
+
+        registry = self.registry
+        kin: dict[str, bool] = {}
+
+        def of_family(agent_id: str) -> bool:
+            if agent_id not in kin:
+                other = agent if agent_id == agent.id else registry.get(agent_id)
+                kin[agent_id] = (other is not None and other.family == agent.family and other.venue == agent.venue
+                                 and other.specialty == agent.specialty)
+            return kin[agent_id]
+
+        out: dict[str, set[str]] = {}
+        for owner, account in list((getattr(book, "accounts", None) or {}).items()):
+            held = [h for h in list((getattr(account, "holdings", None) or {}).values())
+                    if h.instrument.asset_class == "event" and h.quantity > 0]
+            if not held or not of_family(owner):
+                continue
+            for holding in held:
+                event = event_key({"market_id": holding.instrument.market_id or holding.instrument.symbol})
+                if event:
+                    out.setdefault(event, set()).add(owner)
+        reader = getattr(book, "open_orders", None)
+        for working in (reader() if callable(reader) else ()):
+            if working.side != "buy" or working.instrument.asset_class != "event":
+                continue
+            event = event_key({"market_id": working.instrument.market_id or working.instrument.symbol})
+            for share in working.shares:
+                if event and share.quantity > share.filled and of_family(share.agent):
+                    out.setdefault(event, set()).add(share.agent)
+        return out
+
+    def _event_split(self, agent: Agent, book: Any) -> tuple[list[str], dict[str, set[str]]] | None:
+        """(the real members, who holds what) while the agent's events are split, else None: the agent is a proven family's
+        member on real money and another member is on real money too, or another agent of the family still holds or bids an
+        event on the real book (a member sent back to practice winds down to settlement: its events stay its own)."""
         members = self._event_members(agent)
         if not members:
+            return None
+        holders = self._event_holders(agent, book) if book is not None else {}
+        if len(members) < 2 and not any(ids - {agent.id} for ids in holders.values()):
+            return None
+        return members, holders
+
+    @staticmethod
+    def _event_owner(agent: Agent, members: Sequence[str], holders: Mapping[str, set[str]], event: str) -> str | None:
+        """Whose an event is (C7): the agent's own when it holds or bids it; another agent of the family's when that one
+        does (the first by id); else the real member `event_share` names. Sticky (the Deploy B review, Sept 25, 2026): the
+        split moves with its members -- a member seated, sent back or dead -- and without this an event one member held was
+        handed to another, which could enter it again (meriwether-h2d625d holds NO on up to ~6 open MLB totals 2-27 h
+        before the first pitch), so two real members held the same game and the pooled record counted it once."""
+        held = holders.get(event) or set()
+        if agent.id in held:
+            return agent.id
+        if held:
+            return min(held)
+        return event_share(members, event)
+
+    def _split_events(self, agent: Agent, ctx: dict[str, Any], book: Any = None) -> None:
+        """C7: a proven family's real member is shown only the markets of its own share of the desk's events
+        (`_event_owner`: an event held or bid stays with its holder, the rest by `event_share` of `evaluator.event_key`, the
+        ticker's first two segments: one game, one day's strike ladder), so the family's members on real money never bet the
+        same event and each settlement is one more independent observation of the family's pooled record rather than more
+        weight on one. Sept 24, 2026: the House's births into sports-central-run-under traded the same games as their
+        anchor, which the pooled record counts once. The markets of an event it holds or bids are always its own, so an
+        exit that reads its quote is never split; `ctx["event_share"]` says how many members share the desk and how many
+        markets fell to the others. `book`: the real book (its own, by default)."""
+        book = book if book is not None else self.books.get(REAL_BOOK.get(agent.venue, ""))
+        split = self._event_split(agent, book)
+        if split is None:
             return
+        members, holders = split
         from .evaluator import event_key
 
         mine, others = [], 0
         for market in ctx.get("markets") or []:
             event = event_key({"market_id": market.get("market")}) if isinstance(market, Mapping) else None
-            if event is None or event_share(members, event) == agent.id:
+            if event is None or self._event_owner(agent, members, holders, event) == agent.id:
                 mine.append(market)
             else:
                 others += 1
         ctx["markets"] = mine
         ctx["event_share"] = {"members": len(members), "family": agent.family, "shown": len(mine), "left_to_others": others,
                               "rule": "a proven family's members on real money take disjoint events (C7): each settlement is one "
-                                      "observation of the family's pooled record"}
+                                      "observation of the family's pooled record; an event a member holds or bids stays its own"}
 
     def _event_refusal(self, agent: Agent, book: Book, instrument: Instrument) -> str:
         """C7's other half, at the order: a real-money entry by a proven family's member on an event that is another
-        member's share is refused, saying whose (its snapshot never shows such a market, so only a ticker the strategy
-        built itself reaches here). "" when it may go. Exits are never asked."""
+        member's share, or that another agent of the family holds or bids on the real book, is refused, saying whose (its
+        snapshot never shows such a market, so only a ticker the strategy built itself, or a split that moved since the
+        snapshot, reaches here). "" when it may go. Exits are never asked."""
         if not book.real_money or instrument.asset_class != "event":
             return ""
-        members = self._event_members(agent)
-        if not members:
+        split = self._event_split(agent, book)
+        if split is None:
             return ""
+        members, holders = split
         from .evaluator import event_key
 
         event = event_key({"market_id": instrument.market_id or instrument.symbol})
-        owner = event_share(members, event) if event else agent.id
+        owner = self._event_owner(agent, members, holders, event) if event else agent.id
         if owner in (None, agent.id):
             return ""
+        if owner in (holders.get(event) or ()):
+            return (f"the event {event} is held or bid by {owner} of the {agent.family} family on the real book: a proven "
+                    f"family's members on real money take disjoint events (C7), so each settlement is one more observation "
+                    f"of its pooled record, never the same game twice")
         return (f"the event {event} is {owner}'s share of the {agent.family} family's events on this desk: a proven family's "
                 f"members on real money take disjoint events (C7), so each settlement is one more observation of its pooled record")
 
@@ -10081,13 +10147,16 @@ def _block_began(key: Any, at: str) -> float:
 
 def event_share(members: Sequence[str], event: str) -> str | None:
     """C7 (the forward-first run, Sept 25, 2026): which member of a proven family's real-money members on one desk takes
-    an event -- `members` in the House's stable order, the event its `evaluator.event_key` (the ticker's first two
-    segments) -- by a stable hash of the event: SHA-256, never Python's salted `hash`, so every process and every restart
-    splits the same way. None without members."""
+    an event (its `evaluator.event_key`, the ticker's first two segments) that none of the family holds or bids
+    (`House._event_owner`): the member with the highest SHA-256 of the event and its id -- rendezvous hashing, never
+    Python's salted `hash`, so every process and every restart splits the same way, whatever the members' order. A member
+    seated, sent back or dead moves only its own share of the events (the Deploy B review, Sept 25, 2026: the hash of the
+    event modulo the number of members moved about half of them when a second member joined, and two thirds when a
+    third one left). None without members."""
     if not members:
         return None
-    digest = int(hashlib.sha256(str(event).upper().encode("utf-8")).hexdigest()[:16], 16)
-    return list(members)[digest % len(members)]
+    key = str(event).upper()
+    return max((str(m) for m in members), key=lambda m: (hashlib.sha256(f"{key}|{m}".encode("utf-8")).digest(), m))
 
 
 def names_match(founder: Mapping[str, Any], names: Sequence[str]) -> bool:

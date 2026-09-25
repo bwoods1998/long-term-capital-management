@@ -637,12 +637,16 @@ ORDER BY seq DESC LIMIT 20`.
       `displacement_share` (`displaced` over all), with the Kalshi-scale run's `desk_closed` counted
       apart. At T0: 96 of 111 (0.865).
     - **C7** (`House._split_events`, `_event_refusal`): the members of a PROVEN family on real money on one
-      Kalshi desk (two or more) split its events by a stable SHA-256 hash of `evaluator.event_key` (the
-      ticker's first two segments): each is shown only its share's markets (`ctx["event_share"]` says how
-      many members and how many markets fell to the others), and a real entry on another member's event
-      is refused with a `book.refused` row naming whose share it is. Exits are never split. Verify: the
-      family's `real.n` on the allocator board rises with its members, and no two members' real fills share
-      an event.
+      Kalshi desk (two or more, or one while another agent of the family still holds real contracts) split
+      its events: an event any agent of the family holds or bids on the real book stays its holder's (a
+      member sent back to practice winds down to settlement and keeps its games), and the rest go by
+      rendezvous hashing (SHA-256 of `evaluator.event_key`, the ticker's first two segments, and each
+      member's id), so a member seated, sent back or dead moves only its own share. Each is shown only its
+      share's markets and those of what it holds (`ctx["event_share"]` says how many members and how many
+      markets fell to the others), and a real entry on another member's event is refused with a
+      `book.refused` row naming whose share it is or who holds it. Exits are never split. The members are
+      read afresh at every ask (no cache). Verify: the family's `real.n` on the allocator board rises with
+      its members, and no two members' real fills share an event.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state

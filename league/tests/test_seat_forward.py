@@ -347,13 +347,77 @@ class EventSplit(EvidenceCase):
             self.house.evaluator.promote(agent.id, 2, "test: real money")
         return agents
 
-    def test_the_split_is_a_stable_hash_of_the_event(self):
+    def test_the_split_is_a_stable_hash_of_the_event_and_each_member(self):
         members = ["a", "b", "c"]
         event = "KXHIGHNY-26SEP25"
-        expected = members[int(hashlib.sha256(event.encode()).hexdigest()[:16], 16) % 3]
+        expected = max(members, key=lambda m: (hashlib.sha256(f"{event}|{m}".encode()).digest(), m))
         self.assertEqual(event_share(members, event), expected)
-        self.assertEqual(event_share(members, event.lower()), expected)
+        self.assertEqual(event_share(list(reversed(members)), event.lower()), expected)
         self.assertIsNone(event_share([], event))
+
+    def test_a_member_seated_or_gone_moves_only_its_own_share_of_the_events(self):
+        """The Deploy B review (Sept 25, 2026): the event's hash modulo the number of members moved about half of the
+        events between the members already there when a second one joined. Rendezvous hashing moves only the newcomer's."""
+        events = [f"KXMLBTOTAL-26SEP{day:02d}{game}" for day in range(1, 29) for game in ("TBPHI", "PITDET", "TEXMIN", "AZSD")]
+        two = {e: event_share(["x", "y"], e) for e in events}
+        three = {e: event_share(["x", "y", "z"], e) for e in events}
+        moved = [e for e in events if two[e] != three[e]]
+        self.assertTrue(moved)
+        self.assertEqual({three[e] for e in moved}, {"z"}, "only the newcomer's share moves")
+        self.assertEqual({e: event_share(["x", "y"], e) for e in events}, two)
+
+    def real_book(self, holdings=(), bids=()):
+        """A stand-in for the real Kalshi book: `holdings` [(agent, market)] held, `bids` [(agent, market)] working buys."""
+        accounts = {}
+        for agent, market in holdings:
+            instrument = instrument_for("kalshi", {"market": market})
+            accounts.setdefault(agent.id, SimpleNamespace(holdings={}))
+            accounts[agent.id].holdings[instrument.key] = SimpleNamespace(instrument=instrument, quantity=2)
+        orders = [SimpleNamespace(side="buy", instrument=instrument_for("kalshi", {"market": market}),
+                                  shares=[SimpleNamespace(agent=agent.id, quantity=2, filled=0)]) for agent, market in bids]
+        return SimpleNamespace(real_money=True, accounts=accounts, open_orders=lambda agent=None: list(orders))
+
+    def test_an_event_a_member_holds_stays_its_own_when_the_split_moves(self):
+        """The Deploy B review (Sept 25, 2026): meriwether-h2d625d holds NO on up to ~6 open MLB totals, 2-27 h before the
+        first pitch. A second member seated on real money must not be handed one of those games by the hash, nor enter it
+        once the holder is sent back to practice to wind down; and the holder keeps seeing the markets of what it holds."""
+        first, second, practice = self.members()
+        self.house.evaluator.demote(second.id, "test: back to practice")  # first alone on real money
+        games = [f"KXMLBTOTAL-26SEP25{game}" for game in ("1840TBPHI", "1905PITDET", "2010TEXMIN", "2140AZSD", "2210SDLAD", "1910NYYBAL")]
+        theirs = next(g for g in games if event_share(sorted([first.id, second.id]), g) == second.id)
+        held = f"{theirs}-8"
+        book = self.real_book(holdings=[(first, held)])
+        markets = [{"market": f"{g}-{strike}"} for g in games for strike in (7, 8, 9)]
+        with self.proven("weather-favorites"):
+            self.assertEqual(self.house._event_members(first), [first.id])
+            self.house.evaluator.promote(second.id, 2, "test: seated on real money")  # the split moves at once: no cache
+            self.assertEqual(self.house._event_members(second), sorted([first.id, second.id]))
+            seen = {}
+            for agent in (first, second):
+                ctx = {"markets": list(markets)}
+                self.house._split_events(agent, ctx, book)
+                seen[agent.id] = {m["market"] for m in ctx["markets"]}
+            self.assertIn(held, seen[first.id], "the holder still sees the markets of what it holds")
+            self.assertNotIn(held, seen[second.id], "the newcomer is not handed a game its family already holds")
+            self.assertFalse(seen[first.id] & seen[second.id])
+            refusal = self.house._event_refusal(second, book, instrument_for("kalshi", {"market": f"{theirs}-9"}))
+            self.assertIn(f"held or bid by {first.id}", refusal)
+            self.assertEqual(self.house._event_refusal(first, book, instrument_for("kalshi", {"market": f"{theirs}-9"})), "")
+            # The holder is sent back to practice and winds its contracts down to settlement: its game stays its own.
+            self.house.evaluator.demote(first.id, "test: back to practice")
+            self.assertIn(f"held or bid by {first.id}", self.house._event_refusal(second, book, instrument_for("kalshi", {"market": held})))
+            ctx = {"markets": list(markets)}
+            self.house._split_events(second, ctx, book)
+            self.assertNotIn(held, {m["market"] for m in ctx["markets"]})
+            self.assertEqual(len(ctx["markets"]), len(markets) - 3, "every other game is the lone member's")
+            # A working buy holds its event the same way.
+            bidding = self.real_book(bids=[(practice, held)])
+            self.house.registry.get(practice.id).family = "weather-other"
+            self.assertEqual(self.house._event_refusal(second, bidding, instrument_for("kalshi", {"market": held})), "",
+                             "an agent of another family is no member")
+            self.house.registry.get(practice.id).family = second.family
+            self.assertIn(f"held or bid by {practice.id}",
+                          self.house._event_refusal(second, bidding, instrument_for("kalshi", {"market": held})))
 
     def test_two_real_members_of_a_proven_family_see_disjoint_events_and_each_event_whole(self):
         first, second, practice = self.members()
