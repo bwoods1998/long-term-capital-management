@@ -16,6 +16,7 @@ the search's weights; Sol's leaps on the deep-market desks first.
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 from unittest.mock import patch
 
@@ -23,7 +24,7 @@ from league.economy import check_bounds, load_game
 from league.ledger import now_iso
 
 from league.lab import (FORWARD_BREEDING, RESERVED_SHARE_BOUNDS, batch_turn, family_at_capacity, forward_factor, mechanism_digest,
-                        reserved_quota, with_params)
+                        reserved_quota, tape_key, with_params)
 from league.tests.test_lab import KNOB, REWRITTEN, SMALLER, SPARSE, LabCase
 from league.tests.test_lab_forward import ForwardCase
 
@@ -35,8 +36,9 @@ OWN_TAPES = [KNOB.replace('"symbols": ["BTC/USD"]', f'"symbols": ["{symbol}"]').
 
 
 class ReservedShare(LabCase):
-    def test_half_of_a_batch_is_the_written_programs_where_they_wait(self):
-        """A tape where older seeds and newer Luna children wait: a third (2 of 8) went to the children."""
+    def test_two_thirds_of_a_batch_are_the_written_programs_where_they_wait(self):
+        """A tape where older seeds and newer Luna children wait: a third (2 of 8) went to the children before E1, half
+        (4 of 8) with E1, and since F1 (Sept 25, 2026) all but the third kept for the parameter children and seeds (6)."""
         self.house.game["lab"]["batch_size"] = 8
         for n in range(8):  # seeds of the same tape, admitted first
             self.lab.admit(with_params(KNOB, {"notional": 10.0 + n}), niche=self.niche, origin="seed", author="house",
@@ -46,8 +48,8 @@ class ReservedShare(LabCase):
                     for code in SAME_TAPE[:8]]
         _, _, chosen = self.lab._next_batch()
         self.assertEqual(len(chosen), 8)
-        self.assertEqual([r["origin"] for r in chosen].count("luna"), 4)
-        self.assertEqual({r["id"] for r in chosen[:4]} <= set(children), True)
+        self.assertEqual([r["origin"] for r in chosen].count("luna"), 6)
+        self.assertEqual({r["id"] for r in chosen[:6]} <= set(children), True)
 
     def test_the_hours_count_of_written_programs_evaluated_leaves_out_the_blocked(self):
         """The review of #262: `lab.stats` `reserved.evaluated` counted every written program stamped `evaluated` in the
@@ -62,26 +64,29 @@ class ReservedShare(LabCase):
         self.assertEqual(stats["evaluated"], 1)  # what the hour's batches ran, the same unit
 
     def test_the_share_is_held_to_its_bounds(self):
+        # Since F1 (Sept 25, 2026) the share is the parameter children's, and the quota the written programs' rest.
         self.assertEqual(RESERVED_SHARE_BOUNDS, (0.33, 0.75))
         self.assertEqual(reserved_quota(32, 0.5), 16)
-        self.assertEqual(reserved_quota(32, 0.9), 24)  # 0.75 at most
-        self.assertEqual(reserved_quota(32, 0.1), 11)  # 0.33 at least
+        self.assertEqual(reserved_quota(32, 0.9), 8)  # the share 0.75 at most: a quarter for the written programs
+        self.assertEqual(reserved_quota(32, 0.1), 22)  # the share 0.33 at least: two thirds
         self.assertEqual(reserved_quota(3, 0.5), 2)
-        self.assertEqual(reserved_quota(32, "nonsense"), 11)
+        self.assertEqual(reserved_quota(32, "nonsense"), 22)
 
 
 class FullBatches(LabCase):
     def test_the_turns_share_the_builds(self):
-        """Half of the turns (the reserved share) serve the written programs; the rest alternate between the
-        queue's oldest row and the largest group of any origin."""
+        """All but the reserved share of the turns (the parameter children's since F1, Sept 25, 2026; half with E1)
+        serve the written programs; the rest alternate between the queue's oldest row and the largest group."""
         turns = [batch_turn(t, 0.5) for t in range(1, 9)]
         self.assertEqual(turns, ["queue", "reserved", "largest", "reserved"] * 2)
-        self.assertEqual([batch_turn(t, 0.75) for t in range(1, 9)].count("reserved"), 6)
-        self.assertEqual([batch_turn(t, 0.33) for t in range(1, 10)].count("reserved"), 3)
+        self.assertEqual([batch_turn(t, 0.75) for t in range(1, 9)].count("reserved"), 2)
+        self.assertEqual([batch_turn(t, 0.33) for t in range(1, 10)].count("reserved"), 6)
 
     def test_a_step_builds_the_mutants_tape_while_written_programs_wait_each_on_a_tape_of_its_own(self):
         """After Deploy A the step's four builds all went to Luna children a tape each (1.3 a batch) while the
-        archive's mutants waited dozens to a tape. Now one build in four is the largest group's."""
+        archive's mutants waited dozens to a tape. With E1's half one build in four is the largest group's (F1's third
+        gives the written programs two builds in three: test_lab_forward_first)."""
+        self.house.game["lab"]["reserved_share"] = 0.5
         elite = self.queue(KNOB)
         self.lab.evaluate_batch()  # its tape built
         mutants = [self.lab.admit(with_params(KNOB, {"notional": 10.0 + n}), niche=self.niche, origin="param", author="house",
@@ -120,7 +125,7 @@ class Bounds(unittest.TestCase):
     def test_the_game_file_holds_the_labs_bounded_dials(self):
         game = load_game()
         check_bounds(game)
-        self.assertEqual((game["lab"]["reserved_share"], game["lab_bounds"]["reserved_share"]), (0.5, [0.33, 0.75]))
+        self.assertEqual((game["lab"]["reserved_share"], game["lab_bounds"]["reserved_share"]), (0.33, [0.33, 0.75]))  # F1
         self.assertEqual(game["lab"]["idle_desk_hours"], 48)
         self.assertIn("alpaca-megacaps", game["lab"]["deep_desks"])
         bad = copy.deepcopy(game)
@@ -191,7 +196,10 @@ class Holds(ForwardCase):
         return ident
 
     def test_a_nudge_of_a_living_program_is_held_and_not_tried(self):
-        self.nudge()
+        nudge = self.nudge()
+        # F1 (Sept 25, 2026): a winning window of its own first (without one it is "pending"), under the desk's median.
+        self.forward_row(self.lab.resident_candidate(self.resident), 0.004)
+        self.forward_row(nudge, 0.002)
         self.assertEqual(self.lab.graduate(), [])
         self.assertEqual(self.lab._q("SELECT * FROM graduations"), [])  # not a trial, not refused: it may graduate later
         self.assertEqual(self.lab._held["counts"], {"nudge": 1})
@@ -203,6 +211,10 @@ class Holds(ForwardCase):
         graduated the mechanism change beside it."""
         rewritten = self.elite(REWRITTEN, origin="luna", lineage=f"agent:{self.resident.id}")
         nudge = self.nudge()
+        # F1 (Sept 25, 2026): both win a window of their own; the nudge's is the better, under the desk's median.
+        self.forward_row(self.lab.resident_candidate(self.resident), 0.004)
+        self.forward_row(rewritten, 0.002)
+        self.forward_row(nudge, 0.003)
         cell = self.candidate(nudge)["cell"]
         self.assertEqual(self.candidate(rewritten)["cell"], cell)
         self.lab._x("UPDATE candidates SET fitness=1.0 WHERE id=?", (nudge,))  # the fittest of the cell: its elite
@@ -212,8 +224,12 @@ class Holds(ForwardCase):
         self.assertEqual((out[0]["candidate"], out[0]["state"]), (rewritten, "born"))
         self.assertEqual(self.lab._held["counts"], {"nudge": 1})
 
-    def test_a_code_change_graduates_without_a_forward_score(self):
+    def test_a_code_change_graduates_on_a_winning_window_of_its_own(self):
+        """E1 graduated it on its search fitness; since F1 (Sept 25, 2026) it waits for its own window."""
         child = self.elite(SPARSE, origin="luna", lineage=f"agent:{self.resident.id}")
+        self.assertEqual(self.lab.graduate(), [])
+        self.assertEqual(self.lab._held["counts"], {"pending": 1})
+        self.forward_row(child, 0.001)
         out = self.lab.graduate()
         self.assertEqual((out[0]["candidate"], out[0]["state"]), (child, "born"))
 
@@ -245,7 +261,7 @@ class Holds(ForwardCase):
 
     def test_no_graduate_onto_a_desk_offered_markets_with_no_intent_unless_a_feed_it_asked_for_arrived(self):
         """The attention desk went 48 h without an intent at T0 and still received lab graduates."""
-        self.elite(SPARSE, origin="luna", lineage="founder:new")
+        self.forward_row(self.elite(SPARSE, origin="luna", lineage="founder:new"), 0.001)  # F1: a winning window of its own
         self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 3}, agent=self.resident.id)
         self.assertEqual(self.lab.graduate(), [])
         self.assertEqual(self.lab._held["counts"], {"idle": 1})
@@ -259,7 +275,7 @@ class Holds(ForwardCase):
         """The review of #262: on the T0 and T4 snapshots seven of the eight desks with an "answered" request had
         only the toolsmith's "cannot be a pure tool ... BLOCKED" (Sept 22, 15:29Z, status 'deployed'; Sept 23,
         02:17Z): a refusal, not a feed. The desk stays idle, and nothing is born onto it."""
-        self.elite(SPARSE, origin="luna", lineage="founder:new")
+        self.forward_row(self.elite(SPARSE, origin="luna", lineage="founder:new"), 0.001)  # F1: a winning window of its own
         self.house.ledger.append("agent.woke", {"ok": True, "book": "alpaca-paper", "intents": 0, "offered": 3}, agent=self.resident.id)
         asked = self.house.ledger.append("tool.request", {"name": "live_sports_score_feed", "description": "scores"},
                                          agent=self.resident.id)
@@ -332,7 +348,10 @@ class MechanismWindows(ForwardCase):
         self.assertEqual(self.candidate(loser)["cell"], self.candidate(twin)["cell"])
         self.forward_row(loser, -0.002)
         self.assertEqual(self.lab.graduate(), [])
-        self.assertEqual(self.lab._held["counts"], {"forward": 2})
+        # F1 (Sept 25, 2026): where the lab can build a window the twin waits for its own ("pending"); only where it
+        # cannot is it judged by its mechanism's windows.
+        self.assertEqual(self.lab._held["counts"], {"forward": 1, "pending": 1})
+        self.lab._note_unavailable(tape_key(json.loads(self.candidate(twin)["needs"])), "no live tape carries options features")
         self.assertIn("its mechanism", self.lab._hold(self.candidate(twin)))
         other = self.elite(SPARSE, origin="luna", lineage="founder:gone")  # another mechanism: the loser's window is not its
         self.assertIsNone(self.lab._hold(self.candidate(other)))

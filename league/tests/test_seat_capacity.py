@@ -115,6 +115,7 @@ class GraduatesLeave(LabCase):
     def waiting_graduate(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")
         self.house.evaluator.promote(resident.id, 2, "test: real money")  # nobody may be displaced: the graduate waits
@@ -147,6 +148,7 @@ class GraduatesLeave(LabCase):
     def test_no_seat_is_made_for_a_graduate_on_a_desk_the_search_closes(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")  # never trades
         self.clock.advance(3601)  # past its fair chance: an evidenced newcomer may take a never-traded seat

@@ -159,6 +159,7 @@ class GraduateWhoseWindowStopsLosing(LabCase):
     def test_a_graduate_whose_forward_window_no_longer_loses_is_a_waiter_again(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")
         self.house.evaluator.promote(resident.id, 2, "test: real money")  # nobody may be displaced: the graduate waits
