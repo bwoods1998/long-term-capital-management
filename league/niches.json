@@ -205,7 +205,8 @@
         "KDCA"
        ]
       }
-     }
+     },
+     "seat_priority": 50
     },
     {
      "seed": "weather-ensemble-central",
@@ -236,7 +237,8 @@
         "KMSY"
        ]
       }
-     }
+     },
+     "seat_priority": 70
     },
     {
      "seed": "weather-ensemble-texas",
@@ -267,7 +269,8 @@
         "KSAT"
        ]
       }
-     }
+     },
+     "seat_priority": 60
     },
     {
      "seed": "weather-ensemble-west",
@@ -306,7 +309,8 @@
         "KSFO"
        ]
       }
-     }
+     },
+     "seat_priority": 40
     }
    ],
    "maker_fee_series": [],

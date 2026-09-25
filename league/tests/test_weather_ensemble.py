@@ -415,6 +415,10 @@ class Founders(unittest.TestCase):
         for founder in self.rows:
             with self.subTest(founder["key"]):
                 self.assertIs(founder["seat_full_league"], True)
+                # The busiest stations first (Kalshi volume of their high and low series, settled Sept 17-23, contracts a day):
+                # west 810,634 (Los Angeles' highs alone 527,104), east 678,694, texas 195,994, central 186,963. Sports hold 10-30.
+                self.assertEqual(founder["seat_priority"], {"weather-ensemble-west": 40, "weather-ensemble-east": 50,
+                                                            "weather-ensemble-texas": 60, "weather-ensemble-central": 70}[founder["key"]])
                 self.assertEqual(founder["seed"], founder["key"])  # key == seed: the family is the seed row's own
                 self.assertEqual(by_name[founder["seed"]]["family"], founder["key"])
                 self.assertEqual(by_name[founder["seed"]]["file"], "weather_ensemble.py")
