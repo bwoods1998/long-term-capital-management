@@ -52,28 +52,29 @@ def _setup(ctx):  # PARAMS with this agent's mutations, New York's time, memory,
     ny, memory = _ny(ctx.get("now")), ctx.get("memory") if isinstance(ctx.get("memory"), dict) else {}
     return p, ny, memory, ny is None or ny.weekday() >= 5 or ny.strftime("%Y-%m-%d") in HOLIDAYS or not 570 <= ny.hour * 60 + ny.minute < 960
 def _vertical(ctx, under, bullish, kind, p, ny, budget):
-    # The strike nearest entry_delta and the one `width` further out of the money, one expiry in [dte_min, dte_max]:
-    # a debit vertical buys the near strike (calls when bullish), a credit vertical sells it (puts when bullish).
+    # One expiry in [dte_min, dte_max]: the strike nearest entry_delta, and further out of the money (at most `width` away) the one
+    # nearest wing_delta. A debit vertical buys the first (calls when bullish), a credit vertical sells it (puts when bullish).
     credit = kind == "credit_vertical"
     right = ("put" if bullish else "call") if credit else ("call" if bullish else "put")
-    rows = [r for r in ctx.get("chain") or [] if isinstance(r, dict) and r.get("underlying") == under and r.get("right") == right]
-    index, best = {(r.get("expiry"), round(_num(r.get("strike")), 2)): r for r in rows}, None
+    out = 1.0 if right == "call" else -1.0
+    rows = [r for r in ctx.get("chain") or [] if isinstance(r, dict) and r.get("underlying") == under and r.get("right") == right and _num(r.get("delta"), None) is not None]
+    best = None
     for near in rows:
-        dte, delta = _dte(near.get("expiry"), ny), _num(near.get("delta"), None)
-        far = index.get((near.get("expiry"), round(_num(near.get("strike")) + (p["width"] if right == "call" else -p["width"]), 2)))
-        miss = 1.0 if delta is None else abs(abs(delta) - p["entry_delta"])  # never a lottery ticket in place of the bet asked for
-        if far is None or dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
-            continue
-        nb, na, fb, fa = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask"))
-        price = round(nb - fa - p["slip"], 2) if credit else round(na - fb + p["slip"], 2)
-        risk = round(p["width"] - price, 2) if credit else price
-        if not (0 < nb <= na and 0 < fb <= fa) or not 0 < risk * 100 <= budget or (
-                price < p["min_credit"] * p["width"] if credit else not 0.05 <= price <= p["max_debit"] * p["width"]):
-            continue
-        if best is None or (round(miss / 0.05), dte, miss) < best[0]:  # the nearest expiry with a strike near entry_delta
-            best = ((round(miss / 0.05), dte, miss), {"structure": kind, "price": price, "risk": risk, "right": right, "strike": _num(near.get("strike")),
-                    "delta": delta, "dte": dte, "legs": [{"occ": near.get("occ") or near.get("symbol"), "role": "short" if credit else "long"},
-                                                         {"occ": far.get("occ") or far.get("symbol"), "role": "long" if credit else "short"}]})
+        dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
+        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+            continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
+        for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
+            nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
+            price = round(nb - fa - p["slip"], 2) if credit else round(na - fb + p["slip"], 2)
+            risk = round(width - price, 2) if credit else price
+            if not (0 < nb <= na and 0 < fb <= fa) or not 0 < risk * 100 <= budget or (
+                    price < p["min_credit"] * width if credit else not 0.05 <= price <= p["max_debit"] * width):
+                continue
+            score = (round(miss / 0.05), dte, abs(abs(_num(far.get("delta"))) - p["wing_delta"]), miss)
+            if best is None or score < best[0]:  # the nearest expiry with a strike near entry_delta, its wing nearest wing_delta
+                best = (score, {"structure": kind, "price": price, "risk": risk, "right": right, "strike": k, "delta": _num(near.get("delta")), "dte": dte,
+                                "legs": [{"occ": near.get("occ") or near.get("symbol"), "role": "short" if credit else "long"},
+                                         {"occ": far.get("occ") or far.get("symbol"), "role": "long" if credit else "short"}]})
     return best[1] if best else None
 def _exits(ctx, ny, p, notes, signal_exit):
     # Stale orders are cancelled; a held structure is closed at its time, its target, its stop, or its signal.
@@ -98,7 +99,8 @@ def _exits(ctx, ny, p, notes, signal_exit):
         if tuple(occs) in resting or not why:
             notes.append(f"{parts[0][0]} {kind}: {'selling' if why else 'holding'} at {gain:+.2f} a share")
             continue
-        natural = round(max(0.01, mark if "target" in why else mark - p["slip"]), 2)
+        # A target is taken at the bid less `slip`; a stop or a signal gives up to half the mark; the clock takes whatever the bid is.
+        natural = round(max(0.01, mark - p["slip"] if "target" in why else mark * 0.5 if "first expiry" not in why else 0.01), 2)
         natural = round(max(0.01, min(width - 0.01, width - natural)), 2) if credit else natural  # a credit close names the most to pay
         legs = [{"occ": g["occ"], "role": g["role"]} for g in row.get("legs") or [] if isinstance(g, dict) and g.get("occ") and g.get("role") in ("long", "short")]
         legs = legs or [{"occ": c, "role": "long" if s == "+" else "short"} for s, c in re.findall(r"([+-])[12](" + OCC + ")", str(row.get("market_id") or ""))]
@@ -106,13 +108,16 @@ def _exits(ctx, ny, p, notes, signal_exit):
                         "legs": legs, "reason": f"Closing the {parts[0][0]} {kind} at {natural:.2f} a share or better: {why}."})
         notes.append(f"{parts[0][0]} {kind}: closing, {why}")
     return intents, cancels
-def _enter(ctx, p, ny, notes, cancels, done, signal, build):
-    # One structure an underlying: `signal(under)` is a note, or (bullish, why, structure, event); `build` finds the structure.
+def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
+    # One structure an underlying an event: `signal(under)` is a note, or (bullish, why, structure, event); `build` finds the structure.
+    # An event is spent once a structure sent for it is seen held; an entry that did not fill is sent again while the signal stands.
     held = [r for r in ctx.get("positions") or [] if isinstance(r, dict) and len(_occs(r)) >= 2]
     buys = [o for o in ctx.get("open_orders") or [] if isinstance(o, dict) and o.get("side") != "sell" and o.get("action") != "close" and str(o.get("order_id")) not in cancels]
     used = sum(_num(r.get(k)) * 100 * _num(r.get("quantity")) for r, k in [(r, "average_cost") for r in held] + [(o, "limit_price") for o in buys])
     limits, slots, busy, intents = ctx.get("limits") or {}, int(p["max_open"]) - len(held) - len(buys), {_parts(_occs(r)[0])[0] for r in held + buys if _occs(r)}, []
     budget = min(p["notional_usd"], _num(limits.get("max_order_usd")), _num(limits.get("max_position_usd")) - used, _num(ctx.get("cash")) * 0.95)
+    sent, done = [m if isinstance(m, dict) else {} for m in (memory.get("sent"), memory.get("done"))]
+    done.update({u: sent[u] for u in busy if u in sent and u not in {_parts(_occs(o)[0])[0] for o in buys if _occs(o)}})
     for under in NEEDS["symbols"]:
         view = "holding one" if under in busy else "no room: max_open held" if slots <= 0 else signal(under)
         v = None if isinstance(view, str) or done.get(under) == view[3] else build(ctx, under, view[0], view[2], p, ny, budget)
@@ -124,19 +129,20 @@ def _enter(ctx, p, ny, notes, cancels, done, signal, build):
                         "reason": f"{view[1]}: a {v['dte']}-day {v['right']} {v['structure']} at {v['price']:.2f} ({v['strike']:g} strike, delta "
                                   f"{v['delta']:+.2f}); it can lose ${v['risk'] * 100 * qty:.0f}."})
         notes.append(f"{under}: {view[1]}; sending {v['price']:.2f}")
-        done[under], slots, budget = view[3], slots - 1, budget - v["risk"] * 100 * qty
-    return intents
+        sent[under], slots, budget = view[3], slots - 1, budget - v["risk"] * 100 * qty
+    keep = set(NEEDS["symbols"])
+    return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-skew", "asset_class": "option", "structures": True,
          "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 30}, "max_days_to_expiry": 9, "wake_minutes": 10,
-         "parameter_rules": {"bounds": {"width": [1, 5], "dte_min": [1, 9], "dte_max": [1, 9], "entry_delta": [0.15, 0.5], "profit_target": [0.2, 0.95],
+         "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 9], "dte_max": [1, 9], "wing_delta": [0.02, 0.3], "entry_delta": [0.15, 0.5], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.3, 2.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "z_rich": [0.5, 3.0], "z_cheap": [0.5, 3.0], "cheap_side": [0, 1], "skew_norm": [0.0, 0.15], "skew_sd": [0.005, 0.05],
                                         "min_obs": [3, 20], "lookback": [5, 20], "trend_days": [5, 25], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "credit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 9, "entry_delta": 0.35, "profit_target": 0.5, "stop_loss": 1.0,
-          "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 72.0, "slip": 0.01, "max_debit": 0.65,
+PARAMS = {"structure": "credit_vertical", "width": 10.0, "dte_min": 1, "dte_max": 9, "wing_delta": 0.12, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 1.0,
+          "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 72.0, "slip": 0.02, "max_debit": 0.65,
           "min_credit": 0.28, "requote_minutes": 30, "z_rich": 1.0, "z_cheap": 1.0, "cheap_side": 1, "skew_norm": 0.05, "skew_sd": 0.013,
           "min_obs": 8, "lookback": 20, "trend_days": 20, "max_hold_days": 4, "entry_start": 630, "entry_end": 900}
 
@@ -182,7 +188,8 @@ def decide(ctx):
         return f"skew {skew:.3f} is {z:+.1f} sd from {mean:.3f}" + (", rich but under the trend" if z >= p["z_rich"] else "")
 
     intents, cancels = _exits(ctx, ny, p, notes, aged)
-    done = {k: v for k, v in (memory.get("done") or {}).items() if v == day} if isinstance(memory.get("done"), dict) else {}
+    kept = {k: memory.get(k) if isinstance(memory.get(k), dict) else {} for k in ("sent", "done")}
     if p["entry_start"] <= ny.hour * 60 + ny.minute < p["entry_end"]:
-        intents += _enter(ctx, p, ny, notes, cancels, done, signal, _vertical)
-    return {"intents": intents[:8], "cancels": cancels[:20], "thought": "Options skew. " + ("; ".join(notes) or "nothing to do") + ".", "memory": {"done": done, "skew": seen}}
+        opened, kept = _enter(ctx, p, ny, notes, cancels, memory, signal, _vertical)
+        intents += opened
+    return {"intents": intents[:8], "cancels": cancels[:20], "thought": "Options skew. " + ("; ".join(notes) or "nothing to do") + ".", "memory": {**kept, "skew": seen}}

@@ -101,6 +101,11 @@ def ctx_for(now, chain_rows, bars, positions=(), orders=(), memory=None, params=
             "bars": bars, "quotes": q, "chain": list(chain_rows), "structures": []}
 
 
+def width(intent):
+    strikes = [structures.parse("alpaca", intent).spec.legs[i].strike for i in (0, 1)]
+    return float(abs(strikes[0] - strikes[1]))
+
+
 def held(intent, paid, mark, quantity=1, opened_at="2026-09-24T14:00:00Z"):
     """The position row the House shows for a structure opened by `intent`: held price S paid and marked."""
     order = structures.parse("alpaca", {**intent, "action": "open"})
@@ -214,18 +219,22 @@ class OrbTests(FounderCase):
         [intent] = self.opens(out)
         order = structures.parse("alpaca", intent)
         self.assertEqual((order.spec.type, order.spec.legs[0].right), ("debit_vertical", "call"))
-        self.assertEqual(order.spec.legs[1].strike - order.spec.legs[0].strike, 1)
-        self.assertEqual(out["memory"]["done"], {"SPY": THU})
-        again = self.run_seed(ctx_for("2026-09-24T15:15:00Z", chain("SPY", 762.0, "2026-09-24T15:15:00Z", [FRI], vol=0.13), orb_bars(self.UP + [762.2]),
-                                      memory=out["memory"]))
-        self.assertEqual(self.opens(again), [], "once an underlying a day")
+        self.assertTrue(0 < order.spec.legs[1].strike - order.spec.legs[0].strike <= 10, "the wing is out of the money, at most `width` away")
+        self.assertLessEqual(float(order.max_loss_usd), 60.0, "notional_usd")
+        self.assertEqual(out["memory"]["sent"], {"SPY": THU})
+        seen = self.run_seed(ctx_for("2026-09-24T15:15:00Z", chain("SPY", 762.0, "2026-09-24T15:15:00Z", [FRI], vol=0.13), orb_bars(self.UP + [762.2]),
+                                     memory=out["memory"], positions=[held(intent, 0.45, 0.45)]))
+        self.assertEqual(seen["memory"]["done"], {"SPY": THU}, "the fill is seen: today's breakout is spent")
+        again = self.run_seed(ctx_for("2026-09-24T15:30:00Z", chain("SPY", 762.0, "2026-09-24T15:30:00Z", [FRI], vol=0.13), orb_bars(self.UP + [762.2, 762.4]),
+                                      memory=seen["memory"]))
+        self.assertEqual(self.opens(again), [], "once an underlying a day, after its structure was closed")
 
     def test_a_breakout_down_buys_a_put_vertical_and_a_credit_structure_param_sells_calls(self):
         down = [760.0, 760.5, 760.1, 759.6, 759.0, 758.4]
         rows = chain("SPY", 758.4, "2026-09-24T15:00:00Z", [FRI], vol=0.13)
         [intent] = self.opens(self.run_seed(ctx_for("2026-09-24T15:00:00Z", rows, orb_bars(down))))
         self.assertEqual(structures.parse("alpaca", intent).spec.legs[0].right, "put")
-        [credit] = self.opens(self.run_seed(ctx_for("2026-09-24T15:00:00Z", rows, orb_bars(down), params={"structure": "credit_vertical"})))
+        [credit] = self.opens(self.run_seed(ctx_for("2026-09-24T15:00:00Z", rows, orb_bars(down), params={"structure": "credit_vertical", "width": 1.0, "entry_delta": 0.45})))
         spec = structures.parse("alpaca", credit).spec
         self.assertEqual((spec.type, spec.legs[0].right), ("credit_vertical", "call"))
 
@@ -250,10 +259,10 @@ class OrbTests(FounderCase):
     def test_exits_at_the_target_the_stop_and_the_time(self):
         intent = self.vertical()
         now, rows = "2026-09-24T16:00:00Z", chain("SPY", 763.0, "2026-09-24T16:00:00Z", [FRI], vol=0.13)
-        bars = orb_bars(self.UP + [762.5, 762.8, 763.0, 763.0])
-        [win] = self.closes(self.run_seed(ctx_for(now, rows, bars, positions=[held(intent, 0.45, 0.76)])))
+        bars, top = orb_bars(self.UP + [762.5, 762.8, 763.0, 763.0]), round(0.45 + 0.6 * (width(intent) - 0.45), 2)
+        [win] = self.closes(self.run_seed(ctx_for(now, rows, bars, positions=[held(intent, 0.45, top)])))
         self.assertIn("target", win["reason"])
-        self.assertEqual(win["limit_price"], 0.76)
+        self.assertEqual(win["limit_price"], round(top - 0.02, 2), "a target is taken at the bid less `slip`")
         [stop] = self.closes(self.run_seed(ctx_for(now, rows, bars, positions=[held(intent, 0.45, 0.20)])))
         self.assertIn("stop", stop["reason"])
         self.assertEqual(self.closes(self.run_seed(ctx_for(now, rows, bars, positions=[held(intent, 0.45, 0.50)]))), [], "inside both lines it holds")
@@ -276,7 +285,7 @@ class OrbTests(FounderCase):
 
     def test_stale_orders_are_cancelled_and_a_resting_close_is_not_doubled(self):
         intent = self.vertical()
-        position = held(intent, 0.45, 0.80)
+        position = held(intent, 0.45, round(0.45 + 0.6 * (width(intent) - 0.45), 2))
         resting = {"order_id": "ord-9", "symbol": "SPY", "side": "sell", "quantity": 1, "limit_price": 0.79, "submitted_at": "2026-09-24T15:55:00Z",
                    "market_id": position["market_id"]}
         rows, bars = chain("SPY", 763.0, "2026-09-24T16:00:00Z", [FRI], vol=0.13), orb_bars(self.UP + [763.0] * 4)
@@ -326,7 +335,8 @@ class TrendVerticalTests(FounderCase):
 
     def test_exits_target_stop_trend_break_hold_and_expiry_day(self):
         intent = self.opens(self.run_seed(self.ctx(self.UP, 761.0)))[0]
-        self.assertIn("target", self.closes(self.run_seed(self.ctx(self.UP, 763.0, positions=[held(intent, 0.45, 0.80)])))[0]["reason"])
+        top = round(0.45 + 0.7 * (width(intent) - 0.45), 2)
+        self.assertIn("target", self.closes(self.run_seed(self.ctx(self.UP, 763.0, positions=[held(intent, 0.45, top)])))[0]["reason"])
         self.assertIn("stop", self.closes(self.run_seed(self.ctx(self.UP, 759.0, positions=[held(intent, 0.45, 0.20)])))[0]["reason"])
         self.assertIn("crossed", self.closes(self.run_seed(self.ctx(self.UP, 740.0, positions=[held(intent, 0.45, 0.40)])))[0]["reason"])
         old = held(intent, 0.45, 0.45, opened_at="2026-09-20T14:00:00Z")
@@ -361,8 +371,12 @@ class ReversalTests(FounderCase):
         crash = CALM + [CALM[-1] * 0.975]
         first = self.run_seed(self.ctx(CALM, CALM[-1] * 0.975))  # the late-day entry, Thursday
         self.assertEqual(len(self.opens(first)), 1)
-        # Friday 10:15: Thursday's bar is in, the same event is yesterday's move now
-        friday = self.ctx(crash, crash[-1], now="2026-09-25T14:15:00Z", memory=first["memory"])
+        again = self.run_seed(self.ctx(CALM, CALM[-1] * 0.975, now="2026-09-24T19:15:00Z", memory=first["memory"]))
+        self.assertEqual(len(self.opens(again)), 1, "an entry that did not fill is sent again while the move stands")
+        filled = self.run_seed(self.ctx(CALM, CALM[-1] * 0.975, now="2026-09-24T19:20:00Z", memory=first["memory"], positions=[held(self.opens(first)[0], 0.45, 0.45)]))
+        self.assertEqual(filled["memory"]["done"], {"SPY": first["memory"]["sent"]["SPY"]}, "seen held: the event is spent")
+        # Friday 10:15: the structure is gone; Thursday's bar is in, and the same event is yesterday's move now
+        friday = self.ctx(crash, crash[-1], now="2026-09-25T14:15:00Z", memory=filled["memory"])
         friday["bars"]["SPY"] = daily_bars(crash, last_day="2026-09-24")
         self.assertEqual(self.opens(self.run_seed(friday)), [], "one entry an event")
         fresh = self.ctx(crash, crash[-1], now="2026-09-25T14:15:00Z")
