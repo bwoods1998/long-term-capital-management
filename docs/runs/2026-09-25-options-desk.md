@@ -193,6 +193,15 @@ first run is asked for two exceptions so Deploy V can carry the founders' seat c
 structure-only `book.py` hunks before its Deploy A (answer asked by 11:30Z); the Jev run's D-J1 slot moves
 to Saturday. Deploy V is re-planned: integration 11:30-11:45Z, CI, the gateway, then the House by 12:25Z.
 
+**The forward-first run's exceptions (10:40Z, after the outage):** yes to both: (1) the seat call line and its
+import land on main before its Wave 0 (H5 rebases over it); (2) the structure-only `book.py` hunks land
+before H4 (H4 rebases), on condition of a test showing that books and positions with no structure behave
+exactly as on main in `_reconcile` (real-book reconcile above all), `check`, `_quote`, `expire_options` and
+`position_key` (being written, 10:42Z). Its offer, accepted 10:42Z: it merges H3 (#296, the release train)
+and Z (#298, the scoreboard) to main by 11:15Z so Deploy V carries them, and after V promotes the updater
+holds every head through the session. Its Deploy A moves to Friday 20:10Z or the first slot with no real
+Kalshi family's game in play; Deploy G here waits for its Deploy B as agreed.
+
 ## Checklist
 
 | # | Item | State |
