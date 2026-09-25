@@ -554,7 +554,9 @@ class RecorderTest(MoveCase):
 
     def test_a_short_disk_skips_the_cycle_with_one_alert(self):
         move = self.move(min_free_bytes=2 * 1024 ** 3)
-        self.started(move)
+        plenty = type("U", (), {"free": 64 * 1024 ** 3})()
+        with patch("league.jev_features.shutil.disk_usage", return_value=plenty):  # the test machine's own disk must not decide
+            self.started(move)
         self.show(market("KXBTCD-26SEP10-T60000"))
         cursor = move.stats()["cursor"]
         with patch("league.jev_features.shutil.disk_usage", return_value=type("U", (), {"free": 1024 ** 3})()):
