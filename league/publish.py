@@ -14,6 +14,11 @@
 7. The mechanism ledger (Sept 24, 2026): each agent's family state and settlements, and the proven
    and compounding families with their proof, stake and capacity beside the unproven count, from
    the allocator's board; and the lab's hourly line, from its own newest `lab.stats` row.
+8. The flywheel (Sept 25, 2026, W of the forward-first run): the last day's compute, evidence (forward
+   blocks that grew, lab graduates, families newly proven), real profit and House restarts, from
+   health.json, the board and the hourly yield rows; and each proven family's clock to compounding and
+   capacity curve at the real size, from the board (`site_flywheel`, `site_swing_clock`,
+   `site_capacity_curve`; Y2's compute a day through the hook `site_unit_economics`).
 
 The site validates every byte (`personal-site/capital/schema.js`; the contract this file is
 written against is `league/tests/fixtures/site_contract.md`). One bad event refuses its whole
@@ -391,10 +396,19 @@ def site_families(raw: Any) -> dict[str, Any] | None:
             real, capacity = row.get("real"), row.get("capacity")
             real_n = _count(real.get("n")) if isinstance(real, Mapping) else None
             usd = _bounded(capacity.get("usd_per_day"), _MAX_USD) if isinstance(capacity, Mapping) else None
-            rows.append({"family": desk_family(str(name)), "venue": venue, "state": state, "n": n, "real_n": min(real_n or 0, n),
-                         "bound": money(bound, BOUND_PLACES, signed=True), "stake_usd": site_stake(_bounded(row.get("stake_usd"), _MAX_USD)),
-                         "members_real": min(_count(row.get("members_real")) or 0, MAX_DESKS),
-                         "capacity_usd_per_day": None if usd is None else money(usd, 2, signed=True)})
+            out = {"family": desk_family(str(name)), "venue": venue, "state": state, "n": n, "real_n": min(real_n or 0, n),
+                   "bound": money(bound, BOUND_PLACES, signed=True), "stake_usd": site_stake(_bounded(row.get("stake_usd"), _MAX_USD)),
+                   "members_real": min(_count(row.get("members_real")) or 0, MAX_DESKS),
+                   "capacity_usd_per_day": None if usd is None else money(usd, 2, signed=True)}
+            # The forward-first run's W (Sept 25, 2026): each field only when the board carries it in a shape
+            # the site knows (personal-site #8). A compounding family needs no clock, and the site refuses one.
+            clock = site_swing_clock(row.get("swing_clock")) if state == "proven" else None
+            if clock is not None:
+                out["swing_clock"] = clock
+            curve = site_capacity_curve(capacity)
+            if curve is not None:
+                out["capacity_curve"] = curve
+            rows.append(out)
     rows.sort(key=lambda r: (r["state"] != "swing", -r["n"], r["venue"], r["family"]))
     shown: list[dict[str, Any]] = []
     for row in rows:
@@ -419,6 +433,171 @@ def site_lab(entry: Any, now: float) -> dict[str, Any] | None:
     if now - _epoch(at) > LAB_READING_MAX_AGE:
         return None
     return {"at": at, "tested_last_hour": min(tested, MAX_TESTED), "graduates_waiting": min(graduates, MAX_WAITING)}
+
+
+# ------------------------------------------------------------------------------ the flywheel
+# W of the forward-first run (Sept 25, 2026): the capital page's flywheel strip, the floor's last 24 hours in
+# four numbers (compute, the evidence it bought, real profit, restarts), and each proven family's clock to
+# compounding and capacity at the real size. The site (personal-site #8, `capital/schema.js` `validFlywheel`,
+# `validSwingClock`, `validCapacityCurve`) refuses a checkpoint with a field it does not know, so every field
+# here is sent only when its source carries it, in the site's exact shape, and nothing else is: the House's
+# own names never reach the site. The site ships first; `Publisher.publish` still falls back to a body without
+# these fields if a site that predates them refuses it (`without_flywheel`). At the run record's 10:36Z
+# scoreboard the strip would read compute $122.31 a day against $19.38 of real settled profit (6.3x), 24
+# restarts, and the sports family 12 real settlements of 15, 0.56 days from its review.
+#: A health reading older than this says nothing about the last day that the page should draw: the site draws
+#: the strip while it is at most half an hour older than its checkpoint (`FLYWHEEL_STALE_MS`), and so does this.
+FLYWHEEL_MAX_AGE = 1800.0
+DAY_SECONDS = 86400.0
+#: The site's bounds on the strip's counts (`capital/schema.js` `FLYWHEEL_COUNTS`).
+FLYWHEEL_COUNTS = {"positive_blocks_per_day": 1_000_000, "graduates_per_day": 100_000, "proofs_per_day": 1_000, "restarts_per_day": 100_000}
+#: C6's fill-curve bases as the site knows them: the real book's fills, or every book's (practice included).
+CAPACITY_BASES = ("real", "all")
+MAX_CURVE_POINTS = 4  # the site's MAX_CURVE_POINTS: 1x, 2x and 4x the stake, and room for one more
+_MAX_DAYS = Decimal(100000)
+#: Y2's hook (the forward-first run's workstream Y, not built at the time of writing): the key of health.json's
+#: unit-economics block, the scoreboard's `unit_economics` row on the House (`scripts/gap_scoreboard.py`). Its
+#: `compute_per_day_usd` (compute bought in the last 24 hours) and `profit_per_day_usd` (real settled profit
+#: in the last 24 hours) reach the strip through `site_unit_economics`; its builder adds the one line to
+#: `House._health` (`"unit_economics": <the row>`) and the publisher needs no change.
+UNIT_ECONOMICS = "unit_economics"
+
+
+def _rate(value: Any, places: int) -> str | None:
+    """A count a day or a span in days, unsigned, in the site's form ("5.556", "0.72"); None when not a number."""
+    number = _number(value)
+    return money(min(number, _MAX_DAYS), places) if number is not None and number >= 0 else None
+
+
+def site_swing_clock(raw: Any) -> dict[str, Any] | None:
+    """A proven family's clock to compounding (the board's `swing_clock`, `families.swing_clock`) in the site's
+    shape: {look_at, to_go, per_day, days} and, when the clock carries them, `dates_to_go` (M1's distinct
+    settlement days, Sept 25, 2026) and `grant_holds` (only when the live grant does not release stakes above the
+    bunt). None when the board carries no clock, or one without the counts the site needs."""
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("needs"), Mapping):
+        return None
+    needs = raw["needs"]
+    to_go, look = _count(needs.get("real_settlements")), needs.get("look_at")
+    look_at = None if look is None else _count(look)
+    if to_go is None or (look is not None and look_at is None):
+        return None
+    out: dict[str, Any] = {"look_at": None if look_at is None else min(look_at, MAX_SETTLEMENTS), "to_go": min(to_go, MAX_SETTLEMENTS),
+                           "per_day": _rate(raw.get("real_per_day"), 3), "days": _rate(raw.get("days_to_swing"), 2)}
+    dates = _count(needs.get("distinct_dates")) if needs.get("distinct_dates") is not None else None
+    if dates is not None:
+        out["dates_to_go"] = min(dates, 366)
+    if needs.get("grant") is True:
+        out["grant_holds"] = True
+    return out
+
+
+def site_capacity_curve(capacity: Any) -> list[dict[str, Any]] | None:
+    """C6's fill curve (the board's `capacity.curve`, `families.fill_curve`: at 1x, 2x and 4x the stake's size, the
+    rate measured there, whose fills it counts and the dollars a day it implies) in the site's shape, multiples
+    rising, one point each, at most `MAX_CURVE_POINTS`. A point the curve did not measure (or whose basis the site
+    does not know) goes as unmeasured: no rate, no basis, no dollars, never an assumed fill. None before C6."""
+    curve = capacity.get("curve") if isinstance(capacity, Mapping) else None
+    if not isinstance(curve, (list, tuple)):
+        return None
+    points: dict[int, dict[str, Any]] = {}
+    for point in curve:
+        if not isinstance(point, Mapping):
+            continue
+        multiple, size = _count(point.get("multiple")), _number(point.get("size_usd"))
+        if multiple is None or not 1 <= multiple <= 16 or size is None or size < 0 or multiple in points:
+            continue
+        rate, basis = _number(point.get("fill_rate")), point.get("basis")
+        measured = rate is not None and 0 <= rate <= 1 and basis in CAPACITY_BASES
+        usd = _bounded(point.get("usd_per_day"), _MAX_USD) if measured else None
+        points[multiple] = {"multiple": multiple, "size_usd": money(min(size, _MAX_USD), 2), "fill_rate": money(rate, 4) if measured else None,
+                            "usd_per_day": None if usd is None else money(usd, 2, signed=True), "basis": basis if measured else None}
+    return [points[k] for k in sorted(points)][:MAX_CURVE_POINTS] or None
+
+
+def site_unit_economics(block: Any) -> dict[str, str]:
+    """Y2's hook: health.json's `unit_economics` (see `UNIT_ECONOMICS`) as the strip's compute and real profit a
+    day, each only when it is a number; {} before Y2 ships."""
+    out: dict[str, str] = {}
+    if not isinstance(block, Mapping):
+        return out
+    compute, profit = _number(block.get("compute_per_day_usd")), _bounded(block.get("profit_per_day_usd"), _MAX_USD)
+    if compute is not None and compute >= 0:
+        out["compute_usd_per_day"] = money(min(compute, _MAX_USD), 2)
+    if profit is not None:
+        out["real_profit_usd_per_day"] = money(profit, 2, signed=True)
+    return out
+
+
+def site_proofs(families: Any, now: float) -> int | None:
+    """The families newly proven in the last day: proven or compounding families whose state began in the 24
+    hours before `now` (the board's `families`, per venue, per family, with `since`); None without the block."""
+    if not isinstance(families, Mapping):
+        return None
+    count = 0
+    for per in families.values():
+        for row in (per.values() if isinstance(per, Mapping) else ()):
+            if isinstance(row, Mapping) and row.get("state") in PROVEN_STATES and isinstance(row.get("since"), str):
+                since = _epoch(row["since"])
+                count += bool(since) and 0 <= now - since <= DAY_SECONDS
+    return min(count, FLYWHEEL_COUNTS["proofs_per_day"])
+
+
+def yield_evidence(payload: Mapping[str, Any]) -> tuple[int, int]:
+    """An hourly yield row's evidence (`yield_ledger.fold`): its positive forward blocks over every line (each
+    active `eval.block` with positive growth is credited to exactly one line), and the lab's graduates."""
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), Mapping) else {}
+    blocks = sum(_count(units.get("positive_blocks")) or 0 for units in evidence.values() if isinstance(units, Mapping))
+    lab = evidence.get("lab") if isinstance(evidence.get("lab"), Mapping) else {}
+    return blocks, _count(lab.get("graduates")) or 0
+
+
+def site_flywheel(health: Any, families: Any, yields: Any, *, now: float, at: str) -> dict[str, Any] | None:
+    """The checkpoint's `flywheel`: {at} and each number its source carries. From health.json while it is at most
+    `FLYWHEEL_MAX_AGE` old: `restarts_per_day` (`restarts_24h`, H6), `real_profit_usd_per_day` (the real books'
+    settlements and closing fills over the last 24 hours, `research_economy.merton.real_pnl_24h_usd`, until Y2's
+    `unit_economics` says it) and `compute_usd_per_day` (Y2's only). From the board: `proofs_per_day`
+    (`site_proofs`). From the House's hourly yield rows of the last day, `(at, positive blocks, graduates)`
+    (`_Folds.yields`): `positive_blocks_per_day` and `graduates_per_day`. `at` is when the oldest of them was
+    read: health's own `at` when a number came from it, else the checkpoint's. None when nothing is known."""
+    out: dict[str, Any] = {}
+    stamp = at
+    read = site_instant(health.get("at")) if isinstance(health, Mapping) else None
+    if read is not None and read <= at and now - _epoch(read) <= FLYWHEEL_MAX_AGE:
+        restarts = _count(health.get("restarts_24h"))
+        if restarts is not None:
+            out["restarts_per_day"] = min(restarts, FLYWHEEL_COUNTS["restarts_per_day"])
+        economy = health.get("research_economy")
+        merton = economy.get("merton") if isinstance(economy, Mapping) else None
+        profit = _bounded(merton.get("real_pnl_24h_usd"), _MAX_USD) if isinstance(merton, Mapping) else None
+        if profit is not None:
+            out["real_profit_usd_per_day"] = money(profit, 2, signed=True)
+        out.update(site_unit_economics(health.get(UNIT_ECONOMICS)))  # Y2's numbers, where it says them, win
+        if out:
+            stamp = read
+    proofs = site_proofs(families, now)
+    if proofs is not None:
+        out["proofs_per_day"] = proofs
+    since = now_iso(lambda: now - DAY_SECONDS)
+    day = [row for row in (yields or ()) if isinstance(row, tuple) and len(row) == 3 and row[0] >= since]
+    if day:
+        out["positive_blocks_per_day"] = min(sum(row[1] for row in day), FLYWHEEL_COUNTS["positive_blocks_per_day"])
+        out["graduates_per_day"] = min(sum(row[2] for row in day), FLYWHEEL_COUNTS["graduates_per_day"])
+    return {"at": stamp, **out} if out else None
+
+
+def without_flywheel(body: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The checkpoint as a site from before personal-site #8 accepts it: no `flywheel`, and no family row's
+    `swing_clock` or `capacity_curve`. None when the body carries none of them (nothing to fall back to)."""
+    board = body.get("board") if isinstance(body.get("board"), Mapping) else {}
+    families = board.get("families") if isinstance(board.get("families"), Mapping) else {}
+    rows = [row for row in (families.get("rows") or []) if isinstance(row, Mapping)]
+    new = ("swing_clock", "capacity_curve")
+    if "flywheel" not in body and not any(key in row for row in rows for key in new):
+        return None
+    out = {k: v for k, v in body.items() if k != "flywheel"}
+    if rows:
+        out["board"] = {**board, "families": {**families, "rows": [{k: v for k, v in row.items() if k not in new} for row in rows]}}
+    return out
 
 
 def ledger_board_move(entry: Entry, agent: Any) -> dict[str, Any] | None:
@@ -637,6 +816,8 @@ class _Folds:
              "agent.intent", "eval.verdict")
     #: `run.sessions_today` counts today's wakes among the newest this many, as it always has.
     NEWEST_WAKES = 10_000
+    #: The flywheel's evidence a day reads the hourly yield rows of the last day: two days of them are kept.
+    YIELD_ROWS = 48
 
     def __init__(self, ledger: Any) -> None:
         self.ledger = ledger
@@ -653,6 +834,7 @@ class _Folds:
         self.intents: dict[str, int] = {}  # agent -> its `agent.intent` rows
         self.looks: dict[str, Mapping[str, Any]] = {}  # agent -> its latest look's payload
         self.moves: dict[str, list[Entry]] = {}  # agent -> its promotions and demotions, oldest first
+        self.yields: deque[tuple[str, int, int]] = deque(maxlen=self.YIELD_ROWS)  # (at, positive blocks, graduates) of each hourly yield row
 
     def advance(self) -> "_Folds":
         with self.lock:
@@ -673,6 +855,8 @@ class _Folds:
                 amount = Decimal(p["spent_usd"])
                 self.sail = (ZERO if self.sail is None else self.sail) + amount
                 self.sail_days[day] = self.sail_days.get(day, ZERO) + amount
+            elif p.get("what") == "yield":  # `yield_ledger.WHAT`: the flywheel's evidence a day (`site_flywheel`)
+                self.yields.append((entry.at, *yield_evidence(p)))
         elif kind == "provider.request":
             if p.get("profile"):
                 self.profiles.add(str(p["profile"]))
@@ -789,9 +973,19 @@ class Publisher:
             self._save()
         body = self.checkpoint(house)
         status, reply = self.post("/checkpoint", body)
+        older = without_flywheel(body) if status == 400 else None
+        if older is not None:
+            # A site from before personal-site #8 refuses the flywheel's fields: the page keeps its checkpoint
+            # without them, and `flywheel_refused` in the publisher's state says since when, until one is taken.
+            status, reply = self.post("/checkpoint", older)
+            if status in (200, 409) and not self._state.get("flywheel_refused"):
+                self._state["flywheel_refused"] = body["published_at"]
+                self._save()
+        elif status in (200, 409) and self._state.pop("flywheel_refused", None) is not None:
+            self._save()
         if status not in (200, 409):
             raise PublishError(f"the site refused the checkpoint: HTTP {status} {reply}", status=status)
-        return {"events": sent, "checkpoint": status}
+        return {"events": sent, "checkpoint": status, **({"without_flywheel": True} if older is not None else {})}
 
     # -------------------------------------------------------------- real accounts
     def account(self, house: Any = None) -> dict[str, Any] | None:
@@ -942,7 +1136,33 @@ class Publisher:
         body["board"] = self._board_block(board, at, living_rows, ledger_moves)
         if lab is not None:
             body["board"]["lab"] = lab  # with or without the allocator: the lab's line is its own
+        flywheel = self.flywheel(house, board, folds, at)
+        if flywheel is not None:
+            body["flywheel"] = flywheel
         return self.fit(body, order)
+
+    # ------------------------------------------------------------------ the flywheel
+    @staticmethod
+    def health_reading(house: Any) -> Mapping[str, Any] | None:
+        """The House's newest health.json (`House._health` writes it at the end of each tick, after the publish, so
+        this is the previous tick's), or None when there is none or it cannot be read."""
+        root = getattr(house, "root", None)
+        if root is None:
+            return None
+        try:
+            health = json.loads((Path(root) / "health.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        return health if isinstance(health, Mapping) else None
+
+    def flywheel(self, house: Any, board: Mapping[str, Any] | None, folds: _Folds, at: str) -> dict[str, Any] | None:
+        """The checkpoint's `flywheel` (`site_flywheel`) from health.json, the allocator's board and the hourly
+        yield rows, or None. A display strip never costs the floor its checkpoint."""
+        try:
+            return site_flywheel(self.health_reading(house), board.get("families") if board is not None else None,
+                                 list(folds.yields), now=self.clock(), at=at)
+        except Exception:  # noqa: BLE001 - the strip is a courtesy; the checkpoint is not
+            return None
 
     # ----------------------------------------------------------------- the capital board
     @staticmethod
