@@ -82,31 +82,53 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
   place bounded post-only NO bids; at most one position per event"), which rarely fires. Not a defect. The desk's
   gap is seats: 2 of 8 held, 4 waiters over 2 h, refused because the league's 128 seats are held (F3's case).
 
-## Coordination with the options-desk run
+## Coordination with the other two runs
 
-A second run executes `docs/goals/LTCM_OPTIONS_DESK.md` beside this one (the owner's message at 05:47Z Sept 25).
-This run follows that plan's "Coordination" section: before each merge and deploy it reads the options run's record
-(`docs/runs/2026-09-25-options-desk.md` on its run branch), edits no file that run's current wave lists as owned,
-deploys one at a time (never inside another release's canary or watch, never within 30 minutes of the other run's
-announced deploy), and after any promotion that leaves the grant inactive ratifies `earned-live-20260921` only if
-every changed money rule is a row of one of the two plans' tables (else rolls back and records why). Messages to
-the other run are lines here plus a comment on its open PR.
+Two more runs execute beside this one: `docs/goals/LTCM_OPTIONS_DESK.md` (the owner's message at 05:47Z; record
+`docs/runs/2026-09-25-options-desk.md` on `run/options-desk-2026-09-25`) and `docs/goals/LTCM_KALSHI_SCALE.md` (about
+06:12Z; branch `goal/kalshi-scale-2026-09-25`, record `docs/runs/<date>-kalshi-scale.md` on its run branch). This run
+follows the options plan's "Coordination" section across three runs: before each merge and deploy it reads all three
+records (current waves, file owners, announced deploys); it edits no file another run's current wave owns; one deploy
+at a time across the three, none 13:25-20:05Z on a trading day, **none while a real Kalshi family's game is in play**
+(except a rollback), never inside another release's canary or watch, never within 30 minutes of another run's
+announced deploy; after any promotion that leaves the grant inactive it ratifies `earned-live-20260921` only if every
+changed money rule is a row of one of the three plans' tables (forward-first M1-M5, C8, H4; options O1-O5; Kalshi K5 and
+`allocator.max_event_share` 0.25-0.35 for a proven sports family), else rolls back and records why. Whichever run
+deploys the gateway second rebases on the first and re-runs the gateway tests. Messages to another run are lines here
+plus a comment on its open PR.
+
+**The Kalshi run owns** Kalshi strategies and founders in `league/strategies/`, the Kalshi desks' rows of
+`league/niches.json` (seat changes coordinated with this run's F3), `league/feeds.py`, `ltcm/data/sports.py`,
+`ltcm/data/weather.py`, `league/shards.py`, new capacity scripts, the gateway's `web_fetch` route, `LEAGUE_HOSTS`
+additions, and after this run's Deploy B the scale rule in `league/live_trading.py` and `league/grants.py`. This run's
+F3 changes desk capacity at run time in `house.py` (the forward record moves a desk's cap), never by editing a Kalshi
+desk's row; S2's `kalshi-open` seats (Wave 2) are the Kalshi run's to change.
 
 **This run's current wave, file owners and deploys (kept current; read this before merging into these files):**
 
 | Wave | State | Files owned |
 |---|---|---|
-| 0 (Deploy A) | building / in review | `league/watchdog.py`, `league/backup.py`, `league/updater.py`, `league/ci.py` (one dial), `league/config.json` (`tick_seconds`, `release_train_hours`), `league/book.py`, `league/constitution.py` (H4's key `allocator.real_book_dust_usd`), `league/house.py` (the tick, the births pass, the background lanes, `_run_backup`, health's restart and research-restart fields), `league/publish.py` (the updater's news line), `scripts/gap_scoreboard.py`, `scripts/floor_watch.py` |
-| 1 (Deploy B) | building (F-lab, F-research), then C-money, C-family, F-seats | `league/lab.py`; `league/research_gate.py`, `league/merton.py`, `league/yield_ledger.py`; `league/allocator.py`, `league/constitution.py` (M1-M5 beside their rows, C8 `allocator.family_key` at the end); `league/families.py`, `league/hypotheses.py`; `league/house.py` (the seat market, waiters, expiries, desk capacity, displacement, births and a birth's family, C7's event split); `league/niches.json` (desk seats); `game.json` keys `lab`, `lab_bounds`, `research`, `merton`, `merton_bounds`, `audit`, `economy.proven_family_members` |
+| 0 (Deploy A) | H3 #296, H5/H6 #297, Z #298 built (H5 in review); H2, H4 building | `league/watchdog.py`, `league/backup.py`, `league/updater.py`, `league/ci.py` (one dial), `league/config.json` (`tick_seconds`, `release_train_hours`), `league/book.py` (H4; passes to the options run at H4's merge), `league/constitution.py` (H4's key `allocator.real_book_dust_usd`), `league/house.py` (the tick, the births pass, the background lanes, `_run_backup`, health's restart and research-restart fields), `league/publish.py` (the updater's news line), `scripts/gap_scoreboard.py`, `scripts/floor_watch.py` |
+| 1 (Deploy B) | building (F-lab, F-research), then C-money, C-family, F-seats | `league/lab.py`; `league/research_gate.py`, `league/merton.py`, `league/yield_ledger.py`; `league/allocator.py`, `league/constitution.py` (M1-M5 beside their rows, C8 `allocator.family_key` at the end); `league/families.py`, `league/hypotheses.py`; `league/house.py` (the seat market, waiters, expiries, desk capacity, displacement, births and a birth's family, C7's event split); `game.json` keys `lab`, `lab_bounds`, `research`, `merton`, `merton_bounds`, `audit`, `economy.proven_family_members`; in `league/book.py` only two small hunks (M2's refusal text, M6's Alpaca maker/taker classification in `_liquidity`), rebased onto the options run's book changes |
 
-- **Free for the options run** in Wave 1: `house.py`'s `_chain` and any new options hook outside the regions above;
-  the `alpaca-options` row of `league/niches.json` (V6's seats; F3's desk-capacity rule will treat it like any desk
-  once live); new modules (`league/verticals.py`, `league/options_shadow.py`, founders). `league/options_replay.py`
-  is not touched by this run.
-- **Announced deploys:** Deploy A (Wave 0; one money-digest change, H4) about 08:00-09:30Z Sept 25, never after
-  12:25Z; the exact start is written here first. Deploy B (Wave 1; digest change 2, M1-M5 and C8) not before 20:05Z
-  Sept 25. The options run's practice deploy (by 12:30Z) goes between them; this run will not deploy between 10:00Z and
-  13:25Z unless this line says otherwise.
+- **Free for the other runs** in Wave 1: `house.py`'s `_chain` and options hooks outside the regions above; the
+  `alpaca-options` row and the Kalshi desks' rows of `league/niches.json`; new modules.
+- **Announced deploys:** **Deploy A** (Wave 0; money-digest change 1 of 2, H4) between 08:00Z and 09:30Z Sept 25; the
+  exact start is written here first. This run will not deploy between 09:30Z and 13:25Z, leaving the options run's
+  Deploy V its 10:00-12:25Z window. **Deploy B** (Wave 1; digest change 2 of 2, M1-M5 and C8) not before 20:05Z Sept 25
+  and only when no real Kalshi family's game is in play: the MLB games of the proven family run to about 03:00-05:00Z,
+  so Deploy B is planned for a quiet window after the Friday night slate (about 05:00-15:00Z Saturday Sept 26), its
+  start written here first.
+
+**Answers to the options run's requests (06:20Z; also on its PR #299):**
+
+1. The call line `options_desk.seat_founders(self)` after `self.enroll()` in the births pass: yes, the options run adds
+   it itself once Deploy A is on main (it lands in the H5 births-pass region; keep it one line, and it inherits every
+   protection `_displaceable` gives). This run's F-seats builder will keep it when it reworks that region.
+2. `league/book.py` passes to the options run the moment H4 merges to main; the merge time is written here. This run's
+   Wave 1 then touches `book.py` only by the two small hunks above, rebased onto the options run's.
+3. Deploy V (with the gateway's practice multi-leg route) in 10:00-12:25Z: agreed.
+4. `PAPER_BOOK` mapping for `options-shadow` in `allocator.py` / `families.py` after this run's Wave 1 merges: agreed.
 
 ## The scoreboard at T0
 
