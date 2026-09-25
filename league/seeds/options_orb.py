@@ -1,19 +1,18 @@
-# options-orb: an opening-range breakout on SPY, QQQ or IWM, traded as a 0-4 day debit vertical, flat by the close.
+# options-orb: trade the opening range's breakout (or, as measured, fade it) with a 0-4 day debit vertical, flat by the close.
 #
-# THE IDEA. The first half hour sets a range; a 15-minute close outside it, beyond the day's open, is order flow
-# the rest of the day tends to follow. A $1-wide debit vertical near the money (long the strike nearest
-# `entry_delta`, short the next one out) rides it with the loss capped at the debit; near expiry it has most gamma.
-# THE EVIDENCE. Published: intraday momentum in SPY (Gao, Han, Li and Zhou, JFE 2018: the first half hour
-# predicts the last); opening-range breakouts are a desk staple with a thin edge. By this firm: none yet. The
-# replay fills conservatively (long legs at the ask or worse, short at the bid or worse, $0.05 a contract a leg).
-# WHAT IT NEEDS. 15-minute bars of the three ETFs (60: two and a half sessions), the chain within 4 days, and
-# `structures: True`, so the chain is not cut to what one contract costs.
+# THE IDEA. The first half hour sets a range. A 15-minute close outside it, beyond the day's open, is order flow;
+# whether the rest of the day follows it or gives it back is the market's regime. `fade` 0 rides the breakout
+# (calls up, puts down), `fade` 1 bets it fails; a near-the-money debit vertical caps the loss at the debit.
+# THE EVIDENCE. Published: intraday momentum in SPY (Gao, Han, Li and Zhou, JFE 2018). Measured on this firm's
+# history (15-minute bars, May 22 to Aug 11, 2026; breakout 10:00-13:00, out at 15:35): the breakout LOST on
+# average, IWM -0.16% (42), BAC -0.23% (32), SOFI -0.37% (44), SNAP -0.14% (38), AAL -0.44% (45); SPY -0.01%
+# (45). So the founder fades by default, on those five; the published momentum is one mutation (`fade` 0) away.
+# WHAT IT NEEDS. 15-minute bars (60: two and a half sessions), the chain within 4 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (13:00), once an underlying a day, at most
 # `max_open` structures at once, never on an expiry day after 14:00. A limit at the natural net ask plus `slip`.
-# HOW IT EXITS. At `profit_target` of the most it can make, at `stop_loss` of the debit, when price falls back
-# through the range's middle, and always `exit_minutes_before_close` before the close (15:15 on an expiry day).
-# PARAMS (ranges in NEEDS): `structure` debit_vertical or credit_vertical (the same view as a put or call
-# credit spread), `width` in dollars, `dte_min`-`dte_max` days, `max_qty` structures an order, `notional_usd` max loss.
+# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), when price is
+# back at the range's middle (a fade's work done, or a breakout failed), and `exit_minutes_before_close` before
+# the close, every day (by 15:15 on an expiry day). PARAMS: `range_bars`, `breakout_pct`, `fade`, `structure`.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -134,14 +133,14 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-orb", "asset_class": "option", "structures": True,
-         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "15Min", "limit": 60}, "max_days_to_expiry": 4, "wake_minutes": 5,
+         "symbols": ["IWM", "BAC", "SOFI", "SNAP", "AAL"], "bars": {"timeframe": "15Min", "limit": 60}, "max_days_to_expiry": 4, "wake_minutes": 5,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [0, 4], "dte_max": [0, 4], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [15, 240], "exit_dte": [0, 99], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
-                                        "range_bars": [1, 4], "breakout_pct": [0, 0.01]}, "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 10.0, "dte_min": 0, "dte_max": 4, "wing_delta": 0.08, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 0.5,
+                                        "range_bars": [1, 4], "breakout_pct": [0, 0.01], "fade": [0, 1]}, "ordered": [["dte_min", "dte_max"]]}}
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 0, "dte_max": 4, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 25, "exit_dte": 99, "max_open": 2, "max_qty": 1, "notional_usd": 60.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 20, "range_bars": 2, "breakout_pct": 0.001, "entry_start": 600, "entry_end": 780}
+          "min_credit": 0.3, "requote_minutes": 20, "range_bars": 2, "breakout_pct": 0.001, "fade": 1, "entry_start": 600, "entry_end": 780}
 
 def _range(ctx, under, ny, n):
     # Today's closed 15-minute bars: the opening range (high, low), the day's open and the last close.
@@ -157,10 +156,12 @@ def decide(ctx):
         return {"intents": [], "cancels": [], "thought": "Options ORB: the market is shut.", "memory": memory}
     day, notes, n, kind = ny.strftime("%Y-%m-%d"), [], int(p["range_bars"]), "credit_vertical" if p["structure"] == "credit_vertical" else "debit_vertical"
 
-    def failed(row, held_kind, occs, dte):  # the breakout failed: back through the range's middle
+    def failed(row, held_kind, occs, dte):  # back through the range's middle: a failed breakout, or a fade that has done its work
         found, bull = _range(ctx, _parts(occs[0])[0], ny, n), (_parts(occs[0])[2] == "call") != (held_kind in CREDIT)
         middle = (found[0] + found[1]) / 2.0 if found else 0.0
-        return f"the breakout failed: {found[3]:.2f} is back through the range's middle {middle:.2f}" if found and (found[3] < middle if bull else found[3] > middle) else None
+        if not found or (found[3] < middle if bull else found[3] > middle) == (p["fade"] >= 1):
+            return None
+        return f"{found[3]:.2f} is back at the range's middle {middle:.2f}: " + ("the fade has done its work" if p["fade"] >= 1 else "the breakout failed")
 
     def signal(under):
         found = _range(ctx, under, ny, n)
@@ -169,7 +170,8 @@ def decide(ctx):
         high, low, opened, last = found
         bull = True if last > high * (1 + p["breakout_pct"]) and last > opened else False if last < low * (1 - p["breakout_pct"]) and last < opened else None
         return (f"{last:.2f} inside the range {low:.2f}-{high:.2f} or against the open {opened:.2f}" if bull is None else
-                (bull, f"{under} {last:.2f} broke {'above' if bull else 'below'} its opening range {low:.2f}-{high:.2f}", kind, day))
+                (bull != (p["fade"] >= 1), f"{under} {last:.2f} broke {'above' if bull else 'below'} its opening range {low:.2f}-{high:.2f}"
+                 + (": fading it" if p["fade"] >= 1 else ""), kind, day))
 
     intents, cancels = _exits(ctx, ny, p, notes, failed)
     kept = {k: memory.get(k) if isinstance(memory.get(k), dict) else {} for k in ("sent", "done")}

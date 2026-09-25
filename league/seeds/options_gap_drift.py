@@ -1,19 +1,18 @@
-# options-gap-drift: ride a single stock's news gap for days with a 3-10 day vertical in the gap's direction.
+# options-gap-drift: ride a stock's news move for days with a 3-10 day vertical in the move's direction.
 #
 # THE IDEA. When a stock moves two standard deviations of its daily moves on news (an earnings release, most
-# often), the market under-reacts and the price keeps drifting the same way for days. Buy a $1 debit vertical
-# with the move once the first 45 minutes have confirmed it, or the next morning if it has not reversed.
-# THE EVIDENCE. Published: post-earnings-announcement drift (Ball and Brown 1968; Bernard and Thomas 1989), and
-# its modern form in the announcement-day return (Chan, Jegadeesh and Lakonishok 1996). Not measured by this firm.
-# EDGAR's 8-K Item 2.02 feed would name the earnings days, but the options replay tape carries no feeds (a founder
-# that declares one cannot be replayed), so the event is read from the price: a move of `gap_z` sigmas and
-# `min_gap_pct` percent. The replay fills conservatively; single-stock legs print less often than SPY's.
-# WHAT IT NEEDS. Daily bars (40) and quotes of eight stocks with weekly options, the chain within 10 days, and
-# `structures: True`. WHEN IT TRADES. From `entry_start` (10:15 New York) to `entry_end` (12:00), once an event,
-# at most `max_open` structures, never on an expiry day after 14:00.
-# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit, when the gap is filled (the
-# price back through the close before it), after `max_hold_days`, and on its expiry day `exit_minutes_before_close`
-# before the close. PARAMS: `gap_z`, `min_gap_pct`, `lookback`, `structure`, `width`, `dte_min`-`dte_max`.
+# often), the market under-reacts and the price keeps drifting the same way for days. Buy a near-the-money debit
+# vertical with the move once the first 45 minutes have confirmed it, or the next morning if it has not reversed.
+# THE EVIDENCE. Published: post-earnings-announcement drift (Ball and Brown 1968; Bernard and Thomas 1989).
+# Measured on this firm's history (underlying closes): 3-day drift after a 2-sigma, 3% day, May 22 to Aug 11,
+# 2026: BAC +0.46% (1), T +2.04% (5), F +11.5% (1), AAL +2.07% (6), RIVN +5.15% (4), CCL +0.56% (4); HOOD, SOFI
+# and SNAP went the other way and are left out. EDGAR's 8-K Item 2.02 feed would name the earnings days, but the
+# options replay tape carries no feeds (a founder declaring one cannot be replayed): the event is read from price.
+# WHAT IT NEEDS. Daily bars (40) and quotes of six stocks, the chain within 10 days, `structures: True`.
+# WHEN IT TRADES. From `entry_start` (10:15 New York) to `entry_end` (12:00), once an event, at most `max_open`.
+# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), when the gap
+# fills (the price back through the close before it), after `max_hold_days`, and on its expiry day
+# `exit_minutes_before_close` before the close. PARAMS: `gap_z`, `min_gap_pct`, `lookback`, `structure`, `width`.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -134,14 +133,14 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-gap-drift", "asset_class": "option", "structures": True,
-         "symbols": ["INTC", "BAC", "HOOD", "PFE", "T", "F", "SOFI", "SNAP"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 10,
+         "symbols": ["BAC", "T", "F", "AAL", "RIVN", "CCL"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 10,
          "wake_minutes": 10,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 10], "dte_max": [1, 10], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "gap_z": [1.0, 4.0], "min_gap_pct": [0, 10], "lookback": [10, 30], "max_hold_days": [1, 10]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 5.0, "dte_min": 3, "dte_max": 10, "wing_delta": 0.1, "entry_delta": 0.35, "profit_target": 0.6, "stop_loss": 0.5,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 3, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
           "min_credit": 0.3, "requote_minutes": 30, "gap_z": 2.0, "min_gap_pct": 3.0, "lookback": 20, "max_hold_days": 4, "entry_start": 615, "entry_end": 720}
 

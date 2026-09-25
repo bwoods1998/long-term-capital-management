@@ -1,18 +1,19 @@
-# options-diagonal: in a stock's trend, sell a 1-4 day option and own a 5-10 day one at a better strike (a diagonal).
+# options-diagonal: in a stock's uptrend, sell a 1-4 day call and own a 5-10 day one at a lower strike (a diagonal).
 #
-# THE IDEA. An option loses its time value fastest in its last days. Short the near option `entry_delta` out of the
-# money in the trend's direction and own a later one at least `width` nearer the money: the near leg's decay pays
-# for the far leg, and a move with the trend lifts the far leg more than the near. The loss is capped at the debit
-# as long as it is closed before the near leg's expiry, which the founder always does.
-# THE EVIDENCE. Published: theta is steepest near expiry (Black-Scholes); short-dated index and stock options
-# carry the richest variance premium (Bakshi and Kapadia 2003). Not measured by this firm. On SPY and QQQ a
-# diagonal costs more than the $75 cap, so this trades stocks of $12-60 with weekly options.
+# THE IDEA. An option loses its time value fastest in its last days. Short the near call `entry_delta` out of
+# the money and own a later call at least `width` lower: the near leg's decay pays for the far leg, and a move
+# with the trend lifts the far leg more than the near. The loss is capped at the debit as long as it is closed
+# before the near leg's expiry, which the founder always does (and the House from 15:30 that day).
+# THE EVIDENCE. Published: theta is steepest near expiry; short-dated options carry the richest variance premium
+# (Bakshi and Kapadia 2003). Measured on this firm's history (May 22 to Aug 11, 2026): 3 days after a close over a
+# rising 20-day mean BAC +1.18% (44), PFE +0.54% (16), T +0.65% (13), F +0.66% (23), AAL +1.08% (33), SNAP +4.0%
+# (10). On SPY and QQQ a diagonal costs more than the $75 cap; these are $5-60 stocks with weekly options.
 # WHAT IT NEEDS. Daily bars (40) and quotes of six stocks, the chain within 10 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (14:00), once a stock a day, at most
-# `max_open` at once, with the near leg `near_dte_min`-`near_dte_max` days out and the far leg `dte_min`-`dte_max`.
+# `max_open`, the near leg `near_dte_min`-`near_dte_max` days out and the far leg `dte_min`-`dte_max`.
 # HOW IT EXITS. At `profit_target` of its debit, at `stop_loss` of the debit, when the price crosses the trend's
-# mean against it, and `exit_minutes_before_close` before the close `exit_dte` days before the near expiry (the
-# House closes it from 15:30 on that day). PARAMS: `trend_days`, `slope_days`, `both_sides`, `width`, `notional_usd`.
+# mean, and `exit_minutes_before_close` before the close `exit_dte` days before the near expiry. PARAMS:
+# `trend_days`, `slope_days`, `both_sides` (1 buys put diagonals in downtrends), `width`, `notional_usd`.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -60,7 +61,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -133,7 +134,7 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-diagonal", "asset_class": "option", "structures": True,
-         "symbols": ["BAC", "SOFI", "F", "T", "PFE", "AAL"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 10, "wake_minutes": 10,
+         "symbols": ["BAC", "PFE", "T", "F", "AAL", "SNAP"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 10, "wake_minutes": 10,
          "parameter_rules": {"bounds": {"width": [0.5, 5], "dte_min": [3, 10], "dte_max": [3, 10], "near_dte_min": [1, 4], "near_dte_max": [1, 4],
                                         "entry_delta": [0.15, 0.5], "profit_target": [0.2, 2.0], "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240],
                                         "exit_dte": [0, 3], "max_open": [1, 3], "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05],
@@ -141,7 +142,7 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-diagonal", "asse
                              "ordered": [["dte_min", "dte_max"], ["near_dte_min", "near_dte_max"]]}}
 PARAMS = {"structure": "diagonal", "width": 0.5, "dte_min": 5, "dte_max": 10, "near_dte_min": 1, "near_dte_max": 4, "entry_delta": 0.35,
           "profit_target": 0.4, "stop_loss": 0.5, "exit_minutes_before_close": 120, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 75.0,
-          "slip": 0.01, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "both_sides": 1, "entry_start": 600, "entry_end": 840}
+          "slip": 0.01, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "both_sides": 0, "entry_start": 600, "entry_end": 840}
 
 def _diagonal(ctx, under, bullish, kind, p, ny, budget):
     # Short the near leg nearest entry_delta; long the far leg at the strike at least `width` more favourable (the nearest such).

@@ -1,19 +1,18 @@
-# options-trend-vertical: buy the pullback in a 20-day trend with a 4-10 day debit vertical on SPY, QQQ or IWM.
+# options-trend-vertical: buy the pullback in a stock's 20-day uptrend with a 4-10 day call debit vertical.
 #
-# THE IDEA. An index ETF above a rising 20-day mean that closed yesterday under its 5-day mean has pulled back
-# inside its trend; trends in index ETFs tend to resume within days. A $1 debit vertical with the trend (calls
-# up, puts in the mirror image) risks its debit to make the rest of its width, and takes `profit_target` of it.
-# THE EVIDENCE. Published: time-series momentum (Moskowitz, Ooi and Pedersen 2012) and short-term pullbacks in
-# uptrends (Connors' RSI(2) on index ETFs). SPY ranged 725-776 from May to September 2026 (this firm's options
-# history), so the trend filter must earn its keep. The replay fills conservatively; entries pay four fills.
-# WHAT IT NEEDS. Daily bars (60) of the three ETFs, their quotes, the chain within 10 days, `structures: True`.
-# WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (15:00), once an underlying a day, at most
-# `max_open` structures, never on an expiry day after 14:00. A limit at the natural net debit plus `slip`.
-# HOW IT EXITS. At `profit_target` of its width less the debit, at `stop_loss` of the debit, when the price
-# crosses the 20-day mean against it, after `max_hold_days`, and on its expiry day `exit_minutes_before_close`
-# before the close. PARAMS: `structure` debit_vertical or credit_vertical (the view as a put or call credit
-# spread), `width` dollars, `dte_min`-`dte_max` days, `trend_days`, `slope_days`, `fast`, `both_sides` (1 trades
-# downtrends with puts too), `notional_usd` the most one structure may lose.
+# THE IDEA. A stock above a rising 20-day mean that closed yesterday under its 5-day mean has pulled back inside
+# its trend, and such pullbacks were bought within days. A near-the-money call debit vertical (long the strike
+# nearest `entry_delta`, short the one nearest `wing_delta` at most `width` above) risks its debit for the width.
+# THE EVIDENCE. Published: time-series momentum (Moskowitz, Ooi and Pedersen 2012) and short pullbacks in uptrends
+# (Connors). Measured on this firm's history (underlying closes, May 22 to Aug 11, 2026, the replay window's first
+# two thirds): 3-day returns after such a pullback were +2.43% BAC (7), +0.88% PFE (4), +0.83% T (6), +1.27% SOFI
+# (12), negative on SPY, QQQ, F, AAL and RIVN; after Aug 11: PFE +1.25%, T +1.31%, SOFI +6.58%, BAC -2.82%.
+# Names whose near legs cost over a dollar (HOOD, INTC) are left out: the replay's estimated spreads eat them.
+# WHAT IT NEEDS. Daily bars (60) and quotes of four stocks, the chain within 10 days, `structures: True`.
+# WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (15:00), once a pullback, at most `max_open`.
+# HOW IT EXITS. At `profit_target` of the width less the debit, at `stop_loss` of the debit (1.0: none), when the
+# price crosses the 20-day mean, after `max_hold_days`, on its expiry day `exit_minutes_before_close` before the
+# close. PARAMS: `structure` (credit_vertical sells puts instead), `both_sides` (1 buys puts in downtrends too).
 
 import json, math, re
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -134,15 +133,15 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-trend-vertical", "asset_class": "option", "structures": True,
-         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 60}, "max_days_to_expiry": 10, "wake_minutes": 10,
+         "symbols": ["BAC", "PFE", "T", "SOFI"], "bars": {"timeframe": "1Day", "limit": 60}, "max_days_to_expiry": 10, "wake_minutes": 10,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 10], "dte_max": [1, 10], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "trend_days": [10, 50], "slope_days": [1, 10], "fast": [2, 10], "max_hold_days": [1, 10], "both_sides": [0, 1]},
                              "ordered": [["dte_min", "dte_max"], ["fast", "trend_days"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 10.0, "dte_min": 4, "dte_max": 10, "wing_delta": 0.08, "entry_delta": 0.3, "profit_target": 0.6, "stop_loss": 0.5,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 4, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 4, "both_sides": 1,
+          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 4, "both_sides": 0,
           "entry_start": 600, "entry_end": 900}
 
 def _trend(ctx, under, p):  # (price now, the 20-day mean, its slope, yesterday's close against the 5-day mean) or None

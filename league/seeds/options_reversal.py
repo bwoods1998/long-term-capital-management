@@ -1,19 +1,18 @@
-# options-reversal: fade a two-sigma day on SPY, QQQ or IWM with a 2-7 day debit vertical against the move.
+# options-reversal: buy the day after a two-sigma drop with a 2-7 day call debit vertical, against the move.
 #
-# THE IDEA. A day that moves an index ETF two standard deviations of its last 20 daily moves is mostly
-# liquidity demand (forced sellers, short covering), and index ETFs give back part of it within days. At the end
-# of that day (or the next morning) buy a $1 debit vertical against the move: calls after a plunge, puts after a
-# spike (`fade_up`), risking the debit to make most of the width.
-# THE EVIDENCE. Published: short-term reversal in index and ETF returns after extreme days (Connors and Alvarez;
-# Nagel 2012, "Evaporating liquidity"). Measured here: SPY's 11 moves over 1.5 sigma from May 14 to September 23,
-# 2026 were followed by a move against them the next day 6 times out of 9 on the upside. Thin; replay judges it.
-# WHAT IT NEEDS. Daily bars (40) and quotes of the three ETFs, the chain within 7 days, `structures: True`.
-# WHEN IT TRADES. Today's move from `entry_start` (14:30 New York) to `entry_end` (15:30), or yesterday's move
-# from 10:00 to 11:00, once an event. At most `max_open` at once; never on an expiry day after 14:00.
-# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit, when the move has fully
-# reversed (the price back beyond the close before it), after `max_hold_days`, and on its expiry day
-# `exit_minutes_before_close` before the close. PARAMS: `z_entry` sigmas, `lookback` days, `fade_up` (1 fades
-# spikes too), `structure` debit_vertical or credit_vertical, `width`, `dte_min`-`dte_max`, `notional_usd`.
+# THE IDEA. A day that drops a stock or an index ETF more than `z_entry` standard deviations of its last 20 daily
+# moves is mostly liquidity demand (forced sellers), and part of it comes back within days. Late that day (or the
+# next morning) buy a near-the-money call debit vertical; `fade_up` 1 also buys puts after a spike.
+# THE EVIDENCE. Published: short-term reversal after extreme days (Nagel 2012, "Evaporating liquidity"). Measured
+# on this firm's history (underlying closes, May 22 to Aug 11, 2026): 2 days after a 1.8-sigma drop BAC +1.90%
+# (2), SOFI +1.93% (3), AAL +10.3% (1), CCL +6.0% (2), RIVN +1.02% (3), IWM +1.05% (2); after spikes the fade was
+# no better than a coin (SPY +0.09% on 9), so spikes are not faded by default. Few events: `z_entry` is 1.5.
+# WHAT IT NEEDS. Daily bars (40) and quotes of six names, the chain within 7 days, `structures: True`.
+# WHEN IT TRADES. Today's drop from `entry_start` (14:30 New York) to `entry_end` (15:30), or yesterday's from
+# 10:00 to 11:00, once an event, at most `max_open` at once; never on an expiry day after 14:00.
+# HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), when the drop has
+# been made back (the price over the close before it), after `max_hold_days`, and on its expiry day
+# `exit_minutes_before_close` before the close. PARAMS: `z_entry`, `lookback`, `fade_up`, `structure`, `width`.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -134,15 +133,15 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-reversal", "asset_class": "option", "structures": True,
-         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 7, "wake_minutes": 10,
+         "symbols": ["BAC", "SOFI", "AAL", "CCL", "RIVN", "IWM"], "bars": {"timeframe": "1Day", "limit": 40}, "max_days_to_expiry": 7, "wake_minutes": 10,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 7], "dte_max": [1, 7], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "z_entry": [1.0, 3.5], "lookback": [10, 30], "fade_up": [0, 1], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 10.0, "dte_min": 2, "dte_max": 7, "wing_delta": 0.08, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 0.6,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 2, "dte_max": 7, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.8, "lookback": 20, "fade_up": 1, "max_hold_days": 3, "entry_start": 870, "entry_end": 930}
+          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.5, "lookback": 20, "fade_up": 0, "max_hold_days": 3, "entry_start": 870, "entry_end": 930}
 
 def _event(ctx, under, p, ny, late):
     # (z of the move, the close before it, the event's day): today's move so far late in the day, else yesterday's.

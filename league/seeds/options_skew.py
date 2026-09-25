@@ -1,19 +1,18 @@
-# options-skew: sell rich put skew with a put credit vertical in an uptrend; buy cheap puts with a put debit vertical.
+# options-skew: trade the 25-delta put skew of SPY, QQQ and IWM against its own recent level with a vertical.
 #
 # THE IDEA. The 25-delta put's implied volatility over the 25-delta call's (the skew) is the price of crash
-# insurance. When it is rich against its own recent level, puts are dear: sell a $1 put credit vertical under
-# the market (in an uptrend only), which keeps the credit if the index holds. When it is cheap, protection is on
-# sale: buy a $1 put debit vertical. Skew is read from the chain the House shows (its IVs and deltas).
-# THE EVIDENCE. Published: the variance and skew risk premia (Bakshi, Kapadia and Madan 2003; Bollerslev and
-# Todorov 2011): index puts are overpriced on average, most when fear is high. Measured here (options history,
-# May 14 to September 23, 2026): SPY's 30-day 25-delta skew averaged 0.049 (sd 0.013), QQQ's 0.056, IWM's 0.052.
-# Until `min_obs` days of its own readings exist the founder measures against `skew_norm` +- `skew_sd`.
+# insurance. When it is cheap against its recent level the market is calm, and calm index markets kept drifting
+# up: ride it with a call debit vertical (`cheap_side` 1; -1 buys the cheap puts instead). When it is rich above a
+# rising index, the fear can be sold with a put credit vertical (`rich_side` 1, off by default: see below).
+# THE EVIDENCE. Published: the skew and variance risk premia (Bakshi, Kapadia and Madan 2003). Measured on this
+# firm's options history (the House's daily features, May 14 to Aug 11, 2026): 3 days after a skew one sd under
+# its 20-day mean SPY rose 0.62% (11, 82% of the time), QQQ 1.28% (11), IWM 0.35% (12); after a rich skew over a
+# rising index the next 3 days fell (SPY, QQQ, IWM: 5 cases). Readings are taken from the chain the House shows
+# (its IVs and deltas); until `min_obs` days of its own exist it measures against `skew_norm` +- `skew_sd`.
 # WHAT IT NEEDS. Daily bars (30) and quotes of the three ETFs, the chain within 9 days, `structures: True`.
-# WHEN IT TRADES. From `entry_start` (10:30 New York) to `entry_end` (15:00), once an underlying a day, at most
-# `max_open` structures, never on an expiry day after 14:00. HOW IT EXITS. At `profit_target` of what it can
-# make (a credit: of the credit), at `stop_loss` of the credit (or of the debit), after `max_hold_days`, and on
-# its expiry day `exit_minutes_before_close` before the close. PARAMS: `z_rich`, `z_cheap`, `cheap_side` (1 buys
-# cheap puts), `structure` (the rich arm: credit_vertical, or debit_vertical to buy calls), `width`, `dte_min`-`dte_max`.
+# WHEN IT TRADES. From `entry_start` (10:30 New York) to `entry_end` (15:00), once an underlying a day.
+# HOW IT EXITS. At `profit_target` of what it can make (a credit: of the credit), at `stop_loss` of the debit
+# (or of the credit), after `max_hold_days`, and on its expiry day `exit_minutes_before_close` before the close.
 
 import json, math, re
 from datetime import datetime, timezone
@@ -61,7 +60,7 @@ def _vertical(ctx, under, bullish, kind, p, ny, budget):
     best = None
     for near in rows:
         dte, miss, k = _dte(near.get("expiry"), ny), abs(abs(_num(near.get("delta"))) - p["entry_delta"]), _num(near.get("strike"))
-        if dte is None or miss > 0.1 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
+        if dte is None or miss > 0.15 or not p["dte_min"] <= dte <= p["dte_max"] or (dte == 0 and ny.hour * 60 + ny.minute >= 840):
             continue  # never a lottery ticket in place of the bet asked for, nor a structure the House would refuse
         for far in [r for r in rows if r.get("expiry") == near.get("expiry") and 0 < (_num(r.get("strike")) - k) * out <= p["width"] + 1e-9]:
             nb, na, fb, fa, width = _num(near.get("bid")), _num(near.get("ask")), _num(far.get("bid")), _num(far.get("ask")), abs(_num(far.get("strike")) - k)
@@ -138,12 +137,12 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-skew", "asset_cl
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 9], "dte_max": [1, 9], "wing_delta": [0.02, 0.3], "entry_delta": [0.15, 0.5], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.3, 2.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
-                                        "z_rich": [0.5, 3.0], "z_cheap": [0.5, 3.0], "cheap_side": [0, 1], "skew_norm": [0.0, 0.15], "skew_sd": [0.005, 0.05],
+                                        "z_rich": [0.5, 3.0], "z_cheap": [0.5, 3.0], "cheap_side": [-1, 1], "rich_side": [0, 1], "skew_norm": [0.0, 0.15], "skew_sd": [0.005, 0.05],
                                         "min_obs": [3, 20], "lookback": [5, 20], "trend_days": [5, 25], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "credit_vertical", "width": 10.0, "dte_min": 1, "dte_max": 9, "wing_delta": 0.12, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 10.0, "dte_min": 1, "dte_max": 9, "wing_delta": 0.12, "entry_delta": 0.3, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 72.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.28, "requote_minutes": 30, "z_rich": 1.0, "z_cheap": 1.0, "cheap_side": 1, "skew_norm": 0.05, "skew_sd": 0.013,
+          "min_credit": 0.28, "requote_minutes": 30, "z_rich": 1.0, "z_cheap": 1.0, "cheap_side": 1, "rich_side": 0, "skew_norm": 0.05, "skew_sd": 0.013,
           "min_obs": 8, "lookback": 20, "trend_days": 20, "max_hold_days": 4, "entry_start": 630, "entry_end": 900}
 
 def _skew(ctx, under, p, ny):  # the nearest expiry's 25-delta put IV less its 25-delta call IV, or None
@@ -181,10 +180,11 @@ def decide(ctx):
         if under not in readings or price <= 0 or len(closes) < p["trend_days"]:
             return "no 25-delta put and call to read the skew from, or too few daily bars"
         (skew, z, mean), trend = readings[under], sum(closes[-int(p["trend_days"]):]) / int(p["trend_days"])
-        if z >= p["z_rich"] and price > trend:
-            return True, f"{under}'s 25-delta skew {skew:.3f} is rich ({z:+.1f} sd over {mean:.3f}) above its {int(p['trend_days'])}-day mean: selling the fear", kind, day
-        if z <= -p["z_cheap"] and p["cheap_side"] >= 1:
-            return False, f"{under}'s 25-delta skew {skew:.3f} is cheap ({z:+.1f} sd under {mean:.3f}): buying protection on sale", "debit_vertical", day
+        if z >= p["z_rich"] and price > trend and p["rich_side"] >= 1:
+            return True, f"{under}'s 25-delta skew {skew:.3f} is rich ({z:+.1f} sd over {mean:.3f}) above its {int(p['trend_days'])}-day mean: selling the fear", "credit_vertical", day
+        if z <= -p["z_cheap"] and p["cheap_side"] != 0:
+            return (p["cheap_side"] > 0, f"{under}'s 25-delta skew {skew:.3f} is cheap ({z:+.1f} sd under {mean:.3f}): "
+                    + ("riding the calm with calls" if p["cheap_side"] > 0 else "buying protection on sale"), kind, day)
         return f"skew {skew:.3f} is {z:+.1f} sd from {mean:.3f}" + (", rich but under the trend" if z >= p["z_rich"] else "")
 
     intents, cancels = _exits(ctx, ny, p, notes, aged)
