@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from league.house import SEAT_WAIT_WARN_SECONDS, Newcomer
+from league.house import SEAT_WAIT_WARN_SECONDS, House, Newcomer
 from league.ledger import now_iso
 from league.tests.test_house import BUYER
 from league.tests.test_hypotheses import FoundryCase
@@ -507,3 +508,13 @@ class NewCodeFamilies(EvidenceCase):
         self.assertEqual(child.parent, author.id)
         self.assertNotEqual(child.family, author.family)
         self.assertTrue(child.family.startswith("crypto-majors-test-buyer-"), child.family)
+
+
+class WaiterNames(unittest.TestCase):
+    def test_every_class_is_named_in_the_singular_and_the_plural(self):
+        """Sept 24, 2026: an appended "s" wrote "8 merged strategys" into the owner's alert at 18:56:18Z."""
+        self.assertEqual(House._waiters_named("strategies", 8), "8 merged strategies")
+        self.assertEqual(House._waiters_named("strategies", 1), "1 merged strategy")
+        self.assertEqual(House._waiters_named("proven", 3), "3 proven family's births")
+        self.assertEqual(set(House.SEAT_WAITER_PLURALS), set(House.SEAT_WAITER_NAMES))
+

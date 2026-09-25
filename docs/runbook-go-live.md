@@ -31,10 +31,12 @@ to paste a secret into a chat or a file.
   `allocator.enabled: False` in `league/constitution.py` is the rollback to the old ladder of
   sections 2 and 3. It is a money rule, so it needs your deploy and a ratify.
 - **The grant.** `earned-live-20260921`: Alpaca $500, Kalshi $517.75, a $1,017.75 loss line, no
-  expiry. It counts 40 agents, the allocation over the $25 stake line (the smallest bunt). It is
-  pinned to money digest `1d63a56e…` (constitution `52c6c7e5…`), re-ratified at 17:34:36Z on Sept 23
-  (Deploy A of the learn-and-unblock run; before it `44e8d48d…`, 101 agents over a $10 line).
-  The allocator's envelope at each venue is that capital plus the realized profit there.
+  expiry. It counts 101 agents, the allocation over the $10 Kalshi probe (the smallest real stake).
+  It is pinned to money digest `535a7f15…` (constitution `38a57fe9…`), re-ratified at 18:44:00Z on
+  Sept 24, 11 s after Deploy D of the close-the-gaps run promoted (`allocator.family_probe`: no probe
+  on a losing family). The digests before it: `c02ed852…` (Sept 24 Deploy B, 08:31Z), `521c4586…`
+  (Deploy A, 05:37Z), `c2b0e09c…` (Sept 23 Deploy C), `1d63a56e…` (Sept 23 Deploy A). The allocator's
+  envelope at each venue is that capital plus the realized profit there.
 - **After a money-rule change**, from a clean worktree at `origin/main`:
 
   ```sh
@@ -55,10 +57,11 @@ to paste a secret into a chat or a file.
   sleep; it also sleeps by itself after ten idle minutes. If Sail terminates it, the lab stops with
   an error alert and is never given a replacement from the agents' image: make one with
   `python3 scripts/lab_box.py create`, which records the new id in `league/config.json`, and deploy.
-- **Compute.** The OpenAI month is $408 and Jev's allowance $42, each metered spend plus your funded
-  balance on Sept 23. The gateway indexes the OpenAI month to profit (0.3 of the real accounts'
-  equity above $1,017.75), but holds it to the funded $408, so profit buys nothing more until you
-  fund more. Sail is prepaid; its auto-recharge is your decision.
+- **Compute.** The OpenAI month is $607 (raised from $408 at 01:36Z Sept 24 for your $200 top-up;
+  $394.46 metered then plus the $213 funded) and Jev's allowance $42. The gateway indexes the OpenAI
+  month to profit (0.3 of the real accounts' equity above $1,017.75), but holds it to the funded $607,
+  so profit buys nothing more until you fund more; the month resets Oct 1. Sail is prepaid (about $160
+  at 18:45Z Sept 24, about $34 a day); its auto-recharge is your decision.
 - **The watch.** `python3 scripts/floor_watch.py` prints, read-only, the bands, real money,
   evidence, the lab, costs, health and the site's checkpoint. Section 5 has the rest.
 

@@ -29,13 +29,42 @@ class Backup:
         self.keep_days = int(keep_days)
         self.clock = clock
 
+    #: After a failed checkpoint the next try waits this long, doubling with each failure in a row, up to
+    #: `RETRY_MAX_SECONDS`. Sept 24, 2026, 21:31-21:45Z: Sail's checkpoint service answered 503 ("prewarm base
+    #: snapshot ... DeadlineExceeded"), and because `due` read only the last SUCCESSFUL backup the House tried again at
+    #: every tick -- five tries and five error alerts in 13 minutes -- against a service that was down.
+    RETRY_SECONDS = 1800
+    RETRY_MAX_SECONDS = 6 * 3600
+
+    def attempts(self) -> list[dict[str, Any]]:
+        """The recent backup rows, oldest first (`ops.deploy` rows with `what: backup`, ok or not)."""
+        return [e.payload for e in self.ledger.read(kinds="ops.deploy", limit=200, newest=True) if e.payload.get("what") == "backup"]
+
+    def failures_in_a_row(self) -> list[dict[str, Any]]:
+        """The failed tries since the last success, oldest first (empty after a success)."""
+        out: list[dict[str, Any]] = []
+        for row in reversed(self.attempts()):
+            if row.get("ok"):
+                break
+            out.append(row)
+        return list(reversed(out))
+
+    def retry_after(self, failures: int) -> float:
+        """Seconds to wait after the `failures`-th failure in a row."""
+        return float(min(self.RETRY_MAX_SECONDS, self.RETRY_SECONDS * 2 ** max(0, failures - 1)))
+
     def last(self) -> float | None:
-        rows = [e for e in self.ledger.read(kinds="ops.deploy", limit=200, newest=True) if e.payload.get("what") == "backup" and e.payload.get("ok")]
-        return float(rows[-1].payload["at_epoch"]) if rows else None
+        rows = [row for row in self.attempts() if row.get("ok")]
+        return float(rows[-1]["at_epoch"]) if rows else None
 
     def due(self) -> bool:
         last = self.last()
-        return last is None or self.clock() - last >= self.every_hours * 3600
+        if last is not None and self.clock() - last < self.every_hours * 3600:
+            return False
+        failed = self.failures_in_a_row()
+        if failed:
+            return self.clock() - float(failed[-1]["at_epoch"]) >= self.retry_after(len(failed))
+        return True
 
     def run(self) -> dict[str, Any]:
         """One checkpoint of the House's own box. Never raises: a failed backup is a row that says why."""

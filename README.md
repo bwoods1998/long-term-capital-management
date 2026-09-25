@@ -653,7 +653,7 @@ What no model and no code path on Sail may change, and where each item is enforc
 | OpenAI budget | $408 for the month (`FRONTIER_MONTH_USD`: raised from $174 to $374 on Sept 21, 2026, when the owner added $200 of credit, and on Sept 23 to metered + the owner's funded ~$100). Since Sept 23 it also rises by 0.3 of the real accounts' equity above $1,017.75 (`COMPUTE_PROFIT_SHARE`, `EQUITY_BASELINE_USD`), held to `FRONTIER_MONTH_MAX_USD`, which is the funded $408, so profit buys nothing above funded money yet. The House's campaign allowance is a further line | in the gateway, which reads the equity itself: a call is reserved at its worst case and refused (402) when the month cannot cover it |
 | Sail budget | $100 a month plus the owner's recorded top-ups that month (September's line was $200 on Sept 22), $5 reserve | in `league/budget.py`, because Sail has no spend caps: at the line research and practice stop and only agents holding real positions are still woken, so they can exit |
 | The ladder | every threshold, stake and limit above | constants in `league/constitution.py`; a test pins the file's digest (`38a57fe9…` since the close-the-gaps run's R5, Sept 24, 2026; `915c978e…` from its Deploy B; `8116302e…` from its Deploy A; `34adf385…` at that run's T0; `9fa83727…` from the allocator of Sept 23, 2026; `64a206c6…` under swing-and-bunt earlier that day), and the House writes the digest to the ledger every time it starts |
-| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the close-the-gaps run's Deploy A (Sept 24, 2026) it counts 101 agents: the allocation over the smallest real stake, the $10 Kalshi probe (40 over the $25 bunt line from Deploy A of Sept 23; 101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`535a7f15…` from the close-the-gaps run's R5, Sept 24, 2026, `allocator.family_probe`, once ratified; `c02ed852…` from its Deploy B; `521c4586…` from its Deploy A; `c2b0e09c…` at that run's T0; `44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
+| The live grant | `earned-live-20260921`: $500 of Alpaca cash and $517.75 of Kalshi cash, a $1,017.75 loss line, no expiry. Since the close-the-gaps run's Deploy A (Sept 24, 2026) it counts 101 agents: the allocation over the smallest real stake, the $10 Kalshi probe (40 over the $25 bunt line from Deploy A of Sept 23; 101 over a $10 line from the allocator's deploy; 16 over the $60 micro stake before that). The allocator's envelope is this capital plus realized profit at each venue | in `campaigns.sqlite`, through `league/campaigns.py` and `league/live_trading.py`, which no role may change. It pins the money digest (`535a7f15…` from the close-the-gaps run's R5, Sept 24, 2026, `allocator.family_probe`, ratified at 18:44:00Z, 11 s after Deploy D promoted; `c02ed852…` from its Deploy B; `521c4586…` from its Deploy A; `c2b0e09c…` at that run's T0; `44e8d48d…`, ratified at 08:28:13Z on Sept 23, 2026, 19 s after the allocator's release was promoted; `a6b83f9e…` and `3d01ae90…` earlier that day): a changed money rule leaves it inactive until the owner re-ratifies it for the same capital (`scripts/live_trading.py --ratify`). `--disable` stops new real-money entries and keeps exits |
 | The judges | `constitution.py`, `ci.py`, `ledger.py`, `book.py`, `evaluator.py`, `stats.py`, `auditor.py`, `watchdog.py`, `safety.py`, `replay.py`, `updater.py`, the campaign, live-trading and experiment-record files, the agent-box seal (`sandbox.py`), the history a strategy is judged on (`history.py`, `deep_replay.py`), the horizon rule's answer (`resolution.py`), `gateway/`, `.github/` (`ci.FORBIDDEN` has the full list) | out of reach of every Merton role: the gateway refuses the path before a branch exists, and CI's path guard refuses it again. GitHub runs that guard from `main`'s copy, so a branch cannot rewrite its judge |
 | Real money | `"real_money": true` in `league/config.json` -- the owner threw that switch on Sept 20 | only the owner changes it; CI refuses an operator change to anything but four operating dials; the House refuses real money unless agents run in sealed Sailboxes |
 
@@ -777,7 +777,7 @@ The `league/` modules:
 | `rules.py` | The text every agent is told, generated from the constitution and the game file. |
 | `seeds/` | The fourteen founding programs. |
 | `pacer.py` | The legacy fourteen-day expedition pacer, kept for compatibility and fixtures; production is paced by the funded campaign (`campaigns.py`). |
-| `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. |
+| `backup.py` | A daily checkpoint of the House's own box, kept by Sail: the ledger must outlive one disk. A failed try waits 30 minutes, doubling with each failure in a row up to six hours (Sept 24, 2026: Sail's checkpoint service answered 503 and the House had tried at every tick); the House's error alert carries `began_at`, the first failure of the run, so the watchdog inherits an outage that began before a promotion. |
 | `niches.py`, `niches.json` | The specialties: universes, briefs, founders, and the daily survey that lets a universe follow the season; the two open desks (`open: true`) and `match`/`spanning`, which seat a program on one desk or, when it spans desks, on its venue's open desk. |
 | `strategies/`, `tools/`, `playbook/` | What Merton adds by pull request: strategies, helper modules, lessons. |
 | `house.py` | The House: one `tick()` is the whole loop, which since Sept 23, 2026 never waits on a box that background work holds and builds the standings table once. |
@@ -969,7 +969,63 @@ dynamism revisions followed that evening:
   settlement, refusal, block, verdict or lesson) rather than the clock, the foundry follows
   forward yield, failed consults are refunded, and repair children are replayed before a seat.
 
+**The Sept 24 close-the-gaps run** ([plan](docs/goals/LTCM_CLOSE_THE_GAPS.md),
+[execution record](docs/runs/2026-09-24-close-the-gaps.md); T0 01:34:02Z, resumed at T0' 15:04:54Z; no deadline):
+- **Deploy A (#240), 05:37Z,** money digest `521c4586…`:
+  - the lab's step fixed, with failures that escalate;
+  - phantom OpenAI holds released into the gateway's month;
+  - exits never walled off by the self-cross rule;
+  - settlements counted once per event;
+  - a probe ($10 Kalshi, $25 Alpaca) for an unproven family, and a bunt only for a proven one;
+  - one early loss no longer a demotion;
+  - real entries post-only unless the family's taker record is proven.
+- **Deploy B (#260), 08:31Z,** money digest `c02ed852…`:
+  - the mechanism ledger (`league/families.py`) and the family swing;
+  - the evidence clock and the seat market;
+  - the loop's joints: corrected children supersede their parents, repeated warnings escalate, and Sail research is
+    capped at $2 an hour;
+  - the feed recorders.
+- **Deploy C (#272 and #274), 16:32Z:**
+  - the lab as a search: half of each batch goes to mechanism children, and nothing graduates without a mechanism
+    change or a winning forward window;
+  - the foundry brief `foundry-2026-09-24.1`;
+  - the agents' pause and in-place edit tools;
+  - the horizon judge (`league/resolution.py`);
+  - `tick_steps` in health;
+  - the wake skip;
+  - the seat market's fair chance.
+
+  Its first attempt (15:37Z) was rolled back by a practice-book freeze the old House recorded. C′ added the fix (a
+  practice book's cash difference under $1 is dust, not a freeze), a watchdog that judges the new House's own health,
+  and a 20-minute limit for CI's tests job.
+- **Deploy D (#281), 18:43Z,** money digest `535a7f15…` (the owner's third digest change), ratified 11 s after
+  promotion:
+  - no probe on a losing family; the first pass drained 8 probes;
+  - the seat market's capacity: population 128 while Sail's runway allows, waiters on closed desks leave the queue,
+    stale seats go to forward-scored waiters, the proven family is bred first, and a new program is born into its own
+    family;
+  - practice option fills pay the OCC clearing fee.
+- **Deploy E (#282), 19:45Z:** a probe waiting to go back to practice only exits.
+- **Deploy F (#286), 20:42Z:** the tick's perf pass (folds and indexes in place of whole-ledger scans).
+
 Known limits:
+
+- **Proof reads the family label** (Sept 24, 2026). A family is every agent born with its name. Until Deploy D a
+  research child with a different program was born into its parent's family: 98 such children by 15:06Z Sept 24, 39
+  of them living. R5's gate reads the label, so 26 of the 48 practice agents behind losing families at 15:06Z run code
+  unlike their parent's. New forks with other markets or another style now get a family of their own; the lasting fix
+  is a family keyed by mechanism, a money-judge change.
+- **The family swing's clock is days.** The one proven family (sports-central-run-under) had 5 real independent
+  settlements at the end of the Sept 24 run, 10 short of the swing's entry look. Its members trade the same games, so
+  more members add weight to events it already counts, not settlements. At its measured 3.2 a day that is about 3
+  days, and the MLB regular season ends Sept 27-28.
+- **Stock agents are far from the bunt line.** At the Sept 24 close no equity agent with 5 closed trades had E above
+  1.0019 (the line is 1.01), and a stock trade moves E by about 0.0004. The one agent over the line in E (an options
+  agent, 1.0751 on 4 trades) sits on a losing family.
+- **A real option fill's clearing fee.** Alpaca takes the OCC fee at the fill and lists it later (the same day on Sept
+  24). Until it is booked the real book refuses entries (exits go on).
+- **Waiters at the ceiling.** With the population at 128 of 128, about 40 evidenced newcomers queue; each desk's
+  overdue waiters are named hourly with the rule that holds them, not seated within two hours.
 
 - **Daily-bar replay now has separate execution bars.** Signal bars become available after
   their market day ends; five-minute execution observations provide trading opportunities.

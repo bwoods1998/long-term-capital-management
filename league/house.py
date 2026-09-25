@@ -3928,8 +3928,15 @@ class House:
 
     def _run_backup(self) -> None:
         row = self.backup.run()
+        failed = self.backup.failures_in_a_row() if not row.get("ok") else []
         if not row.get("ok"):
-            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}). The ledger lives on one disk until one succeeds.")
+            # `began_at` is the first failure of the run (Sept 24, 2026): the watchdog inherits an error whose condition
+            # began before a promotion, so a Sail outage that started earlier does not roll back the release under watch.
+            began = now_iso(lambda: float((failed[0] if failed else row).get("at_epoch") or self.clock()))
+            wait = int(self.backup.retry_after(max(1, len(failed))) // 60)
+            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}); {max(1, len(failed))} "
+                                f"tr{'y' if len(failed) <= 1 else 'ies'} in a row since {began}, the next in {wait} minutes. The ledger "
+                                "lives on one disk until one succeeds.", began_at=began, failures=max(1, len(failed)))
 
     # -------------------------------------------------------------- expedition
     def _note_stopped(self, reason: str) -> None:
@@ -5393,6 +5400,15 @@ class House:
     SEAT_WAITERS = ("proven", "graduates", "retained", "cards", "strategies")
     SEAT_WAITER_NAMES = {"proven": "proven family's birth", "graduates": "Alpha Lab graduate", "retained": "retained research candidate",
                          "cards": "replay-passed foundry card", "strategies": "merged strategy"}
+    #: Their plurals, written out: an "s" appended made "8 merged strategys" in the owner's alerts (Sept 24, 2026).
+    SEAT_WAITER_PLURALS = {"proven": "proven family's births", "graduates": "Alpha Lab graduates",
+                           "retained": "retained research candidates", "cards": "replay-passed foundry cards",
+                           "strategies": "merged strategies"}
+
+    @classmethod
+    def _waiters_named(cls, kind: str, count: int) -> str:
+        """`count` waiters of `kind` in words: "1 merged strategy", "8 merged strategies"."""
+        return f"{count} {cls.SEAT_WAITER_NAMES[kind] if count == 1 else cls.SEAT_WAITER_PLURALS[kind]}"
     #: What names a waiter of each class in its expiry key (house.json `seat_expired`, the `seat-expired:` ledger ids).
     SEAT_WAITER_IDS = {"proven": "family", "graduates": "candidate", "retained": "session", "cards": "card", "strategies": "strategy"}
     #: S3 (Sept 24, 2026): a dead author's retained candidate waits for a seat this long after its author's
@@ -5642,7 +5658,7 @@ class House:
                 told[desk] = now
         for desk in tell:
             rows = by_desk[desk]
-            classes = ", ".join(f"{n} {self.SEAT_WAITER_NAMES[c]}{'' if n == 1 else 's'}"
+            classes = ", ".join(self._waiters_named(c, n)
                                 for c, n in sorted({c: sum(1 for x in rows if x[0] == c) for c, _, _ in rows}.items()))
             self.alert("info", f"{len(rows)} waiter{'' if len(rows) == 1 else 's'} for {desk} left the seat queue ({classes}): {rows[0][2][:240]}",
                        desk=desk, expired=len(rows), rule=rows[0][1])
@@ -5974,7 +5990,6 @@ class House:
         and told as a warning at most once an hour a class: until Sept 23, 2026 `enroll` broke
         silently and no ops row recorded a refused birth."""
         now = self.clock()
-        name = self.SEAT_WAITER_NAMES[cls]
         with self._state_lock:
             refused = self._state.setdefault("seat_refusals", {})
             refused[cls] = {"count": int(count), "why": str(why)[:300], "at": now_iso(self.clock), "epoch": now}
@@ -5983,7 +5998,7 @@ class House:
             if tell:
                 told[cls] = now
         if tell:
-            self.alert("warning", f"{count} {name}{'' if count == 1 else 's'} wait{'s' if count == 1 else ''} for a seat: {why}")
+            self.alert("warning", f"{self._waiters_named(cls, count)} wait{'s' if count == 1 else ''} for a seat: {why}")
 
     def _seat_market_watch(self, *, fresh: bool = False) -> dict[str, Any]:
         """The seat market once an hour (cached in state `seat_market`; health.json shows it): the
