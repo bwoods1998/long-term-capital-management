@@ -980,7 +980,8 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     # a live wake is shown): markets closing sooner than `min_hours_to_close` are not shown, and at
     # most `max_markets`, the soonest to close. Neither applies unless declared.
     min_hours = _num(needs.get("min_hours_to_close"))
-    min_hours = min_hours if min_hours is not None and min_hours > 0 else None
+    # A floor at or over the horizon is read as absent, as the live wake reads it (`listing_window`).
+    min_hours = min_hours if min_hours is not None and 0 < min_hours < (max_hours or 24.0) else None
     max_markets = needs.get("max_markets") if type(needs.get("max_markets")) is int and 1 <= needs["max_markets"] <= 500 else None
     # Recorded live feeds (`league/feeds.py`), shown only to a strategy that declares them.
     feeds = prepared.feed_index() if needs.get("feeds") and isinstance(tape.get("feeds"), dict) else None

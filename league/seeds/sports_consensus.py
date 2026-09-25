@@ -1,82 +1,48 @@
 # sports-consensus: price Kalshi game markets (who wins, by how much, how many points) from the
-# sportsbook line the House records, and bid where Kalshi is off it by more than fees and a margin.
+# sportsbook line the House records (`odds`), and bid where Kalshi is off it by more than fees and a margin.
 #
-# THE IDEA. A sportsbook's closing line is the best public forecast of a game there is: millions
-# of dollars of sharp money set it, and the book's margin can be taken out of its two (or three)
-# prices. Kalshi lists the same games as binary contracts, often thinly, and its prices lag the
-# book's. Where a Kalshi contract trades below the book's de-vigged probability by more than the
-# fee and a margin, a resting maker bid there is a bet the book is right and Kalshi is late.
+# EVIDENCE. UNMEASURED; practice is the test (lines recorded since Sept 24, 2026: no replay). The premise
+# is thin: DraftKings' de-vigged win probability vs Kalshi's winner prints (Sept 24-25): MLB median gap
+# 0.7c, p90 1.4c; WNBA 1.3c; NCAAF 1.8c. So winners are bid at a small edge and withdrawn when the line
+# moves; ladders ask more; takers only at take_edge. ESPN carried one book (DraftKings).
 #
-# THE EVIDENCE. UNMEASURED as a strategy: the sportsbook line as a second price is published
-# folklore (closing lines beat almost every model), and the House only began recording the lines on
-# Sept 24, 2026 (league/feeds.py `odds`), so there is no replay: practice is the test. What IS
-# measured is the premise, and it is thin. Every recorded `odds` row's DraftKings de-vigged win
-# probability against Kalshi's winner-market prints in the 30 minutes before it (Sept 24 08:35Z to
-# Sept 25 06:30Z): MLB 112 readings on 10 games, Kalshi minus the book +0.6 cents on average,
-# median gap 0.7c, 90th percentile 1.4c, none of 3c or more; WNBA 56 on 4 games, median 1.3c, p90
-# 2.2c; NCAAF 6 on 4 games, median 1.8c, p90 2.7c. On WINNERS Kalshi sits on the book's line, so
-# a winner is bid inside the spread at a small edge (min_edge_winner, about a cent after the maker
-# fee) and adverse selection is the risk to manage: a bid is withdrawn as soon as the line moves.
-# The spread and total ladders are thinner and wider and the model's error there is larger, so
-# they ask more (min_edge_ladder). Takers only at take_edge, which on winners almost never fires.
-# ESPN's core API carried ONE book (DraftKings) for every NFL, NCAAF, MLB and MLS game probed on
-# Sept 25, so "consensus" is one book's line until more appear; the mean over providers is taken
-# whenever there are several.
+# NEEDS. A game market's hours_to_close runs to its expected END (3 h after the start), so
+# min_hours_to_close 3.0 shows a game up to its kickoff; max_markets 500 a college Saturday.
 #
-# WHAT IT NEEDS. The league's Kalshi game series (GAME, SPREAD, TOTAL), the `odds` feed (every
-# provider's line for the coming games, with when each was fetched) and the `sports` scoreboard (the
-# teams' ESPN abbreviations and names, and each game's status and start). Woken every ten minutes.
-# A game market's hours_to_close runs to the game's expected end, 3.00 hours after the start on
-# 306 of 346 NCAAF events, every MLS event and 30 of 45 NFL ones (the rest 6) that weekend; so
-# min_hours_to_close 3.0 shows a game up to its kickoff and hides it once it is on, and the wake is
-# shown up to max_markets 500 (without the two, from the noon kickoffs on Saturday the 200 markets
-# shown were all games in progress: no game it could still enter).
+# MATCHING, NEVER GUESSED. A ticker names its game: KXNFLSPREAD-26OCT01PITCLE-PIT8 is the Oct 1 (New
+# York date) game of PIT and CLE; baseball adds the first pitch and a doubleheader's number
+# (26SEP251805CHCBOSG2). A market is priced only when exactly one game on the board has that date (and a
+# first pitch within 15 minutes) and its two teams are exactly the two codes the ticker spells, either
+# order. A code is a side when it is its ESPN abbreviation, a Kalshi alias, or a code a title of the
+# game names with the side's name ("Northwestern wins" on -NW). Skipped: no game, two games, a code
+# fitting both sides, a baseball ticker without its game number on a doubleheader day (a postponed
+# game keeps its ticker and may settle on the other game), two game codes read as one board game.
 #
-# HOW A MARKET IS MATCHED TO A GAME, WITHOUT GUESSING. A Kalshi ticker names its game:
-# KXNFLSPREAD-26OCT01PITCLE-PIT8 is the Oct 1 game of PIT and CLE (dates are New York dates;
-# baseball adds the first pitch, 26SEP251805CHCBOSG2, and a doubleheader's game number). A market
-# is priced only when exactly one game on the scoreboard has that New York date (and first pitch)
-# and its two teams are exactly the two codes the ticker spells, in either order: a code is a team
-# when it IS its ESPN abbreviation, a known Kalshi spelling of it (JAC for JAX), or when a market of
-# the same game titles that code with the team's own name ("Northwestern wins" on -NW). Anything
-# else -- no game, two games, a code that fits both teams -- is skipped, never guessed.
+# FAIR VALUE. Winner: the de-vigged moneyline (three-way with the draw in soccer), blended with ESPN's
+# predictor by predictor_weight. Spread: home margin ~ Normal(mu, sigma_margin), mu from the home-signed
+# line and its juice; skipped when its win chance and the moneyline's differ by more than ml_tolerance.
+# Total: Normal(line moved by its juice, sigma_total). Only strikes within max_strike_z sigmas of the
+# line. Football: no key number (3, 7, ...) between the strike and the line, a push included. Baseball
+# spreads only at the book's own run line. Soccer: winner and tie only.
 #
-# FAIR VALUE. Winner: the mean over providers of the de-vigged win probability (a three-way
-# de-vig with the draw for soccer), optionally blended with ESPN's predictor. Spread "X wins by
-# over s": X's margin ~ Normal(mu, sigma_margin), mu from the spread line and its juice (home -7 at
-# even money: the home side is expected to win by 7); the game is skipped when that model's win
-# probability and the moneyline's disagree by more than ml_tolerance. Total "over s": Normal(mu,
-# sigma_total), mu the line moved by its over/under juice. Only strikes within max_strike_z sigmas
-# of the line are priced: the book's line says most about the strikes near it. Football margins are
-# lumpy at the KEY numbers (3 and 7 above all: a 7-point favourite wins by exactly 3 far more often
-# than a normal curve says), so a football spread strike is priced only when no key number lies
-# between it and the book's line, an integer line on a key number (a push) included. Baseball margins
-# are not normal either (a third of games are decided by one run), so a baseball spread is priced
-# only at the book's own run line, from its de-vigged run-line price. Soccer: only the winner and
-# the tie.
+# ENTRIES. Only games `pre`, more than start_buffer_minutes out, with lines fetched within stale_minutes.
+# YES or NO, one market an event (a ticker's first two segments), max_per_game a game: a post-only bid
+# one tick over the bid (or at it) clearing min_edge after the maker fee; a limit at the ask only when
+# the edge after the TAKER fee is at least take_edge, and post-only for MAKER_ONLY_HOURS after the real
+# book refuses a taker. Nothing under 30 cents on real money. Fees as the book charges (ltcm/sim.py):
+# taker 0.07 x C x P x (1 - P), rounded up to $0.0001; makers a quarter of it on MAKER_FEE_SERIES; the
+# series multiplier (0.5 on KXMLB*) is not in ctx["fees"], so the full rate unless fee_multiplier lowers
+# it, never under a series' own (FEE_MULTIPLIERS).
 #
-# WHEN IT TRADES. Only games that have not started, start more than start_buffer_minutes from now,
-# and whose lines were fetched within stale_minutes. It buys YES or NO -- never both, and at most
-# one market an event (a ticker's first two segments) and max_per_game markets a game -- as a
-# post-only maker bid at most fair - min_edge - the maker fee a contract (min_edge_winner on a
-# winner, min_edge_ladder on a spread or total), one tick over the best bid where that still clears
-# the edge, else at the bid; it takes the ask (a limit at the ask, not post-only) only when the edge
-# after the TAKER fee is at least take_edge, and never on a book that has refused its taker entry.
-# Fees as the book charges them (ltcm/sim.py `kalshi_fee`): taker 0.07 x C x P x (1 - P) on the order,
-# rounded up to $0.0001; a maker pays a quarter of that on the series Kalshi charges makers (the
-# desk's `maker_fee_series`), nothing elsewhere. Kalshi also scales both by a series multiplier
-# (GET /series, Sept 25, 2026: 1 on every NFL, NCAAF, MLS and Liga MX series, 0.5 on KXMLBGAME,
-# KXMLBSPREAD and KXMLBTOTAL; makers pay on KXMLBGAME only of the three). ctx["fees"] carries no
-# multiplier, so the price is the full rate (fee_multiplier 1.0, bounded down to the measured 0.5).
-#
-# HOW IT EXITS. It does not sell: a contract is held to settlement. A resting bid is cancelled when
-# its game is within start_buffer_minutes of the start, when the fair has moved requote_move or more
-# since the bid was priced (the fair is kept in memory, by market), when its edge at the current
-# fair falls under half its min_edge, when the line can no longer be read fresh, or after
-# requote_minutes when a better price is due.
+# EXITS. Held to settlement. A resting bid is cancelled inside start_buffer_minutes of its start (kept
+# in memory), when the fair moved requote_move since it was priced, when its edge falls under half its
+# min_edge, when its game cannot be priced fresh, or after requote_minutes when a better price is due.
+# A bid whose market is not shown is priced from its ticker (a ladder suffix N is "over N - 0.5": all
+# 5,129 of Sept 25-28) and its game's shown markets, else cancelled; all go when the feeds are absent.
 
 from datetime import datetime, timedelta, timezone
 from statistics import NormalDist
+import json
 import math
 import re
 
@@ -107,7 +73,7 @@ NEEDS = {
             "max_strike_z": [0.1, 1.5],
             "ml_tolerance": [0.02, 0.2],
             "predictor_weight": [0.0, 0.5],
-            "min_price": [0.05, 0.5],
+            "min_price": [0.15, 0.5],
             "max_price": [0.5, 0.97],
             "fee_multiplier": [0.5, 1.0],
         },
@@ -138,15 +104,20 @@ PARAMS = {
 TICK = 0.01
 EPS = 1e-9
 TAKER_RATE = 0.07
-MAKER_SHARE = 0.25  # a maker pays a quarter of the taker rate on the series that charge makers
-# The series of the sports desk that charge makers (its `maker_fee_series` in league/niches.json, the
-# schedule the book charges by: ltcm/data/kalshi_fees.json), those this program can trade.
+MAKER_SHARE = 0.25
+# The series this can trade that charge makers (ltcm/data/kalshi_fees.json).
 MAKER_FEE_SERIES = ("KXNFLGAME", "KXNFLSPREAD", "KXNFLTOTAL", "KXNCAAFGAME", "KXNCAAFSPREAD", "KXNCAAFTOTAL",
                     "KXMLBGAME", "KXEPLGAME", "KXLALIGAGAME", "KXSERIEAGAME", "KXBUNDESLIGAGAME", "KXLIGUE1GAME",
                     "KXWNBAGAME", "KXNHLGAME", "KXNBAGAME", "KXNBASPREAD", "KXNBATOTAL")
-MAX_EVENT_SHARE = 0.25  # allocator.max_event_share: one event holds at most a quarter of the equity
-LONGSHOT_FLOOR_REAL = 0.30  # allocator.longshot_floor_real: no real entry under 30 cents
+MAX_EVENT_SHARE = 0.25  # allocator.max_event_share
+LONGSHOT_FLOOR_REAL = 0.30  # allocator.longshot_floor_real
 MAX_INTENTS = 8
+MAX_CANCELS = 20  # the runner sends at most 20 cancels a decision
+#: Resting bids at once: each keeps ~130 bytes of memory, and memory over 8 KB is dropped whole.
+MAX_RESTING = 40
+MAKER_ONLY_HOURS = 24
+#: Kalshi's series fee multipliers under 1 (GET /series, Sept 25, 2026).
+FEE_MULTIPLIERS = {"KXMLBGAME": 0.5, "KXMLBSPREAD": 0.5, "KXMLBTOTAL": 0.5}
 # Kalshi series prefix -> the league key the House's feeds use, and the kind of game it is.
 LEAGUES = (("KXNCAAF", "ncaaf", "football"), ("KXNFL", "nfl", "football"), ("KXMLB", "mlb", "baseball"),
            ("KXMLS", "mls", "soccer"), ("KXLIGAMX", "ligamx", "soccer"), ("KXEPL", "epl", "soccer"),
@@ -155,9 +126,7 @@ LEAGUES = (("KXNCAAF", "ncaaf", "football"), ("KXNFL", "nfl", "football"), ("KXM
 # Kalshi codes that are not ESPN's abbreviation (the live boards of Sept 25, 2026): ESPN -> Kalshi.
 ALIASES = {"nfl": {"JAX": ("JAC",), "WSH": ("WAS",)}, "mlb": {"ARI": ("AZ",), "CHW": ("CWS",)}, "ncaaf": {"ALB": ("ALBY",)},
            "mls": {"LA": ("LAG",), "RBNY": ("NYRB",), "DC": ("DCU",)}, "ligamx": {"SAN": ("SLA",), "UANL": ("TIG",)}}
-#: A doubleheader's second game is listed at its planned first pitch and moves by minutes (Sept 25,
-#: 2026: Kalshi's CHC-BOS game 2 at 6:05 PM, ESPN's at 6:00 PM). Two games of one pair of teams are
-#: never this close, so a first pitch within this many minutes is the same game.
+#: A first pitch within this many minutes is the same game (Kalshi's CHC-BOS game 2 at 6:05 PM, ESPN's 6:00).
 CLOCK_MINUTES = 15
 #: The margins a football game ends on far more often than a smooth curve says, by league.
 KEY_MARGINS = {"nfl": (3, 7, 10, 14), "ncaaf": (3, 7)}
@@ -180,6 +149,16 @@ def num(value, default=None):
     return number if math.isfinite(number) else default
 
 
+def mapping(value):
+    """A dict, or {} for anything else."""
+    return value if isinstance(value, dict) else {}
+
+
+def rows(value):
+    """The dicts of a list, or [] for anything else."""
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
 def when(text):
     """ISO-8601 text as an aware datetime (UTC when it has no offset), or None."""
     try:
@@ -193,8 +172,7 @@ def when(text):
 
 
 def new_york(moment):
-    """A UTC moment as New York wall time (US daylight time: 2:00 on the second Sunday of March to
-    2:00 on the first Sunday of November), without relying on a time-zone database in the box."""
+    """A UTC moment as New York wall time (US DST rules), without a time-zone database."""
     utc = moment.astimezone(timezone.utc)
     march = datetime(utc.year, 3, 8, 7, tzinfo=timezone.utc)
     november = datetime(utc.year, 11, 1, 6, tzinfo=timezone.utc)
@@ -204,8 +182,7 @@ def new_york(moment):
 
 
 def words(text):
-    """A team name reduced for comparison: lower case, accents and punctuation out, `St.` at the end
-    read as State (Kalshi's "Arkansas St." is ESPN's "Arkansas State") and at the start as Saint."""
+    """A team name reduced for comparison: lower case, no accents or punctuation, `St.` as State/Saint."""
     tokens = re.findall(r"[a-z0-9&]+", re.sub(r"[.'\u2019]", "", str(text or "").lower().translate(ACCENTS)))
     if len(tokens) > 1 and tokens[-1] == "st":
         tokens[-1] = "state"
@@ -230,8 +207,7 @@ def kind_of(series):
 
 
 def parse_market(row):
-    """What the ticker and title say: series, kind, league, the game's key, date, first pitch,
-    the two teams' codes run together, the market's own team code and its line. None if unreadable."""
+    """What the ticker and title say, or None if unreadable."""
     ticker = str(row.get("market") or "").upper()
     parts = ticker.split("-")
     if len(parts) != 3:
@@ -246,7 +222,7 @@ def parse_market(row):
     out = {"ticker": ticker, "series": series, "kind": kind, "league": league, "sport": sport,
            "event": series + "-" + code, "game": league + ":" + code,
            "date": (2000 + int(found.group(1)), MONTHS[found.group(2)], int(found.group(3))),
-           "clock": found.group(4), "teams": found.group(5), "team": None, "name": None, "line": None}
+           "clock": found.group(4), "teams": found.group(5), "number": found.group(6), "team": None, "name": None, "line": None}
     strike = num(row.get("strike"))
     if kind == "GAME":
         if suffix == "TIE":
@@ -279,8 +255,7 @@ def team_names(team):
 
 
 def prepare(board):
-    """The scoreboard read once a wake: each game with its New York date and first pitch (minutes),
-    and each side's abbreviation and names, indexed by date."""
+    """The board by New York date: (game, first pitch in minutes, each side's abbreviation and names)."""
     by_date = {}
     for event in board:
         start = when(event.get("start"))
@@ -294,20 +269,16 @@ def prepare(board):
 
 
 def codes_of(side, league, learned):
-    """The Kalshi codes that are this side of a game ((abbreviation, names)): its abbreviation, a known
-    Kalshi spelling of it, and any code a title of the same game names with one of the side's names."""
+    """The Kalshi codes that are this side: its abbreviation, its aliases, and codes titled with its names."""
     abbrev, names = side
     return {abbrev, *(ALIASES.get(league) or {}).get(abbrev, ())} | {code for code, said in learned.items() if said & names}
 
 
 def match_game(parsed, prepared, learned):
-    """The one scoreboard game this parsed market is about, as (event, {code: "home"|"away"}), or None:
-    the ticker's teams must read as exactly one code of each side, in either order, on exactly one game."""
-    found = []
+    """The one board game this market is about, as (event, {code: "home"|"away"}), or None (see MATCHING)."""
+    readings = []
     teams = parsed["teams"]
     for event, minutes, sides in prepared.get(parsed["date"]) or []:
-        if parsed["clock"] and abs(minutes - int(parsed["clock"][:2]) * 60 - int(parsed["clock"][2:])) > CLOCK_MINUTES:
-            continue
         codes = {name: codes_of(sides[name], parsed["league"], learned) for name in ("home", "away")}
         for first in codes["home"] | codes["away"]:
             second = teams[len(first):] if first and teams.startswith(first) else ""
@@ -316,10 +287,15 @@ def match_game(parsed, prepared, learned):
             one = [name for name in ("home", "away") if first in codes[name]]
             other = [name for name in ("home", "away") if second in codes[name]]
             if len(one) == 1 and len(other) == 1 and one != other:
-                found.append((event, {first: one[0], second: other[0]}))
-    if len(found) != 1:
+                readings.append((event, {first: one[0], second: other[0]}, minutes))
+    if parsed["clock"]:
+        if not parsed.get("number") and len({id(event) for event, _, _ in readings}) > 1:
+            return None  # a doubleheader day, and the ticker does not say which game
+        clock = int(parsed["clock"][:2]) * 60 + int(parsed["clock"][2:])
+        readings = [reading for reading in readings if abs(reading[2] - clock) <= CLOCK_MINUTES]
+    if len(readings) != 1:
         return None  # no game, or more than one reading: skipped, never guessed
-    event, codes = found[0]
+    event, codes, _ = readings[0]
     if parsed["team"] not in (None, "TIE") and parsed["team"] not in codes:
         return None
     return event, codes
@@ -344,7 +320,7 @@ def mean(values):
 
 def consensus(game, sport):
     """The book lines of one odds row reduced to what the pricing reads, averaged over providers."""
-    lines = [line for line in game.get("lines") or [] if isinstance(line, dict)]
+    lines = rows(game.get("lines"))
     out = {"books": len(lines)}
     if sport == "soccer":
         three = [line for line in lines if num(line.get("draw_ml")) is not None and num(line.get("implied_draw")) is not None]
@@ -382,6 +358,8 @@ def game_model(line, event, sport, p):
         model.update(home=line["home"], away=line["away"], draw=line["draw"])
         return model, None
     sigma, sigma_total = num(p.get("sigma_margin"), 13.5), num(p.get("sigma_total"), 13.5)
+    if not sigma > 0 or not sigma_total > 0:
+        return None, "no spread of outcomes"
     if line.get("total") is not None:
         model["total"] = (line["total"] + sigma_total * z_of(line.get("over")), sigma_total)
     if sport == "baseball":
@@ -443,18 +421,16 @@ def fair_yes(parsed, sides, model, p):
 
 
 def fee(series, count, price, maker, rate):
-    """The fee on one order of `count` contracts at `price`, as the book charges it: rounded up to
-    $0.0001, the precision Kalshi charges at (ltcm/sim.py `kalshi_fee`). `rate` is the taker rate
-    times the series multiplier this program assumes (`fee_multiplier`)."""
-    if maker and series not in MAKER_FEE_SERIES:
+    """One order's fee as the book charges it, rounded up to $0.0001 (`rate`: taker rate x multiplier)."""
+    count, price = min(num(count, 0.0), 1e6), num(price, 0.0)
+    if (maker and series not in MAKER_FEE_SERIES) or count <= 0 or not 0.0 < price < 1.0:
         return 0.0
     charged = rate * (MAKER_SHARE if maker else 1.0) * count * price * (1.0 - price)
     return math.ceil(charged * 10000.0 - 1e-6) / 10000.0
 
 
 def min_edge(p, parsed):
-    """The edge a maker bid must clear: small on a winner, where Kalshi sits on the book's line, and
-    larger on a spread or total ladder, where the model's own error is larger."""
+    """The edge a maker bid must clear: small on a winner, larger on a ladder."""
     name = "min_edge_winner" if parsed["kind"] == "GAME" else "min_edge_ladder"
     return num(p.get(name), PARAMS[name])
 
@@ -463,9 +439,29 @@ def snap(price):
     return round(math.floor(price / TICK + EPS) * TICK, 2)
 
 
+def fee_rate(series, rate, multiplier):
+    """A series' taker rate: `rate` x `fee_multiplier`, never under the series' own multiplier."""
+    return rate * max(min(multiplier, 1.0), FEE_MULTIPLIERS.get(series, 1.0))
+
+
+def ladder_row(ticker):
+    """A market row from its ticker alone (a ladder suffix N is "over N - 0.5")."""
+    parts = str(ticker or "").upper().split("-")
+    if len(parts) != 3:
+        return None
+    kind = kind_of(parts[0])
+    strike = re.match(r"^([A-Z]*)(\d+)$", parts[2])
+    if kind == "GAME":
+        return {"market": ticker, "title": ""}
+    if strike is None or (kind == "SPREAD") != bool(strike.group(1)):
+        return None
+    line = int(strike.group(2)) - 0.5
+    title = f"{strike.group(1)} wins by over {line} points" if kind == "SPREAD" else f"Over {line} points"
+    return {"market": ticker, "title": title, "strike": line}
+
+
 def ticker_key(ticker):
-    """(series, event, game) of a ticker alone: its series, Kalshi's event (the first two segments)
-    and the game it is about (the league and the event code, shared by a game's GAME, SPREAD and TOTAL)."""
+    """(series, event, game) of a ticker: the event is its first two segments, the game league:code."""
     parts = str(ticker or "").upper().split("-")
     if len(parts) < 2:
         return None
@@ -474,10 +470,9 @@ def ticker_key(ticker):
 
 
 def best_entry(market, parsed, fair, count_for, p, rate, floor, takers):
-    """The entry this market offers now, as (edge a contract, leg, price, post_only), or None. On each
-    leg: the ask, where the edge after the TAKER fee is at least take_edge (it fills now, so it is
-    preferred); else a maker bid one tick over the best bid (never crossing), or at it, where that
-    still clears the market's min_edge after the maker fee. Of the two legs, the larger edge."""
+    """The entry this market offers now, (edge a contract, leg, price, post_only), or None: on each leg the
+    ask where the edge after the taker fee is at least take_edge, else a maker bid a tick over the bid, or
+    at it, clearing min_edge after the maker fee. Of the two legs, the larger edge."""
     bid, ask = num(market.get("yes_bid")), num(market.get("yes_ask"))
     if bid is None or ask is None or not 0.0 < bid < ask < 1.0:
         return None
@@ -503,33 +498,64 @@ def best_entry(market, parsed, fair, count_for, p, rate, floor, takers):
 
 
 def decide(ctx):
-    p = {**PARAMS, **(ctx.get("params") or {})}
+    ctx = mapping(ctx)
+    p = {**PARAMS, **mapping(ctx.get("params"))}
     knob = lambda name: num(p.get(name), float(PARAMS[name]))
     now = when(ctx.get("now"))
-    feeds = ctx.get("feeds") if isinstance(ctx.get("feeds"), dict) else {}
-    rate = num((ctx.get("fees") or {}).get("kalshi_taker_rate"), TAKER_RATE) * knob("fee_multiplier")
+    feeds = mapping(ctx.get("feeds"))
+    odds_feed, sports_feed = mapping(feeds.get("odds")), mapping(feeds.get("sports"))
+    base_rate = num(mapping(ctx.get("fees")).get("kalshi_taker_rate"))
+    base_rate = base_rate if base_rate is not None and 0.0 < base_rate <= 1.0 else TAKER_RATE
+    rate_of = lambda series: fee_rate(series, base_rate, knob("fee_multiplier"))
     own = {str(s).upper() for s in NEEDS.get("series") or []}
-    markets = [m for m in ctx.get("markets") or [] if isinstance(m, dict) and str(m.get("series") or "").upper() in own]
+    markets = [m for m in rows(ctx.get("markets")) if str(m.get("series") or "").upper() in own]
     shown = {str(m.get("market") or "").upper() for m in markets}
-    positions = [x for x in ctx.get("positions") or [] if isinstance(x, dict) and num(x.get("quantity"), 0.0) > 0]
-    orders = [o for o in ctx.get("open_orders") or [] if isinstance(o, dict)]
-    bids = [o for o in orders if o.get("side") == "buy" and o.get("order_id") and (ticker_key(o.get("market")) or ("",))[0] in own]
-    memory = ctx.get("memory") if isinstance(ctx.get("memory"), dict) else {}
-    starts = {str(k): v for k, v in (memory.get("starts") or {}).items()} if isinstance(memory.get("starts"), dict) else {}
-    priced_at = {str(k): num(v) for k, v in (memory.get("fair") or {}).items()} if isinstance(memory.get("fair"), dict) else {}
+    positions = [x for x in rows(ctx.get("positions")) if num(x.get("quantity"), 0.0) > 0]
+    buys = [o for o in rows(ctx.get("open_orders")) if o.get("side") == "buy"]
+    bids = [o for o in buys if o.get("order_id") and (ticker_key(o.get("market")) or ("",))[0] in own]
+    memory = mapping(ctx.get("memory"))
+    starts = {str(k): v for k, v in mapping(memory.get("starts")).items() if isinstance(v, str)}
+    priced_at = {str(k): num(v) for k, v in mapping(memory.get("fair")).items()}
     buffer = 60.0 * knob("start_buffer_minutes")
 
-    # A resting bid whose game is about to start goes first, whether or not its market is shown
-    # (the House shows the soonest 200 markets, and a live game's can crowd it out).
-    cancels = []
+    # A refused taker entry holds the family to post-only; remembered, as it leaves the outcomes.
+    maker_only = when(memory.get("maker_only_until"))
+    for row in rows(ctx.get("recent_order_outcomes")):
+        if row.get("status") == "refused" and "post-only" in str(row.get("reason") or "") and now is not None:
+            until = (when(row.get("at")) or now) + timedelta(hours=MAKER_ONLY_HOURS)
+            maker_only = until if maker_only is None or until > maker_only else maker_only
+    takers = now is not None and (maker_only is None or maker_only <= now)
+
+    # A resting bid whose game is about to start goes first, whether or not its market is shown.
+    urgent, later = [], []
     for order in bids:
         began = when(starts.get((ticker_key(order.get("market")) or ("", "", ""))[1]))
         if now is not None and began is not None and (began - now).total_seconds() < buffer:
-            cancels.append(str(order["order_id"]))
-    if now is None or not feeds.get("odds") or not feeds.get("sports"):
-        return {"intents": [], "cancels": cancels,
-                "thought": "No sportsbook lines or scoreboard in this wake (the feeds are absent), so nothing was priced.",
-                "memory": {k: v for k, v in (("starts", starts), ("fair", priced_at)) if v}}
+            urgent.append(str(order["order_id"]))
+
+    def finish(intents, games, thought):
+        """The decision: cancels start-first (the runner sends 20), and the memory of every bid still resting."""
+        cancels = list(dict.fromkeys(urgent + later))[:MAX_CANCELS]
+        kept = [o for o in bids if str(o["order_id"]) not in cancels]
+        live = {ticker_key(o.get("market"))[1] for o in kept} | {i["market"].rsplit("-", 1)[0] for i in intents}
+        for event in live:
+            found = games.get(ticker_key(event)[2])
+            if found is not None and event not in starts:
+                starts[event] = found["event"].get("start")
+        resting = {str(o.get("market") or "").upper() for o in kept} | {i["market"] for i in intents}
+        out = {"starts": {event: starts[event] for event in sorted(live) if isinstance(starts.get(event), str)},
+               "fair": {ticker: priced_at[ticker] for ticker in sorted(resting) if priced_at.get(ticker) is not None}}
+        if maker_only is not None and now is not None and maker_only > now:
+            out["maker_only_until"] = maker_only.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        out = {k: v for k, v in out.items() if v}
+        if len(json.dumps(out)) > 7800:
+            out.pop("fair", None)  # never the starts: they cancel a bid at its game's start
+        return {"intents": intents, "cancels": cancels, "thought": thought.replace("{cancelled}", str(len(cancels))), "memory": out}
+
+    if now is None or not odds_feed or not sports_feed:
+        later.extend(str(o["order_id"]) for o in bids)  # no line to stand behind a resting bid
+        return finish([], {}, "No sportsbook lines or scoreboard in this wake (the feeds are absent), so nothing was priced; "
+                              "cancelled {cancelled} resting bids.")
 
     # Read every market, and learn which team code each title names.
     parsed_rows, learned = [], {}
@@ -542,120 +568,149 @@ def decide(ctx):
             learned.setdefault(parsed["game"], {}).setdefault(parsed["team"], set()).add(words(parsed["name"]))
     boards, lines = {}, {}
     for league in {parsed["league"] for _, parsed in parsed_rows}:
-        board = (feeds.get("sports") or {}).get(league)
-        odds = (feeds.get("odds") or {}).get(league)
-        boards[league] = prepare([e for e in (board or {}).get("events") or [] if isinstance(e, dict)])
-        stamped = when((odds or {}).get("t"))
-        lines[league] = {str(e.get("id")): (e, stamped) for e in (odds or {}).get("events") or [] if isinstance(e, dict)}
+        odds = mapping(odds_feed.get(league))
+        boards[league] = prepare(rows(mapping(sports_feed.get(league)).get("events")))
+        stamped = when(odds.get("t"))
+        lines[league] = {str(e.get("id")): (e, stamped) for e in rows(odds.get("events"))}
+
+    # Match every game once. One scoreboard game is one Kalshi game: two game codes read as one are neither.
+    firsts, hits, claimed = {}, {}, {}
+    for _, parsed in parsed_rows:
+        firsts.setdefault(parsed["game"], parsed)
+    for key, parsed in firsts.items():
+        hits[key] = match_game({**parsed, "team": None}, boards.get(parsed["league"]) or {}, learned.get(key) or {})
+        if hits[key] is not None:
+            claimed.setdefault((parsed["league"], str(hits[key][0].get("id"))), []).append(key)
+    doubled = {key for keys in claimed.values() if len(keys) > 1 for key in keys}
 
     # Price every market whose game is matched, has not started, and has fresh lines.
-    games, priced, skipped = {}, {}, {}
-    for market, parsed in parsed_rows:
-        key = parsed["game"]
-        if key not in games:
-            games[key] = None
-            why = None
-            hit = match_game(parsed, boards.get(parsed["league"]) or {}, learned.get(key) or {})
-            if hit is None:
-                why = "unmatched"
+    games, priced, skipped, starting = {}, {}, {}, set()
+    for key, parsed in firsts.items():
+        games[key], why = None, None
+        if hits[key] is None or key in doubled:
+            why = "unmatched" if hits[key] is None else "ambiguous"
+        else:
+            event, sides = hits[key]
+            start = when(event.get("start"))
+            odds, stamped = lines[parsed["league"]].get(str(event.get("id")), (None, None))
+            odds = odds or {}
+            fetched = when(odds.get("fetched")) if "fetched" in odds else stamped
+            if fetched is not None and stamped is not None and stamped < fetched:
+                fetched = stamped
+            if event.get("status") != "pre" or start is None or (start - now).total_seconds() < buffer:
+                why = "starting"
+                starting.add(key)
+            elif not odds or fetched is None or (now - fetched).total_seconds() > 60.0 * knob("stale_minutes"):
+                why = "stale lines"
             else:
-                event, sides = hit
-                start = when(event.get("start"))
-                odds, stamped = lines[parsed["league"]].get(str(event.get("id")), (None, None))
-                fetched = when((odds or {}).get("fetched")) or stamped
-                if event.get("status") != "pre" or start is None or (start - now).total_seconds() < buffer:
-                    why = "starting"
-                elif odds is None or fetched is None or (now - fetched).total_seconds() > 60.0 * knob("stale_minutes"):
-                    why = "stale lines"
-                else:
-                    model, why = game_model(consensus(odds, parsed["sport"]),
-                                            {**event, "win_probability": odds.get("win_probability")}, parsed["sport"], p)
-                    if model is not None:
-                        games[key] = {"event": event, "sides": sides, "model": model, "start": start}
-            if why:
-                skipped[why] = skipped.get(why, 0) + 1
-        game = games[key]
+                model, why = game_model(consensus(odds, parsed["sport"]),
+                                        {**event, "win_probability": odds.get("win_probability")}, parsed["sport"], p)
+                if model is not None:
+                    games[key] = {"event": event, "sides": sides, "model": model, "start": start}
+        if why:
+            skipped[why] = skipped.get(why, 0) + 1
+    for market, parsed in parsed_rows:
+        game = games[parsed["game"]]
         if game is None or (parsed["team"] not in (None, "TIE") and parsed["team"] not in game["sides"]):
             continue
         fair = fair_yes(parsed, game["sides"], game["model"], p)
         if fair is not None and 0.0 < fair < 1.0:
             priced[parsed["ticker"]] = (market, parsed, fair)
 
-    # What this agent already holds or is bidding, by event and by game.
+    # What this agent holds or bids, by event and game (a cost it cannot read counts as a dollar).
     events, per_game, event_cost = set(), {}, {}
-    for row in positions + [o for o in orders if o.get("side") == "buy"]:
+    for row in positions + buys:
         found = ticker_key(row.get("market"))
         if found is None:
             continue
         events.add(found[1])
         per_game.setdefault(found[2], set()).add(found[1])
-        price = row.get("average_cost") if "average_cost" in row else row.get("limit_price")
-        event_cost[found[1]] = event_cost.get(found[1], 0.0) + num(row.get("quantity"), 0.0) * num(price, 0.0)
+        price = num(row.get("average_cost") if "average_cost" in row else row.get("limit_price"))
+        price = price if price is not None and 0.0 < price <= 1.0 else 1.0
+        event_cost[found[1]] = event_cost.get(found[1], 0.0) + max(0.0, num(row.get("quantity"), 0.0)) * price
 
-    # A refused taker entry: the book holds this family to post-only until its taker record is positive.
-    refused = [row for row in ctx.get("recent_order_outcomes") or []
-               if isinstance(row, dict) and row.get("status") == "refused" and "post-only" in str(row.get("reason") or "")]
-    real = int(num(ctx.get("rung"), 0.0) or 0) >= 2
+    rung = num(ctx.get("rung"))
+    real = rung is None or rung >= 2  # a snapshot that does not say is held to the real floor
     floor = max(knob("min_price"), LONGSHOT_FLOOR_REAL) if real else knob("min_price")
 
     cash = num(ctx.get("cash"), 0.0)
-    reserved = sum(num(o.get("quantity"), 0.0) * num(o.get("limit_price"), 0.0) for o in orders if o.get("side") == "buy")
-    free = [max(0.0, (cash - reserved) * 0.98)]  # 2% headroom for fees
-    limits = ctx.get("limits") or {}
+    reserved = sum(max(0.0, num(o.get("quantity"), 0.0)) * max(0.0, num(o.get("limit_price"), 0.0)) for o in buys)
+    free = [max(0.0, (cash - reserved) * 0.98)]  # 2% headroom
+    limits = mapping(ctx.get("limits"))
     equity = num(ctx.get("equity"), cash)
-    remaining = (ctx.get("event_risk") or {}).get("remaining_by_market_usd") or {}
+    remaining = mapping(mapping(ctx.get("event_risk")).get("remaining_by_market_usd"))
 
     def budget(ticker):
+        """The dollars one entry may put up, cash aside: the ticket, the limits, the event's quarter of equity, its risk room."""
         event = ticker_key(ticker)[1]
-        room = [knob("ticket_usd"), free[0], num(limits.get("max_order_usd"), knob("ticket_usd")),
+        room = [knob("ticket_usd"), num(limits.get("max_order_usd"), knob("ticket_usd")),
                 num(limits.get("max_position_usd"), knob("ticket_usd")), MAX_EVENT_SHARE * equity - event_cost.get(event, 0.0)]
         if num(remaining.get(ticker)) is not None:
             room.append(num(remaining.get(ticker)))
         return max(0.0, min(room))
 
-    # Resting bids the fair, the lines or the clock no longer support.
+    def counter(ticker, series):
+        """Whole contracts at a price: within the budget, and within free cash with the taker's fee on top."""
+        rate = rate_of(series)
+        return lambda price: int(max(0.0, min(budget(ticker) / price, free[0] / (price * (1.0 + rate * (1.0 - price))))) + EPS) if price > 0 else 0
+
+    # Resting bids the fair, the lines or the clock no longer support, each judged by its own ticker.
     for order in bids:
+        oid = str(order["order_id"])
         ticker = str(order.get("market") or "").upper()
-        if str(order["order_id"]) in cancels or ticker not in shown:
-            continue  # not shown this wake: nothing to judge it by but its start
-        entry = priced.get(ticker)
-        if entry is None:
-            cancels.append(str(order["order_id"]))  # its game is unmatched, starting, stale or untrusted now
+        series, _, key = ticker_key(ticker)
+        if key in starting:
+            urgent.append(oid)
             continue
-        leg, price = str(order.get("leg") or "yes"), num(order.get("limit_price"), 0.0)
-        count = max(1, int(num(order.get("quantity"), 1.0)))
-        edge = (entry[2] if leg == "yes" else 1.0 - entry[2]) - price - fee(entry[1]["series"], count, price, True, rate) / count
+        leg, price, count = order.get("leg"), num(order.get("limit_price")), num(order.get("quantity"))
+        if leg not in ("yes", "no") or price is None or not 0.0 < price < 1.0 or count is None or count <= 0:
+            later.append(oid)  # an order it cannot read is not one it can stand behind
+            continue
+        entry = priced.get(ticker)
+        if ticker not in shown:
+            game, row = games.get(key), ladder_row(ticker)
+            parsed = parse_market(row) if game is not None and row is not None else None
+            fair = None
+            if parsed is not None and (parsed["team"] in (None, "TIE") or parsed["team"] in game["sides"]):
+                fair = fair_yes(parsed, game["sides"], game["model"], p)
+            entry = (None, parsed, fair) if fair is not None and 0.0 < fair < 1.0 and priced_at.get(ticker) is not None else None
+        if entry is None:
+            later.append(oid)  # its game is not shown, unmatched, starting, stale or untrusted now
+            continue
+        count = max(1, int(min(count, 1e6)))
+        edge = (entry[2] if leg == "yes" else 1.0 - entry[2]) - price - fee(series, count, price, True, rate_of(series)) / count
         sent = when(order.get("submitted_at"))
         then = priced_at.get(ticker)
         if then is not None and abs(entry[2] - then) >= knob("requote_move") - EPS:
-            cancels.append(str(order["order_id"]))  # the line moved since the bid was priced
+            later.append(oid)  # the line moved since the bid was priced
         elif edge < min_edge(p, entry[1]) / 2.0:
-            cancels.append(str(order["order_id"]))
-        elif sent is not None and (now - sent).total_seconds() > 60.0 * knob("requote_minutes"):
-            better = best_entry(entry[0], entry[1], entry[2], lambda px, t=ticker: int(budget(t) / px + EPS), p, rate, floor, False)
+            later.append(oid)
+        elif entry[0] is not None and sent is not None and (now - sent).total_seconds() > 60.0 * knob("requote_minutes"):
+            better = best_entry(entry[0], entry[1], entry[2], counter(ticker, series), p, rate_of(series), floor, False)
             if better is not None and (better[1] != leg or abs(better[2] - price) > EPS):
-                cancels.append(str(order["order_id"]))
+                later.append(oid)
+    cancelled = set(list(dict.fromkeys(urgent + later))[:MAX_CANCELS])
+    resting = sum(1 for o in bids if str(o["order_id"]) not in cancelled)
 
-    # New entries, best edge first: one market an event, max_per_game a game.
+    # New entries, best edge first: one market an event, max_per_game a game, MAX_RESTING bids at once.
     offers = []
     for ticker, (market, parsed, fair) in priced.items():
         if parsed["event"] in events:
             continue
-        takers = not refused and not any(ticker == str((row.get("instrument") or {}).get("market_id") or "").upper() for row in refused)
-        entry = best_entry(market, parsed, fair, lambda px, t=ticker: int(budget(t) / px + EPS), p, rate, floor, takers)
+        entry = best_entry(market, parsed, fair, counter(ticker, parsed["series"]), p, rate_of(parsed["series"]), floor, takers)
         if entry is not None:
             offers.append((entry[0], ticker, entry, parsed, fair))
     offers.sort(key=lambda row: (-row[0], row[1]))
     intents = []
     for edge, ticker, (_, leg, price, post_only), parsed, fair in offers:
-        if len(intents) >= min(int(knob("max_new")), MAX_INTENTS):
+        if len(intents) >= min(int(knob("max_new")), MAX_INTENTS, MAX_RESTING - resting):
             break
         if parsed["event"] in events or len(per_game.get(parsed["game"], set())) >= int(knob("max_per_game")):
             continue
-        quantity = int(budget(ticker) / price + EPS)
+        quantity = counter(ticker, parsed["series"])(price)
         if quantity < 1 or quantity * price < 1.0:
             continue
-        free[0] -= quantity * price
+        free[0] -= quantity * price * (1.0 + rate_of(parsed["series"]) * (1.0 - price))
         events.add(parsed["event"])
         per_game.setdefault(parsed["game"], set()).add(parsed["event"])
         event_cost[parsed["event"]] = event_cost.get(parsed["event"], 0.0) + quantity * price
@@ -671,19 +726,9 @@ def decide(ctx):
             intent["post_only"] = True
         intents.append(intent)
 
-    # Keep the start of every event still bid on, and nothing else.
-    live = {ticker_key(o.get("market"))[1] for o in bids if str(o["order_id"]) not in cancels} | {i["market"].rsplit("-", 1)[0] for i in intents}
-    for event in live:
-        found = games.get(ticker_key(event)[2])
-        if found is not None and event not in starts:
-            starts[event] = found["event"].get("start")
-    resting = {str(o.get("market") or "").upper() for o in bids if str(o["order_id"]) not in cancels} | {i["market"] for i in intents}
-    memory = {"starts": {event: starts[event] for event in sorted(live) if starts.get(event)},
-              "fair": {ticker: priced_at[ticker] for ticker in sorted(resting) if priced_at.get(ticker) is not None}}
-
     leagues = "/".join(sorted({parsed["league"].upper() for _, parsed in parsed_rows})) or "No league"
     best = f"best edge {offers[0][0] * 100:.1f}c on {offers[0][1]}" if offers else "no edge cleared the fee and margin"
     missed = ", ".join(f"{count} {why}" for why, count in sorted(skipped.items())) or "none skipped"
     thought = (f"{leagues}: priced {len(priced)} of {len(markets)} markets on {sum(1 for g in games.values() if g)} "
-               f"matched games ({missed}); {best}. Placed {len(intents)} bids and cancelled {len(cancels)}.")
-    return {"intents": intents, "cancels": cancels, "thought": thought, "memory": {k: v for k, v in memory.items() if v}}
+               f"matched games ({missed}); {best}. Placed {len(intents)} bids and cancelled {{cancelled}}.")
+    return finish(intents, games, thought)

@@ -17,7 +17,7 @@ import unittest
 
 from league import niches
 from league.replay import run_replay
-from league.tapes import KalshiData, iso, parse_time
+from league.tapes import KalshiData, iso, listing_window, parse_time
 from league.tests.test_house import HouseCase
 from league.tests.test_tapes import FakeMarketData, live
 
@@ -65,6 +65,13 @@ class LiveAndReplayAgree(unittest.TestCase):
         self.assertEqual(shown, ["KXNCAAFSPREAD-26SEP26EEEFFF-EEE3", "KXNCAAFSPREAD-26SEP26EEEFFF-EEE7",
                                  "KXNCAAFSPREAD-26SEP26GGGHHH-GGG3"])
         self.assertEqual(self.replayed(program(WINDOW)), shown)
+
+    def test_a_floor_the_live_wake_reads_as_absent_is_absent_in_replay(self):
+        # A floor at or over max_hours_to_close is refused at birth; NEEDS that reach a replay anyway (a direct
+        # run, an old record) are shown what a live wake shows them: every market, as if the floor were absent.
+        self.assertEqual(listing_window({"max_hours_to_close": 30, "min_hours_to_close": 30}), (0.0, 200))
+        self.assertEqual(self.replayed(program(', "min_hours_to_close": 30')), self.replayed(program()))
+        self.assertEqual(self.replayed(program(', "min_hours_to_close": True')), self.replayed(program()))  # a bool is no number
 
     def test_a_replay_without_the_keys_is_unchanged(self):
         # The tape's own order, every market inside max_hours_to_close, uncapped: what it always showed.

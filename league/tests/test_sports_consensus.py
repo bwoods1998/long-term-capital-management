@@ -8,7 +8,8 @@ ESPN's boards as the `sports` feed shows them, every open Kalshi GAME/SPREAD/TOT
 leagues for Sept 25-28 as `ctx["markets"]` shows them, and DraftKings' lines (the only provider ESPN
 answered) for one game a league. They hold the matcher to the rule that matters most -- a market is
 priced only when its game is found without guessing -- and measure it: every Kalshi event of the
-weekend matched but two MLB games ESPN no longer lists at the first pitch Kalshi names.
+weekend matched but three MLB games: two ESPN no longer lists at the first pitch Kalshi names, and one
+named without its game number on a doubleheader day (the review of Sept 25, 2026: either game, so neither).
 """
 
 from __future__ import annotations
@@ -121,7 +122,7 @@ class Matching(unittest.TestCase):
         return {"events": set(events), "matched": matched, "games": games, "sides": sides}
 
     def test_every_weekend_event_is_matched_or_skipped_never_guessed(self):
-        expected = {"nfl": (45, 45), "ncaaf": (346, 346), "mlb": (69, 67), "mls": (15, 15), "ligamx": (9, 9)}
+        expected = {"nfl": (45, 45), "ncaaf": (346, 346), "mlb": (69, 66), "mls": (15, 15), "ligamx": (9, 9)}
         for league, (events, matched) in expected.items():
             with self.subTest(league):
                 found = self.measure(league)
@@ -137,10 +138,13 @@ class Matching(unittest.TestCase):
                     self.assertTrue(parsed["team"] == team["abbrev"] or parsed["team"] in aliases.get(team["abbrev"], ())
                                     or SEED["words"](parsed["name"]) in names, (parsed["ticker"], team))
 
-    def test_the_two_unmatched_are_games_espn_lists_at_another_first_pitch(self):
+    def test_the_unmatched_are_rescheduled_games_and_a_doubleheader_game_without_its_number(self):
         found = self.measure("mlb")
-        # Rescheduled into doubleheaders: Kalshi still lists the original 7:10 PM and 7:15 PM games.
-        self.assertEqual(sorted(found["events"] - found["matched"]), ["KXMLBGAME-26SEP251910CHCBOS", "KXMLBGAME-26SEP261915BALNYY"])
+        # Rescheduled into doubleheaders: Kalshi still lists the original 7:10 PM and 7:15 PM games. And BAL-NYY
+        # plays twice on Sept 25 (ESPN: 4:05 PM and 7:05 PM, the Sept 26 game moved in): Kalshi's 7:05 PM ticker
+        # carries no game number, so it may be either game once the doubleheader is set, and is skipped.
+        self.assertEqual(sorted(found["events"] - found["matched"]),
+                         ["KXMLBGAME-26SEP251905BALNYY", "KXMLBGAME-26SEP251910CHCBOS", "KXMLBGAME-26SEP261915BALNYY"])
         # Game 2 of CHC-BOS is 6:05 PM on Kalshi and 6:00 PM on ESPN: the same game, within 15 minutes.
         self.assertIn("KXMLBTOTAL-26SEP251805CHCBOSG2", found["matched"])
 
@@ -406,6 +410,237 @@ class Cancels(Entries):
     def test_a_bid_on_a_game_that_can_no_longer_be_priced_is_cancelled(self):
         ctx = self.ctx(open_orders=[self.order()], fetched="2026-09-27T10:00:00.000Z")
         self.assertEqual(self.run_seed(ctx)["cancels"], ["ord-1"])
+
+
+def synthetic(count: int, now: str, start: str = "2026-09-26T19:00:00Z") -> tuple:
+    """`count` college games of one Saturday, each with a fresh DraftKings winner line (home 0.60) and a
+    winner market bid 0.50 / asked 0.56: (board, odds row, markets)."""
+    board, events, rows = [], [], []
+    for i in range(count):
+        tag = chr(65 + i // 26) + chr(65 + i % 26)
+        home, away = f"HOME{tag}", f"AWAY{tag}"
+        board.append({"id": f"9{i:03d}", "name": f"{away} at {home}", "start": start, "status": "pre",
+                      "home": {"team": f"Home {tag}", "abbrev": home, "location": f"Home {tag}", "nickname": "H"},
+                      "away": {"team": f"Away {tag}", "abbrev": away, "location": f"Away {tag}", "nickname": "A"}})
+        events.append({"id": f"9{i:03d}", "start": start, "fetched": now, "win_probability": None,
+                       "lines": [{"provider": "Draft Kings", "home_ml": -150, "away_ml": 130, "implied_home": 0.6, "draw_ml": None}]})
+        rows.append(market(f"KXNCAAFGAME-26SEP26{away}{home}-{home}", 0.50, 0.56, f"Home {tag} wins"))
+    return board, {"t": now, "league": "ncaaf", "events": events}, rows
+
+
+class ReviewMatching(unittest.TestCase):
+    """The review of Sept 25, 2026: adversarial pairs the matcher refuses rather than guesses."""
+
+    def parse(self, ticker, title=""):
+        return SEED["parse_market"]({"market": ticker, "title": title})
+
+    def match(self, parsed, games, learned=None):
+        return SEED["match_game"](parsed, SEED["prepare"](games), learned or {})
+
+    def test_a_doubleheader_game_is_named_by_its_number_or_not_at_all(self):
+        mlb = SLATE["mlb"]["board"]  # CHC at BOS twice on Sept 25: 1:05 PM (401817104) and 6:00 PM (401817074)
+        self.assertEqual(self.match(self.parse("KXMLBGAME-26SEP251805CHCBOSG2-CHC"), mlb)[0]["id"], "401817074")
+        self.assertEqual(self.match(self.parse("KXMLBGAME-26SEP251305CHCBOSG1-CHC"), mlb)[0]["id"], "401817104")
+        # Without its number, even at the exact first pitch of one of them: either game, so neither.
+        self.assertIsNone(self.match(self.parse("KXMLBGAME-26SEP251800CHCBOS-CHC"), mlb))
+        self.assertIsNone(self.match(self.parse("KXMLBGAME-26SEP251305CHCBOS-CHC"), mlb))
+        # One game of the pair that day: its first pitch names it.
+        self.assertEqual(self.match(self.parse("KXMLBGAME-26SEP261915CHCBOS-CHC"), mlb)[0]["id"], "401817089")
+
+    def test_prefix_codes_and_a_shared_location(self):
+        def team(abbrev, name, location, nickname):
+            return {"team": name, "abbrev": abbrev, "location": location, "short": location, "nickname": nickname}
+        game = {"id": "1", "start": "2026-09-26T16:00:00Z", "status": "pre",
+                "home": team("MIA", "Miami Hurricanes", "Miami", "Hurricanes"),
+                "away": team("M-OH", "Miami (OH) RedHawks", "Miami (OH)", "RedHawks")}
+        words = SEED["words"]
+        learned = {"MIAOH": {words("Miami (OH)")}, "MIA": {words("Miami")}}
+        hit = self.match(self.parse("KXNCAAFGAME-26SEP26MIAOHMIA-MIAOH", "Miami (OH) wins"), [game], learned)
+        self.assertEqual(hit[1], {"MIAOH": "away", "MIA": "home"})  # YES on -MIAOH is the away side
+        self.assertEqual(self.match(self.parse("KXNCAAFGAME-26SEP26MIAOHMIA-MIA", "Miami wins"), [game], learned)[1]["MIA"], "home")
+        # A title that names the other Miami on the -MIAOH market makes both codes one side: skipped.
+        self.assertIsNone(self.match(self.parse("KXNCAAFGAME-26SEP26MIAOHMIA-MIA"), [game], {"MIAOH": {"miami"}, "MIA": {"miami"}}))
+        # OHST and OH: one a prefix of the other, read in either order and only one way.
+        ohio = {"id": "2", "start": "2026-09-26T16:00:00Z", "status": "pre",
+                "home": team("OHST", "Ohio State Buckeyes", "Ohio State", "Buckeyes"), "away": team("OH", "Ohio Bobcats", "Ohio", "Bobcats")}
+        self.assertEqual(self.match(self.parse("KXNCAAFGAME-26SEP26OHOHST-OH"), [game, ohio])[1], {"OH": "away", "OHST": "home"})
+        self.assertEqual(self.match(self.parse("KXNCAAFGAME-26SEP26OHSTOH-OH"), [game, ohio])[1], {"OH": "away", "OHST": "home"})
+        # A team string that splits two ways (A|BC and AB|C) is two readings: skipped.
+        split = {"id": "3", "start": "2026-09-26T16:00:00Z", "status": "pre",
+                 "home": team("AB", "Ab Team", "Ab", "Ab"), "away": team("C", "C Team", "Cee", "C")}
+        self.assertIsNone(self.match(self.parse("KXNCAAFGAME-26SEP26ABC-AB"), [split], {"A": {words("Ab")}, "BC": {words("Cee")}}))
+
+    def test_two_kalshi_games_read_as_one_board_game_are_neither(self):
+        now = "2026-09-25T18:00:00.000Z"  # game 2 of CHC-BOS starts at 22:00Z
+        g2 = market("KXMLBGAME-26SEP251805CHCBOSG2-CHC", 0.40, 0.46, "Chicago C wins")
+        out = runner.decide(code_for("mlb"), ctx_for("mlb", now, markets=[g2]))
+        self.assertEqual([i["market"] for i in out["intents"]], [g2["market"]])
+        # A second Kalshi game whose first pitch is also within 15 minutes of ESPN's 6:00 PM game.
+        g1 = market("KXMLBGAME-26SEP251810CHCBOSG1-CHC", 0.40, 0.46, "Chicago C wins")
+        out = runner.decide(code_for("mlb"), ctx_for("mlb", now, markets=[g2, g1]))
+        self.assertEqual(out["intents"], [])
+        self.assertIn("2 ambiguous", out["thought"])
+
+
+class ReviewMoney(SeedCase):
+    """The review of Sept 25, 2026: money rules that must hold whatever the wake shows."""
+
+    SEED, NOW, BUF = Entries.SEED, Entries.NOW, Entries.BUF
+    run_seed, ctx = Entries.run_seed, Entries.ctx
+
+    TOTAL = "KXNFLTOTAL-26SEP27LACBUF-48"  # over 47.5: fair 0.5774 on the recorded line
+    STARTS = {"KXNFLTOTAL-26SEP27LACBUF": "2026-09-27T17:00:00Z"}
+
+    def bid(self, ticker, oid="ord-1", price=0.50, leg="yes"):
+        return {"order_id": oid, "market": ticker, "leg": leg, "side": "buy", "quantity": 16.0, "limit_price": price,
+                "filled": 0.0, "submitted_at": "2026-09-27T11:50:00.000Z"}
+
+    def test_every_resting_bid_goes_when_the_lines_or_the_board_are_absent(self):
+        for drop in ("odds", "sports", None):
+            ctx = self.ctx(open_orders=[self.bid(self.BUF, price=0.61)], memory={"fair": {self.BUF: 0.7335}})
+            if drop is None:
+                del ctx["feeds"]
+            else:
+                del ctx["feeds"][drop]
+            self.assertEqual(self.run_seed(ctx)["cancels"], ["ord-1"], drop)
+
+    def test_a_bid_whose_market_is_not_shown_is_judged_by_its_own_ticker(self):
+        memory = {"starts": self.STARTS, "fair": {self.TOTAL: 0.5774}}
+        kept = self.run_seed(self.ctx(open_orders=[self.bid(self.TOTAL)], memory=memory))  # the winners shown, not the total
+        self.assertEqual(kept["cancels"], [])
+        self.assertEqual(kept["memory"]["fair"], {self.TOTAL: 0.5774})
+        moved = self.run_seed(self.ctx(open_orders=[self.bid(self.TOTAL)], memory={"starts": self.STARTS, "fair": {self.TOTAL: 0.56}}))
+        self.assertEqual(moved["cancels"], ["ord-1"])  # the line moved 1.7 cents since it was priced
+        unknown = self.run_seed(self.ctx(open_orders=[self.bid(self.TOTAL)], memory={"starts": self.STARTS}))
+        self.assertEqual(unknown["cancels"], ["ord-1"])  # no fair to hold its reading to
+        other = self.ctx(market("KXNFLGAME-26SEP27TENNYG-NYG", 0.4, 0.5, "New York G wins"), open_orders=[self.bid(self.TOTAL)], memory=memory)
+        self.assertEqual(self.run_seed(other)["cancels"], ["ord-1"])  # no market of its game is shown
+        stale = self.ctx(open_orders=[self.bid(self.TOTAL)], memory=memory, fetched="2026-09-27T10:00:00.000Z")
+        self.assertEqual(self.run_seed(stale)["cancels"], ["ord-1"])  # its game's lines are stale
+        sell = {**self.bid(self.BUF), "side": "sell"}
+        self.assertEqual(self.run_seed(self.ctx(open_orders=[sell], fetched="2026-09-27T10:00:00.000Z"))["cancels"], [])  # never a sell
+
+    def test_at_most_twenty_cancels_the_starts_first_and_the_rest_remembered(self):
+        orders = [self.bid(f"KXNFLGAME-26SEP27T{i:02d}X-T{i:02d}".replace("0", "Q").replace("1", "W").replace("2", "E"), oid=f"o{i}")
+                  for i in range(22)]
+        starts = {o["market"].rsplit("-", 1)[0]: ("2026-09-27T12:10:00Z" if i >= 17 else "2026-09-27T20:00:00Z") for i, o in enumerate(orders)}
+        out = self.run_seed(self.ctx(open_orders=orders, memory={"starts": starts}))
+        self.assertEqual(len(out["cancels"]), 20)
+        self.assertEqual(out["cancels"][:5], ["o17", "o18", "o19", "o20", "o21"])  # inside the start buffer: first
+        left = [o for o in orders if o["order_id"] not in out["cancels"]]
+        self.assertEqual(len(left), 2)
+        for order in left:  # a bid not cancelled this wake keeps its start, for the next
+            self.assertIn(order["market"].rsplit("-", 1)[0], out["memory"]["starts"])
+
+    def test_no_new_bid_once_forty_rest_and_the_memory_stays_small(self):
+        now = "2026-09-26T12:00:00.000Z"
+        board, odds, rows = synthetic(41, now)
+        bids = [self.bid(row["market"], oid=f"o{i}", price=0.51) for i, row in enumerate(rows[:40])]
+        ctx = ctx_for("ncaaf", now, markets=rows, open_orders=bids, cash=2000.0, equity=2000.0,
+                      memory={"fair": {row["market"]: 0.6 for row in rows[:40]}})
+        ctx["feeds"] = {"sports": {"ncaaf": {"t": now, "events": board}}, "odds": {"ncaaf": odds}}
+        out = runner.decide(code_for("ncaaf"), ctx)
+        self.assertTrue(out["ok"], out.get("error"))
+        self.assertEqual((out["cancels"], out["intents"]), ([], []))  # the 41st game's edge waits for a free slot
+        self.assertEqual(len(out["memory"]["fair"]), 40)
+        self.assertLess(len(json.dumps(out["memory"])), 6000)
+        ctx["open_orders"] = bids[:39]
+        self.assertEqual([i["market"] for i in runner.decide(code_for("ncaaf"), ctx)["intents"]], [rows[39]["market"]])  # one slot
+
+    def test_a_refused_taker_is_remembered_after_it_leaves_the_outcomes(self):
+        refused = [{"at": self.NOW, "instrument": {"market_id": self.BUF}, "status": "refused",
+                    "reason": "a real entry on sports-consensus-nfl must be a post-only limit until the family's pooled taker record is positive"}]
+        first = self.run_seed(self.ctx(market(self.BUF, 0.55, 0.62, "Buffalo wins"), recent_order_outcomes=refused))
+        self.assertEqual(first["memory"]["maker_only_until"], "2026-09-28T12:00:00Z")
+        later = self.run_seed(self.ctx(market(self.BUF, 0.55, 0.62, "Buffalo wins"), memory={"maker_only_until": "2026-09-28T12:00:00Z"}))
+        self.assertEqual([(i["limit_price"], i.get("post_only")) for i in later["intents"]], [(0.56, True)])
+        lapsed = self.run_seed(self.ctx(market(self.BUF, 0.55, 0.62, "Buffalo wins"), memory={"maker_only_until": "2026-09-27T11:00:00Z"}))
+        self.assertEqual([(i["limit_price"], i.get("post_only")) for i in lapsed["intents"]], [(0.62, None)])
+        self.assertNotIn("maker_only_until", lapsed["memory"])
+
+    def test_fee_multiplier_lowers_the_baseball_fee_and_no_other(self):
+        rate = SEED["fee_rate"]
+        self.assertEqual(rate("KXNFLGAME", 0.07, 0.5), 0.07)
+        self.assertEqual(rate("KXNCAAFSPREAD", 0.07, 0.5), 0.07)
+        self.assertEqual(rate("KXMLBTOTAL", 0.07, 0.5), 0.035)
+        self.assertEqual(rate("KXMLBGAME", 0.07, 1.0), 0.07)
+        self.assertEqual(rate("KXMLBGAME", 0.07, 0.0), 0.035)  # never under the series' own
+        ctx = self.ctx(market(self.BUF, 0.55, 0.62, "Buffalo wins"))
+        full = self.run_seed(ctx)
+        ctx["params"]["fee_multiplier"] = 0.5
+        self.assertEqual(self.run_seed(ctx)["intents"], full["intents"])  # the NFL pays the full rate either way
+
+    def test_a_snapshot_without_its_rung_is_held_to_the_real_floor(self):
+        ctx = self.ctx(market("KXNFLGAME-26SEP27LACBUF-LAC", 0.20, 0.30, "Los Angeles C wins"))
+        del ctx["rung"]
+        self.assertEqual([(i["leg"], i["limit_price"]) for i in self.run_seed(ctx)["intents"]], [("no", 0.71)])
+
+    def test_a_taker_fits_free_cash_with_its_fee(self):
+        out = self.run_seed(self.ctx(market(self.BUF, 0.55, 0.62, "Buffalo wins"), cash=5.1))
+        (intent,) = out["intents"]
+        cost = intent["quantity"] * 0.62 + SEED["fee"]("KXNFLGAME", intent["quantity"], 0.62, False, 0.07)
+        self.assertLessEqual(cost, 5.1 * 0.98)
+        self.assertEqual(intent["quantity"], 7)  # 8 would cost $5.09 with the fee: over the 2% headroom
+
+    def test_a_line_whose_fetch_time_cannot_be_read_is_stale(self):
+        for fetched in (None, "garbage", 17):
+            ctx = self.ctx()
+            ctx["feeds"]["odds"]["nfl"]["events"][0]["fetched"] = fetched  # the row's own t is fresh
+            out = self.run_seed(ctx)
+            self.assertEqual(out["intents"], [], fetched)
+            self.assertIn("stale lines", out["thought"])
+
+    def test_odd_shapes_never_crash_a_wake(self):
+        odd = [None, float("nan"), float("inf"), -1, 0, "x", [], {}, [1], True, 1e308]
+        base = self.ctx(open_orders=[self.bid(self.BUF, price=0.61)], positions=[{"market": "KXNFLGAME-26SEP27TENNYG-NYG", "quantity": 3}],
+                        recent_order_outcomes=[{"status": "refused", "reason": "post-only"}], event_risk={"remaining_by_market_usd": {self.BUF: 5.0}},
+                        memory={"starts": self.STARTS, "fair": {self.BUF: 0.73}, "maker_only_until": "2026-09-28T00:00:00Z"})
+        paths = [("markets",), ("markets", 0), ("markets", 0, "yes_bid"), ("markets", 0, "title"), ("open_orders",), ("open_orders", 0),
+                 ("open_orders", 0, "limit_price"), ("open_orders", 0, "quantity"), ("open_orders", 0, "leg"), ("positions",),
+                 ("positions", 0, "quantity"), ("recent_order_outcomes",), ("recent_order_outcomes", 0), ("event_risk",),
+                 ("event_risk", "remaining_by_market_usd"), ("limits",), ("limits", "max_order_usd"), ("fees",), ("fees", "kalshi_taker_rate"),
+                 ("params", "sigma_margin"),  # (the runner itself merges ctx["params"] into PARAMS: a dict) ("memory",), ("memory", "starts"), ("memory", "fair"), ("memory", "maker_only_until"),
+                 ("feeds",), ("feeds", "odds"), ("feeds", "odds", "nfl"), ("feeds", "odds", "nfl", "events"),
+                 ("feeds", "odds", "nfl", "events", 0, "lines"), ("feeds", "odds", "nfl", "events", 0, "lines", 0, "implied_home"),
+                 ("feeds", "sports", "nfl", "events"), ("feeds", "sports", "nfl", "events", 0, "home"), ("feeds", "sports", "nfl", "events", 0, "start"),
+                 ("cash",), ("equity",), ("rung",), ("now",)]
+        for path in paths:
+            for value in odd:
+                ctx = copy.deepcopy(base)
+                where = ctx
+                for key in path[:-1]:
+                    where = where[key]
+                where[path[-1]] = value
+                with self.subTest(path=path, value=value):
+                    out = runner.decide(code_for("nfl"), ctx)
+                    self.assertTrue(out["ok"], out.get("error"))
+                    for intent in out["intents"]:
+                        self.assertEqual(intent["type"], "limit")
+                        self.assertTrue(0.15 <= intent["limit_price"] < 1.0 and intent["quantity"] >= 1, intent)
+
+    def test_a_college_saturday_wake_decides_fast_and_small(self):
+        now = "2026-09-26T12:00:00.000Z"
+        lines = {g["id"]: copy.deepcopy(SLATE["ncaaf"]["odds"]["401862779"]) for g in SLATE["ncaaf"]["board"]}
+        rows = sorted((m for m in SLATE["ncaaf"]["markets"] if m["series"] in SERIES["ncaaf"]), key=lambda m: m["market"])[:500]
+        out = runner.decide(code_for("ncaaf"), ctx_for("ncaaf", now, markets=rows, lines=lines))
+        self.assertTrue(out["ok"], out.get("error"))  # the runner refuses a decision past its 5 seconds
+        self.assertLess(out["seconds"], 5.0)
+        self.assertIn("NCAAF: priced", out["thought"])
+        self.assertLess(len(json.dumps(out["memory"])), 8192)
+
+    def test_no_mutation_lowers_the_price_floor_or_takes_at_no_edge(self):
+        described = runner.needs_of(code_for("nfl"))
+        needs, params = described["needs"], described["params"]
+        bounds = needs["parameter_rules"]["bounds"]
+        self.assertGreaterEqual(bounds["min_price"][0], 0.15)  # the practice book's own floor
+        self.assertGreater(bounds["min_edge_winner"][0], 0)
+        self.assertGreater(bounds["min_edge_ladder"][0], 0)
+        self.assertGreater(bounds["take_edge"][0], 0)
+        for trial in range(200):
+            child = parameters.mutate(params, seed=f"review:{trial}", needs=needs)
+            self.assertGreaterEqual(child["min_price"], 0.15)
+            self.assertGreaterEqual(child["take_edge"], max(child["min_edge_winner"], child["min_edge_ladder"]))
+        self.assertEqual(SEED["LONGSHOT_FLOOR_REAL"], 0.30)  # a constant: no knob reaches it
 
 
 class Founders(unittest.TestCase):
