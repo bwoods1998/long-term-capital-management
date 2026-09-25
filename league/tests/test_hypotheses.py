@@ -761,6 +761,7 @@ class Gates(FoundryCase):
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
+        self.clock.advance(float(self.house.settings.house_job_seconds))  # the foundry steps once a minute (H5), inside its cadence
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
@@ -987,3 +988,46 @@ class FoldsReadTheirOwnRows(FoundryCase):
         self.assertIn("a-new-family", after["families"])
         self.house.game.setdefault("hypotheses", {})["fast_lane_min_blocks"] = 1  # its settings, too
         self.assertEqual(self.foundry.desk_forward(), Foundry(self.house, self.frontier).desk_forward())
+
+
+class BesideTheTick(FoundryCase):
+    """The review of #297 (Sept 25, 2026): since H5 the foundry's step runs on the House lane, beside the tick's births,
+    the lab's thread and the research admissions, and its reads of the registry walked `registry.agents` live -- a
+    birth landing mid-walk raised "dictionary changed size during iteration" and failed the step."""
+
+    class Landing:
+        """An agent whose record is read while another thread's birth lands in the registry."""
+
+        def __init__(self, registry, desk):
+            object.__setattr__(self, "_registry", registry)
+            object.__setattr__(self, "_desk", desk)
+
+        def __getattr__(self, name):
+            from types import SimpleNamespace
+
+            self._registry.agents.setdefault("newborn", SimpleNamespace(
+                id="newborn", founder="", line=None, name="newborn", family="newborn-family", specialty=None, code="", alive=True))
+            return {"id": "landing", "founder": "card:c1", "line": None, "name": "landing", "family": "landing-family",
+                    "specialty": self._desk, "code": "", "alive": True}[name]
+
+    def test_every_read_of_the_registry_is_a_copy(self):
+        reads = {
+            "born": lambda: self.foundry.born(),
+            "_retired_niche": lambda: self.foundry._retired_niche("family:no-such-family", {}),
+            "_retired_mechanisms": lambda: self.foundry._retired_mechanisms({"family:landing-family": {}}),
+            "desk_forward": lambda: self.foundry.desk_forward(),
+            "_families": lambda: self.foundry._families(),
+        }
+        failed = {}
+        for name, read in reads.items():
+            self.house.registry.agents.pop("newborn", None)
+            self.house.registry.agents["landing"] = self.Landing(self.house.registry, self.DESK)
+            try:
+                read()
+            except RuntimeError as exc:
+                failed[name] = str(exc)
+            finally:
+                self.house.registry.agents.pop("landing", None)
+                self.house.registry.agents.pop("newborn", None)
+            self.foundry._memo.clear()
+        self.assertEqual(failed, {})

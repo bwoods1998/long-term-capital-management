@@ -114,6 +114,48 @@ back at 15:39:27Z on a practice-book freeze the old House recorded 30 s before t
 old file still goes stale after `max_age_seconds`, and a House that never restarts still fails the
 watch.
 
+**A vendor's outage never rolls a release back** (H2, Sept 25, 2026). On Sept 24-25 Sail's checkpoint
+API answered 503 from 21:31:55Z to 01:55Z; each failed backup was an error alert, and all six
+releases promoted in those hours were rolled back on one (the updater's at 22:21, 23:00, 23:39,
+00:38 and 01:14Z; the owner's at 00:02Z, on the OLD House's backup, in flight at the promotion and
+failed 73 s later). Now:
+
+- An error alert the House raised because a call to a service outside its process failed on the
+  service's side carries `environment: "<service>"` in its payload: `sail` (the backup, a replay
+  box, a fork or retire, Sail's runway), `site` (the publish), `gateway` (the frontier month, the
+  profit-indexed raise), `data` (underlier bars), or a background job's name (`update` for GitHub,
+  `feeds`, `research`, ...). Only the service's failure is marked
+  (`league.watchdog.service_failed`): an HTTP 5xx, 408, 425 or 429, a timeout, a refused, reset or
+  unreachable connection, a name that did not resolve. A 4xx (a payload the House built, its
+  credential, a box it named) and every exception of the House's own (TypeError, KeyError,
+  ValueError, a local file or database error, anything raised in an except block without `from`),
+  even one raised while handling a 503, is not.
+- Nothing on the trading path is ever marked, whoever failed: an agent's wake ("its wake failed",
+  "its box did not run", "no market data this wake") and a venue's poll ("could not poll or
+  settle"). A release can make a service fail there (more wake workers than Sail's API allows answer
+  429; a shorter order-path timeout times out), and those alerts are the only thing the watch sees
+  of a release that stops every agent's trading and exits. So a gateway timeout in a wake still
+  rolls a release back, as before H2 (5 wake errors, 7 box runs Sail did not answer and 16 failed
+  venue polls from Sept 19 to 25, and no run of them escalated).
+- The watch and the canary count marked errors in the reading's detail and never make them a
+  reason: `detail.environment_alerts` (how many since the reading before the promotion) and
+  `detail.environment_first` (`{seq, service, text}` of the first). A tick that raises ("tick
+  failed: ..."), a frozen book, a stale `health.json`, a health failure and every unmarked error
+  still roll back.
+- A warning that repeats into an error ("a warning repeated N times in 30 minutes") keeps the marker
+  only when every warning of its run carried the same one.
+- The backup outage is ONE error when a run of failures begins, a warning at each later backoff step
+  (30 min, 1 h, 2 h, 4 h, then every 6 h) and an info with its length when a checkpoint works again.
+- On TERM the House ends its loop after the tick in hand (it no longer sleeps out the rest of the
+  tick's minute), puts its boxes to sleep (at most 60 s) and waits at most 5 s
+  (`House.SHUTDOWN_WAIT_SECONDS`) for background work in flight. A backup that comes back failed
+  while the House shuts down is a warning; one the shutdown cut off writes nothing.
+
+To see it on the box after a deploy: `tail -n 40 /workspace/deploys.jsonl` and read the `watch`
+rows' `detail.environment_alerts` and `environment_first`; the alerts themselves are
+`SELECT seq, at, payload FROM ledger WHERE kind='ops.alert' AND payload LIKE '%"environment"%'
+ORDER BY seq DESC LIMIT 20`.
+
 - **The updater (automatic).** Every 30 minutes the House reads `main`'s head and deploys it by
   itself. It does so only if both of these hold:
   - GitHub's Checks passed on that exact commit. The attestation is kept in `ops.deploy` and in
@@ -188,7 +230,9 @@ watch.
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
-  digest needs the ratify. The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
+  digest needs the ratify. The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
+  2, `allocator.real_book_dust_usd`) moves them to constitution `d0aa4c2a…`, money `d7d910fe…`: its
+  deploy needs the ratify (the grant's seats unchanged). The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
   `allocator.family_probe`, no probe on a losing family) moves them to constitution `38a57fe9…`, money
   `535a7f15…`: its deploy needs the ratify (the grant's 101 seats unchanged). Its Deploy B (the mechanism
   ledger's unit, the family swing with its entry looks, `swing_requires_proven_family`,
@@ -334,6 +378,16 @@ watch.
     timeout loses no filing). `failing` shows a stock at its first failure. A warning quotes each URL
     without its query, so the reason (a read timeout, an HTTP status) is on the line.
   - `background_jobs`, `durable_research` and `promotion_status`.
+  - `restarts_24h`, `restarts_24h_in_session` and `last_start` (H6, Sept 25, 2026): the `ops.started`
+    rows of the last 24 hours, those that fell inside a regular US session, and the newest (`at`,
+    `release`, ledger `seq`). The plan's line is six a day and none in a session (26 in the day to
+    04:25Z Sept 25, seven inside the Sept 24 session).
+  - `restart_research` (H6): the research sessions in flight when this House started (`at_start`),
+    how many have since ended as sessions do (`resumed`), were closed because their agent died or
+    changed (`retired`), or were lost (`lost_count`; the last 20 in `lost`: session, agent, reason,
+    `began_before_start`, `candidate_recovered`), and those still `waiting` to resume. In the day to
+    04:39Z Sept 25, 110 sessions spanned a restart: 84 resumed, 25 were lost (23
+    `provider: campaign_post_unconfirmed`, 2 `tool outcome unconfirmed`).
   - `tick_steps` (Sept 24, 2026): where the tick's time went, on the monotonic clock. `last`: the
     last tick's `at`, `total_seconds` (from its start to its health block written) and `steps`, the
     seconds of each: `replay_rules`, `feeds` (scheduling the recorders), `poll:<book>` (fills and
@@ -343,9 +397,18 @@ watch.
     sweeps), `allocator`, `floor_invariants`, `research`, `schedule` (the background jobs it starts),
     `jev`, `history_coverage`, `merton`, `hypotheses`, `lab`, `shards`, `payout`, `notices`,
     `horizon`, `tuition`, `population` (culls and births), `save_state`, `publish` and `health` (this
-    file's own block). `slowest_hour`: each step's slowest over the ticks of the last hour, the eight
+    file's own block). Since Sept 25, 2026 (H5 of the forward-first run) the tick runs every 30 s
+    (`config.json` `tick_seconds`) and `research` and `hypotheses` only schedule their jobs on the
+    House lane (`background.house`, keys `house:research` and `house:hypotheses`, once a minute);
+    `population` is the births pass only every five minutes or on the tick after a birth or death
+    (otherwise culls, a few milliseconds); `poll:<book>` (every book, real or simulated) and `publish` run once a minute and
+    are near zero on the ticks between. To judge the tick, read `last.total_seconds` over several ticks
+    and the interval between the log's tick lines (`{"at": ..., "woke": [...]}` in
+    `/workspace/league.log`): the line to hold is a p50 of 40 s or less over an hour with 128 living
+    (before: tick p50 60.8 s over 26 ticks, 04:31-05:00Z Sept 25, the births pass 22.0 s of it; tick lines 60-68 s apart at p50 in quiet hours, 97-121 s
+    in the Sept 24 US session). `slowest_hour`: each step's slowest over the ticks of the last hour, the eight
     slowest first, with that tick's `at`; `ticks_in_hour`; and `background`: each lane's
-    (`research`, `replay`, `ops`, `audit`, `feeds`, `shards`) last job with its `key`, `state`,
+    (`research`, `replay`, `ops`, `audit`, `feeds`, `shards`, `house`) last job with its `key`, `state`,
     `seconds` and `at`, which ran beside the tick and are not in its time. `tick_duration_seconds`
     is unchanged: the tick up to its health block. Measured Sept 24, 2026 08:40-08:50Z: ticks of
     51-64 s landing 70-80 s apart, the House at about 74% of the box's one vCPU, and nothing that said
@@ -779,6 +842,17 @@ watch.
   batch's result after 120 s, a new box after 180 s, an upload after 60 s plus 4 s a megabyte.
   Deferred work is retried on every tick, and nothing needs restarting. Before E3, a hung first tick
   cleared only when the Sail call returned (05:07Z Sept 23: about twelve minutes).
+- **"The daily backup of the House box failed on Sail's side (...)"** (an error, once when a run of
+  failed backups begins, marked `environment: "sail"`; H2, Sept 25, 2026), then **"Sail still fails
+  the daily backup of the House box (...); N tries in a row since <time>, the next in M minutes"** (a
+  warning at each later try, the same marker), then **"The daily backup of the House box succeeded
+  again: the outage lasted <span> (N failed tries since <time>)"** (an info, `outage_seconds`). None
+  of them rolls a release back. The attempts are the `ops.deploy` rows with `what: backup`
+  (`environment`, and `during_shutdown` for one that came back while the House was stopping). A
+  failure that is the House's own ("The daily backup of the House box failed (TypeError: ...); N tries
+  in a row since <time>, the next in M minutes") is an unmarked error at every try, and a release
+  that causes one is rolled back. Nothing to do for a Sail outage but wait; until a checkpoint
+  works, the ledger lives on one disk.
 - **"the Alpha Lab is stopped: its box is gone"** (an error alert). Sail reports the lab box
   terminated or failed. It is never replaced from the agents' image; the lab asks again every hour.
   Make a new box with `python3 scripts/lab_box.py create`, which writes the new `box_id` into
@@ -813,7 +887,8 @@ watch.
   inside 30 minutes. It carries the last warning's payload, its `_traceback` when the caller sent
   one, `repeated` (the folded text, the count, first and last seen) and `began_at`; `health.json`
   `repeating_warnings` lists it until it stops for 30 minutes, and a new run after that escalates
-  again. The watchdog counts it like any error, unless it began before a promotion it is watching.
+  again. The watchdog counts it like any error, unless it began before a promotion it is watching
+  or its run was a service's failures (`environment`, H2: every warning of the run marked alike).
 - **"health failure: the lab evaluated nothing in the last hour while N candidates are queued
   (...)"** (an error, once when it begins, with `failure: lab_evaluates` and `began_at`; L3), and
   **"the lab evaluates again"** (an info) when a batch runs. Read the lab's `refusal`,
@@ -826,7 +901,12 @@ watch.
 - **Research ends with `provider: campaign_post_unconfirmed`.** A Sail request was in flight when
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
-  once means many restarts.
+  once means many restarts. Since Sept 25, 2026 (H6) such a session, and one that ends
+  `tool outcome unconfirmed: <tool>` or whose candidate commit a restart interrupted, is named in one
+  warning a tick ("N research sessions lost to the restart at <start>: <session> (<reason>); ...",
+  with `sessions` and `agents`), counted in `health.json` `restart_research`, and -- when it
+  recovered no retained candidate -- closed as cancelled so its agent may research again in 15
+  minutes, as a provider failure's is.
 - **Research ends with `provider: provider_http_502` (or 500, 503, 504, 529).** The vendor failed
   the session (L2, Sept 24, 2026: 13 sessions ended in a 502 and 13 in a 504 in the day before T0).
   What its model turns were charged comes back in one `credit.grant` (id
@@ -993,7 +1073,57 @@ watch.
   per-fill tolerance or three readings adopted the venue, and a freeze at 15:37:27Z rolled Deploy C
   back inside its watch. A "does not reconcile" warning on a practice book now means a dollar or
   more, or cents beside an order whose outcome is unknown; an error means real money, or positions
-  that disagree. Read the `book.reconciled` rows. A real book is unchanged: its cents still freeze it.
+  that disagree. Read the `book.reconciled` rows. A real book's cents follow the next item.
+- **A real book never freezes on cents its venue's fees explain** (H4 of the forward-first run, Sept
+  25, 2026; `allocator.real_book_dust_usd`, $0.50). Three changes in `league/book.py`, and the
+  House's wiring of the OCC fee:
+  - *The fees an option or stock fill takes.* Every Alpaca option fill pays the OCC clearing fee
+    ($0.03 a contract) at the fill, as the practice book has since Sept 24. The regulators' cents the
+    real account also takes at the fill (ORF, CAT; TAF and SEC on sales) are listed only that evening
+    or the next night, so the book's next reading is a few cents short. A shortfall under the key,
+    with every position agreeing, no order in doubt, nothing awaiting settlement, and no larger than
+    the room the book's option and stock fills of the last 6 hours leave for those fees (less the dust
+    already booked on it), is booked to the House row: a `book.fill` row with `source: dust`, a
+    `detail` beginning "real book:" and `unlisted_fees_usd`, and an ERROR `ops.alert` whose text begins
+    "`<book>`: -0.0300 of cash booked as dust on the House row, not a freeze". Nothing freezes. The
+    dust has PAID those fees: when Alpaca lists them (ORF, CAT, TAF, REG, SEC), the next shortfall's
+    fee check marks each listing the dust covers as paid, a `venue-fee` row at no cash with
+    `covered_usd`, so a listing can never explain a second, unrelated shortfall (the review of H4 found
+    such listings taking a later real shortfall to zero with no alert, over the key when a day's fees
+    come as one row). A listing larger than what the dust paid is booked as before, against its own
+    shortfall. A stale listing (its cash absorbed before H4, like the live ledger's Sept 24 ORF $0.03)
+    booked against the cents of an option or stock fill that no clean reading has followed yet pays
+    that fill's own listings ahead the same way (`unlisted_fees_usd` on its `venue-fee` row), so the
+    stale ones do not pile up. The alert carries `began_at` (the fill's time) when no clean reading
+    had followed the fill, so the fees of a fill in the minutes before a promotion are inherited by
+    the deploy's watch; cents that appear after a clean reading, or a fill inside the watch, still
+    count as the new release's error alert and roll it back, one more reason no deploy runs in the
+    US session.
+  - *Resting crypto bids.* Alpaca holds each at its notional rounded half-up to the cent, and the
+    book now adds each back that way. Added back unrounded (to eighteen places) they moved the
+    reading by tenths of a cent at every change of the resting bids, each booked as dust, until four
+    of the eight bids resting at 02:26Z Sept 25 were cancelled or replaced over the next passes and
+    the real book froze on "cash differs by 0.0149", then "0.0108", from 02:38:59Z to a restart at
+    04:11:50Z, with no fill and no fee behind it. New `book.reconciled` rows carry
+    `holds: "cent"`. The first clean reading after the deploy that ships this expects exactly the
+    sub-cent error the last reading of the release before left on the bids resting then, with its sign
+    (read from the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean
+    readings of Sept 24 18:30Z-Sept 25 04:26Z), and books it back as ordinary dust, so the deploy's
+    watch does not meet a freeze; no fee listing is booked against it. Replayed over the snapshot's
+    1,461 pairs of real readings, every one lands inside the per-fill cent around that error except
+    the readings just after the two real option fills of Sept 24, which are the at-fill fees above.
+  - *A restart.* The first reading after a restart now allows a cent only for each venue fill since
+    the last clean reading (the fold reads the `book.reconciled` rows). It had allowed a cent for every
+    fill the book ever had, which is what "un-froze" the real Alpaca book at 04:11:50Z Sept 25 ($0.12
+    for 12 fills took the 0.0108) and at 18:45:22Z Sept 24 (the option's -0.0324); on the real Kalshi
+    book it allowed $1.39.
+
+  What still freezes a real book, for you to read: a difference at or over the key; any surplus over
+  the tolerance and the maker's fee slack (a dividend, interest, a refund, a fill the book never saw);
+  a shortfall with no option or stock fill in the last 6 hours, or larger than their fees can be; any
+  position difference or order in doubt. To verify after a deploy: `book.reconciled` rows with
+  `ok: true`, a `book.fill` `source: dust` row with `unlisted_fees_usd` beside the next real option or
+  stock fill, its error alert, and `health.json` `books.alpaca` not frozen.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:
   `{"key", "kind", "summary", "agents", "severity"}`. It is admitted whatever its priority.
   `{"drill": "<stamp>"}` plants the labelled synthetic drill; `scripts/repair_drill.py --plant`
@@ -1063,7 +1193,9 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `options_structures.book`, `options_structures.shadow.starting_cash` | `options-shadow`, $100,000 | Level-3 structures (Sept 25, 2026, the options-desk run; `league/structures.py`): the book a STRUCTURE AGENT (the `alpaca-options` desk, NEEDS `"structures": true`) trades on at rung 1. `options-shadow` is the House's own practice account (`league/options_shadow.py`: fills only on a strictly newer OPRA quote, at the structure's touch from every leg, at most 10% of any leg's shown size, session only, $0.05 a contract a leg, marks at the bid, a structure still held after its expiry's close settled at intrinsic, never written off at zero; nothing leaves the House). `alpaca-paper` sends each structure to the shared practice account as ONE multi-leg order (Track P, not before Sept 28; only the five types it can close as one covered order). A structure is held as ONE long instrument priced at net value plus collateral: its cost is its maximum loss, a flat sale is one closed trade, no book holds a negative leg. The House refuses structure intents on real money until O1 (`allocator.option_spreads_real`), closes structures from 15:30 New York on their earliest expiry day (30 minutes before an early close), cancels resting opens at the 14:30 entry cut (90 minutes before an early close), and seats structure founders one a tick (`league/options_desk.py`, cause `options_seat`, at most 12 retirements, never real money, a winner, a proven family's member, a working order or a position while its market is shut, never a Kalshi desk). An unknown book name: every structure intent is refused with the reason |
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
-| `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
+| `league/house.py` | `Settings.tick_seconds` (and `config.json` `tick_seconds`, 30-600) | 30 s | H5 (Sept 25, 2026): the run loop's tick, for the wakes (60 before; the tick lines landed 60-68 s apart at p50 with 60 the floor) |
+| | `Settings.population_pass_seconds`, `house_job_seconds`, `simulated_poll_seconds`, `venue_poll_seconds`, `publish_seconds`, `desk_displacement_seconds` | 300 s, 60 s, 60 s, 60 s, 60 s, 60 s | H5: the births pass (or the tick after a birth or death); research scheduling and the foundry's step on the House lane; a simulated venue's fill and settlement pass (its fill model's cadence); a real venue's poll and settlements (`kalshi`, `alpaca`, `alpaca-paper`: its calls, its exits' re-sends and a failing venue's warnings as before; the review of #297); the site's checkpoint; one displacement a desk. Each keeps what it did at sixty-second ticks |
+| | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `SEAT_WAIT_WARN_SECONDS`, `SEARCH_CLOSED_TTL_SECONDS`, `SEAT_EXPIRED_KEEP_SECONDS`, `SAIL_BURN_WINDOW_SECONDS`, `SAIL_BURN_MIN_SPAN_SECONDS` | 2 h, 10 min, 7 d, 1 d, 6 h | The seat market's capacity (R2, Sept 24, 2026): how long a newcomer waits before one warning a desk an hour names its desk, count and rule; how often the search's closed desks are read (the foundry's rule reads every block of every agent that lived on them); how long an expired waiter is remembered; and Sail's burn for the population rule (the falls of the Sail meter's readings over the trailing day, scaled to a day, none measured under six hours of readings). Constants in `league/house.py` |
 | | `POPULATION_RUNWAY_BAND_DAYS`, `PROVEN_UNBRED_RETRY_SECONDS` | 0.25 d, 1 h | The review of #276 (Sept 24, 2026): once the population rule holds the league it grows again only over the runway floor by this band (the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the 15:06Z snapshot's readings, so at the floor it flipped and the league crept up); and a proven family's program with no distinct valid PARAMS mutation left is held, its desk not kept from other families, this long before it is asked again. Constants in `league/house.py` |
@@ -1118,6 +1250,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `allocator.longshot_floor_real` (read by `book.py`) | `"0.30"` | X0, Sept 24, 2026: a REAL Kalshi entry priced under it is refused by the risk engine's longshot rule; the floor is the larger of it and the book's `min_event_price` (0.15, which practice books keep). 20-cent ETH strikes lost twice on real money on Sept 23. Without the key: 0.15 everywhere |
 | | `allocator.real_entry_liquidity` (read by `book.py`) | `maker_unless_family_taker_positive` | X0: a REAL Kalshi entry must be a post-only limit unless the agent's family's pooled taker record is positive (`Allocator.family_taker`, wired to each real book as `family_taker`); an unmeasured record refuses it, and the refusal names the family, its taker settlements and bound. The taker mechanisms were the loss engine of the nine promotions of Sept 23. Without the key: any order type |
 | | `allocator.max_event_share` (read by `book.py`) | `"0.25"` | X0: on a REAL Kalshi book an agent's holdings at cost, working buys and the new order on one event (a ticker's first two `-` segments, Kalshi's own event: every strike of one game or one city's day, every player prop of one game; a two-segment ticker is its own event) are at most this share of its equity on the book; the refusal says "one event may hold at most 25% of the stake". Without the key: no cap. `Book.risk_lines(agent)["entry_rules"]` lists the three a real book enforces |
+| | `allocator.real_book_dust_usd` (read by `book.py`) | `"0.50"` (bounds $0.25-1.00) | H4 of the forward-first run, Sept 25, 2026: a REAL book's cash SHORTFALL under it, with every position agreeing, no order in doubt and no settlement awaited, that the regulators' fees Alpaca takes at option and stock fills and lists as FEE activities only later can explain (ORF, CAT, TAF, SEC: room for $0.04 a fill plus $0.02 a contract or $0.0002 a share, from the book's option and stock fills of the last 6 hours, less the dust already booked on it; `Book._explain_real_cents`) is booked to the House row as dust with an error alert naming the amount and the explanation, never a freeze and never an agent's record. Over the key, a surplus, or a shortfall no such fill explains, the freeze stays for you. A value outside the bounds, or none, is no key: the book freezes as before. The real account's first option buy (18:19:57Z Sept 24) froze the book on -0.0308: its OCC fee (now paid at the fill, `Fees.option_clearing` on every Alpaca book) and $0.03 of ORF and CAT taken at the fill and listed at 20:35Z and 00:31Z |
 | | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.25, 8, 1.0, 0.9 | Bunt → swing (audited the first time), for a PROVEN family's agent only since Sept 24, 2026 (`swing_requires_proven_family`; an unproven family's agent stays a probe, and a swing whose family stops being proven drops to a probe; a swing audit that finishes after that does not commit); a swing leaves under 1.25 × hysteresis or W_real 0.9. 1.5 → 1.25 on Sept 23, 2026 ~17:00 UTC: the only two earners needed 2.8 and 5.6 days at their rates to reach 1.5 |
 | | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake at Alpaca (`position_share_event` on Kalshi), never under the venue minimum × 1.2 |
 | | `allocator` `stars`, `star_min_w_real` | 3, 1.25 | The site's top lane: the best swings by real P&L |

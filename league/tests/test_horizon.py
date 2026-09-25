@@ -158,6 +158,65 @@ class HouseHorizon(HouseCase):
         self.assertEqual(book.account(agent.id).holdings, {})
         self.assertEqual(book.open_orders(agent.id), [])
 
+    def test_the_houses_own_exit_stands_until_the_venue_reports_it(self):
+        """The review of #297 (Sept 25, 2026): the rule cancelled every working order in the coin -- its own
+        exit too -- and sent the exit again under the same nonce, which the book refused as a duplicate, so a
+        market sell the venue had not reported yet left the position with no exit until the hour turned."""
+        agent = self.house.spawn("holder", "test-family", HOLDER, reason="test")
+        self.house.evaluator.seat(agent.id, 1, "test")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        self.house.tick()
+        book = self.house.books["alpaca-paper"]
+        self.assertIn(self.btc.key, book.account(agent.id).holdings)
+        self.clock.advance(49 * 3600)
+        self.broker.clock_iso = now_iso(self.clock)
+        self.broker.asynchronous = True  # Alpaca's habit: a market order is accepted, and filled on a later read
+        broker = self.broker
+
+        def cancel_before_the_fill(order_id):  # the venue takes a cancel that reaches it before the fill
+            for order in broker.orders.values():
+                if order_id in (order.id, order.broker_order_id):
+                    broker._pending.pop(order.id, None)
+                    if not order.terminal:
+                        order.status = "cancelled"
+                        broker.cancelled.append(order.id)
+                    return order
+            raise AssertionError(order_id)
+
+        broker.cancel = cancel_before_the_fill
+        self.assertEqual(self.house._enforce_horizon(), 1)
+        sent = book.open_orders(agent.id)
+        self.assertEqual(len(sent), 1)  # sent, not yet reported
+        self.house._enforce_horizon()  # the next tick, before the venue's minute pass has read it
+        self.assertEqual(broker.cancelled, [])  # its own exit stands
+        self.assertEqual([w.order_id for w in book.open_orders(agent.id)], [sent[0].order_id])
+        sells = [e for e in self.house.ledger.iter(kinds="agent.intent", agent=agent.id) if e.payload.get("side") == "sell"]
+        self.assertEqual(len(sells), 1)  # never a second sell beside it
+        book.poll()
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertTrue(book.reconcile().ok)
+
+    def test_an_exit_the_venue_cancelled_is_sent_again_at_once_under_a_new_nonce(self):
+        agent = self.house.spawn("holder", "test-family", HOLDER, reason="test")
+        self.house.evaluator.seat(agent.id, 1, "test")
+        self.house._state["tried"][agent.id] = agent.code_sha256
+        self.house.tick()
+        book = self.house.books["alpaca-paper"]
+        self.clock.advance(49 * 3600)
+        self.broker.clock_iso = now_iso(self.clock)
+        self.broker.asynchronous = True
+        self.house._enforce_horizon()
+        (sent,) = book.open_orders(agent.id)
+        self.broker._pending.pop(sent.order_id, None)  # the venue cancels it unfilled (an Alpaca crypto order can expire)
+        self.broker.orders[sent.order_id].status = "cancelled"
+        book.poll()
+        self.assertEqual(book.open_orders(agent.id), [])
+        self.assertIn(self.btc.key, book.account(agent.id).holdings)
+        self.assertEqual(self.house._enforce_horizon(), 1)  # the same hour: a new intent, not the cancelled one's duplicate
+        book.poll()
+        self.assertEqual(book.account(agent.id).holdings, {})
+        self.assertTrue(book.reconcile().ok)
+
     def test_the_crypto_rule_can_be_switched_off_in_the_game_file(self):
         self.house.game["horizon"]["crypto_max_hold_hours"] = 0
         agent = self.house.spawn("holder", "test-family", HOLDER, reason="test")

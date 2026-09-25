@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from ltcm.broker import Balance, Fill, Instrument, Order, OrderIntent, Position, Quote, RejectedOrder, UnknownOutcome, money
 
@@ -70,8 +70,12 @@ class FakeBroker:
 
     def balance(self) -> Balance:
         cash = self.cash
-        if self.reserve_open_buys:  # Alpaca's habit: the cash behind a resting crypto bid leaves `cash` until it fills or is cancelled
-            cash -= sum((o.remaining * o.limit_price for o in self.open_orders() if o.instrument.asset_class == "crypto" and o.side == "buy" and o.limit_price), ZERO)
+        if self.reserve_open_buys:
+            # Alpaca's habit: the cash behind a resting crypto bid leaves `cash` until it fills or is
+            # cancelled, each bid held at its notional rounded half-up to the cent (measured on the real
+            # account, Sept 25, 2026: `book.HOLD_ROUNDING`).
+            cash -= sum(((o.remaining * o.limit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                         for o in self.open_orders() if o.instrument.asset_class == "crypto" and o.side == "buy" and o.limit_price), ZERO)
         return Balance(self.venue, cash, cash, cash, self.clock_iso)
 
     def positions(self) -> list[Position]:
