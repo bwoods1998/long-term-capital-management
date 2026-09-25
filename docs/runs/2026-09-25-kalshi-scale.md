@@ -92,7 +92,7 @@ This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows t
 | Wave | State | Files owned |
 |---|---|---|
 | 1 (Deploy K1, Friday after 20:05Z) | building | K1: `league/feeds.py` (the `odds` and `sports` recorders), `ltcm/data/sports.py`, a new model-versus-market seed `league/seeds/sports_consensus.py` with one `SEEDS` row appended at the END of `league/seeds/__init__.py`, the `kalshi-sports` row of `league/niches.json` (founder rows), K3: a new seed `league/seeds/weather_ensemble.py` (its `SEEDS` rows at the end too) and the `kalshi-weather` row of `league/niches.json`, a new `league/kalshi_founders.py` and ONE call line in `house.py`'s births pass right after the options run's `options_desk.seat_founders(self)`; K2/K3/K4: new read-only scripts (`scripts/kalshi_capacity.py`, `scripts/kalshi_watch.py`); I1: `league/researcher.py` (the `web_fetch` tool beside `web_search`), `league/commons.py` (`web_fetch`; I3's `block` beside `fulfil`) and the gateway's `web_fetch` route (new `gateway/lib/fetch.mjs`, its line in the router, `gateway/test/`) |
-| 2 (after forward-first's Deploy B) | building on a branch, merged after B | K5: `league/live_trading.py`, `league/grants.py`, `scripts/live_trading.py` (`--scale-report`); I2: new recorders in `league/open_feeds.py` registered from `league/feeds.py` by one hunk, new fetchers in `ltcm/data/`, `LEAGUE_HOSTS`; ships early with K1 if reviewed and green in time |
+| 2 (after forward-first's Deploy B) | K5 reviewed, merges after B; K5b after B | K5: `league/live_trading.py`, `league/grants.py`, `scripts/live_trading.py` (`--scale-report`), one `ci.FORBIDDEN` line; K5b: `Allocator.grant_capital` (one line), the board's envelope row, `House.tuition` (house.py ~3625-3646). **I2/I3 moved into wave 1 (Deploy K1)**: `league/open_feeds.py`, the registration and host backoff in `league/feeds.py`, `Commons.block`, new fetchers in `ltcm/data/`, `LEAGUE_HOSTS` |
 
 - **Not touched by this run:** the allocator, the families' proof, the seat market's rules, the lab, the
   foundry brief, `book.py`, `constitution.py` (K5's grant version lives in `grants.py`), the options desk,
@@ -104,8 +104,8 @@ This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows t
   exact start is written here first.
   A **gateway deploy** of `web_fetch` (no money rule) in the same Friday gap or Saturday's quiet window
   after forward-first's Deploy B and the options run's Deploy G, rebased on the options run's gateway
-  change. **Deploy K2** (House: I2's recorders and the research tool) in a weekend quiet window after B and
-  G, its start written here first.
+  change. **Deploy K2** (House: K5, K5b and any fix the weekend watch finds; I2 moved into K1) in a weekend quiet window after
+  B, G and D-J1, its start written here first.
 
 ## Checklist
 
