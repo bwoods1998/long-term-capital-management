@@ -6,7 +6,8 @@
 //   POST            /v1/unkill               release it: GATEWAY_ADMIN_TOKEN only, the owner's
 //   GET|POST|DELETE /v1/kalshi/<path>        signed with the Kalshi key, forwarded to the venue
 //   GET|POST|DELETE /v1/alpaca/<path>        keyed with the Alpaca headers, forwarded to the venue
-//   GET|POST|DELETE /v1/alpaca-paper/<path>  the paper account: same paths, simulated money, no caps
+//   GET|POST|DELETE /v1/alpaca-paper/<path>  the practice account: same paths, simulated money, no caps;
+//                                            its option orders are held to defined-risk shapes
 //   GET             /v1/kalshi/ws-auth       handshake headers for the Kalshi WebSocket, 30 s of life
 //   POST            /v1/notify               one trade notice mailed to the owner, capped per day
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
@@ -37,7 +38,10 @@
 
 import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
-import { createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError } from './caps.mjs';
+import {
+  createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
+  admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError,
+} from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
@@ -186,6 +190,21 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   const body = await readBody(request);
   if (body.error) return fail(body.error, 413);
 
+  // --- the practice account's order shapes (Sept 25, 2026) --------------------------------------
+  // Never metered, but an OPTION order is held to the defined-risk shapes (`caps.practiceOrderError`):
+  // until today an order to the practice account was forwarded with no check at all. Stock and
+  // crypto orders pass as before.
+  if (PAPER_VENUES.includes(target.venue) && createsOrder(rulesOf(target.venue), request.method, target.path)) {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(body.text || '');
+    } catch {
+      return fail('An order body must be JSON.', 400);
+    }
+    const refusal = practiceOrderError(parsed);
+    if (refusal) return fail(refusal, 400);
+  }
+
   // --- caps, before anything is signed or sent -------------------------------------------------
   let reservation = null;
   if (!PAPER_VENUES.includes(target.venue) && createsOrder(target.venue, request.method, target.path)) {
@@ -196,10 +215,13 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       return fail('An order body must be JSON.', 400);
     }
     let reference = request.headers.get(REFERENCE_HEADER);
+    // The structure types the real account admits (`OPTION_STRUCTURES_REAL`, none by default).
+    const structures = target.venue === 'alpaca' ? admittedStructures(env) : [];
     if (target.venue === 'alpaca') {
       // A multi-leg, bracket, stop, trailing or symbol-less order is refused before its symbol is
-      // looked up or priced.
-      const shape = alpacaShapeError(parsed);
+      // looked up or priced. A multi-leg order of an admitted type is read by its own rules instead.
+      const structure = structures.length > 0 && isMultiLegOrder(parsed);
+      const shape = structure ? structureNotional(parsed, structures).error : alpacaShapeError(parsed);
       if (shape) return fail(shape, 400);
       // A market order is priced from the venue's quote alone. The VM's header never prices it,
       // and neither does a stray price field: until Sept 23, 2026 any truthy `limit_price` or
@@ -243,10 +265,22 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
       if (!(price > 0)) return fail('Cannot independently price this order: no venue quote.', 503);
       reference = String(price * 1.10);  // a market order may fill through the touch
     }
-    const exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
-    const priced = notional(target.venue, parsed, { reference, exit });
+    let exit = String(request.headers.get(PURPOSE_HEADER) || '').toLowerCase() === 'exit';
+    const priced = notional(target.venue, parsed, { reference, exit, structures });
     if (priced.error) return fail(priced.error, 400);
-    const decision = await gate.reserve({ micro: String(priced.micro), exit, venue: target.venue });
+    let micro = priced.micro;
+    if (priced.structure) {
+      // A structure's open or close is read from its legs' position_intent, which the venue holds it
+      // to (a close of what is not held is refused there, as a single contract's sell_to_close is:
+      // `caps.optionNotional`), never from the caller's header: an open
+      // is metered at its maximum loss against every cap, whatever the header says. A close takes
+      // risk off and is metered at zero; the gate refuses a zero reservation and counts every order,
+      // so a close holds the least amount it records, one micro-dollar, as an exit: the kill switch
+      // and the day's order count still stop it, the dollar caps do not.
+      exit = !priced.opening;
+      if (!priced.opening) micro = 1n;
+    }
+    const decision = await gate.reserve({ micro: String(micro), exit, venue: target.venue });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
     reservation = decision;
   }
