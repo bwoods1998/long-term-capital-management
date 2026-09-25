@@ -12,25 +12,32 @@ it helps is measured, not assumed (docs/goals/LTCM_JEV_SENSES.md, J3).
    hypothesis memory read it. These are the swarm's own texts, so the existing history may be
    indexed, but only its last `backfill_days` (14): the first run finds that point by a binary
    search over sequence numbers, and every run takes at most `max_docs_per_run` documents and
-   `max_seconds_per_run`. A document is (ref = ledger seq, kind, agent, niche, family, venue, at,
-   text <= 900 chars) plus its deterministic outcome (the session's outcome, a death's cause).
-2. **Labels.** Each document is classified ONCE by Jev in one request of four questions (three
-   `choice`, one noul) into a small versioned taxonomy (`TAXONOMY_VERSION`): mechanism class,
-   verdict, failure cause, and whether it names data the House does not record. Answers are cached
-   by the text's hash, so a text repeated word for word is bought once. Labelling is paced to the
-   day (what is left of the purpose's calls, less `reserve_calls` held for retrieval, spread over
-   the day's remaining runs), newest first, and stops at `daily_usd - reserve_usd`. A document the
-   gateway rejects is asked at most `label_attempts` times. Labels are READING AIDS only: they never
-   gate research, rank an agent, or change any evidence.
+   `max_seconds_per_run` (indexing at most half of it). A document is (ref = ledger seq, kind,
+   agent, niche, family, venue, at, text <= 900 chars) plus its deterministic outcome (the
+   session's outcome, a death's cause). Documents never labelled are pruned after 30 days.
+2. **Labels** (purpose `memory`, its own call cap and breaker). Each document is classified ONCE by
+   Jev in one request of four questions (three `choice`, one noul) into a small versioned taxonomy
+   (`TAXONOMY_VERSION`): mechanism class, verdict, failure cause, and whether it names data the
+   House does not record. Answers are cached by the text's hash, so a text repeated word for word
+   is bought once. Labelling is paced over the day (the purpose's calls left, spread over the day's
+   remaining runs), newest first, each request bounded by the run's time left, and stops at
+   `daily_usd - reserve_usd`. A document the gateway rejects is asked at most `label_attempts`
+   times. Labels are READING AIDS only: they never gate research, rank an agent, or change evidence.
 3. **Retrieval** (`prior_results(agent, now, session=)`, set as the researcher's `prior_results` for
-   its research-state hook). The arm is sha256(agent id + ":j3") % 3, orthogonal to any other
-   split: 0 control (nothing shown), 1 free (the top `shown` other agents' documents by a free
-   score: same niche > same family > same venue, word overlap with the strategy's docstring and its
-   latest conclusion, taxonomy match, recency), 2 Jev (the free top `jev_pool` (16), one noul
-   relevance question each, the top `shown` at p >= 0.5; when Jev cannot answer, the free order,
-   recorded as such). The agent's own line is never shown: its journal already holds it. Every
-   retrieval is stored (session, agent, arm, at, refs, whether Jev was used, cost) so it can be
-   joined with the session's outcome.
+   its research-state hook; at most `budget_seconds` (6) in all). The arm is sha256(agent id +
+   ":j3") % 3, orthogonal to any other split (the forward-first run's `lesson_arm` among them):
+   0 control (nothing shown, but the block it WOULD have seen is computed and recorded), 1 free
+   (the top `shown` other agents' documents by a free score: same niche > same family > same
+   venue, word overlap with the strategy's docstring and its latest conclusion, mechanism match,
+   recency), 2 Jev (the free top `jev_pool` (16), one noul relevance question each under purpose
+   `memory_rank` (its own cap and breaker), the top `shown` at p >= 0.5; one request of up to 16
+   once the gateway has answered partially, else requests of 4; the free order when Jev cannot
+   answer inside the budget, recorded as such). The free arm uses Jev's taxonomy labels too (the
+   mechanism match in its score, the verdict and failure on its lines), so free against Jev
+   measures only the relevance call, and control against free the block itself. The agent's own
+   line is never shown: its journal already holds it. Every retrieval is stored (session, agent,
+   arm, at, refs shown, the free would-be refs, whether Jev was used, cost). Documents are scored
+   from an in-memory snapshot rebuilt after each index run, never re-read per retrieval.
 4. **The block** is bounded (at most 5 lines of at most 240 characters, and 1,400 characters in
    all) and quoted as untrusted data: other agents' notes can carry text fetched from web pages, so
    the excerpts sit between delimiters carrying a random per-block nonce, under a line saying they
@@ -40,18 +47,24 @@ it helps is measured, not assumed (docs/goals/LTCM_JEV_SENSES.md, J3).
 5. **The graveyard** (`graveyard(query, niche)` and `python -m league.jev_memory graveyard`): has any
    agent tried this, and how did it end, with ledger refs. Read-only; Jev relevance optional.
 6. **The report** (`python -m league.jev_memory report --ledger --store --since`, read-only): per
-   arm, finished research sessions joined to their retrieval, turns, abstention, candidates, replay
-   passes within 2 h, model dollars per session, with 95% intervals clustered by agent, and the
-   arms' differences. That is how J3 earns its keep or not.
+   arm, finished research sessions joined to their retrieval record (sessions before the hook, or
+   without a record, are excluded, never counted as treated), (a) all of them and (b) those whose
+   would-be block was non-empty, each also stratified by `lesson_arm`: turns, abstention (the
+   floor's `session_outcome`), failed evaluations, candidates, replay passes within 2 h, model
+   dollars per session, with 95% intervals clustered by agent, and the arms' differences. That is
+   how J3 earns its keep or not.
 
-Budget (purpose "memory"): a label request is about 900 input tokens ($0.00004) and a relevance
-request of four about 950 ($0.00004); with `purpose_calls.memory` 3000 a day that is at most about
-$0.12 a day, and J3 stops itself at `daily_usd` ($0.20) inside the House's $1.50 pool.
+Budget: a label request is about 900 input tokens ($0.00004); a relevance request of four about
+950 ($0.00004), of sixteen about 3,000 ($0.00013). At `purpose_calls` memory 1500 and memory_rank
+2500 that is at most about $0.06 + $0.10-0.30 a day, and J3 stops itself at `daily_usd` ($0.20)
+inside the House's $1.50 pool; a call whose receipt never arrives counts at the gateway's $0.01
+reservation, so an outage reaches that ceiling sooner, as it should.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import math
@@ -69,11 +82,20 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping
 
 from .hypothesis_memory import docstring
-from .jev import GUARD, words
+from .jev import GUARD, MAX_QUESTIONS, words
 from .ledger import HOUSE, Entry, now_iso
 from .research_gate import session_outcome
 
-PURPOSE = "memory"
+try:  # the forward-first run's teacher comparison (research_gate rule 12), once it is on main
+    from .research_gate import lesson_arm
+except ImportError:
+    def lesson_arm(agent_id: str) -> str:
+        """The same rule as forward-first's `research_gate.lesson_arm`: `lesson` when the first byte of
+        the sha256 of the id is even, else `control`."""
+        return "lesson" if hashlib.sha256(str(agent_id).encode("utf-8")).digest()[0] % 2 == 0 else "control"
+
+PURPOSE = "memory"  # labels
+RANK = "memory_rank"  # retrieval relevance: its own call cap and breaker
 TAXONOMY_VERSION = "j3-taxonomy-v1"
 RELEVANCE_VERSION = "j3-relevance-v1"
 SOURCE_KINDS = ("agent.research", "agent.postmortem", "playbook.entry", "library.note")
@@ -87,6 +109,11 @@ MAX_TEXT = 900
 #: A research session is joined to a retrieval of its agent made this long before it started.
 JOIN_SLACK_SECONDS = 300
 REPLAY_WINDOW_SECONDS = 7200
+#: Ledger `at` stamps are not strictly ordered by seq (a row may carry its own `at`): every binary
+#: search for a time starts this much earlier, and rows are then filtered by their own stamp.
+SEARCH_SLACK_SECONDS = 86400
+#: Documents never labelled are dropped this long after they were written.
+EXPIRED_KEEP_DAYS = 30
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "interval_seconds": 600,
@@ -95,16 +122,16 @@ DEFAULTS: dict[str, Any] = {
     "max_seconds_per_run": 60,  # Jev holds one ops slot at a time (JevFloor.tick): a run must not keep the move sensor waiting
     "page_rows": 2000,
     "min_chars": 40,
-    "reserve_calls": 1500,  # of the purpose's daily calls, never spent on labels: retrieval's relevance questions
     "daily_usd": "0.20",  # J3's own ceiling on Jev a UTC day, labels and relevance together
     "reserve_usd": "0.08",  # of which labels leave this much for relevance
-    "batch": 4,  # questions a request (a label is exactly one request)
+    "batch": 4,  # questions in a label request (a label is exactly one request) and in a relevance request
     "label_attempts": 2,
+    "budget_seconds": 6.0,  # one retrieval, relevance included
     "shown": 5,
     "jev_pool": 16,
     "jev_threshold": 0.5,
     "per_agent": 2,  # at most this many of one agent's documents in one block
-    "scan_docs": 5000,  # newest documents scored per retrieval (plus the agent's niche's newest)
+    "scan_docs": 5000,  # newest documents in the snapshot (plus each asked niche's newest fifth as many)
 }
 
 MECHANISMS = {
@@ -319,6 +346,15 @@ class Profile:
     key: str
 
 
+class _Snapshot:
+    """The newest documents without their text, read once per index run; a niche's own newest are
+    read the first time a retrieval asks for them and kept until the next run."""
+
+    def __init__(self, docs: list[Doc]):
+        self.docs = docs
+        self.niches: dict[str, list[Doc]] = {}
+
+
 class MemoryIndex:
     def __init__(self, ledger: Any, sensor: Any = None, *, path: str | Path, clock: Callable[[], float] = time.time,
                  settings: Mapping[str, Any] | None = None, agent_of: Callable[[str], Any] | None = None,
@@ -332,6 +368,8 @@ class MemoryIndex:
         self.closing = closing or (lambda: False)
         self.readonly = readonly
         self.lock = threading.Lock()  # one run at a time
+        self._snapshot_lock = threading.Lock()
+        self._snapshot: _Snapshot | None = None
         self.last_run = 0.0
         self.latest: dict[str, Any] = {}
         self._counts: tuple[float, dict[str, Any]] = (0.0, {})
@@ -354,12 +392,15 @@ class MemoryIndex:
                     day TEXT NOT NULL, agent TEXT NOT NULL, session TEXT, arm INTEGER NOT NULL, refs TEXT NOT NULL,
                     free_refs TEXT, jev TEXT NOT NULL, jev_why TEXT, calls INTEGER NOT NULL DEFAULT 0,
                     cost TEXT NOT NULL DEFAULT '0', chars INTEGER NOT NULL DEFAULT 0,
-                    candidates INTEGER NOT NULL DEFAULT 0, error TEXT);
+                    candidates INTEGER NOT NULL DEFAULT 0, error TEXT, seconds REAL);
                 CREATE INDEX IF NOT EXISTS retrievals_agent ON retrievals(agent, at);
                 CREATE INDEX IF NOT EXISTS retrievals_session ON retrievals(session);
                 CREATE INDEX IF NOT EXISTS retrievals_day ON retrievals(day, arm);
+                CREATE INDEX IF NOT EXISTS retrievals_at ON retrievals(at);
             """)
             db.execute("INSERT OR IGNORE INTO meta VALUES('taxonomy', ?)", (TAXONOMY_VERSION,))
+            if "seconds" not in {row[1] for row in db.execute("PRAGMA table_info(retrievals)")}:
+                db.execute("ALTER TABLE retrievals ADD COLUMN seconds REAL")  # a store from the first J3 build
 
     @contextmanager
     def _db(self):
@@ -399,6 +440,10 @@ class MemoryIndex:
             # A backfill scans many rows for few documents: it may take half the run, never the labels' half.
             out.update(self.index(deadline=started + budget / 2))
             out.update(self.label(deadline=started + budget))
+            with self._db() as db:
+                out["pruned"] = db.execute(
+                    "DELETE FROM docs WHERE rowid IN (SELECT rowid FROM docs WHERE status='expired' AND ts<? LIMIT 10000)",
+                    (self.clock() - EXPIRED_KEEP_DAYS * 86400,)).rowcount
             if self.sensor is not None:
                 try:  # relevance answers outlive their use by the backfill window at most
                     out["forgotten"] = self.sensor.forget("j3rel:", self.clock() - float(self.settings["backfill_days"]) * 86400,
@@ -407,6 +452,11 @@ class MemoryIndex:
                     pass
             self.latest = out
             self._counts = (0.0, {})
+            self._snapshot = None
+            try:
+                self._snap()  # rebuilt here, so a retrieval never waits on it
+            except Exception:  # noqa: BLE001 - the next retrieval builds it
+                pass
             return out
         finally:
             self.lock.release()
@@ -419,7 +469,7 @@ class MemoryIndex:
             cursor = self._meta(db, "cursor")
             if cursor is None:
                 # The first run: the swarm's own history, but only its last `backfill_days`.
-                cursor = seq_at_or_after(self.ledger, cutoff)
+                cursor = seq_at_or_after(self.ledger, cutoff - SEARCH_SLACK_SECONDS)
                 self._set(db, "cursor", cursor)
                 self._set(db, "backfill_from_seq", cursor)
                 self._set(db, "backfill_from", _iso(cutoff))
@@ -490,25 +540,28 @@ class MemoryIndex:
 
     # ----------------------------------------------------------------- label
     def _allowance(self, now: float) -> int:
-        """Label requests this run may make: the purpose's calls left today less the reserve held
-        for retrieval, spread evenly over the day's remaining runs."""
-        spare = int(self.sensor.headroom(PURPOSE)) - int(self.settings["reserve_calls"])
+        """Label requests this run may make: the labels' calls left today (their own purpose cap),
+        spread evenly over the day's remaining runs."""
+        spare = int(self.sensor.headroom(PURPOSE))
         if spare <= 0:
             return 0
         day_end = (math.floor(now / 86400) + 1) * 86400
         runs_left = max(1.0, (day_end - now) / max(1.0, float(self.settings["interval_seconds"])))
         return int(min(int(self.settings["max_docs_per_run"]), max(1, math.ceil(spare / runs_left))))
 
+    def _spent_today(self) -> Decimal:
+        return self.sensor.spent_today(PURPOSE) + self.sensor.spent_today(RANK)
+
     def _dollars_left(self, *, labels: bool) -> bool:
         limit = Decimal(str(self.settings["daily_usd"])) - (Decimal(str(self.settings["reserve_usd"])) if labels else 0)
-        return self.sensor.spent_today(PURPOSE) < limit
+        return self._spent_today() < limit
 
     def label(self, *, deadline: float) -> dict[str, Any]:
         if self.sensor is None:
             return {"labelled": 0, "label_why": "no Jev sensor"}
         now = self.clock()
         with self._db() as db:
-            # Older than the window: never labelled (still indexed, still retrievable, unlabelled).
+            # Older than the window: never labelled (still indexed and retrievable, unlabelled, until pruned).
             expired = db.execute("UPDATE docs SET status='expired' WHERE status='pending' AND ts<?",
                                  (now - float(self.settings["backfill_days"]) * 86400,)).rowcount
             rows = db.execute("SELECT ref, kind, text, th, attempts FROM docs WHERE status='pending' ORDER BY ref DESC LIMIT ?",
@@ -518,9 +571,10 @@ class MemoryIndex:
         cost, why = Decimal(0), ""
         for ref, kind, text, th, attempts in rows:
             if calls >= allowed:
-                why = "paced" if allowed else f"the day's {PURPOSE} calls are held for retrieval"
+                why = "paced" if allowed else f"the day's {PURPOSE} calls are spent"
                 break
-            if time.monotonic() >= deadline or self.closing():
+            left = deadline - time.monotonic()
+            if left <= 0 or self.closing():
                 why = "out of time"
                 break
             if not self._dollars_left(labels=True):
@@ -528,7 +582,8 @@ class MemoryIndex:
                 break
             receipt: dict[str, Any] = {}
             answers = self.sensor.ask_state(PURPOSE, f"j3:{TAXONOMY_VERSION}:{th}", {"document": {"kind": kind, "text": text}},
-                                            QUESTIONS, receipt=receipt, batch=int(self.settings["batch"]))
+                                            QUESTIONS, receipt=receipt, batch=int(self.settings["batch"]),
+                                            timeout=max(1.0, left))
             calls += int(receipt.get("calls") or 0)
             cost += Decimal(str(receipt.get("cost") or 0))
             got = {name: value for name, value in answers.items() if value is not None}
@@ -556,51 +611,104 @@ class MemoryIndex:
                        (status, attempts, TAXONOMY_VERSION, pick("mechanism"), pick("verdict"), pick("failure"),
                         got.get("missing_data"), json.dumps(labels, sort_keys=True), self.clock(), ref))
 
+    # ------------------------------------------------------------- snapshot
+    def _read(self, niche: str | None, limit: int) -> list[Doc]:
+        columns = DOC_COLUMNS.replace("text,", "'' AS text,")  # texts are read only for what is shown or asked
+        with self._db() as db:
+            if niche is None:
+                rows = db.execute(f"SELECT {columns} FROM docs ORDER BY ref DESC LIMIT ?", (limit,)).fetchall()
+            else:
+                rows = db.execute(f"SELECT {columns} FROM docs WHERE niche=? ORDER BY ref DESC LIMIT ?", (niche, limit)).fetchall()
+        return [Doc(*row) for row in rows]
+
+    def _snap(self) -> _Snapshot:
+        snapshot = self._snapshot
+        if snapshot is None:
+            with self._snapshot_lock:
+                snapshot = self._snapshot
+                if snapshot is None:
+                    snapshot = self._snapshot = _Snapshot(self._read(None, int(self.settings["scan_docs"])))
+        return snapshot
+
+    def _docs(self, *, niche: str | None, now: float) -> list[Doc]:
+        """The snapshot's newest `scan_docs` documents and the newest fifth as many of `niche`'s own,
+        none written after `now`."""
+        snapshot = self._snap()
+        docs = list(snapshot.docs)
+        if niche:
+            own = snapshot.niches.get(niche)
+            if own is None:
+                own = self._read(niche, max(1, int(self.settings["scan_docs"]) // 5))
+                if len(snapshot.niches) < 64:
+                    snapshot.niches[niche] = own
+            docs += own
+        seen: dict[int, Doc] = {}
+        for doc in docs:
+            if doc.ts <= now:
+                seen.setdefault(doc.ref, doc)
+        return list(seen.values())
+
+    def _with_text(self, docs: list[Doc]) -> list[Doc]:
+        if not docs:
+            return []
+        refs = [doc.ref for doc in docs]
+        with self._db() as db:
+            texts = dict(db.execute(f"SELECT ref, text FROM docs WHERE ref IN ({','.join('?' for _ in refs)})", refs).fetchall())
+        return [dataclasses.replace(doc, text=texts[doc.ref]) for doc in docs if doc.ref in texts]
+
     # ------------------------------------------------------------- retrieval
     def prior_results(self, agent: Any, now: float | None = None, *, session: str | None = None) -> tuple[int | None, str, list[int]]:
-        """(arm, text block, ledger refs) for one research session. Never raises: any failure
-        returns an empty block, and the arm and the error are recorded when the store allows."""
+        """(arm, text block, ledger refs) for one research session, in at most `budget_seconds`.
+        Never raises: any failure returns an empty block, and the arm and the error are recorded
+        when the store allows."""
+        started = time.monotonic()
         agent_id = str(getattr(agent, "id", agent) or "")
         try:
             arm = arm_of(agent_id)
         except Exception:  # noqa: BLE001
             return None, "", []
         try:
-            return self._prior_results(agent, agent_id, arm, float(now if now is not None else self.clock()), session)
+            return self._prior_results(agent, agent_id, arm, float(now if now is not None else self.clock()), session,
+                                       started + float(self.settings["budget_seconds"]))
         except Exception as exc:  # noqa: BLE001 - a memory that fails must never cost a research pass
             try:
-                self._record(agent_id, session, arm, self.clock(), [], [], "error", "", {}, 0, 0,
+                self._record(agent_id, session, arm, self.clock(), [], [], "error", "", {}, 0, 0, started,
                              error=f"{type(exc).__name__}: {str(exc)[:200]}")
             except Exception:  # noqa: BLE001 - an unwritable store is the error being reported
                 pass
             return arm, "", []
 
-    def _prior_results(self, agent: Any, agent_id: str, arm: int, now: float,
-                       session: str | None) -> tuple[int, str, list[int]]:
-        if arm == CONTROL:
-            self._record(agent_id, session, arm, now, [], [], "none", "", {}, 0, 0)
-            return arm, "", []
+    def _prior_results(self, agent: Any, agent_id: str, arm: int, now: float, session: str | None,
+                       deadline: float) -> tuple[int, str, list[int]]:
+        started = deadline - float(self.settings["budget_seconds"])
         profile = self._profile(agent, agent_id)
         shown = max(0, min(int(self.settings["shown"]), MAX_LINES))
         pool = self._free_rank(profile, now, k=int(self.settings["jev_pool"]) if arm == JEV else shown)
+        if arm != CONTROL:
+            pool = self._with_text(pool)  # control shows nothing: its would-be refs need no text
+        free = pool[:shown]  # the block the free order gives: what control would have seen, what free sees
         receipt: dict[str, Any] = {}
-        if arm == FREE:
-            chosen, jev, why = pool[:shown], "none", ""
+        if arm == CONTROL:
+            chosen, jev, why = [], "none", ""
+        elif arm == FREE:
+            chosen, jev, why = free, "none", ""
         else:
-            chosen, jev, why, receipt = self._jev_rank(profile, pool, shown)
+            chosen, jev, why, receipt = self._jev_rank(profile, pool, shown, deadline)
         block = render(chosen)
         refs = [doc.ref for doc in chosen]
-        self._record(agent_id, session, arm, now, refs, [doc.ref for doc in pool[:shown]], jev, why, receipt, len(block), len(pool))
+        self._record(agent_id, session, arm, now, refs, [doc.ref for doc in free], jev, why, receipt, len(block), len(pool), started)
         return arm, block, refs
 
     def _record(self, agent_id: str, session: str | None, arm: int, now: float, refs: list[int], free_refs: list[int],
-                jev: str, why: str, receipt: Mapping[str, Any], chars: int, candidates: int, *, error: str | None = None) -> None:
+                jev: str, why: str, receipt: Mapping[str, Any], chars: int, candidates: int, started: float, *,
+                error: str | None = None) -> None:
         with self._db() as db:
             db.execute("INSERT INTO retrievals(at, day, agent, session, arm, refs, free_refs, jev, jev_why, calls, cost, chars, "
-                       "candidates, error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       "candidates, error, seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (now, time.strftime("%Y-%m-%d", time.gmtime(now)), agent_id, session, arm, json.dumps(refs),
                         json.dumps(free_refs), jev, str(why or "")[:200] or None, int(receipt.get("calls") or 0),
-                        format(Decimal(str(receipt.get("cost") or 0)), "f"), chars, candidates, error))
+                        format(Decimal(str(receipt.get("cost") or 0)), "f"), chars, candidates, error,
+                        round(time.monotonic() - started, 3)))
 
     def _profile(self, agent: Any, agent_id: str) -> Profile:
         if agent is None or isinstance(agent, str):
@@ -630,25 +738,13 @@ class MemoryIndex:
             pass
         return ""
 
-    def _docs(self, *, niche: str | None) -> list[Doc]:
-        """The newest `scan_docs` documents, and the newest fifth as many of `niche`'s own."""
-        scan = int(self.settings["scan_docs"])
-        with self._db() as db:
-            rows = db.execute(f"SELECT {DOC_COLUMNS} FROM docs ORDER BY ref DESC LIMIT ?", (scan,)).fetchall()
-            if niche:
-                rows += db.execute(f"SELECT {DOC_COLUMNS} FROM docs WHERE niche=? ORDER BY ref DESC LIMIT ?",
-                                   (niche, max(1, scan // 5))).fetchall()
-        seen: dict[int, Doc] = {}
-        for row in rows:
-            seen.setdefault(int(row[0]), Doc(*row))
-        return list(seen.values())
-
     def _free_rank(self, profile: Profile, now: float, *, k: int) -> list[Doc]:
         """Other agents' documents by the free score: desk tier (same niche 3, same family 2, same
-        venue 1) + 4 x word overlap with the strategy + 1 for its mechanism class + recency (1 today,
-        e-folding over a week). At most `per_agent` of one agent, never one text twice."""
+        venue 1) + 4 x word overlap with the strategy + 1 for its mechanism class (Jev's label) +
+        recency (1 today, e-folding over a week). At most `per_agent` of one agent, never one text
+        twice. Texts are not read here: the snapshot holds each document's words."""
         scored = []
-        for doc in self._docs(niche=profile.niche):
+        for doc in self._docs(niche=profile.niche, now=now):
             if doc.agent in profile.line:
                 continue  # its own line: the journal already shows it
             tier = (3 if profile.niche and doc.niche == profile.niche else 2 if profile.family and doc.family == profile.family
@@ -661,9 +757,31 @@ class MemoryIndex:
         scored.sort(key=lambda pair: (-pair[0], -pair[1].ref))
         return _diverse([doc for _, doc in scored], k, int(self.settings["per_agent"]))
 
-    def _jev_rank(self, profile: Profile, pool: list[Doc], shown: int) -> tuple[list[Doc], str, str, dict[str, Any]]:
-        """(chosen, "used"|"partial"|"unavailable"|"none", why, receipt): Jev's relevance order over
-        the free pool, the documents at p >= `jev_threshold`; the free order when it cannot answer."""
+    def _relevance(self, shared: Mapping[str, Any], items: list[tuple[str, str]], question: str,
+                   deadline: float) -> tuple[dict[str, float | None], dict[str, Any], bool]:
+        """Jev's relevance answers for `items` ([(cache key, item text)]) under purpose `memory_rank`:
+        one request of up to 16 once the gateway answers partially, else requests of `batch`, none
+        started with less than a second of the budget left. Returns (answers, receipt, out of time)."""
+        partial = bool(getattr(self.sensor, "partial_supported", lambda: False)())
+        size = MAX_QUESTIONS if partial else max(1, min(MAX_QUESTIONS, int(self.settings["batch"])))
+        answers: dict[str, float | None] = {}
+        receipt: dict[str, Any] = {}
+        for start in range(0, len(items), size):
+            left = deadline - time.monotonic()
+            if left < 1.0:
+                return answers, receipt, True
+            chunk = items[start:start + size]
+            answers.update(self.sensor.ask(RANK, shared, {key: (text, question) for key, text in chunk}, receipt=receipt,
+                                           batch=size, timeout=left))
+            if receipt.get("refused"):
+                break
+        return answers, receipt, time.monotonic() >= deadline and any(answers.get(key) is None for key, _ in items)
+
+    def _jev_rank(self, profile: Profile, pool: list[Doc], shown: int,
+                  deadline: float) -> tuple[list[Doc], str, str, dict[str, Any]]:
+        """(chosen, "used"|"partial"|"timeout"|"unavailable"|"none", why, receipt): Jev's relevance
+        order over the free pool, the documents at p >= `jev_threshold`; the free order when it
+        cannot answer inside the budget. "partial": the gateway rejected some answers; the rest rank."""
         if not pool:
             return [], "none", "no prior results", {}
         if self.sensor is None:
@@ -673,17 +791,18 @@ class MemoryIndex:
         shared = {"strategy": {"desk": profile.niche, "family": profile.family, "venue": profile.venue,
                                "description": profile.description or profile.conclusion or "(no description)"}}
         keys = [f"j3rel:{RELEVANCE_VERSION}:{profile.key}:{doc.ref}" for doc in pool]
-        receipt: dict[str, Any] = {}
-        answers = self.sensor.ask(PURPOSE, shared, {key: (_item(doc), RELEVANT) for key, doc in zip(keys, pool)},
-                                  receipt=receipt, batch=int(self.settings["batch"]))
+        answers, receipt, late = self._relevance(shared, [(key, _item(doc)) for key, doc in zip(keys, pool)], RELEVANT, deadline)
         answered = [(answers[key], n, doc) for n, (key, doc) in enumerate(zip(keys, pool)) if answers.get(key) is not None]
-        if not answered:
-            why = str(receipt.get("refused") or ("the gateway rejected the answers" if receipt.get("rejected") else "no answer"))
-            return pool[:shown], "unavailable", why, receipt
+        if len(answered) < len(pool):
+            if late:
+                return pool[:shown], "timeout", f"the {self.settings['budget_seconds']} s retrieval budget ran out", receipt
+            if receipt.get("refused") or not answered:
+                why = str(receipt.get("refused") or ("the gateway rejected the answers" if receipt.get("rejected") else "no answer"))
+                return pool[:shown], "unavailable", why, receipt
         threshold = float(self.settings["jev_threshold"])
         chosen = [doc for p, n, doc in sorted(answered, key=lambda t: (-t[0], t[1])) if p >= threshold][:shown]
         status = "used" if len(answered) == len(pool) else "partial"
-        why = "" if status == "used" else f"{len(pool) - len(answered)} of {len(pool)} relevance answers missing"
+        why = "" if status == "used" else f"{len(pool) - len(answered)} of {len(pool)} relevance answers rejected"
         return chosen, status, why, receipt
 
     # ------------------------------------------------------------- graveyard
@@ -699,7 +818,7 @@ class MemoryIndex:
             return {"query": query, "niche": niche, "jev": "none", "results": [], "note": note}
         now = self.clock()
         scored = []
-        for doc in self._docs(niche=niche):
+        for doc in self._docs(niche=niche, now=now):
             terms = set(doc.terms.split())
             coverage = len(terms & wanted) / len(wanted)
             if coverage <= 0:
@@ -707,7 +826,7 @@ class MemoryIndex:
             score = coverage + (0.5 if niche and doc.niche == niche else 0.0) + 0.1 * math.exp(-max(0.0, now - doc.ts) / (7 * 86400))
             scored.append((score, doc))
         scored.sort(key=lambda pair: (-pair[0], -pair[1].ref))
-        top = [doc for _, doc in scored[:max(k, int(self.settings["jev_pool"]) if jev else k)]]
+        top = self._with_text([doc for _, doc in scored[:max(k, int(self.settings["jev_pool"]) if jev else k)]])
         status, why = "none", ""
         if jev and top:
             if self.sensor is None or self.readonly:
@@ -717,17 +836,17 @@ class MemoryIndex:
             else:
                 qkey = hashlib.sha256(json.dumps([query, niche]).encode("utf-8")).hexdigest()[:24]
                 keys = [f"j3rel:grave:{RELEVANCE_VERSION}:{qkey}:{doc.ref}" for doc in top]
-                receipt: dict[str, Any] = {}
-                answers = self.sensor.ask(PURPOSE, {"question": query, "desk": niche},
-                                          {key: (_item(doc), GRAVE) for key, doc in zip(keys, top)}, receipt=receipt,
-                                          batch=int(self.settings["batch"]))
+                answers, receipt, late = self._relevance({"question": query, "desk": niche},
+                                                         [(key, _item(doc)) for key, doc in zip(keys, top)], GRAVE,
+                                                         time.monotonic() + float(self.settings["budget_seconds"]))
                 answered = [(answers[key], n, doc) for n, (key, doc) in enumerate(zip(keys, top)) if answers.get(key) is not None]
-                if answered:
+                if answered and not late:
                     status = "used" if len(answered) == len(top) else "partial"
                     threshold = float(self.settings["jev_threshold"])
                     top = [doc for p, n, doc in sorted(answered, key=lambda t: (-t[0], t[1])) if p >= threshold]
                 else:
-                    status, why = "unavailable", str(receipt.get("refused") or "no answer")
+                    status, why = ("timeout", "the retrieval budget ran out") if late else \
+                        ("unavailable", str(receipt.get("refused") or "no answer"))
         return {"query": query, "niche": niche, "jev": status, **({"jev_why": why} if why else {}),
                 "results": [doc.public() for doc in top[:k]], "note": note}
 
@@ -743,14 +862,16 @@ class MemoryIndex:
                     "SELECT arm, COUNT(*) FROM retrievals WHERE day=? GROUP BY arm", (day,))}
                 jev = dict(db.execute("SELECT jev, COUNT(*) FROM retrievals WHERE day=? AND arm=? GROUP BY jev", (day, JEV)).fetchall())
                 errors = db.execute("SELECT COUNT(*) FROM retrievals WHERE day=? AND error IS NOT NULL", (day,)).fetchone()[0]
+                slowest = db.execute("SELECT MAX(seconds) FROM retrievals WHERE day=?", (day,)).fetchone()[0]
                 cursor, since = self._meta(db, "cursor"), self._meta(db, "backfill_from")
             counts = {"docs": sum(statuses.values()), "by_status": statuses, "cursor": int(cursor) if cursor else None,
-                      "backfill_from": since, "retrievals_today": arms, "jev_arm_today": jev, "retrieval_errors_today": int(errors)}
+                      "backfill_from": since, "retrievals_today": arms, "jev_arm_today": jev,
+                      "retrieval_errors_today": int(errors), "slowest_retrieval_seconds_today": slowest}
             self._counts = (self.clock(), counts)
         spent = None
         if self.sensor is not None:
             try:
-                spent = format(self.sensor.spent_today(PURPOSE), "f")
+                spent = format(self._spent_today(), "f")
             except Exception:  # noqa: BLE001
                 spent = None
         return {**counts, "taxonomy": TAXONOMY_VERSION, "running": self.lock.locked(), "last_run": dict(self.latest),
@@ -767,9 +888,11 @@ def _normal(text: str) -> str:
 
 
 def _diverse(docs: list[Doc], k: int, per_agent: int) -> list[Doc]:
+    """At most `per_agent` documents of one agent and never the same words twice (texts are not
+    loaded here, so a document's sorted word set stands for its text)."""
     chosen, texts, by_agent = [], set(), Counter()
     for doc in docs:
-        norm = _normal(doc.text)
+        norm = _normal(doc.text) if doc.text else doc.terms
         if norm in texts or by_agent[doc.agent] >= per_agent:
             continue
         chosen.append(doc)
@@ -803,13 +926,13 @@ def _clustered(values: list[tuple[str, float]]) -> dict[str, Any]:
             "ci95": None if se is None else [round(mean - 1.96 * se, 6), round(mean + 1.96 * se, 6)], "sessions": n, "agents": g}
 
 
-METRICS = ("turns", "abstained", "candidate", "replay_pass_2h", "cost_usd")
+METRICS = ("turns", "abstained", "failed_evaluation", "candidate", "replay_pass_2h", "cost_usd")
 
 
-def _arms(sessions: list[dict[str, Any]], arm_key: str) -> dict[str, Any]:
+def _arms(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     out = {}
     for arm, name in ARMS.items():
-        mine = [s for s in sessions if s[arm_key] == arm]
+        mine = [s for s in sessions if s["arm"] == arm]
         done = [s for s in mine if s["outcome"] != "provider_failure"]
         out[name] = {"sessions": len(mine), "completed": len(done), "agents": len({s["agent"] for s in mine}),
                      "provider_failures": len(mine) - len(done), "candidates": sum(s["candidate"] for s in done),
@@ -834,10 +957,31 @@ def _differences(arms: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _group(sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    arms = _arms(sessions)
+    strata = {}
+    for stratum in ("lesson", "control"):
+        mine = [s for s in sessions if s["lesson_arm"] == stratum]
+        strata[stratum] = {"sessions": len(mine), "arms": _arms(mine)}
+        strata[stratum]["differences"] = _differences(strata[stratum]["arms"])
+    return {"sessions": len(sessions), "arms": arms, "differences": _differences(arms), "by_lesson_arm": strata}
+
+
 def report(ledger: Any, store: str | Path, *, since: float, until: float | None = None) -> dict[str, Any]:
-    """J3's measurement, read-only: finished research sessions per arm, joined to their retrieval."""
+    """J3's measurement, read-only: finished research sessions joined to their retrieval record, per arm."""
     until = float(until) if until is not None else float("inf")
-    after = seq_at_or_after(ledger, since)
+    after = seq_at_or_after(ledger, since - SEARCH_SLACK_SECONDS)
+    retrievals, first = [], None
+    path = Path(store)
+    if path.exists():
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+        try:
+            first = db.execute("SELECT MIN(at) FROM retrievals").fetchone()[0]
+            retrievals = [dict(zip(("id", "at", "agent", "session", "arm", "refs", "free_refs", "jev", "cost", "calls", "error"), row))
+                          for row in db.execute("SELECT id, at, agent, session, arm, refs, free_refs, jev, cost, calls, error "
+                                                "FROM retrievals WHERE at>=? ORDER BY at", (since - SEARCH_SLACK_SECONDS,))]
+        finally:
+            db.close()
     sessions: list[dict[str, Any]] = []
     for entry in ledger.iter(kinds="agent.research", after=after):
         p = entry.payload
@@ -852,42 +996,39 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
             cost = float(Decimal(str(p.get("cost_usd") or 0)))
         except ArithmeticError:
             cost = 0.0
-        outcome = session_outcome(p)
+        outcome = session_outcome(p)  # the floor's own reading of a session
         sessions.append({"seq": entry.seq, "agent": entry.agent, "session": p.get("session"), "started": started,
                          "finished": finished, "turns": int(p.get("turns") or 0), "outcome": outcome,
-                         "candidate": int(bool(p.get("candidate"))), "abstained": int(not p.get("candidate")),
-                         "cost_usd": cost, "arm": arm_of(entry.agent)})
+                         "abstained": int(outcome == "abstained"), "failed_evaluation": int(outcome == "failed_evaluation"),
+                         "candidate": int(bool(p.get("candidate"))), "cost_usd": cost, "lesson_arm": lesson_arm(entry.agent)})
     passes: dict[str, list[float]] = defaultdict(list)
     for entry in ledger.iter(kinds="eval.trial", after=after):
         if entry.payload.get("passed"):
             passes[entry.agent].append(_epoch(entry.at))
-    retrievals = []
-    path = Path(store)
-    if path.exists():
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
-        try:
-            retrievals = [dict(zip(("id", "at", "agent", "session", "arm", "refs", "jev", "cost", "calls", "error"), row))
-                          for row in db.execute("SELECT id, at, agent, session, arm, refs, jev, cost, calls, error FROM retrievals "
-                                                "WHERE at>=? ORDER BY at", (since - 86400,))]
-        finally:
-            db.close()
     by_session = {r["session"]: r for r in retrievals if r["session"]}
     by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in retrievals:
         by_agent[r["agent"]].append(r)
     used: set[int] = set()
+    joined, before, unrecorded = [], 0, 0
     for s in sessions:
         found = by_session.get(s["session"]) if s["session"] else None
         if found is None:  # no session key: the agent's latest retrieval inside the session's span
             span = [r for r in by_agent.get(s["agent"], []) if s["started"] - JOIN_SLACK_SECONDS <= r["at"] <= s["finished"]
                     and r["id"] not in used]
             found = span[-1] if span else None
-        s["retrieval"] = found
-        if found is not None:
-            used.add(found["id"])
-        s["joined_arm"] = found["arm"] if found is not None else None
+        if found is None:
+            # Never counted as treated: before the hook existed, or a session the hook did not see.
+            if first is None or s["finished"] < first:
+                before += 1
+            else:
+                unrecorded += 1
+            continue
+        used.add(found["id"])
+        s["arm"] = int(found["arm"])
+        s["would_be"] = len(json.loads(found["free_refs"] or "[]"))
         s["replay_pass_2h"] = int(any(s["started"] <= t <= s["finished"] + REPLAY_WINDOW_SECONDS for t in passes.get(s["agent"], [])))
-    joined = [s for s in sessions if s["retrieval"] is not None]
+        joined.append(s)
     retrieval_stats = {}
     for arm, name in ARMS.items():
         mine = [r for r in retrievals if r["arm"] == arm and since <= r["at"] < until]
@@ -895,19 +1036,27 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
             "retrievals": len(mine), "jev": dict(Counter(r["jev"] for r in mine)),
             "errors": sum(1 for r in mine if r["error"]), "jev_calls": sum(int(r["calls"] or 0) for r in mine),
             "jev_cost_usd": format(sum((Decimal(str(r["cost"] or 0)) for r in mine), Decimal(0)), "f"),
-            "mean_refs": round(sum(len(json.loads(r["refs"] or "[]")) for r in mine) / len(mine), 3) if mine else None}
-    joined_arms, all_arms = _arms(joined, "joined_arm"), _arms(sessions, "arm")
+            "mean_refs_shown": round(sum(len(json.loads(r["refs"] or "[]")) for r in mine) / len(mine), 3) if mine else None,
+            "would_be_empty": sum(1 for r in mine if not json.loads(r["free_refs"] or "[]"))}
     return {"since": _iso(since), "until": None if until == float("inf") else _iso(until),
-            "sessions": len(sessions), "joined_sessions": len(joined),
-            "joined": {"arms": joined_arms, "differences": _differences(joined_arms)},
-            "all_sessions": {"arms": all_arms, "differences": _differences(all_arms)},
+            "hook_started": _iso(first) if first is not None else None,
+            "sessions": len(sessions), "excluded": {"before_first_retrieval": before, "no_retrieval_record": unrecorded},
+            "all_retrieved": _group(joined),
+            "would_be_nonempty": _group([s for s in joined if s["would_be"]]),
             "retrievals": retrieval_stats,
-            "definitions": {"abstained": "a completed session (no provider failure) that retained no candidate",
-                            "replay_pass_2h": f"a passed eval.trial by the agent between the session's start and {REPLAY_WINDOW_SECONDS // 3600} h after it finished",
-                            "joined": "sessions matched to a retrieval by session key, else by agent inside the session's span",
-                            "all_sessions": "every finished session by its agent's fixed arm, whether or not the hook ran"},
+            "definitions": {
+                "all_retrieved": "finished sessions matched to a retrieval record (by session key, else by agent inside the "
+                                 "session's span), by the arm recorded; sessions before the first retrieval or without a "
+                                 "record are excluded, never counted as treated",
+                "would_be_nonempty": "of those, the sessions whose would-be block (the free order's refs, computed for every "
+                                     "arm, control included) was non-empty: the ones the memory could have changed",
+                "abstained": "session_outcome == 'abstained' (the floor's definition: no candidate and no replay)",
+                "failed_evaluation": "session_outcome == 'failed_evaluation' (a replay that kept nothing)",
+                "replay_pass_2h": f"a passed eval.trial by the agent between the session's start and {REPLAY_WINDOW_SECONDS // 3600} h after it finished",
+                "by_lesson_arm": "the same, within each arm of the forward-first run's teacher comparison (lesson_arm)"},
             "note": "95% intervals: normal approximation, clustered by agent; differences treat the arms as independent "
-                    "(arms partition agents). An arm with fewer than 10 agents is too small to read."}
+                    "(arms partition agents). The free arm uses Jev's labels too, so free - control measures the block and "
+                    "jev - free only the relevance call. An arm with fewer than 10 agents is too small to read."}
 
 
 # ------------------------------------------------------------------------ CLI

@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 from league.jev import CHOICE_BATCH, MODEL, PARTIAL_HEADER, Sensor
 from league.jev_memory import (ARMS, CONTROL, FREE, HEADER, JEV, MAX_BLOCK, MAX_LINE, QUESTIONS, TAXONOMY_VERSION,
-                               MemoryIndex, arm_of, main, report)
+                               MemoryIndex, arm_of, lesson_arm, main, report)
 from league.ledger import Ledger, now_iso
 from league.sensors import JevFloor
 from league.tests.fakes import Clock
@@ -37,13 +37,18 @@ class TypedJev:
     the first option) with 0.7 on the choice. A name in `bad` gets an invalid answer, or, with
     `partial`, is listed in `rejected` as the gateway's opt-in partial response does."""
 
-    def __init__(self, p=0.7, pick=None, *, bad=(), partial=False, cost="0.0001", fail=None):
+    def __init__(self, p=0.7, pick=None, *, bad=(), partial=False, cost="0.0001", fail=None, delay=0.0):
         self.p, self.pick, self.bad, self.partial, self.cost, self.fail = p, pick, set(bad), partial, cost, fail
-        self.calls = []
+        self.delay = delay
+        self.calls, self.timeouts = [], []
 
-    def __call__(self, ident, body):
+    def __call__(self, ident, body, timeout=None):
         request = json.loads(body)
         self.calls.append((ident, request))
+        self.timeouts.append(timeout)
+        if self.delay:
+            import time
+            time.sleep(self.delay)
         if self.fail is not None:
             raise self.fail
         answers, rejected = {}, {}
@@ -135,6 +140,9 @@ class ChoiceAnswerTest(Case):
         jev.calls.clear()
         sensor.ask_state("memory", "doc:4", "state", {f"n{n}": "A yes/no question?" for n in range(6)}, batch=4)
         self.assertEqual([len(r["questions"]) for _, r in jev.calls], [4, 2])
+        jev.calls.clear()
+        sensor.ask_state("memory", "doc:5", "state", {f"c{n}": choice() for n in range(6)}, batch=8)
+        self.assertEqual([len(r["questions"]) for _, r in jev.calls], [4, 2], "a choice request is never larger than four")
 
     def test_an_answer_over_other_options_is_not_served_from_the_cache(self):
         jev = TypedJev()
@@ -201,6 +209,27 @@ class PartialAnswerTest(Case):
         answers = sensor.ask_state("memory", "doc:10", "state", questions)
         self.assertEqual(list(jev.calls[-1][1]["questions"]), ["kind"], "only the rejected name is asked again")
         self.assertEqual(answers["kind"][0], "a")
+
+    def test_the_gateway_answering_partially_is_remembered(self):
+        jev = TypedJev(bad={"kind"}, partial=True)
+        sensor = self.sensor(jev)
+        self.assertFalse(sensor.partial_supported())
+        sensor.ask_state("memory", "doc:16", "state", {"kind": choice(), "other": choice()})
+        self.assertTrue(sensor.partial_seen)
+        self.assertFalse(sensor.partial_supported(), "seen, but this sensor does not send the header")
+        sensor.request_partial_answers()
+        self.assertTrue(sensor.partial_supported())
+        again = self.sensor(TypedJev(), partial=True)
+        self.assertTrue(again.partial_supported(), "kept in the store across a restart")
+        self.assertTrue(again.stats()["partial_seen"])
+
+    def test_ask_passes_a_timeout_to_each_request(self):
+        jev = TypedJev()
+        sensor = self.sensor(jev)
+        sensor.ask("memory_rank", {}, {f"k{n}": ("t", "q?") for n in range(5)}, batch=4, timeout=2.5)
+        self.assertEqual(jev.timeouts, [2.5, 2.5])
+        sensor.ask("memory_rank", {}, {"z": ("t", "q?")})
+        self.assertEqual(jev.timeouts[-1], None, "no timeout: the client's own default")
 
     def test_partial_answers_in_ask_come_back_none(self):
         jev = TypedJev(0.8, bad={"q1"}, partial=True)
@@ -407,8 +436,7 @@ class LabelTest(Floor):
                 self.summary("huang-4", "Momentum on the hourly crypto strikes never beat the spread in replay.")]
         jev = TypedJev(0.2, pick=lambda name, options: {"mechanism": "favourite_longshot_maker", "verdict": "dead_end",
                                                         "failure": "no_edge_after_costs"}[name])
-        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock, purpose_calls={"memory": 3000}),
-                            reserve_calls=0)
+        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock, purpose_calls={"memory": 3000}))
         out = memory.run()
         self.assertEqual(out["labelled"], 3)
         self.assertEqual(len(jev.calls), 2, "a text repeated word for word is bought once")
@@ -418,34 +446,36 @@ class LabelTest(Floor):
         rows = self.labelled()
         self.assertEqual(rows[docs[0].seq], ["labelled", 0, TAXONOMY_VERSION, "favourite_longshot_maker", "dead_end",
                                              "no_edge_after_costs", 0.2])
+        self.assertTrue(all(1 <= t <= 60 for t in jev.timeouts), "each label request waits at most the run's time left")
         self.clock.advance(600)
         self.assertEqual(memory.run()["labelled"], 0)
         self.assertEqual(len(jev.calls), 2, "never classified twice")
 
-    def test_labels_are_paced_over_the_day_and_leave_the_reserve(self):
+    def test_labels_are_paced_over_the_day_under_their_own_cap(self):
         self.agent("huang-5")
         for n in range(6):
-            self.summary("huang-5", f"Conclusion {n}: the weather maker needs a fill model before another replay.")
+            self.summary("huang-5", f"Conclusion {n}: the weather maker needs a fill model before another replay, case {'abcdef'[n]}x.")
         jev = TypedJev()
-        sensor = Sensor(self.root / "jev.sqlite", jev, clock=self.clock, purpose_calls={"memory": 10})
-        memory = self.index(sensor, reserve_calls=8)
+        sensor = Sensor(self.root / "jev.sqlite", jev, clock=self.clock, purpose_calls={"memory": 2, "memory_rank": 5})
+        memory = self.index(sensor)
         out = memory.run()
-        self.assertEqual(out["label_allowance"], 1, "two spare calls spread over the day's remaining runs")
+        self.assertEqual(out["label_allowance"], 1, "two calls spread over the day's remaining runs")
         self.assertEqual((out["labelled"], out["label_why"]), (1, "paced"))
-        sensor.ask("memory", {}, {f"k{n}": ("t", "q?") for n in range(1)})  # retrieval spends its share
+        sensor.ask("memory_rank", {}, {"k": ("t", "q?")})  # retrieval's relevance has its own cap
+        self.assertEqual(sensor.headroom("memory"), 1)
+        self.clock.advance(600)
+        self.assertEqual(memory.run()["labelled"], 1)
         self.clock.advance(600)
         out = memory.run()
-        self.assertEqual(out["labelled"], 0)
-        self.assertIn("held for retrieval", out["label_why"])
-        self.assertEqual(sensor.headroom("memory"), 8, "the reserve is untouched by labels")
+        self.assertEqual((out["labelled"], out["label_why"]), (0, "the day's memory calls are spent"))
+        self.assertEqual(sensor.headroom("memory_rank"), 4, "labels never touch retrieval's calls")
 
     def test_labels_stop_at_the_dollar_ceiling(self):
         self.agent("huang-6")
         for n in range(3):
             self.summary("huang-6", f"Conclusion {n}: the weather maker needs a fill model before another replay.")
         jev = TypedJev(cost="0.05")
-        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock), reserve_calls=0, daily_usd="0.10",
-                            reserve_usd="0.04")
+        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock), daily_usd="0.10", reserve_usd="0.04")
         out = memory.run()
         self.assertEqual(out["labelled"], 2)
         self.assertEqual(out["label_why"], "J3's daily Jev dollars for labels are spent")
@@ -455,7 +485,7 @@ class LabelTest(Floor):
         first = self.summary("huang-7", WEATHER)
         jev = TypedJev(bad={"mechanism"}, partial=True)
         sensor = Sensor(self.root / "jev.sqlite", jev, clock=self.clock)
-        memory = self.index(sensor, reserve_calls=0)
+        memory = self.index(sensor)
         memory.run()
         self.assertEqual(self.labelled()[first.seq][:2], ["pending", 1])
         self.clock.advance(600)
@@ -478,6 +508,20 @@ class LabelTest(Floor):
         rows = self.labelled()
         self.assertEqual((rows[second.seq][:2], rows[third.seq][:2]), (["pending", 0], ["pending", 0]))
 
+    def test_documents_never_labelled_expire_and_are_pruned_after_thirty_days(self):
+        self.agent("huang-9")
+        doc = self.summary("huang-9", WEATHER)
+        memory = self.index(Sensor(self.root / "jev.sqlite", TypedJev(), clock=self.clock, purpose_calls={"memory": 0}))
+        memory.run()
+        self.clock.advance(15 * DAY)
+        self.assertEqual(memory.run()["expired"], 1)
+        self.assertEqual(self.labelled()[doc.seq][0], "expired")
+        self.clock.advance(10 * DAY)
+        self.assertEqual(memory.run()["pruned"], 0, "kept, unlabelled, until thirty days")
+        self.clock.advance(6 * DAY)
+        self.assertEqual(memory.run()["pruned"], 1)
+        self.assertEqual(self.labelled(), {})
+
 
 class ArmTest(unittest.TestCase):
     def test_arms_are_fixed_balanced_and_orthogonal_to_other_splits(self):
@@ -486,7 +530,10 @@ class ArmTest(unittest.TestCase):
         self.assertEqual(arm_of("huang-26"), int(hashlib.sha256(b"huang-26:j3").hexdigest(), 16) % 3)
         counts = [sum(1 for i in ids if arm_of(i) == arm) for arm in ARMS]
         self.assertTrue(all(1850 <= c <= 2150 for c in counts), counts)
-        for other in (lambda i: int(hashlib.sha256(i.encode()).hexdigest(), 16) % 2,
+        self.assertEqual(lesson_arm("huang-26"), "lesson" if hashlib.sha256(b"huang-26").digest()[0] % 2 == 0 else "control",
+                         "the forward-first run's teacher split (research_gate rule 12)")
+        for other in (lesson_arm,
+                      lambda i: int(hashlib.sha256(i.encode()).hexdigest(), 16) % 2,
                       lambda i: int(hashlib.sha256(f"{i}:j2".encode()).hexdigest(), 16) % 2,
                       lambda i: int(hashlib.sha256(i.encode()).hexdigest(), 16) % 3):
             cells = {}
@@ -517,8 +564,9 @@ class RetrievalTest(Floor):
                      for name in ("same-venue", "same-family", "same-niche", "other-venue", "huang-parent")}
         self.own = self.summary(self.me, f"{text} (mine)", ago=7200)
         self.jev = TypedJev(lambda item: 0.9 if "same-venue" in item else 0.6 if "same-family" in item else 0.1)
-        self.sensor = Sensor(self.root / "jev.sqlite", self.jev, clock=self.clock)
-        self.memory = self.index(self.sensor, reserve_calls=3000)
+        # No labels here (their cap is 0): these tests are about retrieval, which has its own purpose.
+        self.sensor = Sensor(self.root / "jev.sqlite", self.jev, clock=self.clock, purpose_calls={"memory": 0})
+        self.memory = self.index(self.sensor)
         self.memory.run()
 
     def retrievals(self):
@@ -559,6 +607,8 @@ class RetrievalTest(Floor):
         row = self.retrievals()[-1]
         self.assertEqual((row[2], row[5], row[7]), (JEV, "used", 2))
         self.assertEqual(Decimal(row[8]), Decimal("0.0002"))
+        self.assertEqual(self.sensor.calls_today("memory_rank"), 2, "relevance is bought under its own purpose")
+        self.assertTrue(all(0 < t <= 6 for t in self.jev.timeouts), "inside the retrieval's six seconds")
         self.assertEqual(json.loads(row[4]), self.free_for_the_jev_agent(), "what the free arm would have shown is kept beside it")
         again = self.memory.prior_results(self.jev_agent, self.clock(), session="sess-3")
         self.assertEqual(again[2], refs)
@@ -572,15 +622,55 @@ class RetrievalTest(Floor):
         row = self.retrievals()[-1]
         self.assertEqual(row[5], "unavailable")
         self.assertIn("Jev call failed", row[6])
-        self.assertIn("breaker open", self.sensor.refusal("memory"))
+        self.assertIn("breaker open", self.sensor.refusal("memory_rank"))
+        self.assertNotIn("breaker", self.sensor.refusal("memory"), "the labels' breaker is their own")
         _, _, refs = self.memory.prior_results(self.jev_agent, self.clock())
         self.assertEqual(refs, free)
         self.assertIn("breaker open", self.retrievals()[-1][6])
 
-    def test_the_control_arm_shows_nothing_and_is_recorded(self):
+    def test_once_the_gateway_answers_partially_relevance_is_one_request(self):
+        self.sensor.request_partial_answers()
+        self.sensor._saw_partial()
+        _, _, refs = self.memory.prior_results(self.jev_agent, self.clock())
+        self.assertEqual([len(r["questions"]) for _, r in self.jev.calls], [5])
+        self.assertEqual(refs, [self.docs["same-venue"].seq, self.docs["same-family"].seq])
+
+    def test_a_retrieval_keeps_to_its_budget_and_falls_back_to_the_free_order(self):
+        self.memory.settings["budget_seconds"] = 1.5
+        self.jev.delay = 0.6
+        arm, block, refs = self.memory.prior_results(self.jev_agent, self.clock(), session="sess-6")
+        self.assertEqual((arm, refs), (JEV, self.free_for_the_jev_agent()))
+        self.assertEqual(len(self.jev.calls), 1, "no request starts with under a second left")
+        self.assertLessEqual(self.jev.timeouts[0], 1.5)
+        row = self.retrievals()[-1]
+        self.assertEqual((row[5], row[7]), ("timeout", 1))
+        self.assertIn("budget", row[6])
+        (seconds,) = self.rows("SELECT seconds FROM retrievals ORDER BY id DESC LIMIT 1")[0]
+        self.assertLess(seconds, 1.5)
+
+    def test_documents_are_scored_from_a_snapshot_rebuilt_each_run(self):
+        reads = []
+        read = self.memory._read
+        self.memory._read = lambda niche, limit: reads.append(niche) or read(niche, limit)
+        for _ in range(3):
+            self.memory.prior_results(self.me, self.clock())
+        self.assertEqual(reads, ["kalshi-weather"], "the snapshot was built by the run; the niche's own once")
+        self.agent("peer-new", niche="kalshi-weather", family="leahy")
+        new = self.summary("peer-new", "Weather bracket makers: a fresh conclusion about resting favourite quotes.")
+        self.assertNotIn(new.seq, self.memory.prior_results(self.me, self.clock())[2], "not indexed yet")
+        self.memory.run()
+        self.assertIn(new.seq, self.memory.prior_results(self.me, self.clock())[2])
+
+    def test_nothing_written_after_now_is_shown(self):
+        arm, block, refs = self.memory.prior_results(self.me, self.clock() - 2 * DAY)
+        self.assertEqual((arm, block, refs), (FREE, "", []))
+
+    def test_the_control_arm_shows_nothing_but_records_what_it_would_have_seen(self):
         self.assertEqual(self.memory.prior_results(self.control, self.clock(), session="sess-4"), (CONTROL, "", []))
         row = self.retrievals()[-1]
         self.assertEqual((row[0], row[1], row[2], json.loads(row[3]), row[5]), (self.control, "sess-4", CONTROL, [], "none"))
+        self.assertEqual(json.loads(row[4]), self.free_for_the_jev_agent(), "the free order it would have been shown")
+        self.assertEqual(self.jev.calls, [])
 
     def test_the_block_is_bounded_fenced_and_quoted_as_untrusted(self):
         for n in range(8):
@@ -628,7 +718,7 @@ class GraveyardTest(Floor):
         self.summary("huang-8", WEATHER)
         jev = TypedJev(pick=lambda name, options: {"mechanism": "momentum", "verdict": "dead_end",
                                                    "failure": "no_edge_after_costs"}[name])
-        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock), reserve_calls=0)
+        memory = self.index(Sensor(self.root / "jev.sqlite", jev, clock=self.clock))
         memory.run()
         found = memory.graveyard("crypto strike momentum", niche="kalshi-crypto", k=5)
         self.assertEqual([r["ref"] for r in found["results"]], [dead.seq])
@@ -650,43 +740,62 @@ class GraveyardTest(Floor):
 
 
 class ReportTest(Floor):
-    def test_the_report_joins_sessions_to_retrievals_and_compares_the_arms(self):
+    def test_the_report_counts_only_retrieved_sessions_and_compares_the_arms(self):
         names = {arm: [agent_named(f"desk{arm}", arm, 0), agent_named(f"desk{arm}", arm, 100)] for arm in ARMS}
         for arm_agents in names.values():
             for name in arm_agents:
                 self.agent(name)
+        self.agent("peer", niche="kalshi-sports")
         memory = self.index(None)
         since = self.clock()
         self.clock.advance(60)
-        plan = {CONTROL: [(False, 3), (False, 5)], FREE: [(True, 4), (False, 6)], JEV: [(True, 2), (True, 2)]}
-        for arm, runs in plan.items():
-            for name, (candidate, turns) in zip(names[arm], runs):
-                started = self.clock()
-                memory.prior_results(name, started, session=f"key-{name}" if name == names[arm][0] else None)
-                self.clock.advance(120)
-                self.summary(name, f"{name} concluded something worth a line in the report.", candidate=candidate,
-                             turns=turns, session=f"key-{name}", started=started, cost="0.03")
-                if candidate:
-                    self.clock.advance(3600)
-                    self.ledger.append("eval.trial", {"passed": True, "code_sha256": "x"}, agent=name)
-        self.summary(names[CONTROL][0], "A provider failure is counted apart.", reason="provider: provider_http_503")
-        self.summary(names[FREE][1], "A session with no retrieval is in all_sessions only.", turns=9)
+        self.summary(names[FREE][0], "A session before the hook existed is never counted as treated.")
+        self.clock.advance(60)
+
+        def session(name, *, candidate=False, trials=0, turns=3, reason="finished", keyed=True):
+            started = self.clock()
+            memory.prior_results(name, started, session=f"key-{name}-{started}" if keyed else None)
+            self.clock.advance(120)
+            self.summary(name, f"{name} concluded something worth a line in the report.", candidate=candidate, trials=trials,
+                         turns=turns, reason=reason, session=f"key-{name}-{started}", started=started, cost="0.03")
+
+        session(names[CONTROL][1], turns=5, keyed=False)  # the index is still empty: its would-be block is too
+        self.ledger.append("library.note", {"title": "Sports favourites", "tags": [],
+                                            "text": "Resting favourite quotes at the tip-off were picked off every time."}, agent="peer")
+        memory.run()
+        session(names[CONTROL][0], turns=3)
+        session(names[FREE][0], candidate=True, trials=1, turns=4)
+        self.ledger.append("eval.trial", {"passed": True, "code_sha256": "x"}, agent=names[FREE][0])
+        session(names[FREE][1], trials=1, turns=6, keyed=False)
+        session(names[JEV][0], candidate=True, trials=1, turns=2)
+        self.clock.advance(3600)
+        self.ledger.append("eval.trial", {"passed": True, "code_sha256": "y"}, agent=names[JEV][0])
+        session(names[JEV][1], reason="provider: provider_http_503")
+        self.clock.advance(3600)
+        self.summary(names[FREE][1], "A session the hook never saw is excluded too.", turns=9)
         out = report(self.ledger, self.root / "jev-memory.sqlite", since=since)
         self.assertEqual(out["sessions"], 8)
-        self.assertEqual(out["joined_sessions"], 6)
-        joined = out["joined"]["arms"]
-        self.assertEqual({name: joined[name]["sessions"] for name in joined}, {"control": 2, "free": 2, "jev": 2})
-        self.assertEqual(joined["control"]["metrics"]["turns"]["mean"], 4.0)
-        self.assertEqual(joined["control"]["metrics"]["abstained"]["mean"], 1.0)
-        self.assertEqual(joined["free"]["metrics"]["candidate"]["mean"], 0.5)
-        self.assertEqual(joined["jev"]["metrics"]["replay_pass_2h"]["mean"], 1.0)
-        self.assertEqual(joined["jev"]["metrics"]["cost_usd"]["mean"], 0.03)
-        self.assertEqual(joined["free"]["metrics"]["turns"]["agents"], 2)
-        self.assertIsNotNone(joined["free"]["metrics"]["turns"]["ci95"])
-        self.assertEqual(out["joined"]["differences"]["jev-control"]["abstained"]["diff"], -1.0)
-        everyone = out["all_sessions"]["arms"]
-        self.assertEqual((everyone["control"]["provider_failures"], everyone["free"]["sessions"]), (1, 3))
-        self.assertEqual(out["retrievals"]["control"]["retrievals"], 2)
+        self.assertEqual(out["excluded"], {"before_first_retrieval": 1, "no_retrieval_record": 1})
+        treated = out["all_retrieved"]
+        arms = treated["arms"]
+        self.assertEqual(treated["sessions"], 6)
+        self.assertEqual({name: arms[name]["sessions"] for name in arms}, {"control": 2, "free": 2, "jev": 2})
+        self.assertEqual(arms["control"]["metrics"]["turns"]["mean"], 4.0)
+        self.assertEqual(arms["control"]["metrics"]["abstained"]["mean"], 1.0)
+        self.assertEqual(arms["free"]["metrics"]["abstained"]["mean"], 0.0, "a failed evaluation is not an abstention")
+        self.assertEqual(arms["free"]["metrics"]["failed_evaluation"]["mean"], 0.5)
+        self.assertEqual(arms["free"]["metrics"]["candidate"]["mean"], 0.5)
+        self.assertEqual(arms["free"]["metrics"]["replay_pass_2h"]["mean"], 0.5)
+        self.assertEqual((arms["jev"]["provider_failures"], arms["jev"]["completed"]), (1, 1))
+        self.assertEqual(arms["jev"]["metrics"]["replay_pass_2h"]["mean"], 1.0)
+        self.assertEqual(arms["jev"]["metrics"]["cost_usd"]["mean"], 0.03)
+        self.assertIsNotNone(arms["control"]["metrics"]["turns"]["ci95"])
+        self.assertEqual(treated["differences"]["free-control"]["abstained"]["diff"], -1.0)
+        self.assertEqual(sum(treated["by_lesson_arm"][k]["sessions"] for k in ("lesson", "control")), 6)
+        nonempty = out["would_be_nonempty"]
+        self.assertEqual(nonempty["sessions"], 5)
+        self.assertEqual(nonempty["arms"]["control"]["sessions"], 1, "control's empty would-be block is left out")
+        self.assertEqual(out["retrievals"]["control"]["would_be_empty"], 1)
         # The CLI reads the files and writes nothing.
         head = self.ledger.head()
         store = (self.root / "jev-memory.sqlite").read_bytes()
@@ -694,10 +803,28 @@ class ReportTest(Floor):
         with contextlib.redirect_stdout(printed):
             main(["report", "--ledger", str(self.root / "ledger.sqlite"), "--store", str(self.root / "jev-memory.sqlite"),
                   "--since", now_iso(lambda: since)])
-        self.assertEqual(json.loads(printed.getvalue())["joined_sessions"], 6)
+        self.assertEqual(json.loads(printed.getvalue())["all_retrieved"]["sessions"], 6)
         self.assertEqual(self.ledger.head(), head)
         self.assertEqual((self.root / "jev-memory.sqlite").read_bytes(), store)
 
+    def test_the_search_for_since_starts_a_day_early(self):
+        """A row may carry its own stamp, so stamps are not ordered by seq: a search from `since`
+        itself would skip the first row here."""
+        name = agent_named("desk", FREE)
+        self.agent(name)
+        memory = self.index(None)
+        since = self.clock()
+        started = since + 5
+        memory.prior_results(name, started, session="k-1")
+        self.clock.advance(10)
+        first = self.summary(name, "The first session after since, stamped in order.", session="k-1", started=started)
+        self.summary(name, "A late row stamped before since.", ago=100, session="k-2")
+        self.clock.advance(10)
+        self.summary(name, "A later row.", session="k-3")
+        out = report(self.ledger, self.root / "jev-memory.sqlite", since=since)
+        self.assertEqual(out["all_retrieved"]["sessions"], 1)
+        self.assertEqual(out["sessions"], 2, "the first row and the later one; the backdated one is before since")
+        self.assertTrue(first.seq)
 
 
 class WiringTest(HouseCase):
@@ -725,8 +852,7 @@ class WiringTest(HouseCase):
         self.assertFalse((self.house.root / "jev-memory.sqlite").exists())
 
     def test_switched_on_it_indexes_in_the_background_and_serves_the_researcher(self):
-        # The test sensor's day is 400 calls, so no reserve: the default holds 1,500 for retrieval.
-        floor = self.floor({"memory": {"enabled": True, "interval_seconds": 600, "reserve_calls": 0}, "partial_answers": True})
+        floor = self.floor({"memory": {"enabled": True, "interval_seconds": 600}, "partial_answers": True})
         self.assertIsInstance(floor.shared_memory, MemoryIndex)
         self.assertEqual(self.house.researcher.prior_results, floor.shared_memory.prior_results)
         self.assertTrue(floor.sensor.partial)

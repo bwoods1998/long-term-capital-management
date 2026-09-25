@@ -102,6 +102,10 @@ class Sensor:
         #: Whether requests ask for partial answers (`request_partial_answers`). A partial response is
         #: read whenever it arrives; this only says whether the header is sent.
         self.partial = False
+        #: Whether the gateway has been seen answering partially (a response naming `rejected`
+        #: answers): until then a request with one bad answer is refused whole, so callers keep
+        #: requests small (`partial_supported`). Kept in the store's meta across restarts.
+        self.partial_seen = False
         self.readonly = readonly  # a report reading the House box's store writes nothing to it
         self.client, self.clock = client, clock
         self.daily_usd = Decimal(str(daily_usd))
@@ -154,6 +158,7 @@ class Sensor:
             # question is not refused as a repeat of an older store's (measured Sept 22, 2026).
             db.execute("INSERT OR IGNORE INTO meta VALUES('salt', ?)", (uuid.uuid4().hex[:8],))
             self.salt = db.execute("SELECT value FROM meta WHERE name='salt'").fetchone()[0]
+            self.partial_seen = db.execute("SELECT 1 FROM meta WHERE name='partial_seen'").fetchone() is not None
         if partial:
             self.request_partial_answers()
 
@@ -179,6 +184,17 @@ class Sensor:
             client.partial = True
         self.partial = True
         return True
+
+    def partial_supported(self) -> bool:
+        """Whether a request may carry many questions without one bad answer losing them all: the
+        header is sent and the gateway has answered partially at least once."""
+        return self.partial and self.partial_seen
+
+    def _saw_partial(self) -> None:
+        if not self.partial_seen:
+            self.partial_seen = True
+            with self._db() as db:
+                db.execute("INSERT OR IGNORE INTO meta VALUES('partial_seen', '1')")
 
     @contextmanager
     def _db(self):
@@ -370,7 +386,8 @@ class Sensor:
 
     # -------------------------------------------------------------------- ask
     def ask(self, purpose: str, shared: Mapping[str, Any], items: Mapping[str, tuple[str, str]], *,
-            receipt: dict[str, Any] | None = None, batch: int | None = None) -> dict[str, float | None]:
+            receipt: dict[str, Any] | None = None, batch: int | None = None,
+            timeout: float | None = None) -> dict[str, float | None]:
         """Probability of "yes" for each item, keyed by the caller's cache key.
 
         `items` maps a cache key to (item text, question). The question refers to "the item",
@@ -378,7 +395,7 @@ class Sensor:
         answer is not cached and cannot be bought now (cap, breaker, outage) or that the gateway
         rejected comes back None: the caller decides deterministically without it. `receipt`, if
         given, accumulates the calls made and their confirmed cost for the caller's own ledger row.
-        `batch` caps the questions in one request (at most 16)."""
+        `batch` caps the questions in one request (at most 16); `timeout` caps each request's wait."""
         result: dict[str, float | None] = {key: None for key in items}
         known = self.cached(items)
         result.update(known)
@@ -387,7 +404,7 @@ class Sensor:
         size = max(1, min(MAX_QUESTIONS, int(batch or MAX_QUESTIONS)))
         for start in range(0, len(pending), size):
             chunk = pending[start:start + size]
-            answers = self._buy(purpose, shared, [(key, *items[key]) for key in chunk], receipt)
+            answers = self._buy(purpose, shared, [(key, *items[key]) for key in chunk], receipt, timeout=timeout)
             if answers is None:
                 break
             result.update(answers)
@@ -405,7 +422,7 @@ class Sensor:
         (choice, {option: probability})). Each answer is cached under `keys[name]` if given (a
         question whose answer outlives the state, e.g. one about the contract's own text), else
         f"{key}:{name}"; only the uncached names are sent, at most 16 to a request, or
-        `CHOICE_BATCH` (4) when a choice is among them, or `batch`. A name that cannot be bought
+        `batch`, and never more than `CHOICE_BATCH` (4) when a choice is among them. A name that cannot be bought
         now (cap, breaker, outage, a state too large) comes back None and `receipt["refused"]`
         says why; a name the gateway rejected comes back None and is named in
         `receipt["rejected"]` (not an outage: the next request goes ahead); `receipt["bought"]`
@@ -420,8 +437,9 @@ class Sensor:
         result: dict[str, Any] = {name: (known_c if name in choices else known_p).get(cache[name]) for name in names}
         self._hit(purpose, sum(1 for name in names if result[name] is not None))
         pending = [name for name in names if result[name] is None]
-        size = CHOICE_BATCH if any(name in choices for name in pending) else MAX_QUESTIONS
-        size = max(1, min(MAX_QUESTIONS, int(batch or size)))
+        size = max(1, min(MAX_QUESTIONS, int(batch or MAX_QUESTIONS)))
+        if any(name in choices for name in pending):
+            size = min(size, CHOICE_BATCH)  # never more, whatever the caller asks
         for start in range(0, len(pending), size):
             chunk = pending[start:start + size]
             body = canonical({"model": MODEL, "state": state, "questions": {name: _body(spec[name]) for name in chunk}})
@@ -442,7 +460,7 @@ class Sensor:
         return result
 
     def _buy(self, purpose: str, shared: Mapping[str, Any], chunk: list[tuple[str, str, str]],
-             receipt: dict[str, Any] | None = None) -> dict[str, float | None] | None:
+             receipt: dict[str, Any] | None = None, *, timeout: float | None = None) -> dict[str, float | None] | None:
         names = [f"q{n}" for n in range(len(chunk))]
         state = {**dict(shared), "items": {name: text for name, (_, text, _) in zip(names, chunk)}}
         questions = {name: {"type": "noul", "instructions": f"About item {name} in state: {question}{GUARD}"}
@@ -457,7 +475,8 @@ class Sensor:
                 if receipt is not None:
                     receipt["refused"] = f"items too large for one Jev request ({len(body.encode())} bytes)"
                 return None
-        answers, why = self._purchase(purpose, body, {name: key for name, (key, _, _) in zip(names, chunk)}, receipt)
+        answers, why = self._purchase(purpose, body, {name: key for name, (key, _, _) in zip(names, chunk)}, receipt,
+                                      timeout=timeout)
         if answers is None:
             if receipt is not None:
                 receipt["refused"] = why  # as `ask_state` says why: a cap, a breaker or an outage
@@ -523,6 +542,8 @@ class Sensor:
                 cost = Decimal(0)  # refused before the gateway reserves anything
             elif refused is not None:
                 rejected = refused
+                if self.partial:
+                    self._saw_partial()  # asked for partial answers and every one was bad: the gateway reads the header
             known = cost is not None and cost.is_finite() and cost >= 0
             status = "conflict" if conflict else "answers_rejected" if refused is not None else "rejected" if known else "unconfirmed"
             error = (f"rejected: {', '.join(sorted(rejected))}"[:200] if refused is not None
@@ -560,6 +581,8 @@ class Sensor:
             receipt["cost"] = Decimal(str(receipt.get("cost") or 0)) + cost
             if rejected:
                 receipt.setdefault("rejected", {}).update(rejected)
+        if rejected:
+            self._saw_partial()
         now = self.clock()
         with self._db() as db:
             db.execute("UPDATE calls SET status=?, cost=?, latency=?, error=? WHERE ident=?",
@@ -618,7 +641,7 @@ class Sensor:
                 "cache_hit_rate": round(hits / (hits + questions), 4) if hits + questions else None,
                 "calls_lifetime": calls, "completed_lifetime": completed,
                 "spent_lifetime_usd": format((Decimal(nano) / NANO).normalize(), "f"), "cached_answers": int(cached),
-                "cached_choices": int(cached_choices), "partial_answers": self.partial,
+                "cached_choices": int(cached_choices), "partial_answers": self.partial, "partial_seen": self.partial_seen,
                 "latency_p50_seconds": latencies[len(latencies) // 2] if latencies else None,
                 "breaker_open_until": max(breakers.values()) if breakers else None, "breakers_open": breakers,
                 "authority": "labels only: no order, promotion, spending or merge authority"}
