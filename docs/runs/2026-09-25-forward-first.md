@@ -69,6 +69,8 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
 | Z | The scoreboard | built, PR #298 (CI green); merges with Deploy A |
+| H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
+| A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:28Z; H5 and H4 after their reviews |
 
 ## Findings before Wave 0 reports
 
@@ -248,6 +250,22 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   agreeing, nothing in doubt, inside the room recent option and stock fills leave for regulators' fees, is dust on the
   House row with an error alert; anything else freezes). Open, from the builder: the Sept 24 ORF fee ($0.03) is still
   unbooked on the real book; a dividend or interest credit would freeze a real book as an unexplained surplus.
+
+- **H2 (#307).** `watchdog.service_failed(exc)` marks an error alert as a service's (5xx, 408/425/429, timeouts,
+  refused/reset/unreachable connections, DNS, cut-off replies, TLS drops; through wrappers) and never a 4xx or this
+  code's own exception; marked alerts are counted in `detail.environment_alerts` and never a reason, in the watch and
+  the canary. The backup outage is one error when it begins, warnings at later backoff steps, an info at recovery,
+  all marked. The 73 s shutdown of 00:04Z was the run loop, not the backup: `time.sleep` slept through TERM, so
+  TERM-to-exit took 24-82 s over the 13 restarts from 18:43Z Sept 24; the loop now sleeps a second at a time and
+  stops on TERM (`league/__main__.py`, 7 lines). Found, not fixed: two `lab.py` errors a Sail outage can raise are
+  unmarked; `feeds.py`'s poll warnings and `DataError` carry no status for the classifier.
+- **H5 review (on `h5/review`).** Four defects fixed: the tick walked `_jobs` while the new `house` lane added keys
+  ("dictionary changed size during iteration" would fail a tick and roll a release back); the stop warning came after
+  one minute at 30 s ticks (now 120 s, `STOPPED_TELL_SECONDS`); a saved scan answer could hand over a replay-only
+  resident whose research was queued mid-pass; the scan read desk stamps other threads write. Being fixed now: real
+  books polled at most every 60 s (a flaky venue's warnings must not reach the 10-in-30-minutes error inside a watch),
+  `_enforce_horizon` cancelling the House's own resting exit and re-sending it with the same nonce (rejected as a
+  duplicate: the position had no exit), and `hypotheses.py` iterating the registry while other threads add agents.
 
 ## Progress notes
 
