@@ -156,6 +156,18 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
   the postseason's few games from Tuesday. Its capacity after this weekend is a fraction of today's $31.70 a day,
   which the scale report and K2 must say, and which makes a football sibling (NFL and NCAAF central unders) the
   mechanism's continuation if the evidence supports it (the study below).
+- **The proven family's mechanism, measured on the whole market (06:30-06:50Z).** A study on Kalshi's public record
+  (the session's scratch `under_study.py`): every settled KXMLBTOTAL event Sept 4-24 matched to ESPN's board (239 of
+  277), buy NO on the central strike (pre-game NO price in 0.38-0.62, volume-weighted over the 7 hours before
+  start−1h from Kalshi's public trade prints; the outcome is Kalshi's own `result`). The under won 107 of 239 (44.8%)
+  at an average NO price of 0.499: mean −14.2% a dollar after the taker fee, t −2.19. It clusters by night: Sept 4-19
+  negative on 13 of 16 days (3/13 wins at worst), Sept 20-24 positive every day (35 of 53). The family's entire
+  record (meriwether-h2d625d, first close 02:01Z Sept 23, practice 20-lot and real 2-20-lot NO takers) sits inside
+  that last stretch, and games on one night move together, so its "independent" events are correlated and n 26 /
+  bound +0.092 overstates the proof. NFL totals (43 games since Aug 27, preseason included): the central under won
+  22/43 at 0.510, −3.6% a dollar, t −0.24: no premium. Sent to the forward-first run at 06:52Z (it owns the family
+  proof, the swing at 10 and M3's members); this run changes nothing of theirs, writes no football sibling of the
+  mechanism, and puts model-versus-market pricing (K1, K3) ahead of behavioural premia.
 - **Open agent data requests at T0** (in the watch window): `mlb_point_in_time_lineup_pitcher_feed` (hufschmid-39),
   `mlb_player_prop_reference_history` (hufschmid-38), `historical_external_crypto_indexes` (rosenfeld-h35c05b),
   `crypto_spot_rebalance_events` (haghani-l22bffc), and five for the options and equity desks (earnings panels,
