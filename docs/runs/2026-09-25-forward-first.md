@@ -311,8 +311,8 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
 
 ### T+6.2 h (10:36Z Sept 25; the 08:23Z note was lost to the usage-limit outage)
 
-Snapshot taken 10:36:08-10:38:03Z (, ledger to 10:36:11Z, release : the
-updater shipped Merton's #314-#316 during the outage). Nothing of this run is deployed yet: the rows move with the floor.
+Snapshot taken 10:36:08-10:38:03Z (`gap_scoreboard.py --take`, ledger to 10:36:11Z, release `main-47c52e860764`:
+the updater shipped Merton's #314-#316 during the outage). Nothing of this run is deployed yet: the rows move with the floor.
 
 | # | Metric | Reading (each number names its function) | Target at the end |
 |---|---|---|---|
@@ -326,10 +326,10 @@ updater shipped Merton's #314-#316 during the outage). Nothing of this run is de
 
 State: Wave 0 is built and reviewed except H4's fixes and H2's review (both running); H3 and Z merged at 10:33Z and ship
 in the options run's Deploy V; Deploy A (H2, H4, H5) is set for 20:10Z. Wave 1: F1 (#306) and F2/F4/X2 (#311) built,
-C-family building, C-money and F-seats next. **Runway:** the OpenAI month reads 60.89 of 07.00 and the House's line
-0.14 at about 05 a day: the House's own tiers ( ) move it to "earned" under 0 (cheap
-research to Sail, unearned roles paused; about 16:30Z) and to "audits" under  (about 19:00Z), where it stays until
-the month resets on Oct 1 unless the owner raises September's cap. Sail 48.21, 8.32 days. The sports family has 12
+C-family building, C-money and F-seats next. **Runway:** the OpenAI month reads $560.89 of $607.00 and the House's line
+$50.14 at about $105 a day: the House's own tiers (`game.json` `frontier_reserve`) move it to "earned" under $20 (cheap
+research to Sail, unearned roles paused; about 16:30Z) and to "audits" under $8 (about 19:00Z), where it stays until
+the month resets on Oct 1 unless the owner raises September's cap. Sail $148.21, 8.32 days. The sports family has 12
 real settlements (the look at 15 is 3 away under the live rules).
 
 
