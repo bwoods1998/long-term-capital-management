@@ -11,6 +11,10 @@ holds.py, gwh.py), for the capital-ladder build (docs/goals/LTCM_NORTH_STAR_BUIL
 turned into the ledger's own form before it is compared (`normalize_since`). Sept 24, 2026: the
 ledger's `at` is compared as text, and sqlite's `datetime('now', '-1 hour')` writes a space where
 the ledger writes `T`; a space sorts before `T`, so that form admitted the whole day.
+
+The `## releases` line (H3 of the forward-first run, Sept 25, 2026) is the harness row: the House's
+restarts in the last day, the updater's last ship and launch, what holds the next one (the release
+train, a US session, a recent start: `league/updater.py` `schedule`) and when it may go.
 """
 from __future__ import annotations
 
@@ -52,6 +56,35 @@ out['tick_steps'] = {'total_s': tl.get('total_seconds'), 'ticks_in_hour': ts.get
 acc = camp.get('accounts') or {}
 out['costs'] = {'openai_left': (acc.get('openai') or {}).get('remaining_usd'), 'sail_left': (acc.get('sail') or {}).get('remaining_usd'),
                 'pending_calls': camp.get('pending_calls'), 'jev': (h.get('jev') or {}).get('budget') if isinstance(h.get('jev'), dict) else None}
+# H3, the release train (the forward-first run, Sept 25, 2026): the House's restarts in the last day
+# (health.json `restarts_24h` when the House writes it, else the ledger's `ops.started` rows: 26 in the
+# 24 hours to 04:23Z Sept 25), the updater's last launch and last hold on the ledger, and the running
+# release's own `league.updater.schedule` (read-only: deploys.jsonl and the ledger) for the last ship,
+# the holds and the next eligible time. A third argument is the moment to read at (the tests' clock).
+now = float(sys.argv[3]) if len(sys.argv) > 3 else time.time()
+base = root.parent
+day_ago = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(now - 86400))
+starts = [at for (at,) in db.execute("select at from ledger where kind='ops.started' and at >= ? order by seq", (day_ago,))]
+train = {'restarts_24h': h.get('restarts_24h'), 'restarts_source': 'health.json', 'starts_24h': len(starts),
+         'last_start_at': starts[-1] if starts else None}
+if train['restarts_24h'] is None:
+    train.update(restarts_24h=len(starts), restarts_source='ops.started')
+for key, action in (('last_launch', 'deploying'), ('last_held', 'held')):
+    row = db.execute("select at, payload from ledger where kind='ops.deploy' and payload like ? order by seq desc limit 1",
+                     ('%"action":"' + action + '"%',)).fetchone()
+    if row:
+        p = json.loads(row[1])
+        train[key] = {'at': row[0], 'release': p.get('release'), 'sha': str(p.get('sha') or '')[:12], 'reasons': p.get('reasons') if action == 'held' else None}
+try:
+    if (base / 'current').is_dir():
+        sys.path.insert(0, str(base / 'current'))
+    from league.updater import schedule as train_schedule
+    plan = train_schedule(base, now)
+    train.update(train_hours=plan['train_hours'], last_ship=plan['last_ship'], next_eligible_at=plan['next_eligible_at'],
+                 holds=[{k: hold.get(k) for k in ('hold', 'until', 'why')} for hold in plan['holds']])
+except Exception as exc:
+    train['schedule'] = f'unavailable ({type(exc).__name__}: {str(exc)[:160]}): the running release has no release train'
+out['train'] = train
 q = lambda kinds: db.execute("select agent, at, kind, payload from ledger where kind in (%s) and at >= ? order by seq" % ','.join('?' * len(kinds)), (*kinds, since)).fetchall()
 born = {a: json.loads(p) for a, p in db.execute("select agent, payload from ledger where kind='agent.born'")}
 V = lambda a: (born.get(a) or {}).get('venue')
@@ -272,6 +305,23 @@ def render(box: dict, site: dict, gateway: dict) -> str:
                      + (", ".join(f"{k} {v}s at {str(at)[11:19]}" for k, v, at in ticks.get("slowest_hour") or []) or "-"))
     if ticks.get("background"):
         lines.append("   background " + ", ".join(f"{lane} {row[1]}s ({row[0]}, {row[2]})" for lane, row in ticks["background"].items()))
+    train = box.get("train") or {}
+    if train:
+        # H3 (Sept 25, 2026): the plan's harness row is at most six restarts a day and none in a US session.
+        restarts = train.get("restarts_24h")
+        ship = train.get("last_ship") or {}
+        launch = train.get("last_launch") or {}
+        lines.append(f"## releases: restarts in 24 h {json.dumps(restarts) if isinstance(restarts, (dict, list)) else restarts}"
+                     f" ({train.get('restarts_source')}; last start {train.get('last_start_at') or '-'})"
+                     f"  last updater ship {ship.get('at') or '-'} {ship.get('release') or ''} {('(' + ship['verdict'] + ')') if ship.get('verdict') else ''}"
+                     f"  last launch {launch.get('at') or '-'} {launch.get('release') or ''}"
+                     f"  next eligible {train.get('next_eligible_at') or train.get('schedule') or '-'}"
+                     + (f" (train {train['train_hours']:g} h)" if train.get("train_hours") is not None else ""))
+        lines += [f"   held now ({hold.get('hold')} until {hold.get('until')}): {hold.get('why')}" for hold in train.get("holds") or []]
+        held = train.get("last_held") or {}
+        if held:
+            lines.append(f"   last hold on the ledger {held.get('at')} {held.get('release')} {held.get('sha')}: "
+                         + "; ".join(str(r) for r in held.get("reasons") or [])[:400])
     lines += [f"## bands {box['bands']}",
               f"moves {box['moves']}  births {box['births']}  deaths {box['deaths']}",
               f"envelope {box.get('envelope')}  throttle {box.get('throttle')}"]
