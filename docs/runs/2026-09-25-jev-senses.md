@@ -279,6 +279,17 @@ Kalshi run at 10:31Z.
   `535a7f15` (read-only, 11:25Z). #319 merged 11:29:26Z (`2ee015b`, on top of Merton's #321, a Hilibrand child
   strategy merged 11:28:05Z that the updater had not shipped: it rides this deploy). Merged ahead of the start on
   purpose: the updater's next check would otherwise launch #321 alone inside the slot; with the `jev` block on
-  main it refuses the head instead, and the owner deploy ships both.
+  main it refuses the head instead, and the owner deploy ships both. (At 11:41:05Z the updater, now the release
+  train, held main's head `main-785ead7f257a` for its 4-hour spacing, so no updater release was in flight.)
+  **Started 11:49:11Z** from `~/Work/ltcm-deploy` at `origin/main` `2ee015b`: release
+  `20260925T114915Z-007e06151f53` (704 files) staged 11:49:19Z, **promoted 11:50:48Z**, `ops.started` 11:51:59Z,
+  the watch's verdict **promoted at 12:00:50Z** (every reading ok, no reasons, 0 error alerts). After promotion
+  (11:59:48Z, read-only): the live grant active, pinned and running money digest both `535a7f15` (unchanged);
+  `health.json` `jev.sensor` daily cap $1.50 / 25,000 calls; the move sensor's first cycle at 11:57:59Z: 17
+  snapshots, 415 markets shown, 415 rows (the served model `move-v1-20260924` ready, the shadow ready), 382 Jev
+  calls for $0.034 (400 static labels asked, stopped by the 60 s budget), lag p50 163 s; the Jev step 0.16 s of the
+  tick; no alert. Four `research.gate` rows written 11:50-11:56Z still carry `:jev_unavailable`: aggregated skip
+  episodes opened before the restart under the old 150-call cap, flushed after it. **The recorder's post-ship
+  clock starts at 11:52:51Z** (`started_at`): no row before it exists, and none will be back-filled.
 
 ## Report
