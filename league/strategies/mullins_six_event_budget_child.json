@@ -1,0 +1,8 @@
+{
+  "family": "weather-favorites",
+  "name": "mullins_six_event_budget_child",
+  "repair": {
+    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXHIGHMIA-#SEP# would hold $# of this account's $# (hold"
+  },
+  "why": "Corrected child of mullins-6: replace independent-market entry sizing with an additional 25%-of-equity event budget, counting both-leg holdings at cost, unfilled working buys and earlier intents across all event strikes. Preserve the parent's weather series, daily horizon, integer-strike filter and post-only NO favourite mechanism. Born at rung 0; must qualify on its own evidence."
+}
