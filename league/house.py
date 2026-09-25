@@ -3869,9 +3869,10 @@ class House:
         return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
-                    scale: float = 1.0) -> tuple[dict[str, Any], str]:
+                    scale: float = 1.0, until: float | None = None) -> tuple[dict[str, Any], str]:
         """`scale` sizes the replay's book: the practice rung's stake and caps times it (an in-place edit
-        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's)."""
+        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's).
+        `until`: the tape's steps after it are left out (`_tape_until`, a lab graduate's)."""
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
@@ -3882,6 +3883,8 @@ class House:
             start, end = self._live_window(needs)
             self._require_feeds(needs, wanted, self.feeds.coverage(wanted, start, end) if self.feeds is not None else {})
         tape_id, tape = self.tape_for(needs)
+        if until is not None:
+            tape_id, tape = self._tape_until(tape_id, tape, until)
         if wanted:
             self._require_feeds(needs, wanted, tape.get("feeds_coverage") or {})  # what this very tape carries
         observed = needs.get("observe") or {}
@@ -3917,6 +3920,42 @@ class House:
             return {**run.result, "experiment": artifact, "tape_source": "history-dev",
                     "walk_forward": walk_forward(run.result, tape)}, attempt["tape"]
         return {**run.result, "experiment": artifact, "tape_source": "live"}, attempt["tape"]
+
+    def _lab_freeze_cut(self, code: str) -> float | None:
+        """Where the House's replay of a lab graduate ends: the hour after the lab froze its code (`Lab._frozen_at`, rounded up
+        as `Lab.forward_windows` cuts the forward window), or None without a lab or for code the lab never held.
+
+        The F-lab review's open finding 2 (Sept 25, 2026): F1 graduates a candidate only on a positive forward window -- the
+        steps of the House's own tape strictly after that hour (`lab.forward_cut`) -- and on Kalshi and the Alpaca desks not
+        replayed on the history store the House then replayed it on the same `tape_for` tape, whose last third (the
+        out-of-sample blocks the replay gate reads) lies inside that window once the tape is rebuilt after the freeze. The
+        lab's search had kept that third out of the selection; the forward window put it back in, and the House's
+        out-of-sample pass stopped being independent of what chose the candidate. Cut there, the replay ends where the
+        forward window begins -- no step in both -- and its last third still follows the search's two thirds (the tape the
+        search read was built no later than the freeze). On the T0 snapshot (Sept 25, 04:23Z) 202 graduations of the day
+        were replayed on a live tape, 107 distinct (tape, freeze hour) pairs: at most that many cut tapes a day go to the
+        experiment archive (6.1 MB the median tape; 0.41 GB of tapes were archived in the 24 hours to 13:22Z)."""
+        lab = getattr(self, "lab", None)
+        if lab is None:
+            return None
+        from .lab import candidate_id
+
+        rows = lab._q("SELECT id, evaluated, created FROM candidates WHERE id=?", (candidate_id(code),))
+        return math.ceil(lab._frozen_at(rows[0]) / 3600.0) * 3600.0 if rows else None
+
+    @staticmethod
+    def _tape_until(tape_id: str, tape: dict[str, Any], until: float) -> tuple[str, dict[str, Any]]:
+        """The tape without its steps after `until` (epoch), and its id saying so; the tape itself when no step is later (a
+        history-store tape, one built before `until`). The cached tape is never mutated. Fewer than two steps left is no
+        replay: a ValueError, which `_candidate_replay` answers as not a trial."""
+        steps = list(tape.get("steps") or [])
+        kept = [step for step in steps if not isinstance(step, Mapping) or _epoch(str(step.get("t") or "")) <= until]
+        if len(kept) == len(steps):
+            return tape_id, tape  # the cached tape as it is, never copied
+        cut = now_iso(lambda: until)
+        if len(kept) < 2:
+            raise ValueError(f"the replay tape holds {len(kept)} step(s) up to {cut}, the hour the lab froze this code")
+        return f"{tape_id}|until:{cut}", {**dict(tape), "steps": kept, "replay_until": cut}
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""
@@ -4139,7 +4178,11 @@ class House:
                         if blind else "this specialty has no replay: paper is the test")
                 return {"counted_as_trial": False, "passed": ok, "error": None if ok else (run.result.get("error") if run else "no book"), "needs": info["needs"], "params": info.get("params") or {},
                         "numbers": {"passed": ok, "untested": blind, "reasons": [] if ok else ["it did not run on the live view"], "note": note}}
-            result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {})
+            # A lab graduate (the lab alone passes `lineage`) is replayed only up to the hour its code was frozen: the forward
+            # window it graduated on starts there (`_lab_freeze_cut`).
+            until = self._lab_freeze_cut(code) if lineage is not None else None
+            result, tape_id = self._run_replay(agent, code, info["needs"], info.get("params") or {},
+                                               **({"until": until} if until is not None else {}))
         except Exception as exc:  # noqa: BLE001
             return {"counted_as_trial": False, "passed": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}", "numbers": {},
                     **({"infrastructure": True} if isinstance(exc, SandboxError) else {})}

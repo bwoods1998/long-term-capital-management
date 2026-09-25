@@ -20,6 +20,13 @@ from league.tests.test_hypotheses import PASSER
 
 D = Decimal
 DESK = "alpaca-crypto-majors"
+#: Where a lab test's clock starts inside the fake House tape (`test_house.FakeAlpacaData`: 2026-09-10T00:00Z to
+#: 2026-09-12T11:55Z): 35 hours in, so a candidate frozen now has a day and a half of tape before its freeze for the House's
+#: replay and a day after it for its forward window, as on the floor, where the House's tape is the last week and a
+#: graduate's forward window its last hours. The House replays a lab graduate only up to the hour its code was frozen (the
+#: F-lab review's open finding 2, Sept 25, 2026: `House._lab_freeze_cut`); frozen at the tape's first half hour, as these
+#: tests' clock once started, a graduate had one hour of tape to pass the replay gate on.
+LAB_CLOCK_OFFSET = 35 * 3600
 
 #: The sawtooth passer with a knob: it buys the low leg with `notional` dollars.
 KNOB = PASSER.replace("PARAMS = {}", 'PARAMS = {"notional": 50.0}').replace('"notional_usd": 50', '"notional_usd": ctx["params"]["notional"]')
@@ -68,6 +75,7 @@ class FakeModel:
 class LabCase(HouseCase):
     def setUp(self):
         super().setUp()
+        self.clock.advance(LAB_CLOCK_OFFSET)
         self.house.pacer.may_spend = lambda kind: True  # the test clock is outside the expedition's calendar
         self.house.game["lab"] = {**(self.house.game.get("lab") or {}), "enabled": True, "step_seconds": 600,
                                   "stats_every_minutes": 0, "leap_every": 1000}

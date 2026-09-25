@@ -178,7 +178,7 @@ class ForwardWindows(ForwardCase):
         self.assertTrue(all(_ts(s["t"]) > cut for s in tape["steps"]))
         self.assertTrue(tape["warmup_bars"]["BTC/USD"])  # the bars before the cut are history, not steps
         self.assertTrue(all(_ts(b["t"]) <= cut for b in tape["warmup_bars"]["BTC/USD"]))
-        self.assertEqual(tape["forward_cut"], "2026-09-10T01:00:00Z")
+        self.assertEqual(tape["forward_cut"], "2026-09-11T12:00:00Z")  # `test_lab.LAB_CLOCK_OFFSET` into the fake tape
         record = self.lab.forward_record(ident)
         self.assertEqual(record["window_start"], cut)
         self.assertGreaterEqual(record["window_start"], frozen)
