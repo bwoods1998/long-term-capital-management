@@ -348,6 +348,12 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   draining (its own program has 3 blocks, under R5's 6); R5's holds must be keyed by the family at the demotion
   (`tape.family_at`, C-money); the scoreboard must read `agent.family` rows (Z follow-up).
 
+- **Other runs' deploys today (from their messages):** the options run's Deploy V, release
+  `20260925T110706Z-c7adcaf627d5`, promoted 11:08:45Z, watched to 11:18:45Z (carried H3 and Z); the Jev run's D-J1,
+  release `20260925T114915Z-007e06151f53` (main `2ee015b`: #319 and Merton's #321), promoted 11:50:48Z, verdict promoted
+  12:00:50Z with 0 error alerts, grant active on `535a7f15`. Deploy A's integration contains both (merged 11:52Z; PR
+  #323, CI re-running).
+
 ## Progress notes
 
 ### T+6.2 h (10:36Z Sept 25; the 08:23Z note was lost to the usage-limit outage)
