@@ -670,7 +670,9 @@ ORDER BY seq DESC LIMIT 20`.
   - **X3, refusals say what fits** (`Book._to_fit`): a refused entry's dollar cap -- the event share,
     free cash, the order, position and gross caps, the seat's caps -- says after " -- to fit" the band it
     was judged in (probe, bunt or swing on a real book, practice), the cap in dollars and the room left
-    under it: whole contracts at the order's price, or dollars and the venue's $10 crypto minimum. The
+    under it: whole contracts at the order's price, or dollars and the venue's $10 crypto minimum (the
+    position and gross caps' room counted as their rules value it, at the ask for a buy: a bid under the
+    ask is told the dollars that fit at its own limit). The
     text before the mark, what is refused and the refusals' classes are unchanged: the repair worklist's
     key (`worklist.normalize_reason`) and the research gate's refusal class (`refusal_class`) read only the
     text before the mark, so a rule the engineer already worked keeps its job. Verify: the next
