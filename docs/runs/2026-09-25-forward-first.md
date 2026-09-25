@@ -177,6 +177,44 @@ Alpaca families' maker/taker records mean nothing (crypto-alts-reversion: taker 
 cash" is the second refusal (83 in the day) and names no constitution key; the evidence clocks were last measured at
 08:32Z Sept 24.
 
+## The proven sports family, verified (07:25Z)
+
+The Kalshi run's study (a public-record test of the family's mechanism) was verified by four independent agents
+(a workflow: reproduce and audit the study; match the family's program; recompute its proof clustered by date; a
+skeptic). Scripts in the session scratchpad (`skeptic/`). What holds:
+
+- **The program is the study's mechanism.** meriwether-h2d625d (born seq 193200, code `6d65362f`, never rewritten):
+  KXMLBTOTAL only, buys NO at the ask (taker) 0.38-0.60, spread <= 2.5c, 2-27 h before first pitch, no feeds, 20 lots.
+  45 fills (28 practice, 17 real), all by the founder. Rebuilt with the program's own rules from Kalshi's public prints
+  over all 277 games Sept 4-24 at a 16 h lead: 241 entered, 46.1% won, -12.2% a dollar (t -1.91); 14 of 21 days
+  negative at every lead tested.
+- **The study reproduces exactly** (107/239, NO 0.499, -14.2%/$, t -2.19) but charges twice the real fee (KXMLBTOTAL's
+  `fee_multiplier` is 0.5; real fills paid 0.035 C P(1-P)) and prices at the VWAP (0.6-0.8c under the ask); the two
+  offset (-13.8%/$ at the ask with the right fee, t -2.17). Sept 4-19: 72/186 won, -24%/$, 14 of 16 days negative;
+  Sept 20-24: 35/53, +29%/$; the split is unlikely to be chance (p 0.005, 0.05 with the 37 skipped Arizona and White
+  Sox games added).
+- **Same-night correlation is not the defect** (within-date correlation -0.003). The defect is that the family
+  record counts events with no time dimension: all 25 events lie on 3 slate dates (Sept 22-24) inside one five-day
+  regime, the real 11 on 2. One observation per date (the House's own collapse rule): n 3, mean +0.1507, 80% bound
+  -0.0665, not proven. The dollar-at-risk weight also counts two-strike games heavily: with equal weights the bound is
+  -0.1197 (14 of 25 events won; winners weigh 0.865, losers 0.545). The regime is closing (runs minus the central
+  strike -1.71, -0.81, -0.60 on Sept 22, 23, 24; the real Sept 24 slate went 2 of 6, -$3.09), and MLB's regular
+  season ends Sept 27 (4-game postseason slates from Sept 29).
+- **What M1 would do:** the look at 10 real settlements at 90% reads -0.1187 (not ready; at 80% +0.0473). Under the
+  LIVE rules the look at 15 is decided by the next 4 real events, already open (SD-LAD Sept 24; TB-PHI, PIT-DET,
+  TEX-MIN, AZ-SD Sept 25): 4 of 4 gives +0.1031 (the swing's entry, then the auditor), 3 of 4 gives -0.0436.
+- **Members:** -3, -5, -6 run the same code with 0 fills (more exposure on the same slate, no new evidence); -4
+  rewrote itself at 02:37Z Sept 25 into a KXWNBAGAME favourite-maker (`26152cae`) and keeps the family's name (C8).
+
+**Decision (07:25Z), inside the table:** M1's entry look moves to 10 real settlements AND every swing look (entry,
+hold, doubling) also needs the family's real record to span at least 5 distinct settlement dates
+(`family_swing.min_distinct_dates` 5, a stricter gate carried in M1's row: the evidence shows a count of events cannot
+tell a regime from an edge). M3 seats a proven family's members only when the family's pooled proof spans at least 5
+distinct settlement dates and only members running the proven code (the digest the family's settled evidence was
+earned with; C8 ships with it); `economy.proven_family_members` stays 4. For the owner (outside this run's table): the
+same distinct-dates requirement on the `family_proven` line itself, and an equal-weight bound beside the at-risk one;
+today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 dates.
+
 ## Wave 0 reports
 
 - **H3 (#296).** Replaying the live `deploys.jsonl` (14 updater launches 02:15Z Sept 24 to 01:14Z Sept 25, one at
