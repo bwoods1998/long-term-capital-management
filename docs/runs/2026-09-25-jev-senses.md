@@ -221,7 +221,7 @@ Sept 22-23; the held-out window is Sept 24 00:00Z to Sept 25 06:00Z; intervals c
   i.e. they predict NO candidate): F2 keeps them as triggers. That is for the forward-first run's F2/F4, which
   owns the gate; this run passes the numbers on and builds no Jev research pre-filter.
 
-**The Merton half (10:36Z)**: 497 Merton passes Sept 22 00:00Z to Sept 25 06:00Z, $174.78 (plus 20 auditor
+**The Merton half (10:35Z)**: 497 Merton passes Sept 22 00:00Z to Sept 25 06:00Z, $174.78 (plus 20 auditor
 verdicts, $4.29). What each role produced:
 
 | Role | Passes | Dollars | Produced nothing (passes / dollars) |
@@ -242,7 +242,7 @@ calls, all completed).
 **J2's verdict:** no Jev pre-filter is built for research or Merton: on held-out data neither earns its keep over
 free rules. Two free findings go to the forward-first run, which owns the gate, Merton and the lanes (F2, F4, Y):
 on the sessions F2 still runs, a trigger-kind skip cuts 31% of dollars for 9% of replay passes; and the architect,
-toolsmith, operator and designer roles produced nothing on 85 of 97 passes ($45.96 of $59.13). Sent 10:37Z.
+toolsmith, operator and designer roles produced nothing on 85 of 97 passes ($45.96 of $59.13). Sent 10:36Z.
 
 ### J4 market discovery (07:32Z): what Kalshi trades that the swarm cannot price
 
