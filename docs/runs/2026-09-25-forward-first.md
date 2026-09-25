@@ -82,6 +82,32 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
   place bounded post-only NO bids; at most one position per event"), which rarely fires. Not a defect. The desk's
   gap is seats: 2 of 8 held, 4 waiters over 2 h, refused because the league's 128 seats are held (F3's case).
 
+## Coordination with the options-desk run
+
+A second run executes `docs/goals/LTCM_OPTIONS_DESK.md` beside this one (the owner's message at 05:47Z Sept 25).
+This run follows that plan's "Coordination" section: before each merge and deploy it reads the options run's record
+(`docs/runs/2026-09-25-options-desk.md` on its run branch), edits no file that run's current wave lists as owned,
+deploys one at a time (never inside another release's canary or watch, never within 30 minutes of the other run's
+announced deploy), and after any promotion that leaves the grant inactive ratifies `earned-live-20260921` only if
+every changed money rule is a row of one of the two plans' tables (else rolls back and records why). Messages to
+the other run are lines here plus a comment on its open PR.
+
+**This run's current wave, file owners and deploys (kept current; read this before merging into these files):**
+
+| Wave | State | Files owned |
+|---|---|---|
+| 0 (Deploy A) | building / in review | `league/watchdog.py`, `league/backup.py`, `league/updater.py`, `league/ci.py` (one dial), `league/config.json` (`tick_seconds`, `release_train_hours`), `league/book.py`, `league/constitution.py` (H4's key `allocator.real_book_dust_usd`), `league/house.py` (the tick, the births pass, the background lanes, `_run_backup`, health's restart and research-restart fields), `league/publish.py` (the updater's news line), `scripts/gap_scoreboard.py`, `scripts/floor_watch.py` |
+| 1 (Deploy B) | building (F-lab, F-research), then C-money, C-family, F-seats | `league/lab.py`; `league/research_gate.py`, `league/merton.py`, `league/yield_ledger.py`; `league/allocator.py`, `league/constitution.py` (M1-M5 beside their rows, C8 `allocator.family_key` at the end); `league/families.py`, `league/hypotheses.py`; `league/house.py` (the seat market, waiters, expiries, desk capacity, displacement, births and a birth's family, C7's event split); `league/niches.json` (desk seats); `game.json` keys `lab`, `lab_bounds`, `research`, `merton`, `merton_bounds`, `audit`, `economy.proven_family_members` |
+
+- **Free for the options run** in Wave 1: `house.py`'s `_chain` and any new options hook outside the regions above;
+  the `alpaca-options` row of `league/niches.json` (V6's seats; F3's desk-capacity rule will treat it like any desk
+  once live); new modules (`league/verticals.py`, `league/options_shadow.py`, founders). `league/options_replay.py`
+  is not touched by this run.
+- **Announced deploys:** Deploy A (Wave 0; one money-digest change, H4) about 08:00-09:30Z Sept 25, never after
+  12:25Z; the exact start is written here first. Deploy B (Wave 1; digest change 2, M1-M5 and C8) not before 20:05Z
+  Sept 25. The options run's practice deploy (by 12:30Z) goes between them; this run will not deploy between 10:00Z and
+  13:25Z unless this line says otherwise.
+
 ## The scoreboard at T0
 
 `scripts/gap_scoreboard.py --snapshot` (Z, PR #298) on the snapshot taken at 04:23-04:26Z Sept 25 (ledger to
