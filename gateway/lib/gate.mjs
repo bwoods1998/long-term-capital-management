@@ -13,6 +13,7 @@ import { dayCap as pullDayCap } from './github.mjs';
 import { formatUsd, formatUsdMicro } from './money.mjs';
 import { iso } from './http.mjs';
 import * as typesafe from './typesafe.mjs';
+import { DAY_CAP as webFetchDayCap } from './fetch.mjs';
 
 /** The one Gate instance. A single object is what makes a cap a cap and not a per-isolate guess. */
 export const GATE_OBJECT = 'gate-v1';
@@ -28,6 +29,7 @@ export const FRONTIER_KEY = 'frontier';
 export const FRONTIER_PREVIOUS_KEY = 'frontier-previous';
 export const PULLS_KEY = 'pulls';
 export const TYPESAFE_KEY = 'typesafe-pilot-v1';
+export const WEB_FETCH_KEY = 'web-fetch';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -301,6 +303,33 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true };
     },
 
+    /**
+     * Pages research read today through `/v1/web/fetch` (lib/fetch.mjs), the floor's UTC day: the
+     * count, and by agent. `webFetchReserve` takes one of the day's `DAY_CAP` places or refuses, in
+     * the same step. The kill switch is not consulted: a page moves no money.
+     */
+    webFetchDay(at = now()) {
+      const day = iso(at).slice(0, 10);
+      const row = read(store, WEB_FETCH_KEY, {});
+      return row.day === day
+        ? { day, count: Number(row.count) || 0, by_agent: row.by_agent && typeof row.by_agent === 'object' ? row.by_agent : {} }
+        : { day, count: 0, by_agent: {} };
+    },
+
+    webFetchReserve({ at = now(), agent = null } = {}) {
+      const row = this.webFetchDay(at);
+      if (row.count + 1 > webFetchDayCap) {
+        return { ok: false, status: 429, cap: 'web_fetch_day', error: `Today's cap of ${webFetchDayCap} web fetches is already reached.` };
+      }
+      const by = { ...row.by_agent };
+      const name = typeof agent === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(agent) ? agent : 'unattributed';
+      // Bounded: past 200 names a day, the rest are counted together.
+      const key = Object.hasOwn(by, name) || Object.keys(by).length < 200 ? name : 'other';
+      by[key] = (Number(by[key]) || 0) + 1;
+      write(store, WEB_FETCH_KEY, { day: row.day, count: row.count + 1, by_agent: by });
+      return { ok: true, day: row.day, count: row.count + 1 };
+    },
+
     watchdog: () => read(store, WATCHDOG_KEY, { last_check_at: null, last_action: null, last_action_at: null }),
 
     recordWatchdog(patch) {
@@ -396,6 +425,10 @@ export function createGate({ store, env = {}, now = Date.now }) {
         })(),
         typesafe: this.typesafeStatus(),
         github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
+        web_fetch: (() => {
+          const row = this.webFetchDay(at);
+          return { day: row.day, fetches: row.count, cap: webFetchDayCap, by_agent: row.by_agent };
+        })(),
         watchdog: {
           last_check_at: watch.last_check_at ?? null,
           last_action: watch.last_action ?? null,
