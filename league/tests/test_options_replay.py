@@ -848,6 +848,25 @@ class Structures(unittest.TestCase):
         before = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T18:15:00Z", limit=0.70)
         self.assertEqual(before["fills"], 1)  # 14:15 New York: still open for entries
 
+    def test_an_early_close_moves_the_entry_cut_and_the_house_close(self):
+        # 13:00 New York bell (the tape carries the House calendar's early closes): cut 11:30, close 12:30
+        steps = [sstep("2026-09-25T15:15:00Z", VPRICES), sstep("2026-09-25T15:30:00Z", VPRICES), sstep("2026-09-25T15:45:00Z", VPRICES),
+                 sstep("2026-09-25T16:30:00Z", VPRICES), sstep("2026-09-25T16:45:00Z", VPRICES)]
+        tape = stape(steps, VERTICAL, structure_hours={EXP: [690, 750]})
+        late = run_replay(STRUCTURE_STRATEGY, {"legs": VLEGS, "open_at": "2026-09-25T15:30:00Z", "limit": 0.70}, tape, stake=1000.0, limits=SLIMITS)
+        self.assertIn("from 11:30 New York", " ".join(late["refusal_reasons"]))
+        r = run_replay(STRUCTURE_STRATEGY, {"legs": VLEGS, "open_at": "2026-09-25T15:15:00Z", "limit": 0.70}, tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual([(f["t"], f["side"], f["how"]) for f in r["fill_log"]],
+                         [("2026-09-25T15:30:00Z", "buy", "opened"), ("2026-09-25T16:45:00Z", "sell", "expiry rule")])  # offered at 12:30
+
+    def test_a_zero_day_strategy_is_shown_todays_expiry_only(self):
+        codes = [socc(585), socc(585, "C", "260923"), socc(585, "C", "260922")]
+        prices = {c: 1.0 for c in codes}
+        strategy = STRUCTURE_STRATEGY.replace('"max_days_to_expiry": 7', '"max_days_to_expiry": 0')
+        r = run_replay(strategy, {"open_at": "never"}, stape([sstep("2026-09-22T13:45:00Z", prices), sstep("2026-09-22T14:00:00Z", prices)], codes),
+                       stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual(r["final_memory"]["2026-09-22T14:00:00Z"]["chain"], [socc(585, "C", "260922")])
+
     def test_participation_counts_a_butterflys_body_twice(self):
         fly = [socc(584), socc(585), socc(586)]
         legs = [{"occ": socc(584), "role": "long"}, {"occ": socc(585), "role": "short", "ratio": 2}, {"occ": socc(586), "role": "long"}]
@@ -1001,6 +1020,7 @@ class StructureTape(unittest.TestCase):
             local = oh.stored_underlier  # the local copy's reader refuses a store with no underlier bars
             with self.assertRaises(oh.HistoryError):
                 local(store)
+            store.close()
 
     def test_a_structure_tape_over_its_budget_drops_its_oldest_steps(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1021,6 +1041,7 @@ class StructureTape(unittest.TestCase):
             self.assertEqual(built["warmup_bars"]["SPY"][-1]["t"], stamps[0])  # the dropped step's signal bar is warmup now
             whole = store.tape(needs, "2026-09-22T00:00:00Z", "2026-09-22T23:59:59Z", horizon="day", underlier_bars=underlier, execution="15Min")
             self.assertNotIn("bounded", whole)
+            store.close()
 
     def test_the_faster_implied_volatility_is_the_same_number(self):
         import random

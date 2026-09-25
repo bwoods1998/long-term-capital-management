@@ -787,8 +787,10 @@ class OptionsHistory:
         warmup) and the tape says so under `bounded`."""
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
         structural = bool(needs.get("structures"))
-        days = (max(0, min(int(needs.get("max_days_to_expiry") or 7), 45)) if structural
-                else max(2, min(int(needs.get("max_days_to_expiry") or 21), 45)))
+        asked = needs.get("max_days_to_expiry")
+        # A structure agent's 0 is a 0-DTE strategy's own answer, not "unsaid" (`House._structure_context`).
+        days = (max(0, min(int(7 if asked is None else asked), 45)) if structural
+                else max(2, min(int(asked or 21), 45)))
         timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
         afford = float("inf") if structural else float(max_order_usd) / MULTIPLIER
         start_ts, end_ts = _ts(start), _ts(end)
@@ -911,7 +913,35 @@ class OptionsHistory:
             # row became available: the options-derived features it declares (Sept 25, 2026).
             **({"options_features": self.feature_series(symbols)} if needs.get("options_features") else {}),
             **({"bounded": bounded} if bounded else {}),
+            **({"structure_hours": structure_hours(first_day, last_day)} if structural else {}),
         }
+
+
+def structure_hours(first: str, last: str) -> dict[str, list[int]]:
+    """{day: [entry cut, House close]} in New York minutes for the days in [first, last] whose structure
+    hours are not the regular 14:30 and 15:30: an early close (13:00 the day after Thanksgiving and on
+    Christmas Eve) holds them 90 and 30 minutes before the bell, as `House._structure_hours` does. Read
+    from the House's session calendar (`ltcm.data`) where the tape is built; the replay in the box
+    reads them off the tape. Empty where the calendar cannot be read (the regular hours then)."""
+    try:
+        from ltcm.data import to_datetime, us_equity_session
+    except ImportError:
+        return {}
+    out: dict[str, list[int]] = {}
+    day, end = _day(first), _day(last)
+    while day <= end:
+        try:
+            session = us_equity_session(day.isoformat())
+        except Exception:  # noqa: BLE001 - a day outside the calendar keeps the regular hours
+            session = None
+        if session is not None:
+            bell = to_datetime(session.close_at).astimezone(NY)
+            minutes = bell.hour * 60 + bell.minute
+            hours = [min(14 * 60 + 30, minutes - 90), min(15 * 60 + 30, minutes - 30)]
+            if hours != [14 * 60 + 30, 15 * 60 + 30]:
+                out[day.isoformat()] = hours
+        day += timedelta(days=1)
+    return out
 
 
 def _in_session(ts: float) -> bool:
