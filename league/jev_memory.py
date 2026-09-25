@@ -24,15 +24,16 @@ it helps is measured, not assumed (docs/goals/LTCM_JEV_SENSES.md, J3).
    `daily_usd - reserve_usd`. A document the gateway rejects is asked at most `label_attempts`
    times. Labels are READING AIDS only: they never gate research, rank an agent, or change evidence.
 3. **Retrieval** (`prior_results(agent, now, session=)`, set as the researcher's `prior_results` for
-   its research-state hook; at most `budget_seconds` (6) in all). The arm is sha256(agent id +
+   its research-state hook; at most `budget_seconds` (`RETRIEVAL_SECONDS`, 1.5) in all, inside the
+   hook's 2.0 s wait (`HOOK_WAIT_SECONDS`, which must equal `researcher.PRIOR_TIMEOUT_SECONDS`). The arm is sha256(agent id +
    ":j3") % 3, orthogonal to any other split (the forward-first run's `lesson_arm` among them):
    0 control (nothing shown, but the block it WOULD have seen is computed and recorded), 1 free
    (the top `shown` other agents' documents by a free score: same niche > same family > same
    venue, word overlap with the strategy's docstring and its latest conclusion, mechanism match,
    recency), 2 Jev (the free top `jev_pool` (16), one noul relevance question each under purpose
    `memory_rank` (its own cap and breaker), the top `shown` at p >= 0.5; one request of up to 16
-   once the gateway has answered partially, else requests of 4; the free order when Jev cannot
-   answer inside the budget, recorded as such). The free arm uses Jev's taxonomy labels too (the
+   once the gateway has answered partially, else requests of 4 sent at once; the free order when
+   Jev cannot answer inside the budget, recorded as such). The free arm uses Jev's taxonomy labels too (the
    mechanism match in its score, the verdict and failure on its lines), so free against Jev
    measures only the relevance call, and control against free the block itself. The agent's own
    line is never shown: its journal already holds it. Every retrieval is stored (session, agent,
@@ -47,8 +48,9 @@ it helps is measured, not assumed (docs/goals/LTCM_JEV_SENSES.md, J3).
 5. **The graveyard** (`graveyard(query, niche)` and `python -m league.jev_memory graveyard`): has any
    agent tried this, and how did it end, with ledger refs. Read-only; Jev relevance optional.
 6. **The report** (`python -m league.jev_memory report --ledger --store --since`, read-only): per
-   arm, finished research sessions joined to their retrieval record (sessions before the hook, or
-   without a record, are excluded, never counted as treated), (a) all of them and (b) those whose
+   arm, finished research sessions joined to their retrieval record (sessions before the hook,
+   without a record, or whose retrieval took over `HOOK_WAIT_SECONDS` so the hook showed nothing,
+   are excluded and counted, never treated), (a) all of them and (b) those whose
    would-be block was non-empty, each also stratified by `lesson_arm`: turns, abstention (the
    floor's `session_outcome`), failed evaluations, candidates, replay passes within 2 h, model
    dollars per session, with 95% intervals clustered by agent, and the arms' differences. That is
@@ -75,6 +77,7 @@ import sys
 import threading
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
@@ -114,6 +117,13 @@ REPLAY_WINDOW_SECONDS = 7200
 SEARCH_SLACK_SECONDS = 86400
 #: Documents never labelled are dropped this long after they were written.
 EXPIRED_KEEP_DAYS = 30
+#: How long the research hook waits for `prior_results` before the pass starts with nothing: the
+#: hook's `PRIOR_TIMEOUT_SECONDS` in league/researcher.py (#328). Keep the two equal. A retrieval
+#: that took longer was never shown, so the report counts it as `too_slow`, never as treated.
+HOOK_WAIT_SECONDS = 2.0
+#: One retrieval's whole budget, Jev relevance included (the free order when it runs out). It must
+#: stay at or below HOOK_WAIT_SECONDS (and the hook's PRIOR_TIMEOUT_SECONDS), with room to record.
+RETRIEVAL_SECONDS = 1.5
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "interval_seconds": 600,
@@ -126,7 +136,7 @@ DEFAULTS: dict[str, Any] = {
     "reserve_usd": "0.08",  # of which labels leave this much for relevance
     "batch": 4,  # questions in a label request (a label is exactly one request) and in a relevance request
     "label_attempts": 2,
-    "budget_seconds": 6.0,  # one retrieval, relevance included
+    "budget_seconds": RETRIEVAL_SECONDS,  # one retrieval, relevance included
     "shown": 5,
     "jev_pool": 16,
     "jev_threshold": 0.5,
@@ -760,22 +770,46 @@ class MemoryIndex:
     def _relevance(self, shared: Mapping[str, Any], items: list[tuple[str, str]], question: str,
                    deadline: float) -> tuple[dict[str, float | None], dict[str, Any], bool]:
         """Jev's relevance answers for `items` ([(cache key, item text)]) under purpose `memory_rank`:
-        one request of up to 16 once the gateway answers partially, else requests of `batch`, none
-        started with less than a second of the budget left. Returns (answers, receipt, out of time)."""
+        one request of up to 16 once the gateway answers partially, else requests of `batch` sent at
+        once (four 0.6 s requests in turn would not fit the 1.5 s budget). Nothing starts with under
+        a second left (the gateway client's shortest wait), and whatever has not answered by the
+        deadline is left behind (it still fills the cache when it lands). Returns (answers, receipt,
+        out of time)."""
         partial = bool(getattr(self.sensor, "partial_supported", lambda: False)())
         size = MAX_QUESTIONS if partial else max(1, min(MAX_QUESTIONS, int(self.settings["batch"])))
+        chunks = [items[start:start + size] for start in range(0, len(items), size)]
+        left = deadline - time.monotonic()
+        if not chunks or left < 1.0:
+            return {}, {}, bool(chunks)
+
+        def ask(chunk: list[tuple[str, str]]) -> tuple[dict[str, float | None], dict[str, Any]]:
+            mine: dict[str, Any] = {}
+            got = self.sensor.ask(RANK, shared, {key: (text, question) for key, text in chunk}, receipt=mine,
+                                  batch=size, timeout=left)
+            return got, mine
+
+        pool = ThreadPoolExecutor(max_workers=len(chunks), thread_name_prefix="j3-rank")
+        try:
+            futures = [pool.submit(ask, chunk) for chunk in chunks]
+            done, _ = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
         answers: dict[str, float | None] = {}
         receipt: dict[str, Any] = {}
-        for start in range(0, len(items), size):
-            left = deadline - time.monotonic()
-            if left < 1.0:
-                return answers, receipt, True
-            chunk = items[start:start + size]
-            answers.update(self.sensor.ask(RANK, shared, {key: (text, question) for key, text in chunk}, receipt=receipt,
-                                           batch=size, timeout=left))
-            if receipt.get("refused"):
-                break
-        return answers, receipt, time.monotonic() >= deadline and any(answers.get(key) is None for key, _ in items)
+        for future in futures:
+            if future not in done or future.exception() is not None:
+                continue
+            got, mine = future.result()
+            answers.update(got)
+            receipt["calls"] = int(receipt.get("calls") or 0) + int(mine.get("calls") or 0)
+            receipt["cost"] = Decimal(str(receipt.get("cost") or 0)) + Decimal(str(mine.get("cost") or 0))
+            receipt.setdefault("rejected", {}).update(mine.get("rejected") or {})
+            if mine.get("refused") and not receipt.get("refused"):
+                receipt["refused"] = mine["refused"]
+        if not receipt.get("rejected"):
+            receipt.pop("rejected", None)
+        unanswered = any(answers.get(key) is None for key, _ in items)
+        return answers, receipt, unanswered and (len(done) < len(futures) or time.monotonic() >= deadline)
 
     def _jev_rank(self, profile: Profile, pool: list[Doc], shown: int,
                   deadline: float) -> tuple[list[Doc], str, str, dict[str, Any]]:
@@ -967,6 +1001,15 @@ def _group(sessions: list[dict[str, Any]]) -> dict[str, Any]:
     return {"sessions": len(sessions), "arms": arms, "differences": _differences(arms), "by_lesson_arm": strata}
 
 
+def _hook_wait() -> float:
+    """The research hook's wait (`researcher.PRIOR_TIMEOUT_SECONDS`) when that module has it, else ours."""
+    try:
+        from .researcher import PRIOR_TIMEOUT_SECONDS
+        return float(PRIOR_TIMEOUT_SECONDS)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return HOOK_WAIT_SECONDS
+
+
 def report(ledger: Any, store: str | Path, *, since: float, until: float | None = None) -> dict[str, Any]:
     """J3's measurement, read-only: finished research sessions joined to their retrieval record, per arm."""
     until = float(until) if until is not None else float("inf")
@@ -977,9 +1020,9 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
         try:
             first = db.execute("SELECT MIN(at) FROM retrievals").fetchone()[0]
-            retrievals = [dict(zip(("id", "at", "agent", "session", "arm", "refs", "free_refs", "jev", "cost", "calls", "error"), row))
-                          for row in db.execute("SELECT id, at, agent, session, arm, refs, free_refs, jev, cost, calls, error "
-                                                "FROM retrievals WHERE at>=? ORDER BY at", (since - SEARCH_SLACK_SECONDS,))]
+            columns = ("id", "at", "agent", "session", "arm", "refs", "free_refs", "jev", "cost", "calls", "error", "seconds")
+            retrievals = [dict(zip(columns, row)) for row in db.execute(
+                f"SELECT {', '.join(columns)} FROM retrievals WHERE at>=? ORDER BY at", (since - SEARCH_SLACK_SECONDS,))]
         finally:
             db.close()
     sessions: list[dict[str, Any]] = []
@@ -1010,7 +1053,8 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
     for r in retrievals:
         by_agent[r["agent"]].append(r)
     used: set[int] = set()
-    joined, before, unrecorded = [], 0, 0
+    joined, before, unrecorded, slow = [], 0, 0, 0
+    wait_limit = _hook_wait()
     for s in sessions:
         found = by_session.get(s["session"]) if s["session"] else None
         if found is None:  # no session key: the agent's latest retrieval inside the session's span
@@ -1025,6 +1069,9 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
                 unrecorded += 1
             continue
         used.add(found["id"])
+        if found["seconds"] is not None and float(found["seconds"]) > wait_limit:
+            slow += 1  # the hook had stopped waiting: this session was shown nothing, whatever its arm
+            continue
         s["arm"] = int(found["arm"])
         s["would_be"] = len(json.loads(found["free_refs"] or "[]"))
         s["replay_pass_2h"] = int(any(s["started"] <= t <= s["finished"] + REPLAY_WINDOW_SECONDS for t in passes.get(s["agent"], [])))
@@ -1037,17 +1084,20 @@ def report(ledger: Any, store: str | Path, *, since: float, until: float | None 
             "errors": sum(1 for r in mine if r["error"]), "jev_calls": sum(int(r["calls"] or 0) for r in mine),
             "jev_cost_usd": format(sum((Decimal(str(r["cost"] or 0)) for r in mine), Decimal(0)), "f"),
             "mean_refs_shown": round(sum(len(json.loads(r["refs"] or "[]")) for r in mine) / len(mine), 3) if mine else None,
-            "would_be_empty": sum(1 for r in mine if not json.loads(r["free_refs"] or "[]"))}
+            "would_be_empty": sum(1 for r in mine if not json.loads(r["free_refs"] or "[]")),
+            "too_slow": sum(1 for r in mine if r["seconds"] is not None and float(r["seconds"]) > wait_limit)}
     return {"since": _iso(since), "until": None if until == float("inf") else _iso(until),
             "hook_started": _iso(first) if first is not None else None,
-            "sessions": len(sessions), "excluded": {"before_first_retrieval": before, "no_retrieval_record": unrecorded},
+            "sessions": len(sessions), "hook_wait_seconds": wait_limit,
+            "excluded": {"before_first_retrieval": before, "no_retrieval_record": unrecorded, "too_slow": slow},
             "all_retrieved": _group(joined),
             "would_be_nonempty": _group([s for s in joined if s["would_be"]]),
             "retrievals": retrieval_stats,
             "definitions": {
                 "all_retrieved": "finished sessions matched to a retrieval record (by session key, else by agent inside the "
-                                 "session's span), by the arm recorded; sessions before the first retrieval or without a "
-                                 "record are excluded, never counted as treated",
+                                 "session's span), by the arm recorded; sessions before the first retrieval, without a "
+                                 "record, or whose retrieval took over the hook's wait (too_slow: shown nothing) are "
+                                 "excluded, never counted as treated",
                 "would_be_nonempty": "of those, the sessions whose would-be block (the free order's refs, computed for every "
                                      "arm, control included) was non-empty: the ones the memory could have changed",
                 "abstained": "session_outcome == 'abstained' (the floor's definition: no candidate and no replay)",

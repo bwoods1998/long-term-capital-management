@@ -18,8 +18,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from league.jev import CHOICE_BATCH, MODEL, PARTIAL_HEADER, Sensor
-from league.jev_memory import (ARMS, CONTROL, FREE, HEADER, JEV, MAX_BLOCK, MAX_LINE, QUESTIONS, TAXONOMY_VERSION,
-                               MemoryIndex, arm_of, lesson_arm, main, report)
+from league.jev_memory import (ARMS, CONTROL, DEFAULTS, FREE, HEADER, HOOK_WAIT_SECONDS, JEV, MAX_BLOCK, MAX_LINE, QUESTIONS,
+                               RETRIEVAL_SECONDS, TAXONOMY_VERSION, MemoryIndex, arm_of, lesson_arm, main, report)
 from league.ledger import Ledger, now_iso
 from league.sensors import JevFloor
 from league.tests.fakes import Clock
@@ -603,12 +603,12 @@ class RetrievalTest(Floor):
         arm, block, refs = self.memory.prior_results(self.jev_agent, self.clock(), session="sess-2")
         self.assertEqual(arm, JEV)
         self.assertEqual(refs, [self.docs["same-venue"].seq, self.docs["same-family"].seq], "p >= 0.5 only, highest first")
-        self.assertEqual([len(r["questions"]) for _, r in self.jev.calls], [4, 1], "four questions a request, five documents")
+        self.assertEqual(sorted(len(r["questions"]) for _, r in self.jev.calls), [1, 4], "four questions a request, five documents")
         row = self.retrievals()[-1]
         self.assertEqual((row[2], row[5], row[7]), (JEV, "used", 2))
         self.assertEqual(Decimal(row[8]), Decimal("0.0002"))
         self.assertEqual(self.sensor.calls_today("memory_rank"), 2, "relevance is bought under its own purpose")
-        self.assertTrue(all(0 < t <= 6 for t in self.jev.timeouts), "inside the retrieval's six seconds")
+        self.assertTrue(all(0 < t <= RETRIEVAL_SECONDS for t in self.jev.timeouts), "inside the retrieval's budget")
         self.assertEqual(json.loads(row[4]), self.free_for_the_jev_agent(), "what the free arm would have shown is kept beside it")
         again = self.memory.prior_results(self.jev_agent, self.clock(), session="sess-3")
         self.assertEqual(again[2], refs)
@@ -635,18 +635,31 @@ class RetrievalTest(Floor):
         self.assertEqual([len(r["questions"]) for _, r in self.jev.calls], [5])
         self.assertEqual(refs, [self.docs["same-venue"].seq, self.docs["same-family"].seq])
 
+    def test_relevance_requests_go_at_once_inside_the_budget(self):
+        import time
+        self.jev.delay = 0.8  # two requests in turn would take 1.6 s, over the 1.5 s budget
+        started = time.monotonic()
+        arm, block, refs = self.memory.prior_results(self.jev_agent, self.clock())
+        self.assertLess(time.monotonic() - started, RETRIEVAL_SECONDS)
+        self.assertEqual(refs, [self.docs["same-venue"].seq, self.docs["same-family"].seq])
+        self.assertEqual(sorted(len(r["questions"]) for _, r in self.jev.calls), [1, 4])
+        self.assertEqual(self.retrievals()[-1][5], "used")
+
     def test_a_retrieval_keeps_to_its_budget_and_falls_back_to_the_free_order(self):
-        self.memory.settings["budget_seconds"] = 1.5
-        self.jev.delay = 0.6
+        import time
+        self.jev.delay = 1.7  # a gateway slower than the whole budget
+        started = time.monotonic()
         arm, block, refs = self.memory.prior_results(self.jev_agent, self.clock(), session="sess-6")
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, RETRIEVAL_SECONDS + 0.3, "the budget, not the slow gateway")
         self.assertEqual((arm, refs), (JEV, self.free_for_the_jev_agent()))
-        self.assertEqual(len(self.jev.calls), 1, "no request starts with under a second left")
-        self.assertLessEqual(self.jev.timeouts[0], 1.5)
+        self.assertTrue(all(t <= RETRIEVAL_SECONDS for t in self.jev.timeouts))
         row = self.retrievals()[-1]
-        self.assertEqual((row[5], row[7]), ("timeout", 1))
+        self.assertEqual(row[5], "timeout")
         self.assertIn("budget", row[6])
         (seconds,) = self.rows("SELECT seconds FROM retrievals ORDER BY id DESC LIMIT 1")[0]
-        self.assertLess(seconds, 1.5)
+        self.assertLess(seconds, HOOK_WAIT_SECONDS)
+        time.sleep(0.5)  # the abandoned requests land (and fill the cache) before the store is removed
 
     def test_documents_are_scored_from_a_snapshot_rebuilt_each_run(self):
         reads = []
@@ -775,7 +788,7 @@ class ReportTest(Floor):
         self.summary(names[FREE][1], "A session the hook never saw is excluded too.", turns=9)
         out = report(self.ledger, self.root / "jev-memory.sqlite", since=since)
         self.assertEqual(out["sessions"], 8)
-        self.assertEqual(out["excluded"], {"before_first_retrieval": 1, "no_retrieval_record": 1})
+        self.assertEqual(out["excluded"], {"before_first_retrieval": 1, "no_retrieval_record": 1, "too_slow": 0})
         treated = out["all_retrieved"]
         arms = treated["arms"]
         self.assertEqual(treated["sessions"], 6)
@@ -806,6 +819,34 @@ class ReportTest(Floor):
         self.assertEqual(json.loads(printed.getvalue())["all_retrieved"]["sessions"], 6)
         self.assertEqual(self.ledger.head(), head)
         self.assertEqual((self.root / "jev-memory.sqlite").read_bytes(), store)
+
+    def test_a_retrieval_slower_than_the_hook_waits_is_not_treated(self):
+        name = agent_named("desk", FREE)
+        self.agent(name)
+        memory = self.index(None)
+        since = self.clock()
+        for n, seconds in enumerate((0.4, HOOK_WAIT_SECONDS + 0.4)):
+            started = self.clock()
+            memory.prior_results(name, started, session=f"slow-{n}")
+            self.clock.advance(60)
+            self.summary(name, f"Session {n} concluded something.", session=f"slow-{n}", started=started)
+            with closing(sqlite3.connect(self.root / "jev-memory.sqlite")) as db:
+                db.execute("UPDATE retrievals SET seconds=? WHERE session=?", (seconds, f"slow-{n}"))
+                db.commit()
+        out = report(self.ledger, self.root / "jev-memory.sqlite", since=since)
+        self.assertEqual(out["hook_wait_seconds"], HOOK_WAIT_SECONDS)
+        self.assertEqual(out["excluded"]["too_slow"], 1, "the hook had stopped waiting: shown nothing")
+        self.assertEqual(out["all_retrieved"]["sessions"], 1)
+        self.assertEqual(out["retrievals"]["free"]["too_slow"], 1)
+
+    def test_the_budget_fits_inside_the_hooks_wait(self):
+        self.assertEqual(DEFAULTS["budget_seconds"], RETRIEVAL_SECONDS)
+        self.assertLessEqual(RETRIEVAL_SECONDS, HOOK_WAIT_SECONDS)
+        try:
+            from league.researcher import PRIOR_TIMEOUT_SECONDS
+        except ImportError:
+            return  # the hook (researcher.py, #328) is a separate change
+        self.assertEqual(PRIOR_TIMEOUT_SECONDS, HOOK_WAIT_SECONDS, "keep the report's limit equal to the hook's wait")
 
     def test_the_search_for_since_starts_a_day_early(self):
         """A row may carry its own stamp, so stamps are not ordered by seq: a search from `since`
