@@ -205,6 +205,37 @@ ACTIVITY_READS = 5
 #: its expiry: those four trade on the House's options shadow book instead (the integrator's decision,
 #: Sept 25, 2026). A close of any type is sent as it is.
 MLEG_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
+#: Those of them that open for a CREDIT (`league/structures.py` CREDIT_TYPES). Where the account and its
+#: rules admit them is `AlpacaBroker.structure_refusal`'s to say (Sept 25, 2026, Wave 2 of the options desk).
+CREDIT_MLEG_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
+#: The practice account's venue names: `gateway_broker` builds BOTH accounts with placeholder credentials
+#: whose `paper` flag is False (the gateway signs), so the venue name is what says which account this is.
+PRACTICE_VENUES = ("alpaca-paper",)
+#: How long a failed read of the account's type waits before `account_type` asks again.
+ACCOUNT_RETRY_SECONDS = 60.0
+#: The account `multiplier` from which Alpaca calls an account a margin account: "1 (standard limited
+#: margin account with 1x buying power), 2 (reg T margin account ...), 4 (PDT account ...)"
+#: (https://docs.alpaca.markets/reference/getaccount-1, read Sept 25, 2026).
+MARGIN_MULTIPLIER = Decimal(2)
+
+
+def real_credit_types() -> "tuple[str, ...]":
+    """The credit structure types the owner has admitted on the REAL account: the constitution's
+    `allocator.option_spread_real_types` (the money builder's key, Wave 2, Sept 25, 2026), a list or a
+    comma-separated string of type names, read at each call. Absent, unreadable, `"off"` or naming no
+    credit type: none. A debit type is not this key's to admit (the House's O1 switch and the gateway's
+    `OPTION_STRUCTURES_REAL` hold every real structure); a credit type needs it on top of them."""
+    try:
+        from league.constitution import CONSTITUTION
+
+        value = (CONSTITUTION.get("allocator") or {}).get("option_spread_real_types")
+    except Exception:  # noqa: BLE001 - a rule that cannot be read admits nothing
+        return ()
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(t for t in CREDIT_MLEG_TYPES if t in {str(v).strip() for v in value})
 
 
 def _structures() -> Any:
@@ -298,8 +329,9 @@ def _first_cost(rows: "list[tuple[Decimal, Decimal]]", contracts: Decimal) -> De
 class AlpacaBroker:
     """A `Broker` over Alpaca's trading and market-data APIs."""
 
-    #: The structure types a book may open on this venue (`MLEG_TYPES`), read by `Book.check`.
-    structure_types = MLEG_TYPES
+    #: The structure types this venue can close as ONE covered multi-leg order (`MLEG_TYPES`), whatever
+    #: the account. Which of them this account OPENS is `structure_types`, read by `Book.check`.
+    closeable_types = MLEG_TYPES
 
     def __init__(
         self,
@@ -344,6 +376,10 @@ class AlpacaBroker:
         self._answers: list[dict[str, Any]] = []
         self._answered: set[tuple[str, str]] = set()
         self._activity_reads: dict[str, int] = {}
+        #: What this account is, read ONCE from `GET /v2/account` (`_note_account`, Wave 2, Sept 25,
+        #: 2026): {"kind": "margin" | "cash", "multiplier", "options_trading_level"}; None until read.
+        self._account: "dict[str, Any] | None" = None
+        self._account_tried = 0.0
 
     # ------------------------------------------------------------------- http
     def _call(
@@ -386,6 +422,7 @@ class AlpacaBroker:
         row = self._call("GET", "/v2/account", what="alpaca account")
         if not isinstance(row, dict):
             raise VenueUnavailable("alpaca account: unexpected response")
+        self._note_account(row)
         return Balance(
             venue=self.venue,
             cash=dec(row.get("cash"), "0"),
@@ -394,6 +431,93 @@ class AlpacaBroker:
             as_of=iso(row.get("balance_asof") or row.get("created_at") or 0),
             currency=str(row.get("currency") or "USD"),
         )
+
+    # ------------------------------------------------------ the account's type (Wave 2, Sept 25, 2026)
+    def _note_account(self, row: dict[str, Any]) -> None:
+        """Read what this account is from an account row, ONCE for the life of the process: its
+        `multiplier` (1: Alpaca's "limited margin account with 1x buying power", which the owner's
+        real account is and this code calls a CASH account; 2 or 4: a margin account, as the practice
+        account is) and its `options_trading_level` (3 = spreads). A row that does not state the
+        multiplier is not a reading: the next one is asked. The reading is kept for the owner's
+        record (`drain_structure_answers`, stage `account`)."""
+        if self._account is not None:
+            return
+        multiplier = dec(row.get("multiplier"))
+        if multiplier is None or multiplier <= 0:
+            return
+        level = dec(row.get("options_trading_level"))
+        facts = {"kind": "margin" if multiplier >= MARGIN_MULTIPLIER else "cash", "multiplier": text(multiplier),
+                 "options_trading_level": None if level is None else int(level)}
+        with self._structure_lock:
+            if self._account is not None:
+                return
+            self._account = facts
+        self._answer("account", facts["kind"], {**facts, "practice": self.practice,
+                                                "credit_in_cash": facts["kind"] == "margin"})
+
+    @property
+    def practice(self) -> bool:
+        """Whether this is the practice account (`PRACTICE_VENUES`, or paper credentials)."""
+        return bool(self.credentials.paper) or self.venue in PRACTICE_VENUES
+
+    def account_type(self) -> "str | None":
+        """"margin" or "cash" (Alpaca's 1x limited margin account), read once through `GET /v2/account`
+        (`balance`, which every reconciliation calls, reads it on the way); None while it cannot be
+        read, asked again at most every `ACCOUNT_RETRY_SECONDS`."""
+        if self._account is None and time.monotonic() - self._account_tried >= ACCOUNT_RETRY_SECONDS:
+            self._account_tried = time.monotonic()
+            try:
+                self.balance()
+            except Exception:  # noqa: BLE001 - unknown for now; the strict answer stands until it is read
+                pass
+        facts = self._account
+        return None if facts is None else str(facts["kind"])
+
+    def credit_in_cash(self) -> "bool | None":
+        """Does the venue ADD a credit structure's credit to `cash` (a margin account: the collateral is
+        held against buying power, not taken from cash), so that the book, which DEBITS the structure's
+        maximum loss, must take the open credit structures' collateral off the venue's cash before the
+        two are compared (`Book._fold_structure_legs`)? True on a margin account (P2's model); False on a
+        cash account, where the spec's model is that the account sets the maximum loss aside from cash,
+        as the book does, so there is nothing to offset; None while the account is unread (the book then
+        keeps P2's model: Alpaca says "all accounts are set up as margin accounts",
+        https://alpaca.markets/support/alpaca-cash-accounts). Neither account has shown a credit
+        structure yet (no test orders): the first one's reconciliation is the measurement."""
+        facts = self._account
+        return None if facts is None else facts["kind"] == "margin"
+
+    @property
+    def structure_types(self) -> "tuple[str, ...]":
+        """The structure types a book may OPEN on this account now (read by `Book.check`): of the types
+        the venue can close as one order (`MLEG_TYPES`), those `structure_refusal` does not refuse."""
+        return tuple(t for t in MLEG_TYPES if self.structure_refusal(t) is None)
+
+    def structure_refusal(self, structure_type: str) -> "str | None":
+        """Why this account does not OPEN a structure of `structure_type`, or None (Wave 2, Sept 25, 2026):
+        - a type the venue cannot close as ONE covered order (`MLEG_TYPES`);
+        - an account whose options level is known and under 3 (spreads): the venue would refuse it;
+        - a CREDIT type on the practice account unless it reads as margin (or is not read yet: the owner
+          verified it margin, level 3), and on the REAL account unless the owner admitted the type
+          (`real_credit_types`: `allocator.option_spread_real_types`), whatever the account reads as.
+        A close is never refused here: what is held must be closable."""
+        if structure_type not in MLEG_TYPES:
+            return (f"a {structure_type} is not opened here: its close as one multi-leg order sells a leg no buy in the order covers, "
+                    "which Alpaca refuses, and legging out is not allowed (it trades on the options shadow book)")
+        facts = self._account or {}
+        level = facts.get("options_trading_level")
+        if level is not None and level < 3:
+            return f"this account's options level is {level}; a multi-leg order needs level 3 (spreads)"
+        if structure_type not in CREDIT_MLEG_TYPES:
+            return None
+        if self.practice:
+            if facts.get("kind") == "cash":
+                return (f"a {structure_type} opens for a credit, and this practice account reads as a cash account (multiplier "
+                        f"{facts.get('multiplier')}): its credit and collateral are not modelled here")
+            return None
+        if structure_type in real_credit_types():
+            return None
+        return (f"a {structure_type} opens for a credit: credit structures on the real account wait for the owner's confirmation "
+                "(allocator.option_spread_real_types does not admit it)")
 
     def positions(self) -> list[Position]:
         """`GET /v2/positions`. A short position reports `side: "short"` and a negative `qty`."""
@@ -627,6 +751,11 @@ class AlpacaBroker:
         answer for each type, and every refusal, is kept for the owner's record."""
         body = mleg_body(intent)
         kind = str(intent.instrument.market_id).split("|", 1)[0]
+        refusal = self.structure_refusal(kind) if intent.side == "buy" else None
+        if refusal:
+            # Before anything is sent (Wave 2, Sept 25, 2026): the account's type and the owner's admitted
+            # real types are this adapter's to hold, whatever the book asked.
+            raise RejectedOrder(f"alpaca: {refusal}")
         try:
             payload = self._call("POST", "/v2/orders", body=body, headers={PURPOSE_HEADER: intent.purpose},
                                  what="alpaca submit structure", refused=(401, 403))
@@ -1158,6 +1287,8 @@ __all__ = [
     "mleg_body",
     "mleg_limit",
     "MLEG_TYPES",
+    "CREDIT_MLEG_TYPES",
+    "real_credit_types",
     "AlpacaCredentials",
     "alpaca_symbol",
     "instrument_for",

@@ -719,6 +719,9 @@ class Book:
         self._closing_buys: set[str] = set()
         self._venue_instruments: dict[str, Instrument] = {}
         self._venue_positions: dict[str, Decimal] = {}
+        #: The credit structures' collateral the last fold did NOT take off the venue's cash (a cash
+        #: account, Wave 2, Sept 25, 2026): what a reconciliation missing by exactly it names.
+        self._collateral_not_offset = ZERO
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -3166,7 +3169,17 @@ class Book:
         the book, holding it at S = K - credit, DEBITS K - credit, its maximum loss. The two differ by
         K x 100 x quantity for every credit structure held (K: the width, or the widest wing), closing
         it moves them back together, and a debit structure (K = 0) moves both alike: that is the cash
-        returned."""
+        returned.
+
+        Which account (Wave 2, Sept 25, 2026): the venue says whether it adds a credit to cash
+        (`AlpacaBroker.credit_in_cash`, read once from the account's `multiplier`): a margin account (the
+        practice account) does, and the collateral is taken off as above; a cash account (the owner's real
+        one, Alpaca's 1x) is taken to set the maximum loss aside from cash as the book does, and nothing is
+        taken off. A debit structure reconciles alike on both. Where nothing is taken off, the collateral
+        that would have been is kept (`_collateral_not_offset`) so a reconciliation that misses by exactly it
+        says so, and freezes: never a difference passed as the venue's fees."""
+        offset = self._credit_added_to_cash()
+        self._collateral_not_offset = ZERO
         collateral = ZERO
         for key, (instrument, quantity) in self._held_structures().items():
             spec = self._spec(instrument)
@@ -3180,8 +3193,21 @@ class Book:
                     positions.pop(leg_key, None)
                 else:
                     positions[leg_key] = left
-            collateral += spec.collateral * instrument.multiplier * quantity
+            if offset:
+                collateral += spec.collateral * instrument.multiplier * quantity
+            else:
+                self._collateral_not_offset += spec.collateral * instrument.multiplier * quantity
         return collateral
+
+    def _credit_added_to_cash(self) -> bool:
+        """Whether this venue adds a credit structure's credit to cash (`AlpacaBroker.credit_in_cash`): True
+        on a margin account, False on a cash account; a venue that cannot say keeps P2's margin model."""
+        read = getattr(self.broker, "credit_in_cash", None)
+        try:
+            value = read() if callable(read) else read
+        except Exception:  # noqa: BLE001 - not knowing keeps the model the book had
+            value = None
+        return value is not False
 
     @staticmethod
     def _contract_signs(instrument: Instrument, quantity: Decimal = ONE) -> dict[str, int]:
@@ -3237,6 +3263,13 @@ class Book:
         # closed there as one covered order, and legging out is not allowed, Sept 25, 2026).
         admitted = getattr(self.broker, "structure_types", None) if self._legs_at_venue() else None
         if admitted is not None and spec.type not in admitted:
+            closeable = getattr(self.broker, "closeable_types", None)
+            refusal = getattr(self.broker, "structure_refusal", None)
+            if closeable is not None and spec.type in closeable and callable(refusal):
+                # A type the venue can close as one order that THIS account does not open (Wave 2, Sept 25, 2026):
+                # its options level, or a credit on an account or under rules that do not admit one; the adapter
+                # says which, and refuses it again itself before anything is sent.
+                return [f"not opened on the {self.name} book: {refusal(spec.type) or 'this account does not open it'}"]
             return [f"a {spec.type} is not opened on the {self.name} book: the venue cannot close it as one order (its close sells "
                     "a leg no buy covers) and legging out is not allowed; it trades on the options shadow book"]
         # Its clock (Sept 25, 2026, merged with the options shadow book's rule): until 14:30 New York on its
@@ -3434,11 +3467,18 @@ class Book:
         for answer in answers:
             stage = str(answer.get("stage") or "")
             level = "error" if stage == "uneven" else ("warning" if stage == "refused" else "info")
-            self.ledger.append("ops.alert", {
-                "level": level, "book": self.name, "structure_answer": answer,
-                "text": (f"{self.name}: the venue's {stage} answer for a {answer.get('structure')}, kept for the owner's record "
-                         "(does the practice account take each structure, and how does it report its legs)"
-                         + ("; ERROR: its legs filled unevenly" if stage == "uneven" else ""))[:1000]})
+            if stage == "account":
+                facts = answer.get("detail") or {}
+                text_ = (f"{self.name}: the account reads as a {answer.get('structure')} account (multiplier {facts.get('multiplier')}, "
+                         f"options level {facts.get('options_trading_level')}): a credit structure's collateral is "
+                         + ("taken off the venue's cash before reconciling (the venue adds the credit)" if facts.get("credit_in_cash")
+                            else "not taken off the venue's cash (the account is taken to set the maximum loss aside)")
+                         + "; kept for the owner's record")
+            else:
+                text_ = (f"{self.name}: the venue's {stage} answer for a {answer.get('structure')}, kept for the owner's record "
+                         "(does the account take each structure, and how does it report its legs)"
+                         + ("; ERROR: its legs filled unevenly" if stage == "uneven" else ""))
+            self.ledger.append("ops.alert", {"level": level, "book": self.name, "structure_answer": answer, "text": text_[:1000]})
 
     # --------------------------------------------------------------- reconcile
     def _venue(self) -> tuple[Decimal, dict[str, Decimal]]:
@@ -3959,6 +3999,11 @@ class Book:
             problems = []
             if not within:
                 problems.append(f"cash differs by {cash_diff:.4f}")
+                unset = self._collateral_not_offset
+                if unset > 0 and abs(cash_diff - unset) < tolerance:
+                    # Wave 2, Sept 25, 2026: the one reading that tells whether a cash account adds a credit to cash.
+                    problems[-1] += (f" (exactly the ${q_cash(unset)} collateral of the credit structures held, which this account was "
+                                     "read not to add to cash: it does, as a margin account; nothing is booked for it)")
             if diffs:
                 problems.append("positions differ: " + ", ".join(f"{k} {v}" for k, v in diffs.items()))
             if pending:

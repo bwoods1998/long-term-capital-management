@@ -145,7 +145,7 @@ class TheOrderSent(unittest.TestCase):
                 closing = mleg_body(order_intent(kind, side="sell", limit=str(limit)))  # a close is sent as it is
                 self.assertEqual({r["position_intent"] for r in closing["legs"]} <= {"sell_to_close", "buy_to_close"}, True)
         self.assertEqual(transport.calls, [])
-        self.assertEqual(AlpacaBroker.structure_types, MLEG_TYPES)
+        self.assertEqual((AlpacaBroker.closeable_types, client.structure_types), (MLEG_TYPES, MLEG_TYPES))
 
     def test_the_close_sign_is_the_gateways_a_credit_buy_back_positive_a_debit_sale_negative(self):
         # The House floors its expiry-day close at S = 0.01 (the integrator, Sept 25): a credit structure
