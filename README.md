@@ -254,7 +254,7 @@ Since Sept 23, 2026 (`league/niches.py`). The owner did not want the agents forc
 "predefined strategies", and until then every desk traded a listed corner of its venue. So each
 venue also has one desk whose universe is the whole venue:
 `kalshi-open` (Greenwich: any Kalshi series but the multivariate combos) and `alpaca-open` (London:
-any US stock, ETF or coin against the dollar, never an option), eight seats each and no founders. A
+any US stock, ETF or coin against the dollar, never an option), eight seats on Kalshi and twelve on Alpaca (from Sept 25, 2026) and no founders. A
 program with no desk of its own (the architect's, the foundry's, a lab graduate's) is born there only
 when no single desk holds most of what its NEEDS name (`niches.match`, `niches.spanning`): it spans
 desks, or trades markets no desk lists. It is still shown only what it names, twelve at most; one

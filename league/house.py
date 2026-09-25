@@ -3980,12 +3980,17 @@ class House:
             raise
         self._charge_box(agent.id, run, note="a replay")
         artifact = self.experiments.finish(attempt, run.result, seconds=run.seconds)
+        # What the foundry's capacity estimate reads of the tape (S1 of the forward-first run, Sept 25, 2026): the span of
+        # its steps and, on a Kalshi tape, how many settled markets were listed against the ones it kept (`meta`).
+        steps = tape.get("steps") or []
+        shape = {"first": steps[0].get("t") if steps else None, "last": steps[-1].get("t") if steps else None,
+                 "meta": tape.get("meta") if isinstance(tape.get("meta"), dict) else None}
         if (tape.get("source") or {}).get("store") == "history":
             from .deep_replay import walk_forward
 
-            return {**run.result, "experiment": artifact, "tape_source": "history-dev",
+            return {**run.result, "experiment": artifact, "tape_source": "history-dev", "tape_shape": shape,
                     "walk_forward": walk_forward(run.result, tape)}, attempt["tape"]
-        return {**run.result, "experiment": artifact, "tape_source": "live"}, attempt["tape"]
+        return {**run.result, "experiment": artifact, "tape_source": "live", "tape_shape": shape}, attempt["tape"]
 
     def _lab_freeze_cut(self, code: str) -> float | None:
         """Where the House's replay of a lab graduate ends: the hour after the lab froze its code (`Lab._frozen_at`, rounded up
@@ -4261,7 +4266,7 @@ class House:
         verdict = self.evaluator.record_trial(agent.id, agent.family, result, tape_id=tape_id, promote=False,
                                               lineage=list(lineage) if lineage else self.registry.lineage(agent.id))
         out = {"counted_as_trial": True, "passed": bool(verdict.numbers.get("passed")), "numbers": verdict.numbers, "needs": info["needs"], "params": info.get("params") or {},
-               "digest": result.get("digest")}
+               "digest": result.get("digest"), "tape_shape": result.get("tape_shape")}
         if result.get("tape_source") == "history-dev":
             # Development history, fold by fold. A pass here still needs the sealed holdout to be
             # promoted, and nothing about the holdout is ever shown.

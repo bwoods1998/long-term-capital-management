@@ -383,14 +383,14 @@
       "alpaca-open",
       "kalshi-open"
     ],
-    "fast_share": 0.5,
+    "fast_share": 0,
     "prefer_horizon": "hour",
     "max_pending_cards": 8,
     "_about_sept23c": "Sept 23, 2026 (the learn-and-unblock run, S3/C3: the foundry follows yield). Measured since Sept 22 13:30Z: the foundry was the only paid source to reach real money (108 cards for $8.48, 33 replay passes, 27 born, 2 on rung 2; $0.26 a replay pass) and the practice loss engine: foundry-born agents were -$272.96 of the -$361 kalshi-shadow loss, two BTC-strike cards -$113.68 in ten settlements, kalshi-crypto-strikes -10.3% an active block (40 born, 2 replay passes ever), kalshi-crypto-15m -1.9% a block with taker entries at 182 bps. So kalshi-crypto-strikes leaves fast_desks; a desk whose foundry-born agents are negative over fast_lane_min_blocks (6) active blocks (league/hypotheses.py desk_forward, from eval.block rows) gets no fast-lane call until one family there is positive over fast_lane_reopen_blocks (3), and the open fast desks are ranked by that yield before the rotation; the exploration share is unchanged; the brief tells Merton that kalshi-crypto-15m needs maker entries and that a binary position above 15% of the stake is a one-loss trial. The foundry runs at the `earned` frontier tier (it is the best yield per dollar) and stops only at `audits`, as before.",
     "fast_lane_min_blocks": 6,
     "fast_lane_reopen_blocks": 3,
     "_about_sept23b": "Sept 23, 2026 (the owner's north star: a swarm that trades 24/7 and compounds). Measured 01:39-02:10Z: 4 of 8 GPT-6 Sol cards passed replay at about $0.03 a card, the best yield in the league, but the foundry never exploited what already works. The only mechanism with real-money profit (Kalshi daily favourites bought as a maker: mullins-2 and mullins-6 on weather, hawkins-19 on commodities, all live) was never offered to a desk where it had not been tried, and 12 of the 16 merged repairs failed replay, so self-improvement was fixing bugs, not finding edges. The fast route sent every fast call to the best-scored fast desk, the index-ETF desk, so the 24/7 crypto desks got no cards. Now up to transfer_share of calls take a family with an earned forward record (real money first) to the best-scored desk of its venue where it was never tried, and Merton adapts its mechanism there; the fast route rotates to the fast desk with the fewest recent cards; every packet carries the league's edge map (winning_mechanisms). Precedence: transfer, fast, exploration, else evidence; with 0.3, 0.5 and 0.2 that is about 27%, 45%, 18% and 9% of calls (the evidence route had about 36% before transfers).",
-    "transfer_share": 0.3,
+    "transfer_share": 0,
     "closed_desks": [
       "kalshi-crypto-strikes",
       "kalshi-crypto-15m"
@@ -406,7 +406,104 @@
         "forecast"
       ]
     },
-    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E2 and E3: the foundry brief foundry-2026-09-24.1). Cards are model-versus-market mechanisms that name the feeds the House records for their desk (league/hypotheses.py DESK_FEEDS: weather ensembles and NWS forecasts for kalshi-weather, EDGAR 8-K earnings times for the megacaps and options, SOFR and par yields for the rates series, ESPN odds for sports, DVOL and funding for crypto) and state the fee each trade pays and the edge it needs to clear it (a card that does not is refused before its replay). fast_desks is now the deep-market desks (the megacaps, index ETFs, crypto majors and both open desks: options has no replay, so no card can be admitted there); kalshi-crypto-strikes and kalshi-crypto-15m (closed_desks) get no card on any route until a family there is positive over closed_reopen_blocks (3) active forward blocks (at T0 every crypto-15m family was negative on its pooled record, crypto-15m-favorites n 106, bound -0.0064; the strike desk ran -10.3% a block). The first transfer to try (first_transfer) scales the weather favourites, the one family with real profit ($1.41 a day on its real seats at T0, about $7.81 a day at its measured capacity), on the ensemble's fair value across every weather series. A family at its measured capacity (the family ledger's estimate) gets no House mutation, and the packet marks it."
+    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E2 and E3: the foundry brief foundry-2026-09-24.1). Cards are model-versus-market mechanisms that name the feeds the House records for their desk (league/hypotheses.py DESK_FEEDS: weather ensembles and NWS forecasts for kalshi-weather, EDGAR 8-K earnings times for the megacaps and options, SOFR and par yields for the rates series, ESPN odds for sports, DVOL and funding for crypto) and state the fee each trade pays and the edge it needs to clear it (a card that does not is refused before its replay). fast_desks is now the deep-market desks (the megacaps, index ETFs, crypto majors and both open desks: options has no replay, so no card can be admitted there); kalshi-crypto-strikes and kalshi-crypto-15m (closed_desks) get no card on any route until a family there is positive over closed_reopen_blocks (3) active forward blocks (at T0 every crypto-15m family was negative on its pooled record, crypto-15m-favorites n 106, bound -0.0064; the strike desk ran -10.3% a block). The first transfer to try (first_transfer) scales the weather favourites, the one family with real profit ($1.41 a day on its real seats at T0, about $7.81 a day at its measured capacity), on the ensemble's fair value across every weather series. A family at its measured capacity (the family ledger's estimate) gets no House mutation, and the packet marks it.",
+    "_about_sept25": "Sept 25, 2026 (the forward-first run, S1 and S2: the foundry brief foundry-2026-09-25.1; league/hypotheses.py). The one proven real family (sports-central-run-under, MLB totals) is a five-day regime whose season ends Sept 27, the proven megacaps family earns $0.25-0.51 a day at 1x-2x, and real settled profit was $19-21 a day against $118-122 of compute (T0 and 10:36Z readings), while no card named its capacity. Every card now carries a capacity estimate -- markets a day in its band x the size a position takes before its fills halve (the desk's family fill curve, C6, else the $6 Kalshi / $12.50 Alpaca a proven family's bunt holds) x its profit a settlement scaled from the replay's position (replay_position_usd: Kalshi $30, 15% of the practice stake under the brief's one-loss rule; Alpaca the $100 practice position cap) -- stated by Merton on the card row and measured by its replay on the evaluation row; under min_capacity_usd ($5) a day it is refused with the arithmetic, before its replay or after it (under_capacity, never born). Calls: capacity_share (half) to desks whose pooled forward record over capacity_days (7) is positive over capacity_min_blocks (6) active blocks, weighted by the measured capacity of the families that earn there (never to one family's mechanism by name: the sports family's proof is a regime); model_share (three tenths) to model_targets, model-versus-market cards on recorded feeds (the weather ensemble; EDGAR earnings for the megacaps; DVOL and funding for the crypto majors; the odds recorder's consensus for sports, on leagues no founder prices on the line); exploration_share (two tenths); transfer and fast none (the first transfer's weather ensemble is now the model route's first target: no call for it had returned by T0, the weather desk being full). A card whose markets span the desk it was written for and the desk its NEEDS match is replayed on both tapes and born on the first it passes (8 open-desk cards were refused unreplayed Sept 23-24; 6 of them spanned two desks). Cards for desks the search closed stay closed.",
+    "capacity_share": 0.5,
+    "model_share": 0.3,
+    "capacity_days": 7,
+    "capacity_min_blocks": 6,
+    "capacity_weight_floor_usd": 0.25,
+    "min_capacity_usd": 5,
+    "replay_position_usd": {
+      "kalshi": 30,
+      "alpaca": 100
+    },
+    "model_targets": [
+      {
+        "desk": "kalshi-weather",
+        "feeds": [
+          "weather",
+          "nws",
+          "forecast"
+        ],
+        "ask": "A fair value for each weather market from the GFS and ECMWF ensemble members' forecasts for its settlement station (the weather feed live; the forecast feed's point-in-time history is what a replay can judge now), priced against Kalshi on every series and strike the desk lists -- highs, lows and rain, not only the favourites' band -- and bid post-only where the model's probability clears the ask plus the fee."
+      },
+      {
+        "desk": "alpaca-megacaps",
+        "feeds": [
+          "earnings",
+          "earnings_date"
+        ],
+        "ask": "A fair value for the move after a report from each 8-K Item 2.02's EDGAR acceptance time (the earnings feed, point-in-time history back two years) and the next announcement date (earnings_date): model the drift after the filing across the megacaps and enter only where the move the model expects clears the spread."
+      },
+      {
+        "desk": "alpaca-crypto-majors",
+        "feeds": [
+          "vol",
+          "funding"
+        ],
+        "ask": "A fair value for BTC and ETH from Deribit's implied volatility (the vol feed, DVOL) and OKX's settled funding (the funding feed): trade where the realized move departs from what DVOL priced or where funding marks crowded positioning, post-only entries and exits so the 0.30% maker round trip is cleared."
+      },
+      {
+        "desk": "kalshi-sports",
+        "feeds": [
+          "odds",
+          "sports",
+          "consensus"
+        ],
+        "leagues": "unfounded",
+        "ask": "A fair value for each game contract from the sportsbooks' line (the odds feed: every provider's de-vigged line and ESPN's predictor; the consensus feed once the owner's key is placed), priced against Kalshi's winners, spreads and totals, bid post-only before the start where Kalshi is off the line by more than the fee and a margin."
+      }
+    ]
+  },
+  "hypotheses_bounds": {
+    "_about": "Checked by economy.check_bounds (and so by league.ci), Sept 25, 2026 (the forward-first run, S1): each foundry dial named here stays inside its range (a range a venue for replay_position_usd), and the five route shares (capacity, model, transfer, fast, exploration) add up to at most the whole call window.",
+    "capacity_share": [
+      0,
+      1
+    ],
+    "model_share": [
+      0,
+      1
+    ],
+    "transfer_share": [
+      0,
+      1
+    ],
+    "fast_share": [
+      0,
+      1
+    ],
+    "exploration_share": [
+      0,
+      1
+    ],
+    "capacity_days": [
+      3,
+      14
+    ],
+    "capacity_min_blocks": [
+      3,
+      48
+    ],
+    "capacity_weight_floor_usd": [
+      0.01,
+      5
+    ],
+    "min_capacity_usd": [
+      2,
+      20
+    ],
+    "replay_position_usd": {
+      "kalshi": [
+        10,
+        100
+      ],
+      "alpaca": [
+        25,
+        100
+      ]
+    }
   },
   "consult": {
     "_about": "What it costs an agent to hire Merton, the frontier model, out of its own credits, and what it must have DONE to be allowed to. Frontier intelligence is the scarcest thing on the floor: it is the prize for trading well, never a rebate for existing. An agent that has not traded is served by Merton's own roles -- the architect who writes strategies, the toolsmith who builds what the queue asks for, the teacher who writes the lessons -- which cost it nothing and reach the whole firm.",

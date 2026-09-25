@@ -104,6 +104,21 @@ def check_bounds(game: Mapping[str, Any]) -> None:
                 raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not one of {bound}")
         elif not float(bound[0]) <= float(gate[key]) <= float(bound[1]):
             raise ValueError(f"game.json: research.gate.{key} = {gate[key]} is outside [{bound[0]}, {bound[1]}]")
+    # The foundry's dials (Sept 25, 2026, the forward-first run's S1): `hypotheses_bounds`, each checked where the
+    # hypotheses section sets it (a range a key for a dict dial), and the five route shares at most the whole window.
+    foundry, bounds = game.get("hypotheses") or {}, game.get("hypotheses_bounds") or {}
+    for key, bound in bounds.items():
+        if str(key).startswith("_") or key not in foundry:
+            continue
+        for sub, (low, high) in (bound.items() if isinstance(bound, Mapping) else [(None, bound)]):
+            value = float(foundry[key] if sub is None else (foundry[key] or {}).get(sub, low))
+            if not float(low) <= value <= float(high):
+                name = key if sub is None else f"{key}.{sub}"
+                raise ValueError(f"game.json: hypotheses.{name} = {value:g} is outside [{low}, {high}]")
+    if bounds:
+        shares = sum(float(foundry.get(f"{route}_share") or 0) for route in ("capacity", "model", "transfer", "fast", "exploration"))
+        if shares > 1 + 1e-9:
+            raise ValueError(f"game.json: the foundry's route shares add up to {shares:g}, more than the whole call window")
     lock = ((game.get("research") or {}).get("gate") or {}).get("abstain_lock_profile")
     if lock is not None:
         from ltcm.provider import PROFILES

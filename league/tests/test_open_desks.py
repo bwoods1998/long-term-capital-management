@@ -32,11 +32,14 @@ class TheDesks(unittest.TestCase):
         self.niches = niches.load()
         self.kalshi, self.alpaca = self.niches["kalshi-open"], self.niches["alpaca-open"]
 
-    def test_one_open_desk_a_venue_with_eight_seats_both_horizons_and_no_planted_strategy(self):
+    def test_one_open_desk_a_venue_with_its_seats_both_horizons_and_no_planted_strategy(self):
         opened = sorted(n.id for n in self.niches.values() if n.open)
         self.assertEqual(opened, ["alpaca-open", "kalshi-open"])
+        # Twelve seats on the Alpaca desk since Sept 25, 2026 (S2 of the forward-first run); the Kalshi desk's row is the
+        # Kalshi-scale run's (eight at the time).
+        self.assertEqual((self.alpaca.max_members, self.kalshi.max_members >= 8), (12, True))
         for desk in (self.kalshi, self.alpaca):
-            self.assertEqual((desk.max_members, desk.horizons, desk.founders, desk.dormant, desk.replay), (8, ("hour", "day"), (), False, True))
+            self.assertEqual((desk.horizons, desk.founders, desk.dormant, desk.replay), (("hour", "day"), (), False, True))
             self.assertEqual(desk.listed, ())  # not a hard-coded list: the whole venue
         self.assertEqual(self.alpaca.asset_classes, ("equity", "crypto"))  # never options: the options desk's rules
         self.assertNotIn("option", self.alpaca.asset_classes)
@@ -244,15 +247,15 @@ class InTheHouse(HouseCase):
         self.assertEqual(intents, [])
         self.assertIn("outside the alpaca-crypto-majors specialty", " ".join(dropped))
 
-    def test_capacity_is_eight(self):
+    def test_capacity_is_twelve(self):
         niche = self.house.niches["alpaca-open"]
-        self.assertEqual(niche.max_members, 8)
-        agents = [self.seat_open(OPEN_BUYER.replace("open-buyer", f"open-buyer-{i}")) for i in range(7)]
+        self.assertEqual(niche.max_members, 12)  # eight until Sept 25, 2026 (S2 of the forward-first run)
+        agents = [self.seat_open(OPEN_BUYER.replace("open-buyer", f"open-buyer-{i}")) for i in range(11)]
         parent = agents[0]
         self.house.economy.grant(parent.id, "10", "test")
         child = self.house.fork(parent)
-        self.assertIsNotNone(child)  # the eighth seat
-        self.assertEqual((child.specialty, self.house.members("alpaca-open")), ("alpaca-open", 8))
+        self.assertIsNotNone(child)  # the twelfth seat
+        self.assertEqual((child.specialty, self.house.members("alpaca-open")), ("alpaca-open", 12))
         self.house.economy.grant(parent.id, "10", "test")
         self.assertIsNone(self.house.fork(parent))  # full: no niche may crowd out the rest
 
