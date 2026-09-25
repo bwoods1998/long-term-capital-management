@@ -515,6 +515,15 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   anything still over 80 cut; the ledger keeps the full code; a test runs the site's own validator). It ships in Deploy
   B (06:00Z Saturday) rather than as a restart among tonight's real-family games; the page stays frozen until then.
 
+- **Tonight's coordination (20:50-21:10Z).** The Kalshi run's K1 promoted 20:54:38Z (watch passed 21:04:46Z, grant
+  active on `d7d910fe`). Its verification found a feeds bug that predates K1 (every live recorder gave way on every
+  ~80 s pass to boards due every 60 s and never polled: the odds recorder's last poll 18:48Z); its fix #343 rides
+  Deploy B from its branch (merged into `b/integration` when its CI is green), not a restart tonight. It also found that
+  H3's train knows the session and recent starts but not "a real Kalshi family's game in play", so a Merton merge to main
+  could ship during a game: **H3b** (a builder, for Deploy C) holds the train while the real Kalshi book has a position
+  whose event has started and not settled, and fixes the watchdog's pre-existing `UnboundLocalError` on `inherited`.
+  Wave 0 cleanup: nine merged worktrees and their branches (h2, h3, h4, h5, z, their reviews, `a/integration`) removed.
+
 ## Progress notes
 
 ### T+14.2 h (18:37Z Sept 25, inside the US session; nothing of this run deployed yet)
