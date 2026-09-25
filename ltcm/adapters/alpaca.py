@@ -966,7 +966,10 @@ class AlpacaBroker:
         if instrument is None:
             with self._structure_lock:
                 instrument = next((self._structure_ids[i] for i in ids if i and i in self._structure_ids), None)
-        spec = s.spec_of(instrument) if instrument is not None else self._identify(legs)
+        try:
+            spec = s.spec_of(instrument) if instrument is not None else self._identify(legs)
+        except ValueError:  # a code that no longer reads as a structure: never booked, never a crashed poll
+            spec = None
         client_order_id = str(row.get("client_order_id") or (intent.id if intent else ""))
         order_id = ("ord-" + client_order_id[3:] if client_order_id.startswith("oi-") else
                     ("ord-" + client_order_id if client_order_id else "ord-" + str(row.get("id") or "")))

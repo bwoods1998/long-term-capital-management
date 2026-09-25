@@ -356,6 +356,16 @@ class TheOrderRead(unittest.TestCase):
         self.assertIsNone(order.average_price)
         self.assertIn("cannot name", order.reason)
 
+    def test_an_order_on_a_code_that_no_longer_reads_as_a_structure_is_never_booked_and_never_crashes_a_poll(self):
+        good = held("debit_vertical")
+        tampered = Instrument("option", "SPY", VENUE, multiplier="100", expiry=good.expiry, strike=good.strike, right=good.right,
+                              market_id=good.market_id.replace("+1", "#").replace("-1", "+1").replace("#", "-1"))
+        intent = OrderIntent.new(desk_id="d", instrument=tampered, side="buy", quantity="1", order_type="limit", limit_price="0.40",
+                                 rationale="t", created_at="2026-09-25T14:00:00Z")
+        order, _ = self.read(condor_order(status="filled", filled=("1",) * 4, prices=self.PRICES), intent=intent)
+        self.assertIsNone(order.average_price)
+        self.assertIn("cannot name", order.reason)
+
     def test_get_and_open_orders_ask_for_the_legs_nested(self):
         client, transport = broker({PAPER_BASE + f"/v2/orders/{PARENT}*": condor_order(),
                                     PAPER_BASE + "/v2/orders?*": [condor_order()]})
