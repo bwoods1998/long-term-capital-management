@@ -232,19 +232,31 @@ watch.
   writes a space where the ledger writes `T`, a space sorts before `T`, and that form admitted the
   whole day.
 - **`python3 scripts/gap_scoreboard.py --snapshot DIR | --take DIR [--since ISO] [--baseline ISO]
-  [--json | --markdown]`** (Sept 24, 2026): the scoreboard of
-  [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z), read-only and standard
-  library only, from a snapshot of the House's stores rather than the live box. `--take` backs up
-  `ledger.sqlite`, `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp`
-  (sqlite's backup API, each source opened `mode=ro`), downloads them gzipped with `health.json`,
-  `house.json` and `allocator-board.json`, and deletes the box copies; `--snapshot` reads a directory
-  taken before. It prints the plan's seven metrics, each number with the function that computed it,
-  then each desk's evidence clock (hours from a member's first fill to its third independent
+  [--deploys FILE] [--json | --markdown]`** (Sept 24, 2026; the forward-first rows Sept 25): the
+  scoreboard of [the forward-first plan](goals/LTCM_FORWARD_FIRST.md) and, kept in a second table,
+  of [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z of both), read-only, from
+  a snapshot of the House's stores rather than the live box. `--take` backs up `ledger.sqlite`,
+  `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp` (sqlite's backup API,
+  each source opened `mode=ro`), downloads them gzipped with `health.json`, `house.json`,
+  `allocator-board.json`, `allocator.json` and the watchdog's `/workspace/deploys.jsonl`, and deletes
+  the box copies; `--snapshot` reads a directory taken before (`--deploys FILE` names a deploy log kept
+  outside it; without one, deploys and rollbacks are read from the ledger, which cannot see a release
+  killed before its first `ops.started`). The first table is the forward-first plan's seven rows with
+  their targets: real settled profit a day against compute a day (`scripts/economics.py`'s method plus
+  the lab's own calls in `lab.sqlite`, with the gateway's meter and the yield rows as checks) and the
+  proven families' capacity at 1x, 2x and 4x their real size; the forward-positive share of the day's
+  graduates and newborns; real dollars on proof, the swing clock and Alpaca real stock agents;
+  restarts, rollbacks by cause, the tick interval's p50 and deploys inside a US session (the NYSE
+  calendar); the seat queue, median life against each desk's evidence clock and the displacement
+  share; the real fill rate per order, refused real entries by rule and probes' taker entries; Sail's
+  runway, October's OpenAI cap and the population ceiling. Every part of a reading names the function
+  that computed it. The second table is the close-the-gaps plan's seven metrics; then each row in
+  detail, each desk's evidence clock (hours from a member's first fill to its third independent
   settlement), every family's pooled record (practice at weight 0.5, real at 1, one observation an
   event, a one-sided 80% Student's t bound) and the weather favourites' capacity. Its clock is the
-  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window for deaths,
-  the lab and supersessions, and `--baseline` counts promotions only from a moment (Deploy A). Every
-  definition is in the script's docstring.
+  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window, and
+  `--baseline` counts promotions only from a moment (Deploy A). Every definition is in the script's
+  docstring.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled). `meters` (Sept 24, 2026) has one entry per metered provider (`sail`,
