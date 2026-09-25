@@ -196,7 +196,10 @@ class TheSeatRule(SeatCase):
         self.assertIn("rule (a)", post)
         note = [e.payload for e in self.house.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "options desk seat rule"]
         self.assertEqual((note[0]["retired"], note[0]["count"], note[0]["cap"], note[0]["rule"]), (loser.id, 1, 12, "a"))
-        self.assertEqual(self.house._state["options_desk"]["retired"][0]["agent"], loser.id)
+        self.assertEqual(options_desk.retired_count(self.house), 1)
+        self.house.close(wait=None)
+        self.house = self.new_house()  # counted from the ledger: a restart (or a lost house.json) keeps the count
+        self.assertEqual(options_desk.retired_count(self.house), 1)
 
     def test_then_the_losing_alpaca_desks_most_negative_first_and_never_a_kalshi_desk(self):
         up = self.resident(BUYER.replace('["BTC/USD"]', '["SOL/USD"]').replace("test-buyer", "test-alts"), growth=0.30)  # alts desk: up
@@ -275,11 +278,10 @@ class TheSeatRule(SeatCase):
         self.options_resident(-0.10)
         self.grown_up()
         self.full()
-        self.house._state.setdefault("options_desk", {})["retired"] = [{"agent": f"x{i}"} for i in range(options_desk.RETIRE_CAP)]
-        self.assertEqual(options_desk.seat_founders(self.house), [])
+        with mock.patch.object(options_desk, "retired_count", return_value=options_desk.RETIRE_CAP):
+            self.assertEqual(options_desk.seat_founders(self.house), [])
         self.assertEqual(self.retired(), [])
         self.assertIn("its 12 residents", self.house._state["options_desk"]["waiting"]["why"])
-        self.house._state["options_desk"]["retired"] = []
         self.house._state["options_desk"].pop("waiting")
         with mock.patch.object(options_desk, "owed", return_value=[]):
             self.assertEqual(options_desk.seat_founders(self.house), [])
@@ -334,6 +336,56 @@ class TheSeatRule(SeatCase):
                 mock.patch.object(self.house, "kill", side_effect=watch("kill", kill)):
             options_desk.seat_founders(self.house)
         self.assertEqual(seen, {"probe": False, "spawn": True, "kill": True})
+
+
+class SafeRetirement(SeatCase):
+    def test_a_retirement_that_fails_leaves_the_founder_unborn_and_the_league_at_its_ceiling(self):
+        resident = self.options_resident(-0.10)
+        self.grown_up()
+        self.full()
+        ceiling = self.house.game["economy"]["max_population"]
+        with mock.patch.object(self.house, "kill", side_effect=RuntimeError("a venue error in the wind-down")):
+            self.assertEqual(options_desk.seat_founders(self.house), [])
+        self.assertEqual(len(self.house.registry.living()), ceiling)
+        self.assertTrue(self.house.registry.get(resident.id).alive)
+        self.assertEqual(self.born(), {})
+        self.assertTrue([e for e in self.house.ledger.iter(kinds="ops.alert") if "could not be retired" in str(e.payload)])
+
+    def test_a_founder_the_probe_refuses_retires_nobody(self):
+        resident = self.options_resident(-0.10)
+        self.grown_up()
+        self.full()
+        refused = mock.Mock(result={"ok": False, "error": "a syntax error"}, seconds=0.1, created=False)
+        with mock.patch.object(self.house.sandbox, "needs", return_value=refused):
+            self.assertEqual(options_desk.seat_founders(self.house), [])
+        self.assertTrue(self.house.registry.get(resident.id).alive)
+        self.assertEqual(self.retired(), [])
+        self.assertIn("test-condor", self.house._state["options_desk"]["refused"])
+
+    def test_the_seat_is_freed_before_the_birth(self):
+        self.options_resident(-0.10)
+        self.grown_up()
+        self.full()
+        order = []
+        kill, spawn = self.house.kill, self.house.spawn
+        with mock.patch.object(self.house, "kill", side_effect=lambda *a, **k: (order.append("kill"), kill(*a, **k))), \
+                mock.patch.object(self.house, "spawn", side_effect=lambda *a, **k: (order.append("spawn"), spawn(*a, **k))[1]):
+            options_desk.seat_founders(self.house)
+        self.assertEqual(order, ["kill", "spawn"])
+
+
+class TheCanary(SeatCase):
+    def test_found_and_founders_never_birth_a_structure_founder(self):
+        """A fresh (canary) House is under `min_population`, and `found` births every niche founder at once: the
+        structure founders are `seat_founders`' alone, one a tick."""
+        keys = {row["key"] for row in self.house.founders()}
+        self.assertFalse(keys & set(TEST_SEEDS))
+        self.assertIn("options-breakout", keys)  # the single-contract founders are still `found`'s
+        with mock.patch.object(self.house, "spawn", wraps=self.house.spawn) as spawn:
+            self.house.found(["options-breakout", "test-condor", "test-vertical"])
+        self.assertEqual(self.born(), {})
+        self.assertEqual([c.kwargs.get("founder") for c in spawn.call_args_list], ["options-breakout"])
+        self.assertEqual([f["key"] for f in options_desk.owed(self.house)], ["test-condor", "test-vertical"])
 
 
 class Records(SeatCase):

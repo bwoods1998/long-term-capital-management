@@ -37,9 +37,10 @@ Always kept: real money (rung >= 2); a winner (a positive 7-day record of its ow
 a position while its market is shut (eligible at the open); one with a working order on any book; one
 born less than `MIN_AGE_SECONDS` ago; and any structure agent (a founder never retires another). When
 the options desk is at its cap only (a) is asked, so the desk stays within it. At most `RETIRE_CAP`
-retirements in all (house.json `options_desk.retired`, persisted), one a tick, none while no founder is
+retirements in all (counted from the ledger's deaths of this cause), one a tick, none while no founder is
 owed; each is an `ops.budget` row ("options desk seat rule": who, why, the count and the cap) and an info
-alert.
+alert. The count is the ledger's (`retired_count`: the registry's deaths of cause `CAUSE`, folded from the
+`agent.died` rows), never a house.json list.
 
 A 7-day record is the sum of the log growth of the ACTIVE `eval.block` rows written on practice books in
 the last seven days (`records`, folded incrementally from the ledger); a desk's is every member's, living
@@ -47,12 +48,17 @@ or dead (a desk's record, not its survivors'). No House number is either: `famil
 lifetime record, and the foundry's `desk_forward` counts only its own cards.
 
 Locking: the founder's NEEDS are read in the probe box first, outside the lock (about 20 s of Sail); the
-choice of the resident, the birth (from that probe, `spawn(described=...)`, no Sail call) and the
-retirement run under the House's lifecycle lock, as the births pass's admissions do, so no wake or
-background pass sees half of it. Idempotent and restart-safe: a founder is owed only while no agent,
-living or dead, carries its key (the registry, from the ledger); a founder whose program cannot be born
-is not tried again until its code changes (`options_desk.refused`). Cheap when nothing is owed: one pass
-over the desk's founders, whose seeds are read once a process.
+choice of the resident, its retirement and the birth (from that probe, `spawn(described=...)`, no Sail call)
+run under the House's lifecycle lock, as the births pass's admissions do, so no wake or background pass sees
+half of it. The seat is freed before the birth, and only once the probe says the founder can be born: a
+retirement that fails leaves the founder unborn, never the league over its ceiling (the adversarial review
+of Sept 25, 2026). Only `seat_founders` births a structure founder: `House.founders` leaves them out
+(`is_structure_founder`), so `House.found` (a fresh canary under `min_population`) never probes all twelve.
+
+Idempotent and restart-safe: a founder is owed only while no agent, living or dead, carries its key (the
+registry, from the ledger); a founder whose program cannot be born is not tried again until its code
+changes (`options_desk.refused`). Cheap when nothing is owed: one pass over the desk's founders, whose
+seeds are read once a process.
 """
 
 from __future__ import annotations
@@ -99,23 +105,52 @@ def declares_structures(code: str) -> bool:
     return False
 
 
+def is_structure_founder(founder: Any) -> bool:
+    """Whether a niches.json `founders` row's seed declares structures (read once a process; a seed that cannot
+    be read is not one). `House.founders` leaves these out, so `House.found` never births them: only
+    `seat_founders` does, one a tick (a fresh canary House is under `min_population` and would otherwise probe
+    all twelve in its first tick)."""
+    seed = str((founder or {}).get("seed") or "") if isinstance(founder, dict) else ""
+    if seed not in _DECLARES:
+        try:
+            _DECLARES[seed] = declares_structures(seeds_module.load(seed))
+        except Exception:  # noqa: BLE001 - an unreadable seed seats nothing
+            _DECLARES[seed] = False
+    return _DECLARES[seed]
+
+
 def structure_founders(house: Any) -> list[dict[str, Any]]:
     """The options desk's `founders` rows whose seed declares structures, in niches.json order; none when the
-    desk is missing or dormant. A seed that cannot be read is not a structure founder."""
+    desk is missing or dormant."""
     niche = house.niches.get(OPTIONS_DESK)
     if niche is None or niche.dormant:
         return []
-    out = []
-    for founder in niche.founders:
-        seed = str(founder.get("seed") or "")
-        if seed not in _DECLARES:
-            try:
-                _DECLARES[seed] = declares_structures(seeds_module.load(seed))
-            except Exception:  # noqa: BLE001 - an unreadable seed seats nothing
-                _DECLARES[seed] = False
-        if _DECLARES[seed]:
-            out.append(dict(founder))
+    return [dict(founder) for founder in niche.founders if is_structure_founder(founder)]
+
+
+def founder_rows(house: Any, founders: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Key -> the birth row of each structure founder, as `House.founders` makes one for any other founder (which
+    leaves these out): the desk's name, the family (the seed's own when the key is the seed's name), the seed's
+    why, and its program pointed at the desk (`niches.founder_code`). A founder whose seed is not in SEEDS has none."""
+    from . import niches as niches_module
+
+    niche = house.niches[OPTIONS_DESK]
+    seeds = {row["name"]: row for row in seeds_module.SEEDS}
+    out = {}
+    for founder in founders:
+        seed = seeds.get(founder.get("seed"))
+        if seed is None:
+            continue
+        family = seed["family"] if founder["key"] == founder["seed"] else f"{niche.id.split('-', 1)[1]}-{seed['family'].split('-', 1)[-1]}"
+        out[founder["key"]] = {"name": niche.desk, "key": founder["key"], "family": family, "niche": niche.id, "why": seed["why"],
+                               "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)}
     return out
+
+
+def retired_count(house: Any) -> int:
+    """How many residents this rule has retired, ever: the deaths of cause `CAUSE` in the registry, which is the
+    ledger's `agent.died` rows folded (restart-safe, and nothing a house.json edit can reset)."""
+    return sum(1 for agent in house.registry.agents.values() if not agent.alive and agent.cause == CAUSE)
 
 
 def owed(house: Any) -> list[dict[str, Any]]:
@@ -309,8 +344,7 @@ def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
     if waiting and house.clock() - float(waiting.get("at") or 0) < RETRY_SECONDS:
         return []  # no seat a moment ago: asked again in a few minutes, not every tick
     refused = state.setdefault("refused", {})
-    retired = state.setdefault("retired", [])
-    rows = {row["key"]: row for row in house.founders() if row["niche"] == OPTIONS_DESK}
+    rows = founder_rows(house, wanted)
     wanted = [founder for founder in wanted if founder["key"] in rows
               and refused.get(founder["key"]) != code_sha(rows[founder["key"]]["code"])]
     born: list[Agent] = []
@@ -319,7 +353,7 @@ def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
             break
         row = rows[founder["key"]]
         full, desk_full = _seat_needed(house)
-        if (full or desk_full) and len(retired) >= RETIRE_CAP:
+        if (full or desk_full) and retired_count(house) >= RETIRE_CAP:
             _wait(house, len(wanted) - len(born), f"the seat rule has retired its {RETIRE_CAP} residents, its cap")
             break
         if full or desk_full:
@@ -331,6 +365,10 @@ def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
         with house._lifecycle_lock:
             if row["key"] in {agent.founder for agent in house.registry.agents.values()}:
                 continue  # born meanwhile
+            unborn = _unborn(house, described)
+            if unborn:
+                _refuse(house, refused, row, unborn)
+                continue
             full, desk_full = _seat_needed(house)
             loser, why, numbers = (None, "", {})
             if full or desk_full:
@@ -338,43 +376,71 @@ def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
                 if loser is None:
                     _wait(house, len(wanted) - len(born), why)
                     break
+                # The seat is freed FIRST, once the probe has said the founder can be born (as `House._admit_orphan`
+                # does): a retirement that fails leaves the founder unborn and the league at its ceiling, never over.
+                if not _retire(house, loser, row, why, numbers, desk_full=desk_full):
+                    break
             try:
                 agent = house.spawn(row["name"], row["family"], row["code"], reason=row["why"], specialty=OPTIONS_DESK,
                                     founder=row["key"], described=described)
             except ValueError as exc:
-                with house._state_lock:
-                    refused[row["key"]] = code_sha(row["code"])  # once per code version, not every tick
-                house.alert("warning", f"the options desk's structure founder {row['key']} could not be born: {str(exc)[:200]}")
+                _refuse(house, refused, row, str(exc))
                 continue
             if house.evaluator.rung(agent.id) < 1:
                 house.evaluator.seat(agent.id, 1, "a structure founder of the options desk: forward-tested on practice from the first day")
             house.seat(agent)
             born.append(agent)
             if loser is not None:
-                _retire(house, loser, agent, row, why, numbers, desk_full=desk_full)
+                house.alert("info", f"{loser.id} retired for the options desk's structure founder {row['key']} ({agent.id}): {why} "
+                                    f"[{retired_count(house)} of at most {RETIRE_CAP} by this rule]")
     if born:
         with house._state_lock:
             state.pop("waiting", None)
     return born
 
 
-def _retire(house: Any, loser: Agent, founder_agent: Agent, row: dict[str, Any], why: str, numbers: dict[str, Any], *, desk_full: bool) -> None:
-    """Retire `loser` for the founder just born (under the lifecycle lock), and say so: its post-mortem, one
-    `ops.budget` row with the rule's count and cap, and an info alert."""
-    state = _state(house)
-    full = "the options desk was at its cap" if desk_full else "the league was at its population ceiling"
-    house.kill(loser, CAUSE, f"{full} and the options desk's structure founder {row['key']} ({founder_agent.id}) takes its seat "
-                             f"by the options desk's seat rule (Sept 25, 2026): {why}")
+def _unborn(house: Any, described: Any) -> str:
+    """Why the probe says the founder cannot be born on the options desk (empty when it can): checked before any
+    seat is freed for it, with what `House.spawn` checks of the NEEDS."""
+    from . import niches as niches_module
+    from .agents import niche_of
+
+    info = getattr(described, "result", None) or {}
+    if not info.get("ok"):
+        return str(info.get("error") or "its NEEDS could not be read")
+    try:
+        niche_of(info["needs"])
+        niches_module.constrain(info["needs"], house.niches[OPTIONS_DESK])
+    except (KeyError, ValueError) as exc:
+        return str(exc)
+    return ""
+
+
+def _refuse(house: Any, refused: dict[str, str], row: dict[str, Any], why: str) -> None:
     with house._state_lock:
-        state.setdefault("retired", []).append({"agent": loser.id, "desk": loser.specialty, "family": loser.family, "founder": row["key"],
-                                                "born": founder_agent.id, "rule": numbers.get("rule"), "at": house.clock()})
-        count = len(state["retired"])
+        refused[row["key"]] = code_sha(row["code"])  # once per code version, not every tick
+    house.alert("warning", f"the options desk's structure founder {row['key']} could not be born: {str(why)[:200]}")
+
+
+def _retire(house: Any, loser: Agent, row: dict[str, Any], why: str, numbers: dict[str, Any], *, desk_full: bool) -> bool:
+    """Retire `loser` for the founder about to be born (under the lifecycle lock), and say so: its post-mortem and
+    one `ops.budget` row with the rule's count (from the ledger: `retired_count`) and cap. True when the resident is
+    gone; a retirement that fails is a warning, and the founder waits (the league never goes over its ceiling)."""
+    full = "the options desk was at its cap" if desk_full else "the league was at its population ceiling"
+    try:
+        house.kill(loser, CAUSE, f"{full} and the options desk's structure founder {row['key']} takes its seat "
+                                 f"by the options desk's seat rule (Sept 25, 2026): {why}")
+    except Exception as exc:  # noqa: BLE001 - checked below: only a resident that is gone frees a seat
+        house.alert("warning", f"{loser.id} could not be retired for the options desk's structure founder {row['key']} "
+                               f"({type(exc).__name__}: {str(exc)[:160]})")
+    current = house.registry.get(loser.id)
+    if current is not None and current.alive:
+        return False
     house.ledger.append("ops.budget", {"what": "options desk seat rule", "retired": loser.id, "desk": loser.specialty, "family": loser.family,
-                                       "founder": row["key"], "born": founder_agent.id, "count": count, "cap": RETIRE_CAP,
+                                       "founder": row["key"], "count": retired_count(house), "cap": RETIRE_CAP,
                                        "why": why[:300], **{k: v for k, v in numbers.items() if k != "desks"}})
-    house.alert("info", f"{loser.id} retired for the options desk's structure founder {row['key']} ({founder_agent.id}): {why} "
-                        f"[{count} of at most {RETIRE_CAP} by this rule]")
+    return True
 
 
-__all__ = ["OPTIONS_DESK", "RECORD_DAYS", "CAUSE", "RETIRE_CAP", "declares_structures", "structure_founders", "owed", "records",
-           "desk_records", "retiree", "seat_founders"]
+__all__ = ["OPTIONS_DESK", "RECORD_DAYS", "CAUSE", "RETIRE_CAP", "declares_structures", "is_structure_founder", "structure_founders",
+           "founder_rows", "owed", "retired_count", "records", "desk_records", "retiree", "seat_founders"]

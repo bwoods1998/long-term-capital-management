@@ -642,14 +642,36 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual(sorted({r["expiry"] for r in rows}), ["2026-09-10", "2026-09-11", "2026-09-14"])  # 0 DTE before 14:30 New York
         self.assertLessEqual(len(rows), 80)
         self.assertTrue(any(r["ask"] > 0.75 for r in rows))  # over the single contract's line
-        # One expiry a read, weekdays only, Thursday to the next Thursday.
-        self.assertEqual([a[1] for a in asked], ["2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"])
-        self.assertTrue(all(a[1] == a[2] for a in asked))
-        self.house._chain(["SPY"], 7, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
-        self.assertEqual(len(asked), 6)  # shared: read again only after two minutes
+        # ONE ranged request (306 rows: under the split line), Thursday to the next Thursday.
+        self.assertEqual(asked, [("SPY", "2026-09-10", "2026-09-17")])
+        self.house._chain(["SPY"], 2, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
+        self.assertEqual(len(asked), 1)  # shared, by an agent asking fewer days too: read again only after two minutes
         self.at(THURSDAY_11_NY + 3.75 * 3600)  # 14:45 New York: today's expiry is no longer shown
         rows = self.house._chain(["SPY"], 7, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
         self.assertNotIn("2026-09-10", {r["expiry"] for r in rows})
+
+    def test_a_chain_near_the_adapters_page_is_read_one_trading_day_at_a_time_and_stays_so_for_the_day(self):
+        asked = []
+        days = ("2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17")
+        self.broker.option_chain = fake_chain(asked, expiries=days)  # 612 rows over the window: a cut page
+        rows = self.house._chain(["SPY"], 7, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
+        self.assertEqual(asked[0], ("SPY", "2026-09-10", "2026-09-17"))
+        self.assertEqual([a[1] for a in asked[1:]], list(days))  # then one an expiry, trading days only (no weekend)
+        self.assertTrue(all(a[1] == a[2] for a in asked[1:]))
+        self.assertEqual(sorted({r["expiry"] for r in rows}), sorted(days))
+        self.at(self.clock() + 180)  # past the two minutes: straight to the expiries, no ranged request again today
+        self.house._chain(["SPY"], 7, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
+        self.assertEqual([a[1] for a in asked[7:]], list(days))
+        self.assertEqual(self.house._trading_days("2026-11-25", "2026-11-30"), ["2026-11-25", "2026-11-27", "2026-11-30"])  # no Thanksgiving
+
+    def test_a_structure_marked_at_zero_shows_its_loss_not_its_cost(self):
+        """The adversarial review (Sept 25, 2026): `mark or average_cost` showed a worthless condor at its cost."""
+        agent = self.structure_agent()
+        book, inst = self.held_condor(agent)
+        book.marks[inst.key] = D("0")  # what the book marks a structure whose bid comes to nothing (s1/shadow 0bba5c1)
+        row = self.house.snapshot(agent, book)["positions"][0]
+        self.assertEqual((row["mark"], row["natural_mark"]), (0.0, 1.0))  # the whole wing to buy it back
+        self.assertAlmostEqual(row["pnl_usd"], round(-row["average_cost"] * 100, 2))
 
     def test_a_zero_dte_strategy_is_shown_today_only(self):
         """Regression: `max_days_to_expiry: 0` read as "unsaid" (a falsy 0) showed a 0-DTE strategy a week."""

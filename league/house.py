@@ -146,6 +146,10 @@ STRUCTURE_BOOK_DEFAULT = "options-shadow"
 STRUCTURE_ENTRY_CUT_HOUR = 14.5
 STRUCTURE_CLOSE_HOUR = 15.5
 STRUCTURE_CHAIN_PER_UNDERLYING = 80
+#: A structure agent's chain is one ranged request an underlying over this many days (`House._expiry_chain`), split
+#: into one request an expiry only when it returns this many rows or more (near the adapter's 1,000-snapshot page).
+STRUCTURE_CHAIN_WINDOW_DAYS = 7
+STRUCTURE_CHAIN_SPLIT_ROWS = 600
 PROBE_BOX = "house-probe"
 #: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
 #: how often they run, how many ledger rows the first pass reads back (never the whole ledger),
@@ -762,9 +766,9 @@ class House:
         (`afford` None; a structure's legs are not bought alone, and the book meters the structure's
         maximum loss), expiries from TODAY in New York until the entry cut (`STRUCTURE_ENTRY_CUT_HOUR`,
         from tomorrow after it) to `days` ahead, and at most `STRUCTURE_CHAIN_PER_UNDERLYING` an
-        underlying. The venue's chain is read one expiry at a time (`_expiry_chain`), shared by every
-        structure agent for two minutes: a 0-7 day SPY chain is over a thousand contracts, and the
-        adapter's one call stops at its first thousand, cutting an expiry in half."""
+        underlying. The venue's chain is read by `_expiry_chain`, shared by every structure agent for two
+        minutes: one ranged request an underlying, split by expiry only where the adapter's one call would
+        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain)."""
         broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
         if broker is None:
             return []
@@ -801,23 +805,52 @@ class House:
             self.alert("warning", f"option quotes not kept ({type(exc).__name__}: {str(exc)[:120]})")
 
     def _expiry_chain(self, broker: Any, symbol: str, first: str, last: str, spot: float | None) -> list[dict[str, Any]]:
-        """A structure agent's chain of one underlying (`_chain`), read from the venue one expiry date at a time
-        (weekdays only) and cached two minutes a date, so every structure agent naming SPY shares one read of each
-        SPY expiry. Kept in the options history once a read, as a single-leg chain is."""
-        from datetime import date as _date
+        """A structure agent's chain of one underlying (`_chain`), shared by every structure agent for two minutes.
 
+        ONE ranged request first, over `STRUCTURE_CHAIN_WINDOW_DAYS` from `first` (or the agent's own days if
+        longer), so agents asking 2, 4 or 7 days share it; each agent keeps the expiries up to its own `last`.
+        Only when that request comes back near the adapter's page (`STRUCTURE_CHAIN_SPLIT_ROWS` rows: the adapter
+        stops at its first 1,000 snapshots and drops the one-sided ones before returning, so a cut chain returns
+        fewer than 1,000) is the underlying read one expiry at a time, on the House's trading days only
+        (`us_equity_session`), each expiry cached two minutes; and such an underlying is read that way for the
+        rest of the New York day without asking the ranged request again. The adversarial review of Sept 25, 2026
+        counted 42 requests for one cold wake of a 10-day, six-underlying agent when every weekday was asked
+        apart; on the box that day an SPY, QQQ or IWM expiry lists 164-586 contracts, a small stock's far fewer."""
+        window_end = max(last, _plus_days(first, STRUCTURE_CHAIN_WINDOW_DAYS))
+        split = self.__dict__.setdefault("_structure_split", {})
+        if split.get(symbol) != first:
+            ranged = self._cached(f"structure-range:{symbol}:{first}:{window_end}", 120,
+                                  lambda: self._read_expiry(broker, symbol, first, spot, until=window_end), record=False)
+            if len(ranged) < STRUCTURE_CHAIN_SPLIT_ROWS:
+                return [c for c in ranged if str(c.get("expiry") or "") <= last]
+            if len(split) > 256:
+                split.clear()
+            split[symbol] = first  # too long for one page: by expiry until the New York day changes
         out: list[dict[str, Any]] = []
-        day = first
-        while day <= last:
-            if _date.fromisoformat(day).weekday() < 5:
-                fetched = self._cached(f"expiry-chain:{symbol}:{day}", 120,
-                                       lambda day=day: self._read_expiry(broker, symbol, day, spot), record=False)
-                out += fetched
-            day = _plus_days(day, 1)
+        for day in self._trading_days(first, last):
+            out += self._cached(f"expiry-chain:{symbol}:{day}", 120, lambda day=day: self._read_expiry(broker, symbol, day, spot), record=False)
         return out
 
-    def _read_expiry(self, broker: Any, symbol: str, day: str, spot: float | None) -> list[dict[str, Any]]:
-        chain = list(broker.option_chain(symbol, expiry_from=day, expiry_to=day))
+    def _trading_days(self, first: str, last: str) -> list[str]:
+        """The dates from `first` to `last` with a regular session by the House's calendar (`us_equity_session`;
+        a date it cannot answer for counts when it is a weekday): no option expires on a holiday or a weekend."""
+        from datetime import date as _date
+
+        days, day = [], first
+        while day <= last:
+            try:
+                open_day = us_equity_session(day) is not None
+            except Exception:  # noqa: BLE001 - outside the computed calendar: a weekday is asked
+                open_day = _date.fromisoformat(day).weekday() < 5
+            if open_day:
+                days.append(day)
+            day = _plus_days(day, 1)
+        return days
+
+    def _read_expiry(self, broker: Any, symbol: str, day: str, spot: float | None, *, until: str | None = None) -> list[dict[str, Any]]:
+        """One request to the venue: the contracts of `symbol` expiring on `day` (through `until` when given),
+        kept in the options history as a single-leg chain is."""
+        chain = list(broker.option_chain(symbol, expiry_from=day, expiry_to=until or day))
         if self.options_history is not None:
             self._keep_option_quotes(broker, chain, spot)
         return chain
@@ -1483,13 +1516,19 @@ class House:
 
     # ------------------------------------------------------------ population
     def founders(self) -> list[dict[str, Any]]:
-        """Every founder of every open specialty: a seed's program pointed at the niche's markets."""
+        """Every founder of every open specialty: a seed's program pointed at the niche's markets. Not the options
+        desk's structure founders (Sept 25, 2026): `options_desk.seat_founders` births them one a tick, and a fresh
+        House under `min_population` (a canary) would otherwise probe all twelve in its first tick."""
+        from .options_desk import is_structure_founder
+
         rows = {row["name"]: row for row in seeds_module.SEEDS}
         out = []
         for niche in self.niches.values():
             if niche.dormant:
                 continue
             for founder in niche.founders:
+                if is_structure_founder(founder):
+                    continue  # seated one a tick by league/options_desk.py, never all at once by `found` (a canary's first tick)
                 seed = rows[founder["seed"]]
                 # One family a program a specialty: real-money records are pooled among agents that
                 # run the same idea on the same kind of market. (Replay trials are counted by line.)
@@ -2171,8 +2210,13 @@ class House:
             if inst.asset_class == "event":
                 row.update(market=inst.market_id or inst.symbol, leg=inst.right or "yes")
             elif is_structure(inst):  # the held price S, with the natural prices and P&L a strategy exits by
-                row.update(self._structure_row(inst, average_cost=holding.average_cost, mark=book.marks.get(inst.key) or holding.average_cost,
-                                               quantity=holding.quantity))
+                # A structure's mark of 0 is the book's word (its bid comes to nothing), never a missing mark: the
+                # adversarial review of Sept 25, 2026 found `or average_cost` showing a worthless condor at its
+                # cost, no loss, and no stop firing. Only a mark not yet read falls back to the cost.
+                mark = book.marks.get(inst.key)
+                mark = holding.average_cost if mark is None else mark
+                row["mark"] = float(mark)
+                row.update(self._structure_row(inst, average_cost=holding.average_cost, mark=mark, quantity=holding.quantity))
             elif inst.asset_class == "option":
                 row.update(occ=occ_symbol(inst), symbol=inst.symbol, expiry=inst.expiry, strike=float(inst.strike), right=inst.right)
             else:
