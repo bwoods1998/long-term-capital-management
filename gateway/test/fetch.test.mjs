@@ -407,3 +407,82 @@ test('the kill switch does not stop a page from being read', async () => {
   assert.equal(response.status, 200);
   assert.equal(body.text, 'still reading');
 });
+
+// --- review (i1/review): what a hostile page or a burst of reads cannot do ----------------------
+
+test('hostile HTML is read in linear time: a tag or element that never closes ends the text', () => {
+  // Each of these held the old regex reader for minutes to hours at this size (32 KB of `<a` took
+  // 22 s): a pattern retried at every `<` scanned to the end of the page each time.
+  const size = 256 * 1024;
+  for (const unit of ['<a', '<p ', '<title>', '<a "', '<li x', "<td '", '<div x="1"', '<!--', '<script>', '<svg><b']) {
+    const html = '<p>kept</p>' + unit.repeat(Math.ceil(size / unit.length));
+    const started = performance.now();
+    const { text } = web.htmlToText(html);
+    const took = performance.now() - started;
+    assert.ok(took < 2000, `${JSON.stringify(unit)} x ${size / 1024} KB took ${took.toFixed(0)} ms`);
+    assert.equal(text, 'kept', JSON.stringify(unit));
+  }
+});
+
+test('the reader keeps what a browser would show', () => {
+  // A head with neither close nor body ends at the first element a head cannot hold.
+  assert.deepEqual(web.htmlToText('<html><head><title>T</title><meta x><p>Body'), { title: 'T', text: 'Body' });
+  // A self-closed svg holds nothing; the rest of the page is still read.
+  assert.equal(web.htmlToText('<svg/><p>after the icon</p>').text, 'after the icon');
+  // A `<` that opens no tag is text; entities are decoded once, after the tags are gone.
+  assert.equal(web.htmlToText('<p>1 < 2 and &lt;b&gt; is &amp;lt;</p>').text, '1 < 2 and <b> is &lt;');
+  // A tag may hold `>` inside a quoted value.
+  assert.equal(web.htmlToText('<a title="a > b" data-x=\'>\'>link</a>').text, 'link');
+  // A long custom element's name is any other tag.
+  assert.equal(web.htmlToText('<my-very-long-element-name>text</my-very-long-element-name>').text, 'text');
+  // A title's own tags are not its text.
+  assert.equal(web.htmlToText('<title>Kal<b>shi</b> &amp; co</title>').title, 'Kalshi & co');
+});
+
+test('an isolate reads at most MAX_IN_FLIGHT pages at once; one more is refused, free and uncounted', async () => {
+  const gate = gateFor();
+  const releases = [];
+  const tape = upstream(() => new Promise(resolve => releases.push(() => resolve(page('<p>held</p>')))));
+  const opts = { gate, fetcher: tape.fetcher, now: () => NOW };
+  const pending = [];
+  for (let k = 0; k < web.MAX_IN_FLIGHT; k++) pending.push(route(ask({ url: `https://example.com/${k}` }), env, opts));
+  while (tape.calls.length < web.MAX_IN_FLIGHT) await new Promise(resolve => setTimeout(resolve, 1));
+  assert.equal(web.inFlightNow(), web.MAX_IN_FLIGHT);
+
+  const busy = await route(ask({ url: 'https://example.com/busy' }), env, opts);
+  const answer = await busy.json();
+  assert.equal(busy.status, 429);
+  assert.equal(answer.busy, true);
+  assert.equal('url' in answer, false, 'a page the gateway did not read names no url, so the House does not charge it');
+  assert.equal(busy.headers.get('Retry-After'), '5');
+  assert.equal(tape.calls.length, web.MAX_IN_FLIGHT, 'nothing was fetched for it');
+  assert.equal(gate.webFetchDay(NOW).count, web.MAX_IN_FLIGHT, 'it took none of the day\'s places');
+
+  // A place held past a minute is stale: a request the runtime terminated never gave it back.
+  assert.equal(web.inFlightNow(Date.now() + 61_000), 0);
+  releases.forEach(release => release());
+  assert.ok((await Promise.all(pending)).every(response => response.status === 200));
+  assert.equal(web.inFlightNow(), 0);
+  // A page that fails, or a refused hop, gives its place back too.
+  await call({ url: 'https://down.example/' }, { replies: { 'https://down.example/': new TypeError('fetch failed') } });
+  await call({ url: 'https://example.com/go' }, { replies: { 'https://example.com/go': redirect('http://10.0.0.1/') } });
+  assert.equal(web.inFlightNow(), 0);
+});
+
+test('a content type is answered only as a bounded, well-formed media type', async () => {
+  for (const type of ['text/' + 'x'.repeat(10_000), 'text/html garbage that is not a type', 'text/']) {
+    const { response, body } = await call({ url: 'https://example.com/ct' }, {
+      replies: { 'https://example.com/ct': page('<p>x</p>', { type }) },
+    });
+    assert.equal(response.status, 415, type.slice(0, 40));
+    assert.equal(body.content_type, null);
+    assert.match(body.error, /\(malformed\)/);
+    assert.ok(JSON.stringify(body).length < 400, 'the page cannot make the answer (or the House\'s ledger row) large');
+  }
+  const { response, body } = await call({ url: 'https://example.com/ok' }, {
+    replies: { 'https://example.com/ok': page('<p>fine</p>', { type: 'Text/HTML ; charset=UTF-8' }) },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(body.content_type, 'text/html');
+  assert.equal(body.text, 'fine');
+});

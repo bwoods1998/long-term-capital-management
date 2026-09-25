@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
 import re
 import urllib.error
@@ -43,6 +44,10 @@ MAX_FETCH_URL_CHARS = 2048
 MAX_FETCH_ANSWER_BYTES = 2 * 1024 * 1024
 #: The page fields the gateway answers (gateway/lib/fetch.mjs `webFetch`).
 PAGE_FIELDS = ("url", "final_url", "status", "content_type", "title", "text", "truncated", "bytes", "fetched_at")
+#: The most of each string field kept from the gateway's answer. The gateway bounds them too; what
+#: reaches the model and the ledger is bounded here whatever the gateway (or a page) sent.
+PAGE_FIELD_CHARS = {"url": MAX_FETCH_URL_CHARS, "final_url": MAX_FETCH_URL_CHARS, "content_type": 127, "title": 300,
+                    "text": 200_000, "fetched_at": 40}
 WORD = re.compile(r"[a-z0-9]{3,}")
 
 
@@ -101,6 +106,24 @@ def gateway_fetch(gateway_url: str, token_source: Callable[[], str], *, opener: 
     return fetch
 
 
+def _page_field(key: str, value: Any) -> Any:
+    """One field of a page the gateway answered, as the House keeps it: a string cut to its bound, a
+    count as an int, a flag as a bool; anything else None."""
+    if key == "truncated":
+        return value is True
+    if key in ("status", "bytes"):
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return value[:PAGE_FIELD_CHARS[key]] if isinstance(value, str) else None
+
+
+def _may_have_read(exc: BaseException) -> bool:
+    """Whether a call that failed may still have had the gateway read the page. A connection never
+    made (refused, no such host) did not; a timeout, a dropped answer or an answer too large to be
+    a page may have, and the gateway may have spent its time on it."""
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError) else exc
+    return not isinstance(reason, (ConnectionRefusedError, socket.gaierror))
+
+
 class Commons:
     def __init__(self, ledger: Ledger, *, search: Callable[[str, int], list[dict[str, Any]]] | None = None, news: Any = None,
                  clock: Callable[[], float] = time.time, fetch: Callable[[str, str], tuple[int, dict[str, Any]]] | None = None):
@@ -132,35 +155,46 @@ class Commons:
 
     # -------------------------------------------------------------- web fetch
     def web_fetch(self, url: str, agent: str) -> dict[str, Any]:
-        """One public page, read by the gateway: its fields (`PAGE_FIELDS`), or `{"error"}`.
+        """One public page, read by the gateway: its fields (`PAGE_FIELDS`, bounded), or `{"error"}`.
 
         Errors are answers, never exceptions. `judged` says whether the gateway answered about this
         URL -- a page (whatever the page's own status), a refusal of the URL, a redirect or a
         content type, or the page's host failing to answer -- as opposed to a gateway that could not
-        act at all (unreachable, its token, its day's cap, a Worker error). Every answer the gateway
-        gives about a URL names it (`url`); nothing else does. The researcher charges and counts a
-        judged fetch only."""
+        act at all (unreachable, its token, its day's cap, busy, a Worker error). Every answer the
+        gateway gives about a URL names it (`url`); nothing else does.
+
+        `reached` says whether the gateway may have read the page, which is what the researcher
+        charges and counts: a judged answer, and also a Worker error (5xx naming no url: a page
+        that exhausted the Worker's CPU or memory ends that way) or a call that timed out or lost
+        its answer. Only a request the gateway refused before reading (4xx naming no url: its body,
+        its token, its day's cap, busy) or a connection never made is free -- otherwise a page
+        that kills the Worker could be asked for again and again at no cost to anyone."""
         url = str(url or "").strip()
         if not url:
-            return {"error": "give the url of one public page", "judged": False}
+            return {"error": "give the url of one public page", "judged": False, "reached": False}
         if len(url) > MAX_FETCH_URL_CHARS:
-            return {"error": f"the url is longer than {MAX_FETCH_URL_CHARS} characters", "judged": False}
+            return {"error": f"the url is longer than {MAX_FETCH_URL_CHARS} characters", "judged": False, "reached": False}
         if not url.lower().startswith(("http://", "https://")):
-            return {"error": "only a public http or https url can be read", "judged": False}
+            return {"error": "only a public http or https url can be read", "judged": False, "reached": False}
         if self._fetch is None:
-            return {"error": "web fetch is not configured on this floor", "judged": False}
+            return {"error": "web fetch is not configured on this floor", "judged": False, "reached": False}
         try:
             status, answer = self._fetch(url, str(agent or ""))
         except Exception as exc:  # noqa: BLE001 - a gateway that cannot be reached is an answer, not a crash
-            return {"error": f"the gateway could not be reached: {type(exc).__name__}", "judged": False}
+            return {"error": f"the gateway could not be reached: {type(exc).__name__}", "judged": False, "reached": _may_have_read(exc)}
+        answer = answer if isinstance(answer, dict) else {}
         judged = isinstance(answer.get("url"), str)
+        reached = judged or (isinstance(status, int) and status >= 500)
         if status == 200 and judged and isinstance(answer.get("text"), str):
-            return {**{key: answer.get(key) for key in PAGE_FIELDS}, "judged": True}
+            return {**{key: _page_field(key, answer.get(key)) for key in PAGE_FIELDS}, "judged": True, "reached": True}
         error = str(answer.get("error") or f"the gateway answered HTTP {status}")[:400]
-        out: dict[str, Any] = {"error": error, "gateway_status": status, "judged": judged}
+        out: dict[str, Any] = {"error": error, "gateway_status": status, "judged": judged, "reached": reached}
         for key in ("url", "final_url", "status", "content_type", "refused", "cap"):
-            if answer.get(key) is not None:
-                out[key] = answer[key] if not isinstance(answer[key], str) else answer[key][:400]
+            value = answer.get(key)
+            if isinstance(value, str):
+                out[key] = value[:400]
+            elif isinstance(value, (int, float)):
+                out[key] = value
         return out
 
     # ---------------------------------------------------------------- library

@@ -222,8 +222,68 @@ class WebFetchThroughTheGateway(unittest.TestCase):
         self.assertEqual((refused["judged"], refused["refused"], refused["gateway_status"]), (True, "url", 403))
         capped = commons.web_fetch("https://example.com/", "a1")
         self.assertEqual((capped["judged"], capped["cap"]), (False, "web_fetch_day"))
-        self.assertEqual(commons.web_fetch("https://example.com/", "a1"), {"error": "the gateway answered HTTP 500", "gateway_status": 500, "judged": False})
-        self.assertEqual(commons.web_fetch("https://example.com/", "a1"), {"error": "the gateway could not be reached: OSError", "judged": False})
+        self.assertEqual(commons.web_fetch("https://example.com/", "a1"),
+                         {"error": "the gateway answered HTTP 500", "gateway_status": 500, "judged": False, "reached": True})
+        self.assertEqual(commons.web_fetch("https://example.com/", "a1"),
+                         {"error": "the gateway could not be reached: OSError", "judged": False, "reached": True})
+        self.assertEqual((ok["reached"], refused["reached"], capped["reached"]), (True, True, False))
         for url in ("", "ftp://example.com/", "https://example.com/" + "a" * 2100):
-            self.assertFalse(commons.web_fetch(url, "a1")["judged"])
+            answer = commons.web_fetch(url, "a1")
+            self.assertEqual((answer["judged"], answer["reached"]), (False, False))
         self.assertIn("not configured", Commons(ledger).web_fetch("https://example.com/", "a1")["error"])
+
+    def test_what_may_have_been_read_is_told_from_what_never_was(self):
+        """Review (i1/review): a Worker that died on a page (5xx naming no url) or a call that timed
+        out may have read it, and is charged; a request refused before reading, or a connection
+        never made, is not."""
+        import socket
+        import urllib.error
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ledger = Ledger(Path(directory.name) / "l.sqlite")
+        self.addCleanup(ledger.close)
+        outcomes = [
+            ((503, {}), True),  # Cloudflare's "Worker exceeded resource limits" page
+            ((502, {}), True),
+            ((429, {"error": "busy", "busy": True}), False),
+            ((429, {"error": "cap", "cap": "web_fetch_day"}), False),
+            ((401, {"error": "Unauthorized."}), False),
+            ((400, {"error": "bad body"}), False),
+            (TimeoutError("timed out"), True),
+            (urllib.error.URLError(TimeoutError("timed out")), True),
+            (ValueError("the gateway's answer is larger than a page can be"), True),
+            (urllib.error.URLError(ConnectionRefusedError(111, "refused")), False),
+            (urllib.error.URLError(socket.gaierror(-2, "Name or service not known")), False),
+        ]
+        queue = [outcome for outcome, _ in outcomes]
+
+        def fetch(url, agent):
+            outcome = queue.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        commons = Commons(ledger, fetch=fetch)
+        for outcome, reached in outcomes:
+            answer = commons.web_fetch("https://example.com/", "a1")
+            self.assertEqual(answer["reached"], reached, repr(outcome))
+            self.assertIn("error", answer)
+
+    def test_a_page_is_kept_only_as_bounded_fields_of_the_right_types(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ledger = Ledger(Path(directory.name) / "l.sqlite")
+        self.addCleanup(ledger.close)
+        page = {"url": "https://example.com/", "final_url": "https://example.com/" + "p" * 5000, "status": "200", "content_type": "text/" + "x" * 9000,
+                "title": "T" * 5000, "text": "body", "truncated": "yes", "bytes": True, "fetched_at": "2026-09-26T16:00:00.000Z" + "z" * 500}
+        error = {"error": "e" * 5000, "url": "https://example.com/", "refused": {"nested": ["x"] * 1000}, "status": [1, 2], "content_type": "c" * 5000}
+        answers = iter([(200, page), (403, error)])
+        commons = Commons(ledger, fetch=lambda url, agent: next(answers))
+        ok = commons.web_fetch("https://example.com/", "a1")
+        self.assertEqual((len(ok["final_url"]), len(ok["content_type"]), len(ok["title"]), len(ok["fetched_at"])), (2048, 127, 300, 40))
+        self.assertEqual((ok["status"], ok["bytes"], ok["truncated"], ok["text"]), (None, None, False, "body"))
+        bad = commons.web_fetch("https://example.com/", "a1")
+        self.assertEqual((len(bad["error"]), len(bad["content_type"])), (400, 400))
+        self.assertNotIn("refused", bad)
+        self.assertNotIn("status", bad)

@@ -16,7 +16,9 @@
 //   - read longer than TIMEOUT_MS, more than MAX_BODY_BYTES of body, or a content type outside
 //     `readable` (the refusal names the type);
 //   - answer more than MAX_TEXT_CHARS of text, or more than DAY_CAP pages a UTC day across the
-//     floor (counted in the Gate, reported in /v1/health).
+//     floor (counted in the Gate, reported in /v1/health);
+//   - read more than MAX_IN_FLIGHT pages at once in one isolate (the isolate that serves the
+//     order routes), or spend more than linear time on a page's HTML.
 //
 // The kill switch does not stop it: it moves no money. A page that answers non-2xx is an answer,
 // with its status, not an error. Names are not resolved here: a public name that resolves to a
@@ -40,6 +42,20 @@ const MAX_REQUEST_BYTES = 8 * 1024;
 //: Beyond `text/*`, the application types it reads.
 export const TYPES = ['application/json', 'application/xml', 'application/rss+xml', 'application/atom+xml', 'application/xhtml+xml'];
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+//: Pages read at once by one isolate. A page's body is held and turned into text in the same isolate
+//: (128 MB, one thread) that serves the order routes, so a burst of research reads is refused, free
+//: and uncounted, rather than crowding them out.
+export const MAX_IN_FLIGHT = 4;
+//: A read held longer than this no longer holds its place: a request the runtime terminated (its CPU
+//: limit) never runs its `finally`, and four of them must not close the route for the isolate's life.
+const IN_FLIGHT_STALE_MS = 60_000;
+const inFlight = new Map();
+let readSeq = 0;
+/** Pages this isolate is reading now, stale places dropped. */
+export function inFlightNow(at = Date.now()) {
+  for (const [id, started] of inFlight) if (at - started > IN_FLIGHT_STALE_MS) inFlight.delete(id);
+  return inFlight.size;
+}
 const AGENT = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const BLOCKED_NAMES = new Set(['localhost', 'metadata.google.internal']);
 const BLOCKED_SUFFIXES = ['.localhost', '.local', '.internal', '.home.arpa', '.localdomain'];
@@ -161,9 +177,15 @@ export function checkUrl(raw, own = []) {
 
 // --- what a page is turned into -----------------------------------------------------------------
 
-/** The media type of a Content-Type header, lower case, parameters dropped; '' when none. */
+//: A media type as RFC 9110 spells one (`type/subtype`, token characters), bounded: the header is the
+//: page's to write, and what is answered and recorded must not be a page's worth of text.
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$/;
+
+/** The media type of a Content-Type header, lower case, parameters dropped; '' when there is none
+ * or it is not a well-formed media type. */
 export function mediaType(header) {
-  return String(header || '').split(';')[0].trim().toLowerCase();
+  const type = String(header || '').split(';')[0].trim().toLowerCase();
+  return MEDIA_TYPE.test(type) ? type : '';
 }
 
 export const readable = type => type.startsWith('text/') || TYPES.includes(type);
@@ -187,42 +209,128 @@ export function decodeEntities(text) {
   });
 }
 
-// A tag with its attributes, quoted values allowed to hold `>`.
-const ATTRS = `(?:"[^"]*"|'[^']*'|[^'">])*`;
-const tag = (names, { close = true } = {}) => new RegExp(`<${close ? '\\/?' : ''}(?:${names})(?=[\\s/>])${ATTRS}>`, 'gi');
-//: Never text. The title is answered on its own, so it is not repeated in the text.
-const DROP = /<(script|style|noscript|svg|template|title)(?=[\s/>])[\s\S]*?(?:<\/\1\s*>|$)/gi;
-const BLOCKS = tag('p|div|section|article|header|footer|main|nav|aside|h[1-6]|ul|ol|dl|dt|dd|table|thead|tbody|tfoot|tr|pre|blockquote|figure|figcaption|form|fieldset|address|details|summary|caption|br|hr');
-const CELLS = tag('td|th', { close: false });
-const ITEMS = tag('li', { close: false });
-const ANY_TAG = new RegExp(`<[a-zA-Z/!?]${ATTRS}>`, 'g');
+// The page is read in ONE forward pass, never with a pattern that can scan past a tag it could not
+// close: a regex like `<[a-z](?:"[^"]*"|[^">])*>` retried at every `<` of a page with no `>` is
+// super-linear: 32 KB of `<a<a<a...` took 22 seconds on a (loaded) test machine, the cost growing
+// faster than the square of the page, and the isolate -- with every order request on it -- waits
+// for it. A tag that never closes, or a dropped element that never ends, ends the text there, as it
+// would in a browser.
 
-/** Readable text from an HTML page: its title, and its body without scripts, styles, `noscript`,
- * `svg`, `template` or the head, links kept as their text, whitespace collapsed. */
-export function htmlToText(html) {
-  const found = /<title(?=[\s>])[^>]*>([\s\S]*?)<\/title\s*>/i.exec(html);
-  const title = found ? collapse(decodeEntities(found[1].replace(ANY_TAG, ' '))).replace(/\s+/g, ' ').slice(0, 300) : '';
-  let text = html.replace(/<!--[\s\S]*?(?:-->|$)/g, ' ');
-  // The head: to its close, or to the body when the close is left out (it is optional).
-  const head = /<head(?=[\s>])/i.exec(text);
-  if (head) {
-    const rest = text.slice(head.index);
-    const end = /<\/head\s*>|<body(?=[\s>])/i.exec(rest);
-    if (end) text = text.slice(0, head.index) + ' ' + rest.slice(end.index + (end[0][1] === '/' ? end[0].length : 0));
+//: Never text. The title is answered on its own, so it is not repeated in the text.
+const DROPPED = new Set(['script', 'style', 'noscript', 'svg', 'template', 'title']);
+const BLOCK_TAGS = new Set(['p', 'div', 'section', 'article', 'header', 'footer', 'main', 'nav', 'aside', 'h1', 'h2', 'h3', 'h4',
+  'h5', 'h6', 'ul', 'ol', 'dl', 'dt', 'dd', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'pre', 'blockquote', 'figure', 'figcaption',
+  'form', 'fieldset', 'address', 'details', 'summary', 'caption', 'br', 'hr']);
+const CELL_TAGS = new Set(['td', 'th']);
+//: What a head holds. Any other element ends it, as a browser's parser would: its close is optional.
+const IN_HEAD = new Set(['html', 'head', 'title', 'meta', 'link', 'style', 'script', 'noscript', 'base', 'template']);
+//: The raw characters of a title considered: a title is shown to 300 characters.
+const MAX_TITLE_SOURCE = 4096;
+const CLOSES = new Map([...DROPPED].map(name => [name, new RegExp(`</${name}\\s*>`, 'gi')]));
+//: No name acted on is longer than this ('blockquote', 'figcaption'): a longer one is any other tag.
+const MAX_NAME = 10;
+
+const isSpaceCode = code => code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
+const isLetterCode = code => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+const isNameCode = code => isLetterCode(code) || (code >= 48 && code <= 58) || code === 45;
+
+/** Just past the `>` that closes the tag opening at `at` (a quoted value may hold `>`), or -1. */
+function tagEnd(html, at) {
+  const n = html.length;
+  for (let k = at + 1; k < n; k++) {
+    const code = html.charCodeAt(k);
+    if (code === 62) return k + 1;
+    if (code === 34 || code === 39) {
+      const quoteEnd = html.indexOf(code === 34 ? '"' : "'", k + 1);
+      if (quoteEnd === -1) return -1;
+      k = quoteEnd;
+    }
   }
-  text = text.replace(DROP, ' ');
-  text = text.replace(ITEMS, '\n- ').replace(CELLS, ' | ').replace(BLOCKS, '\n').replace(ANY_TAG, '');
-  return { title, text: collapse(decodeEntities(text)) };
+  return -1;
 }
 
-/** Spaces collapsed within lines, lines trimmed, at most one blank line in a row. */
+/** The lower-case name of the element whose tag opens at `at`; '*' for one whose name is longer than
+ * any acted on; '' for a doctype, `<?...>` or a malformed name. */
+function tagName(html, at, closing) {
+  const start = at + (closing ? 2 : 1);
+  if (!isLetterCode(html.charCodeAt(start))) return '';
+  let k = start + 1;
+  while (k - start <= MAX_NAME && isNameCode(html.charCodeAt(k))) k++;
+  if (k - start > MAX_NAME) return '*';
+  const after = html.charCodeAt(k);
+  return after === 47 || after === 62 || isSpaceCode(after) ? html.slice(start, k).toLowerCase() : '';
+}
+
+/** The page's text, in one forward pass, and its first title's raw source (or null). */
+function readText(html, { titles = true } = {}) {
+  const starts = /<[a-zA-Z/!?]/g;  // `<` then anything else is text
+  let text = '';
+  let title = null;
+  let head = 'before';  // 'before' the head, 'in' it (its text dropped), or 'after' it
+  const n = html.length;
+  let i = 0;
+  for (;;) {
+    starts.lastIndex = i;
+    const found = starts.exec(html);
+    const lt = found ? found.index : n;
+    if (head !== 'in' && lt > i) text += html.slice(i, lt);
+    if (!found) break;
+    if (html.startsWith('<!--', lt)) {
+      const end = html.indexOf('-->', lt + 4);
+      if (end === -1) break;
+      if (head !== 'in') text += ' ';
+      i = end + 3;
+      continue;
+    }
+    const end = tagEnd(html, lt);
+    if (end === -1) break;
+    i = end;
+    const closing = html.charCodeAt(lt + 1) === 47;
+    const name = tagName(html, lt, closing);
+    if (!name) continue;
+    if (head === 'before' && !closing && name === 'head') {
+      head = 'in';
+      continue;
+    }
+    if (head === 'in' && (closing ? name === 'head' : !IN_HEAD.has(name))) {
+      head = 'after';
+      if (closing) continue;
+    }
+    if (!closing && DROPPED.has(name)) {
+      if (name === 'svg' && html.charCodeAt(end - 2) === 47) continue;  // <svg ... /> holds nothing
+      const close = CLOSES.get(name);
+      close.lastIndex = end;
+      const shut = close.exec(html);
+      if (titles && name === 'title' && title === null && shut) title = html.slice(end, Math.min(shut.index, end + MAX_TITLE_SOURCE));
+      if (!shut) break;
+      if (head !== 'in') text += ' ';
+      i = shut.index + shut[0].length;
+      continue;
+    }
+    if (head === 'in') continue;
+    if (!closing && name === 'li') text += '\n- ';
+    else if (!closing && CELL_TAGS.has(name)) text += ' | ';
+    else if (BLOCK_TAGS.has(name)) text += '\n';
+  }
+  return { text, title };
+}
+
+/** Readable text from an HTML page: its title, and its body without scripts, styles, `noscript`,
+ * `svg`, `template` or the head, links kept as their text, whitespace collapsed. Linear in the page. */
+export function htmlToText(html) {
+  const { text, title } = readText(html);
+  const heading = title === null ? '' : collapse(decodeEntities(readText(title, { titles: false }).text)).replace(/\s+/g, ' ').slice(0, 300);
+  return { title: heading, text: collapse(decodeEntities(text)) };
+}
+
+/** Spaces collapsed within lines, lines trimmed, a table row's leading `|` dropped, at most one
+ * blank line in a row. Global replaces only: a page of empty lines is not a million calls. */
 function collapse(text) {
   return text
     .replace(/\r\n?/g, '\n')
-    .replace(/[ \t\f\v\u00a0\u2000-\u200b\u3000]+/g, ' ')
-    .split('\n')
-    .map(line => line.trim().replace(/^\|\s*/, ''))
-    .join('\n')
+    .replace(/[ \t\f\v  -​　]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/(^|\n)\| ?/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -308,12 +416,27 @@ export async function webFetch(request, env, { gate, fetcher = fetch, now = Date
   const first = checkUrl(asked.url, own);
   if (first.error) return json({ error: first.error, url: shown, refused: 'url' }, 403);
   const agent = typeof asked.agent === 'string' && AGENT.test(asked.agent) ? asked.agent : null;
+  if (inFlightNow() >= MAX_IN_FLIGHT) {
+    return json({ error: `The gateway is already reading ${MAX_IN_FLIGHT} pages; ask again in a few seconds.`, busy: true },
+      429, { 'Retry-After': '5' });
+  }
+  const id = ++readSeq;
+  inFlight.set(id, Date.now());
+  try {
+    return await readPage(first.url, own, { gate, agent, fetcher, now, timeoutMs });
+  } finally {
+    inFlight.delete(id);
+  }
+}
+
+/** The day's place, then the page: every answer from here names the url. */
+async function readPage(first, own, { gate, agent, fetcher, now, timeoutMs }) {
   const place = await gate.webFetchReserve({ at: now(), agent });
   if (!place.ok) return json({ error: place.error, cap: place.cap }, place.status, { 'Retry-After': '3600' });
 
-  const url = first.url.href;
+  const url = first.href;
   const signal = AbortSignal.timeout(timeoutMs);
-  let current = first.url;
+  let current = first;
   let upstream;
   try {
     for (let redirects = 0; ; redirects++) {
@@ -336,10 +459,11 @@ export async function webFetch(request, env, { gate, fetcher = fetch, now = Date
       }
       current = hop.url;
     }
-    const type = mediaType(upstream.headers.get('Content-Type'));
+    const header = upstream.headers.get('Content-Type');
+    const type = mediaType(header);
     if (!readable(type)) {
       await discard(upstream);
-      return json({ error: `The page's content type ${type || '(none)'} is not one the gateway reads.`, url,
+      return json({ error: `The page's content type ${type || (header ? '(malformed)' : '(none)')} is not one the gateway reads.`, url,
         final_url: current.href, status: upstream.status, content_type: type || null }, 415);
     }
     const raw = await readCapped(upstream, MAX_BODY_BYTES, signal);

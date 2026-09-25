@@ -372,19 +372,29 @@ What comes back: `{url, final_url, status, content_type, title, text, truncated,
 fetched_at}`. A page that answers non-2xx is still a `200` from the gateway, with the page's own
 `status`. The read has 15 seconds in all; the body is read to 2 MiB and no further. It reads
 `text/*`, `application/json`, `application/xml`, `application/rss+xml`, `application/atom+xml`
-and `application/xhtml+xml`; any other type (or none) is `415` naming it. HTML becomes readable
-text: the title on its own, and the body without scripts, styles, `noscript`, `svg`, `template` or
-the head, links kept as their text, list items and table cells marked, entities decoded,
-whitespace collapsed. JSON, XML and plain text come back as they are. The text is cut at 200,000
-characters, with `truncated: true` (as it is when the body passed 2 MiB). A page that did not
-answer in time is `504`, one that failed is `502`, too many redirects is `502`.
+and `application/xhtml+xml`; any other type, none, or a `Content-Type` that is not a well-formed
+media type of at most 127 characters is `415` naming it (`(none)`, `(malformed)`). HTML becomes
+readable text: the title on its own, and the body without scripts, styles, `noscript`, `svg`,
+`template` or the head, links kept as their text, list items and table cells marked, entities
+decoded, whitespace collapsed. JSON, XML and plain text come back as they are. The text is cut at
+200,000 characters, with `truncated: true` (as it is when the body passed 2 MiB). A page that did
+not answer in time is `504`, one that failed is `502`, too many redirects is `502`.
+
+The HTML is read in one forward pass, linear in the page: no pattern is retried at every `<`
+(the first reader's regexes were super-linear: 32 KB of `<a<a<a...` took 22 seconds on a test
+machine, and a 2 MiB page far longer). A tag that never closes, or a script, style or comment that never ends, ends the text
+there, as it would in a browser. The page is read in the same isolate that serves the order
+routes, so one isolate reads at most `MAX_IN_FLIGHT` (4) pages at once; one more is
+`429 {"busy": true}` with `Retry-After: 5`, before it takes a place of the day's cap.
 
 The floor reads at most **3,000 pages a UTC day** together (`DAY_CAP`), counted in the `Gate` in
 one step with the page's agent, and reported in `/v1/health` as `web_fetch: {day, fetches, cap,
 by_agent}`; over it is `429 {"cap": "web_fetch_day"}`. The House keeps its own budget of 20 pages
 per agent a day, charged like a search. Every answer about a URL names it (`url`), so the House
-can tell a page the gateway judged from a gateway that could not act (a bad body, the cap, a
-Worker error); it charges only the first.
+can tell a page the gateway judged from a gateway that could not act (a bad body, the cap, busy,
+a Worker error). It charges and counts a judged read and also a Worker error (`5xx` naming no
+url, which is how a page that exhausted the Worker ends) or a timeout: only a request refused
+before any read (`4xx` naming no url) or never received is free.
 
 ## The watchdog, and the mail
 
