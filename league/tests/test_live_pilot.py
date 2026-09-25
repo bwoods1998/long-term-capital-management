@@ -369,6 +369,10 @@ class LivePath(unittest.TestCase):
         from unittest.mock import patch
         from league.house import Newcomer
         with patch.object(h, '_resident_forward', return_value=-0.01):
+            # F3's tenure (Sept 25, 2026): finished episodes or not, never before its desk's evidence clock (the plain
+            # grace where none is measured) has run from its first fill.
+            self.assertIsNone(h._weakest(rules, newcomer=Newcomer(forward=0.0)))
+            f.clock.advance(12 * 3600)
             self.assertEqual(h._weakest(rules, newcomer=Newcomer(forward=0.0)).id, loser.id)
             self.assertIsNone(h._weakest(rules), 'no forward score: the trader keeps its seat')
             h.research_jobs.enqueue(loser.id, list(h._generation(loser.id)))
