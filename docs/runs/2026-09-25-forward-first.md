@@ -135,12 +135,17 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 
 - **Free for the other runs** in Wave 1: `house.py`'s `_chain` and options hooks outside the regions above; the
   `alpaca-options` row and the Kalshi desks' rows of `league/niches.json`; new modules.
-- **Announced deploys:** **Deploy A** (Wave 0; money-digest change 1 of 2, H4) between 08:00Z and 09:30Z Sept 25; the
-  exact start is written here first. This run will not deploy between 09:30Z and 13:25Z, leaving the options run's
-  Deploy V its 10:00-12:25Z window. **Deploy B** (Wave 1; digest change 2 of 2, M1-M5 and C8) not before 20:05Z Sept 25
-  and only when no real Kalshi family's game is in play: the MLB games of the proven family run to about 03:00-05:00Z,
-  so Deploy B is planned for a quiet window after the Friday night slate (about 05:00-15:00Z Saturday Sept 26), its
-  start written here first.
+- **Announced deploys (revised 10:41Z):** a usage limit stopped every session on this account from about 07:35Z to
+  10:30Z, so Deploy A missed its 08:00-09:30Z window. **Deploy A** (H2, H4, H5 and their reviews' fixes; H3 and Z too
+  unless the options run's Deploy V carries them) now starts at **20:10Z Friday Sept 25**, if no real Kalshi family's
+  game is in play then, else at the first quiet slot after; the exact start is written here first. **Deploy B** (Wave
+  1; digest change 2 of 2) follows after the Friday night slate, about 05:00-15:00Z Saturday Sept 26, its start written
+  here first. This run does not deploy 09:30Z-20:05Z Friday.
+- **Exceptions granted to the options run (10:40Z, for its Deploy V today):** (1) its one call line
+  `options_desk.seat_founders(self)` in `_births` lands on main before this run's Wave 0 (H5 rebases over it); (2) its
+  structure-only hunks in `league/book.py` land before H4 (H4 rebases over them), with a test that non-structure books
+  and positions behave exactly as before. Offered: H3 (#296) and Z (#298) merged to main before its 11:45Z merge so
+  Deploy V carries the release train into today's session, if it agrees by 11:15Z.
 
 **Answers to the options run's requests (06:07Z; also on its PR #299):**
 
