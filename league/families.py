@@ -779,7 +779,10 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     made_by_book = {"practice": 0.0, "real": 0.0}  # what its closed trades made, by book, before any haircut (C8: to the cent)
     # The family's closed level-3 STRUCTURES (O4 of the options-desk run, Sept 25, 2026): one flat sale (or settlement) of a
     # held structure is one; on practice books and the real one, with the account-unit log growth of each after its haircut.
-    structures = {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0}
+    # `by_type` splits them by the structure's type (its code's head): O4 is a line for the types real money may open, so a
+    # family is judged on its closes of those types only (the review of g/money, Sept 25, 2026: a condor-only record
+    # seated a debit-vertical probe).
+    structures: dict[str, Any] = {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0, "by_type": {}}
     for member in members:
         rows = tape.rows.get(member) or []
         cutoffs = tape.cutoffs.get(member) or {}
@@ -819,10 +822,14 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 paid = math.fsum(ch for seq, ch in charges.get(row["key"], ()) if opened <= seq <= row["seq"])
                 made = row["made"] - paid
                 made_by_book["real" if book == REAL_BOOK[venue] else "practice"] += row["made"]
-                if is_code((row["instrument"] or {}).get("market_id")):
+                code = (row["instrument"] or {}).get("market_id")
+                if is_code(code):
                     side_of = "real" if book == REAL_BOOK[venue] else "practice"
-                    structures[f"{side_of}_closed"] += 1
-                    structures[f"{side_of}_log"] += log1p(made / lent)
+                    kind = structures["by_type"].setdefault(str(code).split("|", 1)[0], {
+                        "practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0})
+                    for tally in (structures, kind):
+                        tally[f"{side_of}_closed"] += 1
+                        tally[f"{side_of}_log"] += log1p(made / lent)
                 unit[0] += log1p(made / lent)
                 unit[1] += made
                 risk = at_risk.get(row["seq"], 0.0)
@@ -928,7 +935,7 @@ def empty_record(family: str, venue: str, *, through: int | None = None, error: 
            "rows_without_risk": 0, "edge_per_dollar": None, "maker": dict(side), "taker": dict(side),
            "real": {**side, "first_closes": [], "closed_at": [], "entry": None}, "blocks": {"practice": 0, "real": 0, "growth": 0.0},
            "rule": rule, "dollars": {"practice": 0.0, "real": 0.0},
-           "structures": {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0}}
+           "structures": {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0, "by_type": {}}}
     if error is not None:
         out["error"] = error
     return out

@@ -1059,7 +1059,13 @@ class House:
         held instrument, by the same `Book` and broker path as practice: the venue's adapter sends it as one multi-leg
         order, and the gateway admits exactly the constitution's types (`league.ci` holds `OPTION_STRUCTURES_REAL` to them).
         A CLOSE is never refused for the switch or the type: it only takes risk off, and a structure held when the switch
-        went off must still be sold (the gateway checks that the account holds its legs)."""
+        went off must still be sold (the gateway checks that the account holds its legs, and admits a close of any type).
+
+        Since the review of g/money (Sept 25, 2026): NO real structure order, open or close, goes through an adapter that
+        cannot send it as one multi-leg order (`_structure_unsendable`: a close sent leg by leg would leave a naked short
+        leg), and a real open whose leg would net at the venue against a contract the real book holds or bids on the other
+        side is refused (`_real_netting_refusal`: the venue nets contracts across the account, and a netted leg can no
+        longer be closed as the structure's)."""
         if not self.is_structure_agent(agent):
             return ("a structure intent comes only from a structure agent: an agent of the options desk whose NEEDS "
                     "carry \"structures\": true")
@@ -1075,14 +1081,13 @@ class House:
                     article = "an" if order.spec.type[:1] in "aeiou" else "a"
                     return (f"{article} {order.spec.type} is not admitted on real money: allocator.option_spread_real_types "
                             f"admits {', '.join(admitted)} (a credit type waits for the owner's explicit confirmation)")
-                try:  # the venue adapter's word that it sends a structure as ONE multi-leg order (`mleg`, Track P's adapter)
-                    whole = "mleg" in set(book.broker.capabilities() or ())
-                except Exception:  # noqa: BLE001 - an adapter that cannot say is one that cannot
-                    whole = False
-                if not whole:
-                    # An adapter without it would spell the held instrument as its first leg's OCC code: one leg alone.
-                    return (f"the {book.name} book's venue adapter cannot send a structure as one multi-leg order (no `mleg` "
-                            "capability): no structure is opened on it, never leg by leg")
+            unsendable = self._structure_unsendable(book, agent.id, instrument, order.action)
+            if unsendable:
+                return unsendable
+            if order.action == "open":
+                netting = self._real_netting_refusal(book, [(leg.occ, leg.sign) for leg in order.spec.legs])
+                if netting:
+                    return netting
         else:
             wanted = self._structure_book_name()
             if book.name != wanted:
@@ -1113,6 +1118,73 @@ class House:
                                agent=agent.id, id=f"refused:{intent.id}")
         except LedgerConflict:
             pass  # this very intent was refused already
+
+    def _structure_unsendable(self, book: Book, agent_id: str, inst: Instrument, action: str) -> str:
+        """Why a structure order may not go to this REAL book's venue adapter, open or close (empty when it may, and on every
+        practice book): the adapter must say it sends a structure as ONE multi-leg order (`mleg`, Track P's adapter). One
+        without it would spell the held instrument as its first leg's OCC code and send that leg alone: legging in on an
+        open, and on a close legging OUT, which leaves the structure's short leg naked (the review of g/money, Sept 25, 2026;
+        until then only opens were held back). A close held back here is an error on the record, said once a structure a
+        day: a held real structure the House cannot close needs the owner (restore the adapter; never a leg by hand)."""
+        if not book.real_money:
+            return ""
+        try:
+            whole = "mleg" in set(book.broker.capabilities() or ())
+        except Exception:  # noqa: BLE001 - an adapter that cannot say is one that cannot
+            whole = False
+        if whole:
+            return ""
+        why = (f"the {book.name} book's venue adapter cannot send a structure as one multi-leg order (no `mleg` capability): no "
+               "structure order, open or close, is sent to it, never leg by leg")
+        if action != "open":
+            told = self.__dict__.setdefault("_structure_unsendable_told", set())
+            key = (agent_id, inst.key, _new_york(self.clock)[0])
+            if key not in told:
+                told.add(key)
+                try:
+                    self.alert("error", f"{agent_id}: the real structure {inst.market_id} on {book.name} cannot be closed: {why}. "
+                                        "Restore an adapter that sends one multi-leg order; never close it leg by leg")
+                except Exception:  # noqa: BLE001 - the refusal stands whether or not the alert is written
+                    pass
+        return why
+
+    def _real_netting_refusal(self, book: Book, legs: Sequence[tuple[str, int]]) -> str:
+        """Why an option OPEN on a REAL book would net against a contract the book already holds or bids on the other side
+        (empty when it would not, and on every practice book). `legs` are (OCC code, +1 long | -1 short); a single contract
+        is one long leg. The venue nets contracts across the account: two structures sharing a strike on opposite sides, or a
+        single contract bought on a structure's short leg, leave the account without one of the legs, and each structure's
+        close is then refused at the gateway as closing a leg not held -- into expiry (the review of g/money, Sept 25, 2026).
+        Every account's holdings and working buys on the book are read (the House knows them before the venue does)."""
+        if not book.real_money:
+            return ""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        wanted = {str(occ): int(sign) for occ, sign in legs}
+        sides: dict[str, set[int]] = {}
+
+        def add(inst: Instrument) -> None:
+            if is_structure(inst):
+                for leg in structures.spec_of(inst).legs:
+                    sides.setdefault(leg.occ, set()).add(leg.sign)
+            elif inst.asset_class == "option":
+                sides.setdefault(alpaca_symbol(inst), set()).add(1)  # a book never holds a single contract short
+
+        try:
+            for agent_id in book.agents():
+                for holding in list(book.account(agent_id).holdings.values()):
+                    if holding.quantity > 0:
+                        add(holding.instrument)
+            for working in book.open_orders():
+                if working.side == "buy":
+                    add(working.instrument)
+        except Exception as exc:  # noqa: BLE001 - a book that cannot be read opens nothing
+            return f"the {book.name} book's holdings could not be read to rule out netting ({type(exc).__name__}): no option is opened"
+        clash = sorted(occ for occ, sign in wanted.items() if -sign in sides.get(occ, ()))
+        if not clash:
+            return ""
+        return (f"{', '.join(clash)} is held or bid on the other side on {book.name}: the venue nets one account's contracts, "
+                "and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
 
     def _structure_context(self, agent: Agent, ctx: dict[str, Any], symbols: list[str], max_order: Decimal,
                            max_position: Decimal, *, book: Book | None = None) -> None:
@@ -1260,6 +1332,8 @@ class House:
         if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < self._structure_hours(today)[1] \
                 or market_hours(inst, now) is False:
             return None
+        if self._structure_unsendable(book, agent_id, inst, "close"):
+            return None  # never leg by leg (the review of g/money, Sept 25, 2026): an error on the record, once a day
         limit = self._structure_bid(book, inst)
         if limit is None:
             return None
@@ -3270,6 +3344,14 @@ class House:
                 if (book.real_money and side == "buy" and self.campaigns
                         and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
                     raise ValueError("this phase permits exits but no new real-money entries")
+                if book.real_money and side == "buy" and instrument.asset_class == "option":
+                    # A single contract bought on a real structure's short leg would net it away at the venue (the review
+                    # of g/money, Sept 25, 2026): `_real_netting_refusal`.
+                    from ltcm.adapters.alpaca import alpaca_symbol
+
+                    netting = self._real_netting_refusal(book, [(alpaca_symbol(instrument), 1)])
+                    if netting:
+                        raise ValueError(netting)
                 niche = self.niche_of(agent)
                 if niche is not None and side == "buy" and not niche.holds(instrument):
                     raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
@@ -3357,7 +3439,42 @@ class House:
                     adjusted.extend(f"{shown} {side}: {note}" for note in notes)
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+        if book.real_money and intents:
+            intents = self._net_within_decision(agent, book, intents, dropped)
         return intents, dropped
+
+    def _net_within_decision(self, agent: Agent, book: Book, intents: list[Intent], dropped: list[str]) -> list[Intent]:
+        """`_real_netting_refusal` within one decision on a REAL book (the review of g/money, Sept 25, 2026): its option
+        buys in order, a later one whose leg meets an earlier one's opposite leg is refused (a structure's as the book's own
+        refusal row, a single contract's as a dropped row), since neither is on the book yet when the other is checked."""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        kept: list[Intent] = []
+        sides: dict[str, set[int]] = {}
+        for intent in intents:
+            inst = intent.instrument
+            if intent.side != "buy" or inst.asset_class != "option":
+                kept.append(intent)
+                continue
+            try:
+                legs = [(leg.occ, leg.sign) for leg in structures.spec_of(inst).legs] if is_structure(inst) else [(alpaca_symbol(inst), 1)]
+            except Exception as exc:  # noqa: BLE001 - an open whose legs cannot be read is not sent
+                dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                continue
+            clash = sorted(occ for occ, sign in legs if -sign in sides.get(occ, ()))
+            if clash:
+                why = (f"{', '.join(clash)} is opened on the other side by this same decision on {book.name}: the venue nets one "
+                       "account's contracts, and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
+                if is_structure(inst):
+                    self._refuse_intent(agent, book, intent, why)
+                else:
+                    dropped.append(f"ValueError: {why[:160]}")
+                continue
+            for occ, sign in legs:
+                sides.setdefault(occ, set()).add(sign)
+            kept.append(intent)
+        return kept
 
     def _fit_order_type(self, book: Book, instrument: Instrument, side: str, order_type: str, limit: Decimal | None,
                         post_only: bool) -> tuple[str, Decimal | None, str] | None:
@@ -5304,7 +5421,10 @@ class House:
                 # A structure is sold whole, at its bid (at least a cent), in the session (Sept 25, 2026): its
                 # bid can be zero while its legs still trade, and a debit structure worth nothing is sold for a cent.
                 # A sale of it resting at or under the bid is kept across passes (it fills there, and `quantity` is
-                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`).
+                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`). Never
+                # through an adapter that would send it leg by leg (`_structure_unsendable`, the review of g/money).
+                if self._structure_unsendable(book, agent.id, holding.instrument, "close"):
+                    continue
                 sale = self._structure_sale(agent.id, holding.instrument, quantity, structure_bids.get(holding.instrument.key), now,
                                             nonce=f"wind-down:{now}", reason="the House is closing this account: the whole structure at its bid")
                 if sale is not None:

@@ -704,7 +704,9 @@ class StructuresInTheHouse(StructureHouseCase):
         from types import SimpleNamespace
 
         agent = self.structure_agent()
-        real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca"))
+        # An adapter that sends a structure as one multi-leg order (`mleg`): without it no real structure order, open or
+        # close, is sent (the review of g/money, Sept 25, 2026; test_real_structures).
+        real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca", capabilities=lambda: {"mleg"}))
         intents, dropped = self.house._intents(agent, real, [condor_row(), condor_row(action="close", limit=0.10)])
         self.assertEqual(dropped, [])
         self.assertEqual([(i.side, i.instrument.venue) for i in intents], [("sell", "alpaca")])

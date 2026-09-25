@@ -22,6 +22,7 @@ from unittest.mock import patch
 from league import allocator, ci, families, seeds, structures
 from league.constitution import CONSTITUTION
 from league.economy import load_game
+from league.book import Holding
 from league.house import House, Settings
 from league.ledger import Ledger, now_iso
 from league.tests.fakes import Clock, FakeBroker
@@ -254,8 +255,9 @@ class RealStructuresHouse(unittest.TestCase):
         self.house.structure_book_name = "options-shadow"
         self.auditor.ledger = self.house.ledger
 
-    def structure_agent(self, style):
-        code = STRUCTURE_AGENT.replace("test-structures", style)
+    def structure_agent(self, style, structure="debit_vertical"):
+        """A structure agent whose PARAMS open `structure` (a debit vertical unless named: the one type real money may open)."""
+        code = STRUCTURE_AGENT.replace("test-structures", style).replace('"structure": "iron_condor"', f'"structure": "{structure}"')
         agent = self.house.spawn(style, style, code, reason="test", specialty="alpaca-options")
         self.house.seat(agent)  # its practice stake, as its first wake lends it
         self.assertTrue(self.house.is_structure_agent(agent))
@@ -272,10 +274,23 @@ class RealStructuresHouse(unittest.TestCase):
                 self.house.ledger.append("book.fill", {"book": "options-shadow", "source": "venue", "side": side, "quantity": "1",
                                                        "price": px, "instrument": inst, "realized": realized, "flat": flat,
                                                        "cash_delta": str(cash), "liquidity": "taker"}, agent=agent.id)
+        self.mark(agent)
 
-    def passed_replay(self, agent, *, trades=24, oos=0.0012, passed=True, code=None):
+    def mark(self, agent, book="options-shadow"):
+        """The book's mark of the agent's equity after its closes, as the book writes one (what `Evaluator.wealth`, and so
+        the agent's evidence, reads): its stake plus what its closes on the book realized, nothing held."""
+        realized = sum((D(e.payload["realized"]) for e in self.house.ledger.iter(kinds="book.fill", agent=agent.id)
+                        if e.payload.get("book") == book and e.payload.get("realized") is not None), D(0))
+        staked = self.house.books[book].account(agent.id).staked
+        self.house.ledger.append("book.mark", {"book": book, "equity": str(staked + realized), "cash": str(staked + realized),
+                                               "staked": str(staked), "realized": str(realized), "fees": "0", "holdings": 0,
+                                               "real_money": False}, agent=agent.id)
+
+    def passed_replay(self, agent, *, trades=24, oos=0.0012, passed=True, code=None, params=None):
+        """A House replay's `eval.trial`, of the agent's own program (its code and PARAMS) unless told otherwise."""
         self.house.ledger.append("eval.trial", {"family": agent.family, "code_sha256": code or agent.code_sha256, "trades": trades,
-                                                "blocks": 40, "oos_mean_log_growth": oos, "passed": passed, "reasons": []},
+                                                "blocks": 40, "oos_mean_log_growth": oos, "passed": passed, "reasons": [],
+                                                "params": dict(agent.params) if params is None else params},
                                  agent=agent.id)
 
     def rung(self, agent):
@@ -343,7 +358,7 @@ class TheLadder(RealStructuresHouse):
             self.assertEqual({f: row["meets"] for f, row in lines.items()},
                              {winner.family: True, short.family: False, loser.family: False, near.family: False})
             self.assertLess(lines[loser.family]["w_paper"], 1.01)
-            self.assertIn("2 closed practice structures", house._state["promotion_status"][short.id]["reason"])
+            self.assertIn("2 closed practice debit_vertical structures", house._state["promotion_status"][short.id]["reason"])
 
             # The first family to meet the line is promoted at the very next pass: its third closed structure ...
             self.close_structures(short, ["0.70"], low=595)
@@ -409,6 +424,25 @@ class TheLadder(RealStructuresHouse):
         self.assertEqual(demote["rule"], "allocator.option_spreads_real")
         self.assertEqual(house.book_of(agent).name, "options-shadow")
 
+    def test_a_seated_structure_agent_that_rewrites_itself_to_another_type_goes_back_once_flat(self):
+        """The review of g/money (Sept 25, 2026): a seat whose program opens a type real money does not admit is idle money."""
+        house, alloc = self.house, self.house.allocator
+        agent = self.structure_agent("test-rewrites")
+        self.close_structures(agent, ["0.66", "0.56", "0.61"])
+        with switched(True):
+            alloc.rebalance()
+            self.assertEqual(self.rung(agent), 2)
+            self.assertTrue(alloc.structure_real_ok(agent))
+            agent.params = {**agent.params, "structure": "iron_condor"}  # its rewrite, as `agent.strategy` sets it
+            self.assertFalse(alloc.structure_real_ok(agent))
+            self.assertFalse(alloc.swing_allowed(agent))
+            with patch.object(type(alloc), "target_stake", return_value=D("400")):
+                self.assertIsNone(alloc._size(agent, allocator.evidence(house, agent), "bunt", allocator._params()))
+            alloc.rebalance()
+        self.assertEqual(self.rung(agent), 1)
+        demote = [e.payload for e in house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "demote"][-1]
+        self.assertEqual(demote["rule"], "allocator.option_spread_real_types")
+
     def test_a_structure_agents_evidence_and_verdicts_read_its_structure_book(self):
         agent = self.structure_agent("test-evidence")
         self.close_structures(agent, ["0.66", "0.56"])
@@ -421,6 +455,30 @@ class TheLadder(RealStructuresHouse):
         single = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"),
                                   reason="test", specialty="alpaca-options")
         self.assertEqual(allocator.practice_book(self.house, single), "alpaca-paper")
+
+    def test_a_structure_agents_evidence_pools_every_practice_book_it_was_staked_on(self):
+        """The review of g/money (Sept 25, 2026, the coordination with Track P): a structure agent moving between practice
+        books keeps its whole record -- its evidence reads each practice book of its venue it was ever staked on, as its
+        family's record does -- and an agent never staked on a second book reads its one book as before."""
+        agent = self.structure_agent("test-two-books")
+        self.close_structures(agent, ["0.66", "0.56"])  # on options-shadow, its structure book now
+        alone = allocator.evidence(self.house, agent)
+        self.assertEqual(alone.paper_trades, 2)
+        # A stretch on alpaca-paper: staked there, one structure closed there, marked.
+        self.house.ledger.append("book.stake", {"book": "alpaca-paper", "usd": "200", "note": "t"}, agent=agent.id)
+        inst = structure_code("alpaca-paper", low=600)
+        for side, px, realized, flat in (("buy", "0.46", None, None), ("sell", "0.66", "20", True)):
+            self.house.ledger.append("book.fill", {"book": "alpaca-paper", "source": "venue", "side": side, "quantity": "1",
+                                                   "price": px, "instrument": inst, "realized": realized, "flat": flat,
+                                                   "cash_delta": str(D(px) * 100 * (-1 if side == "buy" else 1)),
+                                                   "liquidity": "taker"}, agent=agent.id)
+        self.house.ledger.append("book.mark", {"book": "alpaca-paper", "equity": "220", "cash": "220", "staked": "200",
+                                               "realized": "20", "fees": "0", "holdings": 0, "real_money": False}, agent=agent.id)
+        both = allocator.evidence(self.house, agent)
+        self.assertEqual((both.paper_trades, both.paper_book), (3, "options-shadow"))
+        self.assertAlmostEqual(math.log(both.w_paper) + both.haircut_log,
+                               math.log(alone.w_paper) + alone.haircut_log + math.log(220 / 200), places=9)
+        self.assertGreater(both.haircut_log, alone.haircut_log, "the O5 haircut is paid on both books")
 
     def test_a_structure_agent_is_shown_its_familys_spread_line_not_the_bunt_line(self):
         agent = self.structure_agent("test-line")
@@ -435,8 +493,10 @@ class TheLadder(RealStructuresHouse):
         house, alloc = self.house, self.house.allocator
         agent = self.structure_agent("test-audit")
         self.close_structures(agent, ["0.66", "0.56", "0.61"])
-        verdict = allocator._verdict(agent.id, 1, "test", allocator.evidence(house, agent))
+        ev = allocator.evidence(house, agent)
+        verdict = allocator._verdict(agent.id, 1, "test", ev)
         alloc._begin_pass()
+        alloc._evidence = {agent.id: ev}  # the last pass's evidence, as an audit finishing after it reads it
         self.assertTrue(alloc.refuses_probe(agent, verdict), "O1 off")
         self.assertIn("owner's switch", house._state["promotion_status"][agent.id]["reason"])
         with switched(True):
@@ -476,15 +536,36 @@ class TheHouseOnRealMoney(RealStructuresHouse):
             intents, _ = self.house._intents(agent, shadow, [vertical_row()])
         self.assertEqual(len(intents), 1)
 
-    def test_no_real_open_through_an_adapter_that_cannot_send_one_multi_leg_order(self):
-        """Without `mleg` the adapter would spell the held instrument as its first leg's OCC code: one leg alone."""
+    def test_no_real_structure_order_open_or_close_through_an_adapter_that_cannot_send_one_multi_leg_order(self):
+        """Without `mleg` the adapter would spell the held instrument as its first leg's OCC code: one leg alone. On a close
+        that is legging OUT, which leaves the short leg naked (the review of g/money, Sept 25, 2026, MINOR: until then the
+        close went). The agent's close, the House's expiry close and its wind-down all hold back, with one error a day."""
+        house = self.house
         agent = self.structure_agent("test-real-legs")
-        real = self.house.books["alpaca"]
+        real = house.books["alpaca"]
         self.real.caps.discard("mleg")
         with switched(True):
-            intents, _ = self.house._intents(agent, real, [vertical_row(), vertical_row(action="close", limit=0.40)])
-        self.assertEqual([i.side for i in intents], ["sell"])
-        self.assertIn("cannot send a structure as one multi-leg order (no `mleg` capability)", self.refusals(agent)[0])
+            intents, _ = house._intents(agent, real, [vertical_row(), vertical_row(action="close", limit=0.40)])
+        self.assertEqual(intents, [], "neither the open nor the close is sent")
+        refused = self.refusals(agent)
+        self.assertEqual(len(refused), 2)
+        for reason in refused:
+            self.assertIn("cannot send a structure as one multi-leg order (no `mleg` capability)", reason)
+        errors = [e.payload["text"] for e in house.ledger.iter(kinds="ops.alert") if e.payload.get("level") == "error"]
+        self.assertEqual(len(errors), 1, "the close is an error on the record, once")
+        self.assertIn("cannot be closed", errors[0])
+        # The House's own sales of a held real structure: its expiry close and its wind-down send nothing either.
+        inst = structures.instrument(structures.parse("alpaca", vertical_row(expiry="2026-09-10")).spec, "alpaca")
+        real.account(agent.id).holdings[inst.key] = Holding(inst, D(1), D("46"))
+        holding = real.account(agent.id).holdings[inst.key]
+        self.assertIsNone(house._structure_expiry_close(real, agent.id, holding, "2026-09-10", 15.6, now_iso(self.clock)))
+        with patch.object(house, "_structure_sale", wraps=house._structure_sale) as sale:
+            house._wind_down(agent, real)
+        sale.assert_not_called()
+        self.assertEqual(self.real.submitted, [], "nothing reached the venue")
+        # With the capability back, the expiry close is priced again (the unsendable check is the only thing that changed).
+        self.real.caps.add("mleg")
+        self.assertEqual(house._structure_unsendable(real, agent.id, inst, "close"), "")
 
     def test_a_structure_agent_is_shown_only_what_real_money_admits(self):
         agent = self.structure_agent("test-real-ctx")
@@ -512,6 +593,150 @@ class TheHouseOnRealMoney(RealStructuresHouse):
         self.assertEqual((limits.max_position_usd, limits.max_order_usd), (D("40.00"), D("40.00")))  # a single contract: unchanged
         self.assertEqual(self.house.allocator.target_stake(agent, "bunt"), D("150"))
         self.assertEqual(self.house.allocator.target_stake(single, "bunt"), D("80"))
+
+
+def condor_code(low=570):
+    """The held instrument of a $1-winged SPY iron condor on the options shadow book, its strikes shifted by `low`."""
+    row = condor_row()
+    for leg, k in zip(row["legs"], (low, low + 1, low + 10, low + 11)):
+        leg["occ"] = leg["occ"][:-8] + f"{int(k * 1000):08d}"
+    return structures.instrument(structures.parse("options-shadow", row).spec, "options-shadow").to_dict()
+
+
+class TheReviewOfGMoney(RealStructuresHouse):
+    """The adversarial review of g/money (Sept 25, 2026): its demonstrations, fixed. O4 is the line of the types real money
+    may open, judged on programs the family ran; a probe is staked O2 at most; closes hide no held losers; no real open nets
+    against a contract the real book holds on the other side."""
+
+    def close_condors(self, agent, sold, *, low=570):
+        for i, price in enumerate(sold):
+            inst = condor_code(low=low + 12 * i)
+            for side, px, realized, flat in (("buy", "0.62", None, None), ("sell", price, str((D(price) - D("0.62")) * 100), True)):
+                cash = D(px) * 100 * (-1 if side == "buy" else 1)
+                self.house.ledger.append("book.fill", {"book": "options-shadow", "source": "venue", "side": side, "quantity": "1",
+                                                       "price": px, "instrument": inst, "realized": realized, "flat": flat,
+                                                       "cash_delta": str(cash), "liquidity": "taker"}, agent=agent.id)
+        self.mark(agent)
+
+    def test_a_condor_only_family_is_never_seated_on_debit_vertical_money(self):
+        """MAJOR 1, the reviewer's first demonstration: three closed practice iron condors and no vertical seated a $150 real
+        probe. Now the line counts only the types real money may open, and only a member whose program opens one is seated."""
+        house, alloc = self.house, self.house.allocator
+        condors = self.structure_agent("test-condor-only", structure="iron_condor")
+        self.close_condors(condors, ["0.82", "0.72", "0.77"])  # three winning condors: W_paper far over 1.01
+        # A vertical program whose family's record is condors only (its PARAMS changed since, say), and a condor program
+        # whose family's record is verticals.
+        rewritten = self.structure_agent("test-rewritten")
+        self.close_condors(rewritten, ["0.82", "0.72", "0.77"], low=400)
+        mismatched = self.structure_agent("test-mismatched", structure="iron_condor")
+        self.close_structures(mismatched, ["0.66", "0.56", "0.61"])
+        with switched(True):
+            for _ in range(2):
+                alloc.rebalance()
+            lines = alloc.board()["spread"]["families"]
+        self.assertEqual([self.rung(a) for a in (condors, rewritten, mismatched)], [1, 1, 1])
+        self.assertEqual(house.books["alpaca"].account(condors.id).staked, D("0"))
+        for agent in (condors, rewritten):
+            line = lines[agent.family]
+            self.assertEqual((line["meets"], line["practice_closed"], line["all_types_closed"], line["types"]),
+                             (False, 0, 3, ["debit_vertical"]))
+        self.assertTrue(lines[mismatched.family]["meets"], "its record is verticals ...")
+        self.assertIn("opens iron_condor (PARAMS \"structure\"), not a type real money may open (debit_vertical",
+                      house._state["promotion_status"][mismatched.id]["reason"])  # ... but its program opens condors
+        self.assertIn("0 closed practice debit_vertical structures", house._state["promotion_status"][rewritten.id]["reason"])
+        record = alloc.family(condors.family, "alpaca")["structures"]
+        self.assertEqual(record["by_type"]["iron_condor"]["practice_closed"], 3)
+        self.assertNotIn("debit_vertical", record["by_type"])
+
+    def test_the_replay_route_takes_only_a_trial_of_a_program_a_member_ran_of_an_admitted_type(self):
+        """MAJOR 1, the reviewer's second demonstration: a passed trial of the family's code with PARAMS no member runs (a
+        condor variant, a research candidate never adopted) seated the family's best member."""
+        agent = self.structure_agent("test-params")
+        self.close_structures(agent, ["0.50"])  # one closed practice vertical
+        alloc = self.house.allocator
+        for params in ({"structure": "iron_condor", "width": 5.0}, {**agent.params, "width": 5.0}, None):
+            self.passed_replay(agent, oos=0.001, params=params if params is not None else {})
+            if params is None:  # a trial that names no PARAMS at all is no program the family ran
+                self.house.ledger.append("eval.trial", {"family": agent.family, "code_sha256": agent.code_sha256, "trades": 24,
+                                                        "blocks": 40, "oos_mean_log_growth": 0.001, "passed": True, "reasons": []},
+                                         agent=agent.id)
+            with switched(True):
+                alloc.rebalance()
+            self.assertEqual(self.rung(agent), 1, params)
+            self.assertIsNone(alloc.board()["spread"]["families"][agent.family]["replay"])
+        self.passed_replay(agent, oos=0.001)  # its own program: code and PARAMS
+        with switched(True):
+            alloc.rebalance()
+        self.assertEqual(self.rung(agent), 2)
+        promote = self.promoted(agent)[-1]
+        self.assertEqual((promote["spread_line"]["route"], promote["spread_line"]["replay"]["structure"]), ("replay", "debit_vertical"))
+        # PARAMS compare as JSON would write them, keys in any order.
+        self.assertEqual(allocator._params_key({"width": 1.0, "structure": "x"}), allocator._params_key({"structure": "x", "width": 1.0}))
+
+    def test_a_probe_reseat_is_staked_at_o2_at_most(self):
+        """MINOR, the reviewer's demonstration: `bunt_stake` grew the O2 base by W_real, so a probe re-seated after a winning
+        real stay was staked $180 at tier probe."""
+        agent = self.structure_agent("test-restake")
+        alloc = self.house.allocator
+        ev = allocator.evidence(self.house, agent)
+        ev.w_real = 1.2
+        with switched(True):
+            self.assertEqual(alloc.tier(agent), "probe")
+            self.assertEqual(alloc.target_stake(agent, "bunt", ev), D("150"))
+            self.assertEqual(alloc.target_stake(agent, "probe", ev), D("150"))
+
+    def test_closes_that_hide_losers_still_held_seat_nothing(self):
+        """MINOR: O4 reads closed structures; at seating the members' practice records marked to market must not be losing."""
+        house, alloc = self.house, self.house.allocator
+        agent = self.structure_agent("test-marked")
+        self.close_structures(agent, ["0.66", "0.56", "0.61"])  # three closed winners
+        with switched(True), patch.object(allocator, "evidence", side_effect=TheLadder.w_paper(self, {agent.id: 0.95})):
+            alloc.rebalance()  # ... and a loser held: its record marked to market is down 5%
+            line = alloc.board()["spread"]["families"][agent.family]
+        self.assertEqual(self.rung(agent), 1)
+        self.assertEqual((line["meets"], line["held_back"], line["practice_closed"]), (False, "practice", 3))
+        self.assertAlmostEqual(line["marked"]["log_w_paper"], math.log(0.95), places=6)
+        self.assertIn("marked to market are losing", house._state["promotion_status"][agent.id]["reason"])
+        with switched(True), patch.object(allocator, "evidence", side_effect=TheLadder.w_paper(self, {agent.id: 1.02})):
+            alloc.rebalance()
+        self.assertEqual(self.rung(agent), 2)
+
+    def test_no_real_open_nets_against_a_contract_held_on_the_other_side(self):
+        """MINOR (the review's DEMO 4): the venue nets one account's contracts, so a structure whose leg meets another's
+        opposite leg, or a single contract bought on a structure's short leg, left each close refused at the gateway (a leg
+        not held) into expiry. The House opens none of them."""
+        house = self.house
+        real = house.books["alpaca"]
+        holder = self.structure_agent("test-holder")
+        held = structures.instrument(structures.parse("alpaca", vertical_row(low=580)).spec, "alpaca")  # long 580C, short 581C
+        real.account(holder.id).holdings[held.key] = Holding(held, D(1), D("46"))
+        opener = self.structure_agent("test-opener")
+        with switched(True):
+            intents, _ = house._intents(opener, real, [vertical_row(low=581), vertical_row(low=579), vertical_row(low=582)])
+        # 581/582 buys the 581C held short; 579/580 sells the 580C held long; 582/583 touches neither.
+        self.assertEqual([i.instrument.market_id for i in intents],
+                         [structures.instrument(structures.parse("alpaca", vertical_row(low=582)).spec, "alpaca").market_id])
+        refused = [e.payload["reasons"][0] for e in house.ledger.iter(kinds="book.refused", agent=opener.id)]
+        self.assertEqual(len(refused), 2)
+        self.assertIn(f"{occ('2026-09-11', 'call', 581)} is held or bid on the other side on alpaca", refused[0])
+        self.assertIn(f"{occ('2026-09-11', 'call', 580)} is held or bid on the other side on alpaca", refused[1])
+        # A single contract bought on the structure's short leg is dropped for the same reason; on its long leg it is not.
+        self.assertIn(occ("2026-09-11", "call", 581), house._real_netting_refusal(real, [(occ("2026-09-11", "call", 581), 1)]))
+        self.assertEqual(house._real_netting_refusal(real, [(occ("2026-09-11", "call", 580), 1)]), "")
+        single = house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
+        intents, dropped = house._intents(single, real, [{"occ": occ("2026-09-11", "call", 581), "side": "buy", "quantity": 1,
+                                                          "type": "limit", "limit_price": 0.5}])
+        self.assertEqual(intents, [])
+        self.assertIn("is held or bid on the other side", " ".join(dropped))
+        # A practice book never asks: the options shadow book and alpaca-paper net nothing at a real venue here.
+        self.assertEqual(house._real_netting_refusal(house.books["options-shadow"], [(occ("2026-09-11", "call", 581), 1)]), "")
+        # Nor does one decision net against itself: of two verticals sharing 591C on opposite sides, the second is refused.
+        with switched(True):
+            intents, _ = house._intents(opener, real, [vertical_row(low=590), vertical_row(low=591), vertical_row(low=595)])
+        self.assertEqual([i.instrument.market_id for i in intents],
+                         [structures.instrument(structures.parse("alpaca", vertical_row(low=low)).spec, "alpaca").market_id for low in (590, 595)])
+        self.assertIn(f"{occ('2026-09-11', 'call', 591)} is opened on the other side by this same decision on alpaca",
+                      [e.payload["reasons"][0] for e in house.ledger.iter(kinds="book.refused", agent=opener.id)][-1])
 
 
 if __name__ == "__main__":

@@ -245,8 +245,10 @@ ORDER BY seq DESC LIMIT 20`.
   constitution `63b65b34…`, money `be1e3ce9…` on g/money over b/integration (recompute on the tree deployed): its deploy
   needs the ratify (the grant's seats unchanged). Flipping O1 to true is its digest change 2 of 2 and must set the
   gateway's `OPTION_STRUCTURES_REAL` to exactly `option_spread_real_types` in the same deploy (`league.ci`
-  `check_structures` refuses a tree where they disagree); deploy the gateway's `off` again only once the real book holds
-  no structure (a structure's close is refused at the gateway while its type is not admitted). The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
+  `check_structures` refuses a tree where they disagree). The gateway's list gates real OPENS only: a close of any
+  defined-risk type goes at `off` too once the account holds its legs, so the gateway can go back to `off` at any time
+  (the review of g/money). Never roll the House back past Deploy G or past Track P's Alpaca adapter while the real book
+  holds a structure: an older House refuses its real closes (or holds them back, without one multi-leg order). The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
   2, `allocator.real_book_dust_usd`) moves them to constitution `d0aa4c2a…`, money `d7d910fe…`: its
   deploy needs the ratify (the grant's seats unchanged). The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
   `allocator.family_probe`, no probe on a losing family) moves them to constitution `38a57fe9…`, money

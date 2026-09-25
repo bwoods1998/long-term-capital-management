@@ -104,7 +104,9 @@
     // admits, a comma-separated list of the structure spec's types (`debit_vertical`,
     // `credit_vertical`, `iron_condor`, ...; lib/caps.mjs STRUCTURE_TYPES). An admitted structure is
     // metered at its maximum loss against the caps above; "off", or any name that is not a type,
-    // admits none, and every multi-leg order to the real account is refused. The practice account
+    // admits none, and every multi-leg OPEN to the real account is refused. A CLOSE of any
+    // defined-risk type goes whatever this says, once the account's positions hold its legs (the
+    // review of g/money, Sept 25, 2026: "off" never strands a held structure). The practice account
     // (`alpaca-paper`) takes every defined-risk type unmetered whatever this says. Opening it is a
     // money-digest change the owner ratifies, not one the VM can make: it lists exactly the
     // constitution's `allocator.option_spread_real_types` while `allocator.option_spreads_real` (O1)
