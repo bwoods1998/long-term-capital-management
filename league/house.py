@@ -3651,6 +3651,15 @@ class House:
             self._state["options_history_day"] = _new_york(self.clock)[0]  # done for today only once it ran through
         return done
 
+    #: The replay tapes kept in memory at most, the oldest dropped first (Sept 25, 2026: the cache had no bound).
+    TAPES_KEPT = 24
+
+    def _trim_tapes(self) -> None:
+        """Keep at most `TAPES_KEPT` tapes, dropping the ones stored longest ago (called under `_tape_lock`)."""
+        while len(self._tapes) > self.TAPES_KEPT:
+            oldest = min(self._tapes, key=lambda k: self._tapes[k][0])
+            self._tapes.pop(oldest, None)
+
     def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
@@ -3747,9 +3756,20 @@ class House:
                 return tape
         with self._tape_lock:  # one build at a time: two agents of one family want the same tape
             hit = self._tapes.get(key)
-            if hit is None or end - hit[0] > 86400:
-                self._tapes[key] = (end, build())
-            return key, self._tapes[key][1]
+            if hit is not None and end - hit[0] <= 86400:
+                return key, hit[1]
+            tape = build()
+            if option:
+                # An OPTIONS tape is built for the call and never kept (Sept 25, 2026): a structure agent's
+                # tape holds up to 2 M option bars (hundreds of MB), every distinct NEEDS is a new key, and a
+                # cache with no eviction held them for the life of the process: the House was killed for
+                # memory mid-session (exit 137 at 14:37:30Z, RSS 4.1 GB of 6.2 GB an hour and a half after
+                # its restart). Rebuilding costs seconds of the box; a kill costs the tick.
+                self._tapes.pop(key, None)
+                return key, tape
+            self._tapes[key] = (end, tape)
+            self._trim_tapes()
+            return key, tape
 
     def _live_window(self, needs: Mapping[str, Any]) -> tuple[float, float]:
         """(start, end) of the recent live tape a strategy with these NEEDS is replayed over."""
@@ -3855,6 +3875,7 @@ class House:
                     if not tape.get("steps"):
                         raise ValueError(f"unsupported input: the development tape {key} has no steps: nothing was recorded in its window")
                     self._tapes[key] = (self.clock(), tape)
+                    self._trim_tapes()
                 return key, self._tapes[key][1]
         except TapeError:
             return None  # not fetched yet: a gap in the store is never a result against the strategy
