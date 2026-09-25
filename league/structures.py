@@ -43,7 +43,7 @@ from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from ltcm.adapters.alpaca import alpaca_symbol
-from ltcm.broker import Instrument, money
+from ltcm.broker import Instrument, RejectedOrder, money
 
 from . import structure_core as core
 from .venues import instrument_for
@@ -66,6 +66,16 @@ TYPES = core.TYPES
 BOUNDED = core.BOUNDED
 #: Types with more than one expiry: no value at the near expiry without the far leg's market.
 TWO_EXPIRIES = core.TWO_EXPIRIES
+
+
+def _occ(inst: Instrument) -> str:
+    """The option's OCC code; a leg the venue could not spell (a malformed expiry) is a ValueError, as in
+    `structure_core.occ_code`, never the venue's `RejectedOrder` (review of Sept 25, 2026: the House dropped
+    such a row where the replay counted a refusal)."""
+    try:
+        return alpaca_symbol(inst)
+    except RejectedOrder as exc:
+        raise ValueError(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -101,7 +111,7 @@ class Leg:
         multiplier), so a leg that is not an option contract is refused by the core's own rule."""
         inst = self.instrument
         option = inst.asset_class == "option"
-        return core.Leg(alpaca_symbol(inst) if option else inst.symbol, self.sign, self.ratio, inst.symbol,
+        return core.Leg(_occ(inst) if option else inst.symbol, self.sign, self.ratio, inst.symbol,
                         str(inst.expiry or ""), str(inst.right or ""), inst.strike if option else None,
                         inst.asset_class, inst.venue, inst.multiplier)
 
@@ -218,6 +228,11 @@ def _leg_from(venue: str, row: Mapping[str, Any]) -> Leg:
         raise ValueError("a leg's ratio is a whole number") from exc
     try:
         inst = instrument_for(venue, {k: v for k, v in row.items() if k not in ("role", "ratio")})
+        if inst.asset_class == "option":
+            # Read back from its OCC code, as the core reads every leg: a malformed expiry is this leg's
+            # error, worded as the core words it, and one spelled another way ("20260928") is the same
+            # contract as its code says, never a second expiry.
+            inst = instrument_for(venue, {"occ": _occ(inst)})
     except ValueError as exc:
         raise ValueError(f"a {role} leg: {exc}") from exc
     return Leg(inst, 1 if role == "long" else -1, ratio)

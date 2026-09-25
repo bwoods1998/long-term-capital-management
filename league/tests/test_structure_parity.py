@@ -83,6 +83,8 @@ REFUSED = [
     intent("debit_vertical", [leg(580, "long"), {"symbol": "SPY", "expiry": "2026-09-28", "strike": 581.0, "right": "call", "role": "short"}]),
     intent("debit_vertical", [leg(580, "long"), {"symbol": "SPY", "expiry": "2026-09-28", "strike": "581", "role": "short"}]),
     intent("debit_vertical", "legs"),
+    # a leg spelled out with a malformed expiry (review of Sept 25, 2026: RejectedOrder in the House, ValueError in the box)
+    intent("debit_vertical", [{"symbol": "SPY", "expiry": "2026-9-28", "strike": "580", "right": "call", "role": "long"}, leg(581, "short")]),
     {"action": "open", "quantity": 1, "limit_price": 0.3, "legs": [leg(580, "long"), leg(581, "short")], "reason": "no type"},
     {"structure": "debit_vertical", "action": "open", "quantity": 1, "legs": [leg(580, "long"), leg(581, "short")], "reason": "no limit"},
 ]
@@ -91,8 +93,8 @@ REFUSED = [
 def outcome(parse, row):
     try:
         order = parse(row)
-    except ValueError as exc:
-        return ("refused", str(exc))
+    except Exception as exc:  # noqa: BLE001 - any refusal, so a different KIND of error is a difference too
+        return ("refused", type(exc).__name__, str(exc))
     spec = order.spec
     return ("admitted", spec.type, spec.code, order.action, order.side, order.quantity, order.limit_price, order.held_limit,
             order.max_loss_usd, order.reason, spec.collateral, spec.max_value, spec.contracts, spec.expiry, spec.underlying,
@@ -118,6 +120,11 @@ class Parity(unittest.TestCase):
         house, box = both(intent("debit_vertical", spelled))
         self.assertEqual(house, box)
         self.assertEqual(house[2], "debit_vertical|+1SPY260928C00580000|-1SPY260928C00581000")
+        # an expiry spelled without dashes is the contract its OCC code names, in both (never a second expiry)
+        compact = [leg(580, "long"), {"symbol": "SPY", "expiry": "20260928", "strike": "581", "right": "call", "role": "short"}]
+        house, box = both(intent("debit_vertical", compact))
+        self.assertEqual(house, box)
+        self.assertEqual(house[2], "debit_vertical|+1SPY260928C00580000|-1SPY260928C00581000")
         alias = {"spread": "debit_vertical", "side": "sell", "quantity": 2, "type": "limit", "limit_price": 0.55,
                  "legs": ADMITTED["debit_vertical"], "reason": "take profit"}
         self.assertEqual(*both(alias))
@@ -128,6 +135,23 @@ class Parity(unittest.TestCase):
                 house, box = both(row)
                 self.assertEqual(house[0], "refused", house)
                 self.assertEqual(house, box)
+
+    def test_the_same_malformed_leg_is_the_same_error_in_both(self):
+        """The review's ParseParity (Sept 25, 2026): the House read a leg with a malformed expiry as the venue's
+        RejectedOrder, which `_intents` drops as a crash, where the box's core refuses it as a ValueError."""
+        row = {"structure": "debit_vertical", "action": "open", "quantity": 1, "limit_price": 0.3, "reason": "x",
+               "legs": [{"symbol": "SPY", "expiry": "2026-9-28", "strike": "580", "right": "call", "role": "long"},
+                        {"occ": "SPY260928C00581000", "role": "short"}]}
+        with self.assertRaises(ValueError):
+            core.parse(row, venue=V)
+        with self.assertRaises(ValueError):
+            structures.parse(V, row)
+        house, box = both(row)
+        self.assertEqual(house, box)
+        self.assertEqual(house, ("refused", "ValueError", "a long leg: alpaca: option expiry '2026-9-28' is not YYYY-MM-DD"))
+        malformed = structures.Leg(structures.instrument_for(V, {"symbol": "SPY", "expiry": "2026-9-28", "strike": "580", "right": "call"}), 1)
+        with self.assertRaisesRegex(ValueError, "is not YYYY-MM-DD"):  # a Leg built by hand is refused the same way
+            structures.classify("debit_vertical", [malformed, structures.Leg(structures.instrument_for(V, {"occ": occ(581)}), -1)])
 
     def test_the_held_code_round_trips_the_same_way(self):
         for type_, legs in ADMITTED.items():
