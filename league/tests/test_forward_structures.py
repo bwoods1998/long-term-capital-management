@@ -110,6 +110,9 @@ class Harness(unittest.TestCase):
         self.assertEqual((log[0]["submitted_snapshot"], log[0]["filled_snapshot"]), (0, 3))
         self.assertEqual(log[0]["price"], "0.57")
         self.assertEqual(result["checks"]["fills_not_on_newer_snapshot"], 0)
+        # the audit, apart from the broker: the touch from the raw rows, every leg quoted after the acceptance, sizes
+        self.assertEqual(log[0]["audit"], {"ok": True, "touch": "0.57", "legs_newer_than_acceptance": True, "legs_short_of_size": []})
+        self.assertEqual(result["checks"]["fills_failing_audit"], 0)
         [founder] = result["founders"]
         self.assertEqual(founder["opens"], 1)
         self.assertEqual(founder["fills"][0]["held_price"], 0.57)
@@ -130,6 +133,33 @@ class Harness(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0].startswith("2026-09-25T15:01:00"))  # its start: no quote in it is later
         self.assertEqual(result["checks"]["sized_from"], "2026-09-25T15:01:00.000000Z")
+
+
+class CalibrationBars(unittest.TestCase):
+    """`build_calibration_store`: the day's 15-minute bars from the snapshots' minute bars, only windows seen whole."""
+
+    def test_a_window_is_built_from_the_most_complete_minute_readings_and_only_when_seen_whole(self):
+        import league.options_history as history
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "live.jsonl"
+
+            def at(minute: int, bars: dict, last_t: str | None) -> str:
+                rows = [{**row(LOW, 1.00, 1.05, f"2026-09-25T15:{minute:02d}:30Z"), "last": 1.02, "last_t": last_t, "mbar": bars}]
+                return line(f"2026-09-25T15:{minute:02d}:10Z", rows)
+
+            minute = lambda m, c, v: {"o": c, "h": c + 0.01, "l": c - 0.01, "c": c, "v": v, "t": f"2026-09-25T15:{m:02d}:00Z"}  # noqa: E731
+            lines = [at(14, minute(14, 0.90, 3), "2026-09-25T15:14:05Z"),  # before the window 15:15-15:30 (a partial one: dropped)
+                     at(15, minute(15, 1.00, 2), "2026-09-25T15:15:05Z"),
+                     at(16, minute(15, 1.01, 6), "2026-09-25T15:15:50Z"),  # minute 15 seen again, more complete: kept
+                     at(29, minute(29, 1.04, 1), "2026-09-25T15:29:02Z"),
+                     at(31, minute(31, 1.10, 1), "2026-09-25T15:31:00Z")]  # the next window, not seen whole: dropped
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            built = fwd.build_calibration_store(path, Path(tmp) / "cal.sqlite", history, local_store=None)
+            bars = built["store"].db.execute("SELECT occ, timeframe, t, o, h, l, c, v, n FROM bars ORDER BY t").fetchall()
+            # o and l from minute 15 as last seen (1.01, 1.00), h and c from minute 29; v 6 + 1; n the three trades seen
+            self.assertEqual(bars, [(LOW, "15Min", "2026-09-25T15:30:00Z", 1.01, 1.05, 1.0, 1.04, 7.0, 3)])
+            self.assertEqual(built["store"].db.execute("SELECT count(*) FROM quotes").fetchone()[0], 5)
 
 
 if __name__ == "__main__":

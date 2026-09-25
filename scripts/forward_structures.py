@@ -523,11 +523,12 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
     tallies = {a.id: Tally() for a in agents}
     next_wake: dict[str, float] = {}
     last_mark = -1e18
-    checks = {"decisions": 0, "decision_snapshot_after_clock": 0, "fills": 0, "fills_not_on_newer_snapshot": 0, "snapshots": 0,
+    checks = {"decisions": 0, "decision_snapshot_after_clock": 0, "fills": 0, "fills_not_on_newer_snapshot": 0, "fills_failing_audit": 0, "snapshots": 0,
               "first_snapshot": None, "last_snapshot": None, "sized_from": None}
     decided_on: dict[str, list[tuple[float, int]]] = {}  # agent -> [(decision clock, snapshot index)]
     fill_snapshot: dict[str, int] = {}
     fill_log: list[dict[str, Any]] = []
+    submitted_at: dict[str, float] = {}
     seen_fills = 0
     started_book = False
     snap = None
@@ -559,11 +560,16 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
             fills = [row for row in ledger.iter(kinds=("book.fill",))]
             for row in fills[seen_fills:]:
                 checks["fills"] += 1
-                order_snap = fill_snapshot.get(str(row.payload.get("order_id") or ""))
-                fill_log.append({"agent": row.agent, "order_id": row.payload.get("order_id"), "side": row.payload.get("side"),
-                                 "submitted_snapshot": order_snap, "filled_snapshot": snap.index, "at": row.at, "price": row.payload.get("price")})
+                order_id = str(row.payload.get("order_id") or "")
+                order_snap = fill_snapshot.get(order_id)
+                audit = audit_fill(row.payload, snap, submitted_at.get(order_id))
+                fill_log.append({"agent": row.agent, "order_id": order_id, "side": row.payload.get("side"),
+                                 "submitted_snapshot": order_snap, "filled_snapshot": snap.index, "at": row.at, "price": row.payload.get("price"),
+                                 "audit": audit})
                 if order_snap is None or order_snap >= snap.index:
                     checks["fills_not_on_newer_snapshot"] += 1
+                if not audit.get("ok"):
+                    checks["fills_failing_audit"] += 1
             seen_fills = len(fills)
             batch = []
             for agent in agents:
@@ -607,9 +613,11 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
                 for outcome in book.submit(batch):
                     if outcome.order_id:
                         fill_snapshot[str(outcome.order_id)] = snap.index
+                        submitted_at[str(outcome.order_id)] = clock()
             shim._horizon_exits(book, float("inf"))
             for working in book.open_orders():
                 fill_snapshot.setdefault(str(working.order_id), snap.index)
+                submitted_at.setdefault(str(working.order_id), clock())
             if clock() - last_mark >= mark_every:
                 book.mark()
                 last_mark = clock()
@@ -624,6 +632,38 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
     finally:
         ledger.close()
         tmp.cleanup()
+
+
+def audit_fill(payload: Mapping[str, Any], snap: Snapshot, submitted: float | None) -> dict[str, Any]:
+    """A fill checked against the raw snapshot it was made on, apart from the broker's code: the structure's touch from
+    its legs' recorded quotes (an open at the ask: long legs' asks less short legs' bids; a close at the bid: long
+    legs' bids less short legs' asks, a long leg with no bid at nothing), every leg quoted AFTER the order was accepted,
+    and every sized leg showing at least ten times the contracts taken (the 10% rule's floor)."""
+    try:
+        spec = core.spec_of_code(str((payload.get("instrument") or {}).get("market_id")))
+    except ValueError as exc:
+        return {"ok": False, "why": f"not a structure: {exc}"}
+    buy = payload.get("side") == "buy"
+    quantity = Decimal(str(payload.get("quantity")))
+    touches, times, short = {}, [], []
+    for leg in spec.legs:
+        row = snap.rows.get(leg.occ) or {}
+        bid = Decimal(str(row["bid"])) if row.get("bid") not in (None, 0, 0.0) else None
+        ask = Decimal(str(row["ask"])) if row.get("ask") not in (None, 0, 0.0) else None
+        free = not buy and leg.sign > 0 and bid is None and ask is not None
+        touches[leg.occ] = (Decimal(0) if free else bid, ask)
+        times.append(parse_ts(row.get("as_of")) if row.get("as_of") else None)
+        if not free:
+            takes_ask = (leg.sign > 0) == buy
+            size = row.get("ask_size" if takes_ask else "bid_size")
+            if size is None or Decimal(str(size)) < 10 * quantity * leg.ratio:
+                short.append(leg.occ)
+    bid, ask = core.quote(spec, touches)
+    touch = ask if buy else bid
+    price = Decimal(str(payload.get("price")))
+    newer = submitted is not None and all(t is not None and t > submitted for t in times)
+    ok = touch is not None and touch == price and newer and not short
+    return {"ok": ok, "touch": None if touch is None else str(touch), "legs_newer_than_acceptance": newer, "legs_short_of_size": short}
 
 
 def _money(value: Any) -> float:
