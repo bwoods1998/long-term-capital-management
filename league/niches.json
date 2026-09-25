@@ -1057,10 +1057,10 @@
     "day"
    ],
    "title": "The open Alpaca desk: any stock, ETF or coin on the venue",
-   "brief": "Every US stock and ETF the account can trade and every coin Alpaca lists against the dollar, long only, for the program no one desk can hold: a coin traded on the equity open, a sector ETF against its largest names, a stock no desk lists. Name up to twelve symbols in NEEDS (stocks and coins may be mixed); the House shows their bars and quotes as it does any desk's, and the venue judges what is tradable. No options: they are the options desk's, under its rules. A program whose symbols sit mostly on one desk belongs to that desk and is born there, not here. Eight seats; the allocator bunts and stakes an open-desk agent exactly like any other, by its evidence. Stocks pay no commission and keep New York's session; coins trade around the clock at 0.25% a side as a taker and 0.15% resting, and the House closes a coin position after its hold limit.",
+   "brief": "Every US stock and ETF the account can trade and every coin Alpaca lists against the dollar, long only, for the program no one desk can hold: a coin traded on the equity open, a sector ETF against its largest names, a stock no desk lists. Name up to twelve symbols in NEEDS (stocks and coins may be mixed); the House shows their bars and quotes as it does any desk's, and the venue judges what is tradable. No options: they are the options desk's, under its rules. A program whose symbols sit mostly on one desk belongs to that desk and is born there, not here, unless its replay passes only with every market it names (a foundry card is replayed on both desks' tapes). Twelve seats (eight until Sept 25, 2026: the search looks for capacity, and a program spanning desks is where more of it is); the allocator bunts and stakes an open-desk agent exactly like any other, by its evidence. Stocks pay no commission and keep New York's session; coins trade around the clock at 0.25% a side as a taker and 0.15% resting, and the House closes a coin position after its hold limit.",
    "desk": "london",
    "desk_note": "the firm's London office",
-   "max_members": 8
+   "max_members": 12
   }
  ]
 }
