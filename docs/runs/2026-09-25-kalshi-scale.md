@@ -137,6 +137,28 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 | 7 | The scale report | none | prints committed, capacity used and the tranche per venue |
 | 8 | Data hosts recorded; research web reads a day; agent data requests answered | 25 hosts in `LEAGUE_HOSTS`; research has `web_search` only (0 fetches); 211 `tool.request` rows lifetime (118 `tool.fulfilled`, 121 `tool.blocked`), the newest 05:23:54Z | ≥ 45 hosts recorded; `web_fetch` in use; every request of the run answered |
 
+## Deploy K1: the runbook
+
+1. **By 19:30Z:** every builder's PR green; the adversarial reviews (the two seeds and the seating hook: three lenses
+   each, in `*/review` worktrees) merged into their branches; the other three records read (their deploys, owners);
+   `deploys.jsonl` and `floor_box.py status` show no deploy in flight; the proven family's open positions and their
+   games' first pitches read from the box (no deploy while one is in play).
+2. **Integration** `k1/integration` from `origin/main` (with Deploy A's and V's merges in): merge
+   `k1/sports-consensus`, `k1/founder-seats`, `k3/weather-ensemble`, `k/watch`, `k2/capacity` and the House side of
+   `i1/web-fetch`, one at a time with `git -c rerere.enabled=false merge`, committing each merge before the next;
+   the `SEEDS` rows of both seeds and the options run's at the end of `league/seeds/__init__.py`; the
+   `kalshi_founders` call line right after the options run's `options_desk.seat_founders(self)`. Targeted tests on
+   the tmpfs, `league.ci --no-tests`, a PR, CI's job states read (a cancelled job is not a pass).
+3. **The gateway first** (no money rule): `web_fetch` rebased on the options run's gateway change, `npm run check &&
+   npm test` green, `npx wrangler deploy --tag <sha>` in `gateway/`, `/v1/health` read back.
+4. **The House:** merge the PR; `~/Work/ltcm-deploy` at `origin/main`; `python3 scripts/floor_box.py deploy` (the
+   loop running, so the watchdog's watch runs). No money-digest change: after promotion the grant reads active on
+   `535a7f15` (or whatever Deploy A left), and a ratify check writes nothing.
+5. **Verify in the window:** `ops.started` on the release; one founder born a births pass, each displacement by rule
+   (reason names the founder); the college board and the odds rows covering Saturday's slate (≥ 60 games with
+   lines); the founders' first wakes offered markets, their intents and practice orders; no new error alerts; tick
+   p50. Then the gateway fetch from a research pass (the `web_fetch` ledger row).
+
 ## Findings before the builders report
 
 - **No agent has ever declared `weather`, `nws`, `forecast` or `odds`** (every `agent.born` row to 06:30Z Sept 25:
@@ -165,7 +187,7 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
   record (meriwether-h2d625d, first close 02:01Z Sept 23, practice 20-lot and real 2-20-lot NO takers) sits inside
   that last stretch, and games on one night move together, so its "independent" events are correlated and n 26 /
   bound +0.092 overstates the proof. NFL totals (43 games since Aug 27, preseason included): the central under won
-  22/43 at 0.510, −3.6% a dollar, t −0.24: no premium. Sent to the forward-first run at 06:52Z (it owns the family
+  22/43 at 0.510, −3.6% a dollar, t −0.24: no premium; NCAAF totals (269 games matched of 421 since Aug 27): 128/269 (47.6%) at 0.514, −10.1% a dollar, t −1.68. Sent to the forward-first run at 06:52Z (it owns the family
   proof, the swing at 10 and M3's members); this run changes nothing of theirs, writes no football sibling of the
   mechanism, and puts model-versus-market pricing (K1, K3) ahead of behavioural premia.
 - **K1's premise, measured point in time (06:55Z).** Every `odds` row recorded since 08:35Z Sept 24 (one provider,
