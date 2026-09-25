@@ -1,0 +1,349 @@
+{
+  "version": "move-v0-placeholder",
+  "fitted_on": {
+    "placeholder": true,
+    "note": "PLACEHOLDER, not fitted. The J1 analysis delivers the real coefficients. Every weight is 0 and each intercept is the logit of the semantic lab's training base rate for 'moves at all' (executable rows, scripts/jev_lab_eval/result.txt: 0.454 / 0.493 / 0.624 at 5 / 15 / 60 minutes). The recorder treats this version as no Jev model: move_p5/15/60 stay null and numeric_p5/15/60 are that constant base rate. Jev's answers are still recorded, for the post-ship evaluation.",
+    "source": "scripts/jev_lab_eval/result.txt",
+    "written": "2026-09-25"
+  },
+  "questions": {
+    "per_market": [
+      "continuous_threshold",
+      "relative_return",
+      "discrete_event",
+      "ambiguous_settlement"
+    ],
+    "per_state": [
+      "related_exposure",
+      "missing_catalyst_context",
+      "fragile_liquidity",
+      "recent_reversal"
+    ]
+  },
+  "numeric": [
+    {
+      "name": "mid",
+      "definition": "(yes_bid + yes_ask) / 2 of the observed quote"
+    },
+    {
+      "name": "spread",
+      "definition": "yes_ask - yes_bid of the observed quote"
+    },
+    {
+      "name": "log_oi",
+      "definition": "log1p(max(0, open_interest)) / 15; 0 if open_interest is missing"
+    },
+    {
+      "name": "hours",
+      "definition": "min(max(hours_to_close, 0), 48) / 48; 1 if hours_to_close is missing"
+    },
+    {
+      "name": "drift",
+      "definition": "mid minus the mid of the newest earlier minute quote in the state; 0 if none"
+    }
+  ],
+  "horizons": {
+    "5": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift",
+        "continuous_threshold",
+        "relative_return",
+        "discrete_event",
+        "ambiguous_settlement",
+        "related_exposure",
+        "missing_catalyst_context",
+        "fragile_liquidity",
+        "recent_reversal"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        -0.184522,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    },
+    "15": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift",
+        "continuous_threshold",
+        "relative_return",
+        "discrete_event",
+        "ambiguous_settlement",
+        "related_exposure",
+        "missing_catalyst_context",
+        "fragile_liquidity",
+        "recent_reversal"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        -0.028002,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    },
+    "60": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift",
+        "continuous_threshold",
+        "relative_return",
+        "discrete_event",
+        "ambiguous_settlement",
+        "related_exposure",
+        "missing_catalyst_context",
+        "fragile_liquidity",
+        "recent_reversal"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        0.506561,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    }
+  },
+  "numeric_only": {
+    "5": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        -0.184522,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    },
+    "15": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        -0.028002,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    },
+    "60": {
+      "features": [
+        "mid",
+        "spread",
+        "log_oi",
+        "hours",
+        "drift"
+      ],
+      "mean": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "sd": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "weights": [
+        0.506561,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "l2": null,
+      "dev_auc": null,
+      "dev_auc_numeric": null
+    }
+  }
+}
