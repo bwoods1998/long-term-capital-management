@@ -233,14 +233,14 @@ class SameDayGreeks(unittest.TestCase):
     other six as computing their own deltas. Five of the six can never pick a same-day expiry at all, and five of the
     other six take the chain's delta whenever it has one."""
 
-    def test_only_orb_is_blocked_and_five_founders_would_change_with_greeks_on_todays_expiries(self):
+    def test_only_orb_is_blocked_and_five_founders_may_change_with_greeks_on_todays_expiries(self):
         exposure = fwd.zero_dte_exposure()
         verdicts = {founder: row["verdict"] for founder, row in exposure.items()}
         self.assertEqual(verdicts, {
             "options-orb": "blocked",
-            "options-condor-vrp": "changed_by_greeks", "options-butterfly-pin": "changed_by_greeks",
-            "options-ironfly-quiet": "changed_by_greeks", "options-strangle-cheap": "changed_by_greeks",
-            "options-putspread-dip": "changed_by_greeks",
+            "options-condor-vrp": "may_change_with_greeks", "options-butterfly-pin": "may_change_with_greeks",
+            "options-ironfly-quiet": "may_change_with_greeks", "options-strangle-cheap": "may_change_with_greeks",
+            "options-putspread-dip": "may_change_with_greeks",
             "options-calendar-term": "unaffected", "options-gap-drift": "unaffected", "options-reversal": "unaffected",
             "options-skew": "unaffected", "options-trend-vertical": "unaffected", "options-diagonal": "unaffected"})
         # the premise from each founder's NEEDS: the lowest its nearest expiry may be
@@ -341,6 +341,7 @@ class Thoughts(unittest.TestCase):
     def test_a_digest_takes_the_numbers_out(self):
         self.assertEqual(fwd.digest("Condor VRP. SPY: rich (1.18x) but no 1-wide condor near 0.15 delta; entries 10:00-14:00 New York"),
                          "Condor VRP. SPY: rich (#) but no #-wide condor near # delta; entries #:#-#:# New York")
+        self.assertEqual(fwd.digest("IWM debit_vertical: holding at +0.05 a share"), fwd.digest("IWM debit_vertical: holding at -0.02 a share"))
 
     def test_thoughts_agree_where_the_twin_said_the_same_within_a_wake_and_stop_at_the_first_rewrite(self):
         forward = {"founders": [{"founder": "options-orb", "wake_minutes": 5.0, "thought_runs": [

@@ -549,7 +549,7 @@ def load_founder(name: str) -> SimpleNamespace:
                            specialty="alpaca-options", code=source, decide=module.decide, alive=True)
 
 
-_NUMBER = re.compile(r"\$?\d[\d,]*(?:\.\d+)?(?:%|x\b)?")
+_NUMBER = re.compile(r"(?:(?<![\w.])[-+])?\$?\d[\d,]*(?:\.\d+)?(?:%|x\b)?")  # a sign only where it starts the number
 
 
 def digest(thought: str) -> str:
@@ -1239,8 +1239,9 @@ def compare_chains(snapshots: str | Path, house_chains: Sequence[Mapping[str, An
     (the two reads are up to a minute apart), and of the greeks (Alpaca's against the forward test's Black-Scholes) on
     contracts of 1 day or more ONLY: Alpaca gives no greeks on a contract expiring today, so nothing here validates a
     same-day Black-Scholes delta (`*_0dte_rows_forward_delta_computable` only counts where one could be solved).
-    `*_rows_delta_missing_house`: rows of 1 day or more the House showed WITHOUT a delta that the forward chain carries
-    one for (a founder that keeps only rows with a delta could pick one forward and not live)."""
+    `*_rows_delta_missing_house_only`: rows of 1 day or more the House showed WITHOUT a delta that the forward chain
+    carries one for (a founder that keeps only rows with a delta could pick one forward and not live);
+    `*_rows_delta_missing_forward_only` the reverse; `*_rows_delta_missing_both`."""
     chains = sorted(house_chains, key=lambda c: float(c.get("received") or 0))
     stats: dict[str, dict[str, list[float]]] = {}
     counts: dict[str, int] = {}
@@ -1273,7 +1274,7 @@ def compare_chains(snapshots: str | Path, house_chains: Sequence[Mapping[str, An
                     count(f"{kind}_0dte_rows_forward_delta_computable")
                 continue
             if delta is None or mine[1] is None:
-                count(f"{kind}_rows_delta_missing_{'house' if delta is None else 'forward'}")
+                count(f"{kind}_rows_delta_missing_" + ("both" if delta is None and mine[1] is None else "house_only" if delta is None else "forward_only"))
                 continue
             add(kind, "abs_delta_difference", abs(float(delta) - mine[1]))
             if iv is not None and mine[0] is not None:
@@ -1631,8 +1632,9 @@ def zero_dte_exposure(founders: Sequence[str] = FOUNDERS) -> dict[str, dict[str,
     contract's delta, from its code: 'chain delta only' keeps only the rows the chain gives a delta (the
     `_num(r.get("delta"), None) is not None` filter), so with none on today's expiries it never picks one live;
     'chain delta first' takes the chain's delta where there is one and solves its own only where not (`_delta`), so
-    greeks on today's expiries would change its strike choice. Verdict: `blocked` (can pick today's expiry, chain
-    delta only), `changed_by_greeks` (can pick it, chain delta first), `unaffected` (can never pick it)."""
+    greeks on today's expiries CAN change its strike choice (whether they did on a day, `main` measures: the what-if
+    against the session, each founder alone and together). Verdict: `blocked` (can pick today's expiry, chain delta
+    only), `may_change_with_greeks` (can pick it, chain delta first), `unaffected` (can never pick it)."""
     out: dict[str, dict[str, Any]] = {}
     for name in founders:
         agent = load_founder(name)
@@ -1646,7 +1648,7 @@ def zero_dte_exposure(founders: Sequence[str] = FOUNDERS) -> dict[str, dict[str,
             reads = "chain delta only"
         else:
             reads = "unknown"
-        verdict = "unaffected" if not can else {"chain delta only": "blocked", "chain delta first": "changed_by_greeks"}.get(reads, "unknown")
+        verdict = "unaffected" if not can else {"chain delta only": "blocked", "chain delta first": "may_change_with_greeks"}.get(reads, "unknown")
         out[agent.founder] = {"expiry_parameter": key, "params": agent.params.get(key), "bounds": bounds.get(key),
                               "can_pick_todays_expiry": can, "reads_delta": reads, "verdict": verdict}
     return out
@@ -1823,15 +1825,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         paths[name] = section
     result["paths"] = paths
     exposure = zero_dte_exposure(founders)
-    if args.what_if_0dte_greeks and args.alone:
+    if args.what_if_0dte_greeks:
         for founder in founders:
-            changed = 0
-            for k in offsets:
-                a, b = by.get(("session", f"alone:{founder}", k)), by.get(("what_if_0dte_greeks", f"alone:{founder}", k))
-                if a and b:
-                    rows = [next(f for f in r["founders"] if f["seed"] == founder) for r in (a, b)]
-                    changed += path_brief(rows[0], None)["asked"] != path_brief(rows[1], None)["asked"]
-            exposure[load_founder(founder).founder]["what_if_changed_its_orders_alone"] = f"{changed} of {len(offsets)} starts"
+            for company in ("together", f"alone:{founder}"):
+                changed = compared = 0
+                for k in offsets:
+                    a, b = by.get(("session", company, k)), by.get(("what_if_0dte_greeks", company, k))
+                    if a and b:
+                        rows = [next(f for f in r["founders"] if f["seed"] == founder) for r in (a, b)]
+                        compared += 1
+                        changed += path_brief(rows[0], None)["asked"] != path_brief(rows[1], None)["asked"]
+                if compared:
+                    tag = "together" if company == "together" else "alone"
+                    exposure[load_founder(founder).founder][f"what_if_changed_its_orders_{tag}"] = f"{changed} of {compared} starts"
     result["zero_dte_exposure"] = exposure
     result["checks_every_floor"] = {key: sum(r["checks"][key] for r in results) for key in
                                     ("decisions", "decision_snapshot_after_clock", "fills", "fills_not_on_newer_snapshot", "fills_failing_audit")}
