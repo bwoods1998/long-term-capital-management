@@ -70,9 +70,10 @@ its session.
 
 | Wave | State | Files owned |
 |---|---|---|
-| J0 + J1 (D-J1, owner deploy) | built, PR #319 (draft; second review running) | `league/jev.py`, `league/sensors.py`, `league/semantic_lab.py`, new `league/jev_features.py` and `league/jev_move_model.json`, `league/config.json`'s `jev` block only, `league/tests/test_jev_*.py` |
+| J0 + J1 (D-J1, owner deploy) | deployed 11:50:48Z (#319) | `league/jev.py`, `league/sensors.py`, `league/semantic_lab.py`, new `league/jev_features.py` and `league/jev_move_model.json`, `league/config.json`'s `jev` block only, `league/tests/test_jev_*.py` |
 | J5 (gateway) | after the options run's and the Kalshi run's gateway deploys | `gateway/lib/typesafe.mjs` (the `score` answer), `TYPESAFE_PILOT_USD` in `gateway/wrangler.jsonc` (to $41), `gateway/test/` Jev cases |
-| J3 (with D-J1 if reviewed in time) | building on `j3/memory` (stacked on #319) | new `league/jev_memory.py` and `league/tests/test_jev_memory.py`; `league/jev.py` (`choice` answers), `league/sensors.py` |
+| J1 serving (with J3 in the next deploy, switched off) | building on `j1/serve` (stacked on the Kalshi run's #320) | one small hunk in `league/feeds.py` (a live internal feed `move`, never polled), `league/jev_features.py`, `league/sensors.py`, one line each in `league/FEEDS.md` and `league/CONTRACT.md`; `"serve": false` in the model file until the ship rule passes |
+| J3 (next deploy) | built and reviewed, #322 (draft) | new `league/jev_memory.py` and `league/tests/test_jev_memory.py`; `league/jev.py` (`choice` answers), `league/sensors.py` |
 | Hooks (J1 serving, J3's research block) | after their owners' waves merge | one hook each in `league/feeds.py` (Kalshi run, after K1) and `league/researcher.py` (J3's prior-results block in `_state`; the Kalshi run's I1 owns the file), each a small PR read by the owner run first. J2 builds no hook in `research_gate.py` (no Jev pre-filter earned its keep); J3 needs none in `lab.py` |
 
 - **The Kalshi run's answers (06:29Z):** J1's serving hook `ctx["feeds"]["move"]` is agreed as a small
