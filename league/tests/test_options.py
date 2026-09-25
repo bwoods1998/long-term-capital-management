@@ -699,13 +699,18 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertIn("outside the regular session", self.refusals(agent)[0])
 
     def test_structures_on_real_money_wait_for_the_owners_switch(self):
+        """An OPEN on real money waits for O1 (`allocator.option_spreads_real`, off); a close only takes risk off and goes
+        (G of Sept 25, 2026: `league/tests/test_real_structures.py` has the switch on)."""
         from types import SimpleNamespace
 
         agent = self.structure_agent()
         real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca"))
         intents, dropped = self.house._intents(agent, real, [condor_row(), condor_row(action="close", limit=0.10)])
-        self.assertEqual((intents, dropped), ([], []))
-        self.assertTrue(all("owner's switch (O1)" in r for r in self.refusals(agent)))
+        self.assertEqual(dropped, [])
+        self.assertEqual([(i.side, i.instrument.venue) for i in intents], [("sell", "alpaca")])
+        refusals = self.refusals(agent)
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("owner's switch (O1: allocator.option_spreads_real is off)", refusals[0])
 
     def test_a_missing_structure_book_refuses_and_never_sends_to_alpaca_paper(self):
         agent = self.structure_agent()

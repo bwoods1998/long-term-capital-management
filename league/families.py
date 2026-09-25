@@ -93,10 +93,17 @@ from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 from . import stats
 from .constitution import CONSTITUTION
+from .structure_core import is_code
 from .ledger import HOUSE
 
 CENT = Decimal("0.01")
 PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
+#: Every practice book of a venue (G of the options-desk run, Sept 25, 2026): an Alpaca STRUCTURE agent practises on the
+#: House's `options-shadow` book (or `alpaca-paper`, as `league/config.json` `options_structures.book` names it), so a
+#: family's record reads each member's practice wherever it traded; a member never lent anything on a book has no record
+#: there. And the practice books whose fills pay the execution haircut (`evidence.alpaca_paper_haircut_bps`): Alpaca's.
+PRACTICE_BOOKS = {"alpaca": ("alpaca-paper", "options-shadow"), "kalshi": ("kalshi-shadow",)}
+HAIRCUT_BOOKS = ("alpaca-paper", "options-shadow")
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 REAL_BOOKS = tuple(REAL_BOOK.values())
 STATES = ("unproven", "proven", "swing")
@@ -531,7 +538,7 @@ def practice_charges(rows: list[TapeRow], book: str, bps: Any) -> dict[str, list
     instrument key a closed trade carries (`evaluator.closed_trade_rows`): `bps` (a number, or a table
     by asset class) of the fill's notional, as the allocator's `_paper_haircut` charges the paper
     record its E reads."""
-    from .allocator import _haircut_rate
+    from .allocator import _haircut_rate, _structure_fill
 
     charges: dict[str, list[tuple[int, float]]] = {}
     for r in rows:
@@ -543,7 +550,8 @@ def practice_charges(rows: list[TapeRow], book: str, bps: Any) -> dict[str, list
             notional = abs(float(p["quantity"]) * float(p["price"]) * float(inst.get("multiplier") or 1))
         except (KeyError, TypeError, ValueError):
             continue
-        charges.setdefault(instrument_key(inst), []).append((r.seq, notional * _haircut_rate(bps, inst.get("asset_class")) / 10_000.0))
+        rate = _haircut_rate(bps, inst.get("asset_class"), structure=_structure_fill(inst))  # O5: a structure's own rate
+        charges.setdefault(instrument_key(inst), []).append((r.seq, notional * rate / 10_000.0))
     return charges
 
 
@@ -739,7 +747,8 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     rule = proof_rule(c)
     at_risk_unit = rule["unit"] == "at_risk"
     share = rule["reference_share"]
-    books = {PAPER_BOOK[venue]: rule["practice_weight"], REAL_BOOK[venue]: rule["real_weight"]}
+    # Every practice book of the venue (G, Sept 25, 2026: a structure member's practice is on its structure book).
+    books = {**{name: rule["practice_weight"] for name in PRACTICE_BOOKS[venue]}, REAL_BOOK[venue]: rule["real_weight"]}
     haircut = ((c.get("allocator") or {}).get("evidence") or {}).get("alpaca_paper_haircut_bps", 0)
     registry = house.registry
     with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
@@ -768,6 +777,9 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
     risked: list[float] = []  # each entry's cash over what had been lent then, as `trade_returns` reads its risk
     without_risk = 0
     made_by_book = {"practice": 0.0, "real": 0.0}  # what its closed trades made, by book, before any haircut (C8: to the cent)
+    # The family's closed level-3 STRUCTURES (O4 of the options-desk run, Sept 25, 2026): one flat sale (or settlement) of a
+    # held structure is one; on practice books and the real one, with the account-unit log growth of each after its haircut.
+    structures = {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0}
     for member in members:
         rows = tape.rows.get(member) or []
         cutoffs = tape.cutoffs.get(member) or {}
@@ -789,7 +801,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
             at_risk = risked_at_close(rows, book, through)
             when = {r.seq: r.at for r in rows}
             by_event = per_event(book, c)
-            charges = practice_charges(rows, book, haircut) if book == "alpaca-paper" else {}
+            charges = practice_charges(rows, book, haircut) if book in HAIRCUT_BOOKS else {}
             # observation -> [account log growth, made, at risk, (first entry seq, its liquidity), first close, last close]
             mine: dict[str, list[Any]] = {}
             for row in closed:
@@ -807,6 +819,10 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
                 paid = math.fsum(ch for seq, ch in charges.get(row["key"], ()) if opened <= seq <= row["seq"])
                 made = row["made"] - paid
                 made_by_book["real" if book == REAL_BOOK[venue] else "practice"] += row["made"]
+                if is_code((row["instrument"] or {}).get("market_id")):
+                    side_of = "real" if book == REAL_BOOK[venue] else "practice"
+                    structures[f"{side_of}_closed"] += 1
+                    structures[f"{side_of}_log"] += log1p(made / lent)
                 unit[0] += log1p(made / lent)
                 unit[1] += made
                 risk = at_risk.get(row["seq"], 0.0)
@@ -889,7 +905,7 @@ def family_record(house: Any, family: str, venue: str, *, tape: TradeTape | None
               "lopsided": whole.get("lopsided"), "loss_gate": whole.get("loss_gate"), "honest_bound": whole["honest_bound"],
               "risk_per_entry": risk_per_entry, "rows_without_risk": without_risk, "edge_per_dollar": edge,
               "maker": side("maker"), "taker": side("taker"), "real": real, "blocks": blocks, "rule": rule,
-              "dollars": {k: round(v, 6) for k, v in made_by_book.items()}}
+              "dollars": {k: round(v, 6) for k, v in made_by_book.items()}, "structures": structures}
     if now is not None and stake_usd is not None:
         record["capacity"] = capacity(tape, members, venue, now=float(now), days=(swing or {}).get("capacity_days", 7.0),
                                       stake_usd=float(stake_usd), edge=edge, real_events=real["closed_at"],
@@ -911,7 +927,8 @@ def empty_record(family: str, venue: str, *, through: int | None = None, error: 
            "state": "unproven", "real_n": 0, "dates": 0, "lopsided": None, "loss_gate": None, "honest_bound": None, "risk_per_entry": None,
            "rows_without_risk": 0, "edge_per_dollar": None, "maker": dict(side), "taker": dict(side),
            "real": {**side, "first_closes": [], "closed_at": [], "entry": None}, "blocks": {"practice": 0, "real": 0, "growth": 0.0},
-           "rule": rule, "dollars": {"practice": 0.0, "real": 0.0}}
+           "rule": rule, "dollars": {"practice": 0.0, "real": 0.0},
+           "structures": {"practice_closed": 0, "practice_log": 0.0, "real_closed": 0, "real_log": 0.0}}
     if error is not None:
         out["error"] = error
     return out
