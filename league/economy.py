@@ -81,6 +81,22 @@ def check_bounds(game: Mapping[str, Any]) -> None:
     paused = merton.get("paused_until_profit") or []
     if not isinstance(paused, list) or any(role not in allowed for role in paused):
         raise ValueError(f"game.json: merton.paused_until_profit must be a subset of {sorted(allowed)}")
+    # F4 (Sept 25, 2026): the lanes' lift dials inside `merton_bounds.lift`.
+    lift = merton.get("lift") or {}
+    for key, (low, high) in (limits.get("lift") or {}).items():
+        if key in lift and not float(low) <= float(lift[key]) <= float(high):
+            raise ValueError(f"game.json: merton.lift.{key} = {lift[key]} is outside [{low}, {high}]")
+    # F2 (Sept 25, 2026): each research.gate dial `research_bounds.gate` names is inside its range, or
+    # one of the values it lists.
+    gate = (game.get("research") or {}).get("gate") or {}
+    for key, bound in ((game.get("research_bounds") or {}).get("gate") or {}).items():
+        if key not in gate:
+            continue
+        if all(isinstance(v, str) for v in bound):
+            if gate[key] not in bound:
+                raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not one of {bound}")
+        elif not float(bound[0]) <= float(gate[key]) <= float(bound[1]):
+            raise ValueError(f"game.json: research.gate.{key} = {gate[key]} is outside [{bound[0]}, {bound[1]}]")
     lock = ((game.get("research") or {}).get("gate") or {}).get("abstain_lock_profile")
     if lock is not None:
         from ltcm.provider import PROFILES

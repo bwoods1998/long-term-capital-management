@@ -103,6 +103,9 @@ KINDS: dict[str, bool] = {
     "audit.counterfactual": True,
     "merton.pass": True,  # one architect, toolsmith, operator, designer or teacher pass
     "merton.change": True,  # a pull request it opened and what CI said
+    # F4 (Sept 25, 2026): what an agent did with a paid consult within two sessions, then its forward
+    # blocks after against before (league/yield_ledger.py). Private, as the consult's answer is.
+    "consult.outcome": False,
     # The commons.
     "library.note": True,
     "tool.request": True,

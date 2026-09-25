@@ -20,18 +20,52 @@ the code (a card's line to the foundry, `lab:` founders to the lab, a merged rep
 engineer, an architect's strategy to the architect, everything else to research); positive forward
 blocks are active `eval.block` rows with positive log growth, credited the same way; cards and lessons
 are counted for the foundry and the teacher. `usd_per` divides a line's spend by each unit it produced.
+A lesson is a `playbook.entry` the teacher wrote (`source: teacher`): until Sept 25, 2026 every
+post-mortem counted, 111 of the 117 "lessons" of the 24 hours to T0 (the teacher wrote 6).
+
+The forward lift (Sept 25, 2026, the forward-first run, F4; `lift` on the row, `lifts()`). Pricing a
+lane is not measuring it: in the 24 hours to T0 (04:23Z) the consultant cost $35.44 for 62 answers and
+nothing said whether one made an agent trade better. Replayed on the T0 snapshot with the functions
+below: 50 of 110 judged consults were followed by no candidate and no strategy change; the 31 with six
+forward blocks after them grew 0.0091 a block LESS than in the six before (one-sided 80% lower bound
+-0.0129; 12 of 31 better), at $0.45 a positive block after against research's $0.29 over the same day.
+Over the last `merton.lift.days` (7):
+
+- the teacher: forward growth per active block over `teacher_days` (3) after each lesson, of the agents
+  the lesson names (desk, specialty or family), split by `research_gate.lesson_arm`: under the gate's
+  `lesson_arm: parity` a lesson wakes the research of the even half only, so the odd half is a control
+  that was not steered to it. Counted from `lesson_since`, when the gate first split the arms.
+- the consultant: a `consult.outcome` row for each paid consult at two stages -- `sessions`, whether the
+  agent retained a candidate or changed its strategy within two sessions (`merton.consult_verdict`; an
+  unproductive one doubles its next consult's price, `Merton.consult_price_multiple`), and `blocks`,
+  its next `consult_blocks` (6) active forward blocks against its previous ones (`merton.consult_blocks`)
+  -- and their mean lift, dollars per positive block after, against research's over the last day.
+- the engineer: repairs verified (`repair.status` `verified`, one per key) per dollar of its passes,
+  over the window and lifetime (22 for $27.54 at T0, $1.25 a repair).
+
+Each lane's `verdict` is `lift` when the one-sided 80% lower bound of its lift is above zero (the
+engineer: a verified repair in the window), `no_lift` when it is not on at least `min_blocks` (30)
+blocks an arm (the consultant: 10 judged consults), and `insufficient` otherwise. A lane with no lift
+at the end of the run goes into `merton.paused_until_profit` (the teacher and, since Sept 25, 2026, the
+consultant are allowed there).
 """
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .ledger import now_iso
 
 WHAT = "yield"
 ROLES = ("architect", "engineer", "consultant", "teacher", "foundry", "toolsmith", "operator", "designer")
+#: The one-sided 80% normal quantile: a lift's lower bound is lift - Z80 x its standard error.
+Z80 = 0.8416
+#: Blocks an arm needs before the teacher's lift can say `no_lift`; judged consults, the consultant's.
+MIN_BLOCKS = 30
+MIN_CONSULTS = 10
 
 
 def _money(value: Any) -> Decimal:
@@ -131,7 +165,8 @@ def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[
         elif kind == "hypothesis.card":
             count("foundry", "cards")
         elif kind == "playbook.entry":
-            count("teacher", "lessons")
+            if p.get("source") == "teacher":  # a post-mortem is the graveyard's, not a lesson (Sept 25, 2026)
+                count("teacher", "lessons")
         elif kind == "lab.graduate":
             count("lab", "graduates")
     usd_per: dict[str, dict[str, str]] = {}
@@ -151,12 +186,223 @@ def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[
             "usd_per": usd_per, "total_usd": format(sum(spend.values(), Decimal(0)), ".4f")}
 
 
+def _epoch(iso: str) -> float:
+    from datetime import datetime
+
+    return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _arm(values: list[float]) -> dict[str, Any]:
+    mean = _mean(values)
+    var = sum((v - mean) ** 2 for v in values) / (len(values) - 1) if len(values) > 1 and mean is not None else None
+    return {"blocks": len(values), "mean_log_growth": round(mean, 6) if mean is not None else None,
+            "_mean": mean, "_var": var}
+
+
+def _lower(lift: float | None, *variances_over_n: float | None) -> float | None:
+    """The one-sided 80% lower bound of a difference of means (Welch's standard error)."""
+    if lift is None or any(v is None for v in variances_over_n):
+        return None
+    return lift - Z80 * math.sqrt(sum(variances_over_n))
+
+
+def _teacher_tape(ledger: Any, cache: dict[str, Any], keep_after: float) -> dict[str, Any]:
+    """What the teacher's lift reads, folded incrementally into `cache` (the `YieldLedger` keeps one,
+    so an hourly row reads only the rows since the last): each agent's lesson words, birth and death,
+    its active forward blocks since `keep_after`, and each teacher's lesson with its terms. The first
+    fold reads the whole history (about 4 s on the T0 snapshot, most of it agent.born's code)."""
+    from .research_gate import lesson_terms, lesson_words
+
+    for key in ("words", "born", "died", "blocks"):
+        cache.setdefault(key, {})
+    cache.setdefault("lessons", [])
+    for entry in ledger.iter(kinds=("agent.born", "agent.died", "eval.block", "playbook.entry"), after=int(cache.get("seq") or 0)):
+        cache["seq"] = entry.seq
+        p = entry.payload
+        if entry.kind == "agent.born":
+            cache["words"][entry.agent] = lesson_words(entry.agent, p.get("specialty"), p.get("niche"), p.get("family"))
+            cache["born"][entry.agent] = _epoch(entry.at)
+        elif entry.kind == "agent.died":
+            cache["died"][entry.agent] = _epoch(entry.at)
+        elif entry.kind == "eval.block":
+            if p.get("active") and _epoch(entry.at) >= keep_after:
+                cache["blocks"].setdefault(entry.agent, []).append((entry.seq, _epoch(entry.at), float(p.get("log_growth") or 0)))
+        elif p.get("source") == "teacher":
+            cache["lessons"].append((_epoch(entry.at), lesson_terms(entry)))
+    for agent, rows in list(cache["blocks"].items()):
+        kept = [row for row in rows if row[1] >= keep_after]
+        if kept:
+            cache["blocks"][agent] = kept
+        else:
+            del cache["blocks"][agent]
+    return cache
+
+
+def teacher_lift(ledger: Any, *, now: float, since: str | None, days: float = 7, teacher_days: float = 3,
+                 min_blocks: int = MIN_BLOCKS, cache: dict[str, Any] | None = None) -> dict[str, Any]:
+    """F4: forward growth over `teacher_days` after each teacher's lesson written in the last `days`
+    (and after `since`, when the gate first split the arms), of the agents it names, by
+    `research_gate.lesson_arm`. A block counts once per arm however many lessons name its agent."""
+    from .research_gate import lesson_arm
+
+    if not since:
+        return {"verdict": "not_started", "note": "the research gate has not split the lesson arms (research.gate.lesson_arm)"}
+    start = max(_epoch(since), now - days * 86400)
+    tape = _teacher_tape(ledger, cache if cache is not None else {}, now - (days + teacher_days + 1) * 86400)
+    words, born, died, blocks = tape["words"], tape["born"], tape["died"], tape["blocks"]
+    lessons = [(at, terms) for at, terms in tape["lessons"] if at >= start]
+    seen: dict[str, dict[tuple[str, int], float]] = {"lesson": {}, "control": {}}
+    agents: dict[str, set[str]] = {"lesson": set(), "control": set()}
+    complete = 0
+    for at, terms in lessons:
+        complete += at + teacher_days * 86400 <= now
+        for agent, named in words.items():  # a lesson names an agent as the gate's `lesson_names` reads it
+            if born[agent] > at or died.get(agent, float("inf")) < at or not any(word in terms for word in named):
+                continue
+            arm = lesson_arm(agent)
+            agents[arm].add(agent)
+            for seq, t, growth in blocks.get(agent, ()):
+                if at < t <= at + teacher_days * 86400:
+                    seen[arm][(agent, seq)] = growth
+    treated, control = _arm(list(seen["lesson"].values())), _arm(list(seen["control"].values()))
+    lift = treated["_mean"] - control["_mean"] if treated["_mean"] is not None and control["_mean"] is not None else None
+    lower = _lower(lift, *(a["_var"] / a["blocks"] if a["_var"] is not None else None for a in (treated, control)))
+    enough = min(treated["blocks"], control["blocks"]) >= min_blocks
+    verdict = "lift" if lower is not None and lower > 0 else "no_lift" if enough else "insufficient"
+    return {"since": since, "lessons": len(lessons), "complete_windows": complete,
+            "lesson_arm": {**{k: v for k, v in treated.items() if not k.startswith("_")}, "agents": len(agents["lesson"])},
+            "control_arm": {**{k: v for k, v in control.items() if not k.startswith("_")}, "agents": len(agents["control"])},
+            "lift": round(lift, 6) if lift is not None else None, "lower_80": round(lower, 6) if lower is not None else None,
+            "verdict": verdict}
+
+
+def consult_outcomes(ledger: Any, *, now: float, settings: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The `consult.outcome` rows not yet on the ledger (F4), as (id, agent, payload) dicts. A consult is
+    judged at `sessions` once the agent has run `consult_sessions` sessions after it (or three days have
+    passed: an agent that died or stopped researching did nothing with it), and at `blocks` once it has
+    `consult_blocks` active forward blocks after it (or twice `days` have passed, `partial`)."""
+    from .merton import consult_blocks, consult_verdict, consults_of
+
+    sessions, n, days = int(settings["consult_sessions"]), int(settings["consult_blocks"]), float(settings["days"])
+    judged = {(int(e.payload.get("consult_seq") or 0), str(e.payload.get("stage")))
+              for e in ledger.read(kinds="consult.outcome", limit=5000, newest=True)}
+    out: list[dict[str, Any]] = []
+    by_agent: dict[str, list[Any]] = {}
+    for consult in consults_of(ledger):
+        if now - _epoch(consult.at) <= 2 * days * 86400:
+            by_agent.setdefault(str(consult.payload["agent"]), []).append(consult)
+    for agent, consults in by_agent.items():
+        # One read of the agent's rows for all its consults: at 64 consults a day, a fortnight of
+        # consults waiting for their blocks is hundreds of consults over far fewer agents.
+        waiting = [c for c in consults if (c.seq, "sessions") not in judged]
+        rows = list(ledger.iter(kinds=("agent.research", "agent.strategy"), agent=agent, after=waiting[0].seq)) if waiting else []
+        blocks = list(ledger.iter(kinds="eval.block", agent=agent)) if any((c.seq, "blocks") not in judged for c in consults) else []
+        for consult in consults:
+            age = now - _epoch(consult.at)
+            base = {"consult_seq": consult.seq, "agent": agent, "consulted_at": consult.at,
+                    "cost_usd": str(consult.payload.get("cost_usd") or "0"), "wrote_code": bool(consult.payload.get("wrote_code"))}
+            if (consult.seq, "sessions") not in judged:
+                verdict = consult_verdict(consult, rows, sessions=sessions)
+                if verdict is None and age >= 3 * 86400:
+                    done = sum(1 for e in rows if e.seq > consult.seq and e.payload.get("tool") == "summary")
+                    verdict = {"productive": False, "by": None, "sessions": done, "expired": True}
+                if verdict is not None:
+                    out.append({"id": f"consult-outcome:{consult.seq}:sessions", "agent": agent,
+                                "payload": {**base, "stage": "sessions", **verdict, "doubles_next_price": not verdict["productive"]}})
+            if (consult.seq, "blocks") not in judged:
+                before, after = consult_blocks(ledger, consult, n=n, rows=blocks)
+                partial = len(after) < n
+                if not partial or age >= 2 * days * 86400:
+                    b, a = _mean(before), _mean(after)
+                    out.append({"id": f"consult-outcome:{consult.seq}:blocks", "agent": agent,
+                                "payload": {**base, "stage": "blocks", "partial": partial,
+                                            "before": {"blocks": len(before), "mean_log_growth": round(b, 6) if b is not None else None},
+                                            "after": {"blocks": len(after), "mean_log_growth": round(a, 6) if a is not None else None,
+                                                      "positive": sum(1 for g in after if g > 0)},
+                                            "lift": round(a - b, 6) if a is not None and b is not None else None}})
+    return out
+
+
+def consultant_lift(ledger: Any, *, now: float, days: float = 7, min_consults: int = MIN_CONSULTS,
+                    research_usd_per_positive_block: str | None = None) -> dict[str, Any]:
+    """F4: the consultant over the last `days` from its `consult.outcome` rows and `merton.pass` costs."""
+    start = now - days * 86400
+    rows = [e.payload for e in ledger.read(kinds="consult.outcome", limit=5000, newest=True) if _epoch(e.at) >= start]
+    judged = [r for r in rows if r.get("stage") == "sessions"]
+    lifted = [r for r in rows if r.get("stage") == "blocks" and r.get("lift") is not None]
+    spend = sum((_money(e.payload.get("cost_usd")) for e in ledger.read(kinds="merton.pass", limit=3000, newest=True)
+                 if e.payload.get("role") == "consultant" and _epoch(e.at) >= start), Decimal(0))
+    positive = sum(int((r.get("after") or {}).get("positive") or 0) for r in rows if r.get("stage") == "blocks")
+    lifts = [float(r["lift"]) for r in lifted]
+    mean = _mean(lifts)
+    var = sum((v - mean) ** 2 for v in lifts) / (len(lifts) - 1) if len(lifts) > 1 and mean is not None else None
+    lower = _lower(mean, var / len(lifts) if var is not None else None)
+    verdict = "lift" if lower is not None and lower > 0 else "no_lift" if len(lifts) >= min_consults else "insufficient"
+    return {"judged": len(judged), "productive": sum(1 for r in judged if r.get("productive")),
+            "judged_blocks": len(lifted), "lift": round(mean, 6) if mean is not None else None,
+            "lower_80": round(lower, 6) if lower is not None else None, "usd": format(spend, ".4f"),
+            "positive_blocks_after": positive, "usd_per_positive_block": format(spend / positive, ".4f") if positive else None,
+            "research_usd_per_positive_block_24h": research_usd_per_positive_block, "verdict": verdict}
+
+
+def engineer_lift(ledger: Any, *, now: float, days: float = 7) -> dict[str, Any]:
+    """F4: repairs verified (one per `repair.status` key) per dollar of the engineer's passes, over the
+    last `days` and lifetime."""
+    start = now - days * 86400
+    verified: dict[str, float] = {}
+    for entry in ledger.iter(kinds="repair.status"):
+        if entry.payload.get("state") == "verified":
+            verified.setdefault(str(entry.payload.get("key")), _epoch(entry.at))
+    spend_all = spend = Decimal(0)
+    for entry in ledger.iter(kinds="merton.pass"):
+        if entry.payload.get("role") == "engineer":
+            cost = _money(entry.payload.get("cost_usd"))
+            spend_all += cost
+            spend += cost if _epoch(entry.at) >= start else 0
+    window = sum(1 for t in verified.values() if t >= start)
+    return {"repairs_verified": window, "usd": format(spend, ".4f"),
+            "usd_per_repair": format(spend / window, ".4f") if window else None,
+            "lifetime": {"repairs_verified": len(verified), "usd": format(spend_all, ".4f"),
+                         "usd_per_repair": format(spend_all / len(verified), ".4f") if verified else None},
+            "verdict": "lift" if window else "no_lift" if spend > 0 else "insufficient"}
+
+
+def research_usd_per_positive_block(rows: Iterable[Mapping[str, Any]]) -> str | None:
+    """Research's dollars per positive forward block over some hourly yield rows (the F2 acceptance)."""
+    spend, positive = Decimal(0), 0
+    for row in rows:
+        spend += _money((row.get("spend_usd") or {}).get("research"))
+        positive += int(((row.get("evidence") or {}).get("research") or {}).get("positive_blocks") or 0)
+    return format(spend / positive, ".4f") if positive else None
+
+
+def lifts(ledger: Any, *, now: float, settings: Mapping[str, Any] | None = None, lesson_since: str | None = None,
+          recent: Iterable[Mapping[str, Any]] = (), cache: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The `lift` section of the hourly yield row (F4): the teacher, the consultant and the engineer
+    over the last `days`, and research's dollars per positive forward block over `recent` rows."""
+    from .merton import LIFT
+
+    s = {**LIFT, **dict(settings or {})}
+    days = float(s["days"])
+    research = research_usd_per_positive_block(recent)
+    return {"days": days, "research_usd_per_positive_block_24h": research,
+            "teacher": teacher_lift(ledger, now=now, since=lesson_since, days=days, teacher_days=float(s["teacher_days"]), cache=cache),
+            "consultant": consultant_lift(ledger, now=now, days=days, research_usd_per_positive_block=research),
+            "engineer": engineer_lift(ledger, now=now, days=days)}
+
+
 class YieldLedger:
-    """Writes one `ops.budget` yield row an hour (`every_seconds`), covering the hour before it."""
+    """Writes one `ops.budget` yield row an hour (`every_seconds`), covering the hour before it, with its
+    `lift` section, after the `consult.outcome` rows that became due (Sept 25, 2026, F4)."""
 
     def __init__(self, house: Any, *, every_seconds: float = 3600.0):
         self.house = house
         self.every_seconds = float(every_seconds)
+        self._teacher: dict[str, Any] = {}  # `teacher_lift`'s incremental fold, for this process's life
 
     def _state(self) -> dict[str, Any]:
         with self.house._state_lock:
@@ -179,5 +425,30 @@ class YieldLedger:
         row = fold(self.house.ledger, since=since, until=now_iso(lambda: now), repairs=repairs)
         with self.house._state_lock:
             self._state()["last"] = now
-        self.house.ledger.append("ops.budget", {**row, "hours": round(self.every_seconds / 3600, 3)})
+        lift = self._lift(now, row)
+        self.house.ledger.append("ops.budget", {**row, "hours": round(self.every_seconds / 3600, 3), **({"lift": lift} if lift else {})})
         return row
+
+    def _lift(self, now: float, row: Mapping[str, Any]) -> dict[str, Any] | None:
+        """F4: write the consult outcomes that became due, then measure every lane. A failure here is an
+        alert and a row without `lift`, never a missing yield row."""
+        ledger = self.house.ledger
+        try:
+            from .ledger import KINDS
+            from .merton import LIFT
+
+            settings = {**LIFT, **{k: v for k, v in dict(((getattr(self.house, "game", None) or {}).get("merton") or {}).get("lift") or {}).items()
+                                   if not str(k).startswith("_")}}
+            if "consult.outcome" in KINDS:  # the kind ships with the owner's deploy (league/ledger.py)
+                for item in consult_outcomes(ledger, now=now, settings=settings):
+                    ledger.append("consult.outcome", item["payload"], agent=item["agent"], id=item["id"])
+            recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=200, newest=True)
+                      if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
+            state = getattr(getattr(getattr(self.house, "jev_floor", None), "state", None), "data", None) or {}
+            return lifts(ledger, now=now, settings=settings, lesson_since=state.get("lesson_arm_since"), recent=recent, cache=self._teacher)
+        except Exception as exc:  # noqa: BLE001 - the measurement never costs the hour's row
+            try:
+                self.house.alert("warning", f"yield ledger: the lanes' lift could not be measured ({type(exc).__name__}: {str(exc)[:160]})")
+            except Exception:  # noqa: BLE001
+                pass
+            return None
