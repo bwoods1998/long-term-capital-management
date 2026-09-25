@@ -413,6 +413,7 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   **structures on the day +$5.80 on 1 close**; singles -$41.15 on 7. Open structures: krasker-22's CCL condor (marked at
   its maximum loss), krasker-32's AAL and RIVN put verticals (Oct 2). Options desk 15 living.
 - **19:31Z (19:00-19:31):** 41 wakes, 0 intents, 3 dropped (krasker-22's condor buy-back over its wing); structures +$5.80 on 1 close; House RSS about 1.8 GB.
+- **20:01Z (19:30-20:00, the close):** 44 wakes, 0 intents; structures +$5.80 on 1 close; singles -$41.15 on 8 (6 practice, 2 real). Every book unfrozen at 19:59:35Z. The recorder's last snapshot 20:00:15Z (2,584 contracts).
 - **A defect found at 18:18Z:** from 17:47Z krasker-29 (options-orb) tried five times to close its IWM Sept 28 put vertical,
   bought at 0.46, "at 0.28 a share or better" with the bid near 0.54, a profitable close, and the book refused each ("limit
   price deviates 48.15-50.00% from reference"): the book's 10% limit band (`ltcm.risk.rule_limit_sanity`) refuses an exit
@@ -428,3 +429,61 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   (bought at 0.46: +$6.00 less $0.20 of fees).
 
 ## Report
+
+### Friday Sept 25, the close (20:01Z)
+
+**The target's verdict: MISSED.** At least 3 options agents with positive realized P&L on at least 2 closed
+structures each: **0**. The desk's closed structures on the day: **+$5.80 on 1** (krasker-29, options-orb, an IWM Sept 28
+put debit vertical bought at 0.46 and sold at 0.52). Positive, but one close.
+
+**The scoreboard at the close** (read-only `q_score.py` over 13:30-20:05Z; baseline Sept 24):
+
+| # | Metric | Baseline | Close | Target |
+|---|---|---|---|---|
+| 1 | Options agents living; families | 7; 2 (1 living) | **15; 13** (12 structure founders, 3 single-leg pullback agents) | >= 14; >= 8: met |
+| 2 | Options intents and fills in the session | 28 intents, 29 fills, all single | structure intents 10, structure fills 5 (options-shadow); single intents 8, fills 8 (6 practice, 2 real) | >= 20 structure intents (short), >= 5 structure fills (met) |
+| 3 | Median underlying of contracts traded | strike $14 | structures: median long strike $22.5 over 5 fills (IWM 282/283 x2, AAL 14/13.5, RIVN 15.5/15, CCL 22.5 condor) | >= $100: not met (one of four structures on an ETF) |
+| 4 | Bid-ask paid, a share of the net | up to 20% | the forward test on the recorded quotes measures it (G-FORWARD) | <= 8% |
+| 5 | The target | - | 0 agents; desk structures +$5.80 on 1 close | 3 agents x 2 closes, desk positive |
+| 6 | Structure families meeting O4 | 0 | 0 (options-orb-vertical 1 closed structure) | >= 1 by Monday 13:00Z |
+| 7 | Real options activity | krasker-14 draining | krasker-14's two AAL calls sold (real, -$18.00 on the day, R5's drain); no real structure (O1 absent) | real structures by an O4 family |
+| 8 | Harness incidents | - | 4 House starts in the session: 14:38Z (killed for memory at 14:37:30Z, exit 137: a floor-wide defect this run's tapes likely aggravated), 16:23Z (V2), 16:39Z (V3, the tape-cache fix), 18:33Z (V4, the exit fix): three deploys in the session by the owner's lifted rule; no book frozen all day | 0 |
+
+**Open structures at the close:** krasker-22 CCL Oct 2 iron condor (marked at its $17.20 maximum loss: CCL's quotes are
+too wide to buy it back inside the wing; its rewritten program's stop asks $1.49 for a $0.50 wing, refused), krasker-32
+AAL and RIVN Oct 2 put debit verticals (bought 0.27 and 0.24).
+
+**Why the target was missed, with numbers:**
+1. **Founders arrived late.** One replay-passed founder from 11:11Z (options-gap-drift: no 2-sigma, 3% move all day until
+   the House's stuck rule rewrote it at 15:34Z); the other eleven, seated by the owner's call, from 16:24Z to 16:43Z: 3 h 17 min
+   before the close.
+2. **Today's market gave most mechanisms no signal**, by their own stated rules (17:31Z): implied moves 0.81-0.98x realized
+   (the condor wants 1.10x), realized variance 2-3x the usual (the iron fly wants 0.70x), no dip of 0.40%, no term kink
+   (0.77x against 1.10x), no pullback inside a trend. Five structures were opened in all.
+3. **Exits were blocked for 45 minutes by a House defect:** from 17:47Z to 18:33Z every structure exit priced through the
+   bid was refused by the book's 10% band (krasker-29's profitable close refused five times). Fixed in V4 (18:32Z); the
+   same close filled at 18:49Z.
+4. **The replay's evidence:** of twelve founders only one passed; the calibration study showed they fail on edge and trade
+   count, not on the fill model.
+
+**Bugs found today and their state:** the unbounded replay-tape cache (fixed, V3); structure exits refused through the
+touch (fixed, V4); CONTRACT.md's size pushing the engineer's worst case past its $5 line (trimmed); the House's memory growth
+beyond tapes (floor-wide; exit 137 on Sept 20, 24 and 25; to diagnose); the stuck-agent rewrite adopting a program that
+failed replay (Wave 2 gates it for structure agents); a structure strategy whose stop can ask more than its wing
+(krasker-22; strategy-level: the book refuses it correctly).
+
+**What ships after 20:05Z (Deploy G, Saturday about 07:00Z, after the forward-first run's B):** the Wave 2 workflow's four
+branches once built, reviewed and fixed: Track P (structure agents on the owner's Alpaca practice account for the five
+closeable types), the evidence mapping and O1-O5 (automatic promotion of a structure family meeting O4, debit verticals
+first on the real account), the learning loop (edit replays at full caps, the rewrite gated by replay, the lab breeding
+structure PARAMS, SPY/QQQ/IWM daily expiries with a memory bound), and the forward test of today on the recorded quotes.
+
+**The owner's decisions for Monday's real-money open:**
+1. **O1:** the table says `false` until a family meets O4, then a ratified digest change; a family meeting O4 during Monday's
+   session could only go real after 20:05Z. To make real money follow progress at once, ship O1 `true` in Deploy G with O4
+   gating each family automatically (nothing reaches real money until a family meets it). Yes or no.
+2. **Credit structures on the real cash account** (the amendment's item 4 arrived cut): confirm, or keep real money to debit
+   verticals until you do.
+3. **The House's memory:** a floor-wide defect (killed for memory Sept 20, 24 and 25); a diagnosis and fix before more load.
+4. **The losing single-leg options-pullback family** (3 living, practice record negative, a real probe draining): retire it
+   to free the options desk's seats for structure programs.
