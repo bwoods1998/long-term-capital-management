@@ -471,9 +471,13 @@ def request_feed(name: Any) -> str | None:
         return "vol"
     if "funding" in words and words & _PERPS_CONTEXT:
         return "funding" if words & (_HISTORY | _SETTLED) else "perps"
-    for feed, source in RECORDERS.items():  # the recorders of Sept 24, 2026, each by its own words
-        if source.asks(words) and (source.history or not words & _HISTORY):  # a live feed holds no history
-            return feed
+    # The recorders of Sept 24, 2026, each by its own words (a live feed holds no history). A keyed one that
+    # waits for the owner gives way to a key-free one that records the same (review of #309, Sept 25, 2026:
+    # "eia_gasoline_weekly" named `eia`, which polls nothing without EIA_API_KEY, never `fuel`, which records it).
+    matches = [feed for feed, source in RECORDERS.items() if source.asks(words) and (source.history or not words & _HISTORY)]
+    if matches:
+        free = [feed for feed in matches if not RECORDERS[feed].env]
+        return free[0] if free and RECORDERS[matches[0]].env else matches[0]
     if words & _HISTORY:
         return None
     if (("open" in words and "interest" in words) or "oi" in words) and words & _DERIVATIVES:
@@ -627,6 +631,7 @@ class FeedRecorder:
         self._hosts = tuple(str(h).lower() for h in allowed_hosts) if allowed_hosts is not None else None
         self._read: dict[str, tuple[float, Any]] = {}  # "env" / "hosts" -> (read at, what was read)
         self._state: dict[str, dict[str, Any]] = {}  # a recorder of Sept 24, 2026 -> what it keeps between passes
+        self._down: dict[str, dict[str, Any]] = {}  # a recorder's host that failed -> {until, strikes, error} (`_host_wait`)
         self._closed = False
         with self._lock:
             self.db.executescript(SCHEMA)
@@ -704,9 +709,76 @@ class FeedRecorder:
             keys = self.keys(feed)
             if keys:
                 plan.extend([(feed, "*")] if source.batch else [(feed, key) for key in keys])
+        for item in plan:
+            if item[0] in RECORDERS:
+                self._seed(*item)
         if self._backfill_pending():
             plan.append(("backfill", "*"))  # last: every live poll due goes first
         return plan
+
+    def _seed(self, feed: str, key: str) -> None:
+        """A recorder's first due time on this House, from the store's last poll of it: a restart (every
+        release is one) must not ask two dozen hosts at once, nor spend BLS's 25 keyless queries a day
+        (review of #309, Sept 25, 2026). Never polled: due now. Its last poll failed: `retry` after it."""
+        with self._lock:
+            if (feed, key) in self._next:
+                return
+            rows = [row for (name, k), row in self._load_stats().items() if name == feed and (key == "*" or k == key)]
+            last = max((float(row["last_poll"]) for row in rows if row.get("last_poll") is not None), default=None)
+            if last is None:
+                self._next[(feed, key)] = 0.0
+                return
+            source = RECORDERS[feed]
+            every = float(source.every)
+            retry = last + min(every, float(source.retry)) if any(row.get("last_error") for row in rows) else float("inf")
+            due = _aligned(last, every, float(source.offset)) if source.history else last + every
+            self._next[(feed, key)] = min(due, retry)
+
+    # -- a recorder's host that fails ------------------------------------------------------------
+    def _host_wait(self, feed: str, now: float) -> tuple[float, str] | None:
+        """(until, why) while the host of recorder `feed` backs off, else None. A host that timed out,
+        refused the connection or answered 429 or 5xx is not asked again by any recorder on it -- live
+        poll, head or backfill page -- for `RETRY_SECONDS`, doubled at each failure in a row up to the
+        source's cadence: a host that hangs costs the one-slot lane its timeout once a cadence at most
+        (review of #309, Sept 25, 2026: api.gdeltproject.org's TLS handshake hung for 15 s from the
+        House box, and its eight subjects each waited out a 30-s timeout every five minutes)."""
+        source = RECORDERS.get(feed)
+        if source is None or not source.host:
+            return None
+        with self._lock:
+            row = self._down.get(source.host)
+        if row is None or now >= row["until"]:
+            return None
+        return row["until"], (f"{HOST_DOWN} {source.host} failed {row['strikes']} time(s) in a row ({row['error']}); "
+                              f"not asked again until {stamp(row['until'])}")
+
+    def _host_result(self, feed: str, key: str, error: BaseException | None, now: float) -> None:
+        """What a request of recorder `feed` for `key` said about its host: an answer clears the backoff; a host
+        that could not be reached (`_host_failure` "hard") begins or lengthens it at once; one that did not
+        answer in time (or answered 5xx) does when a batch poll failed or a second key failed after another
+        with no answer between -- a hung server, where one slow endpoint (an EDGAR filer) is that key's own
+        failure; a key's own answer says nothing about the host."""
+        source = RECORDERS.get(feed)
+        if source is None or not source.host:
+            return
+        with self._lock:
+            row = self._down.get(source.host)
+            if error is None:
+                self._down.pop(source.host, None)
+                return
+            kind = _host_failure(error)
+            if kind is None or (row is not None and now < row["until"]):
+                return  # a key's own failure, or the outage already counted (a failure remembered for the pass)
+            if kind == "soft" and not source.batch:
+                held = row if row is not None else self._down.setdefault(source.host, {"until": float("-inf"), "strikes": 0})
+                slow = held.setdefault("slow", set())
+                slow.add(str(key))
+                if len(slow) < 2:
+                    return  # one key that did not answer: its own retry
+            strikes = (int(row["strikes"]) if row is not None else 0) + 1
+            wait = min(max(float(source.every), RETRY_SECONDS), RETRY_SECONDS * 2.0 ** (strikes - 1))
+            self._down[source.host] = {"until": float(now) + wait, "strikes": strikes,
+                                       "error": _brief(f"{type(error).__name__}: {error}")[:160]}
 
     def _fetcher(self, feed: str) -> Any:
         fetcher = self._fetchers.get(feed)
@@ -862,7 +934,12 @@ class FeedRecorder:
         failed = False
         asked = 0
         source = RECORDERS.get(feed)
-        for key in self.keys(feed):
+        keys = self.keys(feed)
+        if source is not None:  # a key whose request failed its host last: one bad file never starves the rest
+            with self._lock:
+                tripped = set(self.state(feed).get("tripped") or ())
+            keys = sorted(keys, key=lambda k: k in tripped)
+        for key in keys:
             if self._closed:
                 break
             began = self.clock()
@@ -876,20 +953,33 @@ class FeedRecorder:
                     last = self.state(feed).get("head_polled", {}).get(key)
                 if last is not None and began - float(last) < RETRY_SECONDS:
                     continue  # polled in this cycle, before the pass gave way
-                if asked and self._urgent_due():
+                # Before its first key too (review of #309, Sept 25, 2026): a dozen history recorders in one
+                # run each asked one key before giving way, a timeout apiece when their hosts hung.
+                if self._urgent_due():
                     out["polled"].append(feed)
                     self._schedule(feed, "*", self.clock())  # behind the board, then on from here
                     return
+                down = self._host_wait(feed, began)
+                if down is not None:  # its host backs off: a failed poll, and no request
+                    self._note(feed, key, started=began, finished=began, ok=False, changed=False, error=down[1])
+                    out["failed"].append((feed, key, down[1]))
+                    failed = True
+                    continue
                 with self._lock:
                     self.state(feed).setdefault("head_polled", {})[key] = began
             if asked and (feed == "funding" or (source is not None and source.pause)):
                 self._sleep(OKX_PAUSE if feed == "funding" else source.pause)
             asked += 1
-            stored, error = 0, None
+            stored, error, failure = 0, None, None
             try:
                 stored = self._fetch_head(feed, key, began)
             except Exception as exc:  # noqa: BLE001 - a venue that fails is a failed poll of that key
-                error = f"{type(exc).__name__}: {str(exc)[:300]}"
+                error, failure = f"{type(exc).__name__}: {str(exc)[:300]}", exc
+            self._host_result(feed, key, failure, self.clock())
+            if source is not None:
+                with self._lock:
+                    tripped = self.state(feed).setdefault("tripped", set())
+                    (tripped.add if _host_failure(failure) else tripped.discard)(key)
             self._note(feed, key, started=began, finished=self.clock(), ok=error is None, changed=stored > 0, error=error)
             out["stored"] += stored
             if error:
@@ -898,7 +988,11 @@ class FeedRecorder:
         out["polled"].append(feed)
         finished = self.clock()
         nxt = _aligned(finished, every, offset)
-        self._schedule(feed, "*", min(nxt, finished + RETRY_SECONDS) if failed else nxt)
+        if failed:
+            retry = finished + min(RETRY_SECONDS, float(source.retry) if source is not None else RETRY_SECONDS)
+            down = self._host_wait(feed, finished)
+            nxt = min(nxt, max(retry, down[0]) if down is not None else retry)
+        self._schedule(feed, "*", nxt)
 
     def _fetch_head(self, feed: str, key: str, now: float) -> int:
         """Store what is newer than the newest row held: one page when nothing is held yet (the
@@ -1075,8 +1169,8 @@ class FeedRecorder:
                 ok = True
                 while ok and not self._closed:
                     now = self.clock()
-                    if self._unlisted_now(feed, key, now):
-                        break
+                    if self._unlisted_now(feed, key, now) or self._host_wait(feed, now) is not None:
+                        break  # not listed, or its host backs off (its live pass says so)
                     target = self._target_of(feed, key, now)  # reopens a key whose target moved back
                     with self._lock:
                         row = self._history_row(feed, key, now)
@@ -1106,12 +1200,13 @@ class FeedRecorder:
         target = self._target_of(feed, key, started)
         with self._lock:
             oldest = (self._load_stats().get((feed, key)) or {}).get("first_ok")
-        page, stored, error = None, 0, None
+        page, stored, error, failure = None, 0, None, None
         try:
             page = self._page(feed, key, before=oldest, floor=target, now=started)
             stored = self._store_history(feed, key, page["rows"], fetched=started)
         except Exception as exc:  # noqa: BLE001 - a venue that fails is a failed poll
-            error = f"{type(exc).__name__}: {str(exc)[:300]}"
+            error, failure = f"{type(exc).__name__}: {str(exc)[:300]}", exc
+        self._host_result(feed, key, failure, self.clock())
         self._note(feed, key, started=started, finished=self.clock(), ok=error is None, changed=stored > 0, error=error)
         with self._lock:
             row = self._history_row(feed, key, started)
@@ -1159,12 +1254,22 @@ class FeedRecorder:
             return False
         keys = self.keys(feed) if source.batch else [key]
         started = self.clock()
+        down = self._host_wait(feed, started)
+        if down is not None:  # its host backs off: a failed poll of every key asked, and no request
+            for name in keys:
+                self.record(feed, name, started=started, finished=started, error=down[1])
+                out["failed"].append((feed, name, down[1]))
+            out["polled"].append(feed if source.batch else f"{feed}:{key}")
+            self._schedule(feed, key, down[0])
+            return True
         self._schedule(feed, key, started + RETRY_SECONDS)  # due again soon in any case, pushed out below
         try:
             results = dict(source.poll(self._fetcher(feed), keys, self, started) or {})
         except Exception as exc:  # noqa: BLE001 - a source that fails is a failed poll of every key asked
             results = {k: exc for k in keys}
         finished = self.clock()
+        self._host_result(feed, key, next((r for r in results.values() if isinstance(r, BaseException) and _host_failure(r)), None),
+                          finished)
         clean = True
         for name in keys:
             result = results.get(name, LookupError(f"the source answered nothing for {name}"))
@@ -1179,7 +1284,9 @@ class FeedRecorder:
                 continue
             out["stored"] += int(self.record(feed, name, started=started, finished=finished, payload=result))
         out["polled"].append(feed if source.batch else f"{feed}:{key}")
-        self._schedule(feed, key, finished + (source.every if clean else min(source.every, RETRY_SECONDS)))
+        nxt = finished + (source.every if clean else min(source.every, source.retry))
+        down = self._host_wait(feed, finished)
+        self._schedule(feed, key, max(nxt, down[0]) if down is not None else nxt)
         return True
 
     def _confirm(self, feed: str, key: str, *, started: float, finished: float) -> None:
@@ -1847,6 +1954,35 @@ RUN_CHECK_SECONDS = 900.0
 _WEATHER_SERIES = re.compile(r"^KX(?:HIGH|LOW|RAIN|SNOW)[A-Z]*$")
 
 
+#: How a recorder's poll says it did not ask its host at all, because the host is backing off (`_host_wait`).
+HOST_DOWN = "host backing off:"
+#: The host could not be reached at all (`HttpTransport` wraps urllib's URLError: DNS, a refused or reset
+#: connection, a TLS handshake or connect that timed out), or it said to slow down.
+_HOST_UNREACHABLE = re.compile(r"(failed: timed out$|handshake|connection refused|connection reset|name or service not known|"
+                               r"nodename nor servname|temporary failure in name resolution|network is unreachable|no route to host|"
+                               r"\bHTTP 429\b)", re.I)
+_HOST_SERVER = re.compile(r"\bHTTP 5\d\d\b")
+
+
+def _host_failure(error: Any) -> str | None:
+    """What an error says about the HOST: "hard" when it could not be reached or answered 429 (every URL on it
+    fails alike), "soft" when it was reached but did not answer in time or answered 5xx (a hung server -- or
+    one slow endpoint: EDGAR answers most filers and times out on a few), None for a key's own answer."""
+    import http.client
+    import urllib.error
+
+    from ltcm.data import TransportError
+
+    if not isinstance(error, BaseException):
+        return None
+    text = str(error).strip()
+    if isinstance(error.__cause__, urllib.error.URLError) or _HOST_UNREACHABLE.search(text):
+        return "hard"
+    if isinstance(error, (TransportError, http.client.HTTPException, OSError)) or _HOST_SERVER.search(text):
+        return "soft"
+    return None
+
+
 def _unlisted(error: Any) -> bool:
     """Does a poll's error say the key does not exist at its source (not that the source failed)?"""
     text = str(error or "")
@@ -1958,6 +2094,9 @@ class Source:
     #: The most keys the House polls (what one strategy may DECLARE is `MAX_KEYS`).
     max_keys = 64
     timeout = TIMEOUT
+    #: How soon a key whose poll failed is asked again (at most `every`); a host that failed backs off
+    #: longer (`FeedRecorder._host_wait`).
+    retry = RETRY_SECONDS
     #: How many of a key's polls in a row must fail before the hourly warning names it (`_after_pass`);
     #: health's `failing` names it at once either way. One, unless the source says a failed poll is
     #: read in full at the next one.
@@ -2143,7 +2282,10 @@ class NwsForecast(Source):
         return out
 
     def asks(self, words: set[str]) -> bool:
-        return "nws" in words or {"national", "weather", "service"} <= words
+        # Not what a station recorded: the climate report and the METARs are `cli`, `cli_text` and `metar`
+        # (league/open_feeds.py; review of #309, Sept 25, 2026: "nws_climate_report_cli" matched the forecast).
+        observed = {"cli", "climate", "metar", "metars", "observed", "observation", "observations", "actual", "actuals"}
+        return ("nws" in words or {"national", "weather", "service"} <= words) and not words & observed
 
 
 class ForecastHistory(Source):

@@ -143,7 +143,7 @@ class ClimateReports(Source):
     offset = 600.0
     gap = 36 * 3600.0
     max_keys = 24
-    timeout = 45.0
+    timeout = 30.0  # per socket read; the day file is about 0.8 MB (review of #309: 45 s held the lane)
     example = "KXHIGHNY"
     note = ("The market settles on the FINAL report (final True); a preliminary one's high is the high so far. The station is the "
             "one Kalshi's rules name (KNYC is Central Park).")
@@ -320,7 +320,7 @@ class DailySummaries(Source):
     every = 6 * 3600.0
     gap = 18 * 3600.0
     max_keys = 24
-    timeout = 60.0
+    timeout = 45.0
     example = "KNYC"
     note = "The cli feed carries the same day's numbers days earlier; ghcnd is the quality-checked record."
     DAYS = 14
@@ -408,8 +408,9 @@ class KalshiCandles(Source):
     timeout = 20.0
     pause = 0.3
     example = "KXMLBGAME"
-    note = ("markets_read < markets_listed means the busiest markets (by lifetime volume) were read and the rest were not; an hour "
-            "with no row is not recorded, an hour whose row has no markets had no activity in the markets read.")
+    note = ("markets_listed counts the series' markets open during the hour (by their listing times), markets_read those of them "
+            "read; fewer read means a series listed more than 300 and the busiest (by volume up to when the hour was fetched) were "
+            "read. An hour with no row is not recorded, an hour whose row has no markets had no activity in the markets read.")
     WINDOW_HOURS = 24
     MAX_MARKETS = 300
     #: A market closing this long after an hour can still have traded in it (an MLB game's closes days later).
@@ -446,10 +447,16 @@ class KalshiCandles(Source):
             return {"rows": [], "reached": True, "exhausted": False}
         top_first = max(first, last - (self.WINDOW_HOURS - 1) * HOUR)  # the page's oldest hour end
         opened = top_first - HOUR
-        markets = [m for m in fetcher.markets(key, closing_from=opened, closing_to=last + self.CLOSE_AFTER_DAYS * DAY)
-                   if m["open"] is not None and m["open"] < last and m["volume"] > 0]
-        markets.sort(key=lambda m: -m["volume"])
-        read = [m["ticker"] for m in markets[:self.MAX_MARKETS]]
+        listed = [m for m in fetcher.markets(key, closing_from=opened, closing_to=last + self.CLOSE_AFTER_DAYS * DAY)
+                  if m["open"] is not None and m["open"] < last]
+        markets = sorted((m for m in listed if m["volume"] > 0), key=lambda m: -m["volume"])
+        chosen = markets[:self.MAX_MARKETS]
+        read = [m["ticker"] for m in chosen]
+
+        def open_in(pool: Sequence[Mapping[str, Any]], end: float) -> int:
+            # Per hour, from listing times alone (review of #309, Sept 25, 2026): a count over the whole page
+            # counted markets listed later that day, and lifetime volume says which markets trade after the hour.
+            return sum(1 for m in pool if m["open"] < end and (m["close"] is None or m["close"] > end - HOUR))
         candles: dict[str, list[dict[str, Any]]] = {}
         for index in range(0, len(read), MAX_BATCH):
             candles.update(fetcher.candles(read[index:index + MAX_BATCH], opened, last))
@@ -468,7 +475,8 @@ class KalshiCandles(Source):
             markets_now = by_hour.get(hour, {})
             rows_out.append((hour, {"series": key, "hour_start": stamp(hour - HOUR), "volume": round(sum(m["volume"] for m in markets_now.values()), 2),
                                     "markets_traded": sum(1 for m in markets_now.values() if m["volume"] > 0),
-                                    "markets_read": len(read), "markets_listed": len(markets), "markets": markets_now}))
+                                    "markets_read": open_in(chosen, hour), "markets_listed": open_in(listed, hour),
+                                    "markets": markets_now}))
             hour += HOUR
         return {"rows": rows_out, "reached": top_first <= first, "exhausted": False}
 
@@ -515,6 +523,8 @@ class BlsSeries(Source):
     every = 5400.0
     gap = 3 * 5400.0
     timeout = 30.0
+    #: A failed query is asked again after 45 minutes, not five: 25 keyless queries a day (review of #309).
+    retry = 2700.0
     example = "CPI"
     note = ("CPI is seasonally adjusted (Kalshi's monthly CPI markets); CPI_NSA is the index the year-over-year markets settle "
             "on. A preliminary value (payrolls, earnings, PPI) is revised in later months.")
@@ -883,7 +893,7 @@ class FedCalendar(Source):
     batch = True
     every = 12 * 3600.0
     gap = 36 * 3600.0
-    timeout = 45.0
+    timeout = 30.0
     example = "fomc"
     note = "Times are Eastern; an FOMC decision is announced at the meeting's 'time' on its end_date."
     KEYS = ("fomc", "speeches", "testimony", "beige")
@@ -1477,7 +1487,7 @@ class PresidentialActions(Source):
     gap = 3600.0
     lookback_days = 1
     max_keys = 5
-    timeout = 45.0
+    timeout = 30.0
     example = "actions"
     note = ("today_et counts the key's actions of the row's New York day up to and including it; a day with no row had no action. "
             "KXTRUMPACT settles on this page.")
@@ -1661,7 +1671,7 @@ class FuelPrices(Source):
     every = 6 * 3600.0
     gap = 18 * 3600.0
     max_keys = 4
-    timeout = 60.0
+    timeout = 30.0  # EIA answered in 3-8 s
     example = "GASOLINE"
     note = "latest.date is the week's end (retail) or the trading day (spot); release_date is the day EIA published the table."
     ALIASES = {"GAS": "GASOLINE", "REGULAR": "GASOLINE", "RETAIL_GASOLINE": "GASOLINE", "EMM_EPMR_PTE_NUS_DPG": "GASOLINE",
@@ -1695,7 +1705,11 @@ class FuelPrices(Source):
         return out
 
     def asks(self, words: set[str]) -> bool:
-        return "fuel" in words and bool(words & {"price", "prices", "retail", "weekly", "gasoline", "diesel"})
+        # The `eia` feed's words too: it waits for the owner's key, and request_feed prefers the key-free feed
+        # that records the same (review of #309). Not "gas" or "oil" alone: natural gas, AAA's average.
+        fuel = "fuel" in words and bool(words & {"price", "prices", "retail", "weekly", "gasoline", "diesel"})
+        return fuel or (bool(words & {"gasoline", "diesel", "wti", "brent", "crude", "petroleum"})
+                        and bool(words & {"price", "prices", "retail", "weekly", "spot", "daily", "eia", "fixing", "fixings"}))
 
 
 # ---------------------------------------------------------------------- the NWS's own CLI text
@@ -2042,8 +2056,8 @@ REFUSALS: tuple[Refusal, ...] = (
                          frozenset(("share", "shares", "rankings", "ranking", "usage"))),
             "needs a key: the AI model usage and share rankings Kalshi's markets settle on are OpenRouter's, served to programs "
             "only through its keyed dataset API (openrouter.ai/terms bars scraping the site) -- the owner's step", "owner"),
-    Refusal("econ_consensus", (frozenset(("consensus", "surprise", "surprises", "estimate", "estimates", "expectation", "expectations",
-                                          "expected")),
+    # Not "estimate": BEA names its releases so ("gdp_advance_estimate_values" is BEA's print, the owner's key).
+    Refusal("econ_consensus", (frozenset(("consensus", "surprise", "surprises", "expectation", "expectations", "expected")),
                                frozenset(("cpi", "payrolls", "nfp", "gdp", "unemployment", "jobs", "inflation", "pce", "ppi", "claims",
                                           "jobless", "retail"))),
             "no key-free source publishes it: economists' consensus forecasts are sold by data vendors or shown on sites whose "

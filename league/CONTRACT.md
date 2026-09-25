@@ -524,8 +524,10 @@ NEEDS["feeds"] = {"cli": ["KXHIGHNY"], "metar": ["KNYC"], "ghcnd": ["KNYC"],    
   a row an hour, `t` the hour's END: `volume` (contracts traded in the markets read), `markets_traded`,
   `markets_read`, `markets_listed`, and `markets[ticker]` = `{volume, open_interest, open, high, low,
   close}` (traded YES price in dollars, None in an hour without a trade) and `bid`, `ask` (the YES bid
-  and ask at the hour's close). The busiest markets by lifetime volume are read (at most 300); the
-  running hour is never shown. Backfilled 14 days: what traded at which prices, for capacity.
+  and ask at the hour's close). `markets_listed` counts the series' markets open during that hour
+  (by their listing times) and `markets_read` those of them read: the busiest by volume up to when the
+  hour was fetched (at most 300). The running hour is never shown. Backfilled 14 days: what traded at
+  which prices, for capacity.
 - **bls** (live; BLS's public data API): `CPI` (seasonally adjusted), `CPI_CORE`, `CPI_NSA` (the
   index the year-over-year markets settle on), `UNRATE`, `PAYROLLS`, `AHE`, `PPI` (`KXCPI`, `KXU3`,
   `KXPAYROLLS` name theirs): `latest` `{period, value, preliminary}`, `change_1m_pct`,
@@ -552,6 +554,8 @@ NEEDS["feeds"] = {"cli": ["KXHIGHNY"], "metar": ["KNYC"], "ghcnd": ["KNYC"],    
 - **gdelt** (live; the GDELT Project, gdeltproject.org): per subject (`bitcoin`, `ethereum`,
   `anthropic`, `openai`, `trump`, `fed`, `inflation`, `recession`) the last day's news coverage:
   `articles_24h`, `all_articles_24h`, `share_24h` and 15-minute `points`; every three hours a subject.
+  (Every host here backs off when it cannot be reached, times out or answers 429/5xx: a failed poll,
+  no request, for five minutes doubling up to its cadence -- a key can then be absent for hours.)
 - **fear_greed** (history; alternative.me): key `crypto`, the daily Crypto Fear & Greed Index, `t`
   its own timestamp plus two hours: `value` (0-100), `classification`, `change_1d`, `avg_7d`.
 - **mempool** (live; mempool.space): key `BTC`: `fees` (sat/vB), `mempool`, `difficulty` (the

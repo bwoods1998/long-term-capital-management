@@ -205,6 +205,8 @@ class Halts(RecorderCase):
         store.run()
         self.assertEqual(store.coverage({"halts": ["all"]})["halts"]["all"]["snapshots"], 1)
         down = self.recorder({"halts": ["all"]}, transports={"halts": FakeTransport(default=TransportError("GET x failed: reset"))})
+        self.assertEqual(down.run()["failed"], [])  # a restart over the store: polled five minutes ago, not due yet
+        self.clock.advance(300)
         self.assertTrue(down.run()["failed"])
 
 

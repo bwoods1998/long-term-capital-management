@@ -94,7 +94,7 @@ class Bls(RecorderCase):
 class Fiscal(RecorderCase):
     def test_each_dataset_is_its_own_key_and_one_that_fails_leaves_the_others(self):
         transport = FakeTransport({DTS_CASH_URL: fixtures.tga(), AUCTIONS_URL: fixtures.auctions(),
-                                   DEBT_URL: TransportError("GET https://api.fiscaldata.treasury.gov/... failed: timed out")})
+                                   DEBT_URL: TransportError("GET https://api.fiscaldata.treasury.gov/... failed: The read operation timed out")})
         store = self.recorder({"fiscal": ["tga", "debt", "auctions"]}, transports={"fiscal": transport})
         out = store.run()
         self.assertEqual([(f, k) for f, k, _ in out["failed"]], [("fiscal", "debt")])

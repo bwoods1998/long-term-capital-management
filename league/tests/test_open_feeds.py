@@ -45,9 +45,9 @@ class RecorderCase(unittest.TestCase):
         self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
         self.addCleanup(self.ledger.close)
 
-    def recorder(self, keys, transports=None, **kw) -> FeedRecorder:
+    def recorder(self, keys, transports=None, path_name="feeds.sqlite", **kw) -> FeedRecorder:
         kw.setdefault("sleep", no_sleep)
-        recorder = FeedRecorder(path=Path(self.dir.name) / "feeds.sqlite", transports=transports, clock=self.clock, ledger=self.ledger,
+        recorder = FeedRecorder(path=Path(self.dir.name) / path_name, transports=transports, clock=self.clock, ledger=self.ledger,
                                 alert=lambda level, text: self.alerts.append((level, text)), keys=keys, **kw)
         self.addCleanup(recorder.close)
         return recorder
@@ -216,6 +216,24 @@ class KalshiCandles(RecorderCase):
         listing = [c for c in transport.calls if c["path"].endswith("/markets")]
         self.assertEqual(listing[0]["query"]["series_ticker"], "KXHIGHNY")
 
+    def test_an_hours_counts_read_only_markets_listed_by_its_end(self):
+        """Review of #309 (Sept 25, 2026): markets_listed and markets_read were one count for the page's 24 rows,
+        so the 10:00Z row counted the markets Kalshi listed at 14:00Z that day."""
+        from ltcm.data.kalshi_candles import parse_markets
+
+        store = self.recorder({"kalshi_candles": ["KXHIGHNY"]}, transports={"kalshi_candles": self.transport()}, backfill_pages=1)
+        store.run()
+        listed, _ = parse_markets(kalshi_fixtures.markets())
+        rows = {}
+        for hour in ("2026-09-24T10:00:00Z", "2026-09-24T20:00:00Z"):
+            end = epoch(hour)
+            rows[hour] = store.latest({"kalshi_candles": ["KXHIGHNY"]}, end)["kalshi_candles"]["KXHIGHNY"]
+            open_then = sum(1 for m in listed if m["open"] < end and (m["close"] is None or m["close"] > end - 3600))
+            self.assertEqual(rows[hour]["markets_listed"], open_then, hour)
+        self.assertLess(rows["2026-09-24T10:00:00Z"]["markets_listed"], rows["2026-09-24T20:00:00Z"]["markets_listed"])
+        self.assertTrue(all(ticker in {m["ticker"] for m in listed if m["open"] < epoch("2026-09-24T10:00:00Z")}
+                            for ticker in rows["2026-09-24T10:00:00Z"]["markets"]))
+
     def test_the_backfill_reaches_fourteen_days_a_day_a_page(self):
         transport = self.transport()
         store = self.recorder({"kalshi_candles": ["KXHIGHNY"]}, transports={"kalshi_candles": transport}, backfill_pages=40)
@@ -255,7 +273,7 @@ class WhatIsDeclared(RecorderCase):
             "weather_station_observations_history", "metar_feed", "settlement_station_observed_high", "nws_climate_report_cli",
             "kalshi_hourly_volume_capacity", "kalshi_candles_history", "ghcnd_daily_summaries", "kalshi_open_interest_history")},
             {"weather_station_observations_history": "metar", "metar_feed": "metar", "settlement_station_observed_high": "cli",
-             "nws_climate_report_cli": "nws", "kalshi_hourly_volume_capacity": "kalshi_candles",
+             "nws_climate_report_cli": "cli", "kalshi_hourly_volume_capacity": "kalshi_candles",
              "kalshi_candles_history": "kalshi_candles", "ghcnd_daily_summaries": "ghcnd", "kalshi_open_interest_history": None})
 
     def test_describe_health_and_every_host_on_record(self):
@@ -344,6 +362,159 @@ class Refusals(RecorderCase):
         self.assertEqual(request_feed("openrouter_pageviews"), "pageviews")  # ... but a recorder answers it
         self.assertEqual(open_feeds.refuse_requests(commons), [])
         self.assertEqual([row["id"] for row in commons.open_requests(stale_days=0)], [asked])
+
+    def test_a_restart_refuses_nothing_twice(self):
+        commons = Commons(self.ledger, clock=self.clock)
+        self.ask(commons)
+        self.assertEqual(len(self.recorder({"ghcnd": ["KNYC"]}).fulfil_requests(commons)), 5)
+        again = Commons(self.ledger, clock=self.clock)  # a new release: the queue is read back from the ledger
+        self.assertEqual(open_feeds.refuse_requests(again), [])
+        blocked = [entry.payload["request"] for entry in self.ledger.iter(kinds="tool.blocked")]
+        self.assertEqual(len(blocked), len(set(blocked)))
+
+    def test_a_request_goes_to_the_feed_that_records_it_and_the_rule_it_fails(self):
+        """Review of #309 (Sept 25, 2026): the NWS forecast took every request naming "nws", the keyed `eia` feed
+        (nothing recorded without the owner's key) took the requests `fuel` records key-free, and BEA's "advance
+        estimate" read as an economists' consensus -- the owner's key, not "no-source"."""
+        self.assertEqual({name: request_feed(name) for name in (
+            "nws_climate_report_cli", "nws_point_forecast", "nws_cli_raw_text", "eia_gasoline_weekly", "brent_spot_daily",
+            "gas_price_aaa_daily", "consensus_win_probabilities_sports")},
+            {"nws_climate_report_cli": "cli", "nws_point_forecast": "nws", "nws_cli_raw_text": "cli",
+             "eia_gasoline_weekly": "fuel", "brent_spot_daily": "fuel", "gas_price_aaa_daily": None,
+             "consensus_win_probabilities_sports": "consensus"})
+        rules = {name: (open_feeds.refusal_for(name).name, open_feeds.refusal_for(name).owner) for name in (
+            "gdp_advance_estimate_values", "nonfarm_payrolls_consensus_estimate", "gas_price_aaa_daily", "mlb_probable_pitchers",
+            "sportsbook_line_movement_history", "coinbase_spot_candles", "hyperliquid_oracle_price_history")}
+        self.assertEqual(rules, {"gdp_advance_estimate_values": ("bea_data", "owner"),
+                                 "nonfarm_payrolls_consensus_estimate": ("econ_consensus", "no-source"),
+                                 "gas_price_aaa_daily": ("aaa_gas", "no-source"), "mlb_probable_pitchers": ("lineups", "no-source"),
+                                 "sportsbook_line_movement_history": ("odds_history", "owner"),
+                                 "coinbase_spot_candles": ("exchange_terms", "no-source"),
+                                 "hyperliquid_oracle_price_history": ("crypto_index_history", "no-source")})
+
+
+# ------------------------------------------------------------------ the lane and the hosts (review of #309)
+class LaneAndHosts(RecorderCase):
+    """The feeds lane has one slot, shared with the sports boards the Kalshi founders price from: a host that
+    hangs must cost it a timeout once a backoff at most, never once a key (Sept 25, 2026, 10:41Z: GDELT's TLS
+    handshake timed out after 15 s from the House box)."""
+
+    def hung(self, message="_ssl.c:1011: The handshake operation timed out", seconds=30.0):
+        clock, calls = self.clock, []
+
+        def hang(method, url, body):
+            calls.append(url)
+            clock.advance(seconds)
+            return TransportError(f"{method} {url.split('?')[0]} failed: {message}")
+
+        return FakeTransport(default=hang), calls
+
+    def test_a_host_that_cannot_be_reached_costs_one_timeout_a_backoff_and_warns_hourly(self):
+        from ltcm.data.signals import GDELT_DOC_URL
+
+        transport, calls = self.hung()
+        subjects = list(open_feeds.GDELT_QUERIES)
+        store = self.recorder({"gdelt": subjects}, transports={"gdelt": transport})
+        out = store.run()
+        self.assertEqual(len(calls), 1)  # eight subjects, one request: the other seven were not asked
+        self.assertTrue(calls[0].startswith(GDELT_DOC_URL))
+        self.assertEqual(sorted(k for f, k, _ in out["failed"]), sorted(subjects))
+        self.assertEqual(sorted(store.health()["gdelt"]["failing"]), sorted(subjects))
+        for _ in range(180):  # three hours of the House's minute tick
+            self.clock.advance(60)
+            if store.due():
+                store.run()
+        self.assertLessEqual(len(calls), 6)  # asked again after 5, 10, 20, 40, 80 minutes: never every five minutes
+        self.assertLessEqual(len(calls) * 30.0, 0.05 * 3 * 3600 + 30.0)
+        self.assertTrue(self.alerts and all(level == "warning" for level, _ in self.alerts))  # never an error: no rollback
+        gdelt = [text for _, text in self.alerts if " gdelt " in text]
+        self.assertLessEqual(len(gdelt), 3)  # at most hourly
+        self.assertEqual(self.stamps(store, "gdelt", "bitcoin"), [])
+
+    def test_a_server_that_answers_again_is_asked_at_once(self):
+        from ltcm.tests import test_data_hazards as hazard_fixtures
+
+        transport, calls = self.hung(message="[Errno 111] Connection refused", seconds=0.0)
+        store = self.recorder({"quakes": ["m4.5_day", "significant_week"]}, transports={"quakes": transport})
+        store.run()
+        self.assertEqual(len(calls), 1)
+        self.clock.advance(300)
+        transport.default = lambda method, url, body: hazard_fixtures.quakes()
+        store.run()
+        self.assertEqual(len(calls), 1)  # the handler that counts is gone: the host answered
+        self.assertEqual(sorted(store.latest({"quakes": ["m4.5_day", "significant_week"]}, self.clock())["quakes"]),
+                         ["m4.5_day", "significant_week"])
+        self.assertIsNone(store._host_wait("quakes", self.clock()))
+
+    def test_one_slow_key_is_its_own_failure_but_a_hung_server_backs_off(self):
+        transport, calls = self.hung(message="The read operation timed out", seconds=20.0)
+        store = self.recorder({"pageviews": ["bitcoin", "ethereum", "trump", "fed"]}, transports={"pageviews": transport},
+                              backfill_pages=1)
+        store.run()
+        self.assertEqual(len(calls), 2)  # two keys that did not answer: the server hangs, the other two are not asked
+        self.clock.advance(60)
+        store.run()
+        self.assertEqual(len(calls), 2)  # nor the backfill, while the host backs off
+        # One filer that times out while the others answer (EDGAR's pattern) never holds the host back.
+        slow = FakeTransport({feeds_url("trump"): TransportError("GET x failed: The read operation timed out")},
+                             default=lambda method, url, body: {"items": []})
+        other = self.recorder({"pageviews": ["bitcoin", "trump", "fed"]}, transports={"pageviews": slow}, path_name="other.sqlite",
+                              backfill_pages=1)
+        other.run()
+        asked = {url.split("/user/")[1].split("/")[0] for url in (c["url"] for c in slow.calls)}
+        self.assertEqual(asked, {"Bitcoin", "Donald_Trump", "Federal_Reserve"})
+        self.assertIsNone(other._host_wait("pageviews", self.clock()))
+
+    def test_a_history_recorder_gives_way_to_a_due_board_before_its_first_key(self):
+        transport, calls = self.hung(seconds=0.0)
+        store = self.recorder({"sports": ["nfl"], "cli_text": ["KNYC"]}, transports={"cli_text": transport})
+        store._schedule("sports", "nfl", self.clock())  # the board is due
+        out = {"polled": [], "stored": 0, "failed": []}
+        store._poll_history("cli_text", out)
+        self.assertEqual(calls, [])
+        self.assertLessEqual(store._next[("cli_text", "*")], self.clock())  # due again at once, behind the board
+
+    def test_a_restart_does_not_spend_blss_queries(self):
+        from ltcm.data.releases import BLS_V1_URL
+        from ltcm.tests import test_data_releases as release_fixtures
+
+        transport = FakeTransport({("POST", BLS_V1_URL): release_fixtures.bls()})
+        store = self.recorder({"bls": ["CPI", "UNRATE"]}, transports={"bls": transport})
+        store.run()
+        self.assertEqual(len(transport.calls), 1)
+        self.clock.advance(600)
+        again = self.recorder({"bls": ["CPI", "UNRATE"]}, transports={"bls": transport})  # a release restarts the House
+        again.run()
+        self.assertEqual(len(transport.calls), 1)  # 25 keyless queries a day: polled ten minutes ago, due in eighty
+        self.clock.advance(5400 - 600)
+        again.run()
+        self.assertEqual(len(transport.calls), 2)
+
+    def test_a_failed_bls_query_is_asked_again_in_forty_five_minutes(self):
+        from ltcm.data.releases import BLS_V1_URL
+
+        transport = FakeTransport({("POST", BLS_V1_URL): (503, {}, b"Service Unavailable")})
+        store = self.recorder({"bls": ["CPI"]}, transports={"bls": transport})
+        store.run()
+        for _ in range(44):
+            self.clock.advance(60)
+            store.run()
+        self.assertEqual(len(transport.calls), 1)
+        self.clock.advance(60)
+        store.run()
+        self.assertEqual(len(transport.calls), 2)
+
+    def test_timeouts_stay_under_the_lane_and_every_recorder_host_is_allowed(self):
+        hosts = feeds.league_hosts()
+        for source in open_feeds.SOURCES:
+            self.assertLessEqual(source.timeout, 45.0, source.name)
+            self.assertIn(source.host, hosts, source.name)
+
+
+def feeds_url(subject: str) -> str:
+    from ltcm.data.signals import PAGEVIEWS_URL
+
+    return f"{PAGEVIEWS_URL}/{open_feeds.ATTENTION[subject][0]}/*"
 
 
 class ImportOrder(unittest.TestCase):
