@@ -5,6 +5,7 @@ priced at net value plus collateral, so its cost is its maximum loss), its touch
 its fee and the venue's legs.
 """
 
+import math
 import unittest
 from decimal import Decimal
 
@@ -154,6 +155,40 @@ class Touch(unittest.TestCase):
         fly = parse(V, intent("long_butterfly", [leg(580, "long"), leg(581, "short", ratio=2), leg(582, "long")])).spec
         self.assertEqual([r["ratio_qty"] for r in structures.mleg_legs(fly, "open")], ["1", "2", "1"])
         self.assertEqual(structures.fee_per_unit(fly), D("0.20"))
+
+
+class Candidates(unittest.TestCase):
+    def chain(self):
+        rows = []
+        # SPY at 585.40; $1 strikes 580-591; calls and puts with plausible 0DTE prices
+        for k in range(580, 592):
+            extrinsic = 1.2 * math.exp(-abs(k - 585.40) / 2.0)  # time value decays away from the money
+            call_mid = max(0.0, 585.40 - k) + extrinsic
+            put_mid = max(0.0, k - 585.40) + extrinsic
+            for right, mid in (("C", call_mid), ("P", put_mid)):
+                rows.append({"occ": occ(k, right), "symbol": occ(k, right), "underlying": "SPY", "expiry": "2026-09-28",
+                             "strike": float(k), "right": "call" if right == "C" else "put", "bid": round(mid - 0.02, 2),
+                             "ask": round(mid + 0.02, 2), "underlying_price": 585.40,
+                             "delta": round((1 if right == "C" else -1) * math.exp(-max(0.0, (k - 585.40) if right == "C" else (585.40 - k)) / 3) / 2, 3)})
+        return rows
+
+    def test_every_candidate_parses_fits_and_opens_at_its_touch(self):
+        rows = structures.candidates(self.chain(), max_loss_usd=75, today="2026-09-25", venue=V)
+        kinds = {r["structure"] for r in rows}
+        self.assertTrue({"debit_vertical", "credit_vertical", "iron_condor"} <= kinds, kinds)
+        for row in rows:
+            order = parse(V, {"structure": row["structure"], "action": "open", "quantity": 1, "limit_price": row["open_limit"],
+                              "legs": row["legs"], "reason": "candidate"})
+            self.assertLessEqual(order.max_loss_usd, 75)
+            self.assertAlmostEqual(float(order.max_loss_usd), row["max_loss_usd"], places=6)
+            self.assertEqual(row["days_to_expiry"], 3)
+        credit = [r for r in rows if r["structure"] == "credit_vertical"]
+        for row in credit:  # out of the money only: the short strike on the far side of spot
+            short = [leg for leg in row["legs"] if leg["role"] == "short"][0]["occ"]
+            strike = int(short[-8:]) / 1000
+            self.assertTrue(strike >= 585.40 if short[-9] == "C" else strike <= 585.40)
+        self.assertEqual(structures.candidates(self.chain(), max_loss_usd=10, today="2026-09-25"), [r for r in structures.candidates(self.chain(), max_loss_usd=10, today="2026-09-25")])
+        self.assertTrue(all(r["max_loss_usd"] <= 10 for r in structures.candidates(self.chain(), max_loss_usd=10, today="2026-09-25")))
 
 
 if __name__ == "__main__":

@@ -423,6 +423,112 @@ def mleg_legs(spec: Spec, action: str) -> list[dict[str, str]]:
     return rows
 
 
+# ------------------------------------------------------------------------ what a strategy is shown
+def _day_count(today: str, expiry: str) -> int:
+    from datetime import date
+
+    return (date.fromisoformat(expiry) - date.fromisoformat(today)).days
+
+
+def candidates(chain: Sequence[Mapping[str, Any]], *, max_loss_usd: Any, today: str, venue: str = "alpaca-paper",
+               limit: int = 60) -> list[dict[str, Any]]:
+    """Ready-made structures a strategy may send as they are (`ctx["structures"]`), built from the
+    chain rows it is shown, the same function live (`House._chain`) and in the options replay so a
+    strategy sees one context in both: adjacent-strike DEBIT verticals (the long leg the dearer), OUT OF
+    THE MONEY adjacent-strike CREDIT verticals (the short leg the dearer), and iron condors pairing an
+    out-of-the-money put credit vertical with a call credit vertical of the same width and the nearest
+    short delta. Only those whose maximum loss x 100 is within `max_loss_usd` (the agent's order and
+    position caps, the smaller) and whose touches make a positive debit under the width or a positive
+    credit under the collateral.
+
+    Each row: `structure`, `kind` (debit or credit), `legs` (as an intent names them), `width`,
+    `net_ask`/`net_bid` in the trader's sense (a debit structure: the debit to open at the touches /
+    what closing gets; a credit structure: `net_bid` the credit taken opening at the touches, `net_ask`
+    what buying it back costs), `open_limit` (the natural limit that opens it at the touches),
+    `max_loss_usd` and `max_gain_usd` a structure at that limit, `days_to_expiry`, `underlying`,
+    `underlying_price`, and `long_delta` or `short_delta` where the feed gives deltas. Nearest the
+    money first, at most `limit` rows."""
+    cap = money(max_loss_usd)
+    groups: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    spots: dict[str, float] = {}
+    for row in chain:
+        try:
+            if row.get("bid") is None or row.get("ask") is None or float(row["ask"]) <= 0:
+                continue
+            under = str(row.get("underlying") or "").upper()
+            groups.setdefault((under, str(row["expiry"]), str(row["right"])), []).append(row)
+            if row.get("underlying_price"):
+                spots[under] = float(row["underlying_price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    out: list[tuple[float, dict[str, Any]]] = []
+    credits: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+
+    def code(row: Mapping[str, Any]) -> str:
+        return str(row.get("occ") or row.get("symbol"))
+
+    def delta(row: Mapping[str, Any]) -> float | None:
+        value = row.get("delta")
+        return None if value is None else float(value)
+
+    for (under, expiry, right), rows in groups.items():
+        rows = sorted(rows, key=lambda r: float(r["strike"]))
+        spot = spots.get(under)
+        dte = _day_count(today, expiry)
+        for low, high in zip(rows, rows[1:]):
+            width = money(str(high["strike"])) - money(str(low["strike"]))
+            if width <= 0:
+                continue
+            dearer, cheaper = (low, high) if right == "call" else (high, low)
+            # the debit vertical: long the dearer at its ask, short the cheaper at its bid
+            debit = money(str(dearer["ask"])) - money(str(cheaper["bid"]))
+            value = max(ZERO, money(str(dearer["bid"])) - money(str(cheaper["ask"])))
+            if ZERO < debit < width and debit * HUNDRED <= cap:
+                row = {"structure": "debit_vertical", "kind": "debit",
+                       "legs": [{"occ": code(dearer), "role": "long"}, {"occ": code(cheaper), "role": "short"}],
+                       "width": float(width), "net_ask": float(debit), "net_bid": float(value), "open_limit": float(debit),
+                       "max_loss_usd": float(debit * HUNDRED), "max_gain_usd": float((width - debit) * HUNDRED),
+                       "days_to_expiry": dte, "underlying": under, "underlying_price": spot, "long_delta": delta(dearer)}
+                out.append((abs(float(dearer["strike"]) - spot) if spot else 0.0, row))
+            # the credit vertical: short the dearer at its bid, long the cheaper at its ask; out of the money only
+            out_of_money = spot is None or (float(dearer["strike"]) >= spot if right == "call" else float(dearer["strike"]) <= spot)
+            credit = money(str(dearer["bid"])) - money(str(cheaper["ask"]))
+            buy_back = money(str(dearer["ask"])) - money(str(cheaper["bid"]))
+            if out_of_money and ZERO < credit < width and (width - credit) * HUNDRED <= cap:
+                row = {"structure": "credit_vertical", "kind": "credit",
+                       "legs": [{"occ": code(dearer), "role": "short"}, {"occ": code(cheaper), "role": "long"}],
+                       "width": float(width), "net_bid": float(credit), "net_ask": float(max(ZERO, buy_back)), "open_limit": float(credit),
+                       "max_loss_usd": float((width - credit) * HUNDRED), "max_gain_usd": float(credit * HUNDRED),
+                       "days_to_expiry": dte, "underlying": under, "underlying_price": spot, "short_delta": delta(dearer)}
+                out.append((abs(float(dearer["strike"]) - spot) if spot else 0.0, row))
+                credits.setdefault((under, expiry), {}).setdefault(right, []).append(
+                    {"row": row, "credit": credit, "buy_back": max(ZERO, buy_back), "width": width, "short": float(dearer["strike"]), "delta": delta(dearer)})
+    for (under, expiry), sides in credits.items():
+        puts, calls = sides.get("put") or [], sides.get("call") or []
+        for put in puts:
+            same = [c for c in calls if c["width"] == put["width"] and c["short"] > put["short"]]
+            if not same:
+                continue
+            if put["delta"] is not None and all(c["delta"] is not None for c in same):
+                call = min(same, key=lambda c: abs(abs(c["delta"]) - abs(put["delta"])))
+            else:
+                spot = spots.get(under) or 0.0
+                call = min(same, key=lambda c: abs((c["short"] - spot) - (spot - put["short"])))
+            credit = put["credit"] + call["credit"]
+            width = put["width"]
+            if not ZERO < credit < width or (width - credit) * HUNDRED > cap:
+                continue
+            row = {"structure": "iron_condor", "kind": "credit", "legs": put["row"]["legs"] + call["row"]["legs"],
+                   "width": float(width), "net_bid": float(credit), "net_ask": float(put["buy_back"] + call["buy_back"]), "open_limit": float(credit),
+                   "max_loss_usd": float((width - credit) * HUNDRED), "max_gain_usd": float(credit * HUNDRED),
+                   "days_to_expiry": put["row"]["days_to_expiry"], "underlying": under, "underlying_price": spots.get(under),
+                   "short_delta": put["delta"], "call_short_delta": call["delta"]}
+            spot = spots.get(under)
+            out.append((abs((put["short"] + call["short"]) / 2 - spot) if spot else 0.0, row))
+    out.sort(key=lambda pair: (pair[1]["days_to_expiry"], pair[0]))
+    return [row for _, row in out[: max(0, int(limit))]]
+
+
 __all__ = ["TYPES", "DEBIT_TYPES", "CREDIT_TYPES", "BOUNDED", "TWO_EXPIRIES", "FEE_PER_CONTRACT", "Leg", "Spec", "Order",
            "classify", "parse", "held_limit", "natural_price", "instrument", "is_structure", "spec_of", "quote", "intrinsic",
-           "max_gain", "fee_per_unit", "mleg_legs"]
+           "max_gain", "fee_per_unit", "mleg_legs", "candidates"]
