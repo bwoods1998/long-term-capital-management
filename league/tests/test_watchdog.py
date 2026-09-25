@@ -1175,6 +1175,31 @@ class TheEnvironmentClassifier(unittest.TestCase):
                 self.assertEqual(wd.environment("sail", exc), {})
         self.assertEqual(wd.environment("", sail_503), {}, "no service named, no marker")
 
+    def test_an_exception_raised_while_a_services_failure_was_handled_is_the_houses(self):
+        """Review of H2 (Sept 25, 2026): a RuntimeError of this code's own -- a BookError, a SandboxError, a dict changed
+        during iteration -- raised in the except block of a timeout, without `from`, is a new failure of the House's,
+        never judged by the one it was handling. The House's clients wrap a failure `from exc` or `from None`, and
+        those are still judged by it."""
+        import errno
+
+        from league.book import BookError
+        from league.sandbox import SandboxError
+        from ltcm.sailbox import SailboxError
+
+        for exc in (
+            raised(lambda: RuntimeError("dictionary changed size during iteration"), inside=ConnectionResetError(errno.ECONNRESET, "reset")),
+            raised(lambda: BookError("invariant broken"), inside=TimeoutError("timed out")),
+            raised(lambda: SandboxError("agent: the batch failed"), inside=SailboxError("sailbox api 503", status=503)),
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertFalse(wd.service_failed(exc))
+        for exc in (
+            raised(lambda: SandboxError("agent: SailboxError: sailbox api 503"), inside=SailboxError("sailbox api 503", status=503), suppress=True),
+            raised(lambda: SandboxError("agent: the batch timed out"), cause=TimeoutError("timed out")),
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertTrue(wd.service_failed(exc))
+
 
 class EnvironmentAlertsInTheWatch(ReadHealthTest):
     """H2: an error alert marked `environment` is counted in the reading's detail and never a reason,

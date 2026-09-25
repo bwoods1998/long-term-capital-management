@@ -128,7 +128,8 @@ failed 73 s later). Now:
   (`league.watchdog.service_failed`): an HTTP 5xx, 408, 425 or 429, a timeout, a refused, reset or
   unreachable connection, a name that did not resolve. A 4xx (a payload the House built, its
   credential, a box it named) and every exception of the House's own (TypeError, KeyError,
-  ValueError, a local file or database error), even one raised while handling a 503, is not.
+  ValueError, a local file or database error, anything raised in an except block without `from`),
+  even one raised while handling a 503, is not.
 - Nothing on the trading path is ever marked, whoever failed: an agent's wake ("its wake failed",
   "its box did not run", "no market data this wake") and a venue's poll ("could not poll or
   settle"). A release can make a service fail there (more wake workers than Sail's API allows answer

@@ -158,8 +158,10 @@ def service_failed(exc: BaseException | None) -> bool:
     mistakes (`_CODE_ERRORS`, a URL it built that urllib cannot use, a local OSError such as a missing
     file). A wrapper that is neither -- `SailboxError("sailbox transport failed: ...")`, `SandboxError`,
     `TransportError`, urllib's `URLError` -- is judged by what it wraps (`reason`, `__cause__`, else
-    `__context__`: raised `from` the failure or `from None` inside its handler), so a Sail 503 inside a
-    `SandboxError` is the environment's and a TypeError inside one is the House's.
+    `__context__` only when it was raised `from None` inside the failure's handler), so a Sail 503
+    inside a `SandboxError` is the environment's and a TypeError inside one is the House's. An
+    exception raised in an except block without `from` is a new failure of this code's own, never
+    judged by the one it was handling.
 
     A bare `TimeoutError` is the builtin one that `concurrent.futures` and `asyncio` raise too (3.11
     on): this cannot tell a pool's own timeout from a socket's, one more reason nothing on the trading
@@ -196,7 +198,11 @@ def service_failed(exc: BaseException | None) -> bool:
             return True
         if isinstance(exc, OSError):
             return exc.errno in _NETWORK_ERRNOS
-        exc = exc.__cause__ if exc.__cause__ is not None else exc.__context__
+        # Only an exception raised FROM the failure is judged by it: `raise X from exc`, or a wrapper's
+        # `raise X from None` inside the handler (what every client of the House does). An exception
+        # merely raised while one was being handled -- a BookError, a "dictionary changed size", any
+        # RuntimeError of this code's own in an except block of a timeout -- is the House's own.
+        exc = exc.__cause__ if exc.__cause__ is not None else exc.__context__ if exc.__suppress_context__ else None
     return False
 
 
