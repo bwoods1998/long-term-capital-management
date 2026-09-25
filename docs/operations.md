@@ -548,7 +548,27 @@ ORDER BY seq DESC LIMIT 20`.
       the same program keeps the family -- a proven family's name only when that program is the family's
       founding one (its first member's NEEDS at birth, `_family_program`), so a member carrying the name
       with another program cannot pass the proof to its forks, and never anchors R3 (the review of #276).
-      Agents born before keep their family on the ledger.
+    - C8, family = mechanism (the forward-first run, Sept 25, 2026; the constitution's `allocator.family_key`
+      "mechanism", which moves the money digest): the family is the program's MECHANISM, its code beyond
+      its PARAMS literal with the venue, series and symbols it trades (`families.mechanism_key`). A child
+      running its parent's program beyond PARAMS is born into its parent's family whatever label it was
+      given (a House mutation, a lab nudge); any other program founds the family of its own mechanism
+      (`<desk>-<style>-<key>`; its birth row says `[born into its own family ...]`), and so does a founder
+      given a label another mechanism holds; an agent that rewrites itself in place moves to its new
+      program's family from the rewrite's row on. The move is an `agent.family` row (`family`, `was`,
+      `since_seq`, `mechanism`, `why`); the birth row keeps its label and lineage, and a member's rows count
+      for a family only while it ran the family's program. The first start under the key re-keys every label
+      born before it, ONCE, before the allocator's first pass: one `agent.family` row per misfiled program and
+      the House's row `family-key:rekey` (`rows`, `agents`, `families`: who moved out of and into which
+      family, `through`), with an info alert "C8: ... (the one-time re-key of the labels born before C8)".
+      On the T0 snapshot that is 781 rows for 424 agents; sports-central-run-under keeps its record to the
+      cent (n 25, bound +0.0344, real n 11, +$16.39 real, +$85.22 practice; -2 and -4 leave it), and
+      megacaps-chip-demand-relay's record (n 13, bound +0.0010, all of it earned by mcentee-hddb4ae's
+      eleventh rewrite) moves with that program to `megacaps-megacap-short-horizon-re-8a220c`. To verify
+      after the deploy, read the `family-key:rekey` row and the next `family.record` row of each proven
+      family (`n`, `bound`, `real.n`, `real.honest_bound` as before), and `agent.family` rows after each
+      in-place rewrite. A start that cannot key the families says so in an error alert and the floor goes on
+      with the families as the rows had them; the next birth or rewrite looks again.
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state
@@ -561,7 +581,10 @@ ORDER BY seq DESC LIMIT 20`.
   the REAL record (`real.n`, `real.bound`, `real.honest_bound`), maker and taker, active blocks,
   members (`members_living`, `members_real`), the stake a member on real money is lent, the
   capacity estimate (markets bid a day, the fill rate at the stake's position, real settlements a
-  day, dollars a day) and, swinging, the ramp (`swing`: `level`, `positive_since_entry`,
+  day, dollars a day; since C6 of the forward-first run, Sept 25, 2026, `fill_rate_basis` -- "real" once
+  the family has bid 10 markets on the real book at that size, "all books" before -- and `curve`, the
+  fill rate and dollars a day at 1x, 2x and 4x the stake, null where a size was never bid on 5 markets;
+  the family swing's capacity rule reads the same rates) and, swinging, the ramp (`swing`: `level`, `positive_since_entry`,
   `next_doubling_in`, `kelly_usd`, `venue_share_usd`, `entered_seq`). The same row is written to the
   ledger as `family.record` (private) at most every five minutes when it changed, the capacity
   estimate's clock-driven rates aside (`families.change_view`): the durable record of every state
