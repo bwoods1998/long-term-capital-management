@@ -590,6 +590,11 @@ def family_at_capacity(record: Mapping[str, Any] | None, rule: Mapping[str, Any]
 GRADUATION_COLUMNS = ("id, code_sha256, params, needs, niche, venue, horizon, origin, author, lineage, parents, idea, priority,"
                       " created, status, evaluated, tape_id, error, eligible, gate, fitness, trades, trades_per_day, corr, cell, summary")
 
+#: Deaths that are not a graduate's failure, so not its lineage's (`Lab._floor_score`): `redundant`, and `desk_closed`
+#: (the forward-first run, Sept 25, 2026: the Kalshi founder-seat hook, PR #308, retires a closed desk's practice
+#: residents, crypto-15m first, because the DESK's record is negative, not the agent's).
+NEUTRAL_DEATHS = ("redundant", "desk_closed")
+
 #: A parent's own forward window in its breeding weight (`Lab._pick_parent`, E1, Sept 24, 2026): a window
 #: that wins doubles it, one that loses quarters it, none leaves it; within the lineage weight's bounds.
 FORWARD_BREEDING = (2.0, 0.25)
@@ -1963,9 +1968,11 @@ class Lab:
         """What one born graduate adds to its lineage's search score, in [-2, 2]: from the
         allocator's board when it has read the agent's evidence (practice: W_paper above or below 1
         after `min_trades` closed trades; real money: W_real above or below 1 after a real trade),
-        else from its standing; a dead graduate -1 unless it died redundant."""
+        else from its standing; a dead graduate -1 unless its death says nothing of its program
+        (`NEUTRAL_DEATHS`: redundant, or since Sept 25, 2026 `desk_closed`, a desk closed on its own
+        negative record)."""
         if not agent.alive:
-            return 0 if agent.cause in ("redundant",) else -1
+            return 0 if agent.cause in NEUTRAL_DEATHS else -1
         evidence = None
         try:
             board = getattr(self.house, "allocator", None)

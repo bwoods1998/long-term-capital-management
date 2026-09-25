@@ -298,6 +298,23 @@ class Graduation(FirstCase):
         self.assertEqual(self.lab.graduate()[0]["state"], "born")
 
 
+class Deaths(FirstCase):
+    def test_a_graduate_retired_because_its_desk_closed_does_not_count_against_its_lineage(self):
+        """The Kalshi run's founder-seat hook (PR #308, Sept 25, 2026) retires a closed desk's practice residents with the cause
+        `desk_closed`: the desk's negative record, not the agent's. Like `redundant`, it moves nothing; any other death is -1."""
+        rows = []
+        for name, cause in (("closed", "desk_closed"), ("spare", "redundant"), ("broke", "credits")):
+            agent = self.house.spawn(name, f"lab-{name}", with_params(KNOB, {"notional": 20.0 + len(rows)}), reason="a lab graduate",
+                                     founder=f"lab:founder:{name}")
+            self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, agent, at, detail) VALUES(?,?,?,?,?,?,?,?,?)",
+                        (name, DESK, f"founder:{name}", agent.id, agent.family, "born", agent.id, self.clock(), ""))
+            self.house.kill(agent, cause, f"a test death: {cause}")
+            rows.append(self.house.registry.get(agent.id))
+        self.assertEqual([self.lab._floor_score(a, 3) for a in rows], [0, 0, -1])
+        weights = self.lab.lineage_weights()
+        self.assertEqual((weights.get("founder:closed", 1.0), weights.get("founder:spare", 1.0), weights["founder:broke"]), (1.0, 1.0, 0.5))
+
+
 class Batches(FirstCase):
     def test_the_mechanism_children_are_two_thirds_of_a_batch_where_they_wait_and_the_mutants_keep_a_third(self):
         """E1 gave the written programs half of a batch (4 of 8) and the rest in queue order, where they sit ahead of the
