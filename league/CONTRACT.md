@@ -307,6 +307,92 @@ day the House offers a held contract at the bid; what is unsold at the bell is w
 zero. The House replays an options candidate only where its options history covers every
 underlying over the window; elsewhere paper remains the test.
 
+### Options structures: defined risk, held as one position (practice, Sept 25, 2026)
+
+A strategy of the options specialty whose NEEDS carry `"structures": True` is a **structure agent**.
+It trades level-3 structures with defined risk, on PRACTICE only (the book `league/config.json`
+`options_structures.book` names: the House's options shadow account by default), and its book holds
+structures only: a single-contract intent from it is refused. On real money every structure intent
+is refused until the owner's switch (O1).
+
+**The intent.** One row a structure (`league/structures.py` parses it):
+
+```python
+{"structure": "iron_condor", "action": "open", "quantity": 1, "limit_price": 0.42,
+ "legs": [{"occ": "SPY260928P00580000", "role": "long"}, {"occ": "SPY260928P00581000", "role": "short"},
+          {"occ": "SPY260928C00590000", "role": "short"}, {"occ": "SPY260928C00591000", "role": "long"}],
+ "reason": "..."}
+```
+
+- `structure`: one of the types below. `action`: `open` or `close`; a close names the same legs and
+  roles as the open and closes the WHOLE structure (never a leg). `quantity`: whole structures, >= 1.
+- Every leg: `occ` (or `symbol`/`expiry`/`strike`/`right`), `role` `long` or `short`, and `ratio` only
+  for a long butterfly's body (2).
+- `limit_price`: a positive NET price a share in whole cents, as a trader says it: opening a debit
+  structure, the most to pay; opening a credit structure, the LEAST credit to take; closing a debit
+  structure, the least to receive; closing a credit structure, the most to pay to buy it back. A
+  structure is always a limit order (`type` may be omitted or `"limit"`); its net is never snapped to a
+  single contract's tick grid. `reason` is required.
+- The verticals schema `{"spread": "debit_vertical", "side": "buy"|"sell", ...}` is read as an alias.
+
+**The types** (one underlying, 2-4 legs, whole contracts, no contract twice):
+
+| type | legs | debit/credit | K (collateral) a share | max loss a share |
+|---|---|---|---|---|
+| `debit_vertical` | 1 long + 1 short, one expiry and right; long the dearer strike | debit | 0 | the debit |
+| `credit_vertical` | 1 long + 1 short, one expiry and right; short the dearer strike | credit | the width | width - credit |
+| `iron_condor` | long put < short put < short call < long call, one expiry | credit | the wider wing | K - credit |
+| `iron_butterfly` | as the condor, short put strike == short call strike | credit | the wider wing | K - credit |
+| `long_butterfly` | one right and expiry: +1 low, -2 middle (ratio 2), +1 high, equal wings | debit | 0 | the debit |
+| `calendar` | one right and strike: short the NEAR expiry, long the FAR | debit | 0 | the debit (closed before the near expiry) |
+| `diagonal` | one right: short near, long far, long strike at least as favourable | debit | 0 | the debit (closed before the near expiry) |
+| `long_straddle` | long call + long put, one strike and expiry | debit | 0 | the debit |
+| `long_strangle` | long call + long put, one expiry, two strikes | debit | 0 | the debit |
+
+Refused always: a naked short leg, any other ratio, a broken wing, a diagonal whose long leg is less
+favourable, a credit limit at or over K, a debit limit at or over the most the structure can be worth,
+mixed underlyings. A row that is not a well-formed defined-risk structure is dropped with the reason
+(the wake's `dropped`); a well-formed one the House will not send is refused on the record
+(`recent_order_outcomes`).
+
+**How it is held: ONE position priced at S = net value + K.** The net value a share is the long legs'
+prices less the short legs' (times their ratios); K is zero for a debit structure and the wider wing
+for a credit one. So what opening costs is always the structure's MAXIMUM LOSS: a $1-wide SPY iron
+condor sold for 0.38 is held at S = 0.62, $62 at risk. An open is a buy of the held instrument at
+S, a close a sell; the order and position caps meter S x 100 x quantity; the structure is marked at its
+bid (what every leg would get closing at once: long legs at the bid, short legs at the ask); realized
+P&L is (S sold - S paid) x 100 x quantity less fees; and a sale that leaves it flat is ONE closed trade.
+Fees: $0.05 a contract a leg a fill (a vertical $0.10, a condor or a butterfly $0.20). The book refuses a
+limit more than 10% away from the structure's touch on its side: when an exit fires, close near the bid
+(`natural_mark` below) rather than resting a far target.
+
+**Time.** A structure's clock is its EARLIEST expiry. No structure is opened on that day from 14:30
+New York (nor outside the regular session); from 15:30 New York that day the House sells whatever is
+still held, whole, at its bid (at least a cent), re-priced each tick until it is gone; nothing is held
+into an expiry. Write your own profit target, stop and time exit: realized P&L exists only when your
+strategy closes.
+
+**What a structure agent is shown.**
+- `ctx["chain"]`: contract rows as above, NOT limited to what one contract may cost, from TODAY (0 DTE,
+  until 14:30 New York) to `max_days_to_expiry` (0-45; 7 when unsaid), within 20% of the underlying,
+  at most 80 an underlying nearest the money.
+- `ctx["structures"]`: ready-made candidates that fit your caps (maximum loss x 100 within the smaller
+  of your order and position caps): adjacent-strike debit and credit verticals and iron condors around
+  the money, nearest expiry and nearest the money first, at most 60. A row: `structure`, `kind`, `legs`
+  (as an intent names them: send it as it is), `width`, `net_bid`/`net_ask` in the trader's sense (a debit
+  structure: what closing gets / what opening costs; a credit one: the credit opening takes / what buying
+  it back costs), `open_limit`, `max_loss_usd`, `max_gain_usd`, `days_to_expiry`, `underlying`,
+  `underlying_price`, and `long_delta` or `short_delta` (and `call_short_delta` for a condor). The options
+  replay shows the same list (`structures.candidates`).
+- `ctx["structure_rules"]`: the entry cut, the House's close, the fee and the book, as data.
+- `ctx["positions"]`: a held structure's row has `structure`, `kind`, `legs`, `symbol` (the
+  underlying), `expiry` (the earliest), `quantity`, `average_cost` and `mark` in the HELD price S, and,
+  so an exit needs no S arithmetic, `natural_open` (the debit paid, or the credit received, a share),
+  `natural_mark` (what it is worth at the mark in the same sense: for a credit structure, what buying it
+  back costs), `pnl_usd` at the mark, `max_loss_usd` and `max_gain_usd`. Close it by sending its `legs`
+  back with `"action": "close"`. An open order in a structure names `structure`, `legs`, `action` and
+  `natural_limit`.
+
 ### Options-derived features for equity and ETF strategies
 
 `NEEDS["options_features"] = True` adds `ctx["options_features"]`: by symbol, the latest row

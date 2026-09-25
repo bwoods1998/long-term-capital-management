@@ -585,6 +585,17 @@ class StructuresInTheHouse(StructureHouseCase):
         rows = self.house._chain(["SPY"], 7, None, {"SPY": {"bid": SPOT, "ask": SPOT}}, structures=True)
         self.assertNotIn("2026-09-10", {r["expiry"] for r in rows})
 
+    def test_a_zero_dte_strategy_is_shown_today_only(self):
+        """Regression: `max_days_to_expiry: 0` read as "unsaid" (a falsy 0) showed a 0-DTE strategy a week."""
+        self.broker.option_chain = fake_chain()
+        agent = self.house.spawn("krasker", "options-0dte-test", STRUCTURE_AGENT.replace('"max_days_to_expiry": 7', '"max_days_to_expiry": 0'),
+                                 reason="test", specialty="alpaca-options")
+        self.house.seat(agent)
+        ctx = self.house.snapshot(agent, self.house.book_of(agent))
+        self.assertEqual({row["expiry"] for row in ctx["chain"]}, {"2026-09-10"})
+        self.assertTrue(ctx["structures"])
+        self.assertEqual({row["days_to_expiry"] for row in ctx["structures"]}, {0})
+
     def test_the_wake_shows_the_chain_and_structures_within_the_caps(self):
         self.broker.option_chain = fake_chain()
         agent = self.structure_agent()

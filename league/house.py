@@ -940,7 +940,8 @@ class House:
         the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee."""
         from . import structures
 
-        days = max(0, min(int(agent.needs.get("max_days_to_expiry") or 7), 45))
+        asked = agent.needs.get("max_days_to_expiry")
+        days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
         today, hour = _new_york(self.clock)
         opening = hour < STRUCTURE_ENTRY_CUT_HOUR
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
