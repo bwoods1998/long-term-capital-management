@@ -376,5 +376,12 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   failed at 15:34:26Z (17 trades, not passed). At 15:42:56Z it opened a CCL Oct 2 iron condor ($0.50 wings) on
   options-shadow: accepted, filled 15:48:59Z at a held price of 0.17 (a $0.33 credit, $17 at risk), no refusal or
   alert. From 15:54Z it has tried to close it; no close fill by 16:05Z.
+- **16:31Z (16:00-16:31):** 12 wakes, 0 intents; krasker-22's close intents dropped: "a buy-back of 1.46 on a
+  iron_condor with 0.50 of collateral is not a defined-risk order" (its rewritten program's stop does not cap the
+  buy-back at the wing; the book marks the condor at its bid, 0, i.e. its whole $17.20 maximum loss, because CCL's
+  quotes make closing cost more than the wing). The House is right to refuse; the strategy's arithmetic is wrong.
+- **17:01Z (16:30-17:01, the first half hour with all twelve founders):** 32 wakes, 3 intents, 3 structure fills, 0
+  refusals, 0 alerts. krasker-29 (IWM Sept 28 282/283 put debit vertical at 0.46), krasker-32 (AAL Oct 2 14/13.5 put
+  debit vertical at 0.27; RIVN Oct 2 15.5/15 at 0.24). No structure closed yet. Singles on the day -$41.15.
 
 ## Report
