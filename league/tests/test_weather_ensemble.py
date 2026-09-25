@@ -510,7 +510,11 @@ class Founders(unittest.TestCase):
                 self.assertEqual(founder["seed"], founder["key"])  # key == seed: the family is the seed row's own
                 self.assertEqual(by_name[founder["seed"]]["family"], founder["key"])
                 self.assertEqual(by_name[founder["seed"]]["file"], "weather_ensemble.py")
-        self.assertEqual([row["name"] for row in seeds.SEEDS[-4:]], list(KEYS), "appended at the end of SEEDS")
+        names = [row["name"] for row in seeds.SEEDS]
+        first = names.index(KEYS[0])
+        # Appended after the fourteen founding seeds, together (other runs' and founders' rows may follow them).
+        self.assertEqual(names[first:first + len(KEYS)], list(KEYS))
+        self.assertGreaterEqual(first, 14)
 
     def test_each_founder_is_safe_valid_and_names_its_own_stations_highs_lows_and_feeds(self):
         stations = []
