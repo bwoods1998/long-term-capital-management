@@ -68,6 +68,11 @@ SEEDS: list[dict] = [
      "why": "The ensemble-priced weather card on Austin, Houston, Dallas and San Antonio highs and lows: bias-corrected members, a kernel, the NWS forecast blended in, shrunk toward the market mid; maker entries held to settlement. Unproven."},
     {"name": "weather-ensemble-west", "family": "weather-ensemble-west", "file": "weather_ensemble.py",
      "why": "The ensemble-priced weather card on Denver, Phoenix, Los Angeles, Seattle, Las Vegas and San Francisco highs and lows: bias-corrected members (Los Angeles runs 3.6 F cool of the models), shrunk toward the market mid; maker entries. Unproven."},
+    # The same idea for a sport whose sides are people (K1c, Sept 25, 2026): `sports_h2h.py`, a fight
+    # found by its fighters' names. UFC is the one individual sport ESPN prices (tennis, golf, cricket
+    # and F1 have boards but no line there).
+    {"name": "h2h-ufc", "family": "sports-h2h-ufc", "file": "sports_h2h.py",
+     "why": "Unmeasured: the sportsbook line as a second price. Each UFC fight's two contracts priced from DraftKings' de-vigged moneyline (a draw or no contest settles 50/50 on Kalshi, so the fair leans to half by the void share), the fight found by its fighters' names, never guessed; bid post-only where Kalshi is off the line by more than the fee and a margin. Measured once, on the Sept 26 card: Kalshi's mid within 1.1 cents of the line on 16 of 18 markets."},
 ]
 
 _HERE = Path(__file__).resolve().parent

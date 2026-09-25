@@ -254,17 +254,18 @@ class InTheHouse(HouseCase):
 
     def test_a_desk_numbers_its_agents_and_a_child_takes_the_next_number(self):
         born = self.house.found(["meriwether"])
-        # Six founders, and since Sept 25, 2026 the five sports-consensus founders (one a league).
-        self.assertEqual([a.id for a in born], ["meriwether"] + [f"meriwether-{n}" for n in range(2, 12)])
+        # Six founders, and since Sept 25, 2026 the five sports-consensus founders (one a league) and the UFC one.
+        self.assertEqual([a.id for a in born], ["meriwether"] + [f"meriwether-{n}" for n in range(2, 13)])
         self.assertEqual({a.line for a in born}, {"meriwether"})
         self.assertEqual([a.founder for a in born][:2], ["football-favorites", "football-longshot-no"])
-        self.assertEqual([a.founder for a in born][6:], ["consensus-nfl", "consensus-ncaaf", "consensus-mlb", "consensus-mls", "consensus-ligamx"])
-        self.assertEqual(self.house.found(["meriwether"]), [])  # idempotent, though eleven share the name
+        self.assertEqual([a.founder for a in born][6:], ["consensus-nfl", "consensus-ncaaf", "consensus-mlb", "consensus-mls", "consensus-ligamx",
+                                                         "h2h-ufc"])
+        self.assertEqual(self.house.found(["meriwether"]), [])  # idempotent, though twelve share the name
         parent = born[2]
         self.house.economy.grant(parent.id, "10", "test")
         self.house.niches["kalshi-sports"].max_members = 20
         child = self.house.fork(parent)
-        self.assertEqual((child.id, child.line, child.parent), ("meriwether-12", "meriwether", parent.id))
+        self.assertEqual((child.id, child.line, child.parent), ("meriwether-13", "meriwether", parent.id))
 
     def test_an_architects_strategy_joins_a_desk_and_is_born_once(self):
         from league import strategies

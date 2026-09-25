@@ -60,6 +60,22 @@ Sept 25, 2026 (the Kalshi-scale run, K1), probed live that morning:
   prices), each side's `spreadOdds` (or, for baseball's run line, `current.spread.american`), and on
   soccer `drawOdds.moneyLine`, the draw's price: the two sides' moneylines are then three-way prices.
   ONE provider (DraftKings) answered for every NFL, NCAAF, MLB and MLS game probed.
+
+Sept 25, 2026, later (the Kalshi-scale run, K1c: which individual sports ESPN can PRICE), probed live:
+
+- MMA (`mma/ufc`): the board is the next CARD, one event with a competition a bout (12 on the Sept 26
+  Fight Night), each with its own start (prelims 21:00Z, main card 00:00Z) and two `athlete`
+  competitors with `order` 1 and 2 and no `homeAway`; `dates=YYYYMMDD` gives a day's card (none on a
+  day without one). The core API prices each bout at `.../events/{card}/competitions/{bout}/odds`
+  (the bout's id alone answers 404): DraftKings' moneylines on 10 of the 12, under
+  `homeAthleteOdds` / `awayAthleteOdds` with each athlete's `$ref`; the home athlete was order 1 on
+  all ten. `event_rows` makes a card a row a bout, and `parse_core_odds` reads athlete prices.
+- Tennis (`tennis/atp`, `tennis/wta`): the board lists tournaments with `groupings` of matches, but
+  the core API's odds were EMPTY for every match probed (ATP Chengdu and Hangzhou, WTA Seoul and
+  Singapore, Medvedev's and Andreeva's included); ITF is not on ESPN. Golf (`golf/pga`, `golf/eur`,
+  `golf/lpga`) and F1 (`racing/f1`): no odds on the tournament or the race, and no futures. Cricket:
+  scoreboards by numeric league id with `odds` [], and the core API refuses cricket leagues. None of
+  those is read here: a board without a line prices nothing.
 """
 
 from __future__ import annotations
@@ -228,6 +244,98 @@ def event_row(event: Any) -> "dict[str, Any] | None":
     }
 
 
+def _athlete(row: Any) -> "dict[str, Any] | None":
+    """One side of an individual sport's bout (MMA): the athlete's names where a team's would be,
+    with the same keys (`abbrev`, `location` and `nickname` None) and `id` the athlete's ESPN id."""
+    if not isinstance(row, Mapping) or not isinstance(row.get("athlete"), Mapping):
+        return None
+    athlete = row["athlete"]
+    record = next((str(entry["summary"]) for entry in row.get("records") or [] if isinstance(entry, Mapping) and entry.get("summary")), None)
+    return {
+        "team": _text(athlete.get("displayName")) or _text(athlete.get("fullName")),
+        "short": _text(athlete.get("shortName")),
+        "abbrev": None,
+        "location": None,
+        "nickname": None,
+        "id": _text(row.get("id")) or _text(athlete.get("id")),
+        "score": _int(row.get("score")),
+        "winner": row.get("winner") if isinstance(row.get("winner"), bool) else None,
+        "record": record,
+    }
+
+
+def _is_card(event: Any) -> bool:
+    """Is this event a card of bouts between two athletes (an MMA event), not one game of two teams?"""
+    competitions = event.get("competitions") if isinstance(event, Mapping) else None
+    for competition in competitions if isinstance(competitions, list) else []:
+        competitors = competition.get("competitors") if isinstance(competition, Mapping) else None
+        if isinstance(competitors, list) and len(competitors) == 2 and all(
+                isinstance(c, Mapping) and isinstance(c.get("athlete"), Mapping) and not isinstance(c.get("team"), Mapping) for c in competitors):
+            return True
+    return False
+
+
+def bout_rows(event: Any) -> "list[dict[str, Any]]":
+    """A card (an MMA event: one competition a bout, two athletes each; probed Sept 25, 2026) as ONE
+    ROW A BOUT, in the shape `event_row` gives a game: `id` is the bout's (the competition's) id, and
+    `card_id` / `card` name the event it is on (ESPN's core API wants both for the bout's odds). Each
+    bout carries its own start (a card's prelims and main card start at different times) and status.
+    ESPN's MMA competitors have no homeAway; `order` 1 is `home` and 2 `away`, which is how the core
+    API's odds name them (`homeAthleteOdds` was the order-1 athlete on all ten bouts it priced that
+    day). A bout that is not two athletes, one of each order, is left out."""
+    if not isinstance(event, Mapping):
+        return []
+    card_id, card = _text(event.get("id")), _text(event.get("name"))
+    rows = []
+    for competition in event.get("competitions") if isinstance(event.get("competitions"), list) else []:
+        if not isinstance(competition, Mapping) or _text(competition.get("id")) is None:
+            continue
+        sides: dict[str, Any] = {}
+        for raw in competition.get("competitors") if isinstance(competition.get("competitors"), list) else []:
+            side = _athlete(raw)
+            where = str(raw.get("homeAway") or "") or {1: "home", 2: "away"}.get(_int(raw.get("order")) or 0, "") if side else ""
+            if where in ("home", "away") and where not in sides:
+                sides[where] = side
+            else:
+                sides["?"] = side
+        if set(sides) != {"home", "away"}:
+            continue
+        status = competition.get("status") if isinstance(competition.get("status"), Mapping) else {}
+        kind = status.get("type") if isinstance(status.get("type"), Mapping) else {}
+        start = _text(competition.get("date")) or _text(competition.get("startDate")) or _text(event.get("date"))
+        try:
+            start = iso(start) if start else None
+        except DataError:
+            pass
+        weight = competition.get("type") if isinstance(competition.get("type"), Mapping) else {}
+        rows.append({
+            "id": _text(competition.get("id")),
+            "card_id": card_id,
+            "card": card,
+            "name": f"{sides['home'].get('team')} vs {sides['away'].get('team')}",
+            "short_name": _text(weight.get("abbreviation")),
+            "start": start,
+            "status": _text(kind.get("state")) or "pre",
+            "detail": _text(kind.get("shortDetail")) or _text(kind.get("detail")),
+            "completed": bool(kind.get("completed", False)),
+            "period": _int(status.get("period")),
+            "clock": _text(status.get("displayClock")),
+            "home": sides["home"],
+            "away": sides["away"],
+            "odds": None,
+        })
+    return rows
+
+
+def event_rows(event: Any) -> "list[dict[str, Any]]":
+    """One scoreboard event as the rows a board lists: a card of bouts is a row a bout (`bout_rows`),
+    any other event its one `event_row` (none when unusable)."""
+    if _is_card(event):
+        return bout_rows(event)
+    row = event_row(event)
+    return [row] if row is not None else []
+
+
 def _last_play(payload: Mapping[str, Any]) -> "str | None":
     """The most recent play's text from a summary, whichever shape the sport uses."""
     candidates: list[Any] = []
@@ -290,6 +398,13 @@ def _spread_price(side: Mapping[str, Any]) -> "int | None":
     return price
 
 
+def _athlete_id(side: Mapping[str, Any]) -> "str | None":
+    """The ESPN id of the athlete one side of a bout's odds names (`athlete.$ref` ends `/athletes/<id>?...`)."""
+    ref = side.get("athlete").get("$ref") if isinstance(side.get("athlete"), Mapping) else None
+    found = re.search(r"/athletes/(\d+)", ref) if isinstance(ref, str) else None
+    return found.group(1) if found else None
+
+
 def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
     """The core API's odds of one competition as one row per provider, best priority first:
     `{provider, details, spread, over_under, home_ml, away_ml, implied_home, open: {spread, home_ml,
@@ -299,7 +414,9 @@ def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
     `implied_draw` is None and the two sides' are the two-way de-vig, as `implied_home` always was),
     `over_odds` / `under_odds` and `implied_over` (the total's prices, de-vigged: the chance the game
     goes over `over_under`), `home_spread_odds` / `away_spread_odds` and `implied_home_cover` (the
-    chance the home side covers `spread`)."""
+    chance the home side covers `spread`). An individual sport's bout (MMA, Sept 25, 2026) prices each
+    ATHLETE (`homeAthleteOdds` / `awayAthleteOdds`): its row is the same, plus `home_athlete` and
+    `away_athlete`, the ESPN ids of the athletes the home and away prices are for."""
     items = payload.get("items") if isinstance(payload, Mapping) else None
     require(isinstance(items, list), "espn core odds: no items")
     out = []
@@ -308,6 +425,9 @@ def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
             continue
         home = item.get("homeTeamOdds") if isinstance(item.get("homeTeamOdds"), Mapping) else {}
         away = item.get("awayTeamOdds") if isinstance(item.get("awayTeamOdds"), Mapping) else {}
+        athletes = not home and not away and isinstance(item.get("homeAthleteOdds"), Mapping) and isinstance(item.get("awayAthleteOdds"), Mapping)
+        if athletes:  # an individual sport's bout (MMA): the same prices, under each athlete
+            home, away = item["homeAthleteOdds"], item["awayAthleteOdds"]
         provider = item.get("provider") if isinstance(item.get("provider"), Mapping) else {}
         opened_home = home.get("open") if isinstance(home.get("open"), Mapping) else {}
         opened_away = away.get("open") if isinstance(away.get("open"), Mapping) else {}
@@ -345,6 +465,8 @@ def parse_core_odds(payload: Any) -> "list[dict[str, Any]]":
             "open": {"spread": _float(str(spread.get("american") or "").replace("+", "") or None),
                      "home_ml": _american(opened_home.get("moneyLine")), "away_ml": _american(opened_away.get("moneyLine"))},
         })
+        if athletes:
+            out[-1]["home_athlete"], out[-1]["away_athlete"] = _athlete_id(home), _athlete_id(away)
     out.sort(key=lambda row: (row["priority"] is None, row["priority"] or 0))
     return out
 
@@ -415,8 +537,8 @@ class Sports:
         events = payload.get("events")
         require(isinstance(events, list), f"espn scoreboard {league}: no events list")
         day = payload.get("day") if isinstance(payload.get("day"), Mapping) else {}
-        return {"events": [row for row in (event_row(event) for event in events) if row is not None],
-                "day": _text(day.get("date"))}
+        # A card of bouts (MMA) is a row a bout (`event_rows`); every other event its one row, as before.
+        return {"events": [row for event in events for row in event_rows(event)], "day": _text(day.get("date"))}
 
     def game(self, league: str, event_id: Any) -> dict[str, Any]:
         """One game's summary as a scoreboard row plus `last_play`, `win_probability`, `predictor`."""
@@ -450,12 +572,16 @@ class Sports:
         row["as_of"] = iso(float(self.clock()))
         return row
 
-    def core_odds(self, league: str, event_id: Any) -> "list[dict[str, Any]]":
-        """Every provider's line of one game from ESPN's core API (`parse_core_odds`)."""
+    def core_odds(self, league: str, event_id: Any, card: Any = None) -> "list[dict[str, Any]]":
+        """Every provider's line of one game from ESPN's core API (`parse_core_odds`). A bout of a card
+        (MMA: `bout_rows`) is asked by its card's id and its own (`card`): ESPN answers 404 for the
+        bout's id alone, which would read as no line at all (probed Sept 25, 2026)."""
         sport, _, code = league_path(league).partition("/")
         event = str(event_id or "").strip()
         require(event.isdigit(), f"espn core odds: not an event id {event_id!r}")
-        url = f"{CORE_HOST}/v2/sports/{sport}/leagues/{code}/events/{event}/competitions/{event}/odds"
+        parent = str(card).strip() if card not in (None, "") else event
+        require(parent.isdigit(), f"espn core odds: not a card id {card!r}")
+        url = f"{CORE_HOST}/v2/sports/{sport}/leagues/{code}/events/{parent}/competitions/{event}/odds"
         status, _, body = self.transport.get(url, {"Accept": "application/json", "User-Agent": USER_AGENT}, self.timeout)
         if status == 404:
             return []  # no book lists a line for this game: none shown, not a failure
@@ -537,5 +663,5 @@ def _team_position(team: Mapping[str, Any], haystack: str) -> "int | None":
     return min(hits) if hits else None
 
 
-__all__ = ["CORE_HOST", "HOST", "LEAGUES", "Sports", "USER_AGENT", "event_row", "implied", "implied_home", "league_path",
-           "parse_core_odds", "parse_predictor"]
+__all__ = ["CORE_HOST", "HOST", "LEAGUES", "Sports", "USER_AGENT", "bout_rows", "event_row", "event_rows", "implied", "implied_home",
+           "league_path", "parse_core_odds", "parse_predictor"]

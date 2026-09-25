@@ -380,13 +380,19 @@ ctx["feeds"] = {
   such as `KXNFLGAME` names its league too). Polled every 60 seconds while a game of the league is
   live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
   the spread is signed from the home side and moneylines are American odds. Esports, cricket,
-  tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
+  tennis, golf, F1 and the smaller football leagues have no scoreboard here (ESPN has boards for
+  tennis, golf, cricket and F1 but no line to price them by, Sept 25, 2026). Line-ups, injuries and
   player props are not supplied. Since Sept 25, 2026 a board is the whole slate Kalshi trades:
   college football is ESPN's FBS and FCS week boards together (its default board is 18 featured
   games; Kalshi listed 113 spread events that weekend), and a daily league (baseball, soccer, hockey,
   basketball) is joined by the boards of the New York days the next 36 hours reach, so today's and
   tomorrow's games are on it before ESPN's own board turns to them. Each team also carries `short`
-  (ESPN's short name: "Red Sox", "Tigres").
+  (ESPN's short name: "Red Sox", "Tigres"). `ufc` (Kalshi's `KXUFCFIGHT`, since Sept 25, 2026) is a
+  daily board of CARDS, listed a row a BOUT: `id` is the bout's, `card_id` and `card` the event it
+  is on, `short_name` the weight class, `start` the bout's card segment (prelims and main card start
+  apart; a bout itself starts later), and `home` / `away` the two athletes in the team's shape
+  (`team` the athlete's name, `short` "V. Demopoulos", `id` the athlete's ESPN id, `abbrev`,
+  `location` and `nickname` None). ESPN names no home side in MMA: `home` is its order-1 athlete.
 - **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
   open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
   rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
@@ -499,6 +505,9 @@ NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGH
   has over a hundred) and each game says when its lines were `fetched` (never after the row's `t`;
   None, with `lines` [], before the first fetch). Judge a line's age by `fetched`, not by `t`. Measured
   Sept 25: ESPN answered ONE provider (DraftKings) for every NFL, NCAAF, MLB and MLS game probed.
+  A `ufc` row lists each bout (its `id` the bout's): each line prices the two athletes and adds
+  `home_athlete` and `away_athlete`, the ESPN ids the home and away prices are for. Join a price to a
+  fighter by that id, never by home and away. DraftKings priced 10 of the 12 bouts of the Sept 26 card.
 - **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
   newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
   House (a bot check) since Sept 24, 2026, so it has no row.
