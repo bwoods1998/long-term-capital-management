@@ -3586,7 +3586,12 @@ class Lab:
         def skip(why: str, n: int) -> None:
             out["skipped"][why] = out["skipped"].get(why, 0) + n
 
-        for (key, cut), rows in groups.items():
+        # The windows of one tape key run together (G-LOOP's review, Sept 25, 2026): the lab holds ONE options forward tape
+        # at a time (`_forward_options_tape`), so a key whose windows sat apart in `forward_due` order was built twice a run.
+        first_seen: dict[str, int] = {}
+        for key, _ in groups:
+            first_seen.setdefault(key, len(first_seen))
+        for (key, cut), rows in sorted(groups.items(), key=lambda item: first_seen[item[0][0]]):
             if time.monotonic() - started >= float(settings["forward_box_seconds"]):
                 skip("the run's box seconds are spent", len(rows))
                 continue

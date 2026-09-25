@@ -371,6 +371,25 @@ class StructureLab(StructureHouseCase):
         self.assertEqual((call["candidate_seconds"], call["options"]), (120.0, True))
         self.assertIn(call["tape_id"], self.box.forgot)
 
+    def test_the_forward_windows_of_one_tape_key_run_together(self):
+        """The review of G-LOOP (Sept 25, 2026): the lab holds one options forward tape at a time, so windows of one key
+        that sat apart in `forward_due` order had it built twice a run, under the House's tape lock."""
+        from league.lab import LabError, tape_key
+
+        spy, qqq = literal(program(), "NEEDS"), literal(program(symbols=("QQQ",)), "NEEDS")
+        now = self.clock.now
+        rows = [{"id": f"cand-{n}", "needs": json.dumps(needs), "code": "x", "evaluated": now - hours * 3600, "created": now - hours * 3600}
+                for n, (needs, hours) in enumerate(((spy, 5), (qqq, 5), (spy, 9)))]
+        asked = []
+
+        def tape(needs):
+            asked.append(tape_key(needs))
+            raise LabError("a test's: no window")
+
+        with mock.patch.object(self.lab, "forward_due", return_value=rows), mock.patch.object(self.lab, "_forward_tape", side_effect=tape):
+            self.lab.forward_windows(force=True)
+        self.assertEqual(asked, [tape_key(spy), tape_key(spy), tape_key(qqq)])
+
     def test_a_forward_cut_of_an_options_tape_hands_the_earlier_signal_bars_on_as_warm_up(self):
         from league.lab import forward_cut
 

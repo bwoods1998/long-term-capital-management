@@ -5887,7 +5887,8 @@ class House:
           displaced only by a newcomer whose forward score beats the resident's own forward record
           (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
           own YET there is nothing to compare, and it keeps its seat -- but a trader the lab can never
-          score (`Lab.can_score`: an options or unreplayed desk, a blocked program) is judged as before,
+          score (`Lab.can_score`: an unreplayed desk, a single-contract program of the options desk -- whose
+          STRUCTURE programs the lab scores since G-LOOP, Sept 25, 2026 -- a blocked program) is judged as before,
           or its desk's waiters would starve for good (the review of #245);
         - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
           displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
