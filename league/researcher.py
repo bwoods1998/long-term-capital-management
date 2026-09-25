@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import re
 import secrets
 import time
@@ -117,6 +118,9 @@ STATE_MARKER = "\nTHIS PASS (everything below changes from pass to pass):\n\n"
 #: The shared memory's block is at most 5 lines and 1,400 characters (league/jev_memory.py); a
 #: longer one is refused whole rather than cut inside its fence.
 PRIOR_MAX_CHARS = 1600
+#: How long a pass waits for the shared memory before starting without it (the memory's own
+#: budget is shorter, so this is the backstop).
+PRIOR_TIMEOUT_SECONDS = 2.0
 
 
 @dataclass
@@ -295,9 +299,25 @@ class Researcher:
         fetch = getattr(self, "prior_results", None)
         if fetch is None:
             return ""
+        answer: list[Any] = []
+
+        def ask() -> None:
+            try:
+                answer.append(fetch(agent, self.clock(), session=session))
+            except Exception:  # noqa: BLE001 - a memory that fails must never cost a research pass
+                pass
+
+        # Every pass starts here, so the memory gets PRIOR_TIMEOUT_SECONDS and not a moment more: a
+        # slow store or a slow Jev call shows nothing (the memory's report counts a retrieval slower
+        # than this as not shown), and the thread finishes on its own under the memory's budget.
+        worker = threading.Thread(target=ask, name=f"prior-results:{agent.id}", daemon=True)
+        worker.start()
+        worker.join(PRIOR_TIMEOUT_SECONDS)
+        if worker.is_alive() or not answer:
+            return ""
         try:
-            block = str((fetch(agent, self.clock(), session=session) or (None, "", []))[1] or "").strip()
-        except Exception:  # noqa: BLE001 - a memory that fails must never cost a research pass
+            block = str((answer[0] or (None, "", []))[1] or "").strip()
+        except Exception:  # noqa: BLE001
             return ""
         return block if 0 < len(block) <= PRIOR_MAX_CHARS else ""
 

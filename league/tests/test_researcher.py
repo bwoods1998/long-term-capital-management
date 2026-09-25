@@ -94,6 +94,23 @@ class PriorResults(ResearchCase):
         self.assertGreater(prompt.index("PRIOR RESULTS"), prompt.index("THIS PASS"))  # the cached prefix is untouched
         self.assertEqual(calls, [(self.parent.id, "s9")])
 
+    def test_a_slow_memory_yields_nothing_in_time(self):
+        import threading, time
+        from league import researcher as module
+        release = threading.Event()
+
+        def slow(agent, now, session=None):
+            release.wait(5)
+            return (1, self.BLOCK, [101])
+        r = self.researcher([])
+        r.prior_results = slow
+        started = time.monotonic()
+        r.research(self.parent, {}, session="s1")
+        waited = time.monotonic() - started
+        release.set()
+        self.assertNotIn("PRIOR RESULTS", self.first_prompt())
+        self.assertLess(waited, module.PRIOR_TIMEOUT_SECONDS + 1.5)
+
     def test_a_failing_empty_or_oversized_memory_adds_nothing_and_never_breaks_the_pass(self):
         def boom(agent, now, session=None):
             raise RuntimeError("store unreadable")
