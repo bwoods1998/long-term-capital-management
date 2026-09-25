@@ -384,7 +384,10 @@ class EngineerLoop(Base):
         self.worklist.transition(key, "patching", attempt=1, extra={"request": "engineer:k:1:9", "hold_usd": "1.75"})
         forge = FakeGitHub()
         frontier = FakeFrontier(self.tool_answer())
-        engineer = self.engineer(frontier, forge)  # a new process: nothing is in flight here
+        # A new process: nothing is in flight here. The per-job ceiling is raised because this test is about the restart's
+        # bookkeeping, not the spend limit: the worst case of the next call carries CONTRACT.md whole (about 75 KB on Sept 25,
+        # 2026), and with the $1.75 hold booked the default $5.00 left it a few hundred bytes of room.
+        engineer = self.engineer(frontier, forge, max_job_usd="20.00")
         engineer.step()
         job = self.worklist.get(key)
         self.assertEqual(self.states(key)[3:], ["revising", "reproducing", "patching", "testing", "testing"])

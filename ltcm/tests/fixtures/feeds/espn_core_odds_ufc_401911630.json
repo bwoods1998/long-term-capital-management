@@ -1,0 +1,79 @@
+{
+ "count": 1,
+ "items": [
+  {
+   "provider": {
+    "id": "100",
+    "name": "DraftKings",
+    "priority": 1
+   },
+   "details": "R. Rosas Jr. -155",
+   "overUnder": 3.5,
+   "spread": -5.5,
+   "overOdds": -180.0,
+   "underOdds": 140.0,
+   "homeAthleteOdds": {
+    "favorite": true,
+    "underdog": false,
+    "moneyLine": -155,
+    "spreadOdds": 105.0,
+    "open": {
+     "moneyLine": {
+      "american": "-205"
+     },
+     "pointSpread": {
+      "american": "-5.5"
+     },
+     "spread": {
+      "american": "+100"
+     }
+    },
+    "current": {
+     "moneyLine": {
+      "american": "-155"
+     },
+     "pointSpread": {
+      "american": "-5.5"
+     },
+     "spread": {
+      "american": "+105"
+     }
+    },
+    "athlete": {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/mma/athletes/5088844?lang=en&region=us"
+    }
+   },
+   "awayAthleteOdds": {
+    "favorite": false,
+    "underdog": true,
+    "moneyLine": 130,
+    "spreadOdds": -140.0,
+    "open": {
+     "moneyLine": {
+      "american": "+170"
+     },
+     "pointSpread": {
+      "american": "+5.5"
+     },
+     "spread": {
+      "american": "-135"
+     }
+    },
+    "current": {
+     "moneyLine": {
+      "american": "+130"
+     },
+     "pointSpread": {
+      "american": "+5.5"
+     },
+     "spread": {
+      "american": "-140"
+     }
+    },
+    "athlete": {
+     "$ref": "http://sports.core.api.espn.com/v2/sports/mma/athletes/3075570?lang=en&region=us"
+    }
+   }
+  }
+ ]
+}

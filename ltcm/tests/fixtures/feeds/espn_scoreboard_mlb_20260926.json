@@ -1,0 +1,132 @@
+{
+ "events": [
+  {
+   "id": "401817092",
+   "name": "Pittsburgh Pirates at Detroit Tigers",
+   "shortName": "PIT @ DET",
+   "date": "2026-09-26T17:10Z",
+   "competitions": [
+    {
+     "id": "401817092",
+     "date": "2026-09-26T17:10Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "6",
+        "location": "Detroit",
+        "name": "Tigers",
+        "abbreviation": "DET",
+        "displayName": "Detroit Tigers",
+        "shortDisplayName": "Tigers"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Total",
+         "type": "total",
+         "summary": "74-85"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "23",
+        "location": "Pittsburgh",
+        "name": "Pirates",
+        "abbreviation": "PIT",
+        "displayName": "Pittsburgh Pirates",
+        "shortDisplayName": "Pirates"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Total",
+         "type": "total",
+         "summary": "81-78"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 1,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Scheduled",
+       "shortDetail": "9/26 - 1:10 PM EDT"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "401817090",
+   "name": "Cincinnati Reds at Toronto Blue Jays",
+   "shortName": "CIN @ TOR",
+   "date": "2026-09-26T19:07Z",
+   "competitions": [
+    {
+     "id": "401817090",
+     "date": "2026-09-26T19:07Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "14",
+        "location": "Toronto",
+        "name": "Blue Jays",
+        "abbreviation": "TOR",
+        "displayName": "Toronto Blue Jays",
+        "shortDisplayName": "Blue Jays"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Total",
+         "type": "total",
+         "summary": "77-82"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "17",
+        "location": "Cincinnati",
+        "name": "Reds",
+        "abbreviation": "CIN",
+        "displayName": "Cincinnati Reds",
+        "shortDisplayName": "Reds"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "Total",
+         "type": "total",
+         "summary": "74-85"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 1,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Scheduled",
+       "shortDetail": "9/26 - 3:07 PM EDT"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

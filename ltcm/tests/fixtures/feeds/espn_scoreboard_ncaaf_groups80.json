@@ -1,0 +1,560 @@
+{
+ "events": [
+  {
+   "id": "401862779",
+   "name": "Army Black Knights at Temple Owls",
+   "shortName": "ARMY @ TEM",
+   "date": "2026-09-25T20:00Z",
+   "competitions": [
+    {
+     "id": "401862779",
+     "date": "2026-09-25T20:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "218",
+        "location": "Temple",
+        "name": "Owls",
+        "abbreviation": "TEM",
+        "displayName": "Temple Owls",
+        "shortDisplayName": "Temple"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "349",
+        "location": "Army",
+        "name": "Black Knights",
+        "abbreviation": "ARMY",
+        "displayName": "Army Black Knights",
+        "shortDisplayName": "Army"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-1"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 4:00 PM EDT",
+       "shortDetail": "9/25 - 4:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "ARMY -3",
+       "overUnder": 48.5,
+       "spread": 3.0,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "awayTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "+136",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "home",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674728%3Foutcomes%3D0ML86319012_1",
+           "text": "Home Bet",
+           "shortText": "Home Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401862779,
+             "betSide": "home",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "+130"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "-162",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "away",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674728%3Foutcomes%3D0ML86319012_3",
+           "text": "Away Bet",
+           "shortText": "Away Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401862779,
+             "betSide": "away",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "-155"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401858468",
+   "name": "Howard Bison at Rutgers Scarlet Knights",
+   "shortName": "HOW @ RUTG",
+   "date": "2026-09-25T23:00Z",
+   "competitions": [
+    {
+     "id": "401858468",
+     "date": "2026-09-25T23:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "164",
+        "location": "Rutgers",
+        "name": "Scarlet Knights",
+        "abbreviation": "RUTG",
+        "displayName": "Rutgers Scarlet Knights",
+        "shortDisplayName": "Rutgers"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "0-3"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "47",
+        "location": "Howard",
+        "name": "Bison",
+        "abbreviation": "HOW",
+        "displayName": "Howard Bison",
+        "shortDisplayName": "Howard"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 7:00 PM EDT",
+       "shortDetail": "9/25 - 7:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "RUTG -43.5",
+       "overUnder": 55.5,
+       "spread": -43.5,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "awayTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "OFF"
+         },
+         "open": {
+          "odds": "OFF"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "OFF"
+         },
+         "open": {
+          "odds": "OFF"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401862778",
+   "name": "Navy Midshipmen at UAB Blazers",
+   "shortName": "NAVY @ UAB",
+   "date": "2026-09-25T23:00Z",
+   "competitions": [
+    {
+     "id": "401862778",
+     "date": "2026-09-25T23:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "5",
+        "location": "UAB",
+        "name": "Blazers",
+        "abbreviation": "UAB",
+        "displayName": "UAB Blazers",
+        "shortDisplayName": "UAB"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-2"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "2426",
+        "location": "Navy",
+        "name": "Midshipmen",
+        "abbreviation": "NAVY",
+        "displayName": "Navy Midshipmen",
+        "shortDisplayName": "Navy"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "1-1"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 7:00 PM EDT",
+       "shortDetail": "9/25 - 7:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "NAVY -6.5",
+       "overUnder": 51.5,
+       "spread": 6.5,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "awayTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "+215",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "home",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674730%3Foutcomes%3D0ML86319014_1",
+           "text": "Home Bet",
+           "shortText": "Home Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401862778,
+             "betSide": "home",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "+380"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "-265",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "away",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674730%3Foutcomes%3D0ML86319014_3",
+           "text": "Away Bet",
+           "shortText": "Away Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401862778,
+             "betSide": "away",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "-500"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401858461",
+   "name": "Northwestern Wildcats at Indiana Hoosiers",
+   "shortName": "NU @ IU",
+   "date": "2026-09-26T00:00Z",
+   "competitions": [
+    {
+     "id": "401858461",
+     "date": "2026-09-26T00:00Z",
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "id": "84",
+        "location": "Indiana",
+        "name": "Hoosiers",
+        "abbreviation": "IU",
+        "displayName": "Indiana Hoosiers",
+        "shortDisplayName": "Indiana"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "3-0"
+        }
+       ]
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "id": "77",
+        "location": "Northwestern",
+        "name": "Wildcats",
+        "abbreviation": "NU",
+        "displayName": "Northwestern Wildcats",
+        "shortDisplayName": "Northwestern"
+       },
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "2-0"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "period": 0,
+      "displayClock": "0:00",
+      "type": {
+       "state": "pre",
+       "completed": false,
+       "detail": "Fri, September 25th at 8:00 PM EDT",
+       "shortDetail": "9/25 - 8:00 PM EDT"
+      }
+     },
+     "odds": [
+      {
+       "details": "IU -20.5",
+       "overUnder": 49.5,
+       "spread": -20.5,
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings"
+       },
+       "homeTeamOdds": {
+        "favorite": true,
+        "underdog": false
+       },
+       "awayTeamOdds": {
+        "favorite": false,
+        "underdog": true
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "-2100",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "home",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674731%3Foutcomes%3D0ML86319015_1",
+           "text": "Home Bet",
+           "shortText": "Home Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401858461,
+             "betSide": "home",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "-4000"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "+1100",
+          "link": {
+           "language": "en-US",
+           "rel": [
+            "away",
+            "desktop",
+            "bets",
+            "draft-kings"
+           ],
+           "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34674731%3Foutcomes%3D0ML86319015_3",
+           "text": "Away Bet",
+           "shortText": "Away Bet",
+           "isExternal": true,
+           "isPremium": false,
+           "tracking": {
+            "campaign": "betting-integrations",
+            "tags": {
+             "league": "college-football",
+             "sport": "football",
+             "gameId": 401858461,
+             "betSide": "away",
+             "betType": "straight"
+            }
+           }
+          }
+         },
+         "open": {
+          "odds": "+1600"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

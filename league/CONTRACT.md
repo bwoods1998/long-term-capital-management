@@ -15,6 +15,8 @@ NEEDS = {
     "bars": {"timeframe": "5Min", "limit": 120},   # alpaca: 1Min 5Min 15Min 1Hour 1Day, limit <= 500
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
+    "min_hours_to_close": 3.5,    # kalshi, optional: only markets closing at least this many hours out (0 when absent)
+    "max_markets": 500,           # kalshi, optional: how many markets a wake is shown, 1 to 500 (200 when absent)
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
                                   # woken a few seconds after the regular open when its next wake would land later,
                                   # and is not woken at all while the regular session is shut)
@@ -25,6 +27,17 @@ def decide(ctx):
     ...
     return {"intents": [...], "cancels": [...], "thought": "one or two plain sentences", "memory": {...}}
 ```
+
+A Kalshi wake is shown at most `max_markets` markets (200 unless declared), the soonest to close
+first, and a game market's `hours_to_close` runs to the game's expected END. So while games are on,
+their markets come first: measured on the slate of Sept 26-27, 2026, a strategy naming the three
+college-football series was shown no game it could still enter from the noon kickoffs on Saturday.
+`min_hours_to_close` (optional, since Sept 25, 2026) hides markets closing sooner than that many hours --
+a game in progress, for a strategy that enters only before the start -- and `max_markets` (optional,
+1 to 500) sets how many are shown. Both are opt-in: a strategy that declares neither is shown exactly
+what it was. `min_hours_to_close` must be at least 0 and under `max_hours_to_close`, and `max_markets`
+a whole number from 1 to 500; the House refuses a birth whose NEEDS break either. A replay applies the
+same window at every step (and caps the markets at `max_markets` only where it is declared).
 
 Only these imports are allowed: `bisect collections datetime decimal fractions functools heapq
 itertools json math random re statistics time typing zoneinfo`. No files, no network, no
@@ -402,8 +415,19 @@ ctx["feeds"] = {
   such as `KXNFLGAME` names its league too). Polled every 60 seconds while a game of the league is
   live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
   the spread is signed from the home side and moneylines are American odds. Esports, cricket,
-  tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
-  player props are not supplied.
+  tennis, golf, F1 and the smaller football leagues have no scoreboard here (ESPN has boards for
+  tennis, golf, cricket and F1 but no line to price them by, Sept 25, 2026). Line-ups, injuries and
+  player props are not supplied. Since Sept 25, 2026 a board is the whole slate Kalshi trades:
+  college football is ESPN's FBS and FCS week boards together (its default board is 18 featured
+  games; Kalshi listed 113 spread events that weekend), and a daily league (baseball, soccer, hockey,
+  basketball) is joined by the boards of the New York days the next 36 hours reach, so today's and
+  tomorrow's games are on it before ESPN's own board turns to them. Each team also carries `short`
+  (ESPN's short name: "Red Sox", "Tigres"). `ufc` (Kalshi's `KXUFCFIGHT`, since Sept 25, 2026) is a
+  daily board of CARDS, listed a row a BOUT: `id` is the bout's, `card_id` and `card` the event it
+  is on, `short_name` the weight class, `start` the bout's card segment (prelims and main card start
+  apart; a bout itself starts later), and `home` / `away` the two athletes in the team's shape
+  (`team` the athlete's name, `short` "V. Demopoulos", `id` the athlete's ESPN id, `abbrev`,
+  `location` and `nickname` None). ESPN names no home side in MMA: `home` is its order-1 athlete.
 - **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
   open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
   rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
@@ -504,9 +528,21 @@ NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGH
   `4M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `7Y`, `10Y`, `20Y`, `30Y` -- `date`, `yield` %.
 - **odds** (live; ESPN's core API; league keys as for `sports`): each game on the league's
   recorded board that has not started and starts within 36 hours: `id`, `name`, `start`, `home`,
-  `away`, `lines` (every provider: `details`, `spread` signed from the home side, `over_under`,
-  `home_ml`, `away_ml`, `implied_home` with the book's margin taken out, `open` prices) and
-  `win_probability` (ESPN's predictor, football and basketball only, else None).
+  `away`, `fetched`, `lines` (every provider: `details`, `spread` signed from the home side,
+  `over_under`, `home_ml`, `away_ml`, `draw_ml` (soccer's draw), `implied_home`, `implied_away`,
+  `implied_draw` with the book's margin taken out -- three-way where there is a draw price, so a
+  soccer row's three sum to 1 --, `over_odds`, `under_odds`, `implied_over` (the chance the game goes
+  over `over_under`), `home_spread_odds`, `away_spread_odds`, `implied_home_cover` (the chance the
+  home side covers `spread`; baseball's run line included), `open` prices) and `win_probability`
+  (ESPN's predictor, football and basketball only, else None). Since Sept 25, 2026 each game's lines
+  are refreshed on their own clock -- every 30 minutes inside 6 hours of its start, every 2 hours
+  before -- by a pass every 5 minutes, so a row lists every coming game (a college-football Saturday
+  has over a hundred) and each game says when its lines were `fetched` (never after the row's `t`;
+  None, with `lines` [], before the first fetch). Judge a line's age by `fetched`, not by `t`. Measured
+  Sept 25: ESPN answered ONE provider (DraftKings) for every NFL, NCAAF, MLB and MLS game probed.
+  A `ufc` row lists each bout (its `id` the bout's): each line prices the two athletes and adds
+  `home_athlete` and `away_athlete`, the ESPN ids the home and away prices are for. Join a price to a
+  fighter by that id, never by home and away. DraftKings priced 10 of the 12 bouts of the Sept 26 card.
 - **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
   newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
   House (a bot check) since Sept 24, 2026, so it has no row.
@@ -519,6 +555,51 @@ NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGH
 
 `runtime_status` (`observations.feeds`) says for each feed its host, what is recorded and since
 when, and for a waiting one what it waits for; `replay_coverage` says whether a replay may use it.
+
+#### The feeds added on Sept 26, 2026
+
+The key-free hosts the Kalshi-scale run added (`league/open_feeds.py`): each passed the rule that a
+host is key-free, public, permits automated access in its terms and answers without a bot wall.
+Declared and read exactly like the feeds above (known keys only, at most six a feed; an absent key is
+unavailable, never zero); **live** rows carry the House's receive time and are never backfilled,
+**history** rows carry the moment the source says the value became known and are backfilled, so a
+strategy that declares only history feeds is replayed at once. Weather keys are settlement stations
+as above (`KXHIGHNY` means `KNYC`).
+
+```python
+NEEDS["feeds"] = {"cli": ["KXHIGHNY"], "metar": ["KNYC"], "ghcnd": ["KNYC"],        # what the stations recorded
+                  "kalshi_candles": ["KXMLBGAME"],                                   # what traded on Kalshi, by the hour
+                  "bls": ["CPI"], "fiscal": ["auctions"], "fx": ["USD"], "cot": ["BTC"], "fomc": ["fomc"],
+                  "pageviews": ["bitcoin"], "gdelt": ["trump"], "fear_greed": ["crypto"], "mempool": ["BTC"],
+                  "storms": ["atlantic"], "quakes": ["m4.5_day"],
+                  "cli_text": ["KNYC"], "presidential": ["actions"], "federal_register": ["executive_orders"],
+                  "fuel": ["GASOLINE"], "bls_releases": ["cpi"], "bea_releases": ["gdp"], "halts": ["AAPL"]}
+```
+
+- **cli** (history; the Iowa Environmental Mesonet's parse of the NWS Daily Climate Report -- the
+  numbers every Kalshi daily high, low and rain market settles on)
+- **metar** (history; the Aviation Weather Center)
+- **ghcnd** (live; NCEI's GHCN-Daily)
+- **kalshi_candles** (history; Kalshi's own hourly candles)
+- **bls** (live; BLS's public data API)
+- **fiscal** (live; FiscalData)
+- **fx** (history; the ECB's euro reference rates)
+- **cot** (history; the CFTC's legacy futures-only Commitments of Traders)
+- **fomc** (live; the Federal Reserve Board's calendar)
+- **pageviews** (history; Wikimedia)
+- **gdelt** (live; the GDELT Project, gdeltproject.org)
+- **fear_greed** (history; alternative.me)
+- **mempool** (live; mempool.space)
+- **storms** (live; the National Hurricane Center)
+- **quakes** (live; USGS)
+- **cli_text** (history as issued; the NWS's own raw climate report, `tgftp.nws.noaa.gov`)
+- **presidential** (history; the White House's presidential actions -- what KXTRUMPACT settles on)
+- **federal_register** (history; the Federal Register's API)
+- **fuel** (live; EIA's public tables, no key)
+- **bls_releases**, **bea_releases** (live; the agencies' release calendars)
+- **halts** (live; Nasdaq Trader's trade halts)
+
+Each feed's fields, stamps and caveats: `runtime_status` (`observations.feeds`) and `league/FEEDS.md`.
 
 ## What you may watch but not trade
 

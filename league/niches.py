@@ -273,7 +273,13 @@ def constrain(needs: Mapping[str, Any], niche: Niche) -> dict[str, Any]:
     # scoreboard. Known feeds and keys only, six each, one spelling; what the House does not record
     # is dropped rather than left to fail.
     from .feeds import requested
+    from .tapes import listing_errors
 
+    # The listing window a Kalshi strategy may opt into (`min_hours_to_close`, `max_markets`; Sept 25,
+    # 2026): out of bounds, the birth is refused rather than the keys quietly dropped.
+    refused = listing_errors(out) if niche.venue == "kalshi" else []
+    if refused:
+        raise ValueError(f"the {niche.id} specialty cannot show this listing: " + "; ".join(refused))
     feeds = requested(out.get("feeds"))
     if feeds:
         out["feeds"] = feeds

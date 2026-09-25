@@ -637,6 +637,43 @@ def option_label(instrument: Mapping[str, Any]) -> str:
     return f"{instrument.get('symbol')} {str(instrument.get('expiry') or '')[5:]} {strike}{str(instrument.get('right') or '?')[:1].upper()}"
 
 
+# The site's bound on an instrument's strings (capital/schema.js `validInstrument`: `symbol` is text(80), and
+# `market_id`, `right`, `expiry`, ... at most 80 characters each). A desk row whose position names a longer
+# one is refused, and the site refuses the whole checkpoint with it.
+MAX_INSTRUMENT_TEXT = 80
+_STRUCTURE_LEG = re.compile(r"^([+-])([12])([A-Z]{1,6})([0-9]{6})([CP])([0-9]{8})$")
+
+
+def site_market_id(instrument: Mapping[str, Any]) -> str:
+    """A position's `market_id` inside the site's 80 characters (`MAX_INSTRUMENT_TEXT`).
+
+    Unchanged when it fits: a Kalshi ticker, a coin pair, a two-leg structure (`debit_vertical|-1AAL261002P00013500|
+    +1AAL261002P00014000` is 56). A level-3 structure is held as one instrument whose id is its type and every leg's
+    21-character OCC code (`league/structure_core.py` `CODE`), and four legs do not fit: Sept 25, 2026, krasker-22's
+    CCL iron condor (filled 15:48:59Z on options-shadow) was 95 characters, and the site refused every checkpoint
+    from 15:50:21Z (HTTP 400 "Invalid checkpoint.", 197 refusals by 20:21Z, about 43 an hour) while it was held.
+    Such an id is sent with each leg's underlying and expiry left out when they are the instrument's own (a leg
+    that differs keeps them after an `@`), and the strike written plainly: `iron_condor|-1C22.5|+1C23|+1P21.5|-1P22`.
+    Anything still too long is cut to the bound. Only the published copy is shortened; the ledger keeps the code."""
+    raw = str(instrument.get("market_id") or "")
+    if js_length(raw) <= MAX_INSTRUMENT_TEXT:
+        return raw
+    kind, _, rest = raw.partition("|")
+    legs = rest.split("|") if rest else []
+    home = str(instrument.get("symbol") or "").upper() + str(instrument.get("expiry") or "").replace("-", "")[2:]
+    compact = []
+    for part in legs:
+        found = _STRUCTURE_LEG.match(part)
+        if found is None:
+            compact = []
+            break
+        sign, ratio, root, day, right, strike = found.groups()
+        where = "" if root + day == home else f"@{root}{day}"
+        compact.append(f"{sign}{ratio}{right}{format((Decimal(int(strike)) / 1000).normalize(), 'f')}{where}")
+    shown = "|".join([kind, *compact]) if compact else raw
+    return js_cut(shown, MAX_INSTRUMENT_TEXT)
+
+
 def _shown(instrument: Mapping[str, Any]) -> dict[str, Any]:
     shown = {k: instrument.get(k) for k in ("symbol", "asset_class", "market_id", "right") if instrument.get(k) is not None}
     if instrument.get("asset_class") == "option":
@@ -1360,8 +1397,10 @@ class Publisher:
                 mark = book.marks.get(inst.key) or holding.average_cost
                 value = holding.quantity * mark * inst.multiplier
                 positions.append({
-                    "instrument": {"symbol": option_label(inst.to_dict()) if inst.asset_class == "option" else (inst.market_id or inst.symbol), "asset_class": inst.asset_class, "venue": "kalshi" if agent.venue == "kalshi" else "alpaca",
-                                   **({"market_id": inst.market_id} if inst.market_id else {}), **({"right": inst.right} if inst.right else {})},
+                    # Every string inside the site's 80 (`site_market_id`): one long id refused the whole checkpoint (Sept 25, 2026).
+                    "instrument": {"symbol": js_cut(option_label(inst.to_dict()) if inst.asset_class == "option" else (inst.market_id or inst.symbol), MAX_INSTRUMENT_TEXT),
+                                   "asset_class": inst.asset_class, "venue": "kalshi" if agent.venue == "kalshi" else "alpaca",
+                                   **({"market_id": site_market_id(inst.to_dict())} if inst.market_id else {}), **({"right": inst.right} if inst.right else {})},
                     "side": (inst.right or "yes") if inst.asset_class == "event" else "long",
                     "quantity": money(holding.quantity, 8), "entry_price": money(holding.average_cost, 6), "mark_price": money(mark, 6),
                     "market_value": money(value, 4), "unrealized_pnl": money(value - holding.cost, 4, signed=True),

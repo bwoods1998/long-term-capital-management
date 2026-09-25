@@ -162,17 +162,33 @@ class SeedCase(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------- the registry
+#: The fourteen founding seeds: the twelve of the overnight build and two for listed options (Sept
+#: 19, 2026). Rows added since (the sports-consensus founders of Sept 25, 2026, a row per league on
+#: one file) follow them and are held to their own tests (test_sports_consensus.py).
+FOUNDING = ("favorites-maker", "favorites-no", "favorites-daily", "hourly-quotes", "crypto-reversion", "crypto-trend",
+            "crypto-dip-limit", "crypto-pairs", "equity-overnight", "equity-trend", "equity-rsi2", "equity-vwap",
+            "options-breakout", "options-pullback")
+
+
+def founding_seeds() -> list:
+    return [row for row in all_seeds() if row["name"] in FOUNDING]
+
+
 class RegistryTests(unittest.TestCase):
     def test_fourteen_seeds_with_unique_names_and_files(self):
-        self.assertEqual(len(SEEDS), 14)  # the twelve of the overnight build, and two for listed options (Sept 19, 2026)
-        self.assertEqual(len({row["name"] for row in SEEDS}), 14)
-        self.assertEqual(len({row["file"] for row in SEEDS}), 14)
+        self.assertEqual([row["name"] for row in SEEDS[:14]], list(FOUNDING))
+        self.assertEqual(len({row["name"] for row in SEEDS}), len(SEEDS))
+        self.assertEqual(len({row["file"] for row in SEEDS if row["name"] in FOUNDING}), 14)
         for row in SEEDS:
             self.assertEqual(set(row), {"name", "family", "file", "why"})
             self.assertGreater(len(row["why"]), 40)
+        # A file named by more than one row is one program pointed at several leagues, each its own family.
+        shared = [row for row in SEEDS if sum(1 for other in SEEDS if other["file"] == row["file"]) > 1]
+        self.assertEqual({row["file"] for row in shared}, {"sports_consensus.py", "weather_ensemble.py"})
+        self.assertEqual(len({row["family"] for row in shared}), len(shared))
 
     def test_families_are_the_agreed_ones(self):
-        families = {row["name"]: row["family"] for row in SEEDS}
+        families = {row["name"]: row["family"] for row in SEEDS if row["name"] in FOUNDING}
         self.assertEqual(families, {
             "favorites-maker": "kalshi-favorites", "favorites-no": "kalshi-favorites", "favorites-daily": "kalshi-favorites",
             "hourly-quotes": "kalshi-quotes", "crypto-reversion": "crypto-reversion", "crypto-trend": "crypto-trend",
@@ -196,11 +212,14 @@ class RegistryTests(unittest.TestCase):
                 check_code(row["code"])
 
     def test_every_seed_is_short_and_explains_itself_first(self):
-        for row in all_seeds():
+        for row in founding_seeds():
             with self.subTest(row["name"]):
                 lines = row["code"].splitlines()
-                self.assertLessEqual(len(lines), 160)
-                self.assertTrue(lines[0].startswith(f"# {row['name']}:"), "the header names the seed")
+                if row["name"] in FOUNDING:
+                    self.assertLessEqual(len(lines), 160)
+                    self.assertTrue(lines[0].startswith(f"# {row['name']}:"), "the header names the seed")
+                else:  # a later program seated as several founders names the program its rows share
+                    self.assertTrue(lines[0].startswith("# ") and row["name"].startswith(lines[0][2:].split(":")[0]), "the header names the seed")
                 header = [line for line in lines[:40] if line.startswith("#")]
                 self.assertGreaterEqual(len(header), 15, "a plain-English header: idea, evidence, needs, entries, exits")
                 for word in ("THE IDEA", "THE EVIDENCE", "WHAT IT NEEDS", "WHEN IT TRADES", "HOW IT EXITS"):
@@ -215,7 +234,7 @@ class RegistryTests(unittest.TestCase):
             "equity-overnight": ("alpaca", "day", "overnight"), "equity-trend": ("alpaca", "day", "trend"),
             "equity-rsi2": ("alpaca", "day", "reversion"), "equity-vwap": ("alpaca", "hour", "intraday-reversion"),
             "options-breakout": ("alpaca", "day", "options-breakout"), "options-pullback": ("alpaca", "day", "options-pullback")}
-        for row in all_seeds():
+        for row in founding_seeds():
             with self.subTest(row["name"]):
                 found = runner.needs_of(row["code"])
                 self.assertTrue(found["ok"], found.get("error"))
@@ -236,7 +255,7 @@ class RegistryTests(unittest.TestCase):
                     self.assertGreater(needs["max_hours_to_close"], 0)
 
     def test_the_niches_are_all_different(self):
-        niches = [tuple(runner.needs_of(r["code"])["needs"][k] for k in ("venue", "horizon", "style")) for r in all_seeds()]
+        niches = [tuple(runner.needs_of(r["code"])["needs"][k] for k in ("venue", "horizon", "style")) for r in founding_seeds()]
         self.assertEqual(len(set(niches)), 14)
 
     def test_spec_details_of_needs(self):

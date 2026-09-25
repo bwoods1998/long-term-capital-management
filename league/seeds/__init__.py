@@ -9,6 +9,9 @@ Four trade Kalshi (three expressions of the first run's one measured edge, resti
 favourites above 90 cents, and one control with no measured edge), four trade Alpaca crypto and
 four trade Alpaca equities. Every `why` says where the idea comes from; "published" means outside
 research the league still has to confirm, not something this firm has measured.
+
+Rows appended later may share a file: `weather_ensemble.py` is seated as four founders of the weather desk
+(Sept 25, 2026), one family per group of stations.
 """
 
 from __future__ import annotations
@@ -68,6 +71,33 @@ SEEDS: list[dict] = [
      "why": "Put skew against its own level: a cheap 25-delta skew on SPY, QQQ and IWM preceded rises (+0.35% to +1.28% over 3 days, fit window), so the calm is ridden with a call debit vertical; a rich-skew put credit arm is one switch away."},
     {"name": "options-diagonal", "family": "options-trend-diagonal", "file": "options_diagonal.py",
      "why": "Time decay is steepest in the last days: in a $5-60 stock's uptrend, sell a 1-4 day call and own a 5-10 day one at a lower strike, a diagonal whose loss is capped at its debit."},
+    # Model versus market on sports (K1 of the Kalshi-scale run, Sept 25, 2026): ONE program,
+    # `sports_consensus.py`, a row per league, so each league's founder is its own family.
+    {"name": "consensus-nfl", "family": "sports-consensus-nfl", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. NFL winners, spreads and totals priced from the de-vigged DraftKings line the odds feed records, bid post-only where Kalshi is off it by more than the fee and a margin; on winners Kalshi measured within about a cent of the book (Sept 24-25), so the edge asked there is small and the bid is withdrawn when the line moves."},
+    {"name": "consensus-ncaaf", "family": "sports-consensus-ncaaf", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. College-football winners, spreads and totals (the whole FBS and FCS slate) priced from the de-vigged DraftKings line, bid post-only where Kalshi's thinner, wider ladders are off it by more than the fee and a margin."},
+    {"name": "consensus-mlb", "family": "sports-consensus-mlb", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. MLB winners, run lines (at the book's own run line only) and totals near the line priced from the de-vigged DraftKings prices; Kalshi's winners measured within 1.4 cents of the book on 90% of 112 readings (Sept 24-25), so this measures whether the small edges that remain pay."},
+    {"name": "consensus-mls", "family": "sports-consensus-mls", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. MLS home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
+    {"name": "consensus-ligamx", "family": "sports-consensus-ligamx", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. Liga MX home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
+    # K3 of the Kalshi-scale run (Sept 25, 2026): one program, weather_ensemble.py, seated as four founders of the weather
+    # desk, one family each (their series are disjoint: the forward-first run's C8 keys a family by its mechanism and series).
+    {"name": "weather-ensemble-east", "family": "weather-ensemble-east", "file": "weather_ensemble.py",
+     "why": "The foundry's first transfer: price every daily high and low bracket of New York, Miami, Philadelphia, Atlanta, Boston and Washington from the 82 GFS and ECMWF ensemble members, calibrated to Kalshi's own settlements, and rest maker bids where the fair clears the price. A proxy lost to the market mid on 16 days: unproven."},
+    {"name": "weather-ensemble-central", "family": "weather-ensemble-central", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Chicago, Minneapolis, Oklahoma City and New Orleans highs and lows: bias-corrected members, a kernel, the NWS forecast blended in, shrunk toward the market mid; maker entries held to settlement. Unproven."},
+    {"name": "weather-ensemble-texas", "family": "weather-ensemble-texas", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Austin, Houston, Dallas and San Antonio highs and lows: bias-corrected members, a kernel, the NWS forecast blended in, shrunk toward the market mid; maker entries held to settlement. Unproven."},
+    {"name": "weather-ensemble-west", "family": "weather-ensemble-west", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Denver, Phoenix, Los Angeles, Seattle, Las Vegas and San Francisco highs and lows: bias-corrected members (Los Angeles runs 3.6 F cool of the models), shrunk toward the market mid; maker entries. Unproven."},
+    # The same idea for a sport whose sides are people (K1c, Sept 25, 2026): `sports_h2h.py`, a fight
+    # found by its fighters' names. UFC is the one individual sport ESPN prices (tennis, golf, cricket
+    # and F1 have boards but no line there).
+    {"name": "h2h-ufc", "family": "sports-h2h-ufc", "file": "sports_h2h.py",
+     "why": "Unmeasured: the sportsbook line as a second price. Each UFC fight's two contracts priced from DraftKings' de-vigged moneyline (a draw or no contest settles 50/50 on Kalshi, so the fair leans to half by the void share), the fight found by its fighters' names, never guessed; bid post-only where Kalshi is off the line by more than the fee and a margin. Measured once, on the Sept 26 card: Kalshi's mid within 1.1 cents of the line on 16 of 18 markets."},
 ]
 
 _HERE = Path(__file__).resolve().parent

@@ -1013,6 +1013,18 @@ ORDER BY seq DESC LIMIT 20`.
     is closed and billed: the gateway's frontier month never sees it, so releasing it would drop
     Jev's spend. An OpenAI hold younger than six hours, or made before the meter's `covers_from`,
     stays too.
+- **"publishing failed (PublishError: the site refused the checkpoint: HTTP 400 {"error":"Invalid
+  checkpoint."})"** (a warning, every publish). The site (`personal-site` `capital/schema.js`
+  `validCheckpoint`) refuses the whole checkpoint for one field it does not allow, and the public page
+  keeps the last one it accepted (`published_at` at https://blakewoods.us/api/capital/checkpoint).
+  Find the field: rebuild the body the House would post from `/workspace/state` (read-only), or take
+  the last accepted body and put the new data into it, and run the site's validators over it with
+  node, desk by desk and position by position (`validDesk`, `validPosition`, `validInstrument`,
+  `validBoard`, `validFamilyRow`). Sept 25, 2026: from 15:50:21Z to the fix, every checkpoint was
+  refused because krasker-22's CCL iron condor (options-shadow, 15:48:59Z) went out with its
+  95-character structure code as the position's `market_id`, and the site allows 80. The publisher
+  now shortens such an id (`publish.site_market_id`); a bound the real data outgrows is widened on
+  the site first, and the site deploys before the House.
 - **The OpenAI meter** (Sept 24, 2026). OpenAI is metered like Sail (`campaigns.json`
   `meter_required`), and its meter is the gateway's frontier month, read on every tick
   (`league/frontier.py` `FrontierMonth` into `CampaignBudget.observe_month`).
