@@ -120,6 +120,42 @@ The options plan's "Coordination" section applies to all three runs, with these 
 - **Acceptance:** the rule built, reviewed, merged switched off, with the report printing today's
   numbers; the owner's ratification command in the report.
 
+### I. Open inputs: everything useful, through the right doors
+
+The owner, Sept 25, 2026: "Can we also expand the allow list incredibly broadly? I'm not sure why we
+wouldn't want everything useful there for agents and they know they can use these online resources."
+
+Agents meet the internet through three doors, and each widens differently:
+
+- **Strategy boxes stay sealed** (no network, `league/safety.py`): a strategy must behave the same
+  in replay, practice and real money, and live web reads cannot be replayed without lookahead.
+  Strategies see the web only as recorded, point-in-time feeds (`ctx["feeds"]`).
+- **I1. Research reads the web** (`league/researcher.py` tools; `gateway/`, protected, a gateway
+  deploy). A `web_fetch` tool beside `web_search`: any public http(s) URL, fetched BY THE GATEWAY
+  (the House box's egress stays exact-host: it holds the Sail key and the gateway token, and Sail's
+  allowlist ignores wildcards anyway). GET only; no cookies or credentials forwarded; private,
+  link-local and metadata addresses refused; redirects re-checked; response converted to text and
+  capped (about 200 KB); a per-agent daily fetch budget charged in credits; fetched text is data,
+  never instructions, and the research brief says so. Each fetch is a `tool` row with the URL.
+- **I2. Recorders for every useful key-free host** (`league/feeds.py` `RECORDERS`,
+  `scripts/floor_box.py` `LEAGUE_HOSTS`). Broad, not curated to a dozen: the run adds any host that
+  is key-free, public, permits automated access in its terms, and answers without a bot wall, each
+  with a recorder that stores point-in-time rows so replay can use it. Start with what the desks
+  need most: Polymarket's public market data (cross-venue pricing for every Kalshi desk), league
+  stats and schedules (MLB, NHL, NBA, NFL, NCAA public APIs), Wikipedia pageviews (attention),
+  GDELT (news volume and tone), Cboe's public delayed data (options and VIX), public crypto exchange
+  market data (order books, funding, open interest), NOAA/NWS products beyond forecasts, BLS and
+  Treasury releases, Kalshi's own public trade history. Refused: anything behind a login, a key,
+  a paid plan or a captcha (those are the owner's), and anything whose terms forbid bots.
+- **I3. Agents ask, the run approves by rule.** A `tool.request` or research summary naming a data
+  source becomes, within the run: the rule check above, the host added
+  (`python3 scripts/floor_box.py hosts --add <host>` from `~/Work/ltcm-deploy`, then `LEAGUE_HOSTS`
+  by PR), a recorder, and a `library.note` telling the desk the feed exists. The watch lists
+  requests and what became of each.
+- **Acceptance:** `web_fetch` used by research with rows on the ledger; at least 20 new hosts
+  recorded with point-in-time rows; every agent data request of the run answered (built, or refused
+  with the rule it failed); a strategy naming a new feed seated.
+
 ### W. The watch (the weekend)
 
 - Every 30 minutes from Saturday 15:00Z to Sunday 23:59Z: Kalshi real and practice fills and
@@ -134,6 +170,11 @@ The options plan's "Coordination" section applies to all three runs, with these 
 |---|---|---|---|
 | K5 `grant.scale_tranches` (new; a new grant version) | none: deposits never enter the envelope | the tranche rule above, activated only by the owner's ratify | the deposit follows proof |
 | `allocator.max_event_share` on sports families | 0.25 | 0.25-0.35 for a PROVEN family only | a proven family's one game per member (C7) should hold its share of the stake |
+
+**Egress (the owner's standing approval, Sept 25, 2026):** this run may add any data host that meets
+I2's rule to the House box's allowlist and to `LEAGUE_HOSTS` without asking, and may deploy the
+gateway's `web_fetch` route with its tests green. It may not give a strategy box network access, add
+a host that needs a key or login, or send any credential to a fetched host.
 
 Everything else follows the forward-first plan's "Authorized" and "Not authorized" lists. In
 particular: no deposits or transfers between venues, no cap above funded money, no test orders, no
@@ -150,12 +191,13 @@ forced trades.
 | 5 | Model-versus-market sports founders seated; leagues covered | 0; MLB only | one per league with a slate; NFL, NCAAF, MLB |
 | 6 | The sports family's swing | 9 of 15 real settlements (10 under forward-first M1) | reached, or the count |
 | 7 | The scale report | none | prints committed, capacity used and the tranche per venue |
+| 8 | Data hosts recorded; research web reads a day; agent data requests answered | 25 hosts in code, search only; — | ≥ 45 hosts recorded; `web_fetch` in use; every request answered |
 
 ## Done
 
 - The weekend watch and the scoreboard at T0, Saturday's close, Sunday's close and Monday 13:00Z
   are in the run record;
-- K1-K4 live and verified in their windows; K5 built, reviewed, merged switched off, with the owner's
+- K1-K4 and I1-I3 live and verified in their windows; K5 built, reviewed, merged switched off, with the owner's
   command;
 - tests and CI green; no harness incident caused by this run; neither other run blocked;
 - docs, memory and the repo current and clean; the report delivered with the owner's next decisions:
@@ -166,7 +208,7 @@ forced trades.
 ```
 /goal Execute docs/goals/LTCM_KALSHI_SCALE.md (branch goal/kalshi-scale-2026-09-25; merge it to main first) autonomously with no deadline, beside the forward-first and options runs, until its Done list holds.
 
-- Direction: make Kalshi, where all our real profit has come from and which never closes, the swarm's 24/7 profit engine. Put model-versus-market sports founders on every league with a slate this weekend (college football Saturday, NFL Sunday, MLB's final weekend), priced from the sportsbook consensus the odds recorder already captures; grow the proven sports family on disjoint games; measure every positive family's capacity at 1x-8x its size; keep a live Kalshi desk in every hour of the weekend; and build the scale rule so my deposits enter the envelope only when proven families would use them. Be bold inside the envelope: I accept volatility and losses.
+- Direction: make Kalshi, where all our real profit has come from and which never closes, the swarm's 24/7 profit engine. Put model-versus-market sports founders on every league with a slate this weekend (college football Saturday, NFL Sunday, MLB's final weekend), priced from the sportsbook consensus the odds recorder already captures; grow the proven sports family on disjoint games; measure every positive family's capacity at 1x-8x its size; keep a live Kalshi desk in every hour of the weekend; open the web to the swarm broadly (workstream I: research reads any public page through the gateway's web_fetch, recorders for every useful key-free data host with point-in-time history, agents' data requests approved by rule; you have my standing approval to add any host that meets I2's rule without asking); and build the scale rule so my deposits enter the envelope only when proven families would use them. Be bold inside the envelope: I accept volatility and losses.
 - Coordinate with the other two runs exactly as the plan's "Coordination" section says: file owners, one deploy at a time across all three, no deploy 13:25-20:05Z on a trading day or while a real family's game is in play, and ratify after a promotion only when every changed money rule is a row of one of the three plans' tables.
 - Authority: the forward-first plan's "Authorized" list applied to this run's workstreams, plus this plan's money table. The scale rule is built and merged switched off; only I ratify it. Nothing in "Not authorized": no deposits, no transfers, no cap raises, no test or forced trades. No owner steps needed.
 - Method: builders in worktrees, adversarial review of money code, verify on the box in each window, watch the weekend every 30 minutes, fix bugs with tests, report at Monday 13:00Z with the scoreboard, the scale report's numbers and my next decisions.
