@@ -165,6 +165,13 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 `earned-live-20260921` ratified 20:11:48Z on `d7d910fe` (active), `ops.started` 20:13:21Z, watch verdict promoted, **watch
 ended 20:21:56Z** (the Kalshi run's K1 may start from 20:52Z).
 
+**MAIN HOLDS DEPLOY B, UNRELEASED, FROM 22:18:40Z UNTIL DEPLOY B AT 06:00Z SATURDAY.** Merton's #346 (strategy files only,
+merged 21:55:31Z) would have been shipped by the updater at its next look (about 22:26Z), a House restart as the proven
+family's games began (22:40Z), and H3b's in-play hold ships only in Deploy C. #334 (Deploy B, protected files) was merged
+to main at 22:18:40Z so the updater refuses main's heads until the owner deploy (the runbook's own mechanism). **No run
+should owner-deploy main before 06:00Z Saturday**: it would ship Deploy B's money rules (digest `acff5c64`) without
+their ratify. If B is called off, main is reverted to the floor's tree before anyone deploys.
+
 **Proposed Saturday Sept 26 deploy order (15:00Z Sept 25; each starts only after the previous one's watch ends plus 30
 minutes, and only when no real Kalshi family's game is in play; the Friday MLB slate's last start is 02:15Z, so play ends
 about 05:30Z; college football and MLB start again about 16:00Z):** 06:00Z forward-first **Deploy B** (#334, money digest
