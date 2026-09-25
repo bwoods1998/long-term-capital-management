@@ -78,7 +78,7 @@ only when the row is a repeat of the last good read).
 ## 3. Checkpoint
 
 Top level (S:465): **shape**. REQUIRED `schema_version` (= 1), `published_at` instant, `floor`,
-`desks`, `committee`, `budget`. Optional `infra`, `run`, `lab`, `watch`, `board`. Whole body <= 512 KiB (S:503; the publisher leaves the least important rows out until it fits, `Publisher.fit`).
+`desks`, `committee`, `budget`. Optional `infra`, `run`, `lab`, `watch`, `board`, `flywheel` (Sept 25, 2026). Whole body <= 512 KiB (S:503; the publisher leaves the least important rows out until it fits, `Publisher.fit`).
 Every instant inside must be <= `published_at` unless noted.
 
 ### floor (S:472-493) shape
@@ -165,6 +165,19 @@ stake on real money), `members_real` counter(160), `capacity_usd_per_day` signed
 places). The page: "sports central run under · proven · 11 settlements, 2 real · lower bound +14.2% · 1 agent at
 $30 · capacity $57/day", then "44 strategies still unproven" (or "No proven edge yet · 45 strategies unproven").
 
+Since Sept 25, 2026 (personal-site #8, W of the forward-first run) a row may add, both optional:
+`swing_clock` (`validSwingClock`; only on a `proven` row, refused on `swing`): shape REQUIRED `look_at`
+counter(1,000,000) or null, `to_go` counter(1,000,000), `per_day` unsigned decimal <= 3 places and <= 100000
+or null, `days` unsigned decimal <= 2 places and <= 100000 or null; optional `dates_to_go` counter(366),
+`grant_holds` boolean (`publish.site_swing_clock`, from the board's `swing_clock`: `needs.look_at`,
+`needs.real_settlements`, `real_per_day`, `days_to_swing`, `needs.distinct_dates`, `needs.grant`). And
+`capacity_curve` (`validCapacityCurve`): 1-4 points, multiples strictly rising, each **exact** `{multiple:
+integer 1-16, size_usd: money, fill_rate: unit or null, usd_per_day: signedMoney or null, basis: "real" |
+"all" | null}`, rate and basis null together, dollars null without a rate (`publish.site_capacity_curve`, from
+C6's `capacity.curve`). The page: "Compounding review at 15 real settlements · 4 to go at 5.6 a day · about 17
+hours" and "Capacity $32/day at $5.39 · $65/day at $11 · not measured at $22"; with a curve the family line
+drops its "capacity $X/day".
+
 `lab` (`validLabReading`): **exact** `{at, tested_last_hour, graduates_waiting}`: `at` instant <= `published_at`
 + 60 s (the publisher reads it before stamping the checkpoint), counters (1,000,000 and 100,000). From the
 newest private `lab.stats` row (`Lab.stats` over the last hour: `evaluated`, `waiting_seat.count`), sent only
@@ -184,6 +197,16 @@ the first words of its cause (`displaced` "lost its seat", `evidence` "lost too 
 "replaced by its fix", `redundant` "a duplicate", `credits` "out of credits", `never qualified` "never
 passed its history test", `stuck` "idle too long"; any other says nothing). A desk's
 `gate.evidence.lifecycle.cause` is read the same way.
+
+### flywheel (optional; personal-site #8, Sept 25, 2026) shape
+
+`validFlywheel`: REQUIRED `at` instant <= `published_at` + 60 s; optional, never null (absent means unknown):
+`compute_usd_per_day` money, `real_profit_usd_per_day` signedMoney, `positive_blocks_per_day`
+counter(1,000,000), `graduates_per_day` counter(100,000), `proofs_per_day` counter(1,000),
+`restarts_per_day` counter(100,000). From `publish.site_flywheel` (see `league/README.md`, `publish.py`).
+The page draws it under the ladder's moves while `at` is at most 30 minutes older than `published_at`:
+"Compute $122 · 6.3× real profit", "Evidence 182 winning blocks · 8 graduates · 1 edge proven", "Real
+profit +$19.38", "Restarts 24", each cell only when its number is sent.
 
 ### position row (S:281-297) shape
 

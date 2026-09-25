@@ -373,7 +373,36 @@
           "bound": "0.021500",
           "stake_usd": "10.00",
           "members_real": 1,
-          "capacity_usd_per_day": "4.10"
+          "capacity_usd_per_day": "4.10",
+          "swing_clock": {
+            "look_at": 15,
+            "to_go": 12,
+            "per_day": "1.500",
+            "days": "8.00"
+          },
+          "capacity_curve": [
+            {
+              "multiple": 1,
+              "size_usd": "5.00",
+              "fill_rate": "0.8200",
+              "usd_per_day": "4.10",
+              "basis": "real"
+            },
+            {
+              "multiple": 2,
+              "size_usd": "10.00",
+              "fill_rate": "0.5000",
+              "usd_per_day": "5.00",
+              "basis": "all"
+            },
+            {
+              "multiple": 4,
+              "size_usd": "20.00",
+              "fill_rate": null,
+              "usd_per_day": null,
+              "basis": null
+            }
+          ]
         }
       ]
     },
@@ -382,5 +411,13 @@
       "tested_last_hour": 84,
       "graduates_waiting": 2
     }
+  },
+  "flywheel": {
+    "at": "2026-09-19T06:29:02.000Z",
+    "restarts_per_day": 3,
+    "real_profit_usd_per_day": "0.32",
+    "proofs_per_day": 1,
+    "positive_blocks_per_day": 41,
+    "graduates_per_day": 2
   }
 }

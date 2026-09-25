@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+import urllib.error
 from decimal import Decimal
 from pathlib import Path
 
@@ -841,6 +843,241 @@ class FamiliesTest(FamiliesCase):
         self.assertIn("families", body["board"])
 
 
+class FlywheelCase(FamiliesCase):
+    """The capital page's flywheel (W of the forward-first run, Sept 25, 2026): the checkpoint's `flywheel` from
+    health.json, the board and the hourly yield rows, and a proven family's clock and capacity curve."""
+
+    def swing_clock(self, **needs):
+        """The board's `swing_clock` as `families.swing_clock` draws it (the T0 snapshot's sports family, Sept 25, 2026)."""
+        return {"real_n": 11, "real_since": "2026-09-23T04:52:20Z", "real_days": 1.98, "real_per_day": 5.556,
+                "needs": {"real_settlements": 4, "look_at": 15, "confidence": 0.9, "proof": False, "audit": True, "grant": False, **needs},
+                "days_to_swing": 0.72}
+
+    def curve(self):
+        """C6's `capacity.curve` as `families.row_of` writes it (c/family, Sept 25, 2026): 1x and 2x measured on the real
+        book, 4x never bid enough."""
+        return [{"multiple": 1, "size_usd": 5.39, "fill_rate": 0.6, "basis": "real", "usd_per_day": 32.3312},
+                {"multiple": 2, "size_usd": 10.78, "fill_rate": 0.6, "basis": "real", "usd_per_day": 64.6624},
+                {"multiple": 4, "size_usd": 21.56, "fill_rate": None, "basis": None, "usd_per_day": None}]
+
+    def sports(self, **overrides):
+        row = self.family_row(swing_clock=self.swing_clock(),
+                              capacity={"usd_per_day": 32.3312, "markets_per_day": 19.07, "fill_rate_at_size": 0.6, "size_usd": 5.39,
+                                        "settlements_per_day": 4.77, "fill_rate_basis": "real", "curve": self.curve(), "binds": False})
+        row.update(overrides)
+        return row
+
+    def health(self, **fields):
+        """health.json as `House._health` writes it at the end of a tick, with the fields the strip reads and some it does not."""
+        body = {"at": now_iso(self.clock), "living": 128, "restarts_24h": 24, "restarts_24h_in_session": 7,
+                "last_start": {"at": now_iso(self.clock), "release": "main-47c52e860764", "seq": 700000},
+                "research_economy": {"sail_cap": {"calls": 198}, "merton": {"roles": ["architect"], "paused": [], "real_pnl_24h_usd": "19.38124",
+                                                                            "settlements": 66, "measure": "realized"}},
+                "tick_duration_seconds": 72.4}
+        body.update(fields)
+        self.house.root.mkdir(parents=True, exist_ok=True)
+        (self.house.root / "health.json").write_text(json.dumps(body), encoding="utf-8")
+        return body
+
+    def yield_row(self, blocks=(("research", 5), ("lab", 3)), graduates=2):
+        """One hourly yield row (`yield_ledger.fold`), as `YieldLedger.tick` appends it."""
+        evidence = {line: {"positive_blocks": n, "active_blocks": 2 * n} for line, n in blocks}
+        evidence.setdefault("lab", {})["graduates"] = graduates
+        return self.house.ledger.append("ops.budget", {"what": "yield", "since": now_iso(lambda: self.clock() - 3600), "until": now_iso(self.clock),
+                                                       "spend_usd": {"research": "2.1"}, "evidence": evidence, "usd_per": {}, "total_usd": "2.1",
+                                                       "hours": 1.0}, agent=HOUSE)
+
+
+class FlywheelTest(FlywheelCase):
+    def test_a_proven_familys_row_carries_its_clock_and_capacity_curve_in_the_sites_shape(self):
+        agent = self.seated()
+        families = self.families()
+        families["kalshi"]["sports-central-run-under"] = self.sports()
+        families["kalshi"]["weather-favorites"]["swing_clock"] = self.swing_clock()  # a compounding family: no clock goes
+        self.house.allocator = FakeAllocator(self.ledger_board(agent, families=families))
+        self.clock.advance(5)
+        rows = {r["family"]: r for r in self.publisher().checkpoint(self.house)["board"]["families"]["rows"]}
+        self.assertEqual(rows["sports-central-run-under"]["swing_clock"], {"look_at": 15, "to_go": 4, "per_day": "5.556", "days": "0.72"})
+        self.assertEqual(rows["sports-central-run-under"]["capacity_curve"], [
+            {"multiple": 1, "size_usd": "5.39", "fill_rate": "0.6000", "usd_per_day": "32.33", "basis": "real"},
+            {"multiple": 2, "size_usd": "10.78", "fill_rate": "0.6000", "usd_per_day": "64.66", "basis": "real"},
+            {"multiple": 4, "size_usd": "21.56", "fill_rate": None, "usd_per_day": None, "basis": None}])
+        self.assertNotIn("swing_clock", rows["weather-favorites"], "the site refuses a clock on a compounding family")
+        # The board as a/integration draws it today (no C6 curve, no M1 dates): nothing the board lacks is sent.
+        self.house.allocator = FakeAllocator(self.ledger_board(agent))
+        self.clock.advance(5)
+        for row in self.publisher().checkpoint(self.house)["board"]["families"]["rows"]:
+            self.assertNotIn("swing_clock", row)
+            self.assertNotIn("capacity_curve", row)
+
+    def test_whatever_the_clock_and_the_curve_hold_the_site_gets_only_what_it_accepts(self):
+        clock = publish.site_swing_clock
+        self.assertEqual(clock(self.swing_clock(distinct_dates=2, grant=True)),
+                         {"look_at": 15, "to_go": 4, "per_day": "5.556", "days": "0.72", "dates_to_go": 2, "grant_holds": True})
+        self.assertEqual(clock({**self.swing_clock(real_settlements=0), "days_to_swing": 0.0}), {"look_at": 15, "to_go": 0, "per_day": "5.556", "days": "0.00"})
+        self.assertEqual(clock({**self.swing_clock(look_at=None), "real_per_day": None, "days_to_swing": None}),
+                         {"look_at": None, "to_go": 4, "per_day": None, "days": None})
+        self.assertEqual(clock({**self.swing_clock(real_settlements=10 ** 9, look_at=10 ** 9, distinct_dates=10 ** 6), "real_per_day": 1e12, "days_to_swing": -3}),
+                         {"look_at": publish.MAX_SETTLEMENTS, "to_go": publish.MAX_SETTLEMENTS, "per_day": "100000.000", "days": None, "dates_to_go": 366})
+        self.assertEqual(clock(self.swing_clock(grant=None))["look_at"], 15)
+        self.assertNotIn("grant_holds", clock(self.swing_clock(grant=None)), "an unknown grant claims nothing")
+        for bad in (None, "0.72", {}, {"needs": "four"}, {"needs": {"look_at": 15}}, {"needs": {"real_settlements": -1}},
+                    {"needs": {"real_settlements": 4, "look_at": "fifteen"}}, {"needs": {"real_settlements": 1.5}}):
+            self.assertIsNone(clock(bad), bad)
+        curve = publish.site_capacity_curve
+        self.assertIsNone(curve({"usd_per_day": 32.33}), "before C6: no curve")
+        self.assertIsNone(curve(None))
+        self.assertIsNone(curve({"curve": []}))
+        odd = curve({"curve": [
+            {"multiple": 4, "size_usd": 20, "fill_rate": 0.5, "basis": "real", "usd_per_day": 1e30},   # out of order, bounded
+            {"multiple": 1, "size_usd": 5, "fill_rate": 0.5, "basis": "practice", "usd_per_day": 3},    # a basis the site does not know: unmeasured
+            {"multiple": 2, "size_usd": 10, "fill_rate": 1.5, "basis": "real", "usd_per_day": 3},       # a rate above one: unmeasured
+            {"multiple": 2, "size_usd": 99, "fill_rate": 0.1, "basis": "all", "usd_per_day": 3},        # the same multiple twice: the first stands
+            {"multiple": 0, "size_usd": 1}, {"multiple": 8, "size_usd": -1}, {"multiple": 1.5, "size_usd": 1}, "a point",
+            {"multiple": 16, "size_usd": 80, "fill_rate": 0.25, "basis": "all", "usd_per_day": -0.4001},
+            {"multiple": 8, "size_usd": 40, "fill_rate": 0.25, "basis": "all", "usd_per_day": None},
+        ]})
+        self.assertEqual(odd, [
+            {"multiple": 1, "size_usd": "5.00", "fill_rate": None, "usd_per_day": None, "basis": None},
+            {"multiple": 2, "size_usd": "10.00", "fill_rate": None, "usd_per_day": None, "basis": None},
+            {"multiple": 4, "size_usd": "20.00", "fill_rate": "0.5000", "usd_per_day": "999999999.00", "basis": "real"},
+            {"multiple": 8, "size_usd": "40.00", "fill_rate": "0.2500", "usd_per_day": None, "basis": "all"}])
+
+    def test_the_flywheel_is_health_the_board_and_the_yield_rows_of_the_last_day(self):
+        agent = self.seated()
+        families = self.families()
+        families["kalshi"]["sports-central-run-under"]["since"] = now_iso(lambda: self.clock() - 3600)      # proven an hour ago
+        families["kalshi"]["weather-favorites"]["since"] = now_iso(lambda: self.clock() - 3 * 86400)        # compounding for three days
+        families["alpaca"]["equity-trend"]["since"] = now_iso(self.clock)                                   # unproven: not a proof
+        self.house.allocator = FakeAllocator(self.ledger_board(agent, families=families))
+        old = self.yield_row(graduates=40)                     # a day and more ago: not in the day
+        self.clock.advance(86400 + 60)
+        for _ in range(3):
+            self.yield_row()
+            self.clock.advance(3600)
+        families["kalshi"]["sports-central-run-under"]["since"] = now_iso(lambda: self.clock() - 3600)
+        health = self.health()
+        self.clock.advance(60)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["flywheel"], {"at": health["at"], "restarts_per_day": 24, "real_profit_usd_per_day": "19.38", "proofs_per_day": 1,
+                                            "positive_blocks_per_day": 24, "graduates_per_day": 6})
+        self.assertLessEqual(body["flywheel"]["at"], body["published_at"])
+        self.assertTrue(old.at < now_iso(lambda: self.clock() - 86400))
+        # health.json older than half an hour says nothing of the last day: the board and the yield rows still do.
+        self.clock.advance(publish.FLYWHEEL_MAX_AGE)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(body["flywheel"], {"at": body["published_at"], "proofs_per_day": 1, "positive_blocks_per_day": 24, "graduates_per_day": 6})
+        # Nothing known: no block at all.
+        self.house.allocator = None
+        (self.house.root / "health.json").unlink()
+        self.clock.advance(2 * 86400)
+        self.assertNotIn("flywheel", self.publisher().checkpoint(self.house))
+
+    def test_health_fields_the_site_would_refuse_are_left_out(self):
+        self.seated()
+        self.house.allocator = None
+        for fields, expected in (({"restarts_24h": None}, {"real_profit_usd_per_day": "19.38"}),
+                                 ({"restarts_24h": -1, "research_economy": None}, None),
+                                 ({"restarts_24h": 1.5, "research_economy": {"merton": None}}, None),
+                                 ({"restarts_24h": 10 ** 9, "research_economy": {"merton": {"real_pnl_24h_usd": "-1e40"}}},
+                                  {"restarts_per_day": 100000, "real_profit_usd_per_day": "-999999999.00"}),
+                                 ({"restarts_24h": 0, "research_economy": {"merton": {"real_pnl_24h_usd": "nan"}}}, {"restarts_per_day": 0}),
+                                 ({"at": "yesterday"}, None), ({"at": "2099-01-01T00:00:00.000Z"}, None)):
+            health = self.health(**fields)
+            self.clock.advance(5)
+            flywheel = self.publisher().checkpoint(self.house).get("flywheel")
+            self.assertEqual(flywheel, None if expected is None else {"at": health["at"], **expected}, fields)
+        (self.house.root / "health.json").write_text("{not json", encoding="utf-8")
+        self.assertNotIn("flywheel", self.publisher().checkpoint(self.house))
+        (self.house.root / "health.json").write_text("[1, 2]", encoding="utf-8")
+        self.assertNotIn("flywheel", self.publisher().checkpoint(self.house))
+
+    def test_y2s_unit_economics_reaches_the_strip_through_its_hook_and_nothing_else_of_it(self):
+        self.seated()
+        self.house.allocator = None
+        # The scoreboard's `unit_economics` row (scripts/gap_scoreboard.py) at the 10:36Z reading, Sept 25, 2026.
+        health = self.health(unit_economics={"fn": "unit_economics", "profit_per_day_usd": 19.38, "compute_per_day_usd": 122.31,
+                                             "compute_over_profit": 6.31, "family_swings": False, "meets_target": False})
+        self.clock.advance(5)
+        flywheel = self.publisher().checkpoint(self.house)["flywheel"]
+        self.assertEqual(flywheel, {"at": health["at"], "restarts_per_day": 24, "compute_usd_per_day": "122.31", "real_profit_usd_per_day": "19.38"})
+        self.assertEqual(publish.site_unit_economics({"compute_per_day_usd": -3, "profit_per_day_usd": None}), {})
+        self.assertEqual(publish.site_unit_economics({"compute_per_day_usd": "12.5", "profit_per_day_usd": "-4.2"}),
+                         {"compute_usd_per_day": "12.50", "real_profit_usd_per_day": "-4.20"})
+        self.assertEqual(publish.site_unit_economics(None), {})
+        self.assertEqual(publish.UNIT_ECONOMICS, "unit_economics", "the one key Y2's builder writes")
+
+    def test_a_flywheel_that_cannot_be_read_costs_the_checkpoint_nothing(self):
+        from unittest.mock import patch
+
+        self.seated()
+        self.health()
+        self.clock.advance(5)
+        with patch.object(publish, "site_flywheel", side_effect=RuntimeError("odd health")):
+            body = self.publisher().checkpoint(self.house)
+        self.assertNotIn("flywheel", body)
+        self.assertIn("board", body)
+
+    def test_a_site_that_predates_the_flywheel_still_gets_its_checkpoint_without_it(self):
+        agent = self.seated()
+        families = self.families()
+        families["kalshi"]["sports-central-run-under"] = self.sports()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent, families=families))
+        self.health()
+
+        class OlderSite(FakeSite):
+            """The site before personal-site #8: a checkpoint with a field it does not know is a 400."""
+            knows = False
+
+            def __call__(self, request, timeout=None):
+                body = json.loads(request.data)
+                self.posts.append((request.full_url, dict(request.header_items()), body))
+                rows = ((body.get("board") or {}).get("families") or {}).get("rows") or []
+                new = "flywheel" in body or any("swing_clock" in r or "capacity_curve" in r for r in rows)
+                if request.full_url.endswith("/checkpoint") and new and not self.knows:
+                    raise urllib.error.HTTPError(request.full_url, 400, "invalid checkpoint", {}, io.BytesIO(b'{"error":"invalid checkpoint"}'))
+                return FakeResponse()
+
+        site = OlderSite()
+        publisher = self.publisher(site)
+        self.clock.advance(5)
+        out = publisher.publish(self.house)
+        checkpoints = [body for url, _, body in site.posts if url.endswith("/checkpoint")]
+        self.assertEqual(len(checkpoints), 2)
+        self.assertIn("flywheel", checkpoints[0])
+        self.assertNotIn("flywheel", checkpoints[1])
+        self.assertFalse(any("swing_clock" in r or "capacity_curve" in r for r in checkpoints[1]["board"]["families"]["rows"]))
+        self.assertEqual(checkpoints[1], publish.without_flywheel(checkpoints[0]))
+        self.assertEqual((out["checkpoint"], out["without_flywheel"]), (200, True))
+        self.assertEqual(json.loads((Path(self.dir.name) / "publish.json").read_text())["flywheel_refused"], checkpoints[0]["published_at"])
+        # Once the site knows the fields, the whole checkpoint is taken and the note is cleared.
+        site.knows = True
+        self.clock.advance(60)
+        out = publisher.publish(self.house)
+        self.assertNotIn("without_flywheel", out)
+        self.assertNotIn("flywheel_refused", json.loads((Path(self.dir.name) / "publish.json").read_text()))
+        self.assertIn("flywheel", [body for url, _, body in site.posts if url.endswith("/checkpoint")][-1])
+        # A site that refuses the checkpoint for another reason still refuses it: the fallback hides nothing.
+        self.assertIsNone(publish.without_flywheel({"board": {"families": {"unproven": 0, "rows": [{"family": "x"}]}}}))
+
+        class Refusing(FakeSite):
+            def __call__(self, request, timeout=None):
+                self.posts.append((request.full_url, dict(request.header_items()), json.loads(request.data)))
+                if request.full_url.endswith("/checkpoint"):
+                    raise urllib.error.HTTPError(request.full_url, 400, "invalid checkpoint", {}, io.BytesIO(b'{"error":"invalid checkpoint"}'))
+                return FakeResponse()
+
+        refusing = self.publisher(Refusing())
+        self.clock.advance(60)
+        with self.assertRaises(publish.PublishError):
+            refusing.publish(self.house)  # the body without the flywheel is refused as well
+        self.house.allocator = None
+        (self.house.root / "health.json").unlink()
+        self.clock.advance(60)
+        with self.assertRaises(publish.PublishError):
+            refusing.publish(self.house)  # nothing new in the body: nothing to fall back to
+
+
 class LabLineTest(LabCase):
     """The board's lab line reads what the lab itself writes (`Lab.publish`), not a copy of its shape."""
 
@@ -860,11 +1097,18 @@ class LabLineTest(LabCase):
 SITE = Path(os.environ.get("LTCM_SITE") or Path(__file__).resolve().parents[3] / "personal-site")
 
 
+#: Whether the checked-out site knows the flywheel's fields (personal-site #8, Sept 25, 2026). A site from before
+#: it is sent the body `Publisher.publish` falls back to (`publish.without_flywheel`), and is checked on that.
+FLYWHEEL_SITE = (SITE / "capital" / "schema.js").exists() and "validFlywheel" in (SITE / "capital" / "schema.js").read_text(encoding="utf-8", errors="replace")
+
+
 @unittest.skipUnless(shutil.which("node") and (SITE / "capital" / "schema.js").exists(), "the site's validators are not checked out beside this repository (set LTCM_SITE)")
-class SiteAcceptsTheBoardTest(FamiliesCase):
+class SiteAcceptsTheBoardTest(FlywheelCase):
     """The site's own validators (personal-site/capital/schema.js), run on what this publisher posts."""
 
     def valid(self, body):
+        if not FLYWHEEL_SITE:
+            body = publish.without_flywheel(body) or body
         script = "import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => console.log(m.validCheckpoint(JSON.parse(s)))); })"
         out = subprocess.run(["node", "-e", script, (SITE / "capital" / "schema.js").as_uri()], input=json.dumps(body), capture_output=True, text=True, timeout=60)
         return out.stdout.strip()
@@ -1026,6 +1270,46 @@ class SiteAcceptsTheBoardTest(FamiliesCase):
         out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(events), capture_output=True, text=True, timeout=60)
         self.assertEqual(json.loads(out.stdout), [["up", "paper", "bunt", "10.00"], ["up", "swing", "star", "1240.50"], ["down", "swing", "paper", None], ["size", None, "bunt", "14.20"],
                                                     ["up", "paper", "probe", "10.00"]])
+
+    @unittest.skipUnless(FLYWHEEL_SITE, "the checked-out site predates the flywheel (personal-site #8)")
+    def test_the_site_accepts_the_flywheel_and_its_page_draws_it(self):
+        # Sept 25, 2026 (W of the forward-first run): the checkpoint's flywheel from health.json (with Y2's unit
+        # economics), the board and an hourly yield row, and the sports family's clock and C6 curve, pass the site's
+        # validators and read on its page in its own words.
+        agent = self.seated()
+        self.house.evaluator.promote(agent.id, 2, "fixture evidence")
+        families = self.families()
+        families["kalshi"]["sports-central-run-under"] = self.sports()
+        self.house.allocator = FakeAllocator(self.ledger_board(agent, families=families))
+        self.yield_row()
+        self.health(unit_economics={"compute_per_day_usd": 122.31, "profit_per_day_usd": 19.38})
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(self.valid(body), "true")
+        script = ("import(process.argv[1]).then(m => { let s = ''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { "
+                  "const body = JSON.parse(s); const model = m.boardSnapshot(body, [], Date.parse(body.published_at)); "
+                  "console.log(JSON.stringify({ cells: m.flywheelCells(model.flywheel).map(c => [c.name, c.value]), "
+                  "rows: model.families.rows.map(r => [m.familyWords(r), m.clockWords(r.clock), m.capacityWords(r.curve)]) })); }); })")
+        out = subprocess.run(["node", "-e", script, (SITE / "capital" / "capital.js").as_uri()], input=json.dumps(body), capture_output=True, text=True, timeout=60)
+        page = json.loads(out.stdout)
+        self.assertEqual(page["cells"], [["Compute", "$122 · 6.3× real profit"], ["Evidence", "8 winning blocks · 2 graduates · 2 edges proven"],
+                                         ["Real profit", "+$19.38"], ["Restarts", "24"]])
+        self.assertEqual(page["rows"], [
+            ["compounding · 40 settlements, 32 real · lower bound +3.1% · 2 agents at $120 · capacity $14/day", "", ""],
+            ["proven · 11 settlements, 2 real · lower bound +14.2% · 1 agent at $30", "Compounding review at 15 real settlements · 4 to go at 5.6 a day · about 17 hours",
+             "Capacity $32/day at $5.39 · $65/day at $11 · not measured at $22"]])
+        # The most the publisher sends of everything is still what the site accepts.
+        families["kalshi"]["sports-central-run-under"] = self.sports(swing_clock={**self.swing_clock(real_settlements=10 ** 9, look_at=10 ** 9, distinct_dates=10 ** 6, grant=True),
+                                                                                   "real_per_day": 1e12, "days_to_swing": 1e12})
+        families["kalshi"]["sports-central-run-under"]["capacity"]["curve"] = [
+            {"multiple": k, "size_usd": 1e20, "fill_rate": 1.0, "basis": "all", "usd_per_day": -1e30} for k in (1, 2, 4, 8, 16)]
+        for _ in range(60):
+            self.yield_row(blocks=(("research", 10 ** 8),), graduates=10 ** 8)
+        self.health(restarts_24h=10 ** 12, unit_economics={"compute_per_day_usd": 1e30, "profit_per_day_usd": -1e30})
+        self.clock.advance(5)
+        body = self.publisher().checkpoint(self.house)
+        self.assertEqual(len(body["board"]["families"]["rows"][1]["capacity_curve"]), publish.MAX_CURVE_POINTS)
+        self.assertEqual(self.valid(body), "true")
 
 
 if __name__ == "__main__":
