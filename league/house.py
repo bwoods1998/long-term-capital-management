@@ -1157,19 +1157,23 @@ class House:
                             "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)})
         return out
 
-    def found(self, names: list[str] | None = None) -> list[Agent]:
+    def found(self, names: list[str] | None = None, *, described: Mapping[str, Any] | None = None) -> list[Agent]:
         """Seed the first population (idempotent: a founder already born is not born again).
 
         Founders of one desk share a name and number themselves: the six of the Meriwether desk are
         `meriwether`, `meriwether-2` ... `meriwether-6`. So what says a founder is already born is
-        its `key` (the role it plays on that desk), not the name it ends up with."""
+        its `key` (the role it plays on that desk), not the name it ends up with.
+
+        `described`: founder key -> its NEEDS probe's run, read by a caller that holds the lifecycle lock and must
+        not call Sail under it (`kalshi_founders.seat`, K1)."""
         born = []
         existing = {a.founder for a in self.registry.agents.values()}
         wanted = [f for f in self.founders() if (names is None or names_match(f, names)) and f["key"] not in existing]
         for index, seed in enumerate(wanted):
             # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
             agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"],
-                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1)
+                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1,
+                               described=(described or {}).get(seed["key"]))
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still

@@ -8,58 +8,85 @@ slate (college football Saturday, the NFL Sunday, MLB's final weekend), each row
 a founder that prices games from the live `odds` feed on a day-horizon desk has no replay for 20 days, so `enroll`'s
 replay path cannot seat it either.
 
-`seat(house)` is called once a births pass (`House._births`, after `enroll`) and births at most ONE flagged founder
-a call, through `house.found([key])`, holding the House's lifecycle lock (`House._lifecycle_lock`, which the lab's
-births and the refill's admissions hold) from the seat question to the birth and the death that makes room:
+The seat market is the forward-first run's; these are its conditions, accepted by this run:
 
-- a flagged row of a non-dormant Kalshi desk whose `key` no agent, living or dead, was born with (`Agent.founder`):
-  a founder that died is never reborn, and one already seated is not seated again, across ticks and restarts;
-- a league with room and a desk with room: the free seat;
-- a FULL DESK: the House's own seat market on that desk, asked as `enroll` asks (`House._displaceable(rules,
-  specialty=desk, evidenced=True, newcomer=Newcomer(...))`, whose first row is `_weakest`'s);
-- a FULL LEAGUE and a desk with room, first the House's own seat market: the first resident, in the House's
-  ranking (`_displaceable`, league-wide, least evidence first, leaving out the desks a higher class of waiter holds
-  as `enroll` does), of the desk whose pooled forward record over the last `RECORD_DAYS` (7) days is the most
-  negative (`desk_records`: `House.family_forward`'s statistic -- active `eval.block` rows and their summed log
-  growth, over every agent ever born there -- by desk and over the forward-first run's F3 window), then the next
-  negative desk; never a desk whose record is not negative by the House's own line (`families.losing`,
-  `economy.losing_family_min_blocks` active blocks). That resident dies `displaced`, as in `enroll`;
-- then, when the seat market has nobody (at the Sept 25 T0 it offered no one even to an evidenced newcomer), a desk
-  whose niches.json row carries `"yields_seats": {"floor": 4, "reason": "..."}` gives up one practice resident while
-  it has more than `floor` members and its own 7-day pooled record is negative (`_yielded`): its weakest by the
-  House's ranking (never traded first, a losing family first, then rung, growth, blocks and purse), never one on
-  real money, a member of a proven or swinging family (the allocator's record; unreadable counts as proven), one of
-  the founder's own family, a winner, one with research in flight, or one holding a position or a working order on
-  any book, held for the open or drained by the House (it waits for it to be flat). It dies of its own cause, `desk_closed` (`DESK_CLOSED`), never
-  `displaced`, so the displacement share and F3's tenure rules do not count it; its postmortem names the founder
-  and the desk's record and the flag's reason, and its program stays in the graveyard like any death. The desk's
-  row flag is the switch: remove it and nothing yields;
-- the resident dies only once the founder is born, under the same lock, so no other newcomer takes the seat; the
-  league never grows (one out, one in). Every protection of `_displaceable` holds on the first two paths, and two
-  are checked again on the chosen resident: never rung 2 or above, never a proven or swinging family's member;
-- nobody may make way: nothing is born, the reason is kept where health.json shows a refused birth (house.json
-  `seat_refusals.founders`, `seats.last_refused_birth`) and told as one warning an hour at most.
+- `seat(house)` is ONE call line in `House._births` (after `enroll`, and after the options run's
+  `options_desk.seat_founders` once that is on main). It births at most ONE flagged founder a call, through
+  `house.found([key])` (rung 1; its replay still runs, and for a live-feed day strategy it is refused as unsupported
+  input: a wait, not a trial). The seat question, the birth and the death that makes room are one step under the
+  House's lifecycle lock (`House._lifecycle_lock`, which the lab's births, the refill's admissions, every wake and
+  every death hold), so nothing races it. The founder's NEEDS probe is read in the probe box BEFORE that step,
+  holding nothing but the probe box the births phase holds, and handed to `found` (`described`): a Sail call under
+  the lifecycle lock stalls every wake (the review of PR 159, `House._admit_researched`). The seat question is asked
+  again under the lock after the probe, and a founder is born only if the answer still holds.
+- Which founders: flagged rows (`FLAG` exactly `true`) of open Kalshi desks whose `key` no agent, living or dead,
+  was ever born with (`Agent.founder`): a founder that died is never reborn, and one seated is never seated twice,
+  across ticks and restarts. In the order of the row's integer `"seat_priority"` (lower first, `DEFAULT_PRIORITY`
+  when absent), then desk, then row: only a few seats can be freed before F3, so the order decides which founders
+  trade first. A malformed row (a flag that is not `true` or `false`, no key, a priority that is not an integer) is
+  skipped and told, one warning an hour.
+- A founder takes ONLY A FREE SEAT OF ITS OWN DESK (the run raises the sports and weather desks' caps for them). Its
+  desk full, it waits. The league under its ceiling, it is born there. The league full, room is made elsewhere, one
+  resident out for the founder in, so the league never grows:
+  1. *The House's own seat market* (`_displaced`), league-wide, asked as the House asks for a newcomer WITHOUT
+     forward evidence (`evidenced=False`, `Newcomer(family, "kalshi", forward=None)`: a founder has none), leaving out
+     the desks a higher waiter class holds (`_reserved_desks`/`_keep_for`, as `enroll` does) and each desk's last
+     trading member (`_last_traders`, as the House's own refill does): the first resident, in the House's order, of
+     the desk whose pooled forward record over the last `RECORD_DAYS` (7) days is the most negative (`desk_records`),
+     then the next negative desk; never a desk whose record is not negative by the House's line (`families.losing`
+     at `economy.losing_family_min_blocks` active blocks). That resident dies `displaced`.
+  2. *Then a yielding desk* (`_yielded`): a Kalshi desk whose niches.json row carries
+     `"yields_seats": {"floor": 4, "reason": "..."}` gives up one practice resident while it has more than `floor`
+     members and its own 7-day pooled record is negative; its weakest in `_displaceable`'s order without the market's
+     graces (never traded first, a losing family first, then rung, growth, blocks and purse), never a winner or one of
+     the founder's own family. It dies of its own cause, `desk_closed` (`DESK_CLOSED`), never `displaced`, so the
+     displacement share and F3's tenure rules do not count it; the desk is stamped as `kill` stamps a displacement
+     (`_desk_displaced`), so the seat market takes no second resident of it in the same tick. The row's flag is the
+     switch: remove it and nothing yields.
+  On both paths the resident chosen is never on real money, never a member of a proven or swinging family (the
+  allocator's record; unreadable counts as proven), never one holding a position or a working order on any book,
+  drained by the House (`DRAIN_SESSION`) or held for the open (`wind_down_held`), and never one with research in
+  flight (`_protected`).
+- The founder is born BEFORE the resident dies, in the same step under the lock, so no other newcomer takes the
+  seat; if `found` refuses or raises, nobody dies. Its postmortem (`kill`'s, with this module's detail) names the
+  founder, the desk's record and, for a yielding desk, its members, floor and reason; the program stays in the
+  graveyard like any death, and a retained candidate is handed off by `kill`.
+- Nobody may make way: nothing is born, and the reason is kept where health.json shows a refused birth (house.json
+  `seat_refusals.founders`, `seats.last_refused_birth`), told as one warning an hour at most. A program whose NEEDS
+  are refused is told once and tried again only when its code changes.
 
 Each birth writes its `birth-route:<agent>` row (route `founder`, with the flag, the rule, who made way, its cause
-and its desk's record) before the foundry's labeller can, and an info alert naming the founder and who made way;
-house.json `kalshi_founders.seated` keeps the same. A program that cannot be born (its NEEDS refused) is told once
-and tried again when its code changes. An exception anywhere in here is a warning (one an hour for the same text)
-and never breaks the births pass.
+and the desk's record) before the foundry's labeller can, and an info alert naming the founder and who made way;
+house.json `kalshi_founders.seated` keeps the same. `seat` never raises: an error is a warning, one an hour for the
+same kind of error, and the births pass goes on to the refill.
+
+`desk_records` is F3's "pooled forward growth over the last 7 days" by desk: `House.family_forward`'s statistic
+(active `eval.block` rows and their summed log growth, over every agent ever born there, living or dead) grouped by
+desk, over the blocks that BEGAN in the window (the row's block `key`; a backlog written late is not counted as new).
+It is folded after a cursor, keeps only the window's rows, and is kept `RECORD_CACHE_SECONDS` (an hour, as the seat
+market watch): the first read of a process reads the ledger's `eval.block` rows once, each later one only the rows
+since. When F3 lands its own 7-day desk record, `desk_records` should read it instead.
 """
 
 from __future__ import annotations
 
 import json
+import math
+import re
+import threading
 from contextlib import nullcontext
 from typing import Any, Mapping
 
 from . import niches as niches_module
 from .agents import code_sha
 from .families import losing
-from .ledger import LedgerConflict, now_iso
+from .ledger import HOUSE, LedgerConflict, now_iso
 
 #: The founder row's flag (`league/niches.json`): seated even in a full league.
 FLAG = "seat_full_league"
+#: The founder row's order among the flagged (an integer, lower first).
+PRIORITY = "seat_priority"
+DEFAULT_PRIORITY = 100
 #: The desk row's flag (`league/niches.json`): `{"floor": n, "reason": "..."}`, the desk gives up a practice resident
 #: to a flagged founder while it has more than `floor` members and its pooled record is negative.
 YIELD_FLAG = "yields_seats"
@@ -69,101 +96,201 @@ DESK_CLOSED = "desk_closed"
 VENUE = "kalshi"
 #: The window of a desk's pooled forward record: the forward-first run's F3 window.
 RECORD_DAYS = 7.0
-#: How long the desks' records are reused (the births pass runs every 300 s at most since H5).
-RECORD_CACHE_SECONDS = 300.0
+#: How long the desks' records are reused: an hour, as the seat market watch (the births pass runs every 300 s).
+RECORD_CACHE_SECONDS = 3600.0
 _CACHE_KEY = "kalshi_founders_desk_records"
-#: One warning an hour at most, for a founder that cannot be seated and for an error in here.
+_TAPE_KEY = "kalshi_founders_desk_tape"
+#: One warning an hour at most, for a founder that cannot be seated, a malformed row and an error in here.
 TELL_SECONDS = 3600.0
 #: The founder rows' class in house.json `seat_refusals` (health.json `seats.last_refused_birth`).
 REFUSAL_CLASS = "founders"
 _STATE = "kalshi_founders"
 _FLAGS: dict[str, Any] = {}  # niches.json's `yields_seats` rows, read again when the file changes
+_BLOCK_KEY = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2})?$")
 
 
 def seat(house: Any) -> Any | None:
     """One births pass's flagged founder: the Agent born, or None. Never raises (an error is a warning)."""
     try:
-        lock = getattr(house, "_lifecycle_lock", None)
-        with lock if lock is not None else nullcontext():
-            return _seat(house)
+        return _seat(house)
     except Exception as exc:  # noqa: BLE001 - the births pass goes on to the refill whatever happens here
-        _tell_error(house, exc)
+        _tell(house, f"error:{type(exc).__name__}",
+              f"the flagged founders could not be seated this pass ({type(exc).__name__}: {str(exc)[:200]}); the births pass goes on")
         return None
 
 
 def pending(house: Any) -> list[tuple[Any, Mapping[str, Any]]]:
-    """(niche, founder row) of every flagged founder of an open Kalshi desk whose key no agent was ever born with."""
+    """(niche, founder row) of every flagged founder of an open Kalshi desk whose key no agent was ever born with, in
+    seat order: (`seat_priority`, desk, row). A malformed row is left out and told."""
     lock = getattr(house.registry, "_lock", None)
     with lock if lock is not None else nullcontext():
         born = {a.founder for a in house.registry.agents.values() if a.founder}
-    return [(niche, row) for niche in house.niches.values() if not niche.dormant and niche.venue == VENUE
-            for row in niche.founders if row.get(FLAG) is True and row.get("key") and row["key"] not in born]
+    rows, bad = [], []
+    for niche in list(house.niches.values()):
+        if niche.dormant or niche.venue != VENUE:
+            continue
+        for index, row in enumerate(niche.founders):
+            if not isinstance(row, Mapping) or FLAG not in row:
+                continue
+            flag, key = row.get(FLAG), row.get("key")
+            if flag is not True:
+                if flag is not False:
+                    bad.append(f"{niche.id} row {index}: {FLAG} is {flag!r}, not true or false")
+                continue
+            if not isinstance(key, str) or not key.strip():
+                bad.append(f"{niche.id} row {index}: a flagged row with no key")
+                continue
+            priority = row.get(PRIORITY, DEFAULT_PRIORITY)
+            if isinstance(priority, bool) or not isinstance(priority, int):
+                bad.append(f"{niche.id} {key}: {PRIORITY} is {priority!r}, not an integer")
+                continue
+            if key not in born:
+                rows.append((priority, niche.id, index, niche, row))
+    if bad:
+        _tell(house, "malformed", f"{len(bad)} flagged founder row{'' if len(bad) == 1 else 's'} of league/niches.json "
+                                  f"{'is' if len(bad) == 1 else 'are'} skipped: " + "; ".join(bad[:6]))
+    rows.sort(key=lambda r: r[:3])
+    return [(niche, row) for _, _, _, niche, row in rows]
+
+
+class _Tape:
+    """The active `eval.block` rows whose block began inside the window, folded after a cursor: (began, agent, log
+    growth). Bounded: a row leaves when the window passes it, and each fold reads only the rows after the cursor."""
+
+    def __init__(self) -> None:
+        self.cursor = 0
+        self.rows: list[tuple[str, str, float]] = []
+        self.lock = threading.Lock()
+
+    def fold(self, ledger: Any, since: str) -> list[tuple[str, str, float]]:
+        with self.lock:
+            fresh = []
+            for entry in ledger.iter(kinds="eval.block", after=self.cursor):
+                self.cursor = entry.seq
+                p = entry.payload
+                if not p.get("active") or not entry.agent or entry.agent == HOUSE:
+                    continue
+                try:
+                    growth = float(p.get("log_growth") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(growth):
+                    fresh.append((_began(entry), entry.agent, growth))
+            self.rows = [row for row in self.rows if row[0] >= since] + [row for row in fresh if row[0] >= since]
+            return list(self.rows)
+
+
+def _began(entry: Any) -> str:
+    """When a block began, as the ledger's ISO stamps read: its `key` (`2026-09-20T13` an hour block, `2026-09-20` a
+    day block, `evaluator.block_key`), else when its row was written."""
+    key = entry.payload.get("key")
+    if isinstance(key, str) and _BLOCK_KEY.match(key):
+        return key + (":00:00.000Z" if "T" in key else "T00:00:00.000Z")
+    return str(entry.at)
 
 
 def desk_records(house: Any, *, days: float = RECORD_DAYS) -> dict[str, tuple[int, float]]:
-    """Desk -> (active `eval.block` rows, their summed log growth) over the last `days`: the pooled forward record
-    `House.family_forward` keeps for a family (every agent ever born into it, living or dead), kept for a desk (every
-    agent ever born on it) over the window F3 reads. Kept for `RECORD_CACHE_SECONDS`."""
+    """Desk -> (active `eval.block` rows, their summed log growth) over the blocks that began in the last `days`: the
+    pooled forward record `House.family_forward` keeps for a family (every agent ever born into it, living or dead),
+    kept for a desk (every agent ever born on it) over the window F3 reads. Kept for `RECORD_CACHE_SECONDS`; the
+    ledger is read after a cursor, never whole again."""
     now = house.clock()
     hit = house._data_cache.get(_CACHE_KEY)
-    if hit and now - hit[0] < RECORD_CACHE_SECONDS:
+    if hit and hit[2] == days and now - hit[0] < RECORD_CACHE_SECONDS:
         return hit[1]
     since = now_iso(lambda: now - days * 86400.0)
+    kept = house._data_cache.get(_TAPE_KEY)
+    tape = kept[1] if kept and kept[2] == days else _Tape()
+    house._data_cache[_TAPE_KEY] = (now, tape, days)
+    rows = tape.fold(house.ledger, since)
     lock = getattr(house.registry, "_lock", None)
     with lock if lock is not None else nullcontext():
         desk_of = {a.id: a.specialty for a in house.registry.agents.values() if a.specialty}
     out: dict[str, list[float]] = {}
-    for entry in house.ledger.iter(kinds="eval.block"):
-        if entry.at < since or not entry.payload.get("active"):
-            continue
-        desk = desk_of.get(entry.agent or "")
-        if not desk:
-            continue
-        try:
-            growth = float(entry.payload.get("log_growth") or 0.0)
-        except (TypeError, ValueError):
-            continue
-        row = out.setdefault(desk, [0, 0.0])
-        row[0] += 1
-        row[1] += growth
+    for _, agent, growth in rows:
+        desk = desk_of.get(agent)
+        if desk:
+            row = out.setdefault(desk, [0, 0.0])
+            row[0] += 1
+            row[1] += growth
     value = {desk: (int(n), growth) for desk, (n, growth) in out.items()}
-    house._data_cache[_CACHE_KEY] = (now, value)
+    house._data_cache[_CACHE_KEY] = (now, value, days)
     return value
 
 
 def yielding(house: Any) -> dict[str, dict[str, Any]]:
     """Desk -> {"floor", "reason"}: the open Kalshi desks whose niches.json row carries a valid `yields_seats`
-    (`niches.load` keeps no such key, so the row is read here, from the file the House loaded its desks from)."""
+    (`niches.load` keeps no such key, so the row is read here, from the file the House loaded its desks from). A
+    malformed flag yields nothing and is told."""
     path = niches_module.NICHES_PATH
     stamp = (str(path), path.stat().st_mtime_ns)
     if _FLAGS.get("stamp") != stamp:
         doc = json.loads(path.read_text(encoding="utf-8"))
         _FLAGS.update(stamp=stamp, rows={str(row.get("id")): row.get(YIELD_FLAG) for row in doc.get("niches") or ()
-                                         if row.get(YIELD_FLAG) is not None})
-    out = {}
+                                         if isinstance(row, Mapping) and row.get(YIELD_FLAG) is not None})
+    out, bad = {}, []
     for desk, flag in (_FLAGS.get("rows") or {}).items():
         niche = house.niches.get(desk)
-        if niche is None or niche.dormant or niche.venue != VENUE or not isinstance(flag, Mapping):
+        if niche is None or niche.dormant or niche.venue != VENUE:
             continue
-        floor = flag.get("floor")
+        floor = flag.get("floor") if isinstance(flag, Mapping) else None
         if isinstance(floor, bool) or not isinstance(floor, int) or floor < 1:
-            continue  # a malformed flag yields nothing
+            bad.append(f"{desk}: {YIELD_FLAG} is {flag!r}, not {{\"floor\": an integer of 1 or more, \"reason\": ...}}")
+            continue
         out[desk] = {"floor": floor, "reason": str(flag.get("reason") or "").strip()}
+    if bad:
+        _tell(house, "malformed-yield", "a desk row of league/niches.json yields no seat: " + "; ".join(bad[:4]))
     return out
 
 
+def _lock(house: Any) -> Any:
+    lock = getattr(house, "_lifecycle_lock", None)
+    return lock if lock is not None else nullcontext()
+
+
 def _seat(house: Any) -> Any | None:
+    if not pending(house):
+        return None  # every flagged founder has been born: nothing to read, nothing to ask
+    from .house import PROBE_BOX  # here: league.house imports this module
+
+    with _lock(house):
+        chosen = _choose(house)
+    if chosen is None:
+        return None
+    key = chosen["row"]["key"]
+    # The NEEDS probe outside the lifecycle lock: every wake takes that lock, and Sail stalling under it stalls the
+    # whole tick (review of PR 159). The births phase holds the probe box; this probe re-enters it, as `found`'s does.
+    described = house.sandbox.needs(PROBE_BOX, chosen["row"]["code"])
+    with _lock(house):
+        # The probe took seconds: a birth or a death may have moved the answer. Asked again, and the founder is born
+        # only when the same founder still has a seat.
+        again = _choose(house)
+        if again is None or again["row"]["key"] != key or again["row"]["code"] != chosen["row"]["code"]:
+            return None
+        niche, how = again["niche"], again["how"]
+        born = _found(house, key, code_sha(again["row"]["code"]), niche, described)
+        if born is None:
+            return None  # refused or born meanwhile: nobody dies
+        try:
+            _retire(house, key, born, niche, how)
+        finally:
+            _record(house, key, born, niche, how)
+    return born
+
+
+def _choose(house: Any) -> dict[str, Any] | None:
+    """The first flagged founder, in seat order, whose own desk has a free seat and for whom the league has room or
+    makes it: {"niche", "row" (the House's founder row), "how"}; or None, the reason kept (`_refuse`). One league
+    question a call: the founders behind the first with a seat on its desk wait for it."""
     wanted = pending(house)
     if not wanted:
         return None
-    from .house import Newcomer  # here: league.house imports this module
-
     rules = house.game["economy"]
     state = _state(house)
     rows = house.founders()
     by_key = {row["key"]: row for row in rows}
     desk_names = {niche.desk for niche in house.niches.values()}
-    waiting, why_not, asked = [], [], set()
+    candidates, waiting, why_not = [], [], []
     for niche, raw in wanted:
         key = str(raw["key"])
         row = by_key.get(key)
@@ -174,57 +301,47 @@ def _seat(house: Any) -> Any | None:
             waiting.append(key)
             why_not.append(f"{key}: its key names a desk or another founder, and `found` would seat more than one")
             continue
-        sha = code_sha(row["code"])
-        if (state["refused"].get(key) or {}).get("code") == sha:
+        if (state["refused"].get(key) or {}).get("code") == code_sha(row["code"]):
             continue  # its program could not be born (told once); asked again when its code changes
         waiting.append(key)
-        if niche.id in asked:
-            continue  # one seat question a desk a pass: the desk's next founder asks on the next pass
-        asked.add(niche.id)
-        newcomer = Newcomer(family=row["family"], venue=niche.venue, what=f"the founder {key}")
-        how = _room(house, rules, niche, newcomer)
-        if how.get("why"):
-            why_not.append(f"{key} on {niche.id}: {how['why']}")
+        candidates.append((niche, row))
+    living, ceiling = len(house.registry.living()), int(rules["max_population"])
+    for niche, row in candidates:
+        members, cap = house.members(niche.id), int(niche.max_members)
+        if members >= cap:
+            why_not.append(f"{row['key']} on {niche.id}: its desk is full ({members} of {cap}), and a founder takes only a "
+                           "free seat of its own desk")
             continue
-        born = _found(house, key, sha, niche)
-        if born is None:
-            waiting.remove(key)
-            continue
-        loser = how.get("loser")
-        if loser is not None and loser.alive:
-            house.kill(loser, how["cause"], house.postmortem(loser, how["cause"], _postmortem(key, born, niche, loser, how)))
-        _record(house, key, born, niche, how)
-        return born
+        if living < ceiling:
+            return {"niche": niche, "row": row, "how": {"rule": "free seat", "loser": None, "cause": None}}
+        how = _room(house, rules, niche, row, living, ceiling)
+        if not how.get("why"):
+            return {"niche": niche, "row": row, "how": how}
+        why_not.append(f"{row['key']} on {niche.id}: {how['why']}")
+        break  # one league question a pass: the next founders wait behind this one
     if why_not:
         _refuse(house, waiting, "; ".join(why_not))
     return None
 
 
-def _room(house: Any, rules: Mapping[str, Any], niche: Any, newcomer: Any) -> dict[str, Any]:
-    """Where the founder sits: `rule` ("free seat", "desk full", "league full" or "desk yields seats") with the `loser`
-    that makes way and its `cause` and, from another desk, that desk's `record`; or `why` nobody may make way."""
-    members, cap = house.members(niche.id), int(niche.max_members)
-    if members >= cap:
-        kept: dict[str, int] = {}
-        rank = house._displaceable(rules, specialty=niche.id, evidenced=True, newcomer=newcomer, why=kept)
-        loser = next((row[-1] for row in rank if _allowed(house, row[-1])), None)
-        if loser is None:
-            return {"why": f"its desk is full ({members} of {cap}) and no resident may be displaced{_kept(kept)}"}
-        return {"rule": "desk full", "loser": loser, "cause": "displaced"}
-    living, ceiling = len(house.registry.living()), int(rules["max_population"])
-    if living < ceiling:
-        return {"rule": "free seat", "loser": None, "cause": None}
+def _room(house: Any, rules: Mapping[str, Any], niche: Any, row: Mapping[str, Any], living: int, ceiling: int) -> dict[str, Any]:
+    """Room in a full league for a founder whose desk has a free seat: `rule` ("league full" or "desk yields seats")
+    with the `loser` that makes way, its `cause` and its desk's `record`; or `why` nobody may make way."""
+    from .house import Newcomer  # here: league.house imports this module
+
+    newcomer = Newcomer(family=row["family"], venue=VENUE, forward=None, what=f"the founder {row['key']}")
     market = _displaced(house, rules, newcomer)
     if not market.get("why"):
         return market
-    yielded = _yielded(house, rules, niche, newcomer.family)
+    yielded = _yielded(house, rules, niche, row["family"])
     if not yielded.get("why"):
         return yielded
     return {"why": f"the league is full ({living} of {ceiling}) and {market['why']}; and no desk yields a seat: {yielded['why']}"}
 
 
 def _displaced(house: Any, rules: Mapping[str, Any], newcomer: Any) -> dict[str, Any]:
-    """The House's own seat market in a full league: the first resident, in its ranking, of the most negative desk."""
+    """The House's own seat market in a full league, for a newcomer without forward evidence: the first resident, in
+    its order, of the most negative desk."""
     minimum = int(rules.get("losing_family_min_blocks", 6))
     negative = sorted((growth, desk, blocks) for desk, (blocks, growth) in desk_records(house).items()
                       if losing(blocks, growth, minimum))
@@ -232,14 +349,20 @@ def _displaced(house: Any, rules: Mapping[str, Any], newcomer: Any) -> dict[str,
         return {"why": f"no desk's pooled forward record over the last {RECORD_DAYS:g} days is negative over {minimum} "
                        "active blocks or more"}
     reserved = house._reserved_desks(house.seat_waiters(), below="strategies")
+    exclude = set(house._keep_for(reserved)) | set(house._last_traders(house.registry.living()))
     kept: dict[str, int] = {}
-    rank = house._displaceable(rules, evidenced=True, newcomer=newcomer, exclude=house._keep_for(reserved), why=kept)
+    rank = house._displaceable(rules, evidenced=False, newcomer=newcomer, exclude=tuple(sorted(exclude)), why=kept)
     first: dict[str, Any] = {}
     losers = {desk for _, desk, _ in negative}
     for row in rank:  # the House's order: least evidence first
         agent = row[-1]
-        if agent.specialty in losers and agent.specialty not in first and _allowed(house, agent):
-            first[agent.specialty] = agent
+        if agent.specialty not in losers or agent.specialty in first:
+            continue
+        why = _protected(house, agent)
+        if why:
+            kept[why] = kept.get(why, 0) + 1
+            continue
+        first[agent.specialty] = agent
     for growth, desk, blocks in negative:  # the most negative desk first
         if desk in first:
             return {"rule": "league full", "loser": first[desk], "cause": "displaced",
@@ -277,7 +400,7 @@ def _yielded(house: Any, rules: Mapping[str, Any], niche: Any, family: str | Non
         kept: dict[str, int] = {}
         ranked = []
         for agent in members:
-            why = _kept_from_yield(house, agent, family)
+            why = _protected(house, agent, family)
             standing = None if why else house._standing(agent, epoch)
             if standing is not None and (standing.mean_growth > 0 or standing.score_growth > 0):
                 why = "a winner"
@@ -299,9 +422,11 @@ def _yielded(house: Any, rules: Mapping[str, Any], niche: Any, family: str | Non
     return {"why": "; ".join(notes) or f"no desk but the founder's own carries {YIELD_FLAG}"}
 
 
-def _kept_from_yield(house: Any, agent: Any, family: str | None) -> str:
-    """Why a resident of a yielding desk may not go, or "" (the rules its flag gives up nothing against)."""
-    if not agent.alive:
+def _protected(house: Any, agent: Any, family: str | None = None) -> str:
+    """Why a resident chosen to make way for a founder may not, whichever path chose it, or "". `family`: the
+    founder's own, which a yielding desk never gives up to it."""
+    current = house.registry.get(agent.id)
+    if current is None or not current.alive:
         return "dead"
     if house.evaluator.rung(agent.id) >= 2:
         return "real money"
@@ -316,7 +441,7 @@ def _kept_from_yield(house: Any, agent: Any, family: str | None) -> str:
         return "holding a position or a working order"
     jobs = getattr(house, "research_jobs", None)
     if jobs is not None and jobs.active(agent.id):
-        return "research in flight"  # a paid session the retirement would cancel: it waits for it, as the seat market does
+        return "research in flight"  # a paid session the death would cancel: it waits for it, as the seat market does
     return ""
 
 
@@ -341,15 +466,9 @@ def _proven(house: Any, agent: Any) -> bool:
         return True
     try:
         record = reader(agent.family, agent.venue)
-    except Exception:  # noqa: BLE001 - an unreadable record protects: this path retires outside the seat market
+    except Exception:  # noqa: BLE001 - an unreadable record protects: this path kills outside the House's own rules
         return True
     return bool(record and (record.get("proven") or record.get("state") in ("proven", "swing")))
-
-
-def _allowed(house: Any, agent: Any) -> bool:
-    """The seat market's answer checked again on the resident chosen: alive, never on real money, never a member of
-    a proven or swinging family, whoever asks."""
-    return agent.alive and house.evaluator.rung(agent.id) < 2 and not _proven(house, agent)
 
 
 def _kept(kept: Mapping[str, int]) -> str:
@@ -359,10 +478,11 @@ def _kept(kept: Mapping[str, int]) -> str:
     return " (kept: " + ", ".join(f"{rule} {n}" for rule, n in sorted(kept.items(), key=lambda kv: (-kv[1], kv[0]))[:6]) + ")"
 
 
-def _found(house: Any, key: str, sha: str, niche: Any) -> Any | None:
-    """The founder, born through `House.found` (rung 1, the owner's prior), or None when its program was refused."""
+def _found(house: Any, key: str, sha: str, niche: Any, described: Any) -> Any | None:
+    """The founder, born through `House.found` (rung 1, the owner's prior) from the NEEDS probe read before the lock,
+    or None when its program was refused or it was born meanwhile."""
     try:
-        born = house.found([key])
+        born = house.found([key], described={key: described})
     except ValueError as exc:  # its NEEDS were refused (`House.spawn`): told once a program version
         with house._state_lock:
             _state(house)["refused"][key] = {"code": sha, "why": str(exc)[:300], "at": now_iso(house.clock)}
@@ -372,12 +492,24 @@ def _found(house: Any, key: str, sha: str, niche: Any) -> Any | None:
     return born[0] if born else None
 
 
+def _retire(house: Any, key: str, born: Any, niche: Any, how: Mapping[str, Any]) -> None:
+    """The resident that makes way dies, now that the founder is born (`kill` writes its postmortem)."""
+    loser = how.get("loser")
+    if loser is None:
+        return
+    current = house.registry.get(loser.id)
+    if current is None or not current.alive:
+        return
+    house.kill(current, how["cause"], _postmortem(key, born, niche, current, how))
+    if how["cause"] == DESK_CLOSED and current.specialty and isinstance(getattr(house, "_desk_displaced", None), dict):
+        # One seat out of a desk a tick, as `kill` stamps a displacement: the seat market takes no second one here.
+        house._desk_displaced[current.specialty] = house.clock()
+
+
 def _postmortem(key: str, born: Any, niche: Any, loser: Any, how: Mapping[str, Any]) -> str:
     record = how.get("record") or {}
     measured = (f"pooled forward record over the last {record.get('days', RECORD_DAYS):g} days is "
                 f"{float(record.get('growth') or 0):+.4f} over {record.get('blocks')} active blocks")
-    if how["rule"] == "desk full":
-        return f"its desk {niche.id} was full and the founder {key} ({born.id}) takes its seat"
     if how["rule"] == "desk yields seats":
         return (f"its desk {loser.specialty} yields seats while its pooled record is negative: {how['reason'] or 'no reason given'} "
                 f"(its {measured}; {how['members']} members, floor {how['floor']}); the founder {key} ({born.id}) takes the "
@@ -404,8 +536,6 @@ def _record(house: Any, key: str, born: Any, niche: Any, how: Mapping[str, Any])
     record = how.get("record") or {}
     if loser is None:
         where = "in a free seat"
-    elif how["rule"] == "desk full":
-        where = f"displacing {loser.id} on its full desk"
     elif how["rule"] == "desk yields seats":
         where = (f"in the seat {loser.specialty} yields ({loser.id} retired, {DESK_CLOSED}; the desk's pooled forward record "
                  f"{float(record.get('growth') or 0):+.4f} over {record.get('blocks')} active blocks in {RECORD_DAYS:g} days)")
@@ -440,26 +570,26 @@ def _refuse(house: Any, waiting: list[str], why: str) -> None:
                     founders=waiting[:20])
 
 
-def _tell_error(house: Any, exc: Exception) -> None:
-    """One warning an hour for the same error: an error every births pass must not escalate (`REPEAT_WARNINGS`)."""
-    text = f"the flagged founders could not be seated this pass ({type(exc).__name__}: {str(exc)[:200]}); the births pass goes on"
+def _tell(house: Any, topic: str, text: str) -> None:
+    """One warning an hour a topic (an error's kind, a malformed row): a warning every births pass must not
+    escalate (`REPEAT_WARNINGS`). Never raises."""
     try:
         now = house.clock()
         with house._state_lock:
-            told = _state(house).setdefault("error_told", {})
+            told = _state(house).setdefault("told", {})
             for old in [t for t, at in told.items() if now - float(at or 0) >= TELL_SECONDS]:
                 told.pop(old, None)
-            tell = text not in told
+            tell = topic not in told
             if tell:
-                told[text] = now
+                told[topic] = now
         if tell:
-            house.alert("warning", text)
+            house.alert("warning", text[:1000])
     except Exception:  # noqa: BLE001 - a House that cannot even be told this must still finish its births pass
         pass
 
 
 def _state(house: Any) -> dict[str, Any]:
-    """house.json `kalshi_founders`: `seated` (key -> the birth), `refused` (key -> the program refused), `error_told`."""
+    """house.json `kalshi_founders`: `seated` (key -> the birth), `refused` (key -> the program refused), `told`."""
     with house._state_lock:
         state = house._state.setdefault(_STATE, {})
         state.setdefault("seated", {})
