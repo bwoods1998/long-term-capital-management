@@ -33,6 +33,12 @@ frequent than the clock already allows.
    outside your niche matter to your strategy?" Cached by (note id, strategy sha), 16 notes a
    request, and anything above `relevance_run_threshold` (uncertain included) runs. If Jev is
    down or capped the decision is the deterministic one.
+   Since Sept 25, 2026 the question is behind a switch, `jev_relevance`, which game.json turns off. Measured
+   by the Jev run over Sept 22 00Z-Sept 25 14:35Z: it woke 169 sessions ($5.24) whose o1 was 8.3% and o2 (a
+   candidate that passed replay within 2 h) 4.7% -- the rate of the gate's random 10% sample of would-be
+   skips (6.6% and 4.5% over 1,481) and a fifth of the free triggers' (about 23% o2): $0.66 a replay pass
+   against $0.10-0.19 for the deterministic triggers. J2's held-out AUC for o2: Jev's p 0.650, the trigger
+   kind alone 0.790. Since the Jev run's 11:52Z deploy lifted its call cap it wakes about 30 more a day.
 5. **Sampling.** `sample_percent` of would-be skips run anyway (`decision: sample`, `sampled: true`,
    chosen by a hash of agent, window and slot, so a restart does not re-roll it),
    so the gate's miss rate is measured, not assumed: a miss is a sampled session that retained a
@@ -109,6 +115,35 @@ frequent than the clock already allows.
    agent is neither woken by, asked Jev about, nor shown by `playbook_read` a lesson that names it for
    those 3 days (`withheld`; review of #311: 413 `playbook_read` calls by 121 agents in the 24 hours to
    T0, so the control read the lesson whenever it researched for any other reason).
+13. **A practice agent's own fills and settlements do not wake it** (Sept 25, 2026, the forward-first
+   run's Y, from the Jev run's J2; `practice_skip_triggers`, under `real_positions` only). J2 joined 6,846
+   finished sessions of Sept 22 00Z to Sept 25 06Z to the gate rows that bought them: on the sessions F2
+   still runs, the trigger kind alone predicts a replay pass at AUC 0.856 held out, and sessions woken by
+   the agent's own fills or settlements predict none (0.215). The kinds were chosen on Sept 22-23 alone:
+   those with at least 20 practice sessions whose dollars per replay pass were over 3x the days' average
+   ($0.138): `book.fill` (495 sessions, $0.62 a pass) and `book.settle` (62, $0.44); a refusal ($0.15),
+   a lesson, a note, a block, a code change stay. Checked on the held-out Sept 24 00Z-Sept 25 06Z with
+   each session's own gate triggers: of F2's 1,171 surviving sessions ($37.00, 257 replay passes) the
+   rule skips 408 ($4.86, 13%) for 5 replay passes (2%) and 8 candidates of 301 (3%), $0.97 a pass
+   skipped against $0.14 on average. The kinds are taken out of the triggers found; anything else found
+   still runs the session (a lesson must still wake the lesson arm, rule 12), and the active forward
+   block that sums a practice agent's fills is a trigger as before. The kinds are taken out before rule
+   10's pause filter, so a paused practice agent's fill is not the once-a-UTC-day trade that wakes it
+   (`pause_trade_day` is spent only by what remains, its active forward block): it is woken by news of
+   its program, its own active block once a day, and the sample (the forward-first run's merge of Y into
+   c/integration, Sept 25, 2026). The passed kinds move the baseline only when they were all that was
+   found, so nothing a pause or a lock holds back is consumed. An agent on real money keeps every trigger: J2's 171
+   held-out real sessions held 8 of their 11 replay passes in these kinds, and real outcomes are what
+   its research is for. `[]` restores F2.
+14. **Compute follows yield** (Sept 25, 2026, Y1; `league/yield_ledger.py`). While the hourly yield row
+   has the `research` lane throttled (its dollars per positive forward block over the day above
+   `economy.lane_throttle` times the best lane's), a practice agent's session waits twice its research
+   interval, but never past a day since its last session (one session an agent a day is the floor); an
+   agent on real money, and one on rung 0 (rule 9), keeps its pace. It holds Luna's and Sail's research alike: the lane is both, and
+   Sail's is what remains when OpenAI's month reaches `audits`. Triggers found meanwhile wait, unconsumed,
+   for the session the throttle allows; one skip row (`lane_throttle:research`) marks each held slot and
+   is never sampled (a budget decision, not a guess at relevance). The refusal fast path is not held:
+   rule 11 already allows it once per agent, reason and day.
 
 Each decision writes one private `research.gate` row, with `trigger` (the class of evidence that
 woke it, or the skip's reason) and `record` (winner, loser, unproven or idle) so the yield of each
@@ -206,7 +241,17 @@ DEFAULTS: dict[str, Any] = {
     # Sept 25, 2026 (X2 and F2, rules 11 and 12; read under every `clock_runs`).
     "refusal_dedupe": True,
     "lesson_sources": ["teacher"],
+    # Sept 25, 2026 (Y, rule 13; under `real_positions` only): the trigger kinds that do not wake a
+    # practice agent. game.json sets J2's ["book.fill", "book.settle"]; [] here keeps F2's rules alone.
+    "practice_skip_triggers": [],
+    # Sept 25, 2026 (rule 4's switch; the Jev run's measurement): whether Jev's relevance answer may wake a
+    # session. game.json sets false; True here keeps the rule before it.
+    "jev_relevance": True,
 }
+#: The trigger kinds `practice_skip_triggers` may name (game.json `research_bounds.gate` lists them).
+SKIPPABLE_TRIGGERS = ("book.fill", "book.settle", "book.refused", "credit.grant", "window", "market")
+#: Rule 14: a throttled research lane never holds an agent more than a day past its last session.
+THROTTLE_FLOOR_SECONDS = 86400.0
 #: Provider server errors (Sept 24, 2026): the vendor failed the session, so the researcher refunds
 #: what its turns were charged. The brief's 502 and 504, and the rest of the family the researcher
 #: already treats alike (it polls a response it holds on any of them).
@@ -879,6 +924,17 @@ class ResearchGate:
             tags: dict[str, Any] = {"record": record, **({"money": "real" if real else "practice"} if f2 else {})}
             if forced:
                 return self._run(agent, st, "run", forced, [forced], sampled=False, **tags)
+            if f2 and not real:
+                # Rule 14 (Y1): the research lane is throttled; triggers wait, unconsumed, for the slot. An agent
+                # on rung 0 keeps its clock (rule 9): replay is its only way up, inside its deadline.
+                hold = self._throttle_hold(agent, last, now) if self._rung(agent) != 0 else None
+                if hold is not None:
+                    if float(st.get("throttle_until") or 0) != hold:
+                        st["throttle_until"] = hold
+                        self._skip(agent, st, "lane_throttle:research", {}, **tags)
+                        self.state.save()
+                    return False
+            head = int(self.ledger.head()[0])
             found = self.triggers(agent, st)
             lock_after = int(settings.get("abstain_lock_after") or 0)
             # Rule 9: an agent on rung 0 (replay only) keeps its clock; it is neither paused nor locked.
@@ -886,6 +942,13 @@ class ResearchGate:
             paused = not rung0 and self._paused(settings, real, streak)
             # Rule 7's idle exemption kept an idle agent's cadence; under rule 9 no idle agent has one.
             locked = not paused and not rung0 and lock_after > 0 and streak >= lock_after and (f2 or record != "idle")
+            # Rule 13: a practice agent's own fills and settlements do not wake it; anything else does. Taken
+            # out first, so a paused agent's fill never spends rule 10's once-a-day trade (`pause_trade_day`).
+            skip = self._skip_kinds(settings) if f2 and not real else frozenset()
+            dropped = [t for t in found if t.split(":", 1)[0] in skip]
+            only_dropped = bool(dropped) and len(dropped) == len(found)
+            if dropped:
+                found = [t for t in found if t.split(":", 1)[0] not in skip]
             if paused:
                 # Rule 10: a practice agent after three empty sessions waits for news of its program, or
                 # its own trading once a day.
@@ -897,6 +960,11 @@ class ResearchGate:
                 found = [t for t in found if t.split(":", 1)[0] in ABSTAIN_LOCK_TRIGGERS]
             if found:
                 return self._run(agent, st, "run", "trigger", found, sampled=False, **tags)
+            if only_dropped:
+                # Seen and not bought: the baseline passes them, so they neither wake it later nor pile up
+                # to be read again at every check. Only when nothing else was found up to `head`: a
+                # trigger a pause or a lock holds back (a second active block the same UTC day) must wait.
+                st["seq"] = max(int(st.get("seq") or 0), head)
             if now < float(st.get("recheck_at") or 0):
                 return False  # inside a skipped slot: re-checked only for triggers until the next one
             after = int(settings["after"])
@@ -915,7 +983,9 @@ class ResearchGate:
             interval = float(self.house.research_interval_hours(agent)) * 3600
             if clock and streak < after and not blocked:
                 return self._run(agent, st, "run", "clock", [], sampled=False, **tags)
-            hits, answered = ([], True) if (locked or paused) else self._relevant_notes(agent, st, receipt)
+            # Rule 4's switch (`jev_relevance`): off, Jev is not asked and wakes nothing.
+            ask_jev = not (locked or paused) and bool(settings.get("jev_relevance", True))
+            hits, answered = self._relevant_notes(agent, st, receipt) if ask_jev else ([], True)
             if hits:
                 return self._run(agent, st, "run", "jev_relevant_note", hits, sampled=False, receipt=receipt, **tags)
             heartbeat = float(settings["practice_max_skip_hours"] if f2 and not real else settings["max_skip_hours"])
@@ -927,6 +997,8 @@ class ResearchGate:
                 reason = f"practice_pause:{streak}"
             elif locked:
                 reason = f"abstain_lock:{streak}"
+            elif dropped and not clock:
+                reason = f"trigger_skip:{_primary(dropped)}"
             elif not clock:
                 reason = f"nothing_new:{record}"
             elif blocked:
@@ -945,6 +1017,28 @@ class ResearchGate:
             self._skip(agent, st, reason, receipt, **tags)
             self.state.save()
             return False
+
+    def _skip_kinds(self, settings: Mapping[str, Any]) -> frozenset[str]:
+        """Rule 13: the trigger kinds that do not wake a practice agent (`practice_skip_triggers`)."""
+        kinds = settings.get("practice_skip_triggers") or ()
+        return frozenset(str(k) for k in (kinds if isinstance(kinds, (list, tuple)) else ()) if str(k) in SKIPPABLE_TRIGGERS)
+
+    def _throttle_hold(self, agent: Any, last: float, now: float) -> float | None:
+        """Rule 14: while the hourly yield row has the research lane throttled, the instant until which this
+        practice agent's next session waits (twice its interval, never past a day since its last session),
+        or None when it may run. An agent that never researched is not held: F2 counts it from first sight."""
+        if not last:
+            return None
+        from .yield_ledger import throttled
+
+        if not throttled(self.ledger, "research"):
+            return None
+        try:
+            interval = float(self.house.research_interval_hours(agent)) * 3600
+        except Exception:  # noqa: BLE001 - an interval that cannot be read holds nobody
+            return None
+        until = float(last) + min(2 * interval, max(interval, THROTTLE_FLOOR_SECONDS))
+        return until if now < until else None
 
     def _draw(self, agent: Any, st: dict[str, Any], last: float, now: float, settings: Mapping[str, Any]) -> bool:
         """Whether this skip is sampled (rule 5). Under rule 10 an agent is drawn at most once per

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Replay the research gate's F2/X2 rules (Sept 25, 2026) over the sessions a ledger actually ran.
 
-    python3 scripts/gate_replay.py LEDGER [--hours 24] [--idle barren|off|clock] [--no-parity] [--json]
+    python3 scripts/gate_replay.py LEDGER [--hours 24] [--idle barren|off|clock] [--no-parity]
+                                          [--skip-practice book.fill,book.settle] [--throttle-research] [--no-jev] [--json]
 
 Read-only (sqlite `mode=ro`), standard library plus `league.research_gate`'s own `refusal_class` and
 `lesson_arm`. The window is the last `--hours` before the ledger's newest row. For every research
@@ -28,6 +29,13 @@ It is an approximation, and it says where:
 - A paused agent (rule 10) runs on news of its program (`PAUSE_NEWS`) and on its own trading
   (`PAUSE_DAILY`) once a UTC day; an active forward block can wake it where the gate of the day's
   lock did not, and those sessions never ran, so they are not here (at most one a paused agent a day).
+- `--skip-practice` (Y, rule 13): those trigger kinds are taken out of a practice agent's triggers
+  before the pause's filter, as `ResearchGate.allow` does; game.json's are `book.fill,book.settle`.
+- `--throttle-research` (Y1, rule 14): the research lane throttled all day (as the T0 day's yield rows
+  would have had it from their first hour): a practice agent's session within twice its estimated
+  interval (never past a day) of its last is held. A held session would have run later, with what it
+  waited for, and that session is not here: the throttle's `would` is a lower bound.
+- `--no-jev` (rule 4's switch, `jev_relevance: false`): Jev's relevance answer wakes nothing.
 - A session the new rules would add is not in `would`: the only ones are a teacher's lesson waking an
   agent the gate of the day did not match (`lessons.named_in_arm` is their upper bound) and the new
   sample draws (`samples.expected`).
@@ -75,7 +83,8 @@ def _outcome(p: dict) -> str:
 
 def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_heartbeat: float = 72.0, real_heartbeat: float = 24.0,
            pause_after: int = 3, lock_after: int = 3, barren_wakes: int = 10, sample_percent: float = 10.0,
-           sample_hours: float = 6.0, parity: bool = True) -> dict:
+           sample_hours: float = 6.0, parity: bool = True, skip_practice: tuple[str, ...] = (),
+           throttle_research: bool = False, jev: bool = True) -> dict:
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     end = _epoch(db.execute("SELECT max(at) FROM ledger").fetchone()[0])
     start_at = datetime.fromtimestamp(end - hours * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -182,6 +191,10 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
                 found = [str(x).split(":")[0] for x in g.get("triggers") or []]
             kept = []
             for trigger in found:
+                if trigger == "jev" and not jev:
+                    continue  # rule 4's switch off: Jev's answer wakes nothing
+                if not real and trigger in skip_practice:
+                    continue  # rule 13: a practice agent's own fills and settlements do not wake it
                 if trigger == "book.refused" and not new_keys:
                     continue
                 if trigger == "lesson" and (s["lessons"] == 0 or (parity and lesson_arm(agent) != "lesson")):
@@ -197,7 +210,7 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
                 reason = "resume"
             elif kept:
                 reason = f"trigger:{kept[0]}"
-            elif source.endswith(":jev") and not (paused or locked):
+            elif source.endswith(":jev") and jev and not (paused or locked):
                 reason = "jev"
             elif not (paused or locked) and real and (holds or refused) and due:
                 reason = "clock:real"
@@ -208,6 +221,10 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
                 reason = "trigger:barren"
             elif not paused and t - base >= (real_heartbeat if real else practice_heartbeat) * 3600:
                 reason = "heartbeat"
+            if reason and throttle_research and not real and reason != "resume" and s["last_run"] is not None:
+                gap = interval.get(agent, 7200.0)
+                if t - s["last_run"] < min(2 * gap, max(gap, 86400.0)):
+                    reason = ""  # rule 14: held for a later slot
             run = bool(reason)
             row = table[source]
             usd = float(p.get("cost_usd") or 0)
@@ -252,7 +269,8 @@ def replay(path: str, *, hours: float = 24.0, idle: str = "barren", practice_hea
         "window": {"from": start_at + "Z", "to": datetime.fromtimestamp(end, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "hours": hours},
         "rules": {"idle_runs": idle, "practice_max_skip_hours": practice_heartbeat, "max_skip_hours": real_heartbeat,
                   "practice_pause_after": pause_after, "abstain_lock_after": lock_after, "sample_hours": sample_hours,
-                  "lesson_arm": "parity" if parity else "all"},
+                  "lesson_arm": "parity" if parity else "all", "practice_skip_triggers": list(skip_practice),
+                  "research_throttled": throttle_research, "jev_relevance": jev},
         "sessions": {"did": total["did"], "would": total["would"], "would_with_samples": round(total["would"] + expected, 1)},
         "candidates": {"did": total["did_candidates"], "would": total["would_candidates"],
                        "would_with_samples": round(total["would_candidates"] + expected * per_sample_candidates, 1)},
@@ -278,9 +296,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hours", type=float, default=24.0)
     parser.add_argument("--idle", choices=("barren", "off", "clock"), default="barren")
     parser.add_argument("--no-parity", action="store_true", help="lessons wake every agent they name (lesson_arm: all)")
+    parser.add_argument("--skip-practice", default="", help="trigger kinds that do not wake a practice agent (rule 13)")
+    parser.add_argument("--throttle-research", action="store_true", help="the research lane throttled all day (rule 14)")
+    parser.add_argument("--no-jev", action="store_true", help="Jev's relevance answer wakes nothing (jev_relevance: false)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    out = replay(args.ledger, hours=args.hours, idle=args.idle, parity=not args.no_parity)
+    out = replay(args.ledger, hours=args.hours, idle=args.idle, parity=not args.no_parity,
+                 skip_practice=tuple(k for k in args.skip_practice.split(",") if k), throttle_research=args.throttle_research,
+                 jev=not args.no_jev)
     if args.json:
         print(json.dumps(out, indent=1))
         return 0

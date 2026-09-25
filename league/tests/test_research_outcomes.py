@@ -47,7 +47,10 @@ class Outcomes(GateCase):
     def f2(self, **settings):
         return self.ready(legacy=False, settings={"clock_runs": "real_positions", "abstain_lock_after": 3, "practice_pause_after": 3,
                                                   "max_skip_hours": 24, "practice_max_skip_hours": 72, "idle_runs": "barren",
-                                                  "sample_hours": 6, "lesson_arm": "parity", "refusal_dedupe": True, **settings})
+                                                  "sample_hours": 6, "lesson_arm": "parity", "refusal_dedupe": True,
+                                                  # F2's rules alone: J2's trigger skip (rule 13) has its own tests
+                                                  # (test_compute_follows_yield).
+                                                  "practice_skip_triggers": [], **settings})
 
     def win(self, agent, n=3, growth=0.004):
         for i in range(n):

@@ -38,7 +38,9 @@
     "desk_capacity_grow_blocks": 30,
     "desk_capacity_seats_a_day": 2,
     "desk_capacity_floor": 4,
-    "desk_capacity_max_gain": 4
+    "desk_capacity_max_gain": 4,
+    "_about_lane_throttle": "Sept 25, 2026 (the forward-first run, Y1: compute follows yield; league/yield_ledger.py plan_throttle). At each hourly yield row a lane whose dollars per positive forward block over the last day exceed lane_throttle times the best lane's (the cheapest with at least 10 positive blocks), or that bought none having spent $1, is halved until a row finds it under the line: research's cadence for practice agents (never past one session a day; real money keeps its pace; Luna and Sail alike), the consultant's price, each scheduled Merton role's cadence and the engineer's pace except for jobs about agents on real money; audits never. Each change is an ops.budget 'lane throttle' row. Replayed on the T0 snapshot's 24 yield rows (the lab's own calls read from lab.sqlite): the lab $0.038 a positive block (best), the foundry $0.052, the engineer $0.18 (4.7x), research $0.29 (7.5x), the consultant $0.51 after its consults (13.2x, F4's reading), the architect $7.38 for none: all four halved. Bounds 2-5.",
+    "lane_throttle": 3
   },
   "bounds": {
     "daily_pool_usd": [
@@ -120,6 +122,10 @@
     "desk_capacity_max_gain": [
       0,
       8
+    ],
+    "lane_throttle": [
+      2,
+      5
     ]
   },
   "audit": {
@@ -183,7 +189,14 @@
       "lesson_sources": [
         "teacher"
       ],
-      "lesson_arm": "parity"
+      "lesson_arm": "parity",
+      "_about_sept25_trigger_skip": "Sept 25, 2026 (the forward-first run's Y, from the Jev run's J2; league/research_gate.py rule 13). J2 joined 6,846 finished sessions of Sept 22 00Z-Sept 25 06Z to the gate rows that bought them: on the sessions F2 still runs, the trigger kind alone predicts a replay pass at AUC 0.856 held out, and the agent's own fills and settlements predict none (0.215). Chosen on Sept 22-23 alone: the kinds with at least 20 practice sessions and dollars per replay pass over 3x the days' average ($0.138), book.fill (495 sessions, $0.62 a pass) and book.settle (62, $0.44). Held out (Sept 24 00Z-Sept 25 06Z, each session's own gate triggers): of F2's 1,171 surviving sessions ($37.00, 257 replay passes) it skips 408 ($4.86, 13%) for 5 replay passes (2%) and 8 of 301 candidates (3%). Practice agents only (real money keeps every trigger); the kinds are taken out of the triggers found, before rule 10's pause filter, and anything else still wakes the agent, so a paused practice agent is woken by news of its program, its own active forward block once a UTC day and the sample, never by a fill; [] restores F2. Bounds: research_bounds.gate.practice_skip_triggers lists the kinds allowed.",
+      "practice_skip_triggers": [
+        "book.fill",
+        "book.settle"
+      ],
+      "_about_sept25_jev_relevance": "Sept 25, 2026 (league/research_gate.py rule 4's switch; the Jev run's measurement, Sept 22 00Z-Sept 25 14:35Z): Jev's relevance answer woke 169 research sessions ($5.24) with o1 8.3% and o2 4.7%, the rate of the gate's random 10% sample of would-be skips (6.6% and 4.5% over 1,481) and a fifth of the free triggers' (about 23% o2): $0.66 a replay pass against $0.10-0.19. Off: the gate does not ask Jev and a note it would have rated relevant wakes nothing; notes in the agent's own desk still wake it as a free trigger.",
+      "jev_relevance": false
     }
   },
   "research_bounds": {
@@ -218,6 +231,18 @@
       "max_skip_hours": [
         6,
         72
+      ],
+      "practice_skip_triggers": [
+        "book.fill",
+        "book.settle",
+        "book.refused",
+        "credit.grant",
+        "window",
+        "market"
+      ],
+      "jev_relevance": [
+        true,
+        false
       ]
     }
   },

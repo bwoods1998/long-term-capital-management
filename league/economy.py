@@ -94,13 +94,17 @@ def check_bounds(game: Mapping[str, Any]) -> None:
         if key in lift and not float(low) <= float(lift[key]) <= float(high):
             raise ValueError(f"game.json: merton.lift.{key} = {lift[key]} is outside [{low}, {high}]")
     # F2 (Sept 25, 2026): each research.gate dial `research_bounds.gate` names is inside its range, or
-    # one of the values it lists.
+    # one of the values it lists; a list dial (Y's `practice_skip_triggers`) a subset of them.
     gate = (game.get("research") or {}).get("gate") or {}
     for key, bound in ((game.get("research_bounds") or {}).get("gate") or {}).items():
         if key not in gate:
             continue
-        if all(isinstance(v, str) for v in bound):
-            if gate[key] not in bound:
+        if isinstance(gate[key], list):
+            if any(item not in bound for item in gate[key]):
+                raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not a subset of {bound}")
+        elif all(isinstance(v, (str, bool)) for v in bound):
+            # A switch (`jev_relevance`, Sept 25, 2026) lists true and false: it must be one of them, a bool.
+            if gate[key] not in bound or isinstance(gate[key], bool) != isinstance(bound[0], bool):
                 raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not one of {bound}")
         elif not float(bound[0]) <= float(gate[key]) <= float(bound[1]):
             raise ValueError(f"game.json: research.gate.{key} = {gate[key]} is outside [{bound[0]}, {bound[1]}]")
