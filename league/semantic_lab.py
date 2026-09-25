@@ -86,11 +86,11 @@ class JevClient:
     def __init__(self, gateway, token, *, opener=urllib.request.urlopen):
         self.url, self.token, self.opener = gateway.rstrip('/')+'/v1/typesafe/systemone', token, opener
 
-    def __call__(self, ident, body):
+    def __call__(self, ident, body, *, timeout=40):
         request = urllib.request.Request(self.url, data=body.encode(), method='POST',
             headers={'Authorization':'Bearer '+self.token(), 'Content-Type':'application/json',
                      'X-LTCM-Request':ident, 'User-Agent':'ltcm-floor/1.0'})
-        with self.opener(request, timeout=40) as response:
+        with self.opener(request, timeout=max(1.0, min(40.0, float(timeout)))) as response:
             raw = response.read(128*1024+1)
             if len(raw)>128*1024:
                 raise ValueError('semantic response too large')

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from league.exposure import Exposure, keys_of
 from league.hypothesis_memory import HypothesisMemory, mechanism_id
-from league.jev import MODEL, Sensor
+from league.jev import MODEL, UNKNOWN_COST, Sensor
 from league.ledger import Ledger, now_iso
 from league.pacer import Pacer
 from league.research_gate import report, session_outcome
@@ -28,7 +28,7 @@ class FakeJev:
     def __init__(self, p=0.9, *, fail=False, cost="0.0001"):
         self.p, self.fail, self.cost, self.calls = p, fail, cost, []
 
-    def __call__(self, ident, body):
+    def __call__(self, ident, body, timeout=None):
         request = json.loads(body)
         self.calls.append((ident, request))
         if self.fail:
@@ -70,9 +70,9 @@ class SensorTest(unittest.TestCase):
 
     def test_daily_dollar_and_call_caps_are_checked_before_calling(self):
         jev = FakeJev(0.5, cost="0.001")
-        sensor = self.sensor(jev, daily_usd="0.0045")
+        sensor = self.sensor(jev, daily_usd="0.0115")
         sensor.ask("gate", {}, {f"k{n}": ("t", "q?") for n in range(16 * 5)})
-        # 0.001 spent per call; a new call needs room for the unconfirmed worst case ($0.003).
+        # 0.001 spent per call; a new call needs room for the unconfirmed worst case (the gateway's $0.01 hold).
         self.assertEqual(len(jev.calls), 2)
         self.assertIn("daily Jev cap", sensor.refusal("gate"))
         capped = Sensor(Path(self.dir.name) / "calls.sqlite", FakeJev(0.5), clock=self.clock, daily_calls=10,
@@ -88,7 +88,7 @@ class SensorTest(unittest.TestCase):
         answers = sensor.ask("gate", {}, {f"k{n}": ("t", "q?") for n in range(40)})
         self.assertEqual(set(answers.values()), {None})
         self.assertEqual(len(jev.calls), 1, "no retry storm: the rest of the batch is not attempted")
-        self.assertEqual(sensor.spent_today(), Decimal("0.003"))
+        self.assertEqual(sensor.spent_today(), UNKNOWN_COST)
         sensor.ask("gate", {}, {"k0": ("t", "q?")})
         self.assertEqual(len(jev.calls), 1, "the breaker is open")
         self.clock.advance(601)
@@ -170,7 +170,7 @@ class AskStateTest(unittest.TestCase):
         self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt), {"a": None})
         self.assertTrue(receipt["failed"])
         self.assertIn("failed", receipt["refused"])
-        self.assertEqual(sensor.spent_today("move"), Decimal("0.003"), "an unconfirmed call counts at the worst case")
+        self.assertEqual(sensor.spent_today("move"), UNKNOWN_COST, "an unconfirmed call counts at the worst case")
         receipt = {}
         sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt)
         self.assertIn("breaker", receipt["refused"])
@@ -192,7 +192,7 @@ class AskStateTest(unittest.TestCase):
         db = sqlite3.connect(path)
         rows = db.execute("SELECT purpose, cost FROM calls WHERE day=?", (day,)).fetchall()
         db.close()
-        usd = lambda purpose=None: sum((Decimal(c) if c is not None else Decimal("0.003") for p, c in rows  # noqa: E731
+        usd = lambda purpose=None: sum((Decimal(c) if c is not None else UNKNOWN_COST for p, c in rows  # noqa: E731
                                         if purpose is None or p == purpose), Decimal(0))
         return {"calls": len(rows), "gate": sum(p == "gate" for p, _ in rows), "move": sum(p == "move" for p, _ in rows),
                 "usd": usd(), "usd_gate": usd("gate"), "usd_move": usd("move")}
@@ -205,7 +205,7 @@ class AskStateTest(unittest.TestCase):
         path = Path(self.dir.name) / "jev.sqlite"
         answers = {"mode": "ok"}
 
-        def client(ident, body):
+        def client(ident, body, timeout=None):
             request = json.loads(body)
             if answers["mode"] == "fail":
                 raise TimeoutError("gateway timed out")
@@ -223,7 +223,7 @@ class AskStateTest(unittest.TestCase):
         answers["mode"] = "bad"
         sensor.ask("gate", {}, {"k2": ("t", "q?")})
         self.assertEqual(self.tally(sensor), self.counted(path, day))
-        self.assertEqual(self.tally(sensor)["usd"], Decimal("0.00007") * 3 + Decimal("0.003"))
+        self.assertEqual(self.tally(sensor)["usd"], Decimal("0.00007") * 3 + UNKNOWN_COST)
         restarted = Sensor(path, client, clock=self.clock)
         self.assertEqual(self.tally(restarted), self.counted(path, day))
         # A call that starts before midnight and settles after it stays on its own day.
@@ -241,7 +241,7 @@ class AskStateTest(unittest.TestCase):
         stats = sensor.stats()
         self.assertEqual(stats["calls_lifetime"], 6)
         self.assertEqual(stats["completed_lifetime"], 4)
-        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.00007") * 5 + Decimal("0.003"))
+        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.00007") * 5 + UNKNOWN_COST)
         self.assertEqual(sensor.headroom("move"), sensor.daily_calls - 1)
 
     def test_the_breaker_is_per_purpose_and_doubles_until_a_success(self):
@@ -270,12 +270,58 @@ class AskStateTest(unittest.TestCase):
             capped.ask("gate", {}, {f"k{self.clock()}": ("t", "q?")})
         self.assertEqual(capped.breakers["gate"] - self.clock(), 100, "never longer than cooldown_seconds")
 
+    def test_after_a_breaker_one_probe_call_goes_first(self):
+        seen = []
+
+        def client(ident, body, timeout=None):
+            # While the probe is in flight, every other call of its purpose is refused.
+            seen.append((sensor.refusal("move"), sensor.refusal("gate"), timeout))
+            if len(seen) == 1:
+                raise TimeoutError("gateway timed out")
+            request = json.loads(body)
+            return {"model": MODEL, "answers": {n: {"type": "noul", "noul": 0.5} for n in request["questions"]}}, Decimal("0.0001")
+
+        sensor = self.sensor(client)
+        sensor.ask_state("move", "s1", self.state, {"a": "Question a?"})
+        self.clock.advance(61)
+        self.assertEqual(sensor.ask_state("move", "s2", self.state, {"a": "Question a?"}, timeout=7.5), {"a": 0.5})
+        self.assertIn("half-open", seen[1][0])
+        self.assertEqual((seen[1][1], seen[1][2]), ("", 7.5), "other purposes go on; a caller's timeout reaches the client")
+        self.assertEqual(sensor.refusal("move"), "", "a good probe closes the breaker")
+        stuck = self.sensor(FakeJev(0.5), "stuck.sqlite")
+        stuck._failures["move"], stuck._probing["move"] = 1, self.clock()
+        self.assertIn("half-open", stuck.refusal("move"))
+        self.clock.advance(121)
+        self.assertEqual(stuck.refusal("move"), "", "a probe that never reported back stops holding its purpose")
+
+    def test_a_priced_refusal_is_booked_at_its_stated_cost(self):
+        import urllib.error
+
+        def client(ident, body, timeout=None):
+            raise urllib.error.HTTPError("https://gateway", 502, "Bad Gateway",
+                                         {"X-LTCM-Cost-Known": "true", "X-LTCM-Cost-USD": "0.00005"}, None)
+
+        sensor = self.sensor(client)
+        receipt = {}
+        sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt)
+        self.assertEqual((receipt["cost"], sensor.spent_today("move")), (Decimal("0.00005"), Decimal("0.00005")))
+        self.assertTrue(receipt["failed"])
+        self.assertIn("breaker", sensor.refusal("move"), "a 502 is still an outage")
+
+    def test_the_cached_answer_count_is_refreshed_at_most_every_ten_minutes(self):
+        sensor = self.sensor(FakeJev(0.5))
+        self.assertEqual(sensor.stats()["cached_answers"], 0)
+        sensor.ask_state("move", "s1", self.state, {"a": "Question a?", "b": "Question b?"})
+        self.assertEqual(sensor.stats()["cached_answers"], 0)
+        self.clock.advance(600)
+        self.assertEqual(sensor.stats()["cached_answers"], 2)
+
     def test_a_409_is_a_free_conflict_not_an_outage(self):
         import sqlite3
         import urllib.error
         seen = []
 
-        def client(ident, body):
+        def client(ident, body, timeout=None):
             seen.append(ident)
             if len(seen) == 1:
                 raise urllib.error.HTTPError("https://gateway/v1/typesafe/systemone", 409, "Conflict", {}, None)
@@ -320,16 +366,17 @@ class AskStateTest(unittest.TestCase):
         readonly = Sensor(path, None, clock=self.clock, readonly=True)
         self.assertEqual(readonly.stats()["calls_lifetime"], 3, "a read-only report of an older store counts its calls")
         sensor = Sensor(path, FakeJev(0.5), clock=self.clock)
-        self.assertEqual((sensor.calls_today("gate"), sensor.spent_today()), (2, Decimal("0.0031")))
+        self.assertEqual((sensor.calls_today("gate"), sensor.spent_today()), (2, Decimal("0.0001") + UNKNOWN_COST))
         stats = sensor.stats()
-        self.assertEqual((stats["calls_lifetime"], stats["completed_lifetime"], stats["spent_lifetime_usd"]), (3, 2, "0.0033"))
+        self.assertEqual((stats["calls_lifetime"], stats["completed_lifetime"]), (3, 2))
+        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.0003") + UNKNOWN_COST)
         self.assertEqual(Sensor(path, FakeJev(0.5), clock=self.clock).stats()["calls_lifetime"], 3, "built once")
         self.assertEqual(sensor.prune_calls(), 1, "calls older than 35 days go")
         self.clock.advance(86400)
         sensor.ask("gate", {}, {"k": ("t", "q?")})  # a new day: the tally is read from the day totals
         stats = sensor.stats()
         self.assertEqual((stats["calls_lifetime"], stats["completed_lifetime"]), (4, 3), "the pruned call still counts")
-        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.0034"))
+        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.0004") + UNKNOWN_COST)
         self.assertEqual(stats["today"]["gate"]["calls"], 1)
 
     def test_forget_drops_only_old_answers_under_a_prefix(self):
@@ -1073,6 +1120,26 @@ class FloorTickTest(HouseCase):
         self.assertFalse(floor.move._closing(), "the House's closing flag reaches the recorder")
         self.assertIn("jev:move", {e.payload["key"] for e in self.house.ledger.iter(kinds="ops.job")})
         self.assertIn("move", health["jev"]["sensor"]["today"])
+
+    def test_jev_holds_at_most_one_ops_slot(self):
+        floor = self.floor()
+        self.house.ledger.append("tool.request", {"name": "funding_rates", "description": "perpetual funding feed for BTC and ETH"}, agent="r-1")
+        release = threading.Event()
+        running = threading.Thread(target=release.wait, daemon=True)
+        running.start()
+        self.house._jobs["jev:move"] = running
+        try:
+            self.house.tick()
+            self.house.wait(10)
+            self.assertEqual(self.house.ledger.count(kinds="repair.reported"), 0, "nothing else starts while jev:move runs")
+        finally:
+            release.set()
+            running.join(5)
+        self.clock.advance(60)
+        self.house.tick()
+        self.house.wait(10)
+        self.assertEqual(self.house.ledger.count(kinds="repair.reported"), 1)
+        self.assertIsNotNone(floor.triage)
 
     def test_a_pause_stops_paid_jobs_but_not_the_inactivity_sweep(self):
         floor = self.floor()

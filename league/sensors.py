@@ -87,10 +87,14 @@ class JevFloor:
                 self.house.alert("warning", f"inactivity sweep failed ({type(exc).__name__}: {str(exc)[:160]})")
         if not open_for_business:
             return
+        # Jev holds at most one of the ops lane's three slots: nothing starts while a jev: job runs.
+        jobs = dict(getattr(self.house, "_jobs", None) or {})
+        if any(key.startswith("jev:") and job.is_alive() for key, job in jobs.items()):
+            return
         # The move sensor keeps its own clock: a point-in-time feature cannot wait its turn behind
-        # triage, and its job key keeps it to one run at a time.
-        if self.move is not None and self.move.due():
-            self.house._background("jev:move", self.move.run)
+        # triage once it is due.
+        if self.move is not None and self.move.due() and self.house._background("jev:move", self.move.run):
+            return
         # One job a tick at most: they share the House's three-slot ops lane with the backup, the
         # updater and Merton, and none of them is urgent.
         for key, job in (("jev:triage", self.triage), ("jev:links", self.memory), ("jev:exposure", self.exposure)):
