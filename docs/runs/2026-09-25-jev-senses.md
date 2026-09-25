@@ -70,9 +70,10 @@ its session.
 
 | Wave | State | Files owned |
 |---|---|---|
-| J0 + J1 (D-J1, owner deploy) | building | `league/jev.py`, `league/sensors.py`, `league/semantic_lab.py`, new `league/jev_features.py` and `league/jev_move_model.json`, `league/config.json`'s `jev` block only, `league/tests/test_jev_*.py` |
+| J0 + J1 (D-J1, owner deploy) | built, PR #319 (draft; second review running) | `league/jev.py`, `league/sensors.py`, `league/semantic_lab.py`, new `league/jev_features.py` and `league/jev_move_model.json`, `league/config.json`'s `jev` block only, `league/tests/test_jev_*.py` |
 | J5 (gateway) | after the options run's and the Kalshi run's gateway deploys | `gateway/lib/typesafe.mjs` (the `score` answer), `TYPESAFE_PILOT_USD` in `gateway/wrangler.jsonc` (to $41), `gateway/test/` Jev cases |
-| Hooks (J1 serving, J2, J3) | after their owners' waves merge | one hook each in `league/feeds.py` (Kalshi run, after K1), `league/research_gate.py` (forward-first F2, after Deploy B), `league/lab.py` (forward-first F1, after Deploy B), each a small PR read by the owner run first |
+| J3 (with D-J1 if reviewed in time) | building on `j3/memory` (stacked on #319) | new `league/jev_memory.py` and `league/tests/test_jev_memory.py`; `league/jev.py` (`choice` answers), `league/sensors.py` |
+| Hooks (J1 serving, J3's research block) | after their owners' waves merge | one hook each in `league/feeds.py` (Kalshi run, after K1) and `league/researcher.py` (J3's prior-results block in `_state`; the Kalshi run's I1 owns the file), each a small PR read by the owner run first. J2 builds no hook in `research_gate.py` (no Jev pre-filter earned its keep); J3 needs none in `lab.py` |
 
 - **The Kalshi run's answers (06:29Z):** J1's serving hook `ctx["feeds"]["move"]` is agreed as a small
   PR after K1 merges, posted on its K1 PR for a read first, registered as a `Source`-style entry beside the
@@ -103,12 +104,12 @@ its session.
 | 0.1 | T0 recorded and committed | done |
 | 0.2 | Plan merged to main | done 06:25Z (#303, `19c3771`) |
 | 0.3 | J0 baseline | done 06:25Z (below) |
-| J0 | Caps into one $1.50 daily pool | built with J1 (config), ships in D-J1 |
-| J1 | Move recorder | building; model analysis running |
-| J2 | Filters in front of research, Merton, replays | offline evaluation first; hooks after F2 |
-| J3 | Shared memory | after F1 |
-| J4 | News, scores, filings; market discovery | with the Kalshi run's recorders |
-| J5 | Gateway `score`; cap aligned to funded money | after the other gateway deploys |
+| J0 | Caps into one $1.50 daily pool | built in #319 (config, per-purpose breaker), ships in D-J1 |
+| J1 | Move sensor | analysis done (the free model is served, Jev a shadow); recorder built in #319; ships in D-J1; post-ship evaluation after 24 h of rows; serving after K1 + AUC >= 0.70 |
+| J2 | Filters in front of research, Merton, replays | measured offline: no Jev filter earns its keep; free findings sent to forward-first (10:36Z); nothing built |
+| J3 | Shared memory | building (`j3/memory`): index + taxonomy, three-arm retrieval (control / free / Jev), graveyard query, report |
+| J4 | News, scores, filings; market discovery | market map done (#318); event features wait for the Kalshi run's I2 recorders (K2) |
+| J5 | Gateway `score`; named answer problems and opt-in partial answers; cap to $41 | built, #304 (draft); after the other gateway deploys |
 
 ## The scoreboard at T0 (J0 baseline)
 
