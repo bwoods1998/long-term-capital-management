@@ -161,7 +161,7 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 4. **The House:** merge the PR; `~/Work/ltcm-deploy` at `origin/main`; `python3 scripts/floor_box.py deploy` (the
    loop running, so the watchdog's watch runs). No money-digest change: after promotion the grant reads active on
    `535a7f15` (or whatever Deploy A left), and a ratify check writes nothing.
-5. **Verify in the window:** `ops.started` on the release; one founder born a births pass, each displacement by rule
+5. **Verify in the window:** `ops.started` on the release; the canary never runs the founders' path (`Settings.kalshi_founders` is off there), so the floor's first births pass after the start is its only test: watch it, and record each founder's `found()` timing (the NEEDS probe before the lock, the birth under it) and the births pass's and tick's seconds; one founder born a births pass, each displacement by rule
    (reason names the founder); the college board and the odds rows covering Saturday's slate (≥ 60 games with
    lines); the founders' first wakes offered markets, their intents and practice orders; no new error alerts; tick
    p50; each founder's replay recorded as the wait it is ("unsupported input: feeds recorded live since"), never a
