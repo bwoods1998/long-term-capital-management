@@ -2915,6 +2915,7 @@ class Book:
         exercised into shares shows up as a position the book does not know, and freezes it."""
         now = at or now_iso(self.clock)
         today = _new_york_date(now)
+        broken = self._break_expired_structures(today)
         with self._lock:
             due = [(agent, key, holding) for agent, account in self.accounts.items() for key, holding in account.holdings.items()
                    if holding.instrument.asset_class == "option" and str(holding.instrument.expiry or "9999") < today]
@@ -2924,12 +2925,6 @@ class Book:
             expired = 0
             for agent, key, holding in due:
                 inst = holding.instrument
-                if structures.is_structure(inst) and self._legs_at_venue():
-                    # Nothing is held into an expiry (the House closes from 15:30 New York on the
-                    # earliest expiry day); one that was is broken and what is left of it closed.
-                    self._break_structure(agent, holding, f"held past its earliest expiry {inst.expiry}")
-                    expired += 1
-                    continue
                 if position_key(inst) in shown:
                     continue
                 payload = {
@@ -2946,7 +2941,21 @@ class Book:
                 self._apply(entry.kind, agent, entry.payload, entry.at)
                 self.marks.pop(key, None)
                 expired += 1
-            return expired
+            return expired + broken
+
+    def _break_expired_structures(self, today: str) -> int:
+        """On a venue that holds a structure's legs, a structure held past its earliest expiry (nothing
+        should be: the House closes from 15:30 New York on that day) is broken, and what is left of it
+        -- a calendar's far leg, the shares an exercise left -- is closed by the House row (`_mend_structures`,
+        `_close_break_units`). Returns how many. Anywhere else a structure expires as `expire_options` says."""
+        if not self._legs_at_venue():
+            return 0
+        with self._lock:
+            due = [(agent, holding) for agent, account in self.accounts.items() for holding in list(account.holdings.values())
+                   if structures.is_structure(holding.instrument) and str(holding.instrument.expiry or "9999") < today]
+            for agent, holding in due:
+                self._break_structure(agent, holding, f"held past its earliest expiry {holding.instrument.expiry}")
+            return len(due)
 
     # -------------------------------------------------------------------- mark
     def mark(self) -> dict[str, Decimal]:
@@ -3100,9 +3109,11 @@ class Book:
 
     def _charge(self, instrument: Instrument, side: str, quantity: Decimal, price: Decimal, *, liquidity: str = "taker",
                 filled_before: Decimal = ZERO) -> Charge:
-        """A fill's fee. A structure's fill is a fill of every leg at the venue, and each leg pays the
-        venue's fee on its own contracts (quantity x ratio): a condor four, a butterfly four."""
-        if not structures.is_structure(instrument):
+        """A fill's fee. On a venue that holds a structure's legs, a structure's fill is a fill of every
+        leg, and each leg pays the venue's fee on its own contracts (quantity x ratio): a condor four, a
+        butterfly four. Anywhere else (the options shadow book, whose fee model prices the held unit
+        itself) the fee model is asked about the structure as it is."""
+        if not (structures.is_structure(instrument) and self._legs_at_venue()):
             return self.fees.charge(instrument, side, quantity, price, liquidity=liquidity, filled_before=filled_before)
         usd = sum((self.fees.charge(leg.instrument, side, quantity * leg.ratio, price, liquidity=liquidity).usd
                    for leg in structures.spec_of(instrument).legs), ZERO)
