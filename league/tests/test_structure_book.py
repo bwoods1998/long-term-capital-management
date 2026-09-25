@@ -215,6 +215,22 @@ class Reconciliation(StructureBookCase):
         self.assertTrue(result.ok, result.detail)
         self.assertEqual(result.cash_diff, D(0))
 
+    def test_a_close_over_the_order_cap_goes_in_whole_structure_slices(self):
+        self.seat("a1", usd="300", position="200")
+        for _ in range(2):
+            self.assertEqual(self.trade("a1", CONDOR, "buy", "1", "0.62").status, "filled")
+        self.assertTrue(self.book.reconcile().ok)
+        outcome = self.trade("a1", CONDOR, "sell", "2", "0.53")  # $106 of held price: over the $75 cap, so two slices
+        for _ in range(3):
+            self.book.poll()
+            self.book.reconcile()
+        self.assertNotIn(CONDOR.key, self.book.account("a1").holdings, outcome)
+        sells = [i for i in self.broker.submitted if i.side == "sell" and structures.is_structure(i.instrument)]
+        self.assertEqual([i.quantity for i in sells], [D(1), D(1)])
+        final = self.book.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual({k: v for k, (i, v) in self.broker.held.items() if v}, {})
+
     def test_a_restart_with_a_structure_open_reconciles_without_a_freeze(self):
         self.seat("a1")
         self.trade("a1", CONDOR, "buy", "1", "0.62")
