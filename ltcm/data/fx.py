@@ -1,5 +1,5 @@
 """The European Central Bank's euro foreign exchange reference rates (Sept 25, 2026, the Kalshi-scale
-run's `fx` recorder, league/open_feeds_macro.py).
+run's `fx` recorder, league/open_feeds.py).
 
 Kalshi lists daily EUR/USD and USD/JPY ranges (KXEURUSD, KXUSDJPY); the ECB's reference rates are the
 key-free, public, point-in-time daily fixing of every major currency against the euro. The ECB

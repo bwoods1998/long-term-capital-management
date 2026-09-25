@@ -1,6 +1,6 @@
 """The NWS Daily Climate Report (CLI) as the National Weather Service issued it: the raw text product of
 each settlement station, parsed (Sept 25, 2026, the Kalshi-scale run's `cli_text` recorder,
-league/open_feeds_more.py).
+league/open_feeds.py).
 
 Every Kalshi daily high, low and rain market settles on one station's CLI. The `cli` feed
 (league/open_feeds.py) reads the Iowa Environmental Mesonet's parse of these reports and backfills

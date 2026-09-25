@@ -1,5 +1,5 @@
 """EIA's public price tables, read without a key (Sept 25, 2026, the Kalshi-scale run's `fuel` recorder,
-league/open_feeds_more.py). Source: U.S. Energy Information Administration.
+league/open_feeds.py). Source: U.S. Energy Information Administration.
 
 The House's keyed `eia` recorder (api.eia.gov) waits for the owner's key; the same numbers are on EIA's
 public website as HTML history tables, which need none. Kalshi's gasoline series (KXAAAGAS*) settle on

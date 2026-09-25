@@ -1,6 +1,6 @@
 """Hazards as the agencies publish them now: the National Hurricane Center's active storms and the USGS
 earthquake feed (Sept 25, 2026, the Kalshi-scale run's `storms` and `quakes` recorders,
-league/open_feeds_signals.py).
+league/open_feeds.py).
 
 Kalshi lists hurricane and earthquake markets beside its weather series; the agencies whose numbers
 they use publish key-free JSON meant for programs:

@@ -1,5 +1,5 @@
 """Macro releases and calendars for Kalshi's economics, rates and Fed desks (Sept 25, 2026, the
-Kalshi-scale run's recorders, league/open_feeds_macro.py): BLS's published series, the Treasury's
+Kalshi-scale run's recorders, league/open_feeds.py): BLS's published series, the Treasury's
 cash, debt and auctions, the CFTC's Commitments of Traders, and the Federal Reserve Board's calendar.
 
 Kalshi's KXCPI, KXCPIYOY, KXCPICORE, KXU3 and KXPAYROLLS settle on BLS releases; KXFED on the FOMC's

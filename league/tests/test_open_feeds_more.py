@@ -231,7 +231,7 @@ class WhatIsDeclared(RecorderCase):
              "fomc_meeting_calendar": "fomc"})
 
     def test_every_host_is_on_record(self):
-        from league import open_feeds_more
+        from league import open_feeds as open_feeds_more
 
         hosts = feeds.league_hosts()
         for source in open_feeds_more.SOURCES:

@@ -267,7 +267,7 @@ class WhatIsDeclared(unittest.TestCase):
              "live_sports_scores": "sports", "gdelt_news_volume_history": None})
 
     def test_every_host_is_on_record(self):
-        from league import open_feeds_signals
+        from league import open_feeds as open_feeds_signals
 
         hosts = feeds.league_hosts()
         for source in open_feeds_signals.SOURCES:

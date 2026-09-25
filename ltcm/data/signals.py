@@ -1,5 +1,5 @@
 """Attention underlyings: Wikipedia pageviews and GDELT's news volume (Sept 25, 2026, the Kalshi-scale
-run's `pageviews` and `gdelt` recorders, league/open_feeds_signals.py).
+run's `pageviews` and `gdelt` recorders, league/open_feeds.py).
 
 Thirty-five agents had asked for attention underlyings by Sept 24, 2026, and the attention desk trades
 series on AI model share (KXANTHSHARE, KXOPENSHARE, KXTOKENUSE), Truth Social posts and what the

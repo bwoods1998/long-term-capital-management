@@ -1,6 +1,6 @@
 """Government notices a desk can trade on: the White House's presidential actions, the Federal
 Register's presidential documents, and Nasdaq's trading halts (Sept 25, 2026, the Kalshi-scale run's
-recorders, league/open_feeds_more.py).
+recorders, league/open_feeds.py).
 
 Kalshi's KXTRUMPACT ("Will Trump do anything today?") settles on https://www.whitehouse.gov/presidential-actions/,
 and the attention desk trades it; the equity desks trade stocks a halt stops. Each source is key-free

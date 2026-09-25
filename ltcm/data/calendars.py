@@ -1,6 +1,6 @@
 """When the statistical agencies release what Kalshi's economics markets settle on: the Bureau of Labor
 Statistics' release calendar and the Bureau of Economic Analysis' release schedule (Sept 25, 2026, the
-Kalshi-scale run's `releases` recorder, league/open_feeds_more.py).
+Kalshi-scale run's `releases` recorder, league/open_feeds.py).
 
 KXCPI, KXCPIYOY, KXCPICORE, KXU3 and KXPAYROLLS settle on BLS releases, KXGDP on BEA's; a strategy that
 knows the moment a number comes out knows when its market will move and resolve.

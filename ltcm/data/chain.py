@@ -1,6 +1,6 @@
 """Bitcoin's network and the crypto crowd's mood: mempool.space's fees, mempool and mining, and
 alternative.me's Fear & Greed Index (Sept 25, 2026, the Kalshi-scale run's `mempool` and `fear_greed`
-recorders, league/open_feeds_signals.py).
+recorders, league/open_feeds.py).
 
 The crypto desks trade Kalshi's BTC strikes and Alpaca's coins around the clock; the House recorded
 derivatives positioning (perps, funding, oi, vol) but nothing of the chain itself or of sentiment.
