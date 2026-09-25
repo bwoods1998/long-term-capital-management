@@ -237,7 +237,8 @@ class RealStructuresHouse(unittest.TestCase):
         self.clock = Clock()
         self.clock.now = THURSDAY_11_NY
         self.paper, self.shadow = FakeBroker("alpaca-paper"), FakeBroker("options-shadow")
-        self.real = FakeBroker("alpaca", cash="800")
+        # Track P's adapter says it sends a structure as ONE multi-leg order (`mleg`, g/trackp's ltcm/adapters/alpaca.py).
+        self.real = FakeBroker("alpaca", cash="800", caps={"equity", "option", "crypto", "limit", "gtc", "ioc", "fractional", "mleg"})
         for broker in (self.paper, self.shadow, self.real):
             broker.clock_iso = now_iso(self.clock)
         self.data = FakeAlpacaData()
@@ -474,6 +475,16 @@ class TheHouseOnRealMoney(RealStructuresHouse):
         with switched(True):
             intents, _ = self.house._intents(agent, shadow, [vertical_row()])
         self.assertEqual(len(intents), 1)
+
+    def test_no_real_open_through_an_adapter_that_cannot_send_one_multi_leg_order(self):
+        """Without `mleg` the adapter would spell the held instrument as its first leg's OCC code: one leg alone."""
+        agent = self.structure_agent("test-real-legs")
+        real = self.house.books["alpaca"]
+        self.real.caps.discard("mleg")
+        with switched(True):
+            intents, _ = self.house._intents(agent, real, [vertical_row(), vertical_row(action="close", limit=0.40)])
+        self.assertEqual([i.side for i in intents], ["sell"])
+        self.assertIn("cannot send a structure as one multi-leg order (no `mleg` capability)", self.refusals(agent)[0])
 
     def test_a_structure_agent_is_shown_only_what_real_money_admits(self):
         agent = self.structure_agent("test-real-ctx")

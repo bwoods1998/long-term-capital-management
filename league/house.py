@@ -1075,6 +1075,14 @@ class House:
                     article = "an" if order.spec.type[:1] in "aeiou" else "a"
                     return (f"{article} {order.spec.type} is not admitted on real money: allocator.option_spread_real_types "
                             f"admits {', '.join(admitted)} (a credit type waits for the owner's explicit confirmation)")
+                try:  # the venue adapter's word that it sends a structure as ONE multi-leg order (`mleg`, Track P's adapter)
+                    whole = "mleg" in set(book.broker.capabilities() or ())
+                except Exception:  # noqa: BLE001 - an adapter that cannot say is one that cannot
+                    whole = False
+                if not whole:
+                    # An adapter without it would spell the held instrument as its first leg's OCC code: one leg alone.
+                    return (f"the {book.name} book's venue adapter cannot send a structure as one multi-leg order (no `mleg` "
+                            "capability): no structure is opened on it, never leg by leg")
         else:
             wanted = self._structure_book_name()
             if book.name != wanted:
