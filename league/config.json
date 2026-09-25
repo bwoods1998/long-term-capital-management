@@ -61,11 +61,11 @@
       "max_questions_per_run": 64
     },
     "hypothesis_links": {
-      "enabled": true,
+      "enabled": false,
       "interval_seconds": 3600
     },
     "exposure": {
-      "enabled": true,
+      "enabled": false,
       "interval_seconds": 1800
     },
     "memory": {
