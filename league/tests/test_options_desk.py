@@ -153,6 +153,20 @@ class Births(SeatCase):
         self.assertEqual(len(warnings), 1)
 
 
+class ThePopulationStep(SeatCase):
+    def test_the_births_pass_seats_the_founders_after_enroll(self):
+        order = []
+        with mock.patch.object(self.house, "enroll", side_effect=lambda: order.append("enroll")), \
+                mock.patch.object(options_desk, "seat_founders", side_effect=lambda house: order.append(("seat", house))), \
+                mock.patch.object(self.house, "_refill", side_effect=lambda rules: order.append("refill")):
+            self.house._births(self.house.game["economy"])
+        self.assertEqual(order, ["enroll", ("seat", self.house), "refill"])
+
+    def test_a_tick_births_a_founder(self):
+        self.house.tick()
+        self.assertEqual(sorted(self.born()), ["test-condor"])
+
+
 class TheSeatRule(SeatCase):
     def test_the_options_desks_own_losing_family_goes_first_most_negative_first(self):
         mild = self.options_resident(-0.05)
