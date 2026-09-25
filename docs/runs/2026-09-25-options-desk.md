@@ -262,4 +262,14 @@ session (13:30-20:00Z) as the day's baseline.
 
 ## Watch log
 
+Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scratchpad, read-only): window
+= the last 31 minutes; day = since 13:30Z. Release `20260925T114915Z-007e06151f53` (D-J1, carrying Deploy V).
+
+- **13:24Z pre-open:** all five books unfrozen; options desk 7 living (options-gap-drift krasker-22; six
+  options-pullback single-leg agents); nothing open on options-shadow.
+- **13:31Z:** desk 2 wakes, 2 intents; krasker-11 (single leg) sold an F put at the open for +$8.97. No structure
+  order.
+- **13:38Z (krasker-22's first wake, 13:32:37Z):** woke without error, its six underlyings offered, "Options gap
+  drift. nothing to do." (no 2-sigma, 3% move to ride); options-shadow marked it at $200.
+
 ## Report
