@@ -262,6 +262,10 @@ def _allocator_rule(key: str) -> Decimal | None:
 MAKER_UNLESS_TAKER_POSITIVE = "maker_unless_family_taker_positive"
 #: M2 of the forward-first run (Sept 25, 2026): the same, except that a PROBE may take (`family_taker`'s `may_take`).
 PROBE_MAY_TAKE = "probe_may_take"
+#: X3 of the forward-first run (Sept 25, 2026): a refused entry's cap names, after this mark, the band it was judged in,
+#: the cap in dollars and the room left under it, so the agent's next order fits (`Book._to_fit`). Everything before the
+#: mark is the rule's text exactly as it was: the rule, what it refuses and the classes that count it do not move.
+FIT_MARK = " -- to fit"
 #: What the House tells an agent whose own resting order stood in its exit's way (`_clear_the_way`).
 OWN_CROSS_WHY = ("cancelled by the House: your own exit of this instrument would have met it, and an account never "
                  "trades against itself")
@@ -1281,12 +1285,117 @@ class Book:
                                and _event_of(instrument.market_id or instrument.symbol) == event), ZERO)
                 total = held + working + intent.quantity * price * intent.instrument.multiplier
                 if total > share * max(equity, ZERO):
+                    cap = share * max(equity, ZERO)  # X3: the cap, what is already in the event and the room left
                     reasons.append(
                         f"one event may hold at most {float(share):.0%} of the stake: {event} would hold ${total:.2f} of this "
                         f"account's ${equity:.2f} (holdings at cost, working buys on every market of the event, and this order; "
                         "constitution allocator.max_event_share)"
+                        f"{FIT_MARK} {self._band_words(intent.agent)}: the cap on this event is ${cap:.2f}, ${held + working:.2f} of "
+                        f"it is held or working, so {self._fits(intent, cap - held - working, price)}"
                     )
         return reasons
+
+    # ------------------------------------------------------------ X3: a refusal says what fits
+    def _band_words(self, agent: str) -> str:
+        """The band a refusal names (X3 of the forward-first run, Sept 25, 2026): on a real book the allocator's word for the
+        agent -- "probe", "bunt" or "swing" (`family_taker`'s `band`, else `band_of`) -- and "practice" on a practice book."""
+        if not self.real_money:
+            return f"in practice on the {self.name} book"
+        band = str((self._family_taker(agent) or {}).get("band") or "").strip()
+        if not band and self.band_of is not None:
+            try:
+                band = str(self.band_of(agent) or "").strip()
+            except Exception:  # noqa: BLE001 - a band the House cannot read is left unnamed, never a refusal of its own
+                band = ""
+        return f"as a {band} on the {self.name} book" if band else f"on real money on the {self.name} book"
+
+    def _fits(self, intent: Intent, room: Decimal, price: Decimal | None, *, fee: bool = False) -> str:
+        """What of this order would fit in `room` dollars (X3): whole contracts at its price on an event or an option (after
+        the fee with `fee`), else dollars and, under it, the venue's minimum. Text only: nothing is resized or re-checked."""
+        from .venues import min_order_usd
+
+        inst = intent.instrument
+        room = max(money(room), ZERO)
+        stuck = "nothing more fits until a holding is sold, a working buy is cancelled or a position settles"
+        if room <= 0:
+            return stuck
+        if inst.asset_class in ("event", "option") and price is not None and price > 0:
+            unit = price * inst.multiplier
+            n = (room / unit).to_integral_value(rounding=ROUND_DOWN)
+            for _ in range(50):  # the fee is a few cents a contract at most: a step or two down
+                if not fee or n <= 0 or n * unit + self.fees.charge(inst, "buy", n, price).usd <= room:
+                    break
+                n -= 1
+            if n <= 0:
+                return f"not one contract at {price} (${unit:.2f} each{' before the fee' if fee else ''}) fits in ${room:.2f}"
+            return f"at most {n} contract{'' if n == 1 else 's'} at {price}{' with the fee' if fee else ''} fit{'s' if n == 1 else ''}"
+        minimum = min_order_usd(inst)
+        text = f"an order of at most ${room:.2f}{' with its fee' if fee else ''} fits"
+        if minimum is not None and room < minimum:
+            text += f", under the venue's ${minimum} minimum for {inst.market_id or inst.symbol}: {stuck}"
+        return text
+
+    def _to_fit(self, intent: Intent, reasons: list[str], *, limits: Limits, account: Account, positions: Mapping[str, Position],
+                equity: Decimal, cash: Decimal, reference: Decimal | None, working_buys: Mapping[str, Decimal]) -> list[str]:
+        """X3 of the forward-first run (Sept 25, 2026): each refused entry's dollar cap says after `FIT_MARK` the band it was
+        judged in, the cap in dollars and the room left under it, so the agent's next order fits; every other reason, and
+        the text before the mark, is unchanged. Measured at 10:36Z Sept 25: 372 real entries refused a day, 168 by
+        `allocator.max_event_share` (which says its own room, `_real_entry_reasons`) and 84 "insufficient desk cash", which
+        named no rule -- haghani-56's $12 AVAX/USD bids against $0.35 free, 83 times in a day, each also refused by the
+        book's own cash check and the gross cap, and none saying that nothing fits under Alpaca's $10 minimum."""
+        r = self.rules
+        inst = intent.instrument
+        price = intent.limit_price if intent.order_type == "limit" and intent.limit_price else reference
+        held = account.holdings.get(inst.key)
+        held_value = held.quantity * reference * inst.multiplier if held is not None and reference else ZERO
+        working = working_buys.get(inst.key, ZERO)
+        gross = gross_exposure(positions)
+        named: list[bool] = [True] if any(FIT_MARK in reason for reason in reasons) else []
+
+        def words() -> str:
+            """The mark, and the band the first time: a refusal's reasons are read joined, and the band once is enough."""
+            if named:
+                return FIT_MARK
+            named.append(True)
+            return f"{FIT_MARK} {self._band_words(intent.agent)}"
+
+        def capped(cap: Decimal, used: Decimal | None, what: str) -> str:
+            held_or_working = f", ${used:.2f} of it is held or working" if used else ""
+            return f"{words()}: {what} is ${cap:.2f}{held_or_working}, so {self._fits(intent, cap - (used or ZERO), price)}"
+
+        out = []
+        for reason in reasons:
+            note = ""
+            if FIT_MARK in reason:
+                pass  # it says its own room (`allocator.max_event_share`)
+            elif reason.startswith("insufficient desk cash"):
+                note = (f"{words()}: no leverage (ltcm/risk.py rule_cash): an entry is paid from the account's free "
+                        f"cash, its working buys already set aside, and ${max(cash, ZERO):.2f} is free")
+            elif reason.startswith("needs $") and "free cash" in reason:
+                slack = money(r["market_slippage_pct"]) if intent.order_type == "market" else ZERO
+                note = f"{words()}: {self._fits(intent, max(cash, ZERO) / (ONE + slack), price, fee=True)}"
+                if slack:
+                    note += f" (a market order also sets {float(slack):.1%} aside for slippage)"
+            elif reason.startswith("order notional "):
+                note = capped(equity * money(r["max_order_notional_pct"]), None, "one order's cap (book rule max_order_notional_pct)")
+            elif reason.startswith("position would be "):
+                note = capped(equity * money(r["max_position_pct"]), held_value, "this position's cap (book rule max_position_pct)")
+            elif reason.startswith("gross exposure would be "):
+                note = capped(equity * money(r["max_gross_pct"]), gross, "the account's gross cap (book rule max_gross_pct)")
+            elif reason.startswith("order of $") and "order cap" in reason:
+                note = capped(money(r["max_order_usd"]), None, "the order cap")
+            elif reason.startswith("order of $") and "this rung's" in reason:
+                note = capped(limits.max_order_usd, None, "an order's cap in this seat")
+            elif reason.startswith("position of $") and "this rung's" in reason:
+                note = capped(limits.max_position_usd, held_value + working, "this position's cap in this seat")
+            elif reason.startswith("position including working buys"):
+                note = capped(equity * money(r["max_position_pct"]), held_value + working,
+                              "this position's cap (book rule max_position_pct)")
+            elif reason.startswith("gross exposure including working buys"):
+                note = capped(equity * money(r["max_gross_pct"]), gross + sum(working_buys.values(), ZERO),
+                              "the account's gross cap (book rule max_gross_pct)")
+            out.append(reason + note)
+        return out
 
     def _manifest(self, agent: str, limits: Limits) -> Any:
         r = self.rules
@@ -1618,6 +1727,9 @@ class Book:
                    and yes_space(queued.instrument, queued.side, queued.limit_price)[0] != side
                    for queued, _ in pending):
                 reasons.append("this order could trade against the House's queued market order")
+        if reasons and not reducing:
+            reasons = self._to_fit(intent, reasons, limits=limits, account=account, positions=positions, equity=equity,
+                                   cash=ctx.desk_cash, reference=decision.reference_price, working_buys=working_buys)
         return reasons
 
     def _would_cross_own(self, intent: Intent, quote: Quote | None) -> str | None:

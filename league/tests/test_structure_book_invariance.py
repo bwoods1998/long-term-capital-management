@@ -118,7 +118,10 @@ class Run:
         return out
 
     def check(self, label, intent):
-        self.note(label, self.book.check(intent, self.book._quote(intent.instrument), iso(self.clock)))
+        # X3 of the forward-first run (Sept 25, 2026): a refused entry's cap says after `book.FIT_MARK` the band, the cap and the
+        # room left, text the pinned copy never had; every reason, and each one's text before the mark, is compared.
+        reasons = self.book.check(intent, self.book._quote(intent.instrument), iso(self.clock))
+        self.note(label, [reason.split(book_now.FIT_MARK)[0] for reason in reasons])
 
     def quote(self, label, instrument):
         quote = self.book._quote(instrument)
