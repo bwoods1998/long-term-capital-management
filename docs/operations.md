@@ -114,6 +114,40 @@ back at 15:39:27Z on a practice-book freeze the old House recorded 30 s before t
 old file still goes stale after `max_age_seconds`, and a House that never restarts still fails the
 watch.
 
+**A vendor's outage never rolls a release back** (H2, Sept 25, 2026). On Sept 24-25 Sail's checkpoint
+API answered 503 from 21:31:55Z to 01:55Z; each failed backup was an error alert, and all six
+releases promoted in those hours were rolled back on one (the updater's at 22:21, 23:00, 23:39,
+00:38 and 01:14Z; the owner's at 00:02Z, on the OLD House's backup, in flight at the promotion and
+failed 73 s later). Now:
+
+- An error alert the House raised because a call to a service outside its process failed on the
+  service's side carries `environment: "<service>"` in its payload: `sail` (the backup, a box that
+  did not run, a replay box, a fork or retire, Sail's runway), `site` (the publish), `gateway` (a
+  venue poll, a wake that raised, the frontier month), `data` (underlier bars), or a background
+  job's name (`update` for GitHub, `feeds`, `research`, ...). Only the service's failure is marked
+  (`league.watchdog.service_failed`): an HTTP 5xx, 408, 425 or 429, a timeout, a refused, reset or
+  unreachable connection, a name that did not resolve. A 4xx (a payload the House built, its
+  credential, a box it named) and every exception of the House's own (TypeError, KeyError,
+  ValueError, a local file or database error), even one raised while handling a 503, is not.
+- The watch and the canary count marked errors in the reading's detail and never make them a
+  reason: `detail.environment_alerts` (how many since the reading before the promotion) and
+  `detail.environment_first` (`{seq, service, text}` of the first). A tick that raises ("tick
+  failed: ..."), a frozen book, a stale `health.json`, a health failure and every unmarked error
+  still roll back.
+- A warning that repeats into an error ("a warning repeated N times in 30 minutes") keeps the marker
+  only when every warning of its run carried the same one.
+- The backup outage is ONE error when a run of failures begins, a warning at each later backoff step
+  (30 min, 1 h, 2 h, 4 h, then every 6 h) and an info with its length when a checkpoint works again.
+- On TERM the House ends its loop after the tick in hand (it no longer sleeps out the rest of the
+  tick's minute), puts its boxes to sleep (at most 60 s) and waits at most 5 s
+  (`House.SHUTDOWN_WAIT_SECONDS`) for background work in flight. A backup that comes back failed
+  while the House shuts down is a warning; one the shutdown cut off writes nothing.
+
+To see it on the box after a deploy: `tail -n 40 /workspace/deploys.jsonl` and read the `watch`
+rows' `detail.environment_alerts` and `environment_first`; the alerts themselves are
+`SELECT seq, at, payload FROM ledger WHERE kind='ops.alert' AND payload LIKE '%"environment"%'
+ORDER BY seq DESC LIMIT 20`.
+
 - **The updater (automatic).** Every 30 minutes the House reads `main`'s head and deploys it by
   itself. It does so only if both of these hold:
   - GitHub's Checks passed on that exact commit. The attestation is kept in `ops.deploy` and in
@@ -736,6 +770,17 @@ watch.
   batch's result after 120 s, a new box after 180 s, an upload after 60 s plus 4 s a megabyte.
   Deferred work is retried on every tick, and nothing needs restarting. Before E3, a hung first tick
   cleared only when the Sail call returned (05:07Z Sept 23: about twelve minutes).
+- **"The daily backup of the House box failed on Sail's side (...)"** (an error, once when a run of
+  failed backups begins, marked `environment: "sail"`; H2, Sept 25, 2026), then **"Sail still fails
+  the daily backup of the House box (...); N tries in a row since <time>, the next in M minutes"** (a
+  warning at each later try, the same marker), then **"The daily backup of the House box succeeded
+  again: the outage lasted <span> (N failed tries since <time>)"** (an info, `outage_seconds`). None
+  of them rolls a release back. The attempts are the `ops.deploy` rows with `what: backup`
+  (`environment`, and `during_shutdown` for one that came back while the House was stopping). A
+  failure that is the House's own ("The daily backup of the House box failed (TypeError: ...); N tries
+  in a row since <time>, the next in M minutes") is an unmarked error at every try, and a release
+  that causes one is rolled back. Nothing to do for a Sail outage but wait; until a checkpoint
+  works, the ledger lives on one disk.
 - **"the Alpha Lab is stopped: its box is gone"** (an error alert). Sail reports the lab box
   terminated or failed. It is never replaced from the agents' image; the lab asks again every hour.
   Make a new box with `python3 scripts/lab_box.py create`, which writes the new `box_id` into
@@ -770,7 +815,8 @@ watch.
   inside 30 minutes. It carries the last warning's payload, its `_traceback` when the caller sent
   one, `repeated` (the folded text, the count, first and last seen) and `began_at`; `health.json`
   `repeating_warnings` lists it until it stops for 30 minutes, and a new run after that escalates
-  again. The watchdog counts it like any error, unless it began before a promotion it is watching.
+  again. The watchdog counts it like any error, unless it began before a promotion it is watching
+  or its run was a service's failures (`environment`, H2: every warning of the run marked alike).
 - **"health failure: the lab evaluated nothing in the last hour while N candidates are queued
   (...)"** (an error, once when it begins, with `failure: lab_evaluates` and `began_at`; L3), and
   **"the lab evaluates again"** (an info) when a batch runs. Read the lab's `refusal`,
