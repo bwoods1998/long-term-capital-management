@@ -78,6 +78,15 @@ rule is a row of one of the three plans' tables, else rolls back and records why
 gateway second rebases on the first and re-runs the gateway tests. Messages to another run are lines here
 plus a comment on its open PR.
 
+**A fourth run (the owner's message, about 06:30Z):** `docs/goals/LTCM_JEV_SENSES.md` (branch
+`goal/jev-2026-09-25`). It owns only the Jev files (`league/jev.py`, `sensors.py`, `triage.py`,
+`hypothesis_memory.py`, `exposure.py`, `semantic_lab.py`, `jev_features.py`, `scripts/jev_lab_eval/`,
+`gateway/lib/typesafe.mjs`, `config.json`'s `jev` block) and lands small hooks into `research_gate.py`,
+`feeds.py` and `lab.py` only after the waves that own those files merge; it changes no money rule. From
+now on: one deploy at a time across FOUR runs, and any gateway deploy rebases on the other runs' gateway
+changes (the options run's multi-leg route, the Jev run's `typesafe.mjs`) and re-runs every gateway test.
+This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows them.
+
 **This run's current wave, file owners and deploys (kept current):**
 
 | Wave | State | Files owned |
