@@ -949,6 +949,40 @@ class FloorTickTest(HouseCase):
         floor.sensor.stats = lambda: 1 / 0
         self.assertIn("ZeroDivisionError", floor.health()["sensor"]["error"])
 
+    def test_the_move_sensor_is_off_unless_switched_on(self):
+        floor = self.floor()
+        self.assertIsNone(floor.move)
+        self.assertIsNone(floor.health()["move"])
+        off = JevFloor(self.house, floor.sensor, {"move": {"enabled": False}})
+        self.assertIsNone(off.move)
+
+    def test_the_move_sensor_runs_as_its_own_job_and_reports_health(self):
+        from league.jev_features import MoveSensor
+        self.jev = FakeJev(0.4)
+        floor = JevFloor(self.house, Sensor(self.house.root / "jev.sqlite", self.jev, clock=self.clock),
+                         {"move": {"enabled": True, "interval_seconds": 300}})
+        self.house.jev_floor = floor
+        self.assertIsInstance(floor.move, MoveSensor)
+        self.house.tick()
+        self.house.wait(10)
+        self.assertIsNotNone(floor.move.stats()["cursor"], "the first run only sets the cursor")
+        self.assertEqual(floor.move.stats()["rows"], 0)
+        market = {"market": "KXBTCD-26SEP25-T60000", "series": "KXBTCD", "title": "Bitcoin above 60,000?", "yes_bid": 0.4,
+                  "yes_ask": 0.44, "hours_to_close": 3.0, "open_interest": 100.0}
+        self.house.recorder.record("markets:KXBTCD:24", [market], started=self.clock())
+        self.clock.advance(300)
+        self.house.tick()
+        self.house.wait(10)
+        self.assertEqual(floor.move.stats()["rows"], 1)
+        self.clock.advance(60)
+        self.house.tick()  # health.json is written at the end of a tick, before its background jobs finish
+        self.house.wait(10)
+        health = json.loads((self.house.root / "health.json").read_text())
+        self.assertEqual(health["jev"]["move"]["rows"], 1)
+        self.assertEqual(health["jev"]["move"]["model_version"], "move-v0-placeholder")
+        self.assertIn("jev:move", {e.payload["key"] for e in self.house.ledger.iter(kinds="ops.job")})
+        self.assertIn("move", health["jev"]["sensor"]["today"])
+
     def test_a_pause_stops_paid_jobs_but_not_the_inactivity_sweep(self):
         floor = self.floor()
         agent = self.seated()

@@ -7,12 +7,14 @@
   skip the session. A gate that raises never stops research: the clock decides.
 - `tick(open_for_business)` from `House.tick`: explicit inactivity reasons every
   `inactivity_seconds`, and -- only while the floor is open for business, since a maintenance
-  pause stops paid work -- triage, hypothesis links and exposure groups as background jobs.
+  pause stops paid work -- triage, hypothesis links and exposure groups as background jobs, and
+  the move sensor (`league/jev_features.py`, Sept 25, 2026) as its own `jev:move` job.
 - `health()` for health.json: Jev spend and caps, gate totals, inactivity counts, triage groups,
-  exposure groups.
+  exposure groups, the move sensor's rows and last cycle.
 
 Every switch defaults on and can be turned off in config without a code change; with "jev"
-"enabled": false the House behaves exactly as before this module existed.
+"enabled": false the House behaves exactly as before this module existed. The move sensor is the
+exception: it is off unless `"move": {"enabled": true}`, so a config without the key runs as before.
 """
 
 from __future__ import annotations
@@ -50,6 +52,17 @@ class JevFloor:
         self.exposure = Exposure(house, sensor, clock=house.clock, settings=exposure) if exposure.get("enabled", True) else None
         self.inactivity_seconds = float(self.settings.get("inactivity_seconds", 300))
         self._last_inactivity = 0.0
+        move = dict(self.settings.get("move") or {})
+        self.move = None
+        if move.get("enabled", False):
+            # J1: point-in-time move features for every Kalshi market shown. A recorder that cannot
+            # start is an alert, never a House that cannot start.
+            try:
+                from .jev_features import MoveSensor
+
+                self.move = MoveSensor(root, sensor, clock=house.clock, alert=house.alert, settings=move)
+            except Exception as exc:  # noqa: BLE001
+                house.alert("warning", f"the Jev move sensor is off ({type(exc).__name__}: {str(exc)[:160]})")
 
     def research_due(self, agent: Any, *, last: float, due: bool, forced: str = "") -> bool:
         if not due and not forced:
@@ -72,6 +85,10 @@ class JevFloor:
                 self.house.alert("warning", f"inactivity sweep failed ({type(exc).__name__}: {str(exc)[:160]})")
         if not open_for_business:
             return
+        # The move sensor keeps its own clock: a point-in-time feature cannot wait its turn behind
+        # triage, and its job key keeps it to one run at a time.
+        if self.move is not None and self.move.due():
+            self.house._background("jev:move", self.move.run)
         # One job a tick at most: they share the House's three-slot ops lane with the backup, the
         # updater and Merton, and none of them is urgent.
         for key, job in (("jev:triage", self.triage), ("jev:links", self.memory), ("jev:exposure", self.exposure)):
@@ -97,4 +114,5 @@ class JevFloor:
                                                      for row in list(self.state.data.get("inactive", {}).values())))),
                 "triage": safe(self.triage.stats) if self.triage is not None else None,
                 "hypothesis_memory": safe(self.memory.stats) if self.memory is not None else None,
-                "exposure": self.exposure.latest if self.exposure is not None else None}
+                "exposure": self.exposure.latest if self.exposure is not None else None,
+                "move": safe(self.move.stats) if self.move is not None else None}
