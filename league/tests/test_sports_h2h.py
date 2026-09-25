@@ -346,5 +346,102 @@ class Founder(unittest.TestCase):
             self.assertTrue(parameters.inspect(parameters.mutate(params, seed=f"ufc:{trial}", needs=needs), needs)["valid"])
 
 
+
+# ------------------------------------------------------------------------ the review of K1c (k1c/review)
+class Review(SeedCase):
+    """What the review of Sept 25, 2026 found: a split name read as an initial, a malformed row that
+    stopped the whole wake (and with it every cancel), a taker sized over the cash its fee needs, a
+    sub-penny quote divided by zero, and a price floor a knob could take under the book's."""
+
+    DEM, JAU = "KXUFCFIGHT-26SEP26DEMJAU-DEM", "KXUFCFIGHT-26SEP26DEMJAU-JAU"
+
+    def test_a_letter_the_fold_does_not_know_never_leaves_an_initial(self):
+        same, person = SEED["same_person"], SEED["person"]
+        # "İ".lower() is "i" + a combining dot: split there, "i" read as an initial made him any "I... Kaya".
+        self.assertFalse(same(person("İbrahim Kaya"), person("Ilir Kaya")))
+        self.assertTrue(same(person("İbrahim Kaya"), person("Ibrahim Kaya")))
+        # A letter outside the fold stays inside its word, so no one-letter piece is left over.
+        # ("ũ" is not folded: "Dũng" once read as "d" + "ng", so any "D... Smith" was him.)
+        self.assertEqual(person("Dũng Smith"), ("dũng", "smith"))
+        self.assertFalse(same(person("Dũng Smith"), person("David Smith")))
+        self.assertTrue(same(person("Dũng Smith"), person("D. Smith")))  # a real initial still agrees
+        self.assertFalse(same(person("Jəfər Smith"), person("John Smith")))
+        self.assertTrue(same(person("Məhəmmədəli Osmanli"), person("Mehemmedeli Osmanli")))  # the schwa folds
+        self.assertTrue(same(person("Magʻomed Ankalaev"), person("Magomed Ankalaev")))  # an okina is an apostrophe
+        # On a board: Kalshi's "Ilir Kaya" is not ESPN's "İbrahim Kaya", though his rival's name matches.
+        bout = copy.deepcopy(next(b for b in BOARD if b["id"] == "401914472"))
+        bout["home"]["team"] = "İbrahim Kaya"
+        shown = [parse("KXUFCFIGHT-26SEP26KAYJAU-KAY", "Ilir Kaya wins"), parse("KXUFCFIGHT-26SEP26KAYJAU-JAU", "Yazmin Jauregui wins")]
+        self.assertIsNone(SEED["match_bout"](shown, SEED["bouts_of"]([bout])))
+
+    def test_one_athlete_on_both_sides_is_no_bout(self):
+        bout = copy.deepcopy(next(b for b in BOARD if b["id"] == "401911630"))
+        bout["away"]["id"] = bout["home"]["id"]
+        self.assertEqual(SEED["bouts_of"]([bout]), [])
+        line = dict(LINES["401911630"][0], away_athlete=bout["home"]["id"])
+        self.assertIsNone(SEED["bout_fair"]({"lines": [line]}, bout, 0.015))
+
+    def test_a_ticker_whose_date_is_no_day_is_skipped_and_the_wake_goes_on(self):
+        self.assertIsNone(parse("KXUFCFIGHT-26SEP31DEMJAU-DEM", "Vanessa Demopoulos wins"))
+        self.assertIsNone(parse("KXUFCFIGHT-26FEB30DEMJAU-DEM", "Vanessa Demopoulos wins"))
+        rows = shown() + [{"market": "KXUFCFIGHT-26SEP00DEMJAU-DEM", "series": "KXUFCFIGHT", "title": "Vanessa Demopoulos wins",
+                           "yes_bid": 0.13, "yes_ask": 0.14}]
+        out = self.wake(ctx_for(markets=rows))
+        self.assertEqual([i["market"] for i in out["intents"]], [Entries.DUM])  # before: ValueError, no decision at all
+
+    def test_a_malformed_context_or_feed_never_stops_the_wake_or_its_cancels(self):
+        memory = {"starts": {"KXUFCFIGHT-26SEP26DUMPER": "2026-09-27T00:00:00Z"}, "fair": {Entries.DUM: 0.4375}}
+        order = {"order_id": "ord-1", "market": Entries.DUM, "leg": "yes", "side": "buy", "quantity": 24, "limit_price": 0.41,
+                 "submitted_at": "2026-09-26T23:30:00.000Z"}
+        near = "2026-09-26T23:45:00.000Z"  # the main card starts in 15 minutes: the bid must go, whatever else is wrong
+        bad = [("feeds", {"odds": [1], "sports": {"ufc": {}}}), ("feeds", {"odds": {"ufc": {"events": 5}}, "sports": {"ufc": []}}),
+               ("feeds", {"odds": {"ufc": {"events": [{"id": "401911630", "lines": 5}]}}, "sports": {"ufc": {"events": BOARD}}}),
+               ("limits", [1]), ("event_risk", [1]), ("event_risk", {"remaining_by_market_usd": [1]}), ("fees", [1]),
+               ("recent_order_outcomes", 5), ("positions", 5), ("markets", 5)]
+        for key, value in bad:
+            with self.subTest(key=key, value=value):
+                ctx = ctx_for(near, open_orders=[order], memory=memory)
+                ctx[key] = value
+                out = SEED["decide"](ctx)
+                self.assertEqual(out["cancels"], ["ord-1"])
+                self.assertTrue(out["thought"])
+
+    def test_a_taker_is_sized_so_its_cost_and_its_fee_fit_the_free_cash(self):
+        rows = shown()
+        jau = next(m for m in rows if m["market"] == self.JAU)
+        jau.update(yes_bid=0.62, yes_ask=0.70)  # the line says 0.8625: a taker at 0.70
+        ctx = ctx_for(markets=rows, cash=10.0)
+        out = self.wake(ctx)
+        first = out["intents"][0]
+        self.assertEqual((first["market"], first["limit_price"], first.get("post_only")), (self.JAU, 0.70, None))
+        fee = SEED["fee"]("KXUFCFIGHT", first["quantity"], 0.70, False, 0.07)
+        self.assertEqual(first["quantity"], 13)  # 14 cost $9.80, and with its $0.2058 fee more than the $9.80 free
+        self.assertLessEqual(first["quantity"] * 0.70 + fee, 10.0 * 0.98 + 1e-9)
+        spent = sum(i["quantity"] * i["limit_price"] + SEED["fee"]("KXUFCFIGHT", i["quantity"], i["limit_price"], bool(i.get("post_only")), 0.07)
+                    for i in out["intents"])
+        self.assertLessEqual(spent, 10.0 * 0.98 + 1e-9)  # every intent of the wake, fees included
+
+    def test_a_sub_penny_quote_is_priced_or_passed_never_divided_by_zero(self):
+        rows = shown()
+        next(m for m in rows if m["market"] == self.JAU).update(yes_bid=0.99, yes_ask=0.999)  # NO: bid 0.001 -> 0.00
+        out = self.wake(ctx_for(markets=rows))
+        self.assertFalse([i for i in out["intents"] if i["market"] == self.JAU])
+
+    def test_no_knob_takes_an_entry_under_the_practice_books_floor(self):
+        self.assertFalse(parameters.inspect({**SEED["PARAMS"], "min_price": 0.1}, SEED["NEEDS"])["valid"])
+        rows = shown()
+        next(m for m in rows if m["market"] == self.DEM).update(yes_bid=0.08, yes_ask=0.12)  # fair 0.14: a 9-cent bid clears 2c
+        loose = ctx_for(markets=rows)
+        loose["params"] = {**loose["params"], "min_price": 0.05}  # a knob past its bound, as a hand-set PARAMS would be
+        out = SEED["decide"](loose)
+        self.assertFalse([i for i in out["intents"] if i["limit_price"] < 0.15], out["intents"])
+
+    def wake(self, ctx):
+        out = runner.decide(code(), ctx)
+        self.assertTrue(out.get("ok"), out.get("error"))
+        self._check(out, ctx)
+        return out
+
+
 if __name__ == "__main__":
     unittest.main()

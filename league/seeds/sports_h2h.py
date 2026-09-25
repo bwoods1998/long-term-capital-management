@@ -53,7 +53,8 @@
 # after the TAKER fee is at least take_edge, and never on a book that has refused its taker entry.
 # Fees as the book charges them: taker 0.07 x C x P x (1 - P) per order, rounded up to $0.0001;
 # makers pay a quarter of that only on the series that charge makers (KXUFCFIGHT does not: its fee
-# type is `quadratic`, GET /series, Sept 25, 2026; the tennis series do).
+# type is `quadratic`, GET /series, Sept 25, 2026; the tennis series do). An order is as many
+# contracts as its cost AND its fee fit in the free cash.
 #
 # HOW IT EXITS. It does not sell: a contract is held to settlement. A resting bid is cancelled when
 # its fight is within start_buffer_minutes of the start, when the fair has moved requote_move since
@@ -85,7 +86,7 @@ NEEDS = {
             "stale_minutes": [30, 240],
             "requote_minutes": [10, 240],
             "void_share": [0.0, 0.05],
-            "min_price": [0.05, 0.5],
+            "min_price": [0.15, 0.5],
             "max_price": [0.5, 0.97],
             "fee_multiplier": [0.5, 1.0],
         },
@@ -115,6 +116,7 @@ MAKER_SHARE = 0.25
 MAKER_FEE_SERIES = ("KXATPMATCH", "KXWTAMATCH")
 MAX_EVENT_SHARE = 0.25  # allocator.max_event_share
 LONGSHOT_FLOOR_REAL = 0.30  # allocator.longshot_floor_real: no real entry under 30 cents
+LONGSHOT_FLOOR = 0.15  # the book's min_event_price, which practice books keep: no entry under 15 cents
 MAX_INTENTS = 8
 # Kalshi series -> the league key the House's feeds use (a sport ESPN prices; Sept 25, 2026).
 SPORTS = {"KXUFCFIGHT": "ufc"}
@@ -129,7 +131,18 @@ FOLD = str.maketrans({**{c: "a" for c in "áàâäãåāăą"}, **{c: "c" for c 
                       **{c: "l" for c in "łľĺ"}, **{c: "n" for c in "ñńň"}, **{c: "o" for c in "óòôöõøōő"},
                       **{c: "r" for c in "řŕ"}, **{c: "s" for c in "śšşș"}, **{c: "t" for c in "ťţț"},
                       **{c: "u" for c in "úùûüūůűų"}, **{c: "y" for c in "ýÿ"}, **{c: "z" for c in "źžż"},
-                      "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
+                      "ə": "e", "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th"})
+# Taken out of a name before it is split: dots, apostrophes (and the letters written as one) and the
+# combining accents a decomposed or dotted capital leaves ("İ".lower() is "i" + U+0307).
+DROP = re.compile("[.'`\u2019\u02bb\u02bc\u0300-\u036f]")
+
+
+def table(value):
+    return value if isinstance(value, dict) else {}
+
+
+def listed(value):
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
 def num(value, default=None):
@@ -162,10 +175,12 @@ def new_york(moment):
 
 
 def person(text):
-    """A person's name as the words compared: lower case, accents folded, dots and apostrophes out,
-    split on anything else (hyphens included), Jr/Sr/II/III/IV dropped."""
-    clean = re.sub(r"[.'’`]", "", str(text or "").lower().translate(FOLD))
-    return tuple(word for word in re.findall(r"[a-z0-9]+", clean) if word not in SUFFIXES)
+    """A person's name as the words compared: lower case, accents folded, dots, apostrophes and
+    combining accents out, split on anything but a letter or digit (hyphens included), Jr/Sr/II/III/IV
+    dropped. A letter the fold does not know stays inside its word: split there, a name would leave a
+    one-letter piece that `given` reads as an initial ("Jəfər Smith" would be any "J... Smith")."""
+    clean = DROP.sub("", str(text or "").lower().translate(FOLD))
+    return tuple(word for word in re.findall(r"[^\W_]+", clean) if word not in SUFFIXES)
 
 
 def given(a, b):
@@ -200,6 +215,10 @@ def parse_h2h(row):
         return None
     if not any(word.startswith(code.lower()) for word in name):
         return None
+    try:  # a date that is no day (26SEP31) is no fight
+        datetime(2000 + int(found.group(1)), MONTHS[found.group(2)], int(found.group(3)))
+    except ValueError:
+        return None
     return {"ticker": ticker, "series": parts[0], "league": SPORTS[parts[0]], "event": parts[0] + "-" + parts[1],
             "game": parts[0] + ":" + parts[1], "date": (2000 + int(found.group(1)), MONTHS[found.group(2)], int(found.group(3))),
             "letters": letters, "code": code, "name": name, "team": said.group(1), "kind": "GAME"}
@@ -213,7 +232,12 @@ def bouts_of(board):
         home, away = bout.get("home"), bout.get("away")
         if start is None or not isinstance(home, dict) or not isinstance(away, dict) or not home.get("id") or not away.get("id"):
             continue
-        local = new_york(start)
+        if str(home["id"]) == str(away["id"]):
+            continue  # one athlete on both sides is no bout
+        try:
+            local = new_york(start)
+        except OverflowError:
+            continue
         out.append((bout, datetime(local.year, local.month, local.day),
                     {side: (person(team.get("team")), str(team["id"])) for side, team in (("home", home), ("away", away))}))
     return out
@@ -251,10 +275,10 @@ def bout_fair(odds, bout, void):
     """{athlete id: fair YES}: the mean over providers of each athlete's de-vigged probability, joined
     by the athletes' ESPN ids (never home and away), moved toward 0.5 by the draw/no-contest share."""
     ids = (str(bout["home"]["id"]), str(bout["away"]["id"]))
+    if ids[0] == ids[1]:
+        return None
     seen = {ids[0]: [], ids[1]: []}
-    for line in (odds or {}).get("lines") or []:
-        if not isinstance(line, dict):
-            continue
+    for line in listed(table(odds).get("lines")):
         pair = (str(line.get("home_athlete") or ""), str(line.get("away_athlete") or ""))
         home, away = num(line.get("implied_home")), num(line.get("implied_away"))
         if set(pair) != set(ids) or home is None or away is None or line.get("draw_ml") is not None:
@@ -281,6 +305,10 @@ def snap(price):
     return round(math.floor(price / TICK + EPS) * TICK, 2)
 
 
+def series_of(ticker):
+    return str(ticker or "").upper().split("-")[0]
+
+
 def event_of(ticker):
     parts = str(ticker or "").upper().split("-")
     return parts[0] + "-" + parts[1] if len(parts) >= 2 else None
@@ -295,7 +323,7 @@ def best_entry(market, parsed, fair, count_for, p, rate, floor, takers):
         return None
     cap, found = num(p.get("max_price"), PARAMS["max_price"]), []
     for leg, value, leg_bid, leg_ask in (("yes", fair, bid, ask), ("no", 1.0 - fair, round(1.0 - ask, 2), round(1.0 - bid, 2))):
-        count = count_for(leg_ask)
+        count = count_for(leg_ask, False)
         if takers and count and floor - EPS <= leg_ask <= cap + EPS:
             edge = value - leg_ask - fee(parsed["series"], count, leg_ask, False, rate) / count
             if edge >= num(p.get("take_edge"), PARAMS["take_edge"]) - EPS:
@@ -303,7 +331,7 @@ def best_entry(market, parsed, fair, count_for, p, rate, floor, takers):
                 continue
         price = snap(leg_bid + TICK) if leg_ask - leg_bid > TICK + EPS else leg_bid
         while price >= leg_bid - EPS:
-            count = count_for(price)
+            count = count_for(price, True)
             if floor - EPS <= price <= cap + EPS and count:
                 edge = value - price - fee(parsed["series"], count, price, True, rate) / count
                 if edge >= num(p.get("min_edge"), PARAMS["min_edge"]) - EPS:
@@ -318,12 +346,12 @@ def decide(ctx):
     knob = lambda name: num(p.get(name), float(PARAMS[name]))
     now = when(ctx.get("now"))
     feeds = ctx.get("feeds") if isinstance(ctx.get("feeds"), dict) else {}
-    rate = num((ctx.get("fees") or {}).get("kalshi_taker_rate"), TAKER_RATE) * knob("fee_multiplier")
+    rate = num(table(ctx.get("fees")).get("kalshi_taker_rate"), TAKER_RATE) * knob("fee_multiplier")
     own = {str(s).upper() for s in NEEDS.get("series") or []}
-    markets = [m for m in ctx.get("markets") or [] if isinstance(m, dict) and str(m.get("series") or "").upper() in own]
+    markets = [m for m in listed(ctx.get("markets")) if str(m.get("series") or "").upper() in own]
     shown = {str(m.get("market") or "").upper() for m in markets}
-    positions = [x for x in ctx.get("positions") or [] if isinstance(x, dict) and num(x.get("quantity"), 0.0) > 0]
-    orders = [o for o in ctx.get("open_orders") or [] if isinstance(o, dict)]
+    positions = [x for x in listed(ctx.get("positions")) if num(x.get("quantity"), 0.0) > 0]
+    orders = listed(ctx.get("open_orders"))
     bids = [o for o in orders if o.get("side") == "buy" and o.get("order_id") and str(o.get("market") or "").upper().split("-")[0] in own]
     memory = ctx.get("memory") if isinstance(ctx.get("memory"), dict) else {}
     starts = {str(k): v for k, v in (memory.get("starts") or {}).items()} if isinstance(memory.get("starts"), dict) else {}
@@ -349,11 +377,10 @@ def decide(ctx):
             events.setdefault(parsed["event"], []).append((market, parsed))
     boards, lines = {}, {}
     for league in {rows[0][1]["league"] for rows in events.values()}:
-        board = (feeds.get("sports") or {}).get(league) or {}
-        odds = (feeds.get("odds") or {}).get(league) or {}
-        boards[league] = bouts_of([e for e in board.get("events") or [] if isinstance(e, dict)])
+        board, odds = table(table(feeds.get("sports")).get(league)), table(table(feeds.get("odds")).get(league))
+        boards[league] = bouts_of(listed(board.get("events")))
         stamped = when(odds.get("t"))
-        lines[league] = {str(e.get("id")): (e, stamped) for e in odds.get("events") or [] if isinstance(e, dict)}
+        lines[league] = {str(e.get("id")): (e, stamped) for e in listed(odds.get("events"))}
 
     # Price every fight matched to exactly one bout that has not started and has fresh lines.
     fights, priced, skipped = {}, {}, {}
@@ -396,16 +423,16 @@ def decide(ctx):
         price = row.get("average_cost") if "average_cost" in row else row.get("limit_price")
         event_cost[event] = event_cost.get(event, 0.0) + num(row.get("quantity"), 0.0) * num(price, 0.0)
 
-    refused = [row for row in ctx.get("recent_order_outcomes") or []
-               if isinstance(row, dict) and row.get("status") == "refused" and "post-only" in str(row.get("reason") or "")]
+    refused = [row for row in listed(ctx.get("recent_order_outcomes"))
+               if row.get("status") == "refused" and "post-only" in str(row.get("reason") or "")]
     real = int(num(ctx.get("rung"), 0.0) or 0) >= 2
-    floor = max(knob("min_price"), LONGSHOT_FLOOR_REAL) if real else knob("min_price")
+    floor = max(knob("min_price"), LONGSHOT_FLOOR_REAL if real else LONGSHOT_FLOOR)
     cash = num(ctx.get("cash"), 0.0)
     reserved = sum(num(o.get("quantity"), 0.0) * num(o.get("limit_price"), 0.0) for o in orders if o.get("side") == "buy")
     free = [max(0.0, (cash - reserved) * 0.98)]  # 2% headroom for fees
-    limits = ctx.get("limits") or {}
+    limits = table(ctx.get("limits"))
     equity = num(ctx.get("equity"), cash)
-    remaining = (ctx.get("event_risk") or {}).get("remaining_by_market_usd") or {}
+    remaining = table(table(ctx.get("event_risk")).get("remaining_by_market_usd"))
 
     def budget(ticker):
         room = [knob("ticket_usd"), free[0], num(limits.get("max_order_usd"), knob("ticket_usd")),
@@ -413,6 +440,17 @@ def decide(ctx):
         if num(remaining.get(ticker)) is not None:
             room.append(num(remaining.get(ticker)))
         return max(0.0, min(room))
+
+    def size(ticker, price, maker):
+        """Whole contracts at `price` within the budget whose cost AND fee fit the free cash: a taker's
+        fee is up to 4.9 cents a dollar at the 30-cent floor, more than the 2% headroom holds. None at
+        a price under a tick (a sub-penny quote's NO side rounds to 0.00)."""
+        if not price >= TICK - EPS:
+            return 0
+        count = int(budget(ticker) / price + EPS)
+        while count > 0 and count * price + fee(series_of(ticker), count, price, maker, rate) > free[0] + EPS:
+            count -= 1
+        return count
 
     # Resting bids the fair, the lines or the clock no longer support.
     for order in bids:
@@ -432,7 +470,7 @@ def decide(ctx):
         elif edge < knob("min_edge") / 2.0:
             cancels.append(str(order["order_id"]))
         elif sent is not None and (now - sent).total_seconds() > 60.0 * knob("requote_minutes"):
-            better = best_entry(entry[0], entry[1], entry[2], lambda px, t=ticker: int(budget(t) / px + EPS), p, rate, floor, False)
+            better = best_entry(entry[0], entry[1], entry[2], lambda px, maker, t=ticker: size(t, px, maker), p, rate, floor, False)
             if better is not None and (better[1] != leg or abs(better[2] - price) > EPS):
                 cancels.append(str(order["order_id"]))
 
@@ -442,7 +480,7 @@ def decide(ctx):
         if parsed["event"] in held:
             continue
         takers = not refused
-        entry = best_entry(market, parsed, fair, lambda px, t=ticker: int(budget(t) / px + EPS), p, rate, floor, takers)
+        entry = best_entry(market, parsed, fair, lambda px, maker, t=ticker: size(t, px, maker), p, rate, floor, takers)
         if entry is not None:
             offers.append((entry[0], ticker, entry, parsed, fair))
     offers.sort(key=lambda row: (-round(row[0], 6), row[1]))  # a tie (a fight's two sides) goes to the first ticker
@@ -452,10 +490,10 @@ def decide(ctx):
             break
         if parsed["event"] in held:
             continue
-        quantity = int(budget(ticker) / price + EPS)
+        quantity = size(ticker, price, post_only)
         if quantity < 1 or quantity * price < 1.0:
             continue
-        free[0] -= quantity * price
+        free[0] -= quantity * price + fee(parsed["series"], quantity, price, post_only, rate)
         held.add(parsed["event"])
         event_cost[parsed["event"]] = event_cost.get(parsed["event"], 0.0) + quantity * price
         starts[parsed["event"]] = fights[parsed["event"]]["start"]
