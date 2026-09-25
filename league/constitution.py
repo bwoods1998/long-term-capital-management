@@ -516,6 +516,23 @@ CONSTITUTION: dict[str, Any] = {
         # prices-favorites (23, -0.2225). 6 is the House's breeding line (`game.json` `economy.losing_family_min_blocks`).
         # Absent, a probe is seated on any family's record, as before.
         "family_probe": {"losing_min_blocks": 6, "reseat": "gain_since_demotion"},
+        # `family_key` (row C8 of the forward-first run's money table, Sept 25, 2026; `league/families.py` reads it):
+        # "mechanism": a family is keyed by its program's MECHANISM -- its code beyond its PARAMS literal
+        # (`parameters.same_logic`'s line, `lab.mechanism_digest`) with the venue, series and symbols it trades. A child
+        # whose program is its parent's beyond PARAMS stays in its parent's family; a program whose code differs beyond
+        # PARAMS, or whose venue, series or symbols differ, founds a family of its own, and so does a founder whose label
+        # is another mechanism's; an agent that rewrites itself in place moves to its new program's family from that
+        # ledger position on. Every proof, probe gate, bunt and swing above reads the family, so a mechanism is proven
+        # only by its own settlements. The labels born before it are re-keyed once at the deploy by `agent.family` rows
+        # (the lineage stays on each birth row). Evidence (the Sept 24 report's decision 2; the T0 snapshot, 04:23Z
+        # Sept 25): 343 of 647 births carried a label whose founding program was another mechanism and 148 agents
+        # rewrote themselves into another one; meriwether-h2d625d-4 kept sports-central-run-under's name -- the one
+        # proven family with real money on it -- after it rewrote itself into a KXWNBAGAME favourite maker at 02:37Z,
+        # and -2, a CFB and soccer moneyline file, was born under it. Re-keyed on that snapshot (781 rows, 424 agents),
+        # sports-central-run-under keeps its record to the cent (n 25, bound +0.0344, real n 11, +$16.39 real: all 45
+        # of its fills are the founder's), and megacaps-chip-demand-relay's (n 13, bound +0.0010, practice only) moves
+        # whole to the program that earned it, mcentee-hddb4ae's eleventh rewrite. Absent: the label a birth carries.
+        "family_key": "mechanism",
     },
 }
 
@@ -558,4 +575,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'd0aa4c2a38c933a6d2acba7acb816f48b1c3d2d7d67d86e06b27e2166e61fa49'
+PINNED_DIGEST = '2fa6e95be2898072b20120f670ef6e684c61b6380f08bd0c2c041277db49536f'
