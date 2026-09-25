@@ -201,7 +201,7 @@ import sys
 import time
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -434,7 +434,7 @@ def _payload(text: str) -> dict:
 @dataclass
 class Agent:
     id: str
-    family: str
+    family: str  # the family it is in now: its birth's label, or the last `agent.family` row's (C8)
     venue: str
     desk: str
     horizon: str
@@ -445,20 +445,67 @@ class Agent:
     died: float | None = None
     died_seq: int | None = None
     cause: str | None = None
+    #: C8 (Sept 25, 2026): [(since, family)], in `since` order, as `league.families.place_segment` keeps them: its birth's
+    #: label from its birth, then each `agent.family` row's family from that row's `since_seq`. One entry for an agent
+    #: that never changed family.
+    segments: list[tuple[int, str]] = field(default_factory=list)
+    label: str = ""  # the family its birth row names
 
     @property
     def alive(self) -> bool:
         return self.died is None
 
+    def family_at(self, seq: int) -> str:
+        """The family its rows at ledger position `seq` belong to (`TradeTape.family_at`; the label before any row)."""
+        found = self.segments[0][1] if self.segments else self.family
+        for since, family in self.segments:
+            if since <= seq:
+                found = family
+        return found
+
+    def families(self) -> list[str]:
+        """Every family it was ever a member of: those whose stretch of its rows is not empty (a birth re-keyed from its
+        first row leaves its label none, `league.families.segment_spans`)."""
+        segments = self.segments or [(self.born_seq, self.family)]
+        out = []
+        for i, (since, family) in enumerate(segments):
+            end = segments[i + 1][0] if i + 1 < len(segments) else math.inf
+            if since < end and family not in out:
+                out.append(family)
+        return out
+
+
+def _place(segments: list[tuple[int, str]], since: int, family: str) -> None:
+    """`league.families.place_segment` without the row: one that starts where another starts replaces it."""
+    for i, (start, _) in enumerate(segments):
+        if start == since:
+            segments[i] = (since, family)
+            return
+        if start > since:
+            segments.insert(i, (since, family))
+            return
+    segments.append((since, family))
+
 
 def agents_of(snap: Snapshot) -> dict[str, Agent]:
+    """Every agent ever born, with its family now and its family over time: the Z follow-up of C8 (Sept 25, 2026). Since
+    C8 a birth's `family` is only the label it was born with: the House files a program whose code or markets differ from
+    its parent's under its mechanism's family with an `agent.family` row (`league.families.MechanismIndex`), and re-keyed
+    every label born before it once at deploy. A scoreboard that listed families by birth labels would never see the
+    families those rows found, and would pool each moved agent's trades under a family whose mechanism it did not run."""
     out: dict[str, Agent] = {}
     for row in snap.rows("agent.born"):
         p = row.p
         if row.agent not in out:
-            out[row.agent] = Agent(row.agent, str(p.get("family") or row.agent), str(p.get("venue") or ""),
+            label = str(p.get("family") or row.agent)
+            out[row.agent] = Agent(row.agent, label, str(p.get("venue") or ""),
                                    str(p.get("specialty") or ""), str(p.get("horizon") or ""),
-                                   p.get("parent"), p.get("founder"), row.t, row.seq)
+                                   p.get("parent"), p.get("founder"), row.t, row.seq, segments=[(row.seq, label)], label=label)
+    for row in snap.rows("agent.family"):
+        agent = out.get(row.agent)
+        if agent is not None and row.agent != HOUSE and row.p.get("family"):
+            _place(agent.segments, int(row.p.get("since_seq") or row.seq), str(row.p["family"]))
+            agent.family = agent.segments[-1][1]
     for row in snap.rows("agent.died"):
         agent = out.get(row.agent)
         if agent is not None and agent.died is None:
@@ -782,14 +829,17 @@ class Families:
 
     def __init__(self, agents: Mapping[str, Agent], trades: Sequence[Trade], house: HouseRecords | None = None):
         self.house = house
+        # C8 (Sept 25, 2026): a member is every agent whose rows were ever the family's, and a closed trade is the family's
+        # its member was in when it closed -- `league.families.family_record`'s members and `within(spans, close seq)`.
         self.members: dict[tuple[str, str], list[Agent]] = defaultdict(list)
         for agent in agents.values():
-            self.members[(agent.venue, agent.family)].append(agent)
+            for family in agent.families():
+                self.members[(agent.venue, family)].append(agent)
         self.trades: dict[tuple[str, str], list[Trade]] = defaultdict(list)
         for trade in trades:
             agent = agents.get(trade.agent)
             if agent is not None:
-                self.trades[(agent.venue, agent.family)].append(trade)
+                self.trades[(agent.venue, agent.family_at(trade.close_seq))].append(trade)
         self._records: dict[tuple[str, str], dict[str, Any]] = {}
 
     def state(self, venue: str, family: str) -> dict[str, Any]:
@@ -830,8 +880,13 @@ def family_records(snap: Snapshot, agents: Mapping[str, Agent], families: Famili
             "taker": pooled.get("taker") or record([t for t in trades if t.liquidity == "taker"]),
         })
     rows.sort(key=lambda r: (-(r["pooled"]["n"]), r["venue"], r["family"]))
+    moved = [a for a in agents.values() if a.families() != [a.label]]
     return {"fn": "family_records", "families": rows,
             "with_observations": sum(1 for r in rows if r["pooled"]["n"]),
+            # C8: agents an `agent.family` row filed under another family than their birth's label, and the families only
+            # such rows name (none of them a birth's label).
+            "moved_agents": len(moved),
+            "families_from_rows": len({f for a in moved for f in a.families()} - {a.label for a in agents.values()}),
             "proven": [r["family"] for r in rows if r["pooled"]["proven"]]}
 
 
@@ -850,7 +905,7 @@ def intent_outcomes(snap: Snapshot) -> dict[str, dict[str, Any]]:
             quantity = float(p.get("quantity") or 0)
         except (TypeError, ValueError):
             price, quantity = None, 0.0
-        out[str(p["id"])] = {"agent": row.agent, "book": str(p.get("book")), "t": row.t,
+        out[str(p["id"])] = {"agent": row.agent, "book": str(p.get("book")), "t": row.t, "seq": row.seq,
                              "market": str(instrument.get("market_id") or instrument.get("symbol") or ""),
                              "quantity": quantity, "price": price, "placed": False, "refused": False, "filled": 0.0}
     for row in snap.rows("book.order"):
@@ -897,13 +952,20 @@ def fill_rates(bids: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def in_family(members: Mapping[str, Agent], family: str, intent: Mapping[str, Any]) -> bool:
+    """Whether a member (`members`: by id) placed this intent while it was in `family` (C8: `families.member_bids` reads a
+    member's bids only inside its stretches in the family)."""
+    agent = members.get(intent["agent"])
+    return agent is not None and agent.family_at(int(intent.get("seq") or 0)) == family
+
+
 def family_capacity(snap: Snapshot, venue: str, family: str, members: Sequence[Agent], trades: Sequence[Trade],
                     intents: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     """Capacity in $/day = markets in the band a day x the fill rate at the current size x the average
     profit per settlement, each factor shown (the module docstring says where each comes from)."""
-    ids = {a.id for a in members}
     start = snap.now - CAPACITY_DAYS * DAY
-    bids = [i for i in intents.values() if i["agent"] in ids and i["placed"] and i["t"] >= start and i["market"]]
+    by_id = {a.id: a for a in members}
+    bids = [i for i in intents.values() if i["placed"] and i["t"] >= start and i["market"] and in_family(by_id, family, i)]
     if not bids:
         return {"fn": "family_capacity", "family": family, "venue": venue, "capacity_usd_per_day": None,
                 "why": "no placed buy in the last 7 days"}
@@ -1029,7 +1091,7 @@ def allocator_promotions(snap: Snapshot, agents: Mapping[str, Agent], rungs: Run
 
         opened = [t for t in by_agent.get(row.agent, []) if inside(t.entry_seq)]
         pending = [o for o in open_by_agent.get(row.agent, []) if inside(o.entry_seq)]
-        family = agent.family if agent else None
+        family = agent.family_at(row.seq) if agent else None  # the family it was in when promoted (C8)
         venue = agent.venue if agent else None
         state = families.state_before(venue, family, row.seq) if agent else {}
         label, source = promotion_label(row, board.get(row.agent), state)
@@ -1695,9 +1757,9 @@ def capacity_at_sizes(snap: Snapshot, venue: str, family: str, members: Sequence
     if base.get("capacity_usd_per_day") is None and base.get("why"):
         out["why"] = base["why"]
         return out
-    ids = {a.id for a in members}
     start = snap.now - CAPACITY_DAYS * DAY
-    real = sorted(i["notional"] for i in intents.values() if i["agent"] in ids and i["placed"] and i["t"] >= start
+    by_id = {a.id: a for a in members}
+    real = sorted(i["notional"] for i in intents.values() if in_family(by_id, family, i) and i["placed"] and i["t"] >= start
                   and i["market"] and i["book"] in REAL_BOOKS and i["notional"] is not None)
     size = median(real) if real else base.get("current_size_usd")
     out.update(size_usd=_r(size, 2), size_basis="the median real bid" if real else "the median bid; no real bid yet")
@@ -1876,7 +1938,7 @@ def capital_on_proof(snap: Snapshot, agents: Mapping[str, Agent]) -> dict[str, A
     for row in snap.rows("eval.verdict"):
         if row.p.get("band_to") == "swing" and row.t <= now:
             if first is None or row.t < epoch(first["at"]):
-                first = {"at": row.at, "agent": row.agent, "family": agents[row.agent].family if row.agent in agents else None,
+                first = {"at": row.at, "agent": row.agent, "family": agents[row.agent].family_at(row.seq) if row.agent in agents else None,
                          "row": "eval.verdict"}
             break
     classes = desk_asset_classes()
@@ -2813,6 +2875,8 @@ def render_text(board: Mapping[str, Any], *, markdown: bool = False) -> str:
     section("family records: practice 0.5 + real 1, one observation an event [family_records]")
     fr = x["family_records"]
     out.append(f"{pre}{fr['with_observations']} of {len(fr['families'])} families have a closed trade; proven: {', '.join(fr['proven']) or 'none'}")
+    out.append(f"{pre}C8: {fr.get('moved_agents', 0)} agents filed under another family than their birth's by `agent.family` rows; "
+               f"{fr.get('families_from_rows', 0)} families only such rows name")
     for r in fr["families"]:
         if not r["pooled"]["n"]:
             continue
