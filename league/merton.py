@@ -44,6 +44,16 @@ from .safety import CodeRefused, check_code, check_strategy_code
 REPO = Path(__file__).resolve().parents[1]
 CONTRACT = (Path(__file__).resolve().parent / "CONTRACT.md")
 ROLES = ("architect", "toolsmith", "operator", "designer", "teacher")
+#: The lanes `paused_until_profit` may hold (Sept 25, 2026, F4): the five scheduled roles and the
+#: consultant, whose answers agents buy (`Researcher._consult` asks `consult_paused` first).
+PAUSABLE = ROLES + ("consultant",)
+#: F4's dials (game.json `merton.lift`, bounded by `merton_bounds.lift`): a consult is judged
+#: productive if the agent retained a candidate or changed its strategy within `consult_sessions`
+#: sessions; each unproductive consult in a row doubles its next consult's price, up to
+#: `consult_max_multiple`; its forward lift is its next `consult_blocks` active blocks against its
+#: previous ones; the teacher's lift is forward growth over `teacher_days` after a lesson; the yield
+#: row reads every lane over the last `days`.
+LIFT = {"days": 7, "teacher_days": 3, "consult_sessions": 2, "consult_blocks": 6, "consult_max_multiple": 8}
 
 ANSWER = """Answer with ONE JSON object and nothing else:
 {"summary": "two or three plain sentences: what you concluded and why",
@@ -387,19 +397,80 @@ class RealPnl:
             return self._value
 
 
+def consults_of(ledger: Any, agent_id: str | None = None, *, limit: int = 3000) -> list[Any]:
+    """The paid consults among the newest `limit` `merton.pass` rows, oldest first: role consultant, an
+    agent named, not an error (a failed consult is not charged, Sept 23, 2026); one agent's if named.
+    At about 64 consults and 200 passes a day, 3,000 rows reach back about two weeks."""
+    return [e for e in ledger.read(kinds="merton.pass", limit=limit, newest=True)
+            if e.payload.get("role") == "consultant" and e.payload.get("agent") and not e.payload.get("error")
+            and (agent_id is None or e.payload.get("agent") == agent_id)]
+
+
+def consult_verdict(consult: Any, rows: Iterable[Any], *, sessions: int = 2) -> dict[str, Any] | None:
+    """Did the agent do anything with a consult (F4)? `rows` are its `agent.research` and
+    `agent.strategy` rows in ledger order. Productive: within `sessions` completed research sessions
+    after the consult (its own session is the first) it retained a candidate, or adopted or edited a
+    strategy (a pause or resume of its entries restates one and does not count). None while fewer
+    sessions have finished; a session the provider broke is not a pass (`research_gate.completed_pass`)."""
+    from .allocator import RESTATING_CONTROLS
+    from .research_gate import completed_pass
+
+    seen = 0
+    for entry in rows:
+        if entry.seq <= consult.seq:
+            continue
+        if entry.kind == "agent.strategy":
+            if entry.payload.get("control") in RESTATING_CONTROLS:
+                continue
+            return {"productive": True, "by": "edit" if entry.payload.get("control") else "adopted", "sessions": seen}
+        if entry.payload.get("tool") != "summary" or not completed_pass(entry.payload):
+            continue
+        if seen >= sessions:
+            break  # the next session began: nothing followed the last one it had
+        seen += 1
+        if entry.payload.get("candidate"):
+            return {"productive": True, "by": "candidate", "sessions": seen}
+    if seen >= sessions:
+        return {"productive": False, "by": None, "sessions": seen}
+    return None
+
+
+def consult_verdicts(ledger: Any, agent_id: str, *, sessions: int = 2) -> list[tuple[Any, dict[str, Any] | None]]:
+    """Every paid consult of one agent with its verdict (`consult_verdict`), oldest first."""
+    consults = consults_of(ledger, agent_id)
+    if not consults:
+        return []
+    rows = list(ledger.iter(kinds=("agent.research", "agent.strategy"), agent=agent_id, after=consults[0].seq))
+    return [(c, consult_verdict(c, rows, sessions=sessions)) for c in consults]
+
+
+def consult_blocks(ledger: Any, consult: Any, *, n: int = 6) -> tuple[list[float], list[float]]:
+    """(its previous `n` active forward blocks' log growth, its next `n`) around a consult: the
+    consultant's forward lift (F4) is the mean of the second less the mean of the first."""
+    agent = consult.payload["agent"]
+    rows = [e for e in ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("active")]
+    before = [float(e.payload.get("log_growth") or 0) for e in rows if e.seq < consult.seq][-n:]
+    after = [float(e.payload.get("log_growth") or 0) for e in rows if e.seq > consult.seq][:n]
+    return before, after
+
+
 class Merton:
     def __init__(self, frontier: Frontier, forge: Any, ledger: Ledger, *, evidence: Callable[[str], dict[str, Any]], clock=time.time,
                  schedule_hours: Mapping[str, float] | None = None, first_after_hours: Mapping[str, float] | None = None, pace: Any = None,
                  effort: Mapping[str, str] | None = None, backoff_max: Mapping[str, int] | None = None,
-                 paused_until_profit: Iterable[str] | None = None, real_pnl: Callable[[], tuple[Decimal, int]] | None = None):
+                 paused_until_profit: Iterable[str] | None = None, real_pnl: Callable[[], tuple[Decimal, int]] | None = None,
+                 lift: Mapping[str, Any] | None = None):
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
         self.evidence = evidence
         self.clock = clock
         #: Roles that do not sit down while the floor's 24-hour real P&L is not positive (game.json
-        #: `merton.paused_until_profit`; Sept 24, 2026). `real_pnl` measures it (`RealPnl`).
-        self.paused_until_profit = frozenset(r for r in (paused_until_profit or ()) if r in ROLES)
+        #: `merton.paused_until_profit`; Sept 24, 2026). `real_pnl` measures it (`RealPnl`). Since
+        #: Sept 25, 2026 (F4) the consultant may be one: then no agent may hire him meanwhile.
+        self.paused_until_profit = frozenset(r for r in (paused_until_profit or ()) if r in PAUSABLE)
+        #: F4's dials (`LIFT`, game.json `merton.lift`).
+        self.lift = {**LIFT, **{k: v for k, v in dict(lift or {}).items() if not str(k).startswith("_")}}
         self.real_pnl = real_pnl or RealPnl(ledger, clock)
         #: role -> paused, as last recorded (seeded from the ledger's newest rows, so a restart does
         #: not record a pause again), and the reading it was decided on.
@@ -454,6 +525,28 @@ class Merton:
                                            "question": str(question)[:600], "wrote_code": bool(code.strip()),
                                            **{k: v for k, v in row.items() if k != "code"}})
         return row
+
+    def consult_paused(self) -> bool:
+        """Whether the consultant is held (F4): it is in `paused_until_profit` and the floor's 24-hour
+        real P&L is not positive. `Researcher._consult` asks before anything is spent."""
+        return "consultant" in self.paused_until_profit and "consultant" in self._held()
+
+    def consult_price_multiple(self, agent_id: str) -> tuple[int, int]:
+        """(the multiple of its usual price the agent's next consult costs, the unproductive consults
+        in a row behind it). F4, Sept 25, 2026: in the 24 hours to T0 the consultant cost $28.72 for 51
+        answers with no measured lift, and 56 of the 64 answers of the day wrote the agent a file. A
+        consult after which the agent retained no candidate and changed no strategy within
+        `consult_sessions` (2) sessions doubles its next consult's price, again for each in a row, up to
+        `consult_max_multiple` (8); a productive one resets it. A consult whose sessions have not yet
+        run is not judged and moves nothing."""
+        k = 0
+        for _, verdict in reversed(consult_verdicts(self.ledger, agent_id, sessions=int(self.lift["consult_sessions"]))):
+            if verdict is None:
+                continue
+            if verdict["productive"]:
+                break
+            k += 1
+        return int(min(2 ** k, max(1, int(self.lift["consult_max_multiple"])))), k
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:
