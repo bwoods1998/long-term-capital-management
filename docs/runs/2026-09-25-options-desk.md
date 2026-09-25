@@ -104,7 +104,7 @@ desk's structures go to, so the choice is made at the deploy and undone by a rol
 Read before every merge and deploy: the forward-first record's "Coordination with the options-desk
 run" section (its current wave, file owners and announced deploys).
 
-**Three runs (the owner's message, about 06:12Z):** a third run executes `docs/goals/LTCM_KALSHI_SCALE.md`
+**Three runs (the owner's message, about 06:04Z):** a third run executes `docs/goals/LTCM_KALSHI_SCALE.md`
 (branch `goal/kalshi-scale-2026-09-25`; record `docs/runs/<date>-kalshi-scale.md` on its run branch). The
 coordination rules now span three runs: before each merge and deploy, read all three records (current
 waves, file owners, announced deploys); one deploy at a time across the three, none 13:25-20:05Z on a
@@ -157,6 +157,22 @@ file of the Kalshi run's is touched.
 |---|---|---|
 | 0.1 | T0 recorded and committed | done |
 | 0.2 | Plan merged to main | PR #299 |
+
+## The scoreboard at T0
+
+Read-only from the box's ledger at 06:14Z Sept 25 (`q_base.py` in the session scratchpad), the Sept 24
+session (13:30-20:00Z) as the day's baseline.
+
+| # | Metric | Baseline | Target |
+|---|---|---|---|
+| 1 | Options agents living; distinct options families | 7 (all `options-pullback`); 21 ever (16 pullback, 5 breakout) | >= 14; >= 8 (the amendment: >= 10 founders, one family each) |
+| 2 | Options intents and fills in a session (practice) | 117 wakes, 28 intents, 27 practice fills (+2 real), all single contracts | >= 20 structure intents, >= 5 structure fills |
+| 3 | Median underlying level of contracts traded | median strike $14 (AAL 14 fills, RIVN 4, SOFI 4, PFE 2, SNAP 2, T, F, VALE) | >= $100 (SPY, QQQ, IWM) |
+| 4 | Median bid-ask paid, a share of premium or net | single contracts at $0.05-0.60 (spreads up to 20%) | <= 8% |
+| 5 | **The amended target at 20:00Z:** agents with positive realized P&L on >= 2 closed structures; the desk's closed-structure total | Sept 24 single contracts on practice: 16 closes, +$1.97 in all; positive on >= 2 closes: krasker-11 (+$14.00 on 3), krasker-6 (+$14.00 on 3), krasker-14 (+$12.00 on 4); krasker-16 +$16.97 on 1 | >= 3 agents, each >= 2 closed STRUCTURES, positive; desk total positive |
+| 6 | Structure families meeting O4 by Monday 13:00Z | 0 | >= 1, or the numbers why not |
+| 7 | Real options activity Monday | krasker-14's two contracts (AAL, $34), draining | real structures by an O4 family, or the numbers why not |
+| 8 | Harness incidents this run caused | - | 0 |
 
 ## Progress notes
 
