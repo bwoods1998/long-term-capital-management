@@ -143,6 +143,8 @@ run's `config.json` change is its own new `options_structures` key).
   deploy`, practice multi-leg route, `OPTION_STRUCTURES_REAL` off) at about 11:10Z and the House owner deploy
   (`floor_box.py deploy` from `~/Work/ltcm-deploy` at `origin/main`) at about 11:15Z; no real Kalshi family's
   game is in play (the proven family's MLB totals start from 22:40Z). Exact times below as they happen.
+  **Deploy V started 11:05Z:** PR #317 merged 11:04:57Z (`0d46e90`, CI green 11:04Z: 3 of 3 jobs); the
+  gateway first, then the House.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
   otherwise Saturday after Deploy B and Deploy G. State (10:33Z): **Saturday** (the outage below delayed V). Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
