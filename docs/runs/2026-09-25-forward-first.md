@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
+| F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
 
@@ -287,6 +288,14 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   on 24 h of live lift after Deploy B.
 - **The Kalshi run's K5 (07:23Z):** its one line in `Allocator.grant_capital` (a ratified version-2 tranche's
   `unlocked_usd`, 0 until the owner ratifies) goes in as its own small PR after Deploy B, reviewed here.
+
+- **F-lab (#306, Wave 1).** Replayed on the T0 `lab.sqlite`: 44 of 83 archive cells change program; elites from
+  forward-winning lineages 15 -> 46, from losing ones 24 -> 3, with no record 44 -> 34; Luna and agent elites 9 -> 24.
+  Of the last day's 273 graduates only 2 (0.7%) would have passed (268 had no winning forward window of their own):
+  graduations will fall to what the forward windows can score until they catch up (each forward run scored 5-31
+  candidates in its 90 s at T0; `forward_box_seconds` 90 -> 180 and `forward_candidates_per_run` 48 -> 96, both
+  bounded). 11 lineages blocked at T0 (latest window losing over 6+ active blocks). `reserved_share` 0.5 -> 0.33:
+  mechanism children take 22 of 32 batch slots. Watch after Deploy B: graduations a day and the seat market's inflow.
 
 ## Progress notes
 
