@@ -78,7 +78,7 @@ its session.
   seat market, `house.py` (the `JevFloor` hooks it already calls are enough), the strategies and seeds of
   any desk (J1's first users are children written with each desk's owner run), the options desk.
 - **Announced deploys:** **D-J1** (House owner deploy: J0 caps + the J1 recorder; no money-digest
-  change). **Agreed slot (06:30Z, both runs' answers):** Friday Sept 25 **12:15-12:55Z** if the options
+  change). **Agreed slot (06:27Z, both runs' answers):** Friday Sept 25 **12:15-12:55Z** if the options
   run's Deploy V ends its post-promotion watch by 11:45Z (start at least 30 minutes after V's written end;
   not started if the canary and watch could run past 12:55Z); if V ends later or is rolled back, Saturday
   Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G, before the Kalshi
