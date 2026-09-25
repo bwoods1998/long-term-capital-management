@@ -26,7 +26,7 @@
 # 0.3-0.7 (the body's call |delta|: near the money); profit_target 0.1-0.8 (of the maximum gain);
 # stop_loss 0.2-0.9 (of the debit); exit_minutes_before_close 30-60; max_open 1-3;
 # entry_start/entry_end 780-865; pin_minutes 60-180; pin_pct 0.1-1 (percent); min_share 0.05-0.5;
-# vol_days 3-15; vol_cushion 0.6-1.5; min_edge 0-0.2; risk_usd 10-75; requote_minutes 5-30;
+# vol_days 3-7; vol_cushion 0.6-1.5; min_edge 0-0.2; risk_usd 10-75; requote_minutes 5-30; slip 0-0.2 ($ a contract a leg the entry's limit pays over the touch, and a profit target's under it);
 # max_entries_day 1-2.
 
 import math
@@ -350,13 +350,14 @@ def _expected(rows, spot, sd):
     return sum(w * _payoff(rows, spot * math.exp(sd * z - 0.5 * sd * sd)) for z, w in zip(GRID, WEIGHTS))
 
 
-def _edge(price, rows, spot, sd):
+def _edge(price, rows, spot, sd, slip=0.0):
     """What holding the structure to expiry is expected to make a share after paying the touch to
-    open and the fee on every leg of both fills (it is closed early at the touch or expires)."""
+    open plus `slip` a contract (the worse price its limit allows) and the fee on every leg of both
+    fills. Held to its expiry's close a structure is settled at its value (no touch to pay out)."""
     value = _expected(rows, spot, sd)
     if value is None:
         return None
-    net_paid = -price["open"] if price["credit"] else price["open"]
+    net_paid = (-price["open"] if price["credit"] else price["open"]) + slip * price["contracts"]
     return value - net_paid - 2.0 * FEE * price["contracts"] / 100.0
 
 
@@ -368,38 +369,50 @@ def _cents_down(value):
     return math.floor(round(value * 100.0, 6)) / 100.0
 
 
-def _open_limit(price):
-    """The natural limit that opens at the touch: a debit rounded up to a cent (the most to pay), a
-    credit rounded down (the least to take). None when that is no order a book admits."""
+def _open_limit(price, slip=0.0):
+    """The natural limit that opens: the touch, worse by `slip` a contract (a debit rounded up to a cent,
+    the most to pay; a credit rounded down, the least to take), so it fills where the legs really trade
+    a little wider than shown. None when that is no order a book admits."""
+    allowance = slip * price["contracts"]
     if price["credit"]:
-        limit = _cents_down(price["open"])
+        limit = _cents_down(price["open"] - allowance)
         return limit if 0.01 <= limit < price["k"] - 0.005 else None
-    limit = _cents_up(price["open"])
+    limit = _cents_up(price["open"] + allowance)
     if limit < 0.01 or (price["max_value"] is not None and limit >= price["max_value"] - 0.005):
         return None
     return limit
 
 
-def _close_limit(price):
-    """The natural limit that closes at the touch: the least a debit structure's sale takes (rounded
-    down, at least a cent), or the most a credit structure's buy-back pays (rounded up, under K)."""
+def _held_at(price, limit):
+    """The held price S an opening limit pays at most a share: its maximum loss."""
+    return (price["k"] - limit) if price["credit"] else limit
+
+
+def _close_limit(price, urgent=False, slip=0.0):
+    """The natural limit that closes: the touch worse by `slip` a contract (the least a debit
+    structure's sale takes, rounded down; the most a credit structure's buy-back pays, rounded up,
+    under K), or, `urgent` (a stop or a time exit), down to half the held price at the touch, so it is
+    marketable when the touch has moved: a marketable limit fills at the market's price, never at its
+    own worse one."""
+    held = max(0.0, price["held_close"])
+    held = held * 0.5 if urgent else max(0.0, held - slip * price.get("contracts", 2))
     if price["credit"]:
-        return max(0.01, min(_cents_up(price["close"]), round(price["k"] - 0.01, 2)))
-    return max(0.01, _cents_down(price["close"]))
+        return max(0.01, min(_cents_up(price["k"] - held), round(price["k"] - 0.01, 2)))
+    return max(0.01, _cents_down(held))
 
 
-def _fits(price, quantity, ctx, risk_usd):
+def _fits(price, quantity, ctx, risk_usd, held=None):
     """Whether `quantity` structures fit the caps, the agent's own risk budget and free cash, all read
-    as maximum loss (the held price x 100) plus the fee."""
+    as maximum loss (the held price x 100, at the limit when one is given) plus the fee."""
     limits = ctx.get("limits") or {}
-    cost = price["held_open"] * 100.0 * quantity
+    cost = (price["held_open"] if held is None else held) * 100.0 * quantity
     caps = [risk_usd, _num(limits.get("max_order_usd"), 0.0), _num(limits.get("max_position_usd"), 0.0)]
     return 0 < cost <= min(caps) + 1e-9 and cost + FEE * price["contracts"] * quantity <= _num(ctx.get("cash"), 0.0) * 0.98
 
 
-def _size(price, ctx, risk_usd, most=4):
+def _size(price, ctx, risk_usd, most=4, held=None):
     quantity = 0
-    while quantity < most and _fits(price, quantity + 1, ctx, risk_usd):
+    while quantity < most and _fits(price, quantity + 1, ctx, risk_usd, held):
         quantity += 1
     return quantity
 
@@ -470,8 +483,8 @@ def _held(ctx, by_occ):
         else:
             close_held = _num(position.get("mark"), 0.0)
             close_natural = (k - close_held) if kind in CREDIT_TYPES else close_held
-            price, source = {"kind": kind, "credit": kind in CREDIT_TYPES, "k": k, "close": close_natural,
-                             "held_close": close_held, "max_value": _max_value(kind, rows)}, "the House's mark"
+            price, source = {"kind": kind, "credit": kind in CREDIT_TYPES, "k": k, "close": close_natural, "held_close": close_held,
+                             "max_value": _max_value(kind, rows), "contracts": sum(r for _, _, r in legs)}, "the House's mark"
         natural_open = _num(position.get("natural_open"), None)
         if natural_open is None:
             natural_open = (k - paid) if kind in CREDIT_TYPES else paid
@@ -522,27 +535,27 @@ def _exit_reason(item, p, ny):
     if item["kind"] in CREDIT_TYPES:
         credit = max(item["natural_open"], 0.01)
         if pnl >= p["profit_target"] * credit:
-            return f"the profit target: {pnl:+.2f} a share is {pnl / credit:.0%} of the {credit:.2f} credit (target {p['profit_target']:.0%})"
+            return f"the profit target: {pnl:+.2f} a share is {pnl / credit:.0%} of the {credit:.2f} credit (target {p['profit_target']:.0%})", False
         if item["close_natural"] >= p["stop_loss"] * credit:
-            return f"the stop: buying it back costs {item['close_natural']:.2f}, {p['stop_loss']:.1f}x the {credit:.2f} credit"
+            return f"the stop: buying it back costs {item['close_natural']:.2f}, {p['stop_loss']:.1f}x the {credit:.2f} credit", True
     else:
         top = item["price"].get("max_value")
         gain = (top - paid) if top is not None else paid
         if gain > 0 and pnl >= p["profit_target"] * gain:
             what = "maximum gain" if top is not None else "debit"
-            return f"the profit target: {pnl:+.2f} a share is {pnl / gain:.0%} of the {gain:.2f} {what} (target {p['profit_target']:.0%})"
+            return f"the profit target: {pnl:+.2f} a share is {pnl / gain:.0%} of the {gain:.2f} {what} (target {p['profit_target']:.0%})", False
         if paid > 0 and pnl <= -p["stop_loss"] * paid:
-            return f"the stop: worth {now:.2f} against {paid:.2f} paid, down {-pnl / paid:.0%} (stop {p['stop_loss']:.0%})"
+            return f"the stop: worth {now:.2f} against {paid:.2f} paid, down {-pnl / paid:.0%} (stop {p['stop_loss']:.0%})", True
     if expiry is not None and expiry <= today and clock >= min(exit_at, HOUSE_CLOSE - 5):
-        return f"the time exit: {CLOSE - clock} minutes before the close of its expiry day"
+        return f"the time exit: {CLOSE - clock} minutes before the close of its expiry day", True
     flat = int(p.get("flat_at", 0) or 0)
     if flat and clock >= flat:
-        return f"the time exit: {flat // 60:02d}:{flat % 60:02d} New York, flat every day"
+        return f"the time exit: {flat // 60:02d}:{flat % 60:02d} New York, flat every day", True
     opened = _when(item.get("opened_at"))
     hold = int(p.get("max_hold_days", 0) or 0)
     if hold and opened is not None and _sessions_after(opened.date(), today) >= hold and clock >= exit_at:
-        return f"the time exit: held {hold} session(s)"
-    return None
+        return f"the time exit: held {hold} session(s)", True
+    return None, False
 
 
 def _manage(ctx, p, ny, by_occ, notes):
@@ -551,7 +564,7 @@ def _manage(ctx, p, ny, by_occ, notes):
     working, _ = _working(ctx)
     held = _held(ctx, by_occ)
     for item in held:
-        why = _exit_reason(item, p, ny)
+        why, urgent = _exit_reason(item, p, ny)
         label = f"{item['kind']} {item['underlying']} {item['expiry']}"
         if why is None:
             notes.append(f"{label}: holding, {item['close_held'] - item['paid']:+.2f} a share at {item['source']}")
@@ -560,12 +573,12 @@ def _manage(ctx, p, ny, by_occ, notes):
         if order is not None and order[0] and str(order[1]) not in cancels:
             notes.append(f"{label}: closing, an order already works")
             continue
-        limit = _close_limit(item["price"])
+        limit = _close_limit(item["price"], urgent, p.get("slip", 0.0))
         intents.append({"structure": item["kind"], "action": "close", "quantity": int(item["quantity"]), "type": "limit",
                         "limit_price": limit, "legs": [{"occ": occ, "role": "long" if sign > 0 else "short", **({"ratio": ratio} if ratio != 1 else {})}
                                                       for occ, sign, ratio in item["legs"]],
-                        "reason": f"Closing the {label} at the touch ({'pay at most' if item['kind'] in CREDIT_TYPES else 'take at least'} "
-                                  f"{limit:.2f} a share, from {item['source']}): {why}."[:480]})
+                        "reason": f"Closing the {label} {'marketable' if urgent else 'at the touch'} ({'pay at most' if item['kind'] in CREDIT_TYPES else 'take at least'} "
+                                  f"{limit:.2f} a share; the touch from {item['source']}): {why}."[:480]})
         notes.append(f"{label}: closing, {why}")
     return intents, cancels, held
 
@@ -599,8 +612,8 @@ NEEDS = {
     "parameter_rules": {
         "bounds": {"width": [1, 5], "dte_min": [0, 0], "dte_max": [0, 0], "entry_delta": [0.3, 0.7], "profit_target": [0.1, 0.8],
                    "stop_loss": [0.2, 0.9], "exit_minutes_before_close": [30, 60], "max_open": [1, 3], "entry_start": [780, 865],
-                   "entry_end": [780, 865], "pin_minutes": [60, 180], "pin_pct": [0.1, 1.0], "min_share": [0.05, 0.5], "vol_days": [3, 15],
-                   "vol_cushion": [0.6, 1.5], "min_edge": [0.0, 0.2], "risk_usd": [10, 75], "requote_minutes": [5, 30],
+                   "entry_end": [780, 865], "pin_minutes": [60, 180], "pin_pct": [0.1, 1.0], "min_share": [0.05, 0.5], "vol_days": [3, 7],
+                   "vol_cushion": [0.6, 1.5], "min_edge": [0.0, 0.2], "risk_usd": [10, 75], "requote_minutes": [5, 30], "slip": [0.0, 0.2],
                    "max_entries_day": [1, 2]},
         "ordered": [["dte_min", "dte_max"]],
     },
@@ -608,7 +621,7 @@ NEEDS = {
 PARAMS = {"structure": "long_butterfly", "width": 1.0, "dte_min": 0, "dte_max": 0, "entry_delta": 0.5, "profit_target": 0.35,
           "stop_loss": 0.5, "exit_minutes_before_close": 35, "max_open": 2, "entry_start": 825, "entry_end": 860,
           "pin_minutes": 120, "pin_pct": 0.35, "min_share": 0.12, "vol_days": 5, "vol_cushion": 1.0, "min_edge": 0.0,
-          "risk_usd": 60.0, "requote_minutes": 10, "max_entries_day": 1}
+          "risk_usd": 60.0, "requote_minutes": 10, "slip": 0.02, "max_entries_day": 1}
 
 
 def _volumes(tree, symbol, expiry, spot, pct):
@@ -659,8 +672,8 @@ def _entry(ctx, p, ny, tree, symbol, notes, memory):
             continue
         rows = [(low, 1, 1), (mid, -1, 2), (high, 1, 1)]
         price = _price("long_butterfly", rows)
-        edge = _edge(price, rows, spot, real * p["vol_cushion"]) if real else None
-        if price["open"] <= 0 or edge is None or edge < p["min_edge"] or _open_limit(price) is None or not _fits(price, 1, ctx, p["risk_usd"]):
+        edge = _edge(price, rows, spot, real * p["vol_cushion"], p["slip"]) if real else None
+        if price["open"] <= 0 or edge is None or edge < p["min_edge"] or _open_limit(price, p["slip"]) is None or not _fits(price, 1, ctx, p["risk_usd"], _held_at(price, _open_limit(price, p["slip"]))):
             continue
         if best is None or price["open"] < best[0]["open"]:
             best = (price, rows, edge, right)
@@ -668,12 +681,12 @@ def _entry(ctx, p, ny, tree, symbol, notes, memory):
         notes.append(f"{symbol}: the {body:g} pin ({share:.0%} of the flow), but no {p['width']:g}-wing butterfly clears the touch and fits")
         return None
     price, rows, edge, right = best
-    quantity = _size(price, ctx, p["risk_usd"])
-    limit = _open_limit(price)
+    limit = _open_limit(price, p["slip"])
+    quantity = _size(price, ctx, p["risk_usd"], held=_held_at(price, limit))
     reason = (f"Buying the {symbol} {expiry} {body - p['width']:g}/{body:g}/{body + p['width']:g} {right} butterfly for {limit:.2f} (at the "
               f"touches): {body:g} took {share:.0%} of the traded volume within {max(1.0, 2.0 * p['pin_pct']):.1f}% of the price since "
               f"the snapshot, and the price {spot:.2f} is {abs(spot / body - 1):.2%} from it; expected {edge:+.3f} a share at the close "
-              f"after costs; at most ${price['held_open'] * 100 * quantity:.0f} can be lost. Out at {p['profit_target']:.0%} of the "
+              f"after costs; at most ${_held_at(price, limit) * 100 * quantity:.0f} can be lost. Out at {p['profit_target']:.0%} of the "
               f"maximum gain, -{p['stop_loss']:.0%}, or {int(p['exit_minutes_before_close'])} minutes before the close.")
     notes.append(f"{symbol}: buying the {body:g} {right} butterfly for {limit:.2f}, {share:.0%} of the flow, edge {edge:+.3f}")
     return _intent("long_butterfly", rows, "open", quantity, limit, reason)

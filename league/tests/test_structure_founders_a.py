@@ -338,11 +338,11 @@ class PutSpreadDip(FounderCase):
 class IronflyQuiet(FounderCase):
     SEED = "options-ironfly-quiet"
 
-    def market(self, now, *, noisy=False, iv=0.35, spot=760.0):
+    def market(self, now, *, noisy=False, iv=0.50, spot=760.0):
         opened = datetime.strptime(now, "%Y-%m-%d %H:%M").replace(tzinfo=NY)
         count = int((opened - opened.replace(hour=9, minute=30)).total_seconds() // 900)
-        path = [spot * (1 + (0.004 if (noisy and j % 2) else 0.0) - 0.0001 * (j % 2)) for j in range(count - 1)] + [spot]
-        return ctx_for(now, chain("SPY", spot, now, [FRI, MON], vol=iv), {"SPY": bars(spot, now, annual_vol=0.08, today_path=path),
+        path = [spot * (1 + (0.004 if (noisy and j % 2) else 0.0) - 0.00005 * (j % 2)) for j in range(count - 1)] + [spot]
+        return ctx_for(now, chain("SPY", spot, now, [FRI, MON], vol=iv), {"SPY": bars(spot, now, annual_vol=0.04, today_path=path),
                                                                           "QQQ": [], "IWM": []})
 
     def test_sells_an_at_the_money_iron_butterfly_in_a_quiet_midday(self):
