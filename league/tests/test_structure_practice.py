@@ -9,9 +9,9 @@ the owner asked to see before the switch is flipped:
   (`House._structure_target`): a structure agent trades on `alpaca-paper` only when its program's
   `PARAMS["structure"]` is a type that account opens (the five Alpaca closes as ONE covered order);
   every other structure agent stays on the options shadow book.
-- The migration (`House._structure_move`): an agent holding structures on its old book closes there,
-  opens nothing more there, and is re-seated on the new book once flat; never positions or orders on
-  two books.
+- The migration (`House._structure_move`): an agent holding structures on its old book keeps trading
+  there until it is flat (opens for a day, then closes only), and is then re-seated, its stake moved,
+  on the new book; never positions or orders on two books.
 - The whole path House -> adapter -> book over a fake of the practice account in Alpaca's documented
   shapes (`Venue`, P2's `FakeAlpaca` with the account's type, FILL activities per leg and legs filled
   one at a time): per-leg fills, a partial fill, a late leg, a restart mid-order, a broken structure,
@@ -289,8 +289,9 @@ class TheSwitch(PracticeCase):
 
 
 class TheMigration(PracticeCase):
-    """An agent seated on the options shadow book when the switch turns on keeps trading there, closes only,
-    until it is flat; then it is re-seated, its stake moved, on the practice account. Never two books at once."""
+    """An agent seated on the options shadow book when the switch turns on keeps trading there until it is flat
+    (opens for a day, then closes only); then it is re-seated, its stake moved, on the practice account. Never
+    positions or orders on two books at once."""
 
     def condor_on_the_shadow_book(self):
         self.switch(False)
@@ -318,12 +319,18 @@ class TheMigration(PracticeCase):
         ctx = self.house.snapshot(agent, shadow)
         self.assertEqual(ctx["structure_rules"]["book"], SHADOW)
         self.assertIn("alpaca-paper", ctx["structure_rules"]["moving_to"])
-        # 2. An open there is refused, with the reason; nothing reaches the practice account.
-        self.assertEqual(self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])[0], [])
-        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
-        self.assertIn("moving to the alpaca-paper book", refused[-1])
+        # 2. For a day it keeps trading there, opens included; nothing reaches the practice account.
+        opens, _ = self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])
+        self.assertEqual([i.instrument.venue for i in opens], [SHADOW])
         self.assertEqual(self.venue.posted, [])
         self.assert_one_book(agent)
+        # A day after the first wake that found it moving, it only closes there, so the move always ends.
+        self.at(THURSDAY_11_NY + 86400 + 300)  # Friday 11:05 New York
+        self.house.seat(agent)
+        self.assertEqual(self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])[0], [])
+        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertIn("after a day of trading on here it closes what it holds on options-shadow", refused[-1])
+        self.assertEqual(self.venue.posted, [])
         # 3. A close rests there (0.60 over the 0.55 bid): still not flat, still there.
         rested = self.send(agent, [condor_row(action="close", limit=0.40)])
         self.assertEqual([o.status for o in rested], ["resting"])
@@ -342,6 +349,7 @@ class TheMigration(PracticeCase):
         self.assertIn((SHADOW, "account closed"), stakes)
         self.assertEqual(stakes[-1], (PRACTICE, "rung 1 stake"))
         self.assertTrue(any("moved from options-shadow to alpaca-paper" in str(a) for a in self.alerts()))
+        self.assertNotIn(agent.id, self.house._state.get("structure_moving") or {})
         # 5. Its next open goes to the practice account as ONE multi-leg order.
         self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
         self.assertEqual(len(self.mleg_posts()), 1)
@@ -378,7 +386,8 @@ class TheMigration(PracticeCase):
         self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
         self.switch(False)  # a rollback
         self.assertIs(self.house.book_of(agent), self.practice)
-        self.assertEqual(self.house._intents(agent, self.practice, [condor_row(expiry="2026-09-14")])[0], [])
+        self.house.seat(agent)
+        self.assertIn(agent.id, self.house._state["structure_moving"])
         self.assertEqual([o.status for o in self.send(agent, [condor_row(action="close", limit=0.47)])], ["filled"])
         self.assertIs(self.house.book_of(agent), self.house.books[SHADOW])
         self.house.seat(agent)

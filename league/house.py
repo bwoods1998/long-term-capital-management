@@ -151,6 +151,12 @@ STRUCTURE_CHAIN_PER_UNDERLYING = 80
 #: into one request an expiry only when it returns this many rows or more (near the adapter's 1,000-snapshot page).
 STRUCTURE_CHAIN_WINDOW_DAYS = 7
 STRUCTURE_CHAIN_SPLIT_ROWS = 600
+#: A structure agent moving between the options shadow book and the Alpaca practice account (`House._structure_move`,
+#: Wave 2, Sept 25, 2026) keeps trading on its old book, opens included, until it is flat, for at most this long
+#: from the first wake that found it moving; after that it only closes there, so the move always ends (a structure
+#: it cannot close itself is sold by the House's expiry-day close). A day: a founder of 0-7 day structures is
+#: usually flat within its session, and one that never is must not trade on the old book for ever.
+STRUCTURE_MOVE_OPENS_SECONDS = 24 * 3600
 PROBE_BOX = "house-probe"
 #: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
 #: how often they run, how many ledger rows the first pass reads back (never the whole ledger),
@@ -1015,9 +1021,11 @@ class House:
         THE MIGRATION, when the switch moves a structure agent between the options shadow book and the Alpaca
         practice account (either way: the switch turned on, off by a rollback, or its program's type changed):
         1. While the agent holds a structure, has an order of one open or a never-arrived buy of one binding
-           cash on its OLD book, `_structure_book` keeps it there: its wakes see that book, its closes go
-           there, and the House closes its opens there (`_structure_refusal`), so it only gets flatter. The
-           House's expiry-day close and a strategy's own exits bound this by the structure's earliest expiry.
+           cash on its OLD book, `_structure_book` keeps it there: its wakes see that book and it keeps trading
+           there, opens included, for `STRUCTURE_MOVE_OPENS_SECONDS` (a day) from the first wake that found it
+           moving (kept in house.json, `structure_moving`); after that the House refuses its opens there
+           (`_structure_refusal`) and it only gets flatter: the House's expiry-day close and a strategy's own
+           exits bound the rest by its structures' earliest expiry.
         2. At the first `seat` once it is flat there (every wake seats), this sweeps the old account's free
            cash back to the House (`_sweep`, "account closed"), says so once, and `seat` stakes it on the new
            book at the rung's practice stake, as `_move_books` does for any change of book. Its old record
@@ -1025,6 +1033,15 @@ class House:
         So an agent is never holding, or ordering, structures on two books at once; for a moment it may have
         cash on both (the sweep and the stake are separate rows), never a position or an order."""
         if not self.is_structure_agent(agent) or book not in self._structure_books():
+            return
+        moving = book is not self._structure_target(agent)
+        with self._state_lock:
+            since = self._state.setdefault("structure_moving", {})
+            if moving:
+                since.setdefault(agent.id, self.clock())  # when this wake first found it moving (`STRUCTURE_MOVE_OPENS_SECONDS`)
+            else:
+                since.pop(agent.id, None)
+        if moving:
             return
         for old in self._structure_books():
             if old is book or agent.id not in old.accounts or self._structure_busy(old, agent.id):
@@ -1129,14 +1146,15 @@ class House:
         target = self._structure_target(agent)
         wanted = target.name if target is not None else self._structure_book_name()
         if book.name != wanted:
-            if self._structure_book(agent) is book:
-                # Moving (`_structure_move`, Wave 2, Sept 25, 2026): closes only here, until it is flat.
-                if order.action != "open":
-                    return ""
-                return (f"this agent's structures are moving to the {wanted} book: it closes what it holds on {book.name} and opens "
-                        f"nothing more here; once it is flat here its next open goes to {wanted}")
-            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
-                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+            if self._structure_book(agent) is not book:
+                return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
+                        if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+            # Moving (`_structure_move`, Wave 2, Sept 25, 2026): it trades on here until it is flat, opens only for a day.
+            if order.action == "open":
+                since = (self._state.get("structure_moving") or {}).get(agent.id)
+                if since is not None and self.clock() - float(since) >= STRUCTURE_MOVE_OPENS_SECONDS:
+                    return (f"this agent's structures are moving to the {wanted} book: after a day of trading on here it closes what "
+                            f"it holds on {book.name} and opens nothing more here; once it is flat its next open goes to {wanted}")
         if order.action != "open":
             return ""
         niche = self.niche_of(agent)
@@ -1194,8 +1212,8 @@ class House:
         if here is not None:
             ctx["structure_rules"]["book"] = here.name
             if target is not None and target is not here:
-                ctx["structure_rules"]["moving_to"] = (f"{target.name}: close what you hold on {here.name} (no open is taken here); "
-                                                       f"your next open goes to {target.name} once you are flat")
+                ctx["structure_rules"]["moving_to"] = (f"{target.name}: you trade on {here.name} until you are flat there (opens for a "
+                                                       f"day, then closes only); once flat, your next open goes to {target.name}")
 
     def _structure_row(self, inst: Instrument, *, average_cost: Decimal | None = None, mark: Decimal | None = None,
                        quantity: Decimal | None = None, limit: Decimal | None = None, side: str | None = None) -> dict[str, Any]:
