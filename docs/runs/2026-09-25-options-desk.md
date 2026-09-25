@@ -122,6 +122,9 @@ test of every founder on true touches.
   ratify a no-op (digest `535a7f15`); the old House took until about 16:22:30Z to finish its tick; `ops.started`
   16:23:09Z, every book unfrozen. First new founder krasker-23 (options-condor-vrp) born 16:24:29Z, the seat rule
   retiring krasker-10 (options-pullback, 7-day -0.174). House RSS 731 MB at two minutes.
+  The watch's verdict **promoted 16:31:31Z** (reasons none; health was 217 s old at its last reading while the
+  founders' births and birth replays slowed the tick). By 16:29:46Z five structure founders born, RSS 1,353 MB (about
+  200 MB a birth replay's cached tape).
 - **The 14:37Z restart, found at 16:20Z:** the supervisor's log says "the House exited (137)" at 14:37:30Z: killed for
   memory mid-session (the restart at 14:38:13Z on the same release, no deploy). At 16:19Z the process stood at 4.1 GB
   RSS of the box's 6.2 GB after 1 h 44 min. `House.tape_for` kept every replay tape for a day with no bound, and a
