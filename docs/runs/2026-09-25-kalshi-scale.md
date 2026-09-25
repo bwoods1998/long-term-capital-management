@@ -104,7 +104,7 @@ This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows t
   exact start is written here first.
   A **gateway deploy** of `web_fetch` (no money rule) in the same Friday gap or Saturday's quiet window
   after forward-first's Deploy B and the options run's Deploy G, rebased on the options run's gateway
-  change. **Deploy K2** (House: K5, K5b and any fix the weekend watch finds; I2 moved into K1) in a weekend quiet window after
+  change. **Saturday Sept 26's order (agreed 12:30Z, each after the previous watch + 30 min, none while a real Kalshi family's game is in play):** forward-first's B 06:00Z, the options run's G ~07:00Z, forward-first's C ~08:00Z, the Jev run's D-J2 + its J5 gateway ~09:00Z, then this run's K2 before ~15:30Z. Game times checked (Kalshi tickers, ESPN): Friday's last MLB first pitch 02:15Z (LAD-SF), Saturday's first 17:10Z, college kickoffs from 16:00Z (practice founders only), Sunday MLB 19:05-19:20Z, NFL 17:00Z. **Deploy K2** (House: K5, K5b and any fix the weekend watch finds; I2 moved into K1) in a weekend quiet window after
   B, G and D-J1, its start written here first.
 
 ## Checklist
