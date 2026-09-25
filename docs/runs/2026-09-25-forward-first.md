@@ -297,6 +297,16 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   bounded). 11 lineages blocked at T0 (latest window losing over 6+ active blocks). `reserved_share` 0.5 -> 0.33:
   mechanism children take 22 of 32 batch slots. Watch after Deploy B: graduations a day and the seat market's inflow.
 
+- **From the Jev run (J2, offline, held out Sept 24 00Z-Sept 25 06Z; its record, section "J2"), for Wave 2's Y:**
+  on the 1,228 held-out sessions F2 would still run ($39.05), the trigger kind alone predicts a replay pass at AUC
+  0.856 [0.823, 0.887] and a free logistic (trigger kind, empty streak, record class, previous outcome, fills/settles,
+  hours since last) 0.896; skipping by trigger kind drops 31% of dollars for 9% of replay passes and 12% of candidates.
+  Sessions woken by the agent's own fills or settlements predict no candidate (AUC 0.215). Merton, 497 passes Sept
+  22-25 ($174.78): architect 43 of 54 produced nothing ($31.77 of $44.18); toolsmith, operator and designer 42 of 43
+  ($14.19); engineer 155 of 207 ($16.98); consultant 23 of 112 (30 led to a replay-passed candidate). The consultant
+  looks productive by outcome while F4's forward-lift reading says no lift: the pause decision reads both. Jev builds
+  no pre-filter (it does not beat these free rules).
+
 ## Progress notes
 
 ## Watch log
