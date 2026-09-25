@@ -987,6 +987,14 @@ class House:
         niche = self.niche_of(agent)
         return niche is not None and niche.asset_class == "option"
 
+    def _structure_program(self, agent: Agent | None, needs: Any = None) -> bool:
+        """Whether `agent` trades structures now, or would with a program of these `needs` (a rewrite into one)."""
+        if self.is_structure_agent(agent):
+            return True
+        niche = self.niche_of(agent)
+        return (isinstance(needs, Mapping) and needs.get("structures") is True and niche is not None
+                and niche.asset_class == "option")
+
     def _structure_hours(self, day: str) -> tuple[float, float]:
         """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
         15:30 (`STRUCTURE_ENTRY_CUT_HOUR`, `STRUCTURE_CLOSE_HOUR`), held 90 and 30 minutes before the bell on
@@ -8771,7 +8779,20 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not repair and not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            stuck = traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
+            if stuck and not repair and self._structure_program(agent, candidate.get("needs")):
+                # Never a STRUCTURE program (G-LOOP, Sept 25, 2026): its replay is the only judge of arithmetic that
+                # can cost a structure's whole maximum loss. At 15:34:48Z krasker-22 (options-gap-drift) took this
+                # rule's way out of eleven barren wakes into a credit-spread program whose replay had FAILED at
+                # 15:34:26Z (17 trades), opened a CCL Oct 2 condor on $0.50 wings at 15:42:56Z, and from 15:54Z its
+                # stop tried to buy it back at 1.46, three times the wings: refused as no defined-risk order, the
+                # condor marked at its whole $17.20 maximum loss. A structure agent's new program must pass the
+                # replay gate before it trades; until then its own rules stand, and research goes on.
+                self.ledger.append("agent.research", {"tool": "candidate", "status": "not_adopted",
+                    "reason": (f"its own rules had not fired in {barren} wakes, but a structure program trades only once its "
+                               "replay passes: this one's did not"), "_candidate": candidate}, agent=agent.id)
+                candidate = None
+            elif not repair and not stuck:
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "A specialist wrote this file for it: " + candidate["purpose"]}

@@ -69,6 +69,56 @@ class TheEditReplay(StructureHouseCase):
         self.assertIn("half notional", self.house._entries_standing(agent)["tools"])
 
 
+#: What krasker-22 took at 15:34:48Z: another structure program, whose replay traded (17 trades) and failed.
+REWRITE = STRUCTURE_AGENT.replace("test-structures", "test-credit-spread").replace('"iron_condor"', '"credit_vertical"')
+
+
+class TheStuckRewrite(StructureHouseCase):
+    """The stuck-agent rule (`House._commit_research`) never puts a structure program that failed its replay to work."""
+
+    def commit(self, agent, code, *, passed, barren=11, trades=17):
+        needs = dict(agent.needs, style="test-credit-spread", structures=True)
+        candidate = {"code": code, "needs": needs, "params": {"structure": "credit_vertical", "width": 1.0}, "passed": passed,
+                     "purpose": "a short-dated defined-risk credit spread: this file at least trades", "numbers": {"trades": trades}}
+        with mock.patch.object(self.house, "idle_run", return_value={"barren": barren}):
+            return self.house._commit_research(agent.id, self.house._generation(agent.id), SimpleNamespace(candidate=candidate, consulted=""))
+
+    def test_a_stuck_structure_agent_keeps_its_rules_when_the_new_programs_replay_failed(self):
+        agent = self.structure_agent()
+        was = agent.code_sha256
+        self.assertIsNone(self.commit(agent, REWRITE, passed=False))
+        self.assertEqual(self.house.registry.get(agent.id).code_sha256, was)
+        self.assertEqual(self.house.ledger.count(kinds="agent.strategy", agent=agent.id), 0)
+        row = self.house.ledger.last("agent.research", agent=agent.id).payload
+        self.assertEqual((row["tool"], row["status"]), ("candidate", "not_adopted"))
+        self.assertIn("had not fired in 11 wakes, but a structure program trades only once its replay passes", row["reason"])
+
+    def test_a_single_leg_agent_is_not_rewritten_into_a_failed_structure_program_either(self):
+        from league.tests.test_options_desk import SINGLE_LEG
+
+        agent = self.house.spawn("krasker", "options-single-test", SINGLE_LEG, reason="test", specialty="alpaca-options")
+        self.assertFalse(self.house.is_structure_agent(agent))
+        was = agent.code_sha256
+        self.assertIsNone(self.commit(agent, REWRITE, passed=False))
+        self.assertEqual(self.house.registry.get(agent.id).code_sha256, was)
+        self.assertEqual(self.house.ledger.last("agent.research", agent=agent.id).payload["status"], "not_adopted")
+
+    def test_a_structure_program_that_passed_its_replay_is_adopted_as_before(self):
+        agent = self.structure_agent()
+        self.assertIsNone(self.commit(agent, REWRITE, passed=True))
+        current = self.house.registry.get(agent.id)
+        self.assertEqual(current.code, REWRITE)
+        row = self.house.ledger.last("agent.strategy", agent=agent.id).payload
+        self.assertIs(row["passed_replay"], True)
+
+    def test_a_failed_structure_program_that_is_not_stuck_is_dropped_silently_as_any_other(self):
+        agent = self.structure_agent()
+        was = agent.code_sha256
+        self.assertIsNone(self.commit(agent, REWRITE, passed=False, barren=3))
+        self.assertEqual(self.house.registry.get(agent.id).code_sha256, was)
+        self.assertEqual([e.payload.get("status") for e in self.house.ledger.iter(kinds="agent.research", agent=agent.id)], [])
+
+
 if __name__ == "__main__":
     import unittest
 
