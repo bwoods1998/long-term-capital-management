@@ -112,6 +112,14 @@ This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows t
 | 0.2 | Plan merged to main | PR #301 |
 | 0.3 | First-hour decisions | done 06:20Z (above) |
 | 0.4 | The scoreboard at T0 | done (below) |
+| K1a | Recorder coverage (the full college slate, per-game odds cadence, soccer draw prices) + the model-versus-market seed `sports-consensus` + founder rows (NFL, NCAAF, MLB) | building (`k1/sports-consensus`, launched 06:20Z) |
+| K1b | `league/kalshi_founders.py`: flagged founder rows seated into the full league through `_displaceable` | building (`k1/founder-seats`, 06:20Z) |
+| K2 | `scripts/kalshi_capacity.py`: fill curves at 1x-8x from own orders, Kalshi's public prints and books | building (`k2/capacity`, 06:40Z) |
+| K3 | Ensemble-priced weather founders (`weather_ensemble` seed, every station's high and low) | building (`k3/weather-ensemble`, 06:45Z) |
+| K5 | The scale rule, switched off, and `--scale-report` | building (`k5/scale-rule`, 06:20Z); merges after forward-first's Deploy B |
+| I1 | `web_fetch` for research through the gateway | building (`i1/web-fetch`, 06:20Z) |
+| I2/I3 | Recorders for key-free hosts; requests answered by rule (fulfilled by a recorder's `asks`, or blocked with the rule it fails) | building (`i2/open-recorders`, 06:30Z) |
+| W | `scripts/kalshi_watch.py` (this session) | built, 3 tests OK, run on the box 06:20Z; on `k/watch`, ships with K1 |
 
 ## The scoreboard at T0
 
@@ -128,6 +136,31 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 | 6 | The sports family's swing | 12 real independent settlements; look at 15 (10 under forward-first's M1, in its Deploy B); days_to_swing 0.51 | reached, or the count |
 | 7 | The scale report | none | prints committed, capacity used and the tranche per venue |
 | 8 | Data hosts recorded; research web reads a day; agent data requests answered | 25 hosts in `LEAGUE_HOSTS`; research has `web_search` only (0 fetches); 211 `tool.request` rows lifetime (118 `tool.fulfilled`, 121 `tool.blocked`), the newest 05:23:54Z | ≥ 45 hosts recorded; `web_fetch` in use; every request of the run answered |
+
+## Findings before the builders report
+
+- **No agent has ever declared `weather`, `nws`, `forecast` or `odds`** (every `agent.born` row to 06:30Z Sept 25:
+  feeds declared by 20 agents in all, `funding` 11, `vol` 9, `oi` 1). The recorders of Sept 24 hold 10 ensemble runs per
+  station and 60 days of forecast history, and the sports odds since 08:35Z Sept 24, but no strategy reads them: the
+  foundry's planned `first_transfer` (the weather favourites on the ensemble's fair value) never produced a seated
+  agent. K1 and K3 seed the model-versus-market founders directly, seated as founders (rung 1, practice as the test),
+  because a day-horizon strategy reading a live feed cannot be replayed until 20 days are recorded.
+- **The watch's first reading (18:00Z Sept 24 to 06:20Z Sept 25).** Every hour had a live real-money Kalshi desk
+  (5-10 real agents woken with markets offered each hour, 6-14 real intents). Real settled +$20.31: MLB +$18.42 on
+  9 events (the run-under bunt +$3.98 on 7 of them, taking every entry; the over-under probe +$14.44 on 2), crypto
+  strikes +$0.54 on 14 events (135 post-only orders, 20 fills), prices +$1.35. Real refusals 95: per-event cap 67,
+  maker-only 24, horizon 4. Practice settled −$17.58 (NFL −$59.24 on 2 events; NCAAF +$30.93 on 1; the 15-minute
+  crypto desk +$11.93 on 83 events). Five real `book.fill` rows are the House's dust (`source: dust`, no instrument,
+  −$0.0003 to −$0.0007 each), not trades: the watch keeps them out.
+- **MLB's regular season ends Sunday Sept 27.** The one proven real family trades MLB totals; its markets shrink to
+  the postseason's few games from Tuesday. Its capacity after this weekend is a fraction of today's $31.70 a day,
+  which the scale report and K2 must say, and which makes a football sibling (NFL and NCAAF central unders) the
+  mechanism's continuation if the evidence supports it (the study below).
+- **Open agent data requests at T0** (in the watch window): `mlb_point_in_time_lineup_pitcher_feed` (hufschmid-39),
+  `mlb_player_prop_reference_history` (hufschmid-38), `historical_external_crypto_indexes` (rosenfeld-h35c05b),
+  `crypto_spot_rebalance_events` (haghani-l22bffc), and five for the options and equity desks (earnings panels,
+  replay provenance) that name no new data host. I2's recorders answer the first and third by their `asks()`; the
+  others are to be blocked with the rule they fail (I3's new path: no path answered a refusal before).
 
 ## Progress notes
 
