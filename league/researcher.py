@@ -242,6 +242,7 @@ class Researcher:
             + (f"YOUR JOURNAL (your and your ancestors' notes, oldest first; conclusions are unverified claims. Compare them with the current qualification_policy, runtime capabilities and peer evidence before relying on them; add with `journal_write`):\n{pages}\n\n" if pages else
                "YOUR JOURNAL is empty. Before you finish, write yourself a note with `journal_write`: you will remember nothing else of this pass.\n\n")
             + f"Your standing: {json.dumps(standing, default=str)}\n\n"
+            + execution_brief(getattr(self, "ledger", None), agent, getattr(self, "clock", time.time)())
             + (f"WHY YOU ARE AWAKE NOW: {(standing.get('idle') or {})['why_now']}. The House pulled this pass forward because you are\n"
                "not trading, and an agent that does not trade earns nothing, learns nothing and is spent down until it dies. Do not\n"
                "end this pass with the same rules you started it with.\n"
@@ -1000,6 +1001,51 @@ class Researcher:
                     # Where it won and lost: by series or symbol, by how long before the end it got in, and its worst trades.
                     "digest": outcome.get("digest"), "note": numbers.get("note")}
         return {"error": f"no such tool {name!r}"}
+
+
+def execution_brief(ledger: Any, agent: Agent, now: float) -> str:
+    """X1 of the forward-first run (Sept 25, 2026): the agent's own fill rate and time to fill on its venue's REAL book
+    over seven days (`league/execution.py`), and, where it is under `REQUOTE_BELOW` (25%) on at least
+    `REQUOTE_MIN_ORDERS` (5) finished orders, the ask for a requote rule. At T0 four crypto-alts probes met it
+    (haghani-56 2 of 23 filled, haghani-r42c38c 0 of 18, haghani-62 2 of 17, haghani-63 4 of 22): dip bids left
+    resting under the touch for a median 29-52 minutes and cancelled, the edge never traded. Nothing for an agent
+    with no real order in the window; a rate that cannot be read never costs the pass. `Researcher._state` passes the
+    ledger it has, or None: the cache-layout tests read `_state` on a bare namespace."""
+    from .constitution import CONSTITUTION
+    from .execution import REQUOTE_BELOW, needs_requote, real_fill_stats
+
+    if ledger is None:
+        return ""
+    try:
+        stats = real_fill_stats(ledger, agent.id, agent.venue, now)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not stats or not stats.get("orders"):
+        return ""
+
+    def minutes(value: Any) -> str:
+        return "-" if value is None else f"{float(value):g}"
+
+    finished = int(stats["filled"]) + int(stats["unfilled"])
+    rate = "no order has finished yet" if stats.get("fill_rate") is None else f"{float(stats['fill_rate']):.0%}"
+    text = (f"YOUR REAL EXECUTION (the {stats['book']} book, the last {float(stats['days']):g} days; `execution` in every "
+            f"snapshot): {stats['filled']} of {finished} finished orders filled ({rate}), {stats['resting']} still resting; "
+            f"a filled order took a median {minutes(stats.get('median_minutes_to_fill'))} minutes, an unfilled one was left "
+            f"for a median {minutes(stats.get('median_minutes_unfilled'))} before it ended.\n")
+    if needs_requote(stats):
+        if agent.venue == "kalshi":
+            taking = ("A PROBE may take the price for one position at its cap (constitution allocator.real_entry_liquidity "
+                      "probe_may_take); a bunt or a swing takes only on its family's taker proof. "
+                      if str((CONSTITUTION.get("allocator") or {}).get("real_entry_liquidity") or "") == "probe_may_take" else "")
+        else:
+            taking = "A marketable limit takes the price at the taker's fee (0.25% on crypto against 0.15% resting). "
+        text += (f"REQUOTE: fewer than {REQUOTE_BELOW:.0%} of your real orders fill, so most of the edge you bid for is never "
+                 "traded. Decide a requote rule this pass and write it into your strategy: after how many minutes a resting "
+                 "entry that has not filled is cancelled (your own `open_orders` carry `submitted_at`), where it is quoted "
+                 "again -- toward the touch, never past the price at which your edge after fees is gone -- how many times, "
+                 f"and when it stands aside instead. {taking}Replay the rule before you rely on it: the replay fills a "
+                 "resting limit only when a later step trades through it.\n")
+    return text + "\n"
 
 
 def _candidate_rank(candidate: Mapping[str, Any] | None) -> int:

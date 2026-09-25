@@ -373,6 +373,65 @@ class HouseRecordTest(ScoreboardCase):
         self.assertLess(before["n"], rec["n"], "a record through an earlier ledger position has fewer events")
 
 
+class FamilyKeyTest(ScoreboardCase):
+    """C8 (Sept 25, 2026): the House files a program under its mechanism's family with an `agent.family` row and re-keyed
+    every label once at deploy; the scoreboard reads those rows for membership (Z's follow-up), as the House's record does."""
+
+    def build(self):
+        f = self.floor
+        f.born("m-1", 0, family="label")  # seq 1: moves to the mechanism's family later
+        f.born("m-2", 0, family="label")  # seq 2: re-keyed from its birth, so the label never held it
+        f.born("o-1", 0, family="label")  # seq 3: stays
+        for agent in ("m-1", "m-2", "o-1"):
+            f.stake(agent, 0.1, "kalshi-shadow", 200)
+        f.row("agent.family", "m-2", 0.2, {"family": "mech-abc123", "was": "label", "since_seq": 2, "rule": "allocator.family_key"})
+        f.bid("m-1", 1, "kalshi-shadow", "KXA-26SEP24-B1", "i-a", filled=True)
+        f.settle("m-1", 2, "kalshi-shadow", "KXA-26SEP24-B1", 2)  # under the label
+        f.buy("o-1", 1, "kalshi-shadow", "KXO-26SEP24-B1")
+        f.settle("o-1", 2, "kalshi-shadow", "KXO-26SEP24-B1", 1)
+        f.row("agent.family", "m-1", 3, {"family": "mech-abc123", "was": "label", "rule": "allocator.family_key"})
+        f.bid("m-1", 4, "kalshi-shadow", "KXB-26SEP24-B1", "i-b", filled=True)
+        f.settle("m-1", 5, "kalshi-shadow", "KXB-26SEP24-B1", 3)  # under the mechanism's family
+        f.buy("m-2", 4, "kalshi-shadow", "KXC-26SEP24-B1")
+        f.settle("m-2", 5, "kalshi-shadow", "KXC-26SEP24-B1", -1)
+        return f.snapshot()
+
+    def test_members_and_trades_follow_the_family_rows(self):
+        snap = self.build()
+        agents, trades, _, _, families = self.parts(snap)
+        m1 = agents["m-1"]
+        self.assertEqual((m1.label, m1.family), ("label", "mech-abc123"))
+        self.assertEqual(m1.families(), ["label", "mech-abc123"])
+        self.assertEqual(agents["m-2"].families(), ["mech-abc123"], "a birth re-keyed from its first row leaves its label none")
+        members = {k: sorted(a.id for a in v) for k, v in families.members.items()}
+        self.assertEqual(members[("kalshi", "mech-abc123")], ["m-1", "m-2"])
+        self.assertEqual(members[("kalshi", "label")], ["m-1", "o-1"])
+        by_family = {k: sorted(t.market for t in v) for k, v in families.trades.items()}
+        self.assertEqual(by_family[("kalshi", "label")], ["KXA-26SEP24-B1", "KXO-26SEP24-B1"])
+        self.assertEqual(by_family[("kalshi", "mech-abc123")], ["KXB-26SEP24-B1", "KXC-26SEP24-B1"])
+        # Capacity reads a member's bids only while it was in the family.
+        intents = gs.intent_outcomes(snap)
+        cap = gs.family_capacity(snap, "kalshi", "mech-abc123", families.members[("kalshi", "mech-abc123")],
+                                 families.trades[("kalshi", "mech-abc123")], intents)
+        self.assertEqual(cap["markets_bid"], 1)
+
+    def test_the_scoreboard_lists_the_new_family_as_the_house_records_it(self):
+        snap = self.build()
+        board = gs.scoreboard(snap, hosts=())
+        fr = board["extras"]["family_records"]
+        rows = {r["family"]: r for r in fr["families"]}
+        self.assertIn("mech-abc123", rows)
+        self.assertEqual((rows["mech-abc123"]["members"], rows["label"]["members"]), (2, 2))
+        self.assertEqual((fr["moved_agents"], fr["families_from_rows"]), (2, 1))
+        records = gs.HouseRecords.open(snap, gs.agents_of(snap))
+        house = records.compute(records, "mech-abc123", "kalshi", tape=records.tape)
+        self.assertEqual(house["members"], 2)
+        self.assertEqual(rows["mech-abc123"]["pooled"]["n"], house["n"])
+        self.assertEqual(house["n"], 2)
+        self.assertEqual(records.compute(records, "label", "kalshi", tape=records.tape)["n"], rows["label"]["pooled"]["n"])
+        self.assertEqual(rows["label"]["pooled"]["n"], 2)
+
+
 # --------------------------------------------------------------------------------- metric 4
 class DeathsTest(ScoreboardCase):
     def test_median_life_day_horizon_and_deaths_before_three_fills(self):

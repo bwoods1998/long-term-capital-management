@@ -35,7 +35,7 @@ from league.sandbox import (SEALED, TAPE_DIR, BoundBoxGone, LocalSandbox, SailSa
                             tape_digest)
 from league.tests.fakes import FakeBroker
 from league.tests.test_house import IDLE
-from league.tests.test_lab import DESK, KNOB, FakeBox, FakeModel, LabCase
+from league.tests.test_lab import DESK, KNOB, LAB_CLOCK_OFFSET, FakeBox, FakeModel, LabCase
 from league.tests.test_lab_batch import LIMITS, BatchSail, seed_candidates, single, small
 from league.tests.test_tick_never_blocks import BOUNDED, StalledSailCase
 
@@ -330,6 +330,7 @@ class LabBirthsOnSail(StalledSailCase):
 
     def setUp(self):
         super().setUp()
+        self.clock.advance(LAB_CLOCK_OFFSET)  # a graduate's replay ends at its freeze: a day and a half of tape before it
         self.house.pacer.may_spend = lambda kind: True
         self.house.game["lab"] = {**(self.house.game.get("lab") or {}), "enabled": True, "stats_every_minutes": 0}
         self.lab = Lab(self.house, box=FakeBox(), mutator=FakeModel("gpt-6-luna", []), leaper=FakeModel("gpt-6-sol", []))
