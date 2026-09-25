@@ -436,10 +436,10 @@ class AlpacaBroker:
     def _note_account(self, row: dict[str, Any]) -> None:
         """Read what this account is from an account row, ONCE for the life of the process: its
         `multiplier` (1: Alpaca's "limited margin account with 1x buying power", which the owner's
-        real account is and this code calls a CASH account; 2 or 4: a margin account, as the practice
-        account is) and its `options_trading_level` (3 = spreads). A row that does not state the
-        multiplier is not a reading: the next one is asked. The reading is kept for the owner's
-        record (`drain_structure_answers`, stage `account`)."""
+        real account is and calls his CASH account, the label kept here for the record; 2 or 4: a
+        margin account, as the practice account is) and its `options_trading_level` (3 = spreads). A
+        row that does not state the multiplier is not a reading: the next one is asked. The reading is
+        kept for the owner's record (`drain_structure_answers`, stage `account`)."""
         if self._account is not None:
             return
         multiplier = dec(row.get("multiplier"))
@@ -452,8 +452,7 @@ class AlpacaBroker:
             if self._account is not None:
                 return
             self._account = facts
-        self._answer("account", facts["kind"], {**facts, "practice": self.practice,
-                                                "credit_in_cash": facts["kind"] == "margin"})
+        self._answer("account", facts["kind"], {**facts, "practice": self.practice, "credit_in_cash": True})
 
     @property
     def practice(self) -> bool:
@@ -461,7 +460,7 @@ class AlpacaBroker:
         return bool(self.credentials.paper) or self.venue in PRACTICE_VENUES
 
     def account_type(self) -> "str | None":
-        """"margin" or "cash" (Alpaca's 1x limited margin account), read once through `GET /v2/account`
+        """"margin" or "cash" (Alpaca's 1x limited margin account, the owner's word), read once through `GET /v2/account`
         (`balance`, which every reconciliation calls, reads it on the way); None while it cannot be
         read, asked again at most every `ACCOUNT_RETRY_SECONDS`."""
         if self._account is None and time.monotonic() - self._account_tried >= ACCOUNT_RETRY_SECONDS:
@@ -474,17 +473,19 @@ class AlpacaBroker:
         return None if facts is None else str(facts["kind"])
 
     def credit_in_cash(self) -> "bool | None":
-        """Does the venue ADD a credit structure's credit to `cash` (a margin account: the collateral is
-        held against buying power, not taken from cash), so that the book, which DEBITS the structure's
-        maximum loss, must take the open credit structures' collateral off the venue's cash before the
-        two are compared (`Book._fold_structure_legs`)? True on a margin account (P2's model); False on a
-        cash account, where the spec's model is that the account sets the maximum loss aside from cash,
-        as the book does, so there is nothing to offset; None while the account is unread (the book then
-        keeps P2's model: Alpaca says "all accounts are set up as margin accounts",
-        https://alpaca.markets/support/alpaca-cash-accounts). Neither account has shown a credit
-        structure yet (no test orders): the first one's reconciliation is the measurement."""
-        facts = self._account
-        return None if facts is None else facts["kind"] == "margin"
+        """Does the venue ADD a credit structure's credit to `cash` (the collateral held against buying
+        power, not taken from cash), so that the book, which DEBITS the structure's maximum loss, must
+        take the open credit structures' collateral off the venue's cash before the two are compared
+        (`Book._fold_structure_legs`)? True for EVERY account read, the 1x one included: Alpaca says "we
+        do not offer cash accounts. All accounts are set up as margin accounts"
+        (https://alpaca.markets/support/alpaca-cash-accounts), its multiplier 1 is a "standard limited
+        margin account", and `cash` is the cash balance while a requirement is held against buying power
+        (https://docs.alpaca.markets/reference/getaccount-1). Until the review of Wave 2 (Sept 25, 2026)
+        the 1x account was modelled as setting the maximum loss aside from cash, against those docs.
+        None while the account is unread (the book keeps the same model). Neither account has shown a
+        credit structure yet (no test orders): the first one's reconciliation is the measurement, and a
+        miss by exactly the collateral is named, never booked (`Book._collateral_named`)."""
+        return None if self._account is None else True
 
     @property
     def structure_types(self) -> "tuple[str, ...]":
@@ -511,8 +512,8 @@ class AlpacaBroker:
             return None
         if self.practice:
             if facts.get("kind") == "cash":
-                return (f"a {structure_type} opens for a credit, and this practice account reads as a cash account (multiplier "
-                        f"{facts.get('multiplier')}): its credit and collateral are not modelled here")
+                return (f"a {structure_type} opens for a credit, and this practice account reads as a 1x limited margin account "
+                        f"(multiplier {facts.get('multiplier')}), not the margin account the owner verified: no credit is opened on it")
             return None
         if structure_type in real_credit_types():
             return None

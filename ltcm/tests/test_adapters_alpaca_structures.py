@@ -522,7 +522,7 @@ class SingleContractsUnchanged(unittest.TestCase):
 class TheAccountsType(unittest.TestCase):
     """Wave 2 (Sept 25, 2026): the account's type, read once from `GET /v2/account` (`multiplier`: 1 is Alpaca's 1x
     limited margin account, the owner's "cash" account; 2 or 4 margin, https://docs.alpaca.markets/reference/getaccount-1),
-    decides whether a credit is added to cash and which structure types this account opens."""
+    decides which structure types this account opens; every account read adds a credit to cash (the review of Wave 2)."""
 
     ACCOUNT = {"cash": "98000", "equity": "98000", "buying_power": "392000", "currency": "USD"}
 
@@ -549,6 +549,9 @@ class TheAccountsType(unittest.TestCase):
         transport.route(("GET", PAPER_BASE + "/v2/account"), {**self.ACCOUNT, "multiplier": "1"})
         client.balance()
         self.assertEqual(client.account_type(), "cash")
+        # Alpaca's 1x account is a limited MARGIN account: its cash takes a credit as any account's does (the review of
+        # Wave 2, Sept 25, 2026, https://alpaca.markets/support/alpaca-cash-accounts); "cash" is the owner's label only.
+        self.assertIs(client.credit_in_cash(), True)
         transport.route(("GET", PAPER_BASE + "/v2/account"), {**self.ACCOUNT, "multiplier": "4"})
         client.balance()
         self.assertEqual(client.account_type(), "cash")  # once for the life of the process
@@ -557,7 +560,7 @@ class TheAccountsType(unittest.TestCase):
         client, _ = self.client(multiplier="1")
         client.balance()
         self.assertEqual(client.structure_types, ("debit_vertical", "long_butterfly"))
-        self.assertIn("reads as a cash account", client.structure_refusal("iron_condor"))
+        self.assertIn("reads as a 1x limited margin account", client.structure_refusal("iron_condor"))
 
     def test_under_level_3_nothing_opens_and_nothing_is_sent(self):
         client, transport = self.client(multiplier="4", options_trading_level="2")

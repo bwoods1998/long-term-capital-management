@@ -146,6 +146,17 @@ BREAK_AFTER = 2
 #: The source of the House rows that take a broken structure's legs, and what the venue shows of
 #: them, onto the House row to be closed (`_break_structure`, `_mend_structures`).
 BREAK_SOURCE = "structure-break"
+#: How an order's row says that a multi-leg order ENDED with its legs filled unevenly: the start of
+#: the reason `AlpacaBroker.parse_order` gives it (Wave 2, Sept 25, 2026). The contracts of such an
+#: order are the only ones whose extra LONG contracts `_mend_structures` takes as a leg it left.
+UNEVEN_LEGS_REASON = "ERROR: the structure's legs filled unevenly"
+#: How long an OPEN multi-leg order's legs may stand filled unevenly at the venue before the book
+#: cancels it (`_cancel_uneven`, the review of Wave 2, Sept 25, 2026): while they stand so, the book
+#: is frozen for every agent on the venue (`reconcile`), and nothing else ends the order but the
+#: owning agent's requote (20-30 minutes for the founders) or the day. Two mark passes (300 s each):
+#: a fill between a poll and a reading has long been booked by then. Cancelled, the order ends
+#: uneven and the leg it left is closed by the House row (`_mend_structures`), never adopted.
+UNEVEN_CANCEL_SECONDS = 600
 
 #: What the adapters' open statuses look like to the book.
 OPEN_STATUSES = ("new", "accepted", "partially_filled", "unknown")
@@ -719,9 +730,16 @@ class Book:
         self._closing_buys: set[str] = set()
         self._venue_instruments: dict[str, Instrument] = {}
         self._venue_positions: dict[str, Decimal] = {}
-        #: The credit structures' collateral the last fold did NOT take off the venue's cash (a cash
-        #: account, Wave 2, Sept 25, 2026): what a reconciliation missing by exactly it names.
+        #: The credit structures' collateral the last fold took off the venue's cash, and the collateral it
+        #: did NOT take off (a venue that says it sets the maximum loss aside, Wave 2, Sept 25, 2026): what a
+        #: reconciliation missing by exactly either names (`_collateral_named`).
+        self._collateral_offset = ZERO
         self._collateral_not_offset = ZERO
+        #: Multi-leg orders of this book that ENDED with their legs filled unevenly (`UNEVEN_LEGS_REASON` on
+        #: their row, folded by `_apply_order`): order id -> the held instrument; and open ones whose legs the
+        #: last poll found uneven, since when (`_cancel_uneven`; in memory: a restart waits again, the safe way).
+        self._uneven_ended: dict[str, Instrument] = {}
+        self._uneven_since: dict[str, str] = {}
         self._lock = threading.RLock()
         self._cursor = 0
         self._fold()
@@ -943,6 +961,8 @@ class Book:
                 working.slice_of, working.slice_index = str(part["plan"]), int(part["index"])
                 self._plan_orders.setdefault(working.slice_of, []).append(order_id)
         working.status = p["status"]
+        if not working.open and str(p.get("reason") or "").startswith(UNEVEN_LEGS_REASON):
+            self._uneven_ended[order_id] = working.instrument  # Wave 2, Sept 25, 2026 (`_uneven_leftovers`)
         working.rested = bool(p.get("rested", working.rested))
         if "allocation" in p:
             working.allocation = dict(p["allocation"])
@@ -2531,11 +2551,22 @@ class Book:
             self._order_row(self._base_of(working), working.status, order.broker_order_id or working.broker_order_id,
                             suffix=f"allocation:{text(filled)}", allocation=plan)
             self._finish_allocation(working)
+        if structures.is_structure(working.instrument):
+            # Wave 2, Sept 25, 2026: an open multi-leg order whose legs stand filled unevenly (`_cancel_uneven`),
+            # and one that ENDS so, which its row says (`UNEVEN_LEGS_REASON`: `_uneven_leftovers`, after a restart too).
+            uneven = bool((getattr(order, "_raw", None) or {}).get("uneven_legs"))
+            if uneven and order.status in OPEN_STATUSES:
+                self._uneven_since.setdefault(working.order_id, now)
+            else:
+                self._uneven_since.pop(working.order_id, None)
         if order.status != working.status:
             if order.status not in OPEN_STATUSES:
                 told = self._cancel_why.pop(working.order_id, "")
                 if not reason and order.status == "cancelled":
                     reason = told  # the House's own cancel, confirmed only now (`_clear_the_way`)
+                said = str(getattr(order, "reason", "") or "")
+                if structures.is_structure(working.instrument) and said.startswith(UNEVEN_LEGS_REASON):
+                    reason = f"{said}; {reason}" if reason else said
             self._order_row(self._base_of(working), order.status, order.broker_order_id or working.broker_order_id, suffix=f"{order.status}:{text(filled)}",
                             reason=reason)
 
@@ -2831,6 +2862,7 @@ class Book:
                 checked += 1
                 self._attribute(working, order, now)
             checked += self._recheck_never_arrived(now)
+            self._cancel_uneven(now)
             if self._reconciled_here:
                 # Every fill the venue reported is booked first: the next slice of an exit sizes
                 # off what is still held after them, never off what was held a pass ago. An exit the House
@@ -2840,6 +2872,41 @@ class Book:
                 self._advance_plans(now)
             self._record_venue_answers()
         return checked
+
+    def _cancel_uneven(self, now: str) -> int:
+        """Cancel every open multi-leg order whose legs have stood filled unevenly at the venue for
+        `UNEVEN_CANCEL_SECONDS` (`_uneven_since`, set by `_attribute`), in the owning agent's name, saying
+        why, with an error alert (the review of Wave 2, Sept 25, 2026). While the legs stand so the book is
+        frozen for every agent on the venue (`reconcile`), and before this nothing but the owner's requote or
+        the day ended it: measured in review, five hours of readings stayed frozen. Cancelled, the order ends
+        uneven (`UNEVEN_LEGS_REASON`) and the leg it left is the House row's to close (`_mend_structures`);
+        the structure's whole units that did fill are the agent's as booked. A cancel the venue refuses is
+        asked again at the next poll. Returns the orders cancelled."""
+        done = 0
+        for order_id, since in list(self._uneven_since.items()):
+            working = self.orders.get(order_id)
+            if working is None or not working.open or not working.shares:
+                self._uneven_since.pop(order_id, None)
+                continue
+            waited = _epoch_seconds(now) - _epoch_seconds(since)
+            if waited < UNEVEN_CANCEL_SECONDS:
+                continue
+            agent = working.shares[0].agent
+            why = (f"its legs stood filled unevenly at the venue for {int(waited)} s: cancelled by the House so the leg ahead is "
+                   "closed and the book, frozen meanwhile for every agent on it, reconciles")
+            try:
+                outcome = self.cancel(agent, order_id, why=why)
+            except Exception:  # noqa: BLE001 - asked again at the next poll
+                continue
+            if outcome.status in ("rejected", "refused"):
+                continue
+            if working.open:
+                continue  # the venue has not confirmed the cancel yet: asked again at the next poll
+            self._uneven_since.pop(order_id, None)
+            done += 1
+            self.ledger.append("ops.alert", {"level": "error", "book": self.name, "uneven_cancelled": order_id,
+                                             "text": f"{self.name}: {agent}'s {working.instrument.market_id} order {order_id}: {why}"[:1000]})
+        return done
 
     def _venue_missed(self, working: Working, now: str) -> None:
         """The venue answered a poll about an order it never acknowledged with "no such order".
@@ -3193,13 +3260,17 @@ class Book:
         returned.
 
         Which account (Wave 2, Sept 25, 2026): the venue says whether it adds a credit to cash
-        (`AlpacaBroker.credit_in_cash`, read once from the account's `multiplier`): a margin account (the
-        practice account) does, and the collateral is taken off as above; a cash account (the owner's real
-        one, Alpaca's 1x) is taken to set the maximum loss aside from cash as the book does, and nothing is
-        taken off. A debit structure reconciles alike on both. Where nothing is taken off, the collateral
-        that would have been is kept (`_collateral_not_offset`) so a reconciliation that misses by exactly it
-        says so, and freezes: never a difference passed as the venue's fees."""
+        (`AlpacaBroker.credit_in_cash`). Every Alpaca account does: Alpaca has no cash accounts ("All
+        accounts are set up as margin accounts", https://alpaca.markets/support/alpaca-cash-accounts), and
+        its `cash` is the cash balance, the requirement being held against buying power -- the owner's real
+        1x account (a "limited margin account") included (the review of Wave 2). A venue that says it does
+        NOT (sets the maximum loss aside from cash, as the book does) has nothing taken off. A debit
+        structure reconciles alike on both. Either way the collateral taken off (`_collateral_offset`) or
+        not (`_collateral_not_offset`) is kept, so a reconciliation that misses by exactly it says so
+        (`_collateral_named`), and freezes: never a difference passed as the venue's fees. Neither account
+        has shown a credit structure yet (no test orders): the first one's reconciliation is the measurement."""
         offset = self._credit_added_to_cash()
+        self._collateral_offset = ZERO
         self._collateral_not_offset = ZERO
         collateral = ZERO
         for key, (instrument, quantity) in self._held_structures().items():
@@ -3218,11 +3289,25 @@ class Book:
                 collateral += spec.collateral * instrument.multiplier * quantity
             else:
                 self._collateral_not_offset += spec.collateral * instrument.multiplier * quantity
+        self._collateral_offset = collateral
         return collateral
 
+    def _collateral_named(self, cash_diff: Decimal, tolerance: Decimal) -> str:
+        """What a cash difference of exactly the open credit structures' collateral means (Wave 2, Sept 25,
+        2026): the one reading that tells how the account treats a credit. Nothing is booked for it."""
+        taken, kept = self._collateral_offset, self._collateral_not_offset
+        if taken > 0 and abs(cash_diff + taken) < tolerance:
+            return (f" (exactly the ${taken:.2f} collateral of the credit structures held, which the book took off the venue's cash "
+                    "as a margin account's: this account did not add the credit to cash, it sets the maximum loss aside; "
+                    "nothing is booked for it)")
+        if kept > 0 and abs(cash_diff - kept) < tolerance:
+            return (f" (exactly the ${kept:.2f} collateral of the credit structures held, which this account was read not to add "
+                    "to cash: it does, as a margin account; nothing is booked for it)")
+        return ""
+
     def _credit_added_to_cash(self) -> bool:
-        """Whether this venue adds a credit structure's credit to cash (`AlpacaBroker.credit_in_cash`): True
-        on a margin account, False on a cash account; a venue that cannot say keeps P2's margin model."""
+        """Whether this venue adds a credit structure's credit to cash (`AlpacaBroker.credit_in_cash`: every
+        Alpaca account read); only a venue that says False sets it aside; one that cannot say keeps P2's model."""
         read = getattr(self.broker, "credit_in_cash", None)
         try:
             value = read() if callable(read) else read
@@ -3250,18 +3335,32 @@ class Book:
                 busy.update(self._contract_signs(working.instrument))
         return busy
 
-    def _structure_order_contracts(self, *, in_flight: bool) -> set[str]:
-        """The contracts that are legs of this book's structure orders: with `in_flight`, only of those still
-        open (or closed as never arrived and still asked about); else of every structure order it has sent.
-        Wave 2, Sept 25, 2026 (`reconcile`, `_mend_structures`): a difference on such a contract is a leg of
-        a multi-leg order, never a single contract the venue happens to hold."""
+    def _structure_order_contracts(self) -> set[str]:
+        """The contracts that are legs of this book's structure orders in flight: open, or closed as never
+        arrived and still asked about. Wave 2, Sept 25, 2026 (`reconcile`): a difference on such a contract
+        may be a leg of a multi-leg order ahead of the others, never a single contract the venue happens
+        to hold, and is never adopted."""
         out: set[str] = set()
         for working in self.orders.values():
-            if not structures.is_structure(working.instrument):
+            if structures.is_structure(working.instrument) and (working.open or working.order_id in self._never_arrived):
+                out.update(self._contract_signs(working.instrument))
+        return out
+
+    def _uneven_leftovers(self) -> set[str]:
+        """The contracts of this book's multi-leg orders that ENDED with their legs filled unevenly
+        (`_uneven_ended`) and have not expired (Wave 2, Sept 25, 2026; its review): where such an order left
+        a LONG leg, `_mend_structures` takes the extra contract and closes it, never adopts it. Only these
+        orders, not every structure order ever sent: a later single contract on a contract some structure
+        order once named is a single contract, as on main."""
+        today = now_iso(self.clock)[:10]
+        out: set[str] = set()
+        for order_id, instrument in list(self._uneven_ended.items()):
+            spec = self._spec(instrument)
+            last = max((str(leg.instrument.expiry or "") for leg in spec.legs), default="") if spec else ""
+            if not last or last < today:
+                self._uneven_ended.pop(order_id, None)  # expired (or unreadable): no leg of it can show again
                 continue
-            if in_flight and not (working.open or working.order_id in self._never_arrived):
-                continue
-            out.update(self._contract_signs(working.instrument))
+            out.update(self._contract_signs(instrument))
         return out
 
     def _netting_reason(self, instrument: Instrument) -> str | None:
@@ -3346,8 +3445,10 @@ class Book:
         # The collateral the book set aside for a credit structure (K x 100 x quantity: what makes its
         # held price its maximum loss, `_fold_structure_legs`) is cash again once its legs are the House
         # row's, as they always were at the venue: without it the book would stand that far under the
-        # venue's cash from the moment of the break.
-        released = spec.collateral * instrument.multiplier * quantity
+        # venue's cash from the moment of the break. Only where the fold takes it off the venue's cash
+        # (`_credit_added_to_cash`): where it does not, the venue is taken to hold it aside itself, and
+        # releasing it here would stand the book that far over the venue (the review of Wave 2, Sept 25, 2026).
+        released = spec.collateral * instrument.multiplier * quantity if self._credit_added_to_cash() else ZERO
         for index, leg in enumerate(spec.legs):
             units = leg.sign * leg.ratio * quantity
             cash = released if index == 0 else ZERO
@@ -3361,6 +3462,60 @@ class Book:
             self._apply(entry.kind, entry.agent, entry.payload, entry.at)
         self.marks.pop(instrument.key, None)
 
+    def _structure_holders(self) -> dict[str, list[tuple[int, Decimal, str, Holding]]]:
+        """Contract position key -> (the leg's sign, its ratio, the agent, the holding) for every structure
+        holding with a leg on that contract, every account's (`_mend_structures`)."""
+        out: dict[str, list[tuple[int, Decimal, str, Holding]]] = {}
+        for agent, account in self.accounts.items():
+            for holding in account.holdings.values():
+                if holding.quantity == 0 or not structures.is_structure(holding.instrument):
+                    continue
+                spec = self._spec(holding.instrument)
+                for leg in (spec.legs if spec else ()):
+                    out.setdefault(position_key(leg.instrument), []).append((leg.sign, leg.ratio, agent, holding))
+        return out
+
+    @staticmethod
+    def _lacks_a_leg(key: str, diff: Decimal, holders: Mapping[str, list[tuple[int, Decimal, str, Holding]]]) -> bool:
+        """Whether a contract's difference (venue less book) leaves a structure short of its OWN leg: fewer
+        long contracts than a long leg needs (diff < 0), or fewer short ones than a short leg needs (diff > 0)."""
+        return any((sign > 0 and diff < 0) or (sign < 0 and diff > 0) for sign, _, _, _ in holders.get(key, ()))
+
+    def _structures_to_break(self, due: Mapping[str, Decimal],
+                             holders: Mapping[str, list[tuple[int, Decimal, str, Holding]]]) -> list[tuple[str, Holding]]:
+        """Which structure holdings a due difference breaks (the review of Wave 2, Sept 25, 2026). Before it,
+        EVERY structure holding a contract with any difference was written off: an innocent co-holder beside
+        a leg an uneven order left, both of two identical verticals when one short of the two was assigned.
+
+        Now, a contract at a time: only the holders whose OWN leg the venue lacks (`_lacks_a_leg`: a long leg
+        where the venue shows fewer longs, a short leg where it shows fewer shorts), and only as many, newest
+        first, as cover the difference (a holding covers ratio x quantity contracts; one is broken whole,
+        never a part of it: its record takes the whole loss, never a flattering one). A difference in a
+        leg's own direction breaks nothing (an extra long on a long leg): the House row takes it and closes
+        it. The one exception is the owner's rule (Sept 25, 2026): a SHORT the venue holds that no structure
+        explains closes the structure it sits in, at once -- so an extra short on a short leg, where no long
+        leg lacks it, breaks that leg's holders the same way, newest first, as many as cover it."""
+        chosen: dict[tuple[str, str], tuple[str, Holding]] = {}
+        for key, diff in sorted(due.items()):
+            rows = holders.get(key) or []
+            if not rows or diff == 0:
+                continue
+            if diff > 0:
+                wanted = [r for r in rows if r[0] < 0]
+            else:
+                wanted = [r for r in rows if r[0] > 0] or [r for r in rows if r[0] < 0]  # the owner's rule: an unmatched short
+            need = abs(diff)
+            covered = sum((ratio * holding.quantity for _, ratio, agent, holding in wanted
+                           if (agent, holding.instrument.key) in chosen), ZERO)
+            for _, ratio, agent, holding in sorted(wanted, key=lambda r: (str(r[3].opened_at or ""), r[2]), reverse=True):
+                if covered >= need:
+                    break
+                if (agent, holding.instrument.key) in chosen:
+                    continue
+                chosen[(agent, holding.instrument.key)] = (agent, holding)
+                covered += ratio * holding.quantity
+        return list(chosen.values())
+
     def _mend_structures(self, result: Reconciliation) -> bool:
         """A structure the venue no longer holds whole is BROKEN: it goes to the House row and what is
         left of it is closed at once; a short contract no structure explains is closed with it, and so
@@ -3371,34 +3526,35 @@ class Book:
         Which contracts: a difference on a contract that is a leg of a structure the book holds (a leg
         assigned, exercised, expired, or filled apart from the rest) or that the House row holds from a
         broken one, or on which the venue is net SHORT beyond what the book's structures explain (a leg
-        an order left when its legs filled unevenly).
+        an order left when its legs filled unevenly), or an extra LONG on a contract of a multi-leg order
+        that ended with its legs filled unevenly (`_uneven_leftovers`).
         A long contract no structure touches is left as ever (a lost single-contract fill, which a
         practice book adopts). Never while an open order of this book trades the contract (its fill
         may not be booked yet), and only once `BREAK_AFTER` readings in a row have shown it.
 
-        Then, in order: every structure with a leg among them is broken (`_break_structure`); the House
-        row takes each contract's difference (the leg the venue no longer shows, the short it shows
-        beyond the book), so the book says exactly what the venue holds -- a short there is never a
-        baseline and never an agent's, and is bought back first (`_close_break_units`); and an error
-        alert says what was found and done. The CASH an exercise or assignment moved (a strike's
-        hundred shares bought or sold) is no fill the book saw: on a practice book it is adopted after
-        `ADOPT_AFTER` readings, as any unexplained cash is; on a real book it freezes for the owner."""
+        Then, in order: the structures the difference leaves short of a leg are broken (`_break_structure`,
+        `_structures_to_break`: only where the venue lacks a leg's OWN direction, and only as many holders,
+        newest first, as cover the difference -- the review of Wave 2, Sept 25, 2026); the House row takes
+        each contract's difference (the leg the venue no longer shows, the contract it shows beyond the
+        book), so the book says exactly what the venue holds -- a short there is never a baseline and never
+        an agent's, and is bought back first (`_close_break_units`); and an error alert says what was
+        found and done. The CASH an exercise or assignment moved (a strike's hundred shares bought or
+        sold) is no fill the book saw: on a practice book it is adopted after `ADOPT_AFTER` readings, as
+        any unexplained cash is; on a real book it freezes for the owner."""
         diffs = {key: money(value) for key, value in (result.position_diffs or {}).items()}
-        legs_of: dict[str, list[str]] = {}
-        for key, (instrument, _) in self._held_structures().items():
-            for leg in self._spec(instrument).legs:
-                legs_of.setdefault(position_key(leg.instrument), []).append(key)
+        holders = self._structure_holders()
         house = self.accounts.get(HOUSE)
         remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}
         busy = self._contracts_in_flight() | {position_key(w.instrument) for w in self.orders.values()
                                                if w.open or w.order_id in self._never_arrived}
-        # A leg a multi-leg order of this book left when its legs filled unevenly and the order ended (Wave 2,
-        # Sept 25, 2026): a LONG one too is taken and closed here, never adopted into a practice book's baseline,
-        # where nothing would ever close it and it would be held into its expiry.
-        legged = self._structure_order_contracts(in_flight=False)
+        # A LONG leg a multi-leg order of this book left when its legs filled unevenly and the order ended (Wave 2,
+        # Sept 25, 2026): taken and closed here, never adopted into a practice book's baseline, where nothing would
+        # ever close it and it would be held into its expiry. Only such orders' contracts, and only an extra long
+        # (a short one is the venue's net short, below): a single contract's own difference is left as on main.
+        legged = self._uneven_leftovers()
         found = {key: diff for key, diff in diffs.items()
                  if key.startswith("option:") and "|" not in key and key not in busy
-                 and (key in legs_of or key in remains or key in legged or self._venue_positions.get(key, ZERO) < 0)}
+                 and (key in holders or key in remains or (key in legged and diff > 0) or self._venue_positions.get(key, ZERO) < 0)}
         # The shares an exercise or an assignment of such a leg leaves (a short call assigned is a
         # hundred shares short): the same underlying's stock difference, beside the legs, and only then.
         underlyings = {key.split(":")[1] for key in found} | {key.split(":")[1] for key in remains}
@@ -3408,15 +3564,12 @@ class Book:
         due = {key: diff for key, diff in found.items() if self._break_readings[key] >= BREAK_AFTER}
         if not due:
             return False
-        broken = {structure for key in due for structure in legs_of.get(key, [])}
         apart = ", ".join(f"{_contract_name(key)} {diff:+}" for key, diff in sorted(due.items()))
         written_off = []
-        for agent, account in list(self.accounts.items()):
-            for holding in list(account.holdings.values()):
-                if position_key(holding.instrument) in broken:
-                    why = f"the venue no longer holds it whole (contracts against the book: {apart})"
-                    self._break_structure(agent, holding, why)
-                    written_off.append(f"{agent}: {text(holding.quantity)} {holding.instrument.market_id}")
+        for agent, holding in self._structures_to_break(due, holders):
+            why = f"the venue no longer holds it whole (contracts against the book: {apart})"
+            self._break_structure(agent, holding, why)
+            written_off.append(f"{agent}: {text(holding.quantity)} {holding.instrument.market_id}")
         rows = []
         for key, diff in sorted(due.items()):
             instrument = self._venue_instruments.get(key) or self._traded.get(key)
@@ -3428,8 +3581,8 @@ class Book:
                 "real_money": self.real_money,
                 "detail": ("shares an exercise or assignment of a structure's leg left; the House row takes them to close them"
                            if key.startswith("equity:") else
-                           "the venue holds this contract apart from the book's structures; the House row takes the difference to close it"
-                           if diff < 0 or key not in legs_of else "a leg the venue no longer shows: written off the House row")}})
+                           "a leg the venue no longer shows: written off the House row" if self._lacks_a_leg(key, diff, holders) else
+                           "the venue holds this contract apart from the book's structures; the House row takes the difference to close it")}})
         for entry in self.ledger.append_many(rows) if rows else []:
             self._apply(entry.kind, entry.agent, entry.payload, entry.at)
         for key in due:
@@ -3849,7 +4002,7 @@ class Book:
                 self._unreconciled = 0
                 return result
             if (self._legs_at_venue() and result.position_diffs
-                    and set(result.position_diffs) <= self._structure_order_contracts(in_flight=True)):
+                    and set(result.position_diffs) <= self._structure_order_contracts()):
                 # A multi-leg order's legs mid-fill (Wave 2, Sept 25, 2026): a leg ahead of the others is a fill the
                 # book books with the rest (`AlpacaBroker.parse_order`), not a position it lost. The book stays
                 # frozen for entries until the order completes or ends, and a practice book never adopts the leg:
@@ -3880,6 +4033,13 @@ class Book:
                     self._unreconciled = 0
                     return result
             if self.real_money or self._unreconciled < ADOPT_AFTER:
+                return result
+            if self._legs_at_venue() and set(result.position_diffs or {}) & (self._structure_order_contracts() | set(self._break_readings)):
+                # Never adopted beside anything else either (the review of Wave 2, Sept 25, 2026): a leg of a multi-leg
+                # order in flight, or a contract `_mend_structures` is counting toward a break. Adopted with a stray
+                # single contract, the leg that filled first joined the baseline and the healthy structure its late leg
+                # then completed was read as broken and written off. The whole reading waits (its cash is the leg's
+                # too) until the order ends -- `_cancel_uneven` ends one whose legs stand uneven -- and the mend is done.
                 return result
             return self._adopt_the_venue(result)
 
@@ -4046,11 +4206,9 @@ class Book:
             problems = []
             if not within:
                 problems.append(f"cash differs by {cash_diff:.4f}")
-                unset = self._collateral_not_offset
-                if unset > 0 and abs(cash_diff - unset) < tolerance:
-                    # Wave 2, Sept 25, 2026: the one reading that tells whether a cash account adds a credit to cash.
-                    problems[-1] += (f" (exactly the ${unset:.2f} collateral of the credit structures held, which this account was "
-                                     "read not to add to cash: it does, as a margin account; nothing is booked for it)")
+                named = self._collateral_named(cash_diff, tolerance)
+                if named:
+                    problems[-1] += named
             if diffs:
                 problems.append("positions differ: " + ", ".join(f"{k} {v}" for k, v in diffs.items()))
             if pending:
