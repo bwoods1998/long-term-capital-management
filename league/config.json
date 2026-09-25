@@ -7,6 +7,13 @@
   "sail_app": "ltcm",
   "alpaca_feed": "sip",
   "alpaca_option_feed": "opra",
+  "options_structures": {
+    "_about": "Which book the options desk's structures trade on (the House reads `book`): options-shadow, the House's own practice account over live OPRA quotes (league/options_shadow.py), or alpaca-paper, the Alpaca practice account's multi-leg route. The shadow account's starting_cash matters only when options-shadow.json does not exist yet: 20 structure agents' practice stakes of $200 are $4,000.",
+    "book": "options-shadow",
+    "shadow": {
+      "starting_cash": "100000"
+    }
+  },
   "real_money": true,
   "auto_update": true,
   "release_train_hours": 4,
