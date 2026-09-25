@@ -43,6 +43,20 @@ SEEDS: list[dict] = [
      "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
     {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
+    # The structure founders of direction and events (builder S4b of the options-desk run, Sept 25, 2026): each held
+    # as ONE position priced at its net value plus its collateral (`league/structures.py`), each writing its own exits.
+    {"name": "options-orb", "family": "options-orb-vertical", "file": "options_orb.py",
+     "why": "Intraday momentum in SPY (published: the first half hour predicts the last, Gao et al. 2018): a 0-4 day $1 debit vertical in the direction of an opening-range breakout, flat by the close."},
+    {"name": "options-trend-vertical", "family": "options-trend-vertical", "file": "options_trend_vertical.py",
+     "why": "Buy the pullback in a 20-day trend (published time-series momentum; Connors-style short-term pullbacks): a 3-9 day debit vertical with the trend, taking most of its width."},
+    {"name": "options-reversal", "family": "options-reversal-vertical", "file": "options_reversal.py",
+     "why": "Index ETFs give back part of a two-sigma day within days (published short-term reversal in index returns): a 2-7 day debit vertical against the move."},
+    {"name": "options-gap-drift", "family": "options-gap-drift", "file": "options_gap_drift.py",
+     "why": "Post-announcement drift (published since Ball and Brown, 1968): a single stock that gaps two sigmas on news keeps drifting its way for days; a 3-11 day vertical with the gap."},
+    {"name": "options-skew", "family": "options-skew", "file": "options_skew.py",
+     "why": "Put skew mean-reverts and rich skew pays its seller (published: the variance and skew risk premia): a put credit vertical when 25-delta skew is rich in an uptrend, a put debit vertical when it is cheap."},
+    {"name": "options-diagonal", "family": "options-trend-diagonal", "file": "options_diagonal.py",
+     "why": "Time decay is steepest in the last days: sell a 0-3 day option and own a later one at a better strike in the trend's direction, a diagonal whose loss is capped at its debit."},
 ]
 
 _HERE = Path(__file__).resolve().parent
