@@ -72,7 +72,7 @@ from league.fees import Fees  # noqa: E402
 from league.house import House  # noqa: E402
 from league.ledger import Ledger, now_iso  # noqa: E402
 from league.options_history import implied_vol, bs_delta, years_to  # noqa: E402
-from league.options_shadow import OptionsShadowBroker, stamp  # noqa: E402
+from league.options_shadow import NEW_YORK, OptionsShadowBroker, stamp  # noqa: E402
 from league.venues import market_hours  # noqa: E402
 
 #: The twelve structure founders on main (Sept 25, 2026): every `league/seeds/options_*.py` but the two single-leg
@@ -209,8 +209,9 @@ def _dec(value: Any) -> Decimal | None:
 class ChainBroker:
     """What `House._chain` reads a chain from (`broker.option_chain`), over the current snapshot, in the adapter's
     shape (`ltcm/adapters/alpaca.py` `option_chain`): two-sided rows only (0 < bid < ask), nearest expiry and lowest
-    strike first. `iv` and `delta` are Black-Scholes from the mid against the underlying's mid (r 4%): the recorder
-    did not keep Alpaca's greeks."""
+    strike first. `iv` and `delta` are Black-Scholes from the mid against the underlying's mid (r 4%), the recorder
+    having kept no greeks, and None on a contract expiring today, as Alpaca's feed gives them (`compare_chains`
+    measures both against the chains the House recorded)."""
 
     option_feed = "opra"
 
@@ -226,6 +227,7 @@ class ChainBroker:
         if snap.t > clock + 1e-9:
             raise AssertionError("look-ahead in the chain")
         under = underlying.upper()
+        today = datetime.fromtimestamp(clock, NEW_YORK).strftime("%Y-%m-%d")
         spot = snap.spot.get(under)
         mid_spot = (spot[0] + spot[1]) / 2 if spot else None
         out = []
@@ -237,7 +239,9 @@ class ChainBroker:
                 continue
             key = (snap.index, occ)
             if key not in self._greeks:
-                self._greeks[key] = greeks(row, mid_spot, snap.t)
+                # As the live feed: Alpaca's snapshot carries no greeks on a contract expiring today (the House's recorded
+                # chains of Sept 25: none on 12,882 of 12,882 0-DTE index rows and 7,986 of 7,986 0-DTE stock rows).
+                self._greeks[key] = (None, None) if str(row.get("expiry")) <= today else greeks(row, mid_spot, snap.t)
                 if len(self._greeks) > 200_000:
                     self._greeks.clear()
             iv, delta = self._greeks[key]
@@ -917,6 +921,84 @@ def compare(session: Mapping[str, Any], from_birth: Mapping[str, Any] | None, li
     return out
 
 
+#: READ-ONLY: every structure chain the House showed its structure agents that day, as it recorded them
+#: (`recordings.sqlite`, `House._cached` "structure-chain:..." keys), a row as [occ, bid, ask, iv, delta, as_of, spot].
+CHAINS_QUERY = r'''import gzip, json, sqlite3
+db = sqlite3.connect('file:/workspace/state/recordings.sqlite?mode=ro', uri=True)
+out = []
+for source, started, received, payload in db.execute(
+        "SELECT source, started, received, payload FROM snapshots WHERE received >= 1790341200 AND source LIKE 'structure-chain:%' ORDER BY received"):
+    rows = json.loads(gzip.decompress(payload))
+    out.append({"source": source, "started": started, "received": received,
+                "rows": [[r.get("occ") or r.get("symbol"), r.get("bid"), r.get("ask"), r.get("iv"), r.get("delta"), r.get("as_of"), r.get("underlying_price")]
+                         for r in rows if isinstance(r, dict)]})
+print(json.dumps(out, separators=(",", ":")))
+'''
+
+
+def compare_chains(snapshots: str | Path, house_chains: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The chain the forward test shows against the chains the live House showed (CHAINS_QUERY): each recorded chain
+    against the last snapshot before the House finished reading it. Per row the House showed: whether the recording
+    holds the contract at all (the recorder's 4% and 12% bands against the chain's 20%), the difference of the mids
+    (the two reads are up to a minute apart), and of the greeks (Alpaca's against the forward test's Black-Scholes)."""
+    chains = sorted(house_chains, key=lambda c: float(c.get("received") or 0))
+    stats: dict[str, dict[str, list[float]]] = {}
+    counts: dict[str, int] = {}
+
+    def add(kind: str, key: str, value: float) -> None:
+        stats.setdefault(kind, {}).setdefault(key, []).append(value)
+
+    def count(key: str) -> None:
+        counts[key] = counts.get(key, 0) + 1
+
+    def against(chain: Mapping[str, Any], snap: Snapshot) -> None:
+        count("chains")
+        today = datetime.fromtimestamp(snap.t, NEW_YORK).strftime("%Y-%m-%d")
+        for occ, bid, ask, iv, delta, as_of, spot in chain.get("rows") or ():
+            kind = "etf" if str(occ)[:-15] in ("SPY", "QQQ", "IWM") else "stock"
+            count(f"{kind}_rows")
+            row = snap.rows.get(str(occ))
+            if row is None or row.get("bid") is None or row.get("ask") is None:
+                count(f"{kind}_rows_not_recorded")
+                continue
+            add(kind, "abs_mid_difference", abs((float(row["bid"]) + float(row["ask"])) / 2 - (float(bid) + float(ask)) / 2))
+            zero = "20" + str(occ)[-15:-9] == today.replace("-", "")
+            if zero:
+                count(f"{kind}_0dte_rows")
+                if delta is None:
+                    count(f"{kind}_0dte_rows_house_no_delta")
+                continue
+            touch = snap.spot.get(str(occ)[:-15])
+            mine = greeks(row, (touch[0] + touch[1]) / 2 if touch else None, snap.t)
+            if delta is None or mine[1] is None:
+                count(f"{kind}_rows_delta_missing_{'house' if delta is None else 'forward'}")
+                continue
+            add(kind, "abs_delta_difference", abs(float(delta) - mine[1]))
+            if iv is not None and mine[0] is not None:
+                add(kind, "abs_iv_difference", abs(float(iv) - mine[0]))
+
+    i, previous = 0, None
+    for snap in read_snapshots(snapshots):
+        while i < len(chains) and float(chains[i]["received"]) < snap.t:
+            if previous is not None:
+                against(chains[i], previous)
+            else:
+                count("chains_before_the_first_snapshot")
+            i += 1
+        previous = snap
+    while i < len(chains) and previous is not None:
+        against(chains[i], previous)
+        i += 1
+
+    def q(values: list[float], p: float) -> float | None:
+        ordered = sorted(values)
+        return round(ordered[min(len(ordered) - 1, int(p * (len(ordered) - 1)))], 4) if ordered else None
+
+    summary = {kind: {key: {"n": len(v), "median": q(v, 0.5), "p90": q(v, 0.9), "share_over_0.05": round(sum(1 for x in v if x > 0.05) / len(v), 4)}
+                      for key, v in keys.items()} for kind, keys in stats.items()}
+    return {"counts": counts, "differences": summary}
+
+
 # ------------------------------------------------------------------------------------------ the calibration refit
 def load_fit(path: str | Path | None) -> Any:
     """The module holding `fit_spread_calibration` and `CALIBRATED_SPREADS`: `league.options_history` once
@@ -1186,9 +1268,10 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys"))
+    parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys", "query-bars", "query-live", "query-chains"))
     parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, when main has no fit")
     parser.add_argument("--live", default=None, help="the live founders' day (JSON of LIVE_QUERY's output): compared, and --from-birth reads it")
+    parser.add_argument("--house-chains", default=None, help="the House's recorded structure chains (CHAINS_QUERY's output): compared")
     parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake (the comparison run)")
     parser.add_argument("--what-if-sane-limits", action="store_true", help="also run the session with limits the book's 10%% rule refuses sent at its line (a what-if)")
     parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
@@ -1208,6 +1291,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     began = time.time()
     if args.command == "bar-keys":
         print(bar_keys([f for f in args.founders.split(",") if f]))
+        return 0
+    if args.command.startswith("query-"):  # the read-only query's text, to run on the box through rx.py
+        print({"query-bars": BARS_QUERY, "query-live": LIVE_QUERY, "query-chains": CHAINS_QUERY}[args.command])
         return 0
     if args.command == "calibrate":
         result = calibrate(args.snapshots, fit_from=args.fit_from, local_store=args.local_store, work=args.work)
@@ -1248,7 +1334,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             what_if["run"] = {"label": f"WHAT-IF, not the House ({name}): limits through the touch by more than the book's 10% sent at the 10% line",
                               "seconds": round(time.time() - began, 1)}
             result["what_if_sane_limits"][name] = what_if
-    result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live}
+    if args.house_chains:
+        result = {"session": result} if "session" not in result else result
+        result["chains_against_the_house"] = compare_chains(args.snapshots, json.loads(Path(args.house_chains).read_text(encoding="utf-8")))
+    result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live,
+                        "house_chains": args.house_chains}
     text = json.dumps(result, indent=1, default=str)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
