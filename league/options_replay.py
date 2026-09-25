@@ -245,7 +245,15 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     # A structure agent (NEEDS `"structures": true`): the House's structure context and book rules.
     structural = bool(needs.get("structures"))
     if structural:
-        max_days = max(0, min(int(needs.get("max_days_to_expiry") or 7), 45))  # as `House._structure_context`
+        asked = needs.get("max_days_to_expiry")
+        max_days = max(0, min(int(7 if asked is None else asked), 45))  # as `House._structure_context`: 0 is 0-DTE
+    # The entry cut and the House's close by New York day (`House._structure_hours`): the regular
+    # 14:30 and 15:30, earlier on an early close (the tape carries those days, from the House's calendar).
+    early = {str(day): (int(pair[0]), int(pair[1])) for day, pair in (tape.get("structure_hours") or {}).items()
+             if isinstance(pair, (list, tuple)) and len(pair) == 2}
+
+    def structure_hours(day: str) -> tuple[int, int]:
+        return early.get(day, (STRUCTURE_ENTRY_CUT, STRUCTURE_CLOSE))
     bar_limit = int(_num((needs.get("bars") or {}).get("limit")) or 120)
     bar_limit = max(1, min(MAX_BARS, bar_limit))
     half_bps = float(_num(tape.get("half_spread_bps")) or 1.0) / 10000.0
@@ -413,7 +421,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         # line, today's expiry until the entry cut, at most 80 an underlying.
         afford = None if structural else float(limits["max_order_usd"]) / mult
         moment = _ny(now_ts)
-        first = today if structural and moment.hour * 60 + moment.minute < STRUCTURE_ENTRY_CUT else None
+        first = today if structural and moment.hour * 60 + moment.minute < structure_hours(today)[0] else None
         per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structural else int(rules.get("per_underlying", 40))
         rows_out = []
         for symbol in chain_symbols:
@@ -551,9 +559,10 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         code, qty, limit, moment = spec.code, float(order.quantity), float(order.held_limit), _ny(now_ts)
         today = moment.strftime("%Y-%m-%d")
         if order.action == "open":
-            if spec.expiry < today or (spec.expiry == today and moment.hour * 60 + moment.minute >= STRUCTURE_ENTRY_CUT):
-                return book.refuse("no structure is opened on its earliest expiry day from 14:30 New York: the House closes "
-                                   "what is still held from 15:30 and nothing is held into an expiry")
+            if spec.expiry < today or (spec.expiry == today and moment.hour * 60 + moment.minute >= structure_hours(today)[0]):
+                cut, close = structure_hours(today)
+                return book.refuse(f"no structure is opened on its earliest expiry day from {cut // 60:02d}:{cut % 60:02d} New York: "
+                                   f"the House closes what is still held from {close // 60:02d}:{close % 60:02d} and nothing is held into an expiry")
             for leg in spec.legs:
                 info = contracts.get(leg.occ)
                 if info is None:
@@ -717,7 +726,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 book.sorders = {k: o for k, o in book.sorders.items() if o["code"] != code}
                 price, how = settlement(p["spec"])
                 book.settle(p, price, now, how)
-            elif p["expiry"] == today and minutes >= STRUCTURE_CLOSE:
+            elif p["expiry"] == today and minutes >= structure_hours(today)[1]:
                 # The House's expiry-day close: the agent's orders in it cancelled, the whole structure
                 # offered at its conservative bid (a cent when a leg has none), re-priced each step.
                 book.sorders = {k: o for k, o in book.sorders.items() if o["code"] != code}

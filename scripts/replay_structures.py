@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import resource
 import sys
 import tempfile
 import time
@@ -48,7 +49,8 @@ from league.ledger import Ledger  # noqa: E402
 from league.niches import constrain, load as load_niches  # noqa: E402
 from league.replay import run_replay  # noqa: E402
 from league.safety import check_code  # noqa: E402
-from league.service import load_config  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_HISTORY = Path.home() / "Work" / ".options-history" / "options_history.sqlite"
 OOS_FRACTION = 0.34  # `replay.run_replay`'s default, the House's
@@ -77,7 +79,8 @@ def window(needs: dict, start: str | None, end: str | None, last_bar: float) -> 
     start after the sealed holdout, as `House.tape_for` does for an options tape."""
     _, horizon, _ = niche_of(needs)
     end_ts = _stamp(end, end=True) if end else last_bar
-    days = int(load_config().get("replay_days", 21)) * (6 if horizon == "day" else 1)
+    config = json.loads((ROOT / "league" / "config.json").read_text(encoding="utf-8"))  # as `service.load_config`, without importing the House
+    days = int(config.get("replay_days", 21)) * (6 if horizon == "day" else 1)
     start_ts = _stamp(start) if start else end_ts - days * 86400
     after_holdout = datetime.fromisoformat(HOLDOUT[1]).replace(tzinfo=timezone.utc) + timedelta(days=1)
     return max(_iso(start_ts), after_holdout.strftime("%Y-%m-%dT%H:%M:%SZ")), _iso(end_ts)
@@ -106,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--niche", default="alpaca-options")
     parser.add_argument("--json", action="store_true", help="print the whole summary as JSON")
     parser.add_argument("--trades", action="store_true", help="print every closed trade")
+    parser.add_argument("--measure", action="store_true", help="also measure the tape's JSON size (streamed, a little slower)")
     args = parser.parse_args(argv)
 
     code = Path(args.strategy).read_text(encoding="utf-8")
@@ -115,9 +119,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED by the safety check: {exc}")
         return 2
     needs, defaults = declared(code)
-    needs = constrain(needs, load_niches()[args.niche])
     params = {**defaults, **(json.loads(args.params) if args.params else {})}
-    parameters.require_valid(params, needs)
+    try:
+        needs = constrain(needs, load_niches()[args.niche])  # as the House seats it: e.g. alpaca-options is judged by the day
+        parameters.require_valid(params, needs)  # as `House._run_replay` checks them first
+    except ValueError as exc:
+        print(f"REFUSED before any replay: {exc}")
+        return 2
     mutable = parameters.inspect(params, needs)["mutable"]
     _, horizon, _ = niche_of(needs)
 
@@ -134,7 +142,8 @@ def main(argv: list[str] | None = None) -> int:
                       max_order_usd=float(rung["max_order_usd"]))
     tape["spread_model"]["stress"] = args.stress
     built = time.time() - t0
-    size_mb = len(json.dumps(tape, separators=(",", ":"))) / 1e6
+    # The tape's size as the box would receive it, counted as it is encoded (never one big string).
+    size_mb = (sum(len(chunk) for chunk in json.JSONEncoder(separators=(",", ":")).iterencode(tape)) / 1e6) if args.measure else None
     t0 = time.time()
     result = run_replay(code, params, tape, stake=stake, limits=limits, oos_fraction=OOS_FRACTION, audit=args.trades)
     ran = time.time() - t0
@@ -147,7 +156,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "strategy": args.strategy, "window": [start_iso, end_iso], "horizon": horizon, "symbols": needs.get("symbols"),
         "structures": bool(needs.get("structures")), "params": params, "mutable_params": mutable,
-        "tape": {"steps": len(tape["steps"]), "contracts": len(tape["contracts"]), "json_mb": round(size_mb, 1),
+        "tape": {"steps": len(tape["steps"]), "contracts": len(tape["contracts"]), "json_mb": None if size_mb is None else round(size_mb, 1),
+                 "option_bars": sum(len(step.get("options") or {}) for step in tape["steps"]), "bounded": tape.get("bounded"),
                  "recorded_quotes": tape.get("recorded_quotes"), "build_seconds": round(built, 1)},
         "replay_seconds": round(ran, 1), "ok": result.get("ok"), "error": result.get("error"),
         "gate": {"passed": passed, "reasons": reasons, "floor": CONSTITUTION["ladder"]["replay"]},
@@ -178,9 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  growth {growth:+.6f} over {len(blocks)} blocks; fit window {ins.get('mean_log_growth')} a block over {ins.get('blocks')}; "
           f"OUT OF SAMPLE {oos.get('mean_log_growth')} a block over {oos.get('blocks')} ({oos.get('active_blocks')} active)")
     print(f"  refused {summary['refused']}: {json.dumps(summary['refusal_reasons'])[:400]}")
-    print(f"  tape: {summary['tape']['steps']} steps, {summary['tape']['contracts']} contracts, {summary['tape']['json_mb']} MB, "
+    print(f"  tape: {summary['tape']['steps']} steps, {summary['tape']['contracts']} contracts, {summary['tape']['option_bars']} option bars, "
+          f"{summary['tape']['json_mb']} MB, "
           f"built in {summary['tape']['build_seconds']} s; replay {summary['replay_seconds']} s")
     print(f"  mutable PARAMS (edit replay, lab): {mutable}")
+    print(f"  peak memory {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MB")
     return 0 if passed else 1
 
 
