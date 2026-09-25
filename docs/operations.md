@@ -678,7 +678,11 @@ ORDER BY seq DESC LIMIT 20`.
     review's open finding 2): the House replays a lab graduate on its tape's steps up to the hour after
     the lab froze its code, where the forward window F1 graduated it on begins, so the replay gate's
     out-of-sample third is independent of that window. A tape with nothing after the hour (a history-store
-    tape) is replayed whole; fewer than two steps before it is no trial (`replay_unavailable`). Verify: a
+    tape) is replayed whole; fewer than two steps before it is no trial (`replay_unavailable`). On a Kalshi
+    tape a market that closed by the cut but pays after it (an hourly market closing at the cut hour, a
+    weather market paying hours after its close) is left off the cut tape (`unsettled_at_cut`), since the
+    cut tape could never settle it and a position held into its close would fail the graduate as
+    `unresolved` (the review of Deploy C). Verify: a
     graduate's `experiment.started` manifest (in `/workspace/state/experiments/`) has a `query` ending
     `|until:<the hour>`; the archive gains at most one cut tape a (tape, freeze hour) -- watch its size
     (2.62 GB, 15.7 GB free at 13:22Z Sept 25).
