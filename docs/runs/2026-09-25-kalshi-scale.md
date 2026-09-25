@@ -183,11 +183,18 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
   (the session's scratch `under_study.py`): every settled KXMLBTOTAL event Sept 4-24 matched to ESPN's board (239 of
   277), buy NO on the central strike (pre-game NO price in 0.38-0.62, volume-weighted over the 7 hours before
   start−1h from Kalshi's public trade prints; the outcome is Kalshi's own `result`). The under won 107 of 239 (44.8%)
-  at an average NO price of 0.499: mean −14.2% a dollar after the taker fee, t −2.19. It clusters by night: Sept 4-19
-  negative on 13 of 16 days (3/13 wins at worst), Sept 20-24 positive every day (35 of 53). The family's entire
-  record (meriwether-h2d625d, first close 02:01Z Sept 23, practice 20-lot and real 2-20-lot NO takers) sits inside
-  that last stretch, and games on one night move together, so its "independent" events are correlated and n 26 /
-  bound +0.092 overstates the proof. NFL totals (43 games since Aug 27, preseason included): the central under won
+  at an average NO price of 0.499: mean −14.2% a dollar after the taker fee, t −2.19. It runs in regimes over dates: Sept 4-19
+  negative on 14 of 16 days, Sept 20-24 positive every day (35 of 53). The family's entire record (meriwether-h2d625d,
+  first close 02:01Z Sept 23, practice 20-lot and real 2-20-lot NO takers) sits on three slate dates inside that last
+  stretch, so n 26 / bound +0.092 measures one regime, not the mechanism. **Verified and corrected by the forward-first
+  run (07:40Z, four independent checks; numbers in its record, "The proven sports family, verified"):** the family's
+  program rebuilt with its own rules on all 277 games lost 12.2% a dollar (t −1.91); KXMLBTOTAL's `fee_multiplier` is
+  0.5 (a real fill pays 0.035·C·P(1−P)), so this study's 0.07 doubled the fee while its VWAP sat 0.6-0.8¢ under the
+  ask, and the two roughly cancel (−13.8% a dollar at the ask with the right fee); 37 games were skipped because ESPN
+  writes ARI/CHW where Kalshi writes AZ/CWS; and same-night games are NOT correlated (intraclass correlation −0.003):
+  the defect is time, a proof with no distinct-dates requirement, not clustering within a night. Its decisions: M1 at
+  10 plus a five-distinct-dates gate at every swing look; M3 seats members only when the proof spans five or more
+  dates and only members running the proven code; the same gate on `family_proven` is an owner decision in its report. NFL totals (43 games since Aug 27, preseason included): the central under won
   22/43 at 0.510, −3.6% a dollar, t −0.24: no premium; NCAAF totals (269 games matched of 421 since Aug 27): 128/269 (47.6%) at 0.514, −10.1% a dollar, t −1.68. Sent to the forward-first run at 06:52Z (it owns the family
   proof, the swing at 10 and M3's members); this run changes nothing of theirs, writes no football sibling of the
   mechanism, and puts model-versus-market pricing (K1, K3) ahead of behavioural premia.
