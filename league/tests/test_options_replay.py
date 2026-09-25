@@ -1002,6 +1002,26 @@ class StructureTape(unittest.TestCase):
             with self.assertRaises(oh.HistoryError):
                 local(store)
 
+    def test_a_structure_tape_over_its_budget_drops_its_oldest_steps(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = oh.OptionsHistory(Path(root) / "h.sqlite")
+            store.db.execute("INSERT INTO contracts VALUES (?, 'SPY', '2026-09-25', 585.0, 'call', 100, 'active', '')", (socc(585),))
+            stamps = ["2026-09-22T14:00:00Z", "2026-09-22T14:15:00Z", "2026-09-22T14:30:00Z"]
+            for t in stamps:
+                store.db.execute("INSERT INTO bars VALUES (?, '15Min', ?, 1.2, 1.2, 1.2, 1.2, 50, 10, 1.2)", (socc(585), t))
+            store.db.commit()
+
+            def underlier(symbol, timeframe, start, end):
+                return [{"t": t, "o": 585.4, "h": 585.4, "l": 585.4, "c": 585.4, "v": 1000.0} for t in stamps if start <= t <= end]
+            needs = {"symbols": ["SPY"], "bars": {"timeframe": "15Min", "limit": 5}, "structures": True}
+            built = store.tape(needs, "2026-09-22T00:00:00Z", "2026-09-22T23:59:59Z", horizon="day", underlier_bars=underlier,
+                               execution="15Min", max_option_bars=2)
+            self.assertEqual([step["t"] for step in built["steps"]], stamps[1:])
+            self.assertEqual(built["bounded"]["option_bars"], 3)
+            self.assertEqual(built["warmup_bars"]["SPY"][-1]["t"], stamps[0])  # the dropped step's signal bar is warmup now
+            whole = store.tape(needs, "2026-09-22T00:00:00Z", "2026-09-22T23:59:59Z", horizon="day", underlier_bars=underlier, execution="15Min")
+            self.assertNotIn("bounded", whole)
+
     def test_the_faster_implied_volatility_is_the_same_number(self):
         import random
 

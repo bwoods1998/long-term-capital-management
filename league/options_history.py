@@ -102,6 +102,12 @@ SPREAD_MODEL = {
 #: A structure tape keeps a contract's bar only within this fraction of the underlying's price then:
 #: the chain's own moneyness line (`House._chain`), so nothing a structure agent could be shown is lost.
 STRUCTURE_BAND = 0.20
+#: The most option bars a structure tape carries. Measured Sept 25, 2026 on the local copy: SPY, QQQ and
+#: IWM at 0-7 days over the House's whole options window (May 16 to Sept 24, 2,340 steps) are 797,000
+#: bars, 43 MB of JSON, 323 MB resident and 125 s of CPU on a laptop at load 40, whose CPU ran the same
+#: Black-Scholes loop 6-8x slower than the House box's; so this cap is about 110 MB and a minute of a
+#: box's CPU, well inside its 2 GB and 300 s.
+STRUCTURE_TAPE_MAX_BARS = 2_000_000
 LIQUIDITY = {"min_volume": 5.0, "min_trades": 2, "max_participation": 0.10, "quote_age_seconds": 1500}
 #: Alpaca charges no options commission (`league/fees.py`); the regulatory and clearing
 #: pass-through (ORF, OCC, TAF) is not yet measured on this account. Assumed, per contract per fill.
@@ -762,7 +768,8 @@ class OptionsHistory:
     # -- the options desk's replay tape ------------------------------------------------------------
     def tape(self, needs: Mapping[str, Any], start: str, end: str, *, horizon: str, underlier_bars: Callable[..., list[dict[str, Any]]],
              warmup: int = 70, execution: str = "15Min", max_order_usd: float = 75.0, spread: Mapping[str, Any] | None = None,
-             liquidity: Mapping[str, Any] | None = None, fee_per_contract: float = FEE_PER_CONTRACT_USD) -> dict[str, Any]:
+             liquidity: Mapping[str, Any] | None = None, fee_per_contract: float = FEE_PER_CONTRACT_USD,
+             max_option_bars: int | None = None) -> dict[str, Any]:
         """A replay tape for an options strategy (`league/options_replay.py` walks it).
 
         Steps are the regular-session closes of the underlyings' `execution` bars. A step carries
@@ -775,7 +782,9 @@ class OptionsHistory:
         bought alone), 0 to `max_days_to_expiry` days (7 when unstated), and only bars whose strike is
         within the chain's 20% of the underlying's last close then (`STRUCTURE_BAND`), which bounds a
         month of SPY, QQQ and IWM 0-7 day contracts to about 80,000, 75,000 and 25,000 bars (measured on
-        the local copy, Sept 25, 2026)."""
+        the local copy, Sept 25, 2026). A structure tape is also held to `STRUCTURE_TAPE_MAX_BARS` option
+        bars (`max_option_bars`): over it, the OLDEST steps are dropped (their signal bars joining the
+        warmup) and the tape says so under `bounded`."""
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
         structural = bool(needs.get("structures"))
         days = (max(0, min(int(needs.get("max_days_to_expiry") or 7), 45)) if structural
@@ -867,6 +876,23 @@ class OptionsHistory:
                     index += 1
                 cursors[symbol] = index
             steps.append(entry)
+        bounded = None
+        cap = STRUCTURE_TAPE_MAX_BARS if max_option_bars is None else int(max_option_bars)
+        total = sum(len(entry["options"]) for entry in steps)
+        if structural and total > cap:
+            first, kept = 0, total
+            while first < len(steps) and kept > cap:
+                kept -= len(steps[first]["options"])
+                first += 1
+            for entry in steps[:first]:  # the dropped steps' signal bars are the kept steps' warmup
+                for symbol, rows in (entry.get("history_bars") or {}).items():
+                    warmup_bars.setdefault(symbol, []).extend(rows)
+            warmup_bars = {symbol: rows[-warmup:] for symbol, rows in warmup_bars.items()}
+            steps = steps[first:]
+            printed = {occ for entry in steps for occ in entry["options"]} | {occ for entry in steps for occ in entry.get("quotes") or {}}
+            contracts = {occ: row for occ, row in contracts.items() if occ in printed}
+            bounded = {"option_bars": total, "kept": kept, "max_option_bars": cap, "from": steps[0]["t"] if steps else None,
+                       "why": "a structure tape is held to what a box replays well inside its time and memory"}
         coverage = {s: [r for r in self.coverage(s) if r.get("timeframe") == execution] for s in symbols}
         return {
             "venue": "alpaca", "asset_class": "option", "horizon": horizon, "timeframe": timeframe, "execution_timeframe": execution,
@@ -884,6 +910,7 @@ class OptionsHistory:
             # What a live wake of these NEEDS is handed besides (`House.snapshot`), stamped with when each
             # row became available: the options-derived features it declares (Sept 25, 2026).
             **({"options_features": self.feature_series(symbols)} if needs.get("options_features") else {}),
+            **({"bounded": bounded} if bounded else {}),
         }
 
 
