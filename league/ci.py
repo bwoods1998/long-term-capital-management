@@ -77,6 +77,8 @@ RETIRED_REGISTRY = "league/strategies/registry.json"
 #: The only keys of league/config.json the operator may move, with their bounds.
 CONFIG_DIALS: dict[str, tuple[float, float]] = {
     "tick_seconds": (30, 600), "mark_every_seconds": (60, 1800), "replay_days": (7, 60), "inference_daily_cap_usd": (0.5, 25.0),
+    # The box's updater ships main at most once every this many hours (league/updater.py, the release train).
+    "release_train_hours": (2, 6),
 }
 
 

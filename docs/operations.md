@@ -127,6 +127,37 @@ watch.
   took 9-14 minutes on the day's later heads); a change to `.github/workflows/` re-pins
   `TRUSTED_WORKFLOWS_SHA256` in `league/updater.py` in the same commit (a test fails otherwise) and
   reaches the box only by the owner's deploy, after which the updater trusts the new workflow.
+- **The release train (Sept 25, 2026).** A head that may ship waits while any of three holds
+  stands, and ships at the first look after they all lift (the updater looks again the moment the
+  last one lifts, not up to half an hour later):
+  - *The train:* one updater release every `release_train_hours` (`league/config.json`, default 4;
+    `league/ci.py` `CONFIG_DIALS` bounds it 2-6, so the operator may move it inside that). It is
+    measured from the last updater release that restarted the House (its `promote` row in
+    `deploys.jsonl`). A rolled-back attempt counts; a canary refusal does not, because nothing
+    restarted. A head rolled back once is tried once more at the next train; twice, never again.
+  - *The US session:* no launch on a day the House's calendar (`ltcm.data.us_equity_session`, the
+    one `league/house.py` uses) calls a trading day, from 12:55Z to 20:05Z. The window is 13:25Z to
+    20:05Z, or the session's own open and close with five minutes each side when that is wider
+    (14:25-21:05Z in winter). The launch stops 30 minutes before it opens, because the canary
+    (2.2-4.0 minutes to the restart on Sept 24-25), the ten-minute watch and any rollback all
+    restart the House. Weekends and NYSE holidays have no window.
+  - *A recent start:* none within 30 minutes of the ledger's last `ops.started`, whatever caused it.
+
+  Why: the House restarted 26 times in the 24 hours to 04:23Z Sept 25 (24-37 a day on Sept 20-24),
+  and seven of those restarts fell inside the Sept 24 session. The updater alone launched 14
+  releases in the day from 02:15Z Sept 24, one of them at 14:58Z, inside the session. Every restart
+  kills the research and wakes in flight.
+
+  A held head is `held` in the updater's answer, with `holds` (train, session, recent_start), the
+  reasons and `next_eligible_at`. It is written once per head per reason: a `stage: train` row in
+  `deploys.jsonl` and an `ops.deploy` row with `action: held` on the ledger. It raises no warning.
+  A protected head is still refused at once, whatever holds. `scripts/floor_watch.py` prints all of
+  it on its `## releases` line: restarts in the last day (health.json `restarts_24h` when present,
+  else the ledger's `ops.started`), the last updater ship and launch, the holds now, the last hold
+  on the ledger and the next eligible time.
+
+  The owner's deploy (`floor_box.py deploy`) is not held by the train. Deploy outside the session
+  anyway: the plan's rule is no deploy between 13:25Z and 20:05Z on a trading day, except a rollback.
 - **The owner's deploy.** `python3 scripts/floor_box.py deploy` sends the working tree.
   - Use it for protected changes.
   - Only one deploy runs at a time. If you see `REFUSED: another deploy or rollback is running
@@ -232,19 +263,31 @@ watch.
   writes a space where the ledger writes `T`, a space sorts before `T`, and that form admitted the
   whole day.
 - **`python3 scripts/gap_scoreboard.py --snapshot DIR | --take DIR [--since ISO] [--baseline ISO]
-  [--json | --markdown]`** (Sept 24, 2026): the scoreboard of
-  [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z), read-only and standard
-  library only, from a snapshot of the House's stores rather than the live box. `--take` backs up
-  `ledger.sqlite`, `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp`
-  (sqlite's backup API, each source opened `mode=ro`), downloads them gzipped with `health.json`,
-  `house.json` and `allocator-board.json`, and deletes the box copies; `--snapshot` reads a directory
-  taken before. It prints the plan's seven metrics, each number with the function that computed it,
-  then each desk's evidence clock (hours from a member's first fill to its third independent
+  [--deploys FILE] [--json | --markdown]`** (Sept 24, 2026; the forward-first rows Sept 25): the
+  scoreboard of [the forward-first plan](goals/LTCM_FORWARD_FIRST.md) and, kept in a second table,
+  of [the close-the-gaps plan](goals/LTCM_CLOSE_THE_GAPS.md) (workstream Z of both), read-only, from
+  a snapshot of the House's stores rather than the live box. `--take` backs up `ledger.sqlite`,
+  `lab.sqlite`, `campaigns.sqlite` and `feeds.sqlite` on the box into `/tmp` (sqlite's backup API,
+  each source opened `mode=ro`), downloads them gzipped with `health.json`, `house.json`,
+  `allocator-board.json`, `allocator.json` and the watchdog's `/workspace/deploys.jsonl`, and deletes
+  the box copies; `--snapshot` reads a directory taken before (`--deploys FILE` names a deploy log kept
+  outside it; without one, deploys and rollbacks are read from the ledger, which cannot see a release
+  killed before its first `ops.started`). The first table is the forward-first plan's seven rows with
+  their targets: real settled profit a day against compute a day (`scripts/economics.py`'s method plus
+  the lab's own calls in `lab.sqlite`, with the gateway's meter and the yield rows as checks) and the
+  proven families' capacity at 1x, 2x and 4x their real size; the forward-positive share of the day's
+  graduates and newborns; real dollars on proof, the swing clock and Alpaca real stock agents;
+  restarts, rollbacks by cause, the tick interval's p50 and deploys inside a US session (the NYSE
+  calendar); the seat queue, median life against each desk's evidence clock and the displacement
+  share; the real fill rate per order, refused real entries by rule and probes' taker entries; Sail's
+  runway, October's OpenAI cap and the population ceiling. Every part of a reading names the function
+  that computed it. The second table is the close-the-gaps plan's seven metrics; then each row in
+  detail, each desk's evidence clock (hours from a member's first fill to its third independent
   settlement), every family's pooled record (practice at weight 0.5, real at 1, one observation an
   event, a one-sided 80% Student's t bound) and the weather favourites' capacity. Its clock is the
-  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window for deaths,
-  the lab and supersessions, and `--baseline` counts promotions only from a moment (Deploy A). Every
-  definition is in the script's docstring.
+  snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window, and
+  `--baseline` counts promotions only from a moment (Deploy A). Every definition is in the script's
+  docstring.
 - **`/workspace/state/health.json`** is written every tick:
   - `campaign`: what each provider has left, the burst, the live grant and `pending_calls` (holds
     not yet settled). `meters` (Sept 24, 2026) has one entry per metered provider (`sail`,
@@ -1013,9 +1056,11 @@ deploy and a re-ratified grant (see "A money rule" above).
 | File | Key | Default | What it does |
 |---|---|---|---|
 | `league/config.json` | `semantic_lab` | `false` | The continuous Jev midpoint labeller. It stays off: a capped evaluation found no tradable value |
-| | `jev.enabled`, `jev.daily_usd`, `jev.daily_calls` | on, $0.25, 400 | The Jev floor: gate relevance, triage, hypothesis links, exposure |
+| | `jev.enabled`, `jev.daily_usd`, `jev.daily_calls`, `jev.purpose_calls` | on, $1.50, 25,000; gate 3,000, triage 1,500, links 1,000, exposure 500, move 7,500 | The Jev floor: gate relevance, triage, hypothesis links, exposure, and the move sensor's shadow labels. One daily pool aligned to the funded Jev balance (Sept 25, 2026; $0.25 and 400 before). A breaker per purpose |
+| | `jev.move` (`enabled`, `interval_seconds`, `max_markets_per_cycle`, `daily_usd`, `retention_days`) | on, 300 s, 800, $0.75, 14 days | The move sensor (`league/jev_features.py`, J1): every market the Kalshi strategies are shown gets point-in-time `move_p5/15/60` from the free model every 5 minutes, and Jev's static answers once per market as a recorded shadow. Not served to strategies until its held-out AUC on post-ship events is at least 0.70 |
 | | `deep_replay`, `holdout_gate` | on | Deep Alpaca history for replay, and the sealed holdout before paper |
 | | `options_history` | on | Options history, options replay, and IV/skew/activity features |
+| | `options_structures.book`, `options_structures.shadow.starting_cash` | `options-shadow`, $100,000 | Level-3 structures (Sept 25, 2026, the options-desk run; `league/structures.py`): the book a STRUCTURE AGENT (the `alpaca-options` desk, NEEDS `"structures": true`) trades on at rung 1. `options-shadow` is the House's own practice account (`league/options_shadow.py`: fills only on a strictly newer OPRA quote, at the structure's touch from every leg, at most 10% of any leg's shown size, session only, $0.05 a contract a leg, marks at the bid, a structure still held after its expiry's close settled at intrinsic, never written off at zero; nothing leaves the House). `alpaca-paper` sends each structure to the shared practice account as ONE multi-leg order (Track P, not before Sept 28; only the five types it can close as one covered order). A structure is held as ONE long instrument priced at net value plus collateral: its cost is its maximum loss, a flat sale is one closed trade, no book holds a negative leg. The House refuses structure intents on real money until O1 (`allocator.option_spreads_real`), closes structures from 15:30 New York on their earliest expiry day (30 minutes before an early close), cancels resting opens at the 14:30 entry cut (90 minutes before an early close), and seats structure founders one a tick (`league/options_desk.py`, cause `options_seat`, at most 12 retirements, never real money, a winner, a proven family's member, a working order or a position while its market is shut, never a Kalshi desk). An unknown book name: every structure intent is refused with the reason |
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |

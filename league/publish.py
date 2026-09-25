@@ -566,6 +566,12 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
         if p.get("action") in ("blocked", "waiting"):
             return (f"New code on main ({str(p.get('sha') or '')[:12]}) is not deployed: the House deploys only a commit whose "
                     f"checks GitHub confirms passed on that exact commit. {'; '.join(str(r) for r in (p.get('reasons') or [])[:1])}").strip()
+        if p.get("action") == "held":
+            # The release train (league/updater.py, Sept 25, 2026): not a refusal, a wait.
+            reasons = [str(r) for r in p.get("reasons") or []]
+            shown = "; ".join(reasons[:1] + (reasons[-1:] if len(reasons) > 1 else []))  # the first hold, and when it may go
+            return (f"New code on main ({str(p.get('sha') or '')[:12]}) waits for the release train: the House takes new code at most "
+                    f"every few hours, never in the US stock session or just after a restart. {shown[:1].upper()}{shown[1:]}").strip()
         return f"New code on main was refused before the canary: {'; '.join(str(r) for r in (p.get('reasons') or [])[:2])}"
     if kind == "ops.recommendation":
         return f"Capital recommendation: {p.get('summary')}"

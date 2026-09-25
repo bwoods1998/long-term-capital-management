@@ -321,7 +321,7 @@ class Entries(StructureBookCase):
         self.broker.clock_iso = iso(self.clock)
         outcome = self.trade("a1", today, "buy", "1", "0.62")
         self.assertEqual(outcome.status, "refused")
-        self.assertIn("until 14:30 New York", outcome.detail)
+        self.assertIn("a structure is not opened after 14:30 New York on its expiry day", outcome.detail)
 
 
 class Broken(StructureBookCase):

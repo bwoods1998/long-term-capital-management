@@ -17,6 +17,11 @@ Measured, not assumed:
   every contract, TAF and the regulatory fee on sales) are summed and taken in the overnight batch,
   and `Book._book_venue_fees` books them to the House when that cash moves. A real book keeps no
   option fee until a real option fill has shown when the real account takes it.
+- **The options shadow book** (`options-shadow`, `league/options_shadow.py`, Sept 25, 2026): a
+  structure held as one position pays the replay's assumed fee, $0.05 a contract a leg a fill
+  (`structures.fee_per_unit`): a vertical $0.10 a held unit, a condor or a butterfly $0.20. The shadow
+  account charges its cash exactly that, so this rule is what keeps the book and the account equal to
+  the cent; the practice clearing fee above counts one contract a held unit and would not.
 - **Kalshi**: the venue reports each order's fees, and the book uses the venue's number. This
   model is for the shadow book and for crosses: 0.07 x C x P x (1 - P) times the series
   multiplier, rounded up to $0.0001 per order; a resting fill pays nothing except on the series
@@ -39,6 +44,8 @@ ALPACA_CRYPTO_TAKER = Decimal("0.0025")
 ALPACA_CRYPTO_MAKER = Decimal("0.0015")
 #: The OCC clearing fee on an Alpaca option fill, a contract (rounded up to the cent a fill).
 ALPACA_OPTION_CLEARING = Decimal("0.025")
+#: The options shadow book's venue: its structures pay `structures.fee_per_unit` a held unit a fill.
+OPTIONS_SHADOW = "options-shadow"
 
 
 @dataclass(frozen=True)
@@ -82,6 +89,11 @@ class Fees:
                 # Rounded up: the venue never rounds a fee in our favour.
                 return Charge(quantity=(quantity * rate).quantize(QTY_PLACES, rounding=ROUND_CEILING))
             return Charge(usd=(quantity * price * instrument.multiplier * rate).quantize(CENT, rounding=ROUND_CEILING))
+        if instrument.asset_class == "option" and instrument.venue == OPTIONS_SHADOW and quantity > 0:
+            from .structures import fee_per_unit, is_structure, spec_of  # local: the fee model loads without the venues
+
+            if is_structure(instrument):
+                return Charge(usd=(fee_per_unit(spec_of(instrument)) * quantity).quantize(CENT, rounding=ROUND_CEILING))
         if instrument.asset_class == "option" and self.option_clearing and quantity > 0:
             return Charge(usd=(quantity * ALPACA_OPTION_CLEARING).quantize(CENT, rounding=ROUND_CEILING))
         return Charge()

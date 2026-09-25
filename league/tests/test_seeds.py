@@ -9,7 +9,17 @@ from datetime import datetime, timedelta, timezone
 
 from league import runner
 from league.safety import check_code
-from league.seeds import SEEDS, all_seeds, load
+from league.seeds import SEEDS as ALL_SEEDS, all_seeds as _all_seeds, load
+
+# The registry tests below pin the fourteen single-leg founders of Sept 19-20, 2026. The options
+# desk's structure founders (NEEDS `structures`, Sept 25, 2026) carry their own structure builder and
+# exits and are pinned in `test_structure_founders`.
+STRUCTURE_FOUNDERS = {"options-gap-drift", "options-condor-vrp", "options-putspread-dip", "options-ironfly-quiet", "options-strangle-cheap", "options-calendar-term", "options-butterfly-pin", "options-orb", "options-trend-vertical", "options-reversal", "options-skew", "options-diagonal"}
+SEEDS = [row for row in ALL_SEEDS if row["name"] not in STRUCTURE_FOUNDERS]
+
+
+def all_seeds():
+    return [row for row in _all_seeds() if row["name"] not in STRUCTURE_FOUNDERS]
 
 LIMITS = {"max_position_usd": 100.0, "max_order_usd": 75.0}
 FEES = {"crypto_taker": 0.0025, "crypto_maker": 0.0015, "kalshi_taker_rate": 0.07}
