@@ -2952,7 +2952,8 @@ class Book:
             return 0
         with self._lock:
             due = [(agent, holding) for agent, account in self.accounts.items() for holding in list(account.holdings.values())
-                   if structures.is_structure(holding.instrument) and str(holding.instrument.expiry or "9999") < today]
+                   if structures.is_structure(holding.instrument) and self._spec(holding.instrument)
+                   and str(holding.instrument.expiry or "9999") < today]
             for agent, holding in due:
                 self._break_structure(agent, holding, f"held past its earliest expiry {holding.instrument.expiry}")
             return len(due)
@@ -3000,12 +3001,22 @@ class Book:
         except Exception:  # noqa: BLE001 - a venue that cannot say holds no legs of ours
             return False
 
+    @staticmethod
+    def _spec(instrument: Instrument) -> Any:
+        """A held structure's spec, or None when its code no longer reads as one (a later release's
+        stricter rule): such a holding is left to reconciliation, which then shows its legs apart and
+        freezes as for any unexplained position, never an exception out of a reading of the venue."""
+        try:
+            return structures.spec_of(instrument)
+        except ValueError:
+            return None
+
     def _held_structures(self) -> dict[str, tuple[Instrument, Decimal]]:
         """Every structure the book holds, every agent's and the House row's together: key -> (instrument, quantity)."""
         out: dict[str, tuple[Instrument, Decimal]] = {}
         for account in self.accounts.values():
             for holding in account.holdings.values():
-                if holding.quantity != 0 and structures.is_structure(holding.instrument):
+                if holding.quantity != 0 and structures.is_structure(holding.instrument) and self._spec(holding.instrument):
                     key = position_key(holding.instrument)
                     instrument, quantity = out.get(key, (holding.instrument, ZERO))
                     out[key] = (instrument, quantity + holding.quantity)
@@ -3031,7 +3042,7 @@ class Book:
         returned."""
         collateral = ZERO
         for key, (instrument, quantity) in self._held_structures().items():
-            spec = structures.spec_of(instrument)
+            spec = self._spec(instrument)
             positions[key] = positions.get(key, ZERO) + quantity
             self._venue_instruments[key] = instrument
             for leg in spec.legs:
@@ -3049,7 +3060,8 @@ class Book:
     def _contract_signs(instrument: Instrument, quantity: Decimal = ONE) -> dict[str, int]:
         """The option contracts an instrument holds at the venue, by position key: +1 long, -1 short."""
         if structures.is_structure(instrument):
-            return {position_key(leg.instrument): leg.sign for leg in structures.spec_of(instrument).legs}
+            spec = Book._spec(instrument)
+            return {position_key(leg.instrument): leg.sign for leg in spec.legs} if spec else {}
         if instrument.asset_class == "option":
             return {position_key(instrument): 1 if quantity > 0 else -1}
         return {}
@@ -3113,10 +3125,11 @@ class Book:
         leg, and each leg pays the venue's fee on its own contracts (quantity x ratio): a condor four, a
         butterfly four. Anywhere else (the options shadow book, whose fee model prices the held unit
         itself) the fee model is asked about the structure as it is."""
-        if not (structures.is_structure(instrument) and self._legs_at_venue()):
+        spec = self._spec(instrument) if structures.is_structure(instrument) and self._legs_at_venue() else None
+        if spec is None:
             return self.fees.charge(instrument, side, quantity, price, liquidity=liquidity, filled_before=filled_before)
         usd = sum((self.fees.charge(leg.instrument, side, quantity * leg.ratio, price, liquidity=liquidity).usd
-                   for leg in structures.spec_of(instrument).legs), ZERO)
+                   for leg in spec.legs), ZERO)
         return Charge(usd=usd)
 
     def _break_structure(self, agent: str, holding: Holding, why: str) -> None:
@@ -3180,7 +3193,7 @@ class Book:
         diffs = {key: money(value) for key, value in (result.position_diffs or {}).items()}
         legs_of: dict[str, list[str]] = {}
         for key, (instrument, _) in self._held_structures().items():
-            for leg in structures.spec_of(instrument).legs:
+            for leg in self._spec(instrument).legs:
                 legs_of.setdefault(position_key(leg.instrument), []).append(key)
         house = self.accounts.get(HOUSE)
         remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}

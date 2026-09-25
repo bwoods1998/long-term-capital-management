@@ -268,6 +268,22 @@ class Fees_(StructureBookCase):
         self.assertTrue(self.book.reconcile().ok)
 
 
+class UnreadableCode(StructureBookCase):
+    def test_a_held_code_that_no_longer_reads_as_a_structure_freezes_and_never_raises(self):
+        tampered = Instrument("option", "SPY", V, multiplier="100", expiry=CALL_DEBIT.expiry, strike=CALL_DEBIT.strike,
+                              right=CALL_DEBIT.right,
+                              market_id=CALL_DEBIT.market_id.replace("+1", "#").replace("-1", "+1").replace("#", "-1"))
+        self.assertTrue(structures.is_structure(tampered))
+        self.seat("a1")
+        entry = self.ledger.append("book.fill", {"book": V, "source": "venue", "instrument": tampered.to_dict(), "side": "buy",
+                                                 "quantity": "1", "price": "0.54", "fee_usd": "0", "cash_delta": "-54",
+                                                 "position_delta": "1"}, agent="a1")
+        self.book._apply(entry.kind, "a1", entry.payload, entry.at)
+        result = self.book.reconcile()  # no exception out of the venue's reading
+        self.assertFalse(result.ok)
+        self.assertIn(tampered.market_id, result.detail)
+
+
 class Entries(StructureBookCase):
     def test_an_entry_the_venue_would_net_against_an_opposite_leg_is_refused(self):
         self.seat("a1")
