@@ -117,7 +117,7 @@ This run's `feeds.py` changes merge with Deploy K1; the Jev run's hook follows t
 | K2 | `scripts/kalshi_capacity.py`: fill curves at 1x-8x from own orders, Kalshi's public prints and books | building (`k2/capacity`, 06:40Z) |
 | K3 | Ensemble-priced weather founders (`weather_ensemble` seed, every station's high and low) | building (`k3/weather-ensemble`, 06:45Z) |
 | K5 | The scale rule, switched off, and `--scale-report` | building (`k5/scale-rule`, 06:20Z); merges after forward-first's Deploy B |
-| I1 | `web_fetch` for research through the gateway | built 06:43Z, PR #305 (gateway 174 tests pass, researcher 64 OK, commons+fast_research 37 OK, ci passed): `POST /v1/web/fetch`, SSRF rules on every hop, 2 MiB read / 200k text, 3,000 a day; House tool 20 a day an agent at $0.01, rows `agent.research` tool `web_page`; three-lens review running (`i1/review`) |
+| I1 | `web_fetch` for research through the gateway | built 06:40Z, PR #305 (gateway 174 tests pass, researcher 64 OK, commons+fast_research 37 OK, ci passed): `POST /v1/web/fetch`, SSRF rules on every hop, 2 MiB read / 200k text, 3,000 a day; House tool 20 a day an agent at $0.01, rows `agent.research` tool `web_page`; three-lens review running (`i1/review`) |
 | I2/I3 | Recorders for key-free hosts; requests answered by rule (fulfilled by a recorder's `asks`, or blocked with the rule it fails) | building (`i2/open-recorders`, 06:30Z) |
 | W | `scripts/kalshi_watch.py` (this session) | built, 3 tests OK, run on the box 06:20Z; on `k/watch`, ships with K1 |
 
