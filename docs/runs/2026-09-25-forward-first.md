@@ -60,10 +60,25 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | # | Item | State |
 |---|---|---|
 | 0.1 | T0 recorded and committed | done |
-| 0.2 | Plan merged to main (#295) | CI running |
+| 0.2 | Plan merged to main (#295) | done 04:31:43Z (`2470d26`) |
 | 0.3 | First-hour decisions | done 04:28Z (above) |
 | 0.4 | The scoreboard at T0 | snapshot taken 04:23-04:26Z (`--take`); the plan's seven rows from Z |
-| H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); cadence and the next release to verify |
+| H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); Sail's checkpoints recovered at 01:55:04Z, so the backup alert is quiet until the next failure; the updater's next CODE release is the last check |
+| B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
+
+## Findings before Wave 0 reports
+
+- **Sail's checkpoint service recovered at 01:55:04Z Sept 25** (a successful backup after 73 failures since
+  21:31:55Z Sept 24). The owner step "a Sail checkpoint ticket" is moot; H2 still ships (the next vendor outage
+  must not roll a release back).
+- **A docs-only merge to main is not a release.** The updater's 04:44Z check of `2470d26` (#295, the plan) wrote
+  no row: a release tree holds `league/`, `ltcm/`, `scripts/`, `playbooks/` and `deploy/` only, so its digest
+  equals the running one ("the box already runs main"). The Sept 25 memory note said the opposite; run-record
+  merges restart nothing.
+- **`kalshi-open` (the plan's bug list):** 2 living members; greenwich-h4cb387 woke 22 times in the 6 h to 04:23Z
+  and made 3 intents; its thought each time is its program's screen ("Screen low-priced YES football outcomes and
+  place bounded post-only NO bids; at most one position per event"), which rarely fires. Not a defect. The desk's
+  gap is seats: 2 of 8 held, 4 waiters over 2 h, refused because the league's 128 seats are held (F3's case).
 
 ## Progress notes
 
