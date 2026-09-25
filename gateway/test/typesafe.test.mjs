@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGate, TYPESAFE_KEY } from '../lib/gate.mjs';
 import { route } from '../lib/router.mjs';
-import { MODEL, MAX_CALLS, actualCost, validAnswers, admit } from '../lib/typesafe.mjs';
+import { MODEL, MAX_CALLS, actualCost, validAnswers, admit, answerProblems } from '../lib/typesafe.mjs';
 import { memoryStore, recorder, TOKEN } from './helpers.mjs';
 
 const NOW = Date.parse('2026-09-21T01:00:00Z');
@@ -193,4 +193,38 @@ test('the lifetime Jev line is set at or below funded money', async () => {
   const cap = Number(config.match(/"TYPESAFE_PILOT_USD":\s*"([0-9.]+)"/)[1]);
   // Sept 25, 2026: $16.23 metered + the owner's ~$25 funded = $41.23.
   assert.ok(cap <= 41.23, `TYPESAFE_PILOT_USD ${cap} is above funded money`);
+});
+
+test('a bad answer is named per question, and a caller may opt in to the answers that passed', async () => {
+  const two = { model: MODEL, state: { series: 'KXWTAMATCH' },
+    questions: { mechanics: body.questions.route, feed: { type: 'noul', instructions: 'Is a recorded feed available?' } } };
+  const mixed = { model: MODEL, answers: { mechanics: { type: 'choice', choice: 'elsewhere',
+    probabilities: { narrow: .95, repeat: .05 }, confidence: .9 }, feed: { type: 'noul', noul: .2 } },
+    usage: { input_tokens: 1000, output_tokens: 40 } };
+  const post = (id, headers = {}) => new Request('https://gateway.test/v1/typesafe/systemone', {
+    method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'X-LTCM-Request': id, ...headers }, body: JSON.stringify(two) });
+  // Without the header nothing changes: the whole response is refused, now with the reason named.
+  const x = setup(settings, { body: JSON.stringify(mixed) });
+  const refused = await x.call(post('mixed:1'));
+  assert.equal(refused.status, 502);
+  assert.deepEqual((await refused.json()).rejected, { mechanics: 'the choice is not one of the options' });
+  assert.equal(x.gate.typesafeStatus().spent_usd, '0.000042');
+  // With it, the valid answer comes back and the bad one is named; the cost is the same.
+  const y = setup(settings, { body: JSON.stringify(mixed) });
+  const kept = await y.call(post('mixed:2', { 'X-LTCM-Partial': '1' }));
+  assert.equal(kept.status, 200);
+  assert.equal(kept.headers.get('X-LTCM-Partial'), '1');
+  const got = await kept.json();
+  assert.deepEqual(got.answers, { feed: { type: 'noul', noul: .2 } });
+  assert.deepEqual(got.rejected, { mechanics: 'the choice is not one of the options' });
+  assert.equal(y.gate.typesafeStatus().spent_usd, '0.000042');
+  // Nothing valid is still a refusal, and a missing answer or an unasked one is named.
+  const none = structuredClone(mixed); none.answers.feed.noul = 2;
+  const z = setup(settings, { body: JSON.stringify(none) });
+  assert.equal((await z.call(post('mixed:3', { 'X-LTCM-Partial': '1' }))).status, 502);
+  const missing = structuredClone(mixed); delete missing.answers.mechanics;
+  assert.deepEqual(answerProblems(two, missing).questions, { mechanics: 'no answer' });
+  const extra = structuredClone(mixed); extra.answers.other = { type: 'noul', noul: .5 };
+  assert.match(answerProblems(two, extra).top, /not asked/);
+  assert.match(answerProblems(two, { ...mixed, model: 'jev-0' }).top, /pinned model/);
 });

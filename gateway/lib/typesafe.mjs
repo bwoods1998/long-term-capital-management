@@ -53,27 +53,65 @@ export function actualCost(usage) {
   return (BigInt(usage.input_tokens) * 42n + 999n) / 1000n;
 }
 
-export function validAnswers(body, response) {
-  if (!object(response) || response.model !== MODEL || !object(response.answers)
-      || Object.keys(response.answers).length !== Object.keys(body.questions).length) return false;
-  const probability = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
-  return Object.entries(body.questions).every(([name, q]) => {
-    const a = response.answers[name];
-    if (!object(a) || a.type !== q.type) return false;
-    if (q.type === 'noul') return probability(a.noul);
-    if (q.type === 'score') {
-      // Levels are keyed "0".."n-1"; the score is the probability-weighted level, so it lies in
-      // [0, n-1] and equals the sum of index x probability (a small rounding allowance either way).
-      const levels = q.criteria.map((_, i) => String(i));
-      if (!probability(a.confidence) || !object(a.probabilities) || typeof a.score !== 'number' || !Number.isFinite(a.score)) return false;
-      if (Object.keys(a.probabilities).length !== levels.length || !levels.every(n => probability(a.probabilities[n]))) return false;
-      if (Math.abs(levels.reduce((sum, n) => sum + a.probabilities[n], 0) - 1) > 0.001) return false;
-      const expected = levels.reduce((sum, n) => sum + Number(n) * a.probabilities[n], 0);
-      return a.score >= -0.01 && a.score <= levels.length - 1 + 0.01 && Math.abs(a.score - expected) <= 0.02;
+/**
+ * Why a response is not what was asked, in the gateway's own words (never the provider's text):
+ * `top` for the envelope, `questions` for each answer that fails its type's rules. Sept 25, 2026:
+ * 92 of 535 market-map requests (8% of 2-question batches, 41% of 16-question ones) were refused
+ * whole for one bad answer, although every call was billed, so the problems are named per question.
+ */
+export function answerProblems(body, response) {
+  const questions = object(body?.questions) ? body.questions : {};
+  if (!object(response) || response.model !== MODEL || !object(response.answers)) {
+    return { top: 'the response is not a typed answer from the pinned model', questions: {} };
+  }
+  const extra = Object.keys(response.answers).filter(name => !Object.hasOwn(questions, name));
+  if (extra.length) return { top: `the response answers ${extra.length} question(s) that were not asked`, questions: {} };
+  const problems = {};
+  for (const [name, q] of Object.entries(questions)) {
+    const problem = answerProblem(q, response.answers[name]);
+    if (problem) problems[name] = problem;
+  }
+  return { top: null, questions: problems };
+}
+
+const probability = n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+
+function answerProblem(q, a) {
+  if (a === undefined) return 'no answer';
+  if (!object(a) || a.type !== q.type) return `not a ${q.type} answer`;
+  if (q.type === 'noul') return probability(a.noul) ? null : 'noul is not a probability';
+  if (q.type === 'score') {
+    // Levels are keyed "0".."n-1"; the score is the probability-weighted level, so it lies in
+    // [0, n-1] and equals the sum of index x probability (a small rounding allowance either way).
+    const levels = q.criteria.map((_, i) => String(i));
+    if (!probability(a.confidence)) return 'confidence is not a probability';
+    if (typeof a.score !== 'number' || !Number.isFinite(a.score)) return 'score is not a number';
+    if (!object(a.probabilities)) return 'no probabilities';
+    if (Object.keys(a.probabilities).length !== levels.length || !levels.every(n => probability(a.probabilities[n]))) {
+      return 'probabilities do not match the levels';
     }
-    if (!Object.hasOwn(q.criteria, a.choice) || !probability(a.confidence) || !object(a.probabilities)) return false;
-    const names = Object.keys(q.criteria);
-    if (Object.keys(a.probabilities).length !== names.length || !names.every(n => probability(a.probabilities[n]))) return false;
-    return Math.abs(names.reduce((sum, n) => sum + a.probabilities[n], 0) - 1) <= 0.001;
-  });
+    if (Math.abs(levels.reduce((sum, n) => sum + a.probabilities[n], 0) - 1) > 0.001) return 'probabilities do not sum to 1';
+    const expected = levels.reduce((sum, n) => sum + Number(n) * a.probabilities[n], 0);
+    if (a.score < -0.01 || a.score > levels.length - 1 + 0.01) return 'score is outside the levels';
+    return Math.abs(a.score - expected) <= 0.02 ? null : 'score is not the probability-weighted level';
+  }
+  if (typeof a.choice !== 'string' || !Object.hasOwn(q.criteria, a.choice)) return 'the choice is not one of the options';
+  if (!probability(a.confidence)) return 'confidence is not a probability';
+  if (!object(a.probabilities)) return 'no probabilities';
+  const names = Object.keys(q.criteria);
+  if (Object.keys(a.probabilities).length !== names.length || !names.every(n => probability(a.probabilities[n]))) {
+    return 'probabilities do not match the options';
+  }
+  return Math.abs(names.reduce((sum, n) => sum + a.probabilities[n], 0) - 1) <= 0.001 ? null : 'probabilities do not sum to 1';
+}
+
+export function validAnswers(body, response) {
+  const problems = answerProblems(body, response);
+  return !problems.top && !Object.keys(problems.questions).length;
+}
+
+/** The answers that passed, for a caller that asked for partial answers (`X-LTCM-Partial: 1`). */
+export function partial(response, rejected) {
+  const answers = Object.fromEntries(Object.entries(response.answers).filter(([name]) => !Object.hasOwn(rejected, name)));
+  return { ...response, answers, rejected };
 }

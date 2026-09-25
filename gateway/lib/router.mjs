@@ -465,8 +465,17 @@ async function typesafeCall(request, env, { gate, fetcher, now }) {
   const headers = { 'X-LTCM-Cost-USD': settled.cost_usd, 'X-LTCM-Cost-Known': String(settled.cost_known) };
   // Never echo provider error text: it can contain request data or authentication diagnostics.
   if (!upstream.ok) return json({ error: `TypeSafe returned HTTP ${upstream.status}; no automatic retry.` }, 502, headers);
-  if (!typesafe.validAnswers(parsed, data)) return json({ error: 'TypeSafe returned incompatible typed answers.' }, 502, headers);
-  return json(data, 200, headers);
+  const problems = typesafe.answerProblems(parsed, data);
+  if (problems.top) return json({ error: 'TypeSafe returned incompatible typed answers.', detail: problems.top }, 502, headers);
+  const rejected = problems.questions;
+  const bad = Object.keys(rejected).length;
+  if (!bad) return json(data, 200, headers);
+  // The call is billed either way: a caller that opts in keeps the answers that passed, each
+  // rejected one named with the gateway's reason. Without the header the whole response is refused.
+  if (request.headers.get('X-LTCM-Partial') === '1' && bad < Object.keys(parsed.questions).length) {
+    return json(typesafe.partial(data, rejected), 200, { ...headers, 'X-LTCM-Partial': String(bad) });
+  }
+  return json({ error: 'TypeSafe returned incompatible typed answers.', rejected }, 502, headers);
 }
 
 /** One frontier call, reserved at a conservative ceiling and settled from reported usage. */
