@@ -4040,7 +4040,7 @@ class House:
                 same = row.get("reason") == reason
                 row["ticks"] = int(row.get("ticks") or 0) + 1 if same else 1
                 # A row an older release wrote has no `since`: its stop is timed from now.
-                row["since"] = float(row.get("since") or now) if same else now
+                row["since"] = float(row["since"]) if same and row.get("since") is not None else now
                 row["reason"] = reason
                 if now - row["since"] >= STOPPED_TELL_SECONDS and not row.get("told") and not reason.startswith("maintenance pause"):
                     row["told"] = True
