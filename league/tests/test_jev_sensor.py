@@ -1049,7 +1049,7 @@ class FloorTickTest(HouseCase):
         from league.jev_features import MoveSensor
         self.jev = FakeJev(0.4)
         floor = JevFloor(self.house, Sensor(self.house.root / "jev.sqlite", self.jev, clock=self.clock),
-                         {"move": {"enabled": True, "interval_seconds": 300}})
+                         {"move": {"enabled": True, "interval_seconds": 300, "min_free_bytes": 0}})
         self.house.jev_floor = floor
         self.assertIsInstance(floor.move, MoveSensor)
         self.house.tick()
@@ -1068,7 +1068,9 @@ class FloorTickTest(HouseCase):
         self.house.wait(10)
         health = json.loads((self.house.root / "health.json").read_text())
         self.assertEqual(health["jev"]["move"]["rows"], 1)
-        self.assertEqual(health["jev"]["move"]["model_version"], "move-v0-placeholder")
+        self.assertEqual(health["jev"]["move"]["model_version"], "move-v1-20260924")
+        self.assertEqual(health["jev"]["move"]["today"]["move_rows"], 1)
+        self.assertFalse(floor.move._closing(), "the House's closing flag reaches the recorder")
         self.assertIn("jev:move", {e.payload["key"] for e in self.house.ledger.iter(kinds="ops.job")})
         self.assertIn("move", health["jev"]["sensor"]["today"])
 

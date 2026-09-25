@@ -60,7 +60,9 @@ class JevFloor:
             try:
                 from .jev_features import MoveSensor
 
-                self.move = MoveSensor(root, sensor, clock=house.clock, alert=house.alert, settings=move)
+                closing = getattr(house, "_closing", None)  # a cycle stops asking once the House begins to close
+                self.move = MoveSensor(root, sensor, clock=house.clock, alert=house.alert, settings=move,
+                                       closing=(lambda: bool(closing.is_set())) if closing is not None else None)
             except Exception as exc:  # noqa: BLE001
                 house.alert("warning", f"the Jev move sensor is off ({type(exc).__name__}: {str(exc)[:160]})")
 

@@ -1,44 +1,52 @@
 """The move sensor (J1, docs/goals/LTCM_JEV_SENSES.md): will this Kalshi midpoint move soon, recorded point in time.
 
-Why (Sept 25, 2026). On markets from events never seen in training, the semantic lab's eight fixed
-Jev questions lifted the AUC for "the midpoint moves at all" from a numeric model's 0.609 / 0.616 /
-0.659 to 0.766 / 0.757 / 0.749 at 5 / 15 / 60 minutes, with no gain on direction
-(docs/design/2026-09-22-jev-sensor.md). A maker needs to know when a price is about to move so it is
-not picked off. An options seller needs to judge realized volatility against implied. Direction is
-not what this predicts.
+Why (Sept 25, 2026). The lab's data (semantic.sqlite, Sept 21-22, events unseen in training) says a
+FREE model of 23 quote-and-contract features predicts "the midpoint moves at all" at AUC 0.859 /
+0.829 / 0.806 at 5 / 15 / 60 minutes, where the lab's numeric model plus eight Jev answers reached
+0.769 / 0.760 / 0.683, and Jev's answers add nothing on top of the free model. So the SERVED model
+(`jev_move_model.json`, version move-v1-20260924) uses no Jev at all. Jev keeps a SHADOW model
+(`jev_move_model_jev_shadow.json`): the free features plus six static answers about the contract's
+own text, asked once per market, recorded as `jev_p` so the post-ship data can say whether Jev earns
+anything. The lab's five-feature baseline (`numeric_only` of the served file) is recorded as
+`numeric_p`. Direction is not what any of them predicts: a maker needs to know when a price is about
+to move so it is not picked off.
 
 Every `interval_seconds` (300) the House runs `MoveSensor.run` as its `jev:move` background job:
 
 1. It reads the `markets:` snapshots the House recorded (`recordings.sqlite`, read-only) past its own
-   cursor. The first run only sets the cursor at the newest snapshot. Nothing is back-filled, and
-   rows from before the recorder existed are unavailable.
-2. It keeps its own minute quotes (`move_quotes`, first quote in a minute wins, as in the lab's
-   `semantic_quotes`). These supply the outcomes and each state's earlier quotes.
-3. It dedupes the markets shown and takes at most `max_markets_per_cycle` of them, never-recorded
-   markets first, then the one recorded longest ago, ties to the most recently shown. For each it
-   builds the lab's state exactly (`semantic_lab.market_state`). In one request it asks Jev the
-   model's per-market questions (cached per market text and question set, so they are bought once
-   per contract), its per-state questions, and two recorded-only questions (`moves_15m`,
-   `moves_60m`). The recorded-only answers are kept for the post-ship evaluation and never enter
-   the model. Only the first `allowance` markets are asked: the move budget is paced over the rest
-   of the UTC day (`_allowance`), so it lasts through US hours and leaves the gate its share of the
-   dollar pool.
-4. It writes one row per observation: numeric features, answers, `move_p5/15/60` from the frozen
-   model (`jev_move_model.json`), and the numeric-only model's p on the same row. `recorded_at` is
-   when the row was written. A consumer or replay at time T may see only rows with
-   `recorded_at <= T` (`latest`). A row whose answers could not be bought (cap, breaker, outage,
-   pacing) is still written: the Jev fields and move_p are null, numeric_p is present, and `why`
-   says why.
+   cursor, streamed one at a time, at most `max_snapshots_per_cycle` (300), the newest first. The
+   first run only sets the cursor at the newest snapshot; snapshots older than two intervals are
+   passed over as `stale`, as on the first run: nothing is back-filled, and rows from before the
+   recorder existed are unavailable. A corrupt snapshot is counted and passed over. The cursor
+   always moves past everything it considered, in the transaction that keeps the quotes.
+2. It keeps its own minute quotes (`move_quotes`: one per market and minute bucket, first seen wins,
+   from every snapshot, as the lab's `semantic_quotes`). They are each state's earlier quotes, the
+   features' history (`features`, >= 4 hours of it) and the evaluation's outcomes.
+3. It writes a row for every market shown (at most `max_markets_per_cycle`, 800; never-recorded
+   markets first, then the one recorded longest ago). The free features cost nothing. The Jev asks
+   are the only paced part, inside the move share of the pool (`move.daily_usd`, $0.75): first the
+   static labels of markets that have none (the shadow's per-market questions, over the lab's exact
+   state, cached per market text and question set), then, with what the day's static reserve
+   leaves, the two recorded-only questions (`moves_15m`, `moves_60m`) over a sample of states
+   chosen by a hash of market and minute. At most 4 asks run at once; none starts after the House
+   begins to close or after `max_seconds_per_cycle` (60).
+4. Each row: the features, the answers, `move_p5/15/60` (served), `numeric_p5/15/60` (lab-5
+   baseline), `jev_p5/15/60` (shadow, when the market's static answers exist), and `why` for every
+   null. `recorded_at` is taken inside the insert's transaction once its write lock is held, and
+   the commit follows the inserts at once: a row is visible within milliseconds after its
+   `recorded_at`, never before it. A consumer or replay at time T may see only rows with
+   `recorded_at <= T` (`latest`).
 
 Rules:
 - Jev is a label source only. Nothing here places an order, changes a money rule, promotes or
   spends beyond the Sensor's caps (`league/jev.py`).
-- A placeholder model (`move-v0-placeholder`) counts as no Jev model: move_p stays null. So does a
-  model file naming a feature this module cannot compute; that raises an alert once and leaves the
-  numeric-only p.
+- A model file must define every numeric feature it uses exactly as `DEFINITIONS` does (compared
+  ignoring whitespace and case), else it is refused with one alert: coefficients fitted on one
+  definition are never applied to another. A placeholder version counts as no model.
 - The feature is not served to strategies here. `latest` is the future `ctx["feeds"]["move"]`
-  read. Before a strategy relies on it, `evaluate` (held-out rows after a cutoff, event-clustered
-  bootstrap) must show AUC >= 0.70 for "moves at all" on post-ship events.
+  read. Before a strategy relies on it, `evaluate` (held-out rows after a cutoff no earlier than the
+  model's `fitted_on.to`, event-clustered bootstrap, per model version) must show AUC >= 0.70 for
+  "moves at all" on post-ship events.
 
     python -m league.jev_features evaluate --store /workspace/state/jev-features.sqlite --cutoff 2026-09-26T00:00:00Z [--json]
 """
@@ -51,12 +59,13 @@ import hashlib
 import json
 import math
 import random
+import re
 import shutil
 import sqlite3
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -64,75 +73,183 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .ledger import canonical
-from .semantic_lab import FEATURES, QUESTION_GUARD, finite, market_state, point, questions
+from .semantic_lab import FEATURES, QUESTION_GUARD, market_state, point, questions
 
 PURPOSE = "move"
 MODEL_PATH = Path(__file__).with_name("jev_move_model.json")
-#: A model file with this version is a placeholder: no Jev model, numeric-only p (Sept 25, 2026).
+SHADOW_PATH = Path(__file__).with_name("jev_move_model_jev_shadow.json")
+#: A model file with this version (or `fitted_on.placeholder`) is no model.
 PLACEHOLDER = "move-v0-placeholder"
 HORIZONS = (5, 15, 60)
-#: Asked with every observation and recorded for the post-ship evaluation. No model uses them:
-#: the lab never asked them, so no coefficient for them was fitted on development data.
+#: Asked over a paced sample of states and recorded for the post-ship evaluation. No model uses
+#: them: the lab never asked them, so no coefficient for them was fitted on development data.
 RECORDED_ONLY = {
     "moves_15m": "Will this contract's quoted midpoint change within the next 15 minutes?" + QUESTION_GUARD,
     "moves_60m": "Will this contract's quoted midpoint change within the next 60 minutes?" + QUESTION_GUARD,
 }
 #: The lab's question texts, exactly (`semantic_lab.questions('market')`), so answers are comparable.
 LAB_QUESTIONS = {name: q["instructions"] for name, q in questions("market").items()}
-#: Used when the model file cannot say: questions about the contract's own text once per market,
-#: questions about quotes, peers and context per observation.
-DEFAULT_PER_MARKET = ("continuous_threshold", "relative_return", "discrete_event", "ambiguous_settlement")
-DEFAULT_PER_STATE = ("related_exposure", "missing_catalyst_context", "fragile_liquidity", "recent_reversal")
 #: A market's text that does not move with its quote: what its per-market answers are cached by.
 STATIC_FIELDS = ("market", "series", "title", "subtitle", "rules_primary", "rules_secondary", "strike", "close_time")
 #: A lab-sized state measured $0.000107 a call (Sept 20-22: $13.67 for 128,179 labels); the pace
 #: assumes this until today's own move calls say otherwise.
 DEFAULT_CALL_USD = Decimal("0.0001")
-MIN_FREE_BYTES = 512 * 1024 * 1024  # as the lab: do not buy labels whose rows cannot be kept
+#: What a day's static labels are expected to cost (~4,500 new markets at ~$0.0001), held back from
+#: the per-state sample in proportion to the day left.
+DEFAULT_STATIC_RESERVE_USD = Decimal("0.50")
+MIN_FREE_BYTES = 2 * 1024 ** 3  # below this the recorder skips its cycle with an alert
+MAX_WORKERS = 4  # concurrent asks; each holds a gateway reservation while in flight
+HISTORY_SECONDS = 4 * 3600  # the features read at most four hours of a market's own quotes
 SHIP_AUC = 0.70
+EPS = 1e-9
+
+# --------------------------------------------------------------------------- features
+#: The coarse categories, in order: the first group whose prefix a series starts with, else "other".
+CATS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("crypto", ("KXBTC", "KXETH", "KXSOL", "KXDOGE", "KXXRP", "KXNEAR", "KXZEC", "KXHYPE", "KXBNB", "KXCRYPTO",
+                "KXLTC", "KXADA", "KXAVAX", "KXLINK", "KXSHIB")),
+    ("weather", ("KXHIGH", "KXLOW", "KXRAIN", "KXSNOW", "KXTEMP", "KXHURR", "KXTORN")),
+    ("sports", ("KXMLB", "KXNFL", "KXNBA", "KXWNBA", "KXNHL", "KXMLS", "KXNCAA", "KXT20", "KXODI", "KXTEST", "KXLOL",
+                "KXCS2", "KXDOTA", "KXVAL", "KXUCL", "KXEPL", "KXLALIGA", "KXLIGUE1", "KXSERIEA", "KXBUNDES", "KXLIGA",
+                "KXBRASILEIRO", "KXARGPREM", "KXPGA", "KXATP", "KXWTA", "KXUFC", "KXF1", "KXNASCAR", "KXUEFA", "KXWT20",
+                "KXINTLFRIENDLY", "KXVALORANT", "KXFIFA", "KXCFB")),
+    ("finance", ("KXWTI", "KXGOLD", "KXSILVER", "KXDIESEL", "KXAAAGAS", "KXINX", "KXNASDAQ", "KXDOW", "KXDJI", "KXUSD",
+                 "KXEUR", "KXGBP", "KXJPY", "KXTNOTE", "KXSOFR", "KXFED", "KXCPI", "KXNATGAS", "KXCOPPER", "KXBRENT")),
+)
+CATEGORY_NAMES = ("crypto", "weather", "sports", "finance", "other")
 
 
-# --------------------------------------------------------------------------- numeric features
-def _mid(quote: Mapping[str, Any]) -> float:
-    return (float(quote["bid"]) + float(quote["ask"])) / 2
+def category(series: str | None) -> str:
+    s = (series or "").upper()
+    for name, prefixes in CATS:
+        if s.startswith(prefixes):
+            return name
+    return "other"
 
 
-def _drift(state: Mapping[str, Any], index: int) -> float:
-    earlier = [q for q in state.get("earlier_quotes") or () if finite(q.get("bid")) and finite(q.get("ask"))]
-    return _mid(point(state["market"])) - _mid(earlier[index]) if earlier else 0.0
-
-
-def _log_oi(state: Mapping[str, Any]) -> float:
-    oi = state["market"].get("open_interest")
-    return math.log1p(max(0, oi)) / 15 if finite(oi) else 0.0
-
-
-def _hours(state: Mapping[str, Any]) -> float:
-    hours = state["market"].get("hours_to_close")
-    return min(max(hours, 0), 48) / 48 if finite(hours) else 1.0
-
-
-#: Every numeric feature a model file may name: (definition, value from the lab state). The first
-#: five are scripts/jev_lab_eval/evaluate.py `build`'s (executable mode). `drift_oldest` is the
-#: state's own drift: the lab's fresh rows (75% of them) took `earlier_quotes[0]`, the OLDEST of up
-#: to four, where its stale rows took the newest quote before entry.
-NUMERIC: dict[str, tuple[str, Callable[[Mapping[str, Any]], float]]] = {
-    "mid": ("(yes_bid + yes_ask) / 2 of the observed quote", lambda s: point(s["market"])["mid"]),
-    "spread": ("yes_ask - yes_bid of the observed quote", lambda s: point(s["market"])["ask"] - point(s["market"])["bid"]),
-    "log_oi": ("log1p(max(0, open_interest)) / 15; 0 if open_interest is missing", _log_oi),
-    "hours": ("min(max(hours_to_close, 0), 48) / 48; 1 if hours_to_close is missing", _hours),
-    "drift": ("mid minus the mid of the newest earlier minute quote in the state; 0 if none", lambda s: _drift(s, -1)),
-    "drift_oldest": ("mid minus the mid of the oldest earlier minute quote in the state (of up to 4); 0 if none",
-                     lambda s: _drift(s, 0)),
+_H = ("H = the recorder's own recorded minute quotes of this market with observed < observed_minute (one quote per "
+      "market and minute bucket, first seen wins, recorded from every markets: snapshot as the lab's semantic_quotes; "
+      "keep >= 4 h); mid of a quote = (bid+ask)/2")
+_E = "E = earlier_quotes (oldest first; the last <= 4 recorded minute quotes before observed_minute)"
+_CAT_TABLE = "; ".join(f"{name}: {', '.join(prefixes)}" for name, prefixes in CATS)
+#: Every numeric feature a model file may name, with its canonical definition. The J1 analysis
+#: (scripts in the Sept 25 run's scratchpad, `fit_final.py`) wrote these same strings into the model
+#: files; `features` below is its pure-Python reference, ported line for line.
+DEFINITIONS: dict[str, str] = {
+    "mid": "(yes_bid+yes_ask)/2",
+    "spread": "yes_ask-yes_bid",
+    "log_oi": "log1p(max(0,open_interest))/15, 0 if missing",
+    "hours": "min(max(hours_to_close,0),48)/48, 1 if missing",
+    "drift": "mid minus the mid of earlier_quotes[0] (the oldest of up to four prior minute buckets), 0 if none",
+    "absdrift": "abs(drift)",
+    "ext": "abs(mid-0.5)*2",
+    "lvol": "log1p(max(0,volume_24h))/15, 0 if missing",
+    "lhrs": "log1p(max(hours_to_close,0))/log1p(720), not clamped, 1 if missing",
+    "hres": "min(max(hours_to_resolve,0),48)/48, 1 if missing",
+    "nhist": "len(earlier_quotes)/4",
+    "chg4": (_E + "; S = [mid of each quote in E..., mid]; number of consecutive pairs in S whose values differ by "
+             "more than 1e-9, divided by 4 (0 if E is empty)"),
+    "rng4": _E + "; S = [mid of each quote in E..., mid]; max(S)-min(S)",
+    "tchg": (_H + ". Walk H from its newest quote backwards while observed_minute-observed <= 14400 s; at the first "
+             "quote whose mid differs by more than 1e-9 from the mid of the quote after it (the current mid for the newest "
+             "quote), T = (observed_minute - observed of that later quote, or 0 if the later one is the current quote)/60. "
+             "If no such quote is found, T = (observed_minute - observed of the oldest quote visited)/60, or 0 if none was "
+             "visited. T = min(T,240). Feature = log1p(T)/log1p(240)"),
+    "nochg": "1 if the tchg walk found no mid change (including an empty H), else 0",
+    "rng60": _H + ". max-min of {mid of every quote in H with observed_minute-observed <= 3600 s} together with the current mid",
+    "tight": "1 if spread <= 0.01+1e-9 else 0",
+    "pinned": "1 if yes_bid <= 0.01+1e-9 or yes_ask >= 0.99-1e-9 else 0",
+    **{f"cat_{c}": (f"1 if category(series) == '{c}' else 0; category = the first group whose prefix tuple "
+                    f"series.upper() starts with, else 'other'. Groups: {_CAT_TABLE}") for c in CATEGORY_NAMES},
 }
 
 
-def numeric_features(state: Mapping[str, Any]) -> dict[str, float]:
-    """Every registered numeric feature of a lab state whose quote is valid (`point`)."""
-    return {name: float(read(state)) for name, (_, read) in NUMERIC.items()}
+def numeric_spec(names: Iterable[str] | None = None) -> list[dict[str, str]]:
+    """The `numeric` list a model file carries: each feature with its canonical definition."""
+    return [{"name": name, "definition": DEFINITIONS[name]} for name in (names or DEFINITIONS)]
 
 
-# --------------------------------------------------------------------------- the frozen model
+def _same_definition(a: Any, b: str) -> bool:
+    return isinstance(a, str) and re.sub(r"\s+", "", a).lower() == re.sub(r"\s+", "", b).lower()
+
+
+def _num(x: Any) -> float | None:
+    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
+
+
+def features(state: Mapping[str, Any], history: Sequence[Mapping[str, Any]] | None = None) -> dict[str, float] | None:
+    """Every numeric feature of one lab state, or None where the model does not apply (no valid
+    two-sided quote inside [0, 1], or the market at or after its close).
+
+    `history` is the recorder's own minute quotes of THIS market ({observed, bid, ask}); only those
+    strictly before `observed_minute` count, in any order. drift/nhist/chg4/rng4 read the state's
+    `earlier_quotes` (the last <= 4 of that same history); tchg/nochg/rng60 read `history`. With
+    history None the earlier quotes stand in (about 0.01 AUC worse in the analysis)."""
+    m = state["market"]
+    bid, ask = _num(m.get("yes_bid")), _num(m.get("yes_ask"))
+    if bid is None or ask is None or not 0 <= bid <= ask <= 1:
+        return None
+    hours = _num(m.get("hours_to_close"))
+    if hours is not None and hours <= 0:
+        return None
+    nb = int(state["observed_minute"])
+    eq = sorted((float(q["observed"]), float(q["bid"]), float(q["ask"]))
+                for q in (state.get("earlier_quotes") or []) if float(q["observed"]) < nb)[-4:]
+    src = eq if history is None else [(float(q["observed"]), float(q["bid"]), float(q["ask"])) for q in history]
+    hist = sorted(q for q in src if q[0] < nb)
+    mid = (bid + ask) / 2
+    spread = ask - bid
+    oi = _num(m.get("open_interest"))
+    vol = _num(m.get("volume_24h"))
+    hres = _num(m.get("hours_to_resolve"))
+    seq = [(q[1] + q[2]) / 2 for q in eq] + [mid]
+    drift4 = mid - seq[0] if eq else 0.0
+    chg4 = sum(1 for a, b in zip(seq, seq[1:]) if abs(a - b) > EPS)
+    rng4 = max(seq) - min(seq)
+    # Minutes since the mid last changed, looking back at most 240 minutes.
+    tchg: float | None = None
+    prev_mid, oldest = mid, nb
+    j = len(hist) - 1
+    while j >= 0 and nb - hist[j][0] <= 240 * 60:
+        qm = (hist[j][1] + hist[j][2]) / 2
+        if abs(qm - prev_mid) > EPS:
+            later_t = hist[j + 1][0] if j + 1 < len(hist) else nb
+            tchg = (nb - later_t) / 60
+            break
+        prev_mid, oldest = qm, hist[j][0]
+        j -= 1
+    nochg = 0.0
+    if tchg is None:
+        tchg, nochg = (nb - oldest) / 60, 1.0
+    tchg = min(tchg, 240.0)
+    w60 = [(q[1] + q[2]) / 2 for q in hist if nb - q[0] <= 3600] + [mid]
+    cat = category(m.get("series"))
+    x = {
+        "mid": mid,
+        "spread": spread,
+        "log_oi": math.log1p(max(0.0, oi)) / 15 if oi is not None else 0.0,
+        "hours": min(max(hours, 0.0), 48.0) / 48 if hours is not None else 1.0,
+        "drift": drift4,
+        "absdrift": abs(drift4),
+        "ext": abs(mid - 0.5) * 2,
+        "lvol": math.log1p(max(0.0, vol or 0.0)) / 15,
+        "lhrs": math.log1p(max(hours, 0.0)) / math.log1p(720) if hours is not None else 1.0,
+        "hres": min(max(hres, 0.0), 48.0) / 48 if hres is not None else 1.0,
+        "nhist": len(eq) / 4,
+        "chg4": chg4 / 4,
+        "rng4": rng4,
+        "tchg": math.log1p(tchg) / math.log1p(240),
+        "nochg": nochg,
+        "rng60": max(w60) - min(w60),
+        "tight": 1.0 if spread <= 0.01 + EPS else 0.0,
+        "pinned": 1.0 if (bid <= 0.01 + EPS or ask >= 0.99 - EPS) else 0.0,
+    }
+    for c in CATEGORY_NAMES:
+        x["cat_" + c] = 1.0 if cat == c else 0.0
+    return x
+
+
+# --------------------------------------------------------------------------- the frozen models
 def logistic(block: Mapping[str, Any], values: Mapping[str, float | None]) -> float | None:
     """p = 1 / (1 + exp(-clip(w0 + sum w_i (x_i - mean_i) / sd_i, -30, 30))); None if an input is missing."""
     score = block["weights"][0]
@@ -148,61 +265,74 @@ def _block(raw: Any, allowed: set[str], where: str) -> dict[str, Any]:
     """One horizon's fitted block, checked: known features, matching lengths, finite numbers, sd > 0."""
     if not isinstance(raw, dict):
         raise ValueError(f"{where}: not an object")
-    features = raw.get("features")
-    if not isinstance(features, list) or not all(isinstance(f, str) for f in features) or len(set(features)) != len(features):
+    names = raw.get("features")
+    if not isinstance(names, list) or not all(isinstance(f, str) for f in names) or len(set(names)) != len(names):
         raise ValueError(f"{where}: features must be distinct names")
-    unknown = [f for f in features if f not in allowed]
+    unknown = [f for f in names if f not in allowed]
     if unknown:
-        raise ValueError(f"{where}: unknown feature {unknown[0]!r}")
+        raise ValueError(f"{where}: unknown or undeclared feature {unknown[0]!r}")
     numbers = {key: raw.get(key) for key in ("mean", "sd", "weights")}
     for key, value in numbers.items():
-        size = len(features) + (1 if key == "weights" else 0)
+        size = len(names) + (1 if key == "weights" else 0)
         if (not isinstance(value, list) or len(value) != size
                 or not all(type(v) in (int, float) and math.isfinite(v) for v in value)):
             raise ValueError(f"{where}: {key} must be {size} finite numbers")
     if any(sd <= 0 for sd in numbers["sd"]):
         raise ValueError(f"{where}: every sd must be positive")
-    return {"features": features, "mean": [float(v) for v in numbers["mean"]], "sd": [float(v) for v in numbers["sd"]],
+    return {"features": names, "mean": [float(v) for v in numbers["mean"]], "sd": [float(v) for v in numbers["sd"]],
             "weights": [float(v) for v in numbers["weights"]], "dev_auc": raw.get("dev_auc"),
             "dev_auc_numeric": raw.get("dev_auc_numeric")}
 
 
 class MoveModel:
-    """The frozen move model (`jev_move_model.json`). Loading never raises: what cannot be used is
-    listed in `problems`, and the rest still works (a bad Jev block leaves the numeric-only p)."""
+    """A frozen move model file. Loading never raises: what cannot be used is listed in `problems`.
+
+    `horizons` are the model (`predict`); `numeric_only` its baseline (`baseline_p`). Every numeric
+    feature a block uses must be declared in `numeric` with the canonical definition
+    (`DEFINITIONS`); an unknown or differently defined numeric feature refuses the whole file. Its
+    Jev features are lab questions named in `questions.per_market` (asked once per market) or
+    `questions.per_state`."""
 
     def __init__(self, data: Any, *, source: str = ""):
         self.source = source
         self.problems: list[str] = []
         data = data if isinstance(data, dict) else {}
         self.version = str(data.get("version") or "unknown")
-        self.placeholder = self.version == PLACEHOLDER or bool((data.get("fitted_on") or {}).get("placeholder"))
-        self.per_market, self.per_state = list(DEFAULT_PER_MARKET), list(DEFAULT_PER_STATE)
-        self.jev: dict[int, dict[str, Any]] | None = None
-        self.numeric: dict[int, dict[str, Any]] | None = None
-        numeric = set(NUMERIC)
+        self.fitted_on = dict(data["fitted_on"]) if isinstance(data.get("fitted_on"), dict) else {}
+        self.placeholder = self.version == PLACEHOLDER or bool(self.fitted_on.get("placeholder"))
+        self.per_market: list[str] = []
+        self.per_state: list[str] = []
+        self.blocks: dict[int, dict[str, Any]] | None = None
+        self.baseline: dict[int, dict[str, Any]] | None = None
         try:
-            declared = [row["name"] for row in data.get("numeric") or ()]
-            unknown = [name for name in declared if name not in numeric]
-            if unknown:
-                raise ValueError(f"numeric: unknown feature {unknown[0]!r}")
-            self.numeric = {h: _block((data.get("numeric_only") or {}).get(str(h)), numeric, f"numeric_only.{h}")
-                            for h in HORIZONS}
-        except (ValueError, KeyError, TypeError) as exc:
-            self.problems.append(f"numeric-only model refused: {exc}")
-        try:
+            declared = set()
+            for row in data.get("numeric") or ():
+                name = row.get("name") if isinstance(row, dict) else None
+                if name not in DEFINITIONS:
+                    raise ValueError(f"numeric: unknown feature {name!r}")
+                if not _same_definition(row.get("definition"), DEFINITIONS[name]):
+                    raise ValueError(f"numeric: {name!r} is defined as {str(row.get('definition'))[:80]!r}, "
+                                     f"not as the registry defines it")
+                declared.add(name)
             asked = data.get("questions") or {}
             per_market, per_state = list(asked.get("per_market") or ()), list(asked.get("per_state") or ())
             unknown = [name for name in per_market + per_state if name not in FEATURES]
-            if unknown or set(per_market) & set(per_state) or len(set(per_market + per_state)) != len(per_market + per_state):
+            if unknown or len(set(per_market + per_state)) != len(per_market + per_state):
                 raise ValueError(f"questions must be distinct lab questions (unknown: {unknown[:1]})")
-            if per_market or per_state:
-                self.per_market, self.per_state = per_market, per_state
-            allowed = numeric | set(per_market) | set(per_state)
-            self.jev = {h: _block((data.get("horizons") or {}).get(str(h)), allowed, f"horizons.{h}") for h in HORIZONS}
+        except (ValueError, TypeError, AttributeError) as exc:
+            self.problems.append(f"model refused: {exc}")
+            return
+        self.per_market, self.per_state = per_market, per_state
+        try:
+            self.baseline = {h: _block((data.get("numeric_only") or {}).get(str(h)), declared, f"numeric_only.{h}")
+                             for h in HORIZONS}
         except (ValueError, KeyError, TypeError) as exc:
-            self.problems.append(f"Jev model refused: {exc}")
-            self.jev = None
+            self.problems.append(f"baseline refused: {exc}")
+        try:
+            allowed = declared | set(per_market) | set(per_state)
+            self.blocks = {h: _block((data.get("horizons") or {}).get(str(h)), allowed, f"horizons.{h}") for h in HORIZONS}
+        except (ValueError, KeyError, TypeError) as exc:
+            self.problems.append(f"model refused: {exc}")
 
     @classmethod
     def load(cls, path: str | Path) -> "MoveModel":
@@ -211,26 +341,29 @@ class MoveModel:
         except (OSError, ValueError) as exc:
             model = cls({}, source=str(path))
             model.problems = [f"model file unreadable: {type(exc).__name__}: {str(exc)[:120]}"]
-            model.numeric = model.jev = None
+            model.blocks = model.baseline = None
             return model
         return cls(data, source=str(path))
 
     @property
     def ready(self) -> bool:
-        """A fitted Jev model: move_p can be computed."""
-        return self.jev is not None and not self.placeholder
+        return self.blocks is not None and not self.placeholder
+
+    @property
+    def questions(self) -> list[str]:
+        return self.per_market + self.per_state
 
     @property
     def why_not(self) -> str:
         if self.placeholder:
-            return f"placeholder model {self.version}: no Jev model yet"
-        return next((p for p in self.problems if p.startswith(("Jev model", "model file"))), "")
+            return f"placeholder model {self.version}"
+        return next((p for p in self.problems if p.startswith(("model", "model file"))), "")
 
-    def move_p(self, values: Mapping[str, float | None]) -> dict[int, float | None]:
-        return {h: logistic(self.jev[h], values) if self.ready else None for h in HORIZONS}
+    def predict(self, values: Mapping[str, float | None]) -> dict[int, float | None]:
+        return {h: logistic(self.blocks[h], values) if self.ready else None for h in HORIZONS}
 
-    def numeric_p(self, values: Mapping[str, float | None]) -> dict[int, float | None]:
-        return {h: logistic(self.numeric[h], values) if self.numeric is not None else None for h in HORIZONS}
+    def baseline_p(self, values: Mapping[str, float | None]) -> dict[int, float | None]:
+        return {h: logistic(self.baseline[h], values) if self.baseline is not None else None for h in HORIZONS}
 
 
 # --------------------------------------------------------------------------- helpers
@@ -239,34 +372,13 @@ def event_of(market: str) -> str:
     return market.rsplit("-", 1)[0]
 
 
-CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("crypto", ("KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE", "KXSHIB", "KXADA", "KXBNB", "KXAVAX", "KXLTC", "KXLINK",
-                "KXHYPE", "KXCRYPTO", "BTC", "ETH")),
-    ("weather", ("KXHIGH", "KXLOW", "KXRAIN", "KXSNOW", "KXTEMP", "KXHURR", "KXTORNADO", "KXWIND", "KXHEAT", "KXWEATHER",
-                 "KXCLIMATE", "HIGH")),
-    ("finance", ("KXINX", "KXNASDAQ", "KXSPX", "KXDOW", "KXFED", "KXCPI", "KXPCE", "KXGDP", "KXPAYROLL", "KXJOBS", "KXUNRATE",
-                 "KXWTI", "KXBRENT", "KXGOLD", "KXSILVER", "KXDIESEL", "KXAAAGAS", "KXGAS", "KXNATGAS", "KXOIL", "KXCOPPER",
-                 "KXEURUSD", "KXUSDJPY", "KXGBPUSD", "KXTNOTE", "KXTREAS", "KX10Y", "KX2Y", "KXMORTGAGE", "INX", "NASDAQ")),
-    ("sports", ("KXNFL", "KXNBA", "KXMLB", "KXNHL", "KXNCAA", "KXWNBA", "KXEPL", "KXMLS", "KXUFC", "KXATP", "KXWTA", "KXPGA",
-                "KXF1", "KXNASCAR", "KXUCL", "KXLALIGA", "KXSERIEA", "KXBUNDESLIGA", "KXLIGUE", "KXEFL", "KXLIGA", "KXLOL",
-                "KXCS2", "KXDOTA", "KXVALORANT", "KXT20", "KXIPL", "KXBOXING", "KXTENNIS", "KXGOLF", "KXSOCCER", "KXARG",
-                "KXMVE", "KXCFB", "KXCBB", "KXUEFA", "KXFIFA")),
-)
-
-
-def category(series: str | None, market: str = "") -> str:
-    """A coarse desk for the evaluation's breakdown, from the series prefix (else the ticker's)."""
-    name = str(series or market.split("-", 1)[0]).upper()
-    for label, prefixes in CATEGORIES:
-        if name.startswith(prefixes):
-            return label
-    if any(word in name for word in ("GAME", "MATCH", "FIGHT", "SPREAD", "TOTAL")):
-        return "sports"
-    return "other"
-
-
 def _digest(value: Any, size: int = 16) -> str:
     return hashlib.sha256(canonical(value).encode()).hexdigest()[:size]
+
+
+def _draw(market: str, minute: int) -> float:
+    """A deterministic uniform draw for (market, minute): which states the per-state sample takes."""
+    return int(hashlib.sha256(f"{market}:{minute}".encode()).hexdigest()[:12], 16) / float(16 ** 12)
 
 
 def _iso(moment: float | None) -> str | None:
@@ -286,19 +398,26 @@ def parse_time(text: str) -> float:
         return moment.timestamp()
 
 
-SCHEMA = """
+P_COLUMNS = tuple(f"{kind}_p{h}" for kind in ("move", "numeric", "jev") for h in HORIZONS)
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS move_meta(name TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS move_quotes(market TEXT NOT NULL, minute INTEGER NOT NULL, bid REAL NOT NULL, ask REAL NOT NULL,
     PRIMARY KEY(market, minute)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS move_quotes_minute ON move_quotes(minute);
 CREATE TABLE IF NOT EXISTS move_rows(id INTEGER PRIMARY KEY, market TEXT NOT NULL, event TEXT NOT NULL, series TEXT,
     observed REAL NOT NULL, minute INTEGER NOT NULL, bid REAL NOT NULL, ask REAL NOT NULL, numeric TEXT NOT NULL,
-    answers TEXT, move_p5 REAL, move_p15 REAL, move_p60 REAL, numeric_p5 REAL, numeric_p15 REAL, numeric_p60 REAL,
-    model_version TEXT NOT NULL, snapshot INTEGER NOT NULL, recorded_at REAL NOT NULL, why TEXT,
+    answers TEXT, {', '.join(f'{c} REAL' for c in P_COLUMNS)}, model_version TEXT NOT NULL, shadow_version TEXT,
+    sampled INTEGER NOT NULL DEFAULT 0, snapshot INTEGER NOT NULL, recorded_at REAL NOT NULL, why TEXT,
     UNIQUE(market, snapshot, observed));  -- a replaced recordings store numbers its snapshots from 1 again
 CREATE INDEX IF NOT EXISTS move_rows_market ON move_rows(market, recorded_at);
 CREATE INDEX IF NOT EXISTS move_rows_observed ON move_rows(observed);
-CREATE TABLE IF NOT EXISTS move_markets(market TEXT PRIMARY KEY, last_row REAL NOT NULL, last_jev REAL);
+CREATE INDEX IF NOT EXISTS move_rows_event ON move_rows(event, observed);
+CREATE TABLE IF NOT EXISTS move_markets(market TEXT PRIMARY KEY, last_row REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS move_markets_last ON move_markets(last_row);
+CREATE TABLE IF NOT EXISTS move_models(version TEXT PRIMARY KEY, fitted_on TEXT NOT NULL, first_seen REAL NOT NULL);
 """
+ROW_COLUMNS = ("market", "event", "series", "observed", "minute", "bid", "ask", "numeric", "answers", *P_COLUMNS,
+               "model_version", "shadow_version", "sampled", "snapshot", "why")
 
 
 @contextmanager
@@ -323,36 +442,49 @@ class MoveSensor:
 
     def __init__(self, root: str | Path, sensor: Any, *, clock: Callable[[], float] = time.time,
                  alert: Callable[[str, str], Any] | None = None, settings: Mapping[str, Any] | None = None,
-                 model_path: str | Path | None = None, recordings: str | Path | None = None):
+                 model_path: str | Path | None = None, shadow_path: str | Path | None = None,
+                 recordings: str | Path | None = None, closing: Callable[[], bool] | None = None):
         self.root = Path(root)
         self.sensor, self.clock = sensor, clock
         self._alert = alert
+        self._closing = closing or (lambda: False)
         s = dict(settings or {})
         self.interval = float(s.get("interval_seconds", 300))
-        self.max_markets = max(1, int(s.get("max_markets_per_cycle", 150)))
-        self.retention_days = float(s.get("retention_days", 30))
-        self.max_snapshots = max(1, int(s.get("max_snapshots_per_cycle", 1000)))
-        self.workers = max(1, int(s.get("workers", 4)))
-        self.max_seconds = float(s.get("max_seconds_per_cycle", 150))
-        self.usd_share = Decimal(str(s["daily_usd_share"])) if s.get("daily_usd_share") is not None else None
+        self.max_markets = max(1, int(s.get("max_markets_per_cycle", 800)))
+        self.retention_days = float(s.get("retention_days", 14))
+        self.max_snapshots = max(1, int(s.get("max_snapshots_per_cycle", 300)))
+        self.workers = max(1, min(MAX_WORKERS, int(s.get("workers", MAX_WORKERS))))
+        self.max_seconds = float(s.get("max_seconds_per_cycle", 60))
+        self.max_static = max(0, int(s.get("max_static_per_cycle", 400)))
+        self.min_free_bytes = int(s.get("min_free_bytes", MIN_FREE_BYTES))
+        self.daily_usd = Decimal(str(s["daily_usd"])) if s.get("daily_usd") is not None else None
+        self.static_reserve = Decimal(str(s.get("static_reserve_usd", DEFAULT_STATIC_RESERVE_USD)))
         self.recordings = Path(recordings) if recordings is not None else self.root / "recordings.sqlite"
         self.path = self.root / "jev-features.sqlite"
-        self.model = MoveModel.load(s.get("model_path") or model_path or MODEL_PATH)
-        for problem in self.model.problems:
-            self.alert("warning", f"jev move model ({self.model.source}): {problem}")
-        per_market = {name: LAB_QUESTIONS[name] for name in self.model.per_market}
-        per_state = {**{name: LAB_QUESTIONS[name] for name in self.model.per_state}, **RECORDED_ONLY}
-        self.per_market, self.per_state = per_market, per_state
-        self.questions = {**per_market, **per_state}
+        self.served = MoveModel.load(s.get("model_path") or model_path or MODEL_PATH)
+        self.shadow = MoveModel.load(s.get("shadow_model_path") or shadow_path or SHADOW_PATH)
+        for model in (self.served, self.shadow):
+            for problem in model.problems:
+                self.alert("warning", f"jev move model ({model.source}): {problem}")
+        # Static questions are about the contract's own text: bought once per market. The rest are
+        # about one state: bought only for the sampled states, with the recorded-only pair.
+        static = dict.fromkeys(self.served.per_market + self.shadow.per_market)
+        per_state = dict.fromkeys(self.served.per_state + self.shadow.per_state)
+        self.static = {name: LAB_QUESTIONS[name] for name in static}
+        self.per_state = {**{name: LAB_QUESTIONS[name] for name in per_state if name not in static}, **RECORDED_ONLY}
         # The question-set versions are in the cache keys: a changed text is a new question.
-        self._market_version, self._state_version = _digest(per_market, 10), _digest(per_state, 10)
+        self._static_version, self._state_version = _digest(self.static, 10), _digest(self.per_state, 10)
         self._run_lock = threading.Lock()
         self._last_run = 0.0
         self._last_prune = 0.0
         self._last_error = ""
+        self._deadline = float("inf")
         self.root.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             db.executescript(SCHEMA)
+            # What `evaluate` needs to know of every model that wrote rows: its fitted_on (`to`).
+            db.executemany("INSERT OR IGNORE INTO move_models VALUES(?,?,?)",
+                           [(m.version, canonical(m.fitted_on), self.clock()) for m in (self.served, self.shadow)])
         self._stats: dict[str, Any] = {}
         self._refresh_stats(None)
 
@@ -367,6 +499,12 @@ class MoveSensor:
             except Exception:  # noqa: BLE001 - an alert that fails must not stop the recorder
                 pass
 
+    def _alert_once(self, text: str) -> None:
+        """One alert per distinct trouble, not one every five minutes."""
+        if text != self._last_error:
+            self.alert("warning", text)
+        self._last_error = text
+
     def _meta(self, db: sqlite3.Connection, name: str) -> str | None:
         row = db.execute("SELECT value FROM move_meta WHERE name=?", (name,)).fetchone()
         return row[0] if row else None
@@ -379,6 +517,17 @@ class MoveSensor:
     def due(self) -> bool:
         return self.clock() - self._last_run >= self.interval
 
+    def _stop(self) -> str:
+        """Why no further ask may start this cycle, or ""."""
+        try:
+            if self._closing():
+                return "the House is closing"
+        except Exception:  # noqa: BLE001 - a broken probe must not keep asks running
+            return "the House is closing"
+        if time.monotonic() > self._deadline:
+            return f"time budget: the cycle's {self.max_seconds:g} s are spent"
+        return ""
+
     # ------------------------------------------------------------------ the cycle
     def run(self) -> dict[str, Any] | None:
         """One cycle. A failure is an alert and None, never an exception into the House."""
@@ -386,56 +535,64 @@ class MoveSensor:
             return None
         started, began = self.clock(), time.perf_counter()
         self._last_run = started
-        cycle: dict[str, Any] | None = None
+        self._deadline = time.monotonic() + self.max_seconds
+        cycle: dict[str, Any] = {}
+        failed = False
         try:
             cycle = self._cycle(started)
-            self._last_error = ""
+            if "refusal" not in cycle:
+                self._last_error = ""
         except Exception as exc:  # noqa: BLE001 - the recorder is informational; the House goes on
+            failed = True
             text = f"jev move sensor cycle failed ({type(exc).__name__}: {str(exc)[:160]})"
-            if text != self._last_error:
-                self.alert("warning", text)
-            self._last_error = text
+            self._alert_once(text)
             cycle = {"refusal": text}
         finally:
             try:
-                if cycle is not None:
-                    cycle.update(at=started, seconds=round(time.perf_counter() - began, 3))
+                cycle.update(at=started, seconds=round(time.perf_counter() - began, 3))
                 self._refresh_stats(cycle)
             except Exception:  # noqa: BLE001
                 pass
             self._run_lock.release()
-        return None if self._last_error else cycle
+        return None if failed else cycle
 
     def _cycle(self, now: float) -> dict[str, Any]:
-        if shutil.disk_usage(self.root).free < MIN_FREE_BYTES:
-            return {"rows": 0, "refusal": "less than 512 MB free: no labels whose rows cannot be kept"}
+        free = shutil.disk_usage(self.root).free
+        if free < self.min_free_bytes:
+            text = (f"jev move sensor skipped its cycle: {free / 1024 ** 3:.1f} GB free, "
+                    f"below {self.min_free_bytes / 1024 ** 3:.1f} GB")
+            self._alert_once(text)
+            return {"rows": 0, "refusal": text}
         read = self._read_snapshots(now)
         if isinstance(read, str):
             return {"rows": 0, "note": read}
-        cursor, snapshots, skipped, bad = read
-        shown = self._record_quotes(snapshots)
-        cycle: dict[str, Any] = {"snapshots": len(snapshots), "skipped_snapshots": skipped, "bad_snapshots": bad,
-                                 "markets_shown": len(shown)}
-        rows, jev_rows, refusal, receipt = self._observe(shown, now) if shown else ([], 0, "", {})
+        shown, cycle = read
+        cycle["markets_shown"] = len(shown)
+        rows, refusal, receipt = self._observe(shown, now) if shown else ([], "", {})
         with self._db() as db:
+            # recorded_at is taken once this transaction holds the write lock; the commit follows
+            # the inserts at once (see the module docstring).
+            db.execute("BEGIN IMMEDIATE")
             recorded_at = self.clock()
-            db.executemany(
-                "INSERT OR IGNORE INTO move_rows(market,event,series,observed,minute,bid,ask,numeric,answers,move_p5,move_p15,"
-                "move_p60,numeric_p5,numeric_p15,numeric_p60,model_version,snapshot,recorded_at,why) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [(*row[:17], recorded_at, row[17]) for row in rows])
-            db.executemany("INSERT INTO move_markets VALUES(?,?,?) ON CONFLICT(market) DO UPDATE SET last_row=excluded.last_row, "
-                           "last_jev=COALESCE(excluded.last_jev, move_markets.last_jev)",
-                           [(row[0], row[3], row[3] if row[8] is not None else None) for row in rows])
+            db.executemany(f"INSERT OR IGNORE INTO move_rows({','.join(ROW_COLUMNS)},recorded_at) "
+                           f"VALUES({','.join('?' * (len(ROW_COLUMNS) + 1))})",
+                           [(*(row[c] for c in ROW_COLUMNS), recorded_at) for row in rows])
+        counts = {"rows": len(rows), "move_rows": sum(r["move_p15"] is not None for r in rows),
+                  "jev_rows": sum(r["jev_p15"] is not None for r in rows), "sampled_rows": sum(r["sampled"] for r in rows)}
+        with self._db() as db:
+            db.executemany("INSERT INTO move_markets VALUES(?,?) ON CONFLICT(market) DO UPDATE SET last_row=excluded.last_row",
+                           [(row["market"], row["observed"]) for row in rows])
             day = time.strftime("%Y-%m-%d", time.gmtime(now))
             tally = json.loads(self._meta(db, "today") or "{}")
             if tally.get("day") != day:
-                tally = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "jev_rows": 0}
+                tally = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "move_rows": 0, "jev_rows": 0,
+                         "sampled_rows": 0}
             tally.update(calls=tally["calls"] + int(receipt.get("calls") or 0),
                          bought=tally["bought"] + int(receipt.get("bought") or 0),
                          cost_usd=format(Decimal(tally["cost_usd"]) + Decimal(str(receipt.get("cost") or 0)), "f"),
-                         rows=tally["rows"] + len(rows), jev_rows=tally["jev_rows"] + jev_rows)
-            self._set(db, cursor=cursor, today=canonical(tally))
-        cycle.update(rows=len(rows), jev_rows=jev_rows, calls=int(receipt.get("calls") or 0),
+                         **{k: int(tally.get(k) or 0) + v for k, v in counts.items()})
+            self._set(db, today=canonical(tally))
+        cycle.update(counts, calls=int(receipt.get("calls") or 0), static_asked=int(receipt.get("static") or 0),
                      cost_usd=format(Decimal(str(receipt.get("cost") or 0)), "f"))
         if refusal:
             cycle["refusal"] = refusal
@@ -444,13 +601,22 @@ class MoveSensor:
             cycle["pruned"] = self.prune(now)
         return cycle
 
-    def _read_snapshots(self, now: float) -> str | tuple[int, list[tuple[int, float, list[dict[str, Any]]]], int, int]:
-        """New `markets:` snapshots past the cursor, oldest first, at most `max_snapshots` (the
-        newest: an older backlog is stale for a point-in-time feature). The first sight of the
-        recordings sets the cursor at their newest snapshot and reads nothing."""
+    def _read_snapshots(self, now: float):
+        """The fresh `markets:` snapshots past the cursor, streamed newest first and parsed one at a
+        time (the payloads are never all in memory). Returns (shown, counts) or a note.
+
+        `shown` maps each market to its latest appearance: (snapshot id, received, market row, the
+        first nine rows of its series in that snapshot, which is all `market_state` needs for eight
+        peers). Snapshots older than two intervals are `stale`, those beyond `max_snapshots` are
+        `over_cap`, unreadable ones `corrupt`; all are passed over. The cursor moves to the newest
+        snapshot considered in the transaction that keeps the quotes, whatever happens next."""
         if not self.recordings.exists():
             return "no market recordings yet"
+        fresh_after = now - 2 * self.interval
         source = sqlite3.connect(self.recordings.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+        shown: dict[str, tuple[int, float, dict[str, Any], list[dict[str, Any]]]] = {}
+        quotes: dict[tuple[str, int], tuple[float, float]] = {}
+        read = corrupt = 0
         try:
             newest = int(source.execute("SELECT COALESCE(MAX(id),0) FROM snapshots").fetchone()[0])
             with self._db() as db:
@@ -461,98 +627,111 @@ class MoveSensor:
                     self._set(db, cursor=newest, **({"started_at": now, "started_cursor": newest} if cursor is None else {}))
                     return f"{note}: cursor at snapshot {newest}, nothing earlier is read"
             cursor = int(cursor)
-            found = source.execute("SELECT id, received, payload FROM snapshots WHERE id>? AND source LIKE 'markets:%' "
-                                   "ORDER BY id DESC LIMIT ?", (cursor, self.max_snapshots)).fetchall()
-            skipped = 0
-            if len(found) == self.max_snapshots:
-                skipped = int(source.execute("SELECT COUNT(*) FROM snapshots WHERE id>? AND id<? AND source LIKE 'markets:%'",
-                                             (cursor, found[-1][0])).fetchone()[0])
+            window = "id>? AND id<=? AND source LIKE 'markets:%'"
+            stale, fresh = source.execute(f"SELECT COALESCE(SUM(received<?),0), COALESCE(SUM(received>=?),0) FROM snapshots "
+                                          f"WHERE {window}", (fresh_after, fresh_after, cursor, newest)).fetchone()
+            rows = source.execute(f"SELECT id, received, payload FROM snapshots WHERE {window} AND received>=? "
+                                  f"ORDER BY id DESC LIMIT ?", (cursor, newest, fresh_after, self.max_snapshots))
+            for ident, received, payload in rows:  # newest first
+                read += 1
+                try:
+                    markets = json.loads(gzip.decompress(payload))
+                    if not isinstance(markets, list):
+                        continue
+                    valid = [m for m in markets if isinstance(m, dict) and isinstance(m.get("market"), str) and point(m)]
+                    series: dict[Any, list[dict[str, Any]]] = {}
+                    for m in valid:
+                        group = series.setdefault(m.get("series"), [])
+                        if len(group) < 9:
+                            group.append(m)
+                    bucket = int(float(received) // 60) * 60
+                    for m in valid:
+                        q = point(m)
+                        quotes[(m["market"], bucket)] = (q["bid"], q["ask"])  # newest first: the earliest in a minute wins
+                        shown.setdefault(m["market"], (int(ident), float(received), m, series[m.get("series")]))
+                except Exception:  # noqa: BLE001 - zlib.error, RecursionError, anything: a corrupt snapshot is skipped
+                    corrupt += 1
+                finally:
+                    payload = markets = None  # noqa: F841 - one payload at a time
         finally:
             source.close()
-        snapshots, bad = [], 0
-        for ident, received, payload in reversed(found):
-            try:
-                markets = json.loads(gzip.decompress(payload))
-            except (OSError, ValueError, EOFError):
-                bad += 1
-                continue
-            valid = [m for m in markets if isinstance(m, dict) and isinstance(m.get("market"), str) and point(m)] \
-                if isinstance(markets, list) else []
-            if valid:
-                snapshots.append((int(ident), float(received), valid))
-        return max([newest, *(int(row[0]) for row in found)]), snapshots, skipped, bad
-
-    def _record_quotes(self, snapshots) -> dict[str, tuple[int, float, dict[str, Any], list[dict[str, Any]]]]:
-        """Minute quotes of every valid market shown (first in a minute wins), and each market's
-        latest appearance: (snapshot id, received, market row, that snapshot's valid rows)."""
-        shown: dict[str, tuple[int, float, dict[str, Any], list[dict[str, Any]]]] = {}
-        quotes = []
-        for ident, received, valid in snapshots:
-            bucket = int(received // 60) * 60
-            for m in valid:
-                q = point(m)
-                quotes.append((m["market"], bucket, q["bid"], q["ask"]))
-                shown[m["market"]] = (ident, received, m, valid)
         with self._db() as db:
-            db.executemany("INSERT OR IGNORE INTO move_quotes VALUES(?,?,?,?)", quotes)
-        return shown
+            db.executemany("INSERT OR IGNORE INTO move_quotes VALUES(?,?,?,?)",
+                           [(market, minute, bid, ask) for (market, minute), (bid, ask) in quotes.items()])
+            self._set(db, cursor=newest)
+        over_cap = max(0, int(fresh) - read)
+        return shown, {"snapshots": read - corrupt, "stale_snapshots": int(stale), "over_cap_snapshots": over_cap,
+                       "corrupt_snapshots": corrupt, "skipped_snapshots": int(stale) + over_cap + corrupt}
 
-    def _allowance(self, now: float) -> int:
-        """Markets Jev may be asked about this cycle: the move budget left today, spread evenly over
-        the cycles left in the UTC day. Without a pace the cap bound by mid-morning UTC and US hours
-        ran numeric-only. The budget is the tighter of the Sensor's call headroom and a dollar share of
-        the daily pool (`daily_usd_share`, else the move call cap's share of all calls): the gate,
-        triage, links and exposure keep theirs."""
+    def _allowance(self, now: float) -> tuple[int, int, int]:
+        """(static labels this cycle may buy, sampled states this cycle may buy, calls left today).
+
+        The move budget is the tighter of the Sensor's call headroom and `daily_usd` (else the move
+        call cap's share of the pool) at today's measured cost a call. Static labels come first, up
+        to `max_static_per_cycle`: a market's jev_p needs them once. The per-state sample gets what
+        the static reserve (its expected cost over the rest of the day) leaves, spread evenly over
+        the cycles left, so it lasts through US hours and the gate keeps its share of the pool."""
         left = int(self.sensor.headroom(PURPOSE))
-        share = self.usd_share
+        budget = self.daily_usd
         cap = getattr(self.sensor, "purpose_calls", {}).get(PURPOSE)
-        if share is None and cap is not None and getattr(self.sensor, "daily_calls", 0):
-            share = Decimal(self.sensor.daily_usd) * Decimal(int(cap)) / Decimal(int(self.sensor.daily_calls))
-        if share is not None:
-            spent, calls = Decimal(self.sensor.spent_today(PURPOSE)), int(self.sensor.calls_today(PURPOSE))
-            per_call = spent / calls if calls >= 20 else DEFAULT_CALL_USD
-            left = min(left, max(0, int((share - spent) / max(per_call, Decimal("0.000001")))))
-        cycles = max(1, math.ceil(((int(now // 86400) + 1) * 86400 - now) / max(1.0, self.interval)))
-        return max(0, math.ceil(left / cycles))
+        if budget is None and cap is not None and getattr(self.sensor, "daily_calls", 0):
+            budget = Decimal(self.sensor.daily_usd) * Decimal(int(cap)) / Decimal(int(self.sensor.daily_calls))
+        spent, calls = Decimal(self.sensor.spent_today(PURPOSE)), int(self.sensor.calls_today(PURPOSE))
+        per_call = max(spent / calls if calls >= 20 else DEFAULT_CALL_USD, Decimal("0.000001"))
+        if budget is not None:
+            left = min(left, max(0, int((budget - spent) / per_call)))
+        day_end = (int(now // 86400) + 1) * 86400
+        reserve = int(self.static_reserve * Decimal(str((day_end - now) / 86400)) / per_call)
+        cycles = max(1, math.ceil((day_end - now) / max(1.0, self.interval)))
+        return min(left, self.max_static), math.ceil(max(0, left - reserve) / cycles), left
 
-    def _observe(self, shown, now: float) -> tuple[list[tuple], int, str, dict[str, Any]]:
-        """Rows for the chosen markets. Returns (rows, rows with Jev answers, refusal, receipt)."""
+    def _observe(self, shown, now: float) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+        """Rows for the chosen markets. Returns (rows, the first refusal, receipt)."""
         names = list(shown)
-        history: dict[str, tuple[float, float | None]] = {}
         with self._db() as db:
+            last: dict[str, float] = {}
             for start in range(0, len(names), 500):
                 chunk = names[start:start + 500]
-                history.update({m: (r, j) for m, r, j in db.execute(
-                    f"SELECT market, last_row, last_jev FROM move_markets WHERE market IN ({','.join('?' * len(chunk))})", chunk)})
+                last.update(db.execute(f"SELECT market, last_row FROM move_markets WHERE market IN ({','.join('?' * len(chunk))})",
+                                       chunk).fetchall())
             # Never-recorded first, then the market recorded longest ago; ties to the most recently shown.
-            chosen = sorted(names, key=lambda m: (history.get(m, (0.0, None))[0], -shown[m][1], m))[:self.max_markets]
-            states = {}
+            chosen = sorted(names, key=lambda m: (last.get(m, 0.0), -shown[m][1], m))[:self.max_markets]
+            states, feats = {}, {}
             for market in chosen:
-                ident, received, m, valid = shown[market]
+                _, received, m, peers = shown[market]
                 bucket = int(received // 60) * 60
-                prior = [{"observed": float(o), "bid": b, "ask": a} for o, b, a in db.execute(
-                    "SELECT minute, bid, ask FROM move_quotes WHERE market=? AND minute<? ORDER BY minute DESC LIMIT 4",
-                    (market, bucket))][::-1]
-                states[market] = market_state(m, valid, bucket, prior)
-        allowance = self._allowance(now)
-        # Jev's turn goes round the same way, by when a market last had answers.
-        asked = sorted(chosen, key=lambda m: ((history.get(m) or (0.0, None))[1] or 0.0, -shown[m][1], m))[:allowance]
-        results: dict[str, tuple[dict[str, float | None] | None, str]] = {}
-        receipt: dict[str, Any] = {"calls": 0, "cost": Decimal(0), "bought": 0}
+                recent = [{"observed": float(o), "bid": b, "ask": a} for o, b, a in db.execute(
+                    "SELECT minute, bid, ask FROM move_quotes WHERE market=? AND minute<? ORDER BY minute DESC LIMIT 244",
+                    (market, bucket))]
+                states[market] = market_state(m, peers, bucket, recent[:4][::-1])
+                feats[market] = features(states[market], [q for q in recent if bucket - q["observed"] <= HISTORY_SECONDS])
+        keys = {}
+        for market in chosen:
+            m = shown[market][2]
+            static = _digest({k: m[k] for k in STATIC_FIELDS if k in m})
+            keys[market] = {name: f"move:m:{self._static_version}:{market}:{static}:{name}" for name in self.static}
+        known = self.sensor.cached([k for per in keys.values() for k in per.values()]) if self.static else {}
+        static_limit, sample, left = self._allowance(now)
+        need = sorted((m for m in chosen if any(k not in known for k in keys[m].values())), key=lambda m: (-shown[m][1], m))
+        static_asks = need[:static_limit]
+        sample = min(sample, max(0, left - len(static_asks)))
+        sampled = set(sorted(chosen, key=lambda m: (_draw(m, int(shown[m][1] // 60) * 60), m))[:sample])
+        asks = {m: dict(self.static) for m in static_asks}
+        for m in sampled:
+            asks[m] = {**self.static, **self.per_state}
+        results: dict[str, tuple[dict[str, float | None], str]] = {}
+        receipt: dict[str, Any] = {"calls": 0, "cost": Decimal(0), "bought": 0, "static": len(static_asks)}
         lock = threading.Lock()
-        deadline = time.monotonic() + self.max_seconds
 
         def ask(market: str) -> None:
-            if time.monotonic() > deadline:
-                results[market] = (None, "the cycle's time budget is spent")
+            stop = self._stop()
+            if stop:
+                results[market] = ({}, stop)
                 return
-            state, m = states[market], shown[market][2]
-            static = _digest({k: m[k] for k in STATIC_FIELDS if k in m})
-            keys = {name: f"move:m:{self._market_version}:{market}:{static}:{name}" for name in self.per_market}
             mine: dict[str, Any] = {}
             try:
-                answers = self.sensor.ask_state(PURPOSE, f"move:s:{self._state_version}:{_digest(state, 32)}", state,
-                                                self.questions, receipt=mine, keys=keys)
+                answers = self.sensor.ask_state(PURPOSE, f"move:s:{self._state_version}:{_digest(states[market], 32)}",
+                                                states[market], asks[market], receipt=mine, keys=keys[market])
             except Exception as exc:  # noqa: BLE001 - one market's failure is that row's null, not the cycle's
                 answers, mine = {}, {"refused": f"{type(exc).__name__}: {str(exc)[:80]}"}
             with lock:
@@ -561,40 +740,60 @@ class MoveSensor:
                 receipt["bought"] += int(mine.get("bought") or 0)
             results[market] = (answers, str(mine.get("refused") or ""))
 
-        if asked:
-            with ThreadPoolExecutor(max_workers=min(self.workers, len(asked))) as pool:
-                list(pool.map(ask, asked))
-        rows, with_jev, refusal = [], 0, ""
+        if asks:
+            pool = ThreadPoolExecutor(max_workers=min(self.workers, len(asks)))
+            try:
+                pending = {pool.submit(ask, market) for market in [*static_asks, *(m for m in sampled if m not in static_asks)]}
+                while pending:
+                    _, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                    if pending and self._stop():
+                        break  # the House is closing or the time is spent: queued asks never start
+            finally:
+                pool.shutdown(wait=True, cancel_futures=True)
+        stopped = self._stop()
+        rows, refusal = [], ""
         for market in chosen:
             ident, received, m, _ = shown[market]
-            state = states[market]
-            numeric = numeric_features(state)
-            answers, why = results.get(market, (None, "paced: this cycle's share of today's move budget is spent"))
-            answers = dict(answers or {})
-            complete = bool(answers) and all(answers.get(name) is not None for name in self.questions)
-            values: dict[str, float | None] = {**numeric, **{k: v for k, v in answers.items() if k in FEATURES}}
-            move, base = self.model.move_p(values), self.model.numeric_p(numeric)
+            x = feats[market]
+            got, why = results.get(market, ({}, (stopped or "cancelled") if market in asks else ""))
+            answers = {name: known.get(key) for name, key in keys[market].items()}
+            answers.update({k: v for k, v in (got or {}).items() if v is not None})
+            if market in sampled:
+                answers.update({name: (got or {}).get(name) for name in self.per_state})
             reasons = []
-            if not self.model.ready:
-                reasons.append(self.model.why_not or "no Jev model")
-            if not complete:
-                reasons.append(f"jev: {why or 'no answer'}")
-                refusal = refusal or f"jev: {why or 'no answer'}"
-            if any(v is not None for v in answers.values()):
-                with_jev += 1
+            if x is None:
+                reasons.append("the model does not apply: no two-sided quote in [0, 1], or at or after close")
+                move = base = jev = dict.fromkeys(HORIZONS)
+            else:
+                values = {**x, **{k: v for k, v in answers.items() if v is not None}}
+                move, base, jev = self.served.predict(values), self.served.baseline_p(x), self.shadow.predict(values)
+                if move[15] is None:
+                    reasons.append(f"served: {self.served.why_not or 'a model answer is missing'}")
+                if jev[15] is None:
+                    missing = [q for q in self.shadow.questions if answers.get(q) is None]
+                    cause = self.shadow.why_not or (
+                        f"jev: {why}" if why else "jev: paced: static labels wait for budget" if missing else "no answer")
+                    reasons.append(f"shadow: {cause}")
+                    if why and not refusal:
+                        refusal = f"jev: {why}"
             q = point(m)
-            rows.append((market, event_of(market), m.get("series"), received, int(received // 60) * 60, q["bid"], q["ask"],
-                         canonical({k: round(v, 6) for k, v in numeric.items()}),
-                         canonical({k: (round(v, 6) if v is not None else None) for k, v in answers.items()})
-                         if any(v is not None for v in answers.values()) else None,
-                         *(None if move[h] is None else round(move[h], 6) for h in HORIZONS),
-                         *(None if base[h] is None else round(base[h], 6) for h in HORIZONS),
-                         self.model.version, ident, "; ".join(reasons) or None))
-        return rows, with_jev, refusal, receipt
+            row = {"market": market, "event": event_of(market), "series": m.get("series"), "observed": received,
+                   "minute": int(received // 60) * 60, "bid": q["bid"], "ask": q["ask"],
+                   "numeric": canonical({k: round(v, 9) for k, v in (x or {}).items()}),
+                   "answers": canonical({k: (None if v is None else round(v, 6)) for k, v in answers.items()})
+                   if any(v is not None for v in answers.values()) else None,
+                   "model_version": self.served.version, "shadow_version": self.shadow.version,
+                   "sampled": int(market in sampled), "snapshot": ident, "why": "; ".join(reasons) or None}
+            for kind, found in (("move", move), ("numeric", base), ("jev", jev)):
+                for h in HORIZONS:
+                    row[f"{kind}_p{h}"] = None if found[h] is None else round(found[h], 9)
+            rows.append(row)
+        return rows, refusal, receipt
 
     def prune(self, now: float | None = None) -> dict[str, int]:
-        """Keep `retention_days` of quotes, rows and markets; drop this sensor's cached Jev answers
-        once they cannot recur (a state's after a day, a market's text after the retention)."""
+        """Keep `retention_days` of quotes, rows and markets (each by an index); drop this sensor's
+        cached Jev answers once they cannot recur (a state's after a day, a market's text after the
+        retention); prune the Sensor's `calls` rows past its own keep."""
         now = self.clock() if now is None else now
         cutoff = now - self.retention_days * 86400
         with self._db() as db:
@@ -604,6 +803,9 @@ class MoveSensor:
         forget = getattr(self.sensor, "forget", None)
         if callable(forget):
             out["answers"] = int(forget("move:s:", now - 86400)) + int(forget("move:m:", cutoff))
+        prune_calls = getattr(self.sensor, "prune_calls", None)
+        if callable(prune_calls):
+            out["calls"] = int(prune_calls())
         return out
 
     # ------------------------------------------------------------------ reads
@@ -631,10 +833,13 @@ class MoveSensor:
             started_at, cursor = self._meta(db, "started_at"), self._meta(db, "cursor")
         day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
         if today.get("day") != day:
-            today = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "jev_rows": 0}
+            today = {"day": day, "calls": 0, "bought": 0, "cost_usd": "0", "rows": 0, "move_rows": 0, "jev_rows": 0,
+                     "sampled_rows": 0}
         last = dict(cycle or self._stats.get("last_cycle") or {})
-        self._stats = {"model_version": self.model.version, "model_ready": self.model.ready,
-                       "model_problems": list(self.model.problems), "rows": int(rows), "markets": int(markets),
+        self._stats = {"model_version": self.served.version, "model_ready": self.served.ready,
+                       "shadow_version": self.shadow.version, "shadow_ready": self.shadow.ready,
+                       "model_problems": list(self.served.problems) + list(self.shadow.problems),
+                       "rows": int(rows), "markets": int(markets),
                        "started_at": _iso(float(started_at)) if started_at else None,
                        "cursor": int(cursor) if cursor is not None else None, "today": today,
                        "labels_bought_today": int(today.get("bought") or 0),
@@ -642,6 +847,7 @@ class MoveSensor:
                        "last_cycle": {k: v for k, v in last.items() if k not in ("at", "seconds")},
                        "refusal": last.get("refusal"), "interval_seconds": self.interval,
                        "max_markets_per_cycle": self.max_markets,
+                       "daily_usd": format(self.daily_usd, "f") if self.daily_usd is not None else None,
                        "authority": "labels only: no order, promotion, spending or merge authority"}
 
     def stats(self) -> dict[str, Any]:
@@ -683,108 +889,197 @@ def _quantile(values: Sequence[float], q: float) -> float:
     return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
 
 
+def _interval(draws: Sequence[float]) -> list[float] | None:
+    return [round(_quantile(draws, 0.025), 4), round(_quantile(draws, 0.975), 4)] if draws else None
+
+
+def _resamples(size: int, reps: int, seed: int):
+    """Event weights for each bootstrap resample: events drawn with replacement, seeded."""
+    rng = random.Random(seed)
+    for _ in range(reps):
+        weights = [0] * size
+        for pick in rng.choices(range(size), k=size):
+            weights[pick] += 1
+        yield weights
+
+
 def auc_with_interval(scores: Sequence[float], labels: Sequence[int], events: Sequence[str], *,
                       reps: int = 200, seed: int = 7) -> dict[str, Any]:
     """AUC (ties averaged) with a 95% event-clustered bootstrap interval (events resampled with replacement)."""
     index = {e: n for n, e in enumerate(dict.fromkeys(events))}
     ranked = _Ranked(scores, labels, [index[e] for e in events])
-    point_estimate = ranked.auc()
-    out: dict[str, Any] = {"auc": None if point_estimate is None else round(point_estimate, 4), "ci95": None,
-                           "rows": len(scores), "events": len(index)}
-    if point_estimate is None or len(index) < 2 or reps <= 0:
+    estimate = ranked.auc()
+    out: dict[str, Any] = {"auc": None if estimate is None else round(estimate, 4), "ci95": None,
+                           "rows": len(scores), "events": len(index),
+                           "base_rate": round(sum(labels) / len(labels), 4) if labels else None}
+    if estimate is None or len(index) < 2 or reps <= 0:
         return out
-    rng, size, draws = random.Random(seed), len(index), []
-    for _ in range(reps):
-        weights = [0] * size
-        for pick in rng.choices(range(size), k=size):
-            weights[pick] += 1
-        value = ranked.auc(weights)
-        if value is not None:
-            draws.append(value)
-    if draws:
-        out["ci95"] = [round(_quantile(draws, 0.025), 4), round(_quantile(draws, 0.975), 4)]
+    draws = [a for a in (ranked.auc(w) for w in _resamples(len(index), reps, seed)) if a is not None]
+    out["ci95"] = _interval(draws)
+    return out
+
+
+def paired_auc(a: Sequence[float], b: Sequence[float], labels: Sequence[int], events: Sequence[str], *,
+               names: tuple[str, str] = ("a", "b"), reps: int = 200, seed: int = 7) -> dict[str, Any]:
+    """Two scores on the SAME rows, resampled together: each AUC and `difference` (first minus
+    second), each with a 95% event-clustered interval."""
+    index = {e: n for n, e in enumerate(dict.fromkeys(events))}
+    ids = [index[e] for e in events]
+    ra, rb = _Ranked(a, labels, ids), _Ranked(b, labels, ids)
+    x, y = ra.auc(), rb.auc()
+    out: dict[str, Any] = {"rows": len(labels), "events": len(index),
+                           "base_rate": round(sum(labels) / len(labels), 4) if labels else None,
+                           names[0]: {"auc": None if x is None else round(x, 4), "ci95": None},
+                           names[1]: {"auc": None if y is None else round(y, 4), "ci95": None},
+                           "difference": {"of": f"{names[0]} - {names[1]}",
+                                          "diff": None if x is None or y is None else round(x - y, 4), "ci95": None}}
+    if x is None or y is None or len(index) < 2 or reps <= 0:
+        return out
+    draws_a, draws_b, diffs = [], [], []
+    for weights in _resamples(len(index), reps, seed):
+        u, v = ra.auc(weights), rb.auc(weights)
+        if u is not None and v is not None:
+            draws_a.append(u)
+            draws_b.append(v)
+            diffs.append(u - v)
+    out[names[0]]["ci95"], out[names[1]]["ci95"], out["difference"]["ci95"] = (
+        _interval(draws_a), _interval(draws_b), _interval(diffs))
     return out
 
 
 def evaluate(store: str | Path, cutoff: float, horizons: Iterable[int] = HORIZONS, *, reps: int = 200,
-             seed: int = 7) -> dict[str, Any]:
+             seed: int = 7, fitted_on: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """Held-out evaluation of recorded rows observed at or after `cutoff`, read-only.
 
-    Outcome: the market's first own minute quote in [observed + h, observed + h + 10 min]. "Moves at
-    all": |that mid - the row's mid| > 1e-9 (the lab's target). Rows without an outcome quote are
-    left out. For each horizon, overall and per coarse category, it reports rows, events, the base
-    rate and the AUC of move_p, of numeric_p and of the recorded-only `moves_*` answers, each on the
-    rows where it exists, with a seeded 95% event-clustered bootstrap interval. Entry is the
-    observation. A consumer reads a row at `recorded_at` (up to one cycle later), so a live
-    strategy sees a slightly shorter horizon than measured here."""
+    - Outcome: the market's first own minute quote in [observed + h, observed + h + 10 min] whose
+      minute is also strictly after the row's `recorded_at` (it must come after the row could be
+      read). "Moves at all": |that mid - the row's mid| > 1e-9, the lab's target.
+    - Per served `model_version`, never pooled. A cutoff earlier than the `fitted_on.to` of a model
+      that wrote the rows (served or shadow; the store's `move_models`, or `fitted_on` given here)
+      is refused: rows before it may be in that model's training data.
+    - Two populations: every post-cutoff row, and rows of events never observed before the cutoff
+      in this store (event = ticker minus its last '-' segment).
+    - Scores: `served` (move_p, the free model), `shadow` (jev_p, free + static Jev answers),
+      `baseline` (numeric_p, the lab's five features), the recorded-only answers; each alone on
+      the rows that have it, and paired where they share rows: `served_vs_baseline`,
+      `jev_increment` (AUC(jev_p) - AUC(move_p) on the same rows: does Jev add anything?) and each
+      recorded-only answer against served. Seeded 95% event-clustered bootstrap intervals, overall
+      and per coarse category."""
     path = Path(store)
     horizons = [int(h) for h in horizons]
     with _connect(path, readonly=True) as db:
-        rows = db.execute("SELECT market, event, series, observed, bid, ask, answers, move_p5, move_p15, move_p60, "
-                          "numeric_p5, numeric_p15, numeric_p60, model_version FROM move_rows WHERE observed>=? "
-                          "ORDER BY observed, id", (float(cutoff),)).fetchall()
-        outcomes: dict[int, list[int | None]] = {}
-        for h in horizons:
-            found = []
-            for market, _, _, observed, bid, ask, *_ in rows:
-                quote = db.execute("SELECT bid, ask FROM move_quotes WHERE market=? AND minute>=? AND minute<=? "
-                                   "ORDER BY minute LIMIT 1", (market, observed + 60 * h, observed + 60 * h + 600)).fetchone()
-                found.append(None if quote is None else int(abs((quote[0] + quote[1]) / 2 - (bid + ask) / 2) > 1e-9))
-            outcomes[h] = found
-    models = sorted({row[13] for row in rows})
-    report: dict[str, Any] = {"store": str(path), "cutoff": _iso(cutoff), "rows_after_cutoff": len(rows),
-                              "model_versions": models, "target": "the quoted midpoint moves at all (|change| > 1e-9)",
-                              "ship_rule": f"move_p's held-out AUC >= {SHIP_AUC} on post-ship events", "horizons": {}}
-    column = {5: 7, 15: 8, 60: 9}
-    for h in horizons:
-        kept = [(row, y) for row, y in zip(rows, outcomes[h]) if y is not None]
+        db.row_factory = sqlite3.Row
+        known: dict[str, dict[str, Any]] = {}
+        try:
+            known = {r["version"]: json.loads(r["fitted_on"] or "{}") for r in db.execute("SELECT version, fitted_on FROM move_models")}
+        except sqlite3.OperationalError:
+            pass
+        known.update({k: dict(v) for k, v in (fitted_on or {}).items()})
+        rows = [dict(r) for r in db.execute("SELECT * FROM move_rows WHERE observed>=? ORDER BY observed, id", (float(cutoff),))]
+        for version in sorted({r["model_version"] for r in rows} | {r["shadow_version"] for r in rows if r["shadow_version"]}):
+            to = known.get(version, {}).get("to")
+            if to is not None and float(cutoff) < parse_time(str(to)):
+                raise ValueError(f"cutoff {_iso(cutoff)} is before model {version}'s fitted_on.to {to}: "
+                                 f"rows before it may be in its training data")
+        seen = {r["event"] for r in db.execute("SELECT DISTINCT event FROM move_rows WHERE observed<?", (float(cutoff),))}
+        for row in rows:
+            row["answers"] = json.loads(row["answers"]) if row["answers"] else {}
+            row["outcome"] = {}
+            for h in horizons:
+                quote = db.execute("SELECT bid, ask FROM move_quotes WHERE market=? AND minute>=? AND minute<=? AND minute>? "
+                                   "ORDER BY minute LIMIT 1", (row["market"], row["observed"] + 60 * h,
+                                                               row["observed"] + 60 * h + 600, row["recorded_at"])).fetchone()
+                row["outcome"][h] = None if quote is None else int(
+                    abs((quote["bid"] + quote["ask"]) / 2 - (row["bid"] + row["ask"]) / 2) > 1e-9)
 
-        def block(subset: list[tuple[tuple, int]]) -> dict[str, Any]:
-            scores: dict[str, list[tuple[float, int, str]]] = {"move_p": [], "numeric_p": [], **{k: [] for k in RECORDED_ONLY}}
-            for row, y in subset:
-                if h in column and row[column[h]] is not None:
-                    scores["move_p"].append((row[column[h]], y, row[1]))
-                if h in column and row[column[h] + 3] is not None:
-                    scores["numeric_p"].append((row[column[h] + 3], y, row[1]))
-                answers = json.loads(row[6]) if row[6] else {}
-                for name in RECORDED_ONLY:
-                    if answers.get(name) is not None:
-                        scores[name].append((float(answers[name]), y, row[1]))
-            out = {"rows": len(subset), "events": len({row[1] for row, _ in subset}),
-                   "base_rate": round(sum(y for _, y in subset) / len(subset), 4) if subset else None, "auc": {}}
-            for name, triples in scores.items():
-                if triples:
-                    s, ys, es = zip(*triples)
-                    out["auc"][name] = auc_with_interval(s, ys, es, reps=reps, seed=seed)
-                else:
-                    out["auc"][name] = {"auc": None, "ci95": None, "rows": 0, "events": 0}
-            return out
+    def score(row: Mapping[str, Any], name: str, h: int) -> float | None:
+        if name in RECORDED_ONLY:
+            value = row["answers"].get(name)
+            return None if value is None else float(value)
+        return row.get(f"{name}_p{h}")
 
-        overall = block(kept)
-        move_auc = overall["auc"]["move_p"]["auc"]
-        overall["meets_ship_rule"] = None if move_auc is None else move_auc >= SHIP_AUC
-        by: dict[str, list[tuple[tuple, int]]] = {}
-        for row, y in kept:
-            by.setdefault(category(row[2], row[0]), []).append((row, y))
-        report["horizons"][str(h)] = {"overall": overall, "by_category": {k: block(v) for k, v in sorted(by.items())}}
+    def alone(subset: list[dict[str, Any]], name: str, h: int) -> dict[str, Any]:
+        found = [(score(r, name, h), r["outcome"][h], r["event"]) for r in subset if score(r, name, h) is not None]
+        return (auc_with_interval(*zip(*found), reps=reps, seed=seed) if found
+                else {"auc": None, "ci95": None, "rows": 0, "events": 0, "base_rate": None})
+
+    def pair(subset: list[dict[str, Any]], a: str, b: str, h: int, names: tuple[str, str]) -> dict[str, Any]:
+        found = [(score(r, a, h), score(r, b, h), r["outcome"][h], r["event"]) for r in subset
+                 if score(r, a, h) is not None and score(r, b, h) is not None]
+        if not found:
+            return {"rows": 0, "events": 0, "base_rate": None, names[0]: {"auc": None, "ci95": None},
+                    names[1]: {"auc": None, "ci95": None}, "difference": {"of": f"{names[0]} - {names[1]}", "diff": None, "ci95": None}}
+        return paired_auc(*zip(*found), names=names, reps=reps, seed=seed)
+
+    def block(h: int, subset: list[dict[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {"rows": len(subset), "events": len({r["event"] for r in subset}),
+                               "base_rate": round(sum(r["outcome"][h] for r in subset) / len(subset), 4) if subset else None,
+                               "served": alone(subset, "move", h), "shadow": alone(subset, "jev", h),
+                               "baseline": alone(subset, "numeric", h),
+                               "served_vs_baseline": pair(subset, "move", "numeric", h, ("served", "baseline")),
+                               "jev_increment": pair(subset, "jev", "move", h, ("shadow", "served")),
+                               "recorded_only": {name: {"alone": alone(subset, name, h),
+                                                        "vs_served": pair(subset, name, "move", h, (name, "served"))}
+                                                 for name in RECORDED_ONLY}}
+        served = out["served"]["auc"]
+        out["meets_ship_rule"] = None if served is None else served >= SHIP_AUC
+        return out
+
+    report: dict[str, Any] = {
+        "store": str(path), "cutoff": _iso(cutoff), "rows_after_cutoff": len(rows),
+        "target": "the quoted midpoint moves at all (|change| > 1e-9); outcome quote after observed + h and after recorded_at",
+        "ship_rule": f"the served move_p AUC >= {SHIP_AUC} on events never seen before a post-ship cutoff",
+        "scores": {"served": "move_p: the free model (no Jev), what latest() serves",
+                   "shadow": "jev_p: the free features plus the six static Jev answers, recorded only",
+                   "baseline": "numeric_p: the lab's five numeric features",
+                   "jev_increment": "shadow minus served on the same rows: whether Jev adds anything",
+                   "recorded_only": "the moves_15m / moves_60m answers on the sampled states"},
+        "models": {}}
+    for version in sorted({r["model_version"] for r in rows}):
+        mine = [r for r in rows if r["model_version"] == version]
+        shadows = sorted({r["shadow_version"] for r in mine if r["shadow_version"]})
+        entry: dict[str, Any] = {"fitted_on": known.get(version), "shadow_versions": shadows, "populations": {}}
+        for population, keep in (("all_after_cutoff", lambda r: True), ("unseen_events", lambda r: r["event"] not in seen)):
+            found: dict[str, Any] = {}
+            for h in horizons:
+                kept = [r for r in mine if r["outcome"][h] is not None and keep(r)]
+                by: dict[str, list[dict[str, Any]]] = {}
+                for r in kept:
+                    by.setdefault(category(r["series"] or r["market"].split("-", 1)[0]), []).append(r)
+                found[str(h)] = {"overall": block(h, kept), "by_category": {k: block(h, v) for k, v in sorted(by.items())}}
+            entry["populations"][population] = found
+        report["models"][version] = entry
     return report
 
 
 def _print(report: Mapping[str, Any], out: Any) -> None:
-    print(f"{report['store']}: {report['rows_after_cutoff']} rows observed at or after {report['cutoff']} "
-          f"(models {', '.join(report['model_versions']) or 'none'}); {report['ship_rule']}", file=out)
+    print(f"{report['store']}: {report['rows_after_cutoff']} rows observed at or after {report['cutoff']}. "
+          f"{report['ship_rule']}.", file=out)
 
     def cell(entry: Mapping[str, Any]) -> str:
-        if entry["auc"] is None:
+        if entry.get("auc") is None:
             return "-"
-        ci = entry["ci95"]
-        return f"{entry['auc']:.3f}" + (f" [{ci[0]:.3f},{ci[1]:.3f}]" if ci else "") + f" n={entry['rows']}"
+        ci = entry.get("ci95")
+        return f"{entry['auc']:.3f}" + (f" [{ci[0]:.3f},{ci[1]:.3f}]" if ci else "")
 
-    for h, found in report["horizons"].items():
-        print(f"\n{h} min", file=out)
-        for label, entry in [("overall", found["overall"]), *found["by_category"].items()]:
-            aucs = "  ".join(f"{name}={cell(value)}" for name, value in entry["auc"].items())
-            print(f"  {label:9s} rows={entry['rows']} events={entry['events']} base={entry['base_rate']}  {aucs}", file=out)
+    def diff(entry: Mapping[str, Any]) -> str:
+        d = entry["difference"]
+        if d["diff"] is None:
+            return "-"
+        return f"{d['diff']:+.3f}" + (f" [{d['ci95'][0]:+.3f},{d['ci95'][1]:+.3f}]" if d["ci95"] else "") + f" n={entry['rows']}"
+
+    for version, entry in report["models"].items():
+        print(f"\nmodel {version} (shadow {', '.join(entry['shadow_versions']) or '-'}; fitted_on "
+              f"{canonical(entry['fitted_on'] or {})})", file=out)
+        for population, found in entry["populations"].items():
+            for h, blocks in found.items():
+                print(f"  {population}, {h} min", file=out)
+                for label, b in [("overall", blocks["overall"]), *blocks["by_category"].items()]:
+                    moves = "  ".join(f"{k}={cell(v['alone'])}" for k, v in b["recorded_only"].items())
+                    print(f"    {label:9s} rows={b['rows']} events={b['events']} base={b['base_rate']} | "
+                          f"served={cell(b['served'])} shadow={cell(b['shadow'])} baseline={cell(b['baseline'])} | "
+                          f"jev increment={diff(b['jev_increment'])} served-baseline={diff(b['served_vs_baseline'])} | "
+                          f"{moves}", file=out)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -797,10 +1092,20 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--horizons", default="5,15,60")
     ev.add_argument("--reps", type=int, default=200, help="bootstrap resamples")
     ev.add_argument("--seed", type=int, default=7)
+    ev.add_argument("--model", action="append", default=[],
+                    help="a model file whose fitted_on to use for its version (repeatable; the store keeps its own)")
     ev.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    report = evaluate(args.store, parse_time(args.cutoff), [int(h) for h in args.horizons.split(",") if h.strip()],
-                      reps=args.reps, seed=args.seed)
+    fitted = {}
+    for path in args.model:
+        model = MoveModel.load(path)
+        fitted[model.version] = model.fitted_on
+    try:
+        report = evaluate(args.store, parse_time(args.cutoff), [int(h) for h in args.horizons.split(",") if h.strip()],
+                          reps=args.reps, seed=args.seed, fitted_on=fitted)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
