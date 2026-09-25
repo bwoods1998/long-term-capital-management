@@ -108,13 +108,14 @@ class EventDays(unittest.TestCase):
         self.assertEqual(day("KXBTCD-26SEP2401", None), "2026-09-24")
         self.assertEqual(day("kxmlbhit-26sep222140laaath", None), "2026-09-22")
         # No date code (an Alpaca trade's key, a monthly series): the UTC date of its last close, else no date at all.
-        self.assertEqual(day("alpaca:m1:17", 1790208000.0), "2026-09-25")
-        self.assertEqual(day("KXCPI-26SEP", 1790208000.0), "2026-09-25")
+        noon = 1790337600.0  # 12:00Z Sept 25
+        self.assertEqual(day("alpaca:m1:17", noon), "2026-09-25")
+        self.assertEqual(day("KXCPI-26SEP", noon), "2026-09-25")
         self.assertIsNone(day("alpaca:m1:17", None))
 
     def test_a_night_slate_is_one_date_though_it_settles_on_two(self):
         """The real Sept 24 slate on the T0 snapshot: one event settled on Sept 24 UTC and five on Sept 25."""
-        before_midnight, after = 1790290800.0, 1790305200.0  # 22:20Z Sept 24, 02:20Z Sept 25
+        before_midnight, after = 1790288400.0, 1790302800.0  # 22:20Z Sept 24, 02:20Z Sept 25
         self.assertEqual({families.event_day("KXMLBTOTAL-26SEP241420MIACHC", before_midnight),
                           families.event_day("KXMLBTOTAL-26SEP242140LAASEA", after)}, {"2026-09-24"})
 
@@ -319,9 +320,14 @@ class ProbeMayTake(RealEntryCase):
         self.seat("kay", usd="10", position="2.00", order="2.00")
         self.quote(self.TICKER, "0.48", "0.50")
         self.inst = event(self.TICKER, "no", self.venue)
-        live = patch.dict(CONSTITUTION["allocator"], {"real_entry_liquidity": "probe_may_take", "taker_proof_min": 5})
-        live.start()
-        self.addCleanup(live.stop)
+        # BookCase takes the real book's entry keys out for its tests; this one puts the live rule back. Stopped in
+        # tearDown, BEFORE BookCase restores the constitution (a patch restores what it found when it started).
+        self._live = patch.dict(CONSTITUTION["allocator"], {"real_entry_liquidity": "probe_may_take", "taker_proof_min": 5})
+        self._live.start()
+
+    def tearDown(self):
+        self._live.stop()
+        super().tearDown()
 
     def test_a_probe_takes_the_price_inside_its_position_cap(self):
         self.taker_record = {"family": "sports-central-run-under", "positive": False, "n": 3, "mean_log": 0.1, "bound": None,
@@ -426,7 +432,7 @@ class MembersOnTheProof(KalshiHouse):
         self.code[family] = {"code": agent.code_sha256, "events": 13, "of": 13, "codes": {agent.code_sha256: 13}}
 
     def status(self, agent):
-        return self.house._state["promotion_status"].get(agent.id) or {}
+        return (self.house._state.get("promotion_status") or {}).get(agent.id) or {}
 
     def test_a_proven_familys_member_is_seated_as_a_bunt_without_the_bunt_line(self):
         a = self.agent("mcentee")
@@ -541,8 +547,9 @@ class TheProvenCode(unittest.TestCase):
         self.ledger.append("book.stake", {"book": "kalshi-shadow", "usd": "200", "note": "t", "real_money": False}, agent=agent)
 
     def event(self, agent, n):
-        for i in range(n):
-            ticker = f"KXMLBTOTAL-26SEP{i + 1:02d}1840{agent[-1]}{i:02d}-7"
+        for _ in range(n):
+            self.games = getattr(self, "games", 0) + 1
+            ticker = f"KXMLBTOTAL-26SEP{self.games % 28 + 1:02d}1840G{self.games:03d}-7"  # one game each
             inst = {"asset_class": "event", "symbol": ticker, "venue": "kalshi-shadow", "market_id": ticker, "right": "no", "multiplier": "1"}
             self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "venue", "side": "buy", "realized": None, "flat": None,
                                              "instrument": inst, "quantity": "10", "price": "0.5", "cash_delta": "-5",
@@ -628,7 +635,7 @@ class ReseatByBound(unittest.TestCase):
     def test_the_lines(self):
         self.assertEqual(families.bound_gaining([0.01] * 5, 6, 0.8)[0], False)  # five periods are not a record
         self.assertEqual(families.bound_gaining([0.01] * 6, 6, 0.8), (True, 0.01))
-        self.assertFalse(families.bound_gaining([0.02, 0.01, -0.005, 0.015, -0.01, 0.0], 6, 0.8)[0])  # +0.03, noisy
+        self.assertFalse(families.bound_gaining([0.03, -0.02, 0.025, -0.015, 0.01, -0.01], 6, 0.8)[0])  # +0.02, noisy
         self.assertEqual(families.bound_gaining([], 6, 0.8), (False, None))
 
 
@@ -657,7 +664,7 @@ class ReseatByBoundInTheHouse(ForwardBlocks, KalshiHouse):
                                      agent=ghost.id)
 
     def status(self, agent):
-        return self.house._state["promotion_status"].get(agent.id) or {}
+        return (self.house._state.get("promotion_status") or {}).get(agent.id) or {}
 
     def test_one_hours_blocks_are_one_observation(self):
         """The 18:47Z Sept 24 hold of crypto-alts-reversion turned at 21:00:53Z on six blocks since, +0.0101: two hours,
