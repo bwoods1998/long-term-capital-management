@@ -541,6 +541,29 @@ class TheAccountsType(unittest.TestCase):
         self.assertEqual(client.structure_types, MLEG_TYPES)
         self.assertEqual(client.drain_structure_answers()[0]["stage"], "account")
 
+    def test_the_first_read_is_made_on_a_host_just_booted(self):
+        # The G review (Sept 25, 2026): `time.monotonic()` counts from boot, and the adapter started its last try at
+        # 0.0, so a host up under ACCOUNT_RETRY_SECONDS (a fresh CI runner, a restored Sailbox) never read the account.
+        from unittest import mock
+
+        from ltcm.adapters.alpaca import ACCOUNT_RETRY_SECONDS
+
+        for uptime in (0.0, 5.0, ACCOUNT_RETRY_SECONDS - 1):
+            with self.subTest(uptime=uptime), mock.patch("ltcm.adapters.alpaca.time.monotonic", return_value=uptime):
+                client, transport = self.client(multiplier="4", options_trading_level="3")
+                self.assertEqual(client.account_type(), "margin")
+                self.assertEqual([c["method"] for c in transport.calls], ["GET"])
+        # An unanswered first read is asked again only after ACCOUNT_RETRY_SECONDS, however young the host.
+        with mock.patch("ltcm.adapters.alpaca.time.monotonic", return_value=3.0) as clock:
+            client, transport = self.client()
+            self.assertIsNone(client.account_type())
+            self.assertIsNone(client.account_type())
+            self.assertEqual(len(transport.calls), 1)
+            transport.route(("GET", PAPER_BASE + "/v2/account"), {**self.ACCOUNT, "multiplier": "4"})
+            clock.return_value = 3.0 + ACCOUNT_RETRY_SECONDS
+            self.assertEqual(client.account_type(), "margin")
+            self.assertEqual(len(transport.calls), 2)
+
     def test_read_once_and_only_from_a_row_that_states_it(self):
         client, transport = self.client()
         self.assertIsNone(client.account_type())  # no multiplier stated: unknown
