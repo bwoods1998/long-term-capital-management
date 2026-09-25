@@ -221,6 +221,29 @@ Sept 22-23; the held-out window is Sept 24 00:00Z to Sept 25 06:00Z; intervals c
   i.e. they predict NO candidate): F2 keeps them as triggers. That is for the forward-first run's F2/F4, which
   owns the gate; this run passes the numbers on and builds no Jev research pre-filter.
 
+**The Merton half (10:36Z)**: 497 Merton passes Sept 22 00:00Z to Sept 25 06:00Z, $174.78 (plus 20 auditor
+verdicts, $4.29). What each role produced:
+
+| Role | Passes | Dollars | Produced nothing (passes / dollars) |
+|---|---:|---:|---|
+| consultant | 112 | $59.25 | 23 / $9.01 (89 wrote code; 30 led to a candidate that passed replay) |
+| architect | 54 | $44.18 | 43 / $31.77 |
+| engineer | 207 | $28.10 | 155 / $16.98 |
+| teacher | 38 | $16.85 | 11 / $4.35 (27 lessons) |
+| foundry | 43 | $11.45 | 7 / $1.10 (36 cards) |
+| toolsmith, operator, designer | 43 | $14.95 | 42 / $14.19 |
+
+Five Jev questions over each pass's REQUEST text (before the answer), one chosen on Sept 22-23: the best ("the
+problem is already known or answered") scores held-out AUC 0.736 [0.649, 0.810] for "produced nothing"; the role
+alone scores 0.771 [0.689, 0.839]; both 0.787. At the train-chosen cut the role saves $12.11 of the held-out $76.11
+(4% of useful passes lost), role + Jev $12.57, Jev alone $8.13 (12% lost). Jev spend for both halves: $0.113 (675
+calls, all completed).
+
+**J2's verdict:** no Jev pre-filter is built for research or Merton: on held-out data neither earns its keep over
+free rules. Two free findings go to the forward-first run, which owns the gate, Merton and the lanes (F2, F4, Y):
+on the sessions F2 still runs, a trigger-kind skip cuts 31% of dollars for 9% of replay passes; and the architect,
+toolsmith, operator and designer roles produced nothing on 85 of 97 passes ($45.96 of $59.13). Sent 10:37Z.
+
 ### J4 market discovery (07:32Z): what Kalshi trades that the swarm cannot price
 
 Kalshi's public API at 07:15Z: 131,970 open markets in 4,132 series; 1,654 series with ≥ 100 contracts in 24 h
