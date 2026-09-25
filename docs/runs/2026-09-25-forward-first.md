@@ -70,6 +70,8 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| X | Execution (fill rate in the snapshot, refusals say what fits, the graduate's replay cut at its freeze, the scoreboard's families) | built, PR #332 (CI green); Deploy C (`book.py` text) |
+| C | Deploy C integration (`c/integration`, draft PR #335) | Deploy B + X, S, Y (+ `jev_relevance` off), the W publisher; digest `acff5c64` (no change of its own); Wave 2 review running; about 08:00Z Saturday after the options run's G |
 | S | The search looks for capacity (foundry brief `foundry-2026-09-25.1`; alpaca-open 12 seats) | built, PR #331 (CI green; on #324); Deploy C |
 | Y | Compute follows yield (lane throttle, trigger skip, unit economics, the contract by section) | built, PR #330 (CI green; built on #311); Deploy C |
 | F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
@@ -453,6 +455,21 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   entered it. Disclosed, unchanged: M4's $50 is also the base of an equity bunt's growth and the agent-level swing.
   Replay of one pass on T0 after the fixes: huang-h51fdd3-7 as a $10 Kalshi probe (not $30), huang-h427345-4 held by
   its own demotion, meriwether-h2d625d sized to $37.50; every family record identical.
+
+- **X (#332, Wave 2).** On the T0 snapshot the crypto-alts probes filled 0-18% of their real orders over 7 days
+  (haghani-56 2 of 23, -r42c38c 0 of 18, -62 2 of 17, -63 4 of 22; unfilled bids cancelled after a median 29-52
+  minutes) against 38-100% for Kalshi agents with 5+ finished orders. `league/execution.py` counts each agent's own
+  orders and fills; every snapshot carries `ctx["execution"]` and the research brief asks for a requote rule under 25%
+  on 5+ finished orders. X3: a refused entry's cap now says " -- to fit", the band, the cap and the room left (whole
+  contracts, or dollars and Alpaca's $10 crypto minimum); "insufficient desk cash" (haghani-56's $12.01 AVAX bids
+  against $0.35 free, 83 times on Sept 24) names `ltcm/risk.py rule_cash`. The House replays a lab graduate on its tape
+  up to the hour after its freeze (the F-lab review's open finding). The scoreboard reads `agent.family` rows.
+- **Y merged onto the reviewed F2, plus `jev_relevance` off (the Jev run's finding, 15:00Z: Jev-relevance wakes Sept
+  22-25 cost $0.66 a replay pass against $0.16-0.19 for free triggers, no better than the random sample).** The gate
+  replay on the T0 day: the review alone 794 sessions / 259 candidates / 90 adoptions / $34.58; with the fill/settle
+  skip and Jev off (as shipped) 673 / 253 / 89 / $33.20 (the T0 day as run: 2,566 / 547 / 108 / $87.65). A paused
+  practice agent's fill no longer spends its once-a-day trade wake; it wakes on news of its own program, its own active
+  block once a day, and the sample.
 
 ## Progress notes
 
