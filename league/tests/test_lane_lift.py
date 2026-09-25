@@ -99,6 +99,41 @@ class ConsultVerdicts(LedgerCase):
         self.session(agent="someone-else")
         self.assertEqual(merton.consult_price_multiple("haghani-63"), (1, 0), "another agent's consults are its own")
 
+    def test_the_multiple_decays_with_time_and_an_expired_consult_doubles_nothing(self):
+        """Review of #311: an agent whose balance fell under min x multiple could never buy the productive
+        consult that resets the price, and stayed at 8x until its consults left the newest 3,000
+        `merton.pass` rows (about two weeks). Only consults of the last `days` (7) count now. A consult
+        judged only because three days passed (`expired`) never moved the price, and its row says so."""
+        merton = self.merton(lift={"consult_max_multiple": 8})
+        for _ in range(3):
+            self.consult()
+            self.session()
+            self.session()
+        self.assertEqual(merton.consult_price_multiple("haghani-63"), (8, 3))
+        self.clock.advance(8 * 86400)
+        self.assertEqual(merton.consult_price_multiple("haghani-63"), (1, 0), "a week without a consult clears the multiple")
+        self.consult(agent="stale-desk")
+        self.session(agent="stale-desk")
+        self.clock.advance(3 * 86400 + 60)
+        from league.yield_ledger import consult_outcomes
+        rows = [r["payload"] for r in consult_outcomes(self.ledger, now=self.clock(), settings={**merton.lift})
+                if r["agent"] == "stale-desk" and r["payload"]["stage"] == "sessions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["expired"])
+        self.assertFalse(rows[0]["doubles_next_price"], "consult_price_multiple does not judge an expired consult")
+        self.assertEqual(merton.consult_price_multiple("stale-desk"), (1, 0))
+
+    def test_a_restart_does_not_record_the_consultants_pause_again(self):
+        """Review of #311: the pause state was seeded from the ledger for the five scheduled roles only,
+        so every House restart (26 in the 24 hours to T0) wrote another 'merton pause' row for the
+        consultant while the floor's real P&L stayed at or under zero."""
+        self.ledger.append("ops.started", {"release": "test"})
+        self.ledger.append("book.settle", {"book": "kalshi", "pnl": "-1.00", "real_money": True}, agent="x")
+        for _ in range(3):  # three House processes in a row
+            self.assertTrue(self.merton(paused_until_profit=["consultant"]).consult_paused())
+        rows = [e.payload for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "merton pause"]
+        self.assertEqual(len(rows), 1)
+
     def test_the_consultant_can_be_paused_until_profit(self):
         self.ledger.append("ops.started", {"release": "test"})
         self.ledger.append("book.settle", {"book": "kalshi", "pnl": "-1.00", "real_money": True}, agent="x")
@@ -113,8 +148,8 @@ class ConsultVerdicts(LedgerCase):
 
 class ThePriceAnAgentPays(ResearchCase):
     class Merton:
-        def __init__(self, multiple=(1, 0), paused=False):
-            self.multiple, self.paused, self.seen = multiple, paused, []
+        def __init__(self, multiple=(1, 0), paused=False, cost="0.40"):
+            self.multiple, self.paused, self.seen, self.cost = multiple, paused, [], cost
 
         def consult_paused(self):
             return self.paused
@@ -124,7 +159,7 @@ class ThePriceAnAgentPays(ResearchCase):
 
         def consult(self, agent, question, evidence, *, contract, **settings):
             self.seen.append(agent.id)
-            return {"answer": "Rewrite the entry.", "code": "", "confidence": "medium", "cost_usd": "0.40"}
+            return {"answer": "Rewrite the entry.", "code": "", "confidence": "medium", "cost_usd": self.cost}
 
     def hire(self, merton, credits_min="1.00"):
         r = self.researcher([[("ask_merton", {"question": "Is my idea structurally dead, or is it the parameters?"})]],
@@ -142,6 +177,26 @@ class ThePriceAnAgentPays(ResearchCase):
         self.assertEqual((row["cost_usd"], row["price_multiple"], row["charged_usd"]), ("0.40", 2, "0.80"), "the House's cost stays the cost")
         self.assertLess(self.economy.balance(self.parent.id), before - D("0.79"))
 
+    def test_the_multiple_never_takes_an_agent_to_its_death(self):
+        """Review of #311: the admission check asks for $0.35 x 8 = $2.80 but the charge was the consult's
+        cost x 8. At T0 prices (median $0.525, p90 $0.73, max $0.92) and real agents holding $1.04-$14.61,
+        one consult at 8x took a $5.00 balance to -$0.60, and `House.keep_population` kills a balance at
+        or below zero for 'credits' and winds its book down. The surcharge is capped at what the balance
+        can bear: the consult's own cost is always charged, and the multiple never takes the balance
+        under the 1x consult price."""
+        merton = self.Merton(multiple=(8, 3), cost="0.70")
+        before = self.hire(merton, credits_min="0.35")
+        self.assertEqual(merton.seen, [self.parent.id], "$5.00 clears the $2.80 floor")
+        charged = [D(e.payload["usd"]) for e in self.ledger.iter(kinds="credit.charge", agent=self.parent.id) if e.payload["what"] == "merton's time"]
+        self.assertEqual(len(charged), 1)
+        self.assertGreaterEqual(charged[0], D("0.70"), "the consult's own cost is always charged")
+        self.assertLess(charged[0], D("5.60"))
+        self.assertGreaterEqual(before - charged[0], D("0.35"), "the multiple never takes the balance under the 1x price")
+        self.assertTrue(self.economy.alive(self.parent.id))
+        row = [e.payload for e in self.ledger.iter(kinds="agent.research", agent=self.parent.id) if e.payload.get("tool") == "merton"][-1]
+        self.assertEqual((row["cost_usd"], row["price_multiple"], D(row["charged_usd"])), ("0.70", 8, charged[0]))
+        self.assertTrue(row["surcharge_capped"])
+
     def test_the_doubled_minimum_and_the_pause_refuse_before_anything_is_spent(self):
         merton = self.Merton(multiple=(8, 3))
         self.hire(merton, credits_min="1.00")  # it holds $5: $8 is out of reach
@@ -151,6 +206,24 @@ class ThePriceAnAgentPays(ResearchCase):
         self.hire(paused)
         self.assertEqual(paused.seen, [])
         self.assertIn("paused", self.tool_output(1)["error"])
+
+
+class TheControlArmsPlaybook(ResearchCase):
+    def test_the_researcher_holds_back_what_the_gate_withholds(self):
+        """Review of #311: every session has `playbook_read` (413 calls by 121 agents in the 24 hours to
+        T0), so a control-arm agent read the lesson that named it whenever it researched for any other
+        reason, and the teacher's lift compared two arms that had both read it. The researcher asks the
+        gate (`ResearchGate.withheld`, wired by league/service.py) and leaves out what it holds back."""
+        self.ledger.append("playbook.entry", {"title": "Lesson: 2026-09-25-a", "text": "sports favourites: size down", "source": "teacher"})
+        self.ledger.append("playbook.entry", {"title": "Lesson: 2026-09-25-b", "text": "weather desks: wait for the open", "source": "teacher"})
+        r = self.researcher([[("playbook_read", {"query": ""})]])
+        r.withheld = lambda agent, entry: "sports" in entry.payload["text"]
+        r.research(self.parent, {}, session="s1")
+        titles = [e["title"] for e in self.tool_output(1)["entries"]]
+        self.assertEqual(titles, ["Lesson: 2026-09-25-b"])
+        plain = self.researcher([[("playbook_read", {"query": ""})]])
+        plain.research(self.parent, {}, session="s2")
+        self.assertEqual(len(self.tool_output(1)["entries"]), 2, "no gate wired: the whole playbook, as before")
 
 
 class Lift(LedgerCase):

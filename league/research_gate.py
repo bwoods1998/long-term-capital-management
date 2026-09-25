@@ -78,11 +78,20 @@ frequent than the clock already allows.
    A market that is only closed is the calendar, not an outcome: it waits for the open. The heartbeat is
    `max_skip_hours` (24) for a real agent and `practice_max_skip_hours` (72) for a practice agent, counted
    from the gate's first sight of an agent that never researched, so a newborn trades before it researches.
-   An agent on rung 0 (replay only, no forward outcome possible until it passes) keeps its clock: research
-   is its only way up and `replay_deadline_epochs` bounds it.
+   An agent on rung 0 (replay only, no forward outcome possible until it passes) keeps its clock, with its
+   backoff, and is neither paused (rule 10) nor locked (rule 7): research is its only way up and
+   `replay_deadline_epochs` (72 hours) bounds it. Until the review of #311 the pause overrode that clock,
+   and a replay-only agent, which cannot fill, waited on the 10% sample until it was killed as never
+   qualified; its sessions after three empty ones still run on `abstain_lock_profile`.
 10. **A practice agent's pause** (F2). After `practice_pause_after` (3) abstaining sessions in a row a
-   practice agent researches only on a fill of its own (no settlement, refusal, note, heartbeat or Jev
-   question) until a session produces a candidate or a replay. A real agent keeps rule 7's lock. The
+   practice agent (not on rung 0) researches only on news of its own program (`PAUSE_NEWS`: a code or
+   rung change, a repair verdict about it, a teacher's lesson naming it, its idle program's barren
+   outcome) and on its own trading (`PAUSE_DAILY`: a fill or an active forward block) at most once per
+   UTC day -- no settlement, refusal, desk note, heartbeat or Jev question -- until a session produces a
+   candidate or a replay. Review of #311, replayed on the T0 snapshot: the fill-only pause ran every
+   fill-woken session (452, $5.36: 10 candidates, 1 adoption) and blocked the productive news; this rule
+   runs 794 sessions instead of 1,038 (+44 samples), 259 candidates instead of 253 and 90 adoptions or
+   forks instead of 85, for $34.58 instead of $33.71. A real agent keeps rule 7's lock. The
    sample still draws from both (rule 5), at most once per `sample_hours` (6) per agent under this rule,
    not once per research interval: a winner's interval is 12 minutes, and 10% of its skips was 272
    sessions a day. Paused and locked sessions run on `abstain_lock_profile`.
@@ -96,7 +105,10 @@ frequent than the clock already allows.
    an agent only when its source is in `lesson_sources` (the teacher's): 134 of the 204 lesson-triggered
    rows at T0 had no teacher lesson behind them, only a desk-mate's post-mortem. Under `lesson_arm:
    parity` a lesson wakes only agents whose id hashes even (`lesson_arm`); the odd half is the control
-   the hourly yield row compares on forward growth over 3 days (`yield_ledger.teacher_lift`).
+   the hourly yield row compares on forward growth over 3 days (`yield_ledger.teacher_lift`). A control
+   agent is neither woken by, asked Jev about, nor shown by `playbook_read` a lesson that names it for
+   those 3 days (`withheld`; review of #311: 413 `playbook_read` calls by 121 agents in the 24 hours to
+   T0, so the control read the lesson whenever it researched for any other reason).
 
 Each decision writes one private `research.gate` row, with `trigger` (the class of evidence that
 woke it, or the skip's reason) and `record` (winner, loser, unproven or idle) so the yield of each
@@ -132,8 +144,13 @@ TRIGGER_KINDS = ("book.fill", "book.settle", "book.refused", "agent.strategy", "
                  "eval.block", "audit.verdict")
 #: Under the abstention lock (rule 7) only these wake an agent: its own outcomes at the venue.
 ABSTAIN_LOCK_TRIGGERS = frozenset(("book.fill", "book.settle", "book.refused"))
-#: Under a practice agent's pause (rule 10) only its own fill wakes it.
-PAUSE_TRIGGERS = frozenset(("book.fill",))
+#: Under a practice agent's pause (rule 10) news of its own program wakes it as ever (review of #311,
+#: Sept 25, 2026: a code change, a rung change, a repair verdict about it, a lesson naming it, its idle
+#: program's outcome) ...
+PAUSE_NEWS = frozenset(("code", "rung", "repair.status", "lesson", "barren"))
+#: ... and its own trading (a fill, an active forward block) at most once per UTC day.
+PAUSE_DAILY = frozenset(("book.fill", "eval.block"))
+PAUSE_TRIGGERS = PAUSE_NEWS | PAUSE_DAILY
 #: Which class of evidence a run is credited to when several arrived at once (`trigger` on the row):
 #: the venue's own verdicts first, then the House's, then what other agents wrote.
 TRIGGER_PRIORITY = ("book.settle", "book.fill", "book.refused", "audit.verdict", "eval.verdict", "repair.status", "eval.block",
@@ -497,10 +514,23 @@ class ResearchGate:
         except Exception:  # noqa: BLE001 - an unreadable rung is none
             return None
 
-    def _paused(self, settings: Mapping[str, Any], real: bool, streak: int) -> bool:
-        """Rule 10: a practice agent after `practice_pause_after` abstaining sessions in a row."""
+    def _paused(self, settings: Mapping[str, Any], real: bool, streak: int, agent: Any = None) -> bool:
+        """Rule 10: a practice agent after `practice_pause_after` abstaining sessions in a row, unless it
+        is on rung 0 (`agent` given): a replay-only agent cannot fill, and research is its only way up."""
         after = int(settings.get("practice_pause_after") or 0)
-        return self._f2(settings) and not real and after > 0 and streak >= after
+        if not (self._f2(settings) and not real and after > 0 and streak >= after):
+            return False
+        return agent is None or self._rung(agent) != 0
+
+    def _pause_filter(self, st: dict[str, Any], found: list[str], now: float) -> list[str]:
+        """What wakes a paused practice agent (rule 10): news of its program (`PAUSE_NEWS`) always, its own
+        trading (`PAUSE_DAILY`) when it has not already bought a session this UTC day
+        (`pause_trade_day`, which the run records)."""
+        kept = [t for t in found if t.split(":", 1)[0] in PAUSE_NEWS]
+        trading = [t for t in found if t.split(":", 1)[0] in PAUSE_DAILY]
+        if trading and st.get("pause_trade_day") != now_iso(lambda: now)[:10]:
+            kept += trading
+        return kept
 
     def _used(self, st: dict[str, Any], day: str) -> set[str]:
         return set((st.get("refusals") or {}).get(day) or ())
@@ -548,7 +578,7 @@ class ResearchGate:
             self._absorb_outcomes(agent, st)
             streak = int(st.get("streak") or 0)
             real = self._money(agent)[0] if self._f2(settings) else False
-            if self._paused(settings, real, streak):
+            if self._paused(settings, real, streak, agent):
                 return False
             book = refusal.payload.get("book") if refusal is not None else None
             rows = self._refusals_since(agent, st, book=book)
@@ -682,7 +712,11 @@ class ResearchGate:
             st["barren_seen"] = barren  # first count under this rule: no burst of runs at deploy
             return ""
         seen = int(st.get("barren_seen") or 0)
-        grown = barren - seen if barren >= seen else barren  # acting or new code reset the count
+        if barren < seen:
+            # Acting or new code reset the count: count from zero from now on (review of #311: seen 40,
+            # then 45 after a reset, read as 5).
+            st["barren_seen"] = seen = 0
+        grown = barren - seen
         need = int((((getattr(self.house, "game", None) or {}).get("research") or {}).get("idle") or {}).get("barren_wakes") or 10)
         return f"barren:{grown}" if grown >= need else ""
 
@@ -713,6 +747,37 @@ class ResearchGate:
             found.append(f"lesson:{lessons}")
         return found
 
+    def withheld(self, agent: Any, entry: Any) -> bool:
+        """Whether a `playbook.entry` is held back from this agent (rule 12; review of #311, Sept 25, 2026):
+        under `lesson_arm: parity` with `real_positions`, a teacher's lesson (source in `lesson_sources`)
+        written since the arms were split that names a control-arm agent, for `merton.lift.teacher_days`
+        (3) after it was written -- the window `yield_ledger.teacher_lift` measures. Neither Jev's relevance
+        question (`_relevant_notes`) nor the researcher's `playbook_read` (`Researcher.withheld`, wired by
+        league/service.py) shows it to that agent meanwhile; every other entry, and every lesson after its
+        window, is everyone's. Measured at T0: 413 `playbook_read` calls by 121 agents in 24 hours, so a
+        control agent that researched for any other reason read the lesson that named it, and the lift
+        compared two arms that had both read it. Anything unreadable holds nothing back."""
+        try:
+            settings = self.settings
+            if not settings.get("enabled", True) or not self._f2(settings) or str(settings.get("lesson_arm") or "all") != "parity":
+                return False
+            if lesson_arm(agent.id) != "control":
+                return False
+            sources = settings.get("lesson_sources") or ["teacher"]
+            if str(entry.payload.get("source") or "") not in set(sources):
+                return False
+            since = self.state.data.get("lesson_arm_since")
+            at = _epoch(entry.at)
+            if not since or at < _epoch(since):
+                return False
+            lift = ((getattr(self.house, "game", None) or {}).get("merton") or {}).get("lift") or {}
+            if self.house.clock() - at > float(lift.get("teacher_days") or 3) * 86400:
+                return False
+            words = lesson_words(agent.id, getattr(agent, "niche", None), getattr(agent, "specialty", None), agent.family)
+            return lesson_names(words, entry, sources)
+        except Exception:  # noqa: BLE001 - the control arm must never cost an agent the playbook
+            return False
+
     def lock_profile(self, agent: Any) -> str | None:
         """The profile a NEW session of this agent runs on while it is under the abstention lock
         (rule 7): `abstain_lock_profile`, the cheapest. None when it is not locked, the gate or the
@@ -728,8 +793,10 @@ class ResearchGate:
         if self._f2(settings):
             # Rule 10 (Sept 25, 2026): a paused practice agent's fill session, and a locked real agent's,
             # run on the cheapest profile; idleness buys no exemption once the clock runs nobody idle.
+            # A rung-0 agent is neither paused nor locked (it keeps its clock), but after three empty
+            # sessions its sessions run on the cheapest profile, as they did under rule 7.
             real = self._money(agent)[0]
-            return profile if self._paused(settings, real, streak) or (lock_after > 0 and streak >= lock_after) else None
+            return profile if self._paused(settings, real, streak, agent) or (lock_after > 0 and streak >= lock_after) else None
         if lock_after <= 0 or streak < lock_after or self.record_of(agent) == "idle":
             return None
         return profile
@@ -764,6 +831,8 @@ class ResearchGate:
         for entry in self.ledger.read(kinds=("library.note", "playbook.entry"), after=after, limit=1000):
             if entry.agent == agent.id or (entry.kind == "library.note" and entry.payload.get("niche") == niche):
                 continue
+            if entry.kind == "playbook.entry" and self.withheld(agent, entry):
+                continue  # rule 12: the control arm is not asked about the lesson that names it
             other = str(entry.payload.get("niche") or "")
             if other and not other.startswith(venue):
                 continue  # a note from the other venue's desks is not this strategy's business
@@ -812,12 +881,17 @@ class ResearchGate:
                 return self._run(agent, st, "run", forced, [forced], sampled=False, **tags)
             found = self.triggers(agent, st)
             lock_after = int(settings.get("abstain_lock_after") or 0)
-            paused = self._paused(settings, real, streak)
+            # Rule 9: an agent on rung 0 (replay only) keeps its clock; it is neither paused nor locked.
+            rung0 = f2 and self._rung(agent) == 0
+            paused = not rung0 and self._paused(settings, real, streak)
             # Rule 7's idle exemption kept an idle agent's cadence; under rule 9 no idle agent has one.
-            locked = not paused and lock_after > 0 and streak >= lock_after and (f2 or record != "idle")
+            locked = not paused and not rung0 and lock_after > 0 and streak >= lock_after and (f2 or record != "idle")
             if paused:
-                # Rule 10: a practice agent after three empty sessions waits for a fill of its own.
-                found = [t for t in found if t.split(":", 1)[0] in PAUSE_TRIGGERS]
+                # Rule 10: a practice agent after three empty sessions waits for news of its program, or
+                # its own trading once a day.
+                found = self._pause_filter(st, found, now)
+                if any(t.split(":", 1)[0] in PAUSE_DAILY for t in found):
+                    st["pause_trade_day"] = now_iso(lambda: now)[:10]
             elif locked:
                 # Rule 7: after `abstain_lock_after` empty sessions only its own venue outcomes count.
                 found = [t for t in found if t.split(":", 1)[0] in ABSTAIN_LOCK_TRIGGERS]
@@ -832,7 +906,7 @@ class ResearchGate:
                 # Rule 9: the clock runs an agent on real money that holds a position or a working order
                 # there or met a refusal since its last session, and an agent on rung 0 (replay only).
                 clock = not locked and not paused and ((real and (holding or bool(self._refusals_since(agent, st))))
-                                                       or self._rung(agent) == 0
+                                                       or rung0
                                                        or (record == "idle" and settings.get("idle_runs") == "clock"))
             else:
                 # Rule 6: the clock alone runs a winner and an idle agent; everyone else waits for evidence.
