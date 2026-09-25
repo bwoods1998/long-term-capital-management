@@ -65,6 +65,8 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | 0.4 | The scoreboard at T0 | snapshot taken 04:23-04:26Z (`--take`); the plan's seven rows from Z |
 | H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); Sail's checkpoints recovered at 01:55:04Z, so the backup alert is quiet until the next failure; the updater's next CODE release is the last check |
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
+| H3 | The release train | built, PR #296 (CI green 05:31Z); owner deploy (Deploy A) |
+| H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
 
 ## Findings before Wave 0 reports
 
@@ -79,6 +81,25 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
   and made 3 intents; its thought each time is its program's screen ("Screen low-priced YES football outcomes and
   place bounded post-only NO bids; at most one position per event"), which rarely fires. Not a defect. The desk's
   gap is seats: 2 of 8 held, 4 waiters over 2 h, refused because the league's 128 seats are held (F3's case).
+
+## Wave 0 reports
+
+- **H3 (#296).** Replaying the live `deploys.jsonl` (14 updater launches 02:15Z Sept 24 to 01:14Z Sept 25, one at
+  14:58Z inside the session, five rolled back) under the new rules gives 5 launches, none in a session. The hold
+  window starts 30 minutes before 13:25Z (12:55Z) because the canary took 2.2-4.0 minutes from launch to restart
+  and the watch is ten; the calendar is `ltcm.data.us_equity_session`, the function `house.py` uses. A head
+  rolled back once is retried once at the next train; a second rollback retires it. `release_train_hours` 4
+  (bounds 2-6 in `league/ci.py`). Digest unchanged.
+- **H5/H6 (#297).** The tick interval had a 60 s floor (`tick_seconds` 60) and a p50 of 60.0-68.4 s quiet, 97-121
+  s in the Sept 24 session; tick p50 60.8 s over 26 reads 04:31-05:00Z, the population step p50 22.0 s (max 75.3).
+  Run read-only on the T0 snapshot, the population step asked the displacement scan 399 times a tick (once per
+  deferred research candidate) for 10 distinct questions: 17.1 of 18.4 s, under the lifecycle lock, seating
+  nobody. The fix answers each question once per pass (3.25 s), runs the births pass every 300 s or after a birth
+  or death, moves research scheduling and the foundry step to a `house` background lane, polls kalshi-shadow once
+  a minute, and sets `tick_seconds` 30. H6: of 110 research sessions that spanned one of the day's 26 restarts, 84
+  resumed and 25 were lost with no alert (23 `campaign_post_unconfirmed`, 2 `tool outcome unconfirmed: replay`),
+  each closed as a finished pass; they are now named in a warning and the agent may research again in 15 minutes.
+  `health.json` gains `restarts_24h`, `restarts_24h_in_session`, `last_start`, `restart_research`.
 
 ## Progress notes
 
