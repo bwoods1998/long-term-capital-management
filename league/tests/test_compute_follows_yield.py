@@ -170,6 +170,43 @@ class TheHourlyRow(LedgerCase):
         self.assertNotIn("throttle", row)
 
 
+    def test_removing_the_dial_puts_every_halved_lane_back(self):
+        """The review of Deploy C (Sept 25, 2026): `economy.lane_throttle` removed is the documented off switch, but with no
+        plan made nothing wrote the rows that lift a throttle, and `throttled()` reads each lane's newest row: every lane
+        halved stayed halved."""
+        self.alerts, self.lab_usd = [], "0"
+        self.throttle("research")
+        self.throttle("engineer")
+        self.throttle("toolsmith", on=False)
+        house = self.house()
+        house.game["economy"].pop("lane_throttle")
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertFalse(throttled(self.ledger, "research"))
+        self.assertFalse(throttled(self.ledger, "engineer"))
+        lifted = [e.payload for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == THROTTLE_WHAT][3:]
+        self.assertEqual([(r["lane"], r["throttled"], r["why"]) for r in lifted],
+                         [("engineer", False, "economy.lane_throttle is off"), ("research", False, "economy.lane_throttle is off")])
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertEqual(len([e for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == THROTTLE_WHAT]), 5,
+                         "a lane already back writes nothing more")
+
+    def test_the_day_is_the_day_s_yield_rows_however_many_budget_rows_came_between(self):
+        """The review of Deploy C (Sept 25, 2026): the day was the newest 200 `ops.budget` rows, 18.1 hours at T0 (246 a
+        day, most of them Sail meter readings and absorbed holds)."""
+        self.alerts, self.lab_usd = [], "0"
+        self.ledger.append("ops.budget", {"what": "yield", "spend_usd": {"architect": "5.00", "research": "0.10"},
+                                          "evidence": {"research": {"positive_blocks": 20}}})
+        for _ in range(250):
+            self.clock.advance(60)
+            self.ledger.append("ops.budget", {"what": "holds absorbed", "usd": "0.01"})
+        house = self.house()
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertEqual(self.alerts, [])
+        self.assertTrue(throttled(self.ledger, "architect"), "$5.00 five hours ago, for no positive block, is in the day")
+
 class UnitEconomicsOnTheRow(LedgerCase):
     def test_compute_and_profit_a_day_are_counted_as_the_scoreboard_counts_them(self):
         """T0 by this fold: $118.88 of compute and $21.35 of profit a day, to the cent the scoreboard's."""
@@ -450,6 +487,21 @@ class EngineerLane(LedgerCase):
         self.assertGreater(worst_whole - worst_now, D("0.25"))
 
 
+    def test_sections_an_attempt_asked_for_are_sent_whole_to_the_next(self):
+        """The review of Deploy C (Sept 25, 2026): an attempt that asked for contract sections and had no room under the
+        per-job ceiling to ask again wrote them on its `repair.status` row (`_contract_sections`), but the worklist's fold
+        never carried them, so the next attempt was sent the index again and asked again."""
+        frontier, engineer = self.engineer([self.nothing()])
+        self.report("bug_report:kalshi-weather:1")
+        job = self.worklist.get("bug_report:kalshi-weather:1")
+        engineer._after_failure(job, 1, D("0.10"), "patch 1 asked for contract sections the-alpha-lab; no room", _contract_sections=["the-alpha-lab"])
+        job = self.worklist.get("bug_report:kalshi-weather:1")
+        self.assertEqual(job.carry.get("_contract_sections"), ["the-alpha-lab"])
+        self.clock.advance(3600)
+        engineer.step()
+        self.assertEqual(len(frontier.asked), 1)
+        self.assertIn("## The Alpha Lab", frontier.asked[0]["system"], "the section it asked for comes whole")
+
 class ContractBySection(unittest.TestCase):
     TEXT = ("# The contract\n\nIntro.\n\n## The file\n\n```python\n# not a heading\nNEEDS = {}\n```\n\n## What decide is given\n\nctx.\n\n"
             "### Options: the chain\n\nchain.\n\n#### Greeks\n\ngreeks.\n\n### Feeds: weather\n\nfeeds.\n\n## The open desks\n\nopen.\n\n"
@@ -476,6 +528,8 @@ class ContractBySection(unittest.TestCase):
         self.assertEqual(contract_topics({"asset_class": "option"}, "alpaca-options"), {"options"})
         self.assertEqual(contract_topics({"feeds": ["weather"]}, "kalshi-open"), {"feeds", "open"})
         self.assertEqual(contract_topics({"venue": "kalshi"}, "kalshi-sports"), set())
+        self.assertEqual(contract_topics({"venue": "alpaca", "options_features": True}, "alpaca-megacaps"), {"options"},
+                         "the options-derived features' section is an options section")
 
     def test_an_answer_that_asks_is_asked_again_once_with_the_sections(self):
         calls = []

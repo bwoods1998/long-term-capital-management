@@ -12,7 +12,7 @@ were refused "insufficient desk cash" with no rule named and no word that nothin
 
 import tempfile
 import unittest
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -228,6 +228,27 @@ class CashRefusalsSayWhatFitsTest(BookCase):
         book_cash = next(r for r in reasons if r.startswith("needs $"))
         self.assertIn("under the venue's $10 minimum for AVAX/USD: nothing more fits", book_cash)
         self.assertEqual(sum(1 for r in reasons if "as a probe" in r), 1, "the band once in the joined text")
+
+    def test_a_bid_under_the_ask_is_told_the_room_the_position_rule_values_at_the_ask(self):
+        """The review of Deploy C (Sept 25, 2026): `rule_position_limit` values a buy at the ask, whatever its limit. A $29.10
+        bid under a $30.00 ask was told the cap's whole $50.00 fits; resent at $50.00 it was refused again ($51.55 at the ask)."""
+        self.book.reconcile()
+        self.seat("whale", usd="600")
+        self.seat("prober", usd="100", position="100", order="75")
+        self.broker.set_quote(crypto(), "29.90", "30.00")
+        now = "2026-09-25T04:00:00.000Z"
+
+        def check(quantity):
+            bid = self.intent("prober", crypto(), "buy", quantity, order_type="limit", limit_price="29.10")
+            return self.book.check(bid, self.book._quote(crypto()), now)
+
+        reasons = check("1.7")  # $49.47 at its limit, $51.00 at the ask: over the $50.00 cap on the position
+        position = next(r for r in reasons if r.startswith("position would be "))
+        self.assertIn("this position's cap (book rule max_position_pct) is $50.00, so an order of at most $48.50 fits", position)
+        told = (D("48.50") / D("29.10")).quantize(D("0.0001"), rounding=ROUND_DOWN)
+        self.assertFalse([r for r in check(str(told)) if r.startswith("position would be ")], "an order of the room it was told fits")
+        self.assertTrue([r for r in check(str((D("50.00") / D("29.10")).quantize(D("0.0001"), rounding=ROUND_DOWN))) if r.startswith("position would be ")],
+                        "the cap's whole $50.00 at its limit does not")
 
     def test_text_that_cannot_be_written_never_changes_what_is_refused(self):
         self.book.reconcile()

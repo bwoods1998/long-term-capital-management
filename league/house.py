@@ -4026,7 +4026,56 @@ class House:
         cut = now_iso(lambda: until)
         if len(kept) < 2:
             raise ValueError(f"the replay tape holds {len(kept)} step(s) up to {cut}, the hour the lab froze this code")
-        return f"{tape_id}|until:{cut}", {**dict(tape), "steps": kept, "replay_until": cut}
+        out = {**dict(tape), "steps": kept, "replay_until": cut}
+        unsettled = House._unsettled_at_cut(tape, kept)
+        if unsettled:
+            # The review of Deploy C (Sept 25, 2026): a Kalshi tape holds only markets that had settled when it was built,
+            # a step at each one's close and one at its settlement. Cut at the hour, a market that closed by the tape's
+            # last kept step but settles after it (an hourly market closing at the cut and paying minutes later, a weather
+            # market paying hours after its close) never settles on the cut tape: a position held into its close ends the
+            # replay `unresolved`, and the evaluator fails the graduate as a counted trial ("positions lack a completed
+            # settlement within the recorded scoring window") on a tape that cannot show the settlement. Such a market is
+            # left off the cut tape, as if the tape's sample had not kept it: no step after the cut is added (none is in
+            # both the replay and the forward window) and every market left can settle or stay open, as on the uncut tape.
+            gone = set(unsettled)
+            steps_out = []
+            for step in kept:
+                rows = step.get("markets") if isinstance(step, Mapping) else None
+                if isinstance(rows, list) and any(isinstance(r, Mapping) and r.get("market") in gone for r in rows):
+                    rows = [r for r in rows if not (isinstance(r, Mapping) and r.get("market") in gone)]
+                    step = {**dict(step), "markets": rows}
+                    if all(isinstance(r, Mapping) and r.get("execution_only") is True for r in rows):
+                        step["execution_only"] = True  # as `KalshiData.tape` marks a step with no snapshot row
+                steps_out.append(step)
+            out["steps"] = steps_out
+            for key in ("results", "settlements"):
+                if isinstance(tape.get(key), Mapping):
+                    out[key] = {k: v for k, v in tape[key].items() if k not in gone}
+            if isinstance(tape.get("meta"), Mapping) and isinstance(tape["meta"].get("kept"), int):
+                out["meta"] = {**dict(tape["meta"]), "kept": max(0, int(tape["meta"]["kept"]) - len(gone))}
+            out["unsettled_at_cut"] = sorted(gone)
+        return f"{tape_id}|until:{cut}", out
+
+    @staticmethod
+    def _unsettled_at_cut(tape: Mapping[str, Any], kept: list[Any]) -> list[str]:
+        """The markets of a cut Kalshi tape (one with `settlements`) that have closed by its last kept step -- the close its
+        last kept row shows, as `replay` reads it (`refresh_closes`) -- and settle after that step: on the cut tape they
+        could never settle (`_tape_until`). [] for a tape without settlements (Alpaca, a legacy Kalshi tape)."""
+        settlements = tape.get("settlements")
+        if not isinstance(settlements, Mapping) or not kept or not isinstance(kept[-1], Mapping):
+            return []
+        last = _epoch(str(kept[-1].get("t") or ""))
+        closes: dict[str, str] = {}
+        for step in kept:
+            for row in (step.get("markets") or []) if isinstance(step, Mapping) else []:
+                if isinstance(row, Mapping) and row.get("market") and row.get("close_time"):
+                    closes[str(row["market"])] = str(row["close_time"])
+        out = []
+        for market, close in closes.items():
+            closed, settled = _epoch(close), _epoch(str(settlements.get(market) or ""))
+            if closed and settled and closed <= last < settled:
+                out.append(market)
+        return sorted(out)
 
     def _background(self, key: str, work: Callable[..., Any], *args: Any) -> bool:
         """Run slow work beside the tick. One job per key at a time; failures become alerts."""

@@ -141,6 +141,25 @@ class DeterministicSources(Base):
         self.assertEqual(sources.scan(), reported)
         self.assertEqual(self.worklist.get(reported[0]).recurrence, 4)
 
+    def test_a_refusal_s_x3_note_leaves_its_worklist_key_as_it_was(self):
+        """The review of Deploy C (Sept 25, 2026): X3 appends " -- to fit ..." to a refused entry's cap. Inside the key's
+        100 characters on a short reason it made a new key -- a new real-money job at attempt 0 -- for a rule the
+        engineer had already worked (alpaca "insufficient desk cash" observing on PR #233 at T0)."""
+        from league import worklist
+        from league.book import FIT_MARK
+
+        before = "insufficient desk cash: need 12.00, have 0.35"
+        noted = (before + " -- to fit as a probe on the alpaca book: no leverage (ltcm/risk.py rule_cash): an entry is paid "
+                 "from the account's free cash, its working buys already set aside, and $0.35 is free")
+        other = before + " -- to fit: no leverage (ltcm/risk.py rule_cash): an entry is paid from the account's free cash"
+        self.assertEqual(normalize_reason(noted), normalize_reason(before))
+        self.assertEqual(normalize_reason(other), normalize_reason(before))
+        for n, (agent, reason) in enumerate((("agent-a", before), ("agent-b", noted), ("agent-c", other))):
+            self.clock.now = 1789000000.0 + n * 60
+            self.ledger.append("book.refused", {"book": "alpaca", "reasons": [reason]}, agent=agent)
+        self.assertEqual(self.scan(), ["order_refusal:alpaca:insufficient desk cash: need #, have #"])
+        self.assertEqual(getattr(worklist, "FIT_MARK", None), FIT_MARK, "the worklist's mark is the book's")
+
     def test_a_merton_pr_refused_by_ci_is_reported_but_a_repair_s_own_is_not(self):
         self.ledger.append("merton.change", {"number": 72, "status": "opened", "role": "architect", "title": "t", "paths": ["league/strategies/x.py"]})
         self.ledger.append("merton.change", {"number": 72, "status": "refused by CI", "role": "architect", "title": "t", "paths": ["league/strategies/x.py"]})

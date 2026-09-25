@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import json
 import math
+import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from league.house import House
 from league.lab import candidate_id, forward_cut
+from league.replay import run_replay
 from league.tests.test_lab import KNOB, LabCase
+from league.tests.test_replay import MKT, event, kalshi_tape, market, script, t_at
 
 HOUR = 3600.0
 MIDNIGHT = datetime(2026, 9, 10, tzinfo=timezone.utc).timestamp()  # the fake tape's first step
@@ -78,3 +82,60 @@ class LabGraduateReplayTest(LabCase):
         self.assertTrue(cut_id.startswith("t1|until:2026-09-10T00:10:00"))
         with self.assertRaises(ValueError):
             self.house._tape_until("t1", tape, MIDNIGHT + 60)  # one step up to 00:01
+
+
+class KalshiCutSettlesWhatClosedBeforeIt(unittest.TestCase):
+    """The review of Deploy C (Sept 25, 2026): a Kalshi tape holds only markets that had settled when it was built, a step
+    at each one's close and one at its settlement. Cut at the freeze hour, an hourly market closing at the cut and paying
+    four minutes later never paid on the cut tape: a program holding it ended the replay `unresolved`, and the evaluator
+    failed the graduate as a counted trial on a tape that could not show the settlement."""
+
+    EARLY, LATER = "KXBTCD-26SEP1013-T80999.99", "KXBTCD-26SEP1015-T80999.99"
+
+    def tape(self):
+        rows = []
+        for i in range(25):  # 13:00 to 15:00, a step every five minutes
+            step = []
+            if i * 5 < 30:
+                step.append(market(.50, .51, ticker=self.EARLY, close=30))
+            if i * 5 < 60:
+                step.append(market(.50, .51, close=60))  # MKT closes at the cut, 14:00, and pays at 14:04
+            elif i * 5 == 60:
+                step.append(market(None, None, close=60, execution_only=True))  # its terminal row, as `KalshiData.tape` writes it
+            step.append(market(.50, .51, ticker=self.LATER, close=120))
+            rows.append(step)
+        tape = kalshi_tape(rows, {MKT: "yes", self.EARLY: "yes", self.LATER: "no"})
+        tape["settlements"] = {self.EARLY: t_at(32), MKT: t_at(64), self.LATER: t_at(121)}
+        tape["meta"] = {"listed": 30, "scanned": 3, "kept": 3}
+        for minute in (32, 64, 121):  # a settlement step, as the builder adds one
+            tape["steps"].append({"t": t_at(minute), "markets": [], "execution_only": True})
+        tape["steps"].sort(key=lambda s: s["t"])
+        return tape
+
+    def test_a_market_closed_by_the_cut_and_paid_after_it_is_left_off_the_cut_tape(self):
+        tape = self.tape()
+        until = datetime(2026, 9, 10, 14, 0, tzinfo=timezone.utc).timestamp()
+        _, cut = House._tape_until("t", tape, until)
+        self.assertEqual(cut["steps"][-1]["t"], "2026-09-10T14:00:00Z")
+        plan = {"plan": {"0": [event("buy", 10), event("buy", 10, ticker=self.EARLY), event("buy", 10, ticker=self.LATER)]}}
+        code = script(venue="kalshi")
+        whole = run_replay(code, plan, tape)
+        self.assertEqual((whole["ok"], whole["unresolved"], whole["trades"]), (True, 0, 3))
+        short = run_replay(code, plan, cut)
+        # The market that paid before the cut settles on it; the one still open at the cut is marked, never unresolved.
+        self.assertEqual((short["ok"], short["unresolved"], short["trades"], short["open_positions"]), (True, 0, 1, 1))
+        self.assertEqual(cut["unsettled_at_cut"], [MKT])
+        self.assertFalse(any(row.get("market") == MKT for step in cut["steps"] for row in step["markets"]))
+        self.assertEqual([row["market"] for row in cut["steps"][-1]["markets"]], [self.LATER], "its terminal row gone, the rest kept")
+        self.assertTrue(next(s for s in cut["steps"] if s["t"] == t_at(32)).get("execution_only"), "a settlement step stays one")
+        self.assertEqual((sorted(cut["results"]), cut["meta"]["kept"]), (sorted([self.EARLY, self.LATER]), 2))
+        self.assertIn(MKT, tape["results"], "the cached tape is never mutated")
+        self.assertTrue(any(row.get("market") == MKT for step in tape["steps"] for row in step["markets"]))
+
+    def test_an_alpaca_tape_or_one_without_settlements_is_only_cut(self):
+        tape = self.tape()
+        del tape["settlements"]
+        until = datetime(2026, 9, 10, 14, 0, tzinfo=timezone.utc).timestamp()
+        _, cut = House._tape_until("t", tape, until)
+        self.assertNotIn("unsettled_at_cut", cut)
+        self.assertTrue(any(row.get("market") == MKT for step in cut["steps"] for row in step["markets"]))

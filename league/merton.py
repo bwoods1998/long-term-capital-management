@@ -157,12 +157,14 @@ def contract_for(text: str, topics: Iterable[str] = (), *, extra: Iterable[str] 
 
 
 def contract_topics(needs: Mapping[str, Any] | None, niche: Any = None) -> set[str]:
-    """The topics a strategy's own sections are about: options for an options program or desk, feeds when
-    its NEEDS name any, the open desks when it sits on one."""
+    """The topics a strategy's own sections are about: options for an options program or desk, or one that reads the
+    options-derived features (`NEEDS["options_features"]`, whose section is an options one: the review of Deploy C), feeds
+    when its NEEDS name any, the open desks when it sits on one."""
     needs = dict(needs or {})
     niche = str(niche or "")
     topics = set()
-    if str(needs.get("asset_class") or "") == "option" or "options" in niche or needs.get("options") or needs.get("chain"):
+    if (str(needs.get("asset_class") or "") == "option" or "options" in niche or needs.get("options") or needs.get("chain")
+            or needs.get("options_features")):
         topics.add("options")
     if needs.get("feeds"):
         topics.add("feeds")

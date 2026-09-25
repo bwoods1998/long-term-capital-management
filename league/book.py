@@ -1362,19 +1362,25 @@ class Book:
                 band = ""
         return f"as a {band} on the {self.name} book" if band else f"on real money on the {self.name} book"
 
-    def _fits(self, intent: Intent, room: Decimal, price: Decimal | None, *, fee: bool = False) -> str:
+    def _fits(self, intent: Intent, room: Decimal, price: Decimal | None, *, fee: bool = False,
+              valued_at: Decimal | None = None) -> str:
         """What of this order would fit in `room` dollars (X3): whole contracts at its price on an event or an option (after
-        the fee with `fee`), else dollars and, under it, the venue's minimum. Text only: nothing is resized or re-checked."""
+        the fee with `fee`), else dollars and, under it, the venue's minimum. Text only: nothing is resized or re-checked.
+        `valued_at`: the price the cap's rule values the order at (`ltcm/risk.py` `rule_position_limit` and
+        `rule_gross_limit` take the quote's ask for a buy, whatever its limit): contracts are counted at it, and the
+        dollars an order at its own price may spend are scaled to it (the review of Deploy C, Sept 25, 2026: a $29.10
+        AVAX/USD bid under a $30.00 ask told "$10.00 fits" was refused again at $9.90, valued $10.20)."""
         from .venues import min_order_usd
 
         inst = intent.instrument
-        room = max(money(room), ZERO)
+        valued = valued_at if valued_at is not None and valued_at > 0 and price is not None and price > 0 else None
         stuck = "nothing more fits until a holding is sold, a working buy is cancelled or a position settles"
-        if room <= 0:
+        if max(money(room), ZERO) <= 0:
             return stuck
         if inst.asset_class in ("event", "option") and price is not None and price > 0:
+            room = max(money(room), ZERO)
             unit = price * inst.multiplier
-            n = (room / unit).to_integral_value(rounding=ROUND_DOWN)
+            n = (room / ((valued or price) * inst.multiplier)).to_integral_value(rounding=ROUND_DOWN)
             for _ in range(50):  # the fee is a few cents a contract at most: a step or two down
                 if not fee or n <= 0 or n * unit + self.fees.charge(inst, "buy", n, price).usd <= room:
                     break
@@ -1382,6 +1388,7 @@ class Book:
             if n <= 0:
                 return f"not one contract at {price} (${unit:.2f} each{' before the fee' if fee else ''}) fits in ${room:.2f}"
             return f"at most {n} contract{'' if n == 1 else 's'} at {price}{' with the fee' if fee else ''} fit{'s' if n == 1 else ''}"
+        room = max(money(room * price / valued if valued is not None else room), ZERO)
         minimum = min_order_usd(inst)
         text = f"an order of at most ${room:.2f}{' with its fee' if fee else ''} fits"
         if minimum is not None and room < minimum:
@@ -1412,9 +1419,10 @@ class Book:
             named.append(True)
             return f"{FIT_MARK} {self._band_words(intent.agent)}"
 
-        def capped(cap: Decimal, used: Decimal | None, what: str) -> str:
+        def capped(cap: Decimal, used: Decimal | None, what: str, valued_at: Decimal | None = None) -> str:
             held_or_working = f", ${used:.2f} of it is held or working" if used else ""
-            return f"{words()}: {what} is ${cap:.2f}{held_or_working}, so {self._fits(intent, cap - (used or ZERO), price)}"
+            fits = self._fits(intent, cap - (used or ZERO), price, valued_at=valued_at)
+            return f"{words()}: {what} is ${cap:.2f}{held_or_working}, so {fits}"
 
         out = []
         for reason in reasons:
@@ -1432,9 +1440,14 @@ class Book:
             elif reason.startswith("order notional "):
                 note = capped(equity * money(r["max_order_notional_pct"]), None, "one order's cap (book rule max_order_notional_pct)")
             elif reason.startswith("position would be "):
-                note = capped(equity * money(r["max_position_pct"]), held_value, "this position's cap (book rule max_position_pct)")
+                # `rule_position_limit` values the position at the reference (the ask for a buy), not the order's limit.
+                note = capped(equity * money(r["max_position_pct"]), held_value, "this position's cap (book rule max_position_pct)",
+                              valued_at=reference)
             elif reason.startswith("gross exposure would be "):
-                note = capped(equity * money(r["max_gross_pct"]), gross, "the account's gross cap (book rule max_gross_pct)")
+                # `rule_gross_limit`: the other holdings at their marks and this instrument's, with the order, at the reference.
+                others = gross_exposure({k: v for k, v in positions.items() if k != inst.key})
+                note = capped(equity * money(r["max_gross_pct"]), others + held_value, "the account's gross cap (book rule max_gross_pct)",
+                              valued_at=reference)
             elif reason.startswith("order of $") and "order cap" in reason:
                 note = capped(money(r["max_order_usd"]), None, "the order cap")
             elif reason.startswith("order of $") and "this rung's" in reason:

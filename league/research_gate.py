@@ -174,6 +174,7 @@ from typing import Any, Callable, Mapping
 from .allocator import RESTATING_CONTROLS
 from .jev import sha
 from .ledger import now_iso
+from .worklist import FIT_MARK
 
 TRIGGER_KINDS = ("book.fill", "book.settle", "book.refused", "agent.strategy", "eval.verdict", "credit.grant",
                  "eval.block", "audit.verdict")
@@ -274,8 +275,10 @@ def refusal_class(text: Any) -> str:
     """A refusal's reason without what varies between two refusals of the same rule: its numbers and
     its market tickers. "one event may hold at most 25% of the stake: KXBTCD-26SEP2501 would hold $3.80
     of this account's $13.27 ..." and the same refusal at $4.10 of $13.40 on another event are one class
-    (rule 11; the 670 refusals of the 24 hours to T0 were 86 (agent, day, class) triples)."""
-    text = _NUMBER.sub("#", _TICKER.sub("T", str(text or "")))
+    (rule 11; the 670 refusals of the 24 hours to T0 were 86 (agent, day, class) triples). The X3 note after
+    `FIT_MARK` (the band, the cap and the room, whose words vary: "1 contract fits", "2 contracts fit") is not
+    the rule's text and is left out (the review of Deploy C, Sept 25, 2026)."""
+    text = _NUMBER.sub("#", _TICKER.sub("T", str(text or "").split(FIT_MARK, 1)[0]))
     return re.sub(r"\s+", " ", text).strip().lower()[:120]
 
 

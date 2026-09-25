@@ -439,6 +439,10 @@
     "capacity_min_blocks": 6,
     "capacity_weight_floor_usd": 0.25,
     "min_capacity_usd": 5,
+    "_about_capacity_floor_venues": "Sept 25, 2026 (the review of Deploy C; league/hypotheses.py Foundry._floor): min_capacity_usd refuses cards on these venues only. On Alpaca the size read is the $12.50 a bunt holds, or at most the $50 of a C6 fill curve, whose fills never halved there: $5 a day needs $40 a day of replay profit on the $200 practice book (20% a day), $10 at $50. The best Alpaca replay pass of the three days to T0 (crypto-alts, 5.89% over 21 days) measured $0.07 a day ($0.28 at $50), and 23 of the 29 foundry births of the 48 hours to T0 were Alpaca's: the floor refused every Alpaca card while the calls for them (two of the four model targets) were still paid. A liquid stock or coin fills far above any position the money rules allow, so its capacity is set by the stake, not the market; Alpaca cards still state and measure it (recorded on the card and evaluation rows, capacity_rule.floor_note says why no floor), and the replay judges them as before S1. Add alpaca back once its size before fills halve is measured.",
+    "capacity_floor_venues": [
+      "kalshi"
+    ],
     "replay_position_usd": {
       "kalshi": 30,
       "alpaca": 100
@@ -518,6 +522,10 @@
     "min_capacity_usd": [
       2,
       20
+    ],
+    "capacity_floor_venues": [
+      "kalshi",
+      "alpaca"
     ],
     "replay_position_usd": {
       "kalshi": [
