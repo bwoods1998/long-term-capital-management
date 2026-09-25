@@ -311,7 +311,7 @@ underlying over the window; elsewhere paper remains the test.
 
 An options-desk strategy with `NEEDS["structures"] = True` trades level-3 structures with defined
 risk, on practice only (the full rules: `league/structures.py`). Its book holds structures only; on
-real money every structure is refused until the owner's switch.
+real money an open waits for the owner's switch (O1); a close goes.
 
 Intent: `{"structure", "action": "open"|"close", "quantity", "limit_price", "legs": [{"occ", "role":
 "long"|"short"}], "reason"}`. `limit_price` is the net a share in cents as a trader says it: opening,
