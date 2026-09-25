@@ -671,7 +671,9 @@ ORDER BY seq DESC LIMIT 20`.
     free cash, the order, position and gross caps, the seat's caps -- says after " -- to fit" the band it
     was judged in (probe, bunt or swing on a real book, practice), the cap in dollars and the room left
     under it: whole contracts at the order's price, or dollars and the venue's $10 crypto minimum. The
-    text before the mark, what is refused and the refusals' classes are unchanged. Verify: the next
+    text before the mark, what is refused and the refusals' classes are unchanged: the repair worklist's
+    key (`worklist.normalize_reason`) and the research gate's refusal class (`refusal_class`) read only the
+    text before the mark, so a rule the engineer already worked keeps its job. Verify: the next
     `book.refused` rows on `kalshi` and `alpaca` whose reasons name a cap carry " -- to fit", and
     "insufficient desk cash" names `ltcm/risk.py rule_cash`.
   - **A lab graduate's replay ends at its freeze** (`House._lab_freeze_cut`, `_tape_until`; the F-lab

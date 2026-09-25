@@ -317,10 +317,18 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _TICKER = re.compile(r"\b[A-Z][A-Z0-9#]*#[A-Z0-9#-]*\b")
 
 
+#: Where a refusal's X3 note begins (`league/book.py` `FIT_MARK`, Sept 25, 2026): the band, the cap and the room
+#: that follow it vary between refusals of one rule and are not the rule's text.
+FIT_MARK = " -- to fit"
+
+
 def normalize_reason(reason: str, agent: str = "") -> str:
     """A refusal's reason with the parts that differ between identical refusals taken out: the
-    agent's own name, numbers and market tickers."""
-    text = str(reason or "")
+    agent's own name, numbers and market tickers, and the X3 note after `FIT_MARK` (the review of Deploy C,
+    Sept 25, 2026: inside the key's 100 characters on a short reason -- "insufficient desk cash: need #,
+    have # -- to fit as a probe on the alpaca book: ..." -- the note gave every rule already worked a new
+    key, a new real-money job at attempt 0, and left the old key's observing repair without evidence)."""
+    text = str(reason or "").split(FIT_MARK, 1)[0]
     if agent:
         # As a whole name only: agent "a" must not turn "market" into "m<agent>rket".
         text = re.sub(rf"(?<![\w-]){re.escape(agent)}(?![\w-])", "<agent>", text)

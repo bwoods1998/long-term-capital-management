@@ -313,6 +313,11 @@ class Outcomes(GateCase):
         self.assertEqual(refusal_class(REFUSED), refusal_class(REFUSED_AGAIN))
         self.assertNotEqual(refusal_class(REFUSED), refusal_class("insufficient desk cash: need 5.00 have 1.20"))
         self.assertEqual(refusal_class("insufficient desk cash: need 5.00 have 1.20"), refusal_class("insufficient desk cash: need 12.40 have 0.07"))
+        # X3's note (Sept 25, 2026) is not the rule's text: "1 contract fits" and "2 contracts fit", a probe and a bunt, are one class.
+        self.assertEqual(refusal_class("order notional 30.00 exceeds 50% of desk equity -- to fit as a probe on the kalshi book: one "
+                                       "order's cap (book rule max_order_notional_pct) is $10.00, so at most 1 contract at 0.93 fits"),
+                         refusal_class("order notional 41.00 exceeds 50% of desk equity -- to fit as a bunt on the kalshi book: one "
+                                       "order's cap (book rule max_order_notional_pct) is $20.00, so at most 21 contracts at 0.93 fit"))
         self.assertEqual(refusal_class("the alpaca book is frozen until it reconciles: cash differs by 0.0108"),
                          "the alpaca book is frozen until it reconciles: cash differs by #")
 
