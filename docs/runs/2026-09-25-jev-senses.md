@@ -92,7 +92,7 @@ its session.
   this run's merges to `main` before forward-first's Deploy A or the options run's V; the merge happens in
   the slot, immediately before the deploy. After promotion: `live_trading.active` and the money digest
   checked unchanged (forward-first's request). Its exact start is written here first.
-  **10:39Z: today's slot is closed** (the options run: the usage-limit outage delayed Deploy V past 11:45Z).
+  **10:31Z: today's slot is closed** (the options run: the usage-limit outage delayed Deploy V past 11:45Z).
   D-J1 goes in Saturday Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G,
   before the Kalshi run's K2. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
 
