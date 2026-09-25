@@ -91,7 +91,10 @@ its session.
   run's K2. The options run writes "D-J1 slot: open" or "D-J1 slot: Saturday" in its record. Nothing of
   this run's merges to `main` before forward-first's Deploy A or the options run's V; the merge happens in
   the slot, immediately before the deploy. After promotion: `live_trading.active` and the money digest
-  checked unchanged (forward-first's request). Its exact start is written here first. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
+  checked unchanged (forward-first's request). Its exact start is written here first.
+  **10:39Z: today's slot is closed** (the options run: the usage-limit outage delayed Deploy V past 11:45Z).
+  D-J1 goes in Saturday Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G,
+  before the Kalshi run's K2. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
 
 ## Checklist
 
@@ -192,7 +195,52 @@ the post-ship evaluation can say whether Jev adds anything on data it has never 
 3 days of post-ship events, the shadow is cut to $0. Both are validated on post-ship events before any
 strategy reads them (the plan's 0.70 line applies to the served feature).
 
+### J2 on the research gate (10:35Z): Jev does not pick the sessions worth paying for; a free model does
+
+The J2 analyst built 6,846 finished research sessions Sept 22 00:00Z to Sept 25 06:00Z from the ledger (read-only),
+each with its "new since the agent's previous session" evidence (its own fills, settlements, refusals, verdicts,
+niche notes and lessons, fulfilled requests, inactivity, its previous conclusion; nothing at or after the start),
+asked Jev one frozen question per session ("does this item contain decision-relevant NEW evidence that could
+change what a researcher would conclude or build?", phrasing chosen on Sept 22-23 only), and scored it against
+what the session produced: a retained candidate (o1) and a replay pass within 2 h (o2). Thresholds were chosen on
+Sept 22-23; the held-out window is Sept 24 00:00Z to Sept 25 06:00Z; intervals clustered by agent. Jev spend $0.088.
+
+| Held-out AUC for a replay pass (o2) | All gate runs + refusal fast path (2,697, $98.63) | Sessions forward-first's F2 would still run (1,228, $39.05) |
+|---|---|---|
+| Jev's p | 0.650 [0.613, 0.682] | 0.715 [0.674, 0.748] |
+| trigger kind alone (free) | 0.790 [0.749, 0.826] | 0.856 [0.823, 0.887] |
+| record class alone (free) | 0.852 [0.816, 0.881] | 0.885 [0.851, 0.914] |
+| free logistic (kind, streak, record, previous outcome, fills, hours since last) | 0.860 [0.828, 0.885] | 0.896 [0.864, 0.925] |
+| free logistic + Jev | 0.859 [0.828, 0.884] | 0.893 [0.861, 0.924] |
+
+- **Jev's pre-filter fails the plan's bar:** at the threshold that keeps replay-pass loss under 10% on Sept
+  22-23, it skips 5% of held-out dollars on F2's survivors (3% on all runs), far from 30%.
+- **The free model meets it on F2's survivors:** 63% of sessions and 32% of dollars skipped for 8% of replay
+  passes and 11% of candidates lost. Jev adds nothing on top.
+- Sessions woken by the agent's own fills or settlements rarely produce anything (AUC 0.22 on F2's survivors,
+  i.e. they predict NO candidate): F2 keeps them as triggers. That is for the forward-first run's F2/F4, which
+  owns the gate; this run passes the numbers on and builds no Jev research pre-filter.
+
+### J4 market discovery (07:32Z): what Kalshi trades that the swarm cannot price
+
+Kalshi's public API at 07:15Z: 131,970 open markets in 4,132 series; 1,654 series with ≥ 100 contracts in 24 h
+(59.31M contracts). Jev classified each series' settlement mechanics and which recorded feed could price it
+(`choice` questions, $0.141; it agreed with the deterministic prefix rules on 97.0% of mechanics and 89.4% of
+feeds). Kalshi desks cover 208 series, 53% of the volume, and 20.4M contracts of that covered volume have no
+recorded feed pricing them. The largest near-term volume with no feed: WTA matches 10.03M, DP World Tour 3.06M
+(all within 48 h), ATP matches 2.85M (2.80M within 48 h), T20 cricket 1.07M, international friendlies 0.62M, UFC
+0.26M, F1 0.19M: ESPN's public scoreboards cover these sports, but the House's sports map does not. Sent to the
+Kalshi run at 10:37Z.
+
 ## Progress notes
+
+- **10:40Z (T0 + 4 h 23 m; the 10:17Z note was late: a usage limit stopped this session and its agents
+  07:30-10:30Z, the other three runs too).** J0 done; J1's development analysis done (the free model is the
+  feature, Jev a capped shadow), the recorder built and reviewed (no blockers; eight should-fix items and the
+  model integration in progress); J2 research half measured (no Jev pre-filter; the free model goes to the gate's
+  owner), Merton half in progress; J4 discovery done; J5 built (#304, draft, waits for the other gateway
+  deploys). D-J1 moved to Saturday's window. Jev spent by this run so far: $0.23 of the gateway line (analyses
+  from the Mac); the House's own Jev line is unchanged (still capped at $0.25 a day until D-J1).
 
 ## Deploy log
 
