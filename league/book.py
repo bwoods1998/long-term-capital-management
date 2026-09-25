@@ -664,6 +664,9 @@ class Book:
         #: reading because the last clean reading before it added resting bids back unrounded
         #: (`_bid_rounding`, set by the fold from a `book.reconciled` row without `holds`).
         self._holds_transition = ZERO
+        #: The working crypto bids the ledger shows open (`_apply_order`): what `_bid_rounding` reads, so
+        #: the fold need not walk every order the book ever sent at each reading it replays.
+        self._open_bids: set[str] = set()
         #: Every instrument the book has ever traded, by position key: a crumb the venue still
         #: shows after its holder sold out must still be valued, or it cannot be called dust.
         self._traded: dict[str, Instrument] = {}
@@ -906,6 +909,11 @@ class Book:
             working.allocation = dict(p["allocation"])
         if p.get("broker_order_id"):
             working.broker_order_id = p["broker_order_id"]
+        if working.instrument.asset_class == "crypto" and working.side == "buy" and working.limit_price is not None:
+            if working.open:
+                self._open_bids.add(order_id)
+            else:
+                self._open_bids.discard(order_id)
 
     def _apply_exit_plan(self, p: Mapping[str, Any]) -> None:
         plan_id = str(p["plan_id"])
@@ -3080,8 +3088,9 @@ class Book:
         """What the book's working crypto bids add back unrounded beyond what Alpaca holds for them at
         the cent (`_venue`, H4): the error every reading before H4 booked as dust."""
         out = ZERO
-        for working in self.orders.values():
-            if working.open and working.instrument.asset_class == "crypto" and working.side == "buy" and working.limit_price is not None:
+        for order_id in self._open_bids:
+            working = self.orders[order_id]
+            if working.open:
                 held = working.remaining * working.limit_price * working.instrument.multiplier
                 out += held - held.quantize(CENT, rounding=ROUND_HALF_UP)
         return out
