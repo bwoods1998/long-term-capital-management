@@ -285,7 +285,7 @@ works; those rows are too few to decide anything and the reading is not the deci
 
 | Use | Jev volume and cost | What it produced | Verdict |
 |---|---|---|---|
-| Research gate note relevance | 683 calls, $0.039 | 170 extra sessions ($5.24 of research): candidate 8.3%, replay pass 4.7%, the same as the gate's random 10% sample of would-be skips (6.6% / 4.5%, n 1,481) and a fifth of the free triggers (about 23%); $0.66 of research per replay pass against $0.16-0.19 for free triggers | **No value; costs research dollars.** D-J1's higher cap let it wake 4 sessions in its first 3 h (0 in the same hours before). Sent to forward-first 14:45Z: drop it in F2's gate, or this run sets the gate's Jev cap back to 150 in its next deploy |
+| Research gate note relevance | 683 calls, $0.039 | 170 extra sessions ($5.24 of research): candidate 8.3%, replay pass 4.7%, the same as the gate's random 10% sample of would-be skips (6.6% / 4.5%, n 1,481) and a fifth of the free triggers (about 23%); $0.66 of research per replay pass against $0.16-0.19 for free triggers | **No value; costs research dollars.** D-J1's higher cap let it wake 4 sessions in its first 3 h (0 in the same hours before). Sent to forward-first 14:44Z; **its answer (14:45Z): a `research.gate.jev_relevance` dial, default false, ships in its Deploy C (Saturday); the cap stays** |
 | Triage bug classifier | part of 408 calls, $0.027 | 96 bug groups; 13 reached Merton's engineer ($2.06), 7 verified (against audit's 14 of 164 and refusals' 6 of 26); the fixes are child strategies with 8 fills, −$11.00 | **Earned its keep as a cheap engineering feed; no trading value yet** |
 | Triage request merges | 176 pairs asked | 27 aliases, but every merged name stays its own worklist job; 0 engineer passes | No value |
 | Hypothesis links | 291 calls, $0.009 | 541 links (28 rewording); 0 cards grouped, blocked or retired; `failure_history` has no caller | No value |
@@ -297,7 +297,7 @@ works; those rows are too few to decide anything and the reading is not the deci
 Everything measured to earn its keep so far is free: the gate's deterministic triggers, the audit and refusal
 reporters, the free move model. The only Jev use with a positive reading is triage's bug classifier, and its
 dollars are cents. Cut-backs this run proposes for its next deploy: exposure and hypothesis links off (no
-consumer, no effect), the gate's relevance question dropped (by the gate's owner) or capped back to 150.
+consumer, no effect); the gate's relevance question is dropped by the gate's owner in its Deploy C.
 
 ## Progress notes
 
