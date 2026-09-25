@@ -44,6 +44,9 @@ test('classifyStructure reads the legs alone: collateral and maximum value in pi
   assert.deepEqual(classifyStructure([at(582, 'P', -1), at(580, 'P', 1)]), { type: 'credit_vertical', collateral: 2n * PICO, maxValue: 2n * PICO });
   assert.equal(classifyStructure([at(585, 'C', 1, 1, '261002'), at(585, 'C', -1)]).type, 'calendar');
   assert.equal(classifyStructure([at(580, 'C', -1), at(581, 'C', -1)]).error, NAKED_SHORT);
+  for (const legs of [[], [at(580, 'C', 1)], [1, 2, 3, 4, 5].map(n => at(580 + n, 'C', 1)), null]) {
+    assert.match(classifyStructure(legs).error, /two to four legs/);
+  }
 });
 
 test('the maximum loss is the debit, or the collateral less the credit, x 100 x qty', () => {
@@ -255,10 +258,14 @@ test('the practice account passes the House\'s stock, crypto and single-leg long
 
 test('the practice check cannot be walked around by spelling, padding or an asset id', () => {
   const naked = { symbol: occ(580, 'P'), qty: '1', side: 'sell', type: 'limit', limit_price: '0.25', time_in_force: 'day', position_intent: STO };
-  for (const symbol of [occ(580, 'P').toLowerCase(), 'SPY   260928P00580000', ` ${occ(580, 'P')}\n`, 'XYZ1260928P00005000']) {
+  for (const symbol of [occ(580, 'P').toLowerCase(), 'SPY   260928P00580000', ` ${occ(580, 'P')}\n`, 'XYZ1260928P00005000',
+    `${occ(580, 'P')}\u200b`, 'SPY 260928 P 00580000', 'SPY-260928-P-00580000']) {
     assert.match(practiceOrderError({ ...naked, symbol }) ?? '', /naked short/, JSON.stringify(symbol));
   }
-  assert.match(practiceOrderError({ ...naked, symbol: '904837e3-3b76-47ec-b432-046db621571b' }) ?? '', /asset id/);
+  for (const symbol of ['904837e3-3b76-47ec-b432-046db621571b', '904837e33b7647ecb432046db621571b', '{904837e3-3b76-47ec-b432-046db621571b}',
+    'urn:uuid:904837e3-3b76-47ec-b432-046db621571b', ' 904837E3-3B76-47EC-B432-046DB621571B ']) {
+    assert.match(practiceOrderError({ ...naked, symbol }) ?? '', /asset id/, symbol);
+  }
   const { position_intent: _, ...stock } = { ...naked, symbol: 'SPY' };
   for (const extra of [
     { Legs: [leg(occ(580, 'P'), STO)], order_class: 'mleg' },

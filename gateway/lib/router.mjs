@@ -271,7 +271,8 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     let micro = priced.micro;
     if (priced.structure) {
       // A structure's open or close is read from its legs' position_intent, which the venue holds it
-      // to (a close of what is not held is refused there), never from the caller's header: an open
+      // to (a close of what is not held is refused there, as a single contract's sell_to_close is:
+      // `caps.optionNotional`), never from the caller's header: an open
       // is metered at its maximum loss against every cap, whatever the header says. A close takes
       // risk off and is metered at zero; the gate refuses a zero reservation and counts every order,
       // so a close holds the least amount it records, one micro-dollar, as an exit: the kill switch

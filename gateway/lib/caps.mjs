@@ -368,6 +368,7 @@ const byCanonical = (a, b) => (a.expiry !== b.expiry ? (a.expiry < b.expiry ? -1
  * maxValue}` (picodollars a share; `maxValue` null where the value is unbounded) or `{error}`.
  */
 export function classifyStructure(input) {
+  if (!Array.isArray(input) || input.length < 2 || input.length > 4) return { error: 'A multi-leg order has two to four legs.' };
   const legs = [...input].sort(byCanonical);
   const longs = legs.filter(leg => leg.sign > 0);
   const shorts = legs.filter(leg => leg.sign < 0);
@@ -538,10 +539,12 @@ export function structureNotional(body, admitted = []) {
 const PRACTICE_DECIDING_FIELDS = new Set(['symbol', 'legs', 'order_class', 'position_intent', 'side']);
 //: Go's encoding/json folds ASCII case, and U+017F to "s" and U+212A to "k" (toLowerCase does that one).
 const foldKey = key => key.toLowerCase().replace(/ſ/g, 's');
-//: An option's OCC tail, whatever the root, the case or the padding the venue might forgive.
+//: An option's OCC tail, read with everything but letters and digits taken out, so no case,
+//: padding or separator the venue might forgive hides one.
 const OPTION_TAIL_LOOSE = /[0-9]{6}[CP][0-9]{8}$/i;
-//: An Alpaca asset id: it could name an option contract without looking like one.
-const ASSET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+//: An Alpaca asset id (a UUID, which a parser may take bare, braced or as a URN): it could name an
+//: option contract without looking like one.
+const isAssetId = symbol => /^[0-9a-f]{32}$/i.test(symbol.trim().replace(/^urn:uuid:/i, '').replace(/[{}-]/g, ''));
 //: The single-leg option orders the practice account takes: a buy to open and a sell to close (long
 //: premium, as the House trades today), and a buy to close, which can only buy back a short leg the
 //: account already holds (the venue refuses a close of what is not held): the book's repair of an
@@ -558,9 +561,9 @@ export function practiceOrderError(body) {
     }
   }
   if (isMultiLegOrder(body)) return structureOrder(body).error ?? null;
-  const symbol = typeof body.symbol === 'string' ? body.symbol.replace(/\s+/g, '') : '';
-  if (OPTION_TAIL_LOOSE.test(symbol)) return practiceOptionError(body);
-  if (ASSET_ID.test(symbol)) {
+  const symbol = typeof body.symbol === 'string' ? body.symbol : '';
+  if (OPTION_TAIL_LOOSE.test(symbol.replace(/[^A-Za-z0-9]/g, ''))) return practiceOptionError(body);
+  if (isAssetId(symbol)) {
     return 'An order names its instrument by symbol, not by asset id: an asset id could name an option contract this check cannot read.';
   }
   return null;
