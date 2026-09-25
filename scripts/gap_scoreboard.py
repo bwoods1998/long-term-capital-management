@@ -106,7 +106,9 @@ scoreboard's own account-unit formula below stands in; the practice-only record 
 The scoreboard's own formula (the definition A-money implemented in `league/allocator.py`; Sept 24, 2026)
 
 - Members: every agent ever born with the family (`agent.born` payload `family`) on its venue,
-  living or dead.
+  living or dead, and since C8 (Sept 25, 2026) every agent an `agent.family` row filed under it, each
+  for the stretch of its rows the rows give it (`agents_of`, `Agent.family_at`): a closed trade is the
+  family's its member was in when it closed, as the House's `family_record` counts it.
 - Rows: every closed trade a member made on the practice book (`kalshi-shadow`, `alpaca-paper`,
   weight 0.5) or the real book (`kalshi`, `alpaca`, weight 1), exactly as the evaluator's
   `trade_returns` closes them: a settlement, or a sale that leaves the position flat (the realized

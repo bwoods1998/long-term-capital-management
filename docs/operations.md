@@ -337,7 +337,9 @@ ORDER BY seq DESC LIMIT 20`.
   that computed it. The second table is the close-the-gaps plan's seven metrics; then each row in
   detail, each desk's evidence clock (hours from a member's first fill to its third independent
   settlement), every family's pooled record (practice at weight 0.5, real at 1, one observation an
-  event, a one-sided 80% Student's t bound) and the weather favourites' capacity. Its clock is the
+  event, a one-sided 80% Student's t bound; since C8 its members and trades follow the `agent.family`
+  rows, and the reading counts the agents they moved and the families only they name) and the weather
+  favourites' capacity. Its clock is the
   snapshot's newest ledger row; `--since` (default 24 hours before it) sets the window, and
   `--baseline` counts promotions only from a moment (Deploy A). Every definition is in the script's
   docstring.
@@ -643,6 +645,32 @@ ORDER BY seq DESC LIMIT 20`.
       is refused with a `book.refused` row naming whose share it is. Exits are never split. Verify: the
       family's `real.n` on the allocator board rises with its members, and no two members' real fills share
       an event.
+- **Execution (X of the forward-first run, Sept 25, 2026).** At T0 the real fill rate was 37% per order
+  (Kalshi 62 of 89, Alpaca 13 of 113 at 10:36Z) and 372 real entries were refused a day (168
+  `allocator.max_event_share`, 84 "insufficient desk cash", 67 `allocator.real_entry_liquidity`).
+  - **X1, an agent's own fill rate** (`league/execution.py`): every wake's snapshot carries `execution`
+    -- `real`, the agent's orders on its venue's real book over 7 days (`orders`, `filled`, `unfilled`,
+    `resting`, `fill_rate` over finished orders, `median_minutes_to_fill`, `median_minutes_unfilled`,
+    and `entries` for buys), and `practice`, the same on the practice book it trades now. The research
+    brief shows the real line after its cached prefix, and under 25% on 5 finished orders asks for a
+    requote rule ("REQUOTE:"; at T0 haghani-56, -r42c38c, -62 and -63). Verify after the deploy: a
+    research transcript of a crypto-alts probe (`/workspace/state/traces/`) holds "YOUR REAL EXECUTION"
+    and "REQUOTE:"; the row 6 fill rate on the watch (`gap_scoreboard.real_fill_rate`) against 37%.
+  - **X3, refusals say what fits** (`Book._to_fit`): a refused entry's dollar cap -- the event share,
+    free cash, the order, position and gross caps, the seat's caps -- says after " -- to fit" the band it
+    was judged in (probe, bunt or swing on a real book, practice), the cap in dollars and the room left
+    under it: whole contracts at the order's price, or dollars and the venue's $10 crypto minimum. The
+    text before the mark, what is refused and the refusals' classes are unchanged. Verify: the next
+    `book.refused` rows on `kalshi` and `alpaca` whose reasons name a cap carry " -- to fit", and
+    "insufficient desk cash" names `ltcm/risk.py rule_cash`.
+  - **A lab graduate's replay ends at its freeze** (`House._lab_freeze_cut`, `_tape_until`; the F-lab
+    review's open finding 2): the House replays a lab graduate on its tape's steps up to the hour after
+    the lab froze its code, where the forward window F1 graduated it on begins, so the replay gate's
+    out-of-sample third is independent of that window. A tape with nothing after the hour (a history-store
+    tape) is replayed whole; fewer than two steps before it is no trial (`replay_unavailable`). Verify: a
+    graduate's `experiment.started` manifest (in `/workspace/state/experiments/`) has a `query` ending
+    `|until:<the hour>`; the archive gains at most one cut tape a (tape, freeze hour) -- watch its size
+    (2.62 GB, 15.7 GB free at 13:22Z Sept 25).
 - **`/workspace/state/allocator-board.json`** (Sept 23, 2026), rewritten every mark pass: each
   agent's band, stake and evidence, the last 50 moves, bands per venue (count and capital), the
   throttle and the envelope per venue (`capital_usd`, `committed_usd`). The allocator's own state

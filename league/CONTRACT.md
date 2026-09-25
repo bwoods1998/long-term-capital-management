@@ -235,7 +235,16 @@ resting bid and bidding again in one decision is trimmed the same way.
 
 Forward snapshots also include `recent_order_outcomes` (up to 12, owned by you on this book).
 A House risk refusal has `status="refused"`, `reason`, and `submitted_to_venue=false`; it is
-not an order sent to the exchange. Inspect it on the next decision and research pass.
+not an order sent to the exchange. Inspect it on the next decision and research pass. A refused
+entry's cap says after " -- to fit" your band, the cap in dollars and the room left under it:
+size the next order inside that room.
+
+Forward snapshots also include `execution` (Sept 25, 2026): your own orders over the last 7 days
+on your venue's real book (`real`) and, while you trade on practice, on that book (`practice`,
+the House's fill model): `orders`, `filled`, `unfilled`, `resting`, `fill_rate` (filled over
+finished orders), `median_minutes_to_fill`, `median_minutes_unfilled` and the same counts for
+buys under `entries`. Read it with `.get`: a replay tape has none. A resting entry that rarely
+fills is an edge never traded: re-quote it or stand aside.
 
 Forward snapshots also include `venue_rules`: what the venue asks of an order, keyed by each symbol
 you may trade, and only where it is known. Read it with `.get`: a replay tape has none, and a Kalshi
