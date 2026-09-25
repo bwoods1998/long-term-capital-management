@@ -132,6 +132,25 @@ def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     return str(lab.get("box_key") or "lab")
 
 
+def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, alpaca_data: Any) -> Any:
+    """The options shadow account (`league/options_shadow.py`, Sept 25, 2026, the options-desk run's
+    Track S) beside the Kalshi shadow: every level-3 structure on practice, filled on the live option
+    quotes the House's market-data client reads (read-only GETs through the gateway, on a canary too,
+    which gets its own state file under its own root). On by default; `config.json`
+    `options_structures.shadow.enabled: false` leaves it out. `options_structures.book` (read by the
+    House) says whether structure agents trade here or on `alpaca-paper`; the account is built either
+    way, so a structure it holds is still marked and closable after the switch."""
+    from .options_shadow import OptionsShadowBroker, alpaca_leg_quotes, alpaca_underlying_close
+
+    shadow = dict((config.get("options_structures") or {}).get("shadow") or {})
+    if shadow.get("enabled") is False:
+        return None
+    feed = str(config.get("alpaca_option_feed", "indicative"))
+    return OptionsShadowBroker(Path(root) / "options-shadow.json", alpaca_leg_quotes(data_client, feed=feed),
+                               underlying_close=alpaca_underlying_close(alpaca_data),
+                               starting_cash=str(shadow.get("starting_cash", "100000")), feed=feed)
+
+
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
@@ -188,6 +207,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
                                option_feed=config.get('alpaca_option_feed', 'indicative'))
     brokers: dict[str, Any] = {"alpaca-paper": paper, "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data)}
+    shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
+    if shadow_options is not None:
+        brokers[shadow_options.venue] = shadow_options
     if real_money:
         brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
                                           option_feed=config.get('alpaca_option_feed', 'indicative'))

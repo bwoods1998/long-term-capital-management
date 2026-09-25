@@ -2876,15 +2876,28 @@ class Book:
                    if holding.instrument.asset_class == "option" and str(holding.instrument.expiry or "9999") < today]
             if not due:
                 return 0
+            # A structure held as one position (`league/structures.py`, Sept 25, 2026) is never written off at
+            # zero: the venue settles it at its value at expiry (`OptionsShadowBroker.structure_settlements`) and
+            # the book books that same value. One the venue has not settled yet waits for it.
+            from .structures import is_structure
+
+            codes = {str(h.instrument.market_id) for _, _, h in due if is_structure(h.instrument)}
+            settle = getattr(self.broker, "structure_settlements", None)
+            valued = settle(codes) if codes and settle is not None else {}
             shown = {position_key(p.instrument) for p in self.broker.positions() if money(p.quantity) != 0}
             expired = 0
             for agent, key, holding in due:
                 inst = holding.instrument
-                if position_key(inst) in shown:
+                payout = ZERO
+                if is_structure(inst):
+                    if str(inst.market_id) not in valued:
+                        continue
+                    payout = q_cash(money(valued[str(inst.market_id)]) * inst.multiplier * holding.quantity)
+                elif position_key(inst) in shown:
                     continue
                 payload = {
                     "book": self.name, "instrument": inst.to_dict(), "result": "expired", "quantity": text(holding.quantity),
-                    "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)),
+                    "cost": text(q_cash(holding.cost)), "payout": text(payout), "pnl": text(q_cash(payout - holding.cost)),
                     "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
                 }
                 entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
