@@ -158,6 +158,10 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
   main at 10:33:52Z (`2aa7690`) and Z (#298) at 10:33:56Z (`ce3b97c`)**, both with CI green (tests 3.11 and 3.14,
   gateway). H3 is protected: the updater now refuses main's heads until an owner deploy ships them (Deploy V).
 
+**Deploy A's exact start: 20:10Z Sept 25** (pre-flight 19:54Z: only H4's key changes against main; CI green on
+`b8cc986d`; no deploy in flight; the proven family's first open game starts 22:40Z; #323 merged 19:55:01Z, main
+`d6f8acd5`). Its end is written here when its watch ends.
+
 **Proposed Saturday Sept 26 deploy order (15:00Z Sept 25; each starts only after the previous one's watch ends plus 30
 minutes, and only when no real Kalshi family's game is in play; the Friday MLB slate's last start is 02:15Z, so play ends
 about 05:30Z; college football and MLB start again about 16:00Z):** 06:00Z forward-first **Deploy B** (#334, money digest
