@@ -167,6 +167,10 @@ FUNDING_SECONDS = 1800
 HISTORY_OFFSET = 90
 #: A source that failed is asked again this soon (a live board keeps its minute).
 RETRY_SECONDS = 300
+#: The longest a due recorder gives way to due scoreboards (`FeedRecorder._gives_way`). With a live game a board falls due
+#: every 60 s and a pass can take longer than that, so a recorder that gave way on every pass never polled: the `odds`
+#: recorder asked nothing from 18:48Z to past 21:05Z on Sept 25, 2026, while the evening's games were live.
+STARVE_SECONDS = 240
 #: One warning per feed per hour at most, and never an error: an error alert inside a release's
 #: watch rolls the release back, and a scoreboard that is down says nothing about the release.
 ALERT_SECONDS = 3600
@@ -662,6 +666,8 @@ class FeedRecorder:
         self._local = threading.local()
         self._connections: list[tuple[threading.Thread, Any]] = []
         self._next: dict[tuple[str, str], float] = {}  # (feed, key) -> when it is due; perps poll as one ("perps", "*")
+        self._deferred: dict[tuple[str, str], float] = {}  # (feed, key) -> when it first gave way to a due board (`_gives_way`)
+        self._forced_this_pass = False  # a starved recorder already went ahead of a due board in this pass (`_gives_way`)
         self._hot: dict[str, bool] = {}  # league -> was a game live or near at its last good poll
         self._warned: dict[str, float] = {}
         self._covered: dict[str, int] = {}  # feed -> the hour whose coverage row is on the ledger
@@ -870,6 +876,8 @@ class FeedRecorder:
             return out
         try:
             now = self.clock()
+            with self._lock:
+                self._forced_this_pass = False
             for feed, key in self._plan():
                 if self._closed:
                     break
@@ -1031,7 +1039,7 @@ class FeedRecorder:
                     continue  # polled in this cycle, before the pass gave way
                 # Before its first key too (review of #309, Sept 25, 2026): a dozen history recorders in one
                 # run each asked one key before giving way, a timeout apiece when their hosts hung.
-                if self._urgent_due():
+                if self._gives_way(feed, "*"):
                     out["polled"].append(feed)
                     self._schedule(feed, "*", self.clock())  # behind the board, then on from here
                     return
@@ -1318,6 +1326,22 @@ class FeedRecorder:
             return True
         return bool(self.keys("perps")) and upcoming.get(("perps", "*"), 0.0) <= now
 
+    def _gives_way(self, feed: str, key: str) -> bool:
+        """Should this due recorder wait for a due scoreboard or perps pass (`_urgent_due`)? Yes, but not for ever: once
+        it has given way for `STARVE_SECONDS` it goes ahead, the board waiting at most one poll. Measured Sept 25, 2026:
+        with the evening's MLB and football boards live (each due every 60 s) and a pass of about 80 s, the `odds`
+        recorder and every other live recorder gave way on every pass and polled nothing from 18:48Z to past 21:05Z."""
+        now = self.clock()
+        if self._urgent_due():
+            with self._lock:
+                first = self._deferred.setdefault((feed, key), now)
+                if now - first < STARVE_SECONDS or self._forced_this_pass:
+                    return True  # it waits; and one starved recorder a pass goes ahead, so a board waits one poll at most
+                self._forced_this_pass = True
+        with self._lock:
+            self._deferred.pop((feed, key), None)
+        return False
+
     def _poll_source(self, feed: str, key: str, out: dict[str, Any]) -> bool:
         """One live poll of a recorder of Sept 24, 2026 -- one key, or every key at once for a batch
         source -- kept under the House's receive time (`record`): its content only when it changed, a
@@ -1326,7 +1350,7 @@ class FeedRecorder:
         ensemble, when no newer model run exists): a successful poll that stores nothing. Returns
         False, leaving the key due, when it gave way to a scoreboard or the perps pass."""
         source = RECORDERS[feed]
-        if self._urgent_due():
+        if self._gives_way(feed, key):
             return False
         keys = self.keys(feed) if source.batch else [key]
         started = self.clock()

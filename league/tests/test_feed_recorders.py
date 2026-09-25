@@ -21,6 +21,7 @@ from pathlib import Path
 
 from league import feeds, niches
 from league.commons import Commons
+from league import feeds as feeds_module
 from league.feeds import UNCHANGED, FeedRecorder, request_feed, requested
 from league.ledger import Ledger
 from league.replay import run_replay
@@ -361,6 +362,29 @@ class WhatIsRecorded(RecorderCase):
         self.assertFalse(store._poll_source("weather", "KLAX", {"polled": [], "stored": 0, "failed": []}))
         self.assertEqual(meteo.asked, [])
         self.assertTrue(store.due())
+
+    def test_a_recorder_that_keeps_giving_way_to_live_boards_goes_ahead_once_it_has_waited(self):
+        # Sept 25, 2026: with the evening's boards live (each due every 60 s) and a pass longer than that, the `odds`
+        # recorder gave way on every pass and asked nothing from 18:48Z to past 21:05Z. It waits STARVE_SECONDS at most.
+        meteo = Meteo(self.clock)
+        store = self.recorder({"weather": ["KNYC", "KLAX"], "sports": ["nfl"]}, transports=meteo.transport())
+        out = {"polled": [], "stored": 0, "failed": []}
+        store._next[("weather", "KLAX")] = 0.0
+        store._next[("weather", "KNYC")] = 0.0
+        store._schedule("sports", "nfl", 0.0)  # a board is due, and stays due: the lane never catches up
+        self.assertFalse(store._poll_source("weather", "KLAX", out))
+        self.clock.advance(feeds_module.STARVE_SECONDS - 1)
+        self.assertFalse(store._poll_source("weather", "KLAX", out), "still inside its wait")
+        self.assertEqual(meteo.asked, [])
+        self.clock.advance(2)
+        self.assertTrue(store._poll_source("weather", "KLAX", out), "waited long enough: it goes ahead of the board")
+        self.assertTrue(meteo.asked)
+        asked = len(meteo.asked)
+        self.assertFalse(store._poll_source("weather", "KNYC", out), "one starved recorder a pass: the next one waits")
+        self.assertEqual(len(meteo.asked), asked)
+        store._forced_this_pass = False  # a new pass (`run` resets it)
+        self.clock.advance(feeds_module.STARVE_SECONDS + 1)
+        self.assertTrue(store._poll_source("weather", "KNYC", out))
 
     def test_requests_for_weather_data_are_answered_once_it_is_recorded(self):
         self.assertEqual({name: request_feed(name) for name in (
