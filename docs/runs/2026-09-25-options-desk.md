@@ -417,5 +417,8 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   corrected child of krasker-29 with touch-priced exits: the loop found the same defect in that strategy by itself.)
   **Deploy V4 (PR #339) started 18:30:30Z**, CI green 18:29:52Z; it also carries main's #338. Release `20260925T183013Z-19fb86ee4720` promoted 18:32:03Z, `ops.started` 18:33:52Z, watch verdict **promoted
   18:42:05Z**; the floor's release from then; House RSS 622 MB at 18:36Z; the options desk waking again from 18:35Z.
+  **The fix at work, 18:48-18:49Z:** krasker-29's close "at 0.27 or better" re-priced by the House to 0.49 (the band's edge
+  from the bid 0.54), filled 18:49:36Z at 0.52 (the bid on a newer quote): **the first closed structure, realized +$5.80**
+  (bought at 0.46: +$6.00 less $0.20 of fees).
 
 ## Report
