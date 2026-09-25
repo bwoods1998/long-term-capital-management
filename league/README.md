@@ -164,8 +164,10 @@ births pass 22.0 s of it at p50, and the log's tick lines 60-68 s apart at p50 i
    settlements. One venue's outage is an alert and does not stop the others. A simulated venue
    (kalshi-shadow) is passed once a minute (`simulated_poll_seconds`), never every tick: its maker
    fills are decided on the quotes it samples, so a faster tick would fill more practice orders than
-   the record was earned under; with no working order it is not re-quoted. A real venue is polled
-   every tick.
+   the record was earned under; with no working order it is not re-quoted. A real venue (`kalshi`,
+   `alpaca`, and `alpaca-paper`) keeps its minute too (`venue_poll_seconds`, the review of #297): its
+   calls, its exits' re-sends and a failing venue's warnings (ten in thirty minutes escalate) stay as
+   they were at sixty-second ticks; the wakes alone run every 30 s.
 2. **Check the budget.** `open` or `stopped`: the Sail account's line (`budget.py`), then the
    campaign, whose Sail meter must have been read and whose allowance must be open; a maintenance
    pause also closes business. Once the meter has been read, every ten minutes, Sail holds older

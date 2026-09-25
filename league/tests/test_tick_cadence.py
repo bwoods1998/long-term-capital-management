@@ -232,7 +232,7 @@ class ASimulatedVenue(HouseCase):
                      sandbox=LocalSandbox(Path(self.dir.name) / "boxes"), alpaca_data=self.data, clock=self.clock, game=game,
                      settings=Settings(mark_every_seconds=10 ** 6, research=False))
 
-    def test_a_simulated_venue_is_passed_once_a_minute_and_a_real_one_every_tick(self):
+    def test_a_simulated_venue_and_a_real_one_are_each_passed_once_a_minute(self):
         polled = {"alpaca-paper": 0, "kalshi-shadow": 0}
         books = self.house.books
 
@@ -247,11 +247,28 @@ class ASimulatedVenue(HouseCase):
             for _ in range(4):  # 0, 30, 60, 90 s
                 self.house.tick()
                 self.clock.advance(30)
-        # The first tick also marks (and polls) every book; after it the poll step's own passes are all.
-        self.assertEqual(polled["alpaca-paper"] - before["alpaca-paper"], 4 + 1)
+        # The first tick also marks (and polls) every book; after it the poll step's own passes are all. A real venue
+        # keeps its minute as the simulated one does (the review of #297: every tick doubled its calls and its exits'
+        # re-sends, and a failing venue's warnings reached the error escalation inside a deploy's watch).
+        self.assertEqual(polled["alpaca-paper"] - before["alpaca-paper"], 2 + 1)  # at 0 s and 60 s
         self.assertEqual(polled["kalshi-shadow"] - before["kalshi-shadow"], 2 + 1)  # at 0 s and 60 s
         self.assertEqual(self.shadow.walked - walked, 2)
         self.assertEqual(health(self.house)["tick_steps"]["last"]["steps"]["poll:kalshi-shadow"] >= 0, True)
+
+    def test_a_venue_failing_every_pass_is_told_once_a_minute_not_once_a_tick(self):
+        # Ten warnings in thirty minutes escalate to an error (`REPEAT_WARNINGS`): at one a tick of 30 s a venue outage
+        # would reach it in 4.5 minutes, inside a deploy's ten-minute watch; at one a minute, as before H5, in 9.
+        def down():
+            raise ConnectionError("the venue is down")
+
+        with patch.object(self.house.books["alpaca-paper"], "poll", side_effect=down):
+            for _ in range(10):  # 0 to 270 s
+                self.house.tick()
+                self.clock.advance(30)
+        told = warnings(self.house, "alpaca-paper: could not poll or settle")
+        self.assertEqual(len(told), 5)  # at 0, 60, 120, 180 and 240 s
+        self.assertEqual([e for e in self.house.ledger.iter(kinds="ops.alert") if e.payload.get("level") == "error"
+                          and "could not poll" in e.payload.get("text", "")], [])
 
     def test_a_simulated_venue_with_no_working_order_is_not_re_quoted(self):
         self.house.tick()

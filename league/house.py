@@ -508,6 +508,13 @@ class Settings:
     #: result). Its maker fills are decided on the quotes it samples, so sampling it twice as often
     #: would fill more practice orders than the record was earned under: the fill model's cadence stays.
     simulated_poll_seconds: float = 60.0
+    #: A real venue's pass (`kalshi`, `alpaca`, and `alpaca-paper`, a real venue's practice account: every open order
+    #: read, new settlements applied, the next slices of the exits sent) at most this often, as at sixty-second ticks
+    #: (the review of #297, Sept 25, 2026). Every tick it doubled the venue calls and the exits' re-sends, and a venue
+    #: failing every pass reached the ten warnings in thirty minutes that escalate to an error (`REPEAT_WARNINGS`) in
+    #: about 4.5 minutes instead of about 9.5, inside a deploy's ten-minute watch: "alpaca-paper: could not poll or
+    #: settle" came 10 times in 19 minutes on Sept 23 07:32-07:52Z at sixty-second ticks.
+    venue_poll_seconds: float = 60.0
     #: The site's checkpoint: the site's load does not double with the tick.
     publish_seconds: float = 60.0
     #: At most one displacement a desk in this long (`_displaceable`): the "one a tick" of sixty-second ticks.
@@ -8252,14 +8259,16 @@ class House:
         lap("feeds")
         for name, book in self.books.items():
             advance = getattr(book.broker, "advance", None)
-            if advance is not None:
-                # H5 (Sept 25, 2026): a simulated venue (kalshi-shadow, a canary's) is passed at its fill model's
-                # cadence, never every tick (`Settings.simulated_poll_seconds`); its step was 5.5 s at p50 on the
-                # box (45 held instruments asked for a result, 13 resting orders re-quoted, one venue call each).
-                if not self._cadence_due(f"poll:{name}", self.settings.simulated_poll_seconds):
-                    lap(f"poll:{name}")
-                    continue
-                self._cadence[f"poll:{name}"] = self.clock()
+            # H5 (Sept 25, 2026): a simulated venue (kalshi-shadow, a canary's) is passed at its fill model's cadence,
+            # never every tick (`Settings.simulated_poll_seconds`); its step was 5.5 s at p50 on the box (45 held
+            # instruments asked for a result, 13 resting orders re-quoted, one venue call each). A real venue keeps its
+            # minute too (`venue_poll_seconds`, the review of #297): its calls, its exits' re-sends and the arithmetic of
+            # a failing venue's warnings stay as they were. The mark pass polls every book on its own, every five minutes.
+            every = self.settings.simulated_poll_seconds if advance is not None else self.settings.venue_poll_seconds
+            if not self._cadence_due(f"poll:{name}", every):
+                lap(f"poll:{name}")
+                continue
+            self._cadence[f"poll:{name}"] = self.clock()
             try:
                 if advance and book.open_orders():  # nothing working: nothing to re-quote (H5)
                     advance()
