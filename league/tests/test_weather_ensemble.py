@@ -203,7 +203,9 @@ class HowKalshiStrikesThem(unittest.TestCase):
         self.assertAlmostEqual(sum(warmer) / len(warmer) - sum(points) / len(points), 2.0, places=9)
         low, _, _, _ = priced(kind="low")
         lows = ensemble_row()["dates"][DAY]["low"]["members"]
-        self.assertAlmostEqual(sum(low) / len(low), sum(lows) / len(lows) + SEEDNS["STATIONS"]["KNYC"][3], places=9)
+        # The lows carry the station bias plus the day-ahead ensemble correction `bias_low_f` (-1.7 F by default).
+        self.assertAlmostEqual(sum(low) / len(low), sum(lows) / len(lows) + SEEDNS["STATIONS"]["KNYC"][3] + SEEDNS["PARAMS"]["bias_low_f"], places=9)
+        self.assertEqual(SEEDNS["PARAMS"]["bias_low_f"], -1.7)
         base, _ = fair_of("KXHIGHNY-26SEP25-T67", {"model_weight": 1.0})      # under 67 F
         hot, _ = fair_of("KXHIGHNY-26SEP25-T67", {"model_weight": 1.0, "bias_high_f": 2.0})
         self.assertLess(hot, base - 0.03)

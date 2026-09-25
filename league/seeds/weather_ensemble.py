@@ -68,7 +68,8 @@ PARAMS = {
     "take_edge": 0.20,          # proxy takers: +3.6c (se 3.4) on highs, -17c (se 4.4) on lows; 0.20 is rare
     "model_weight": 0.5,        # fair = mid + w x (model - mid): the proxy's fitted w was 0, the card's is 1
     "bias_high_f": 0.0,         # on top of STATIONS: the ensemble mean ran 0.2 F warm of the pair (40 station-days)
-    "bias_low_f": 0.0,          # the same for lows: +1.7 F at one day's lead, -0.1 F at two; unresolved, so 0
+    "bias_low_f": -1.7,         # the same for lows: the members ran +1.7 F warm of the pair at one day's lead (-0.1 F at two);
+                                # lows trade only until 23:00 the evening before, a day's lead, so the day-ahead figure (review, Sept 25)
     "spread_mult": 1.1,         # members' sd 1.4-2.0 F on the day ahead against a 2.1 F station error
     "kernel_f": 1.0,            # each member is N(value, 1 F); the station's error sd is the floor
     "nws_weight": 0.25,         # the NWS point forecast as a quarter of the mixture: unmeasured here
