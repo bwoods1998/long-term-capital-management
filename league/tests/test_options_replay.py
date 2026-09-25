@@ -679,3 +679,374 @@ class InTheHouse(HouseCase):
         self.house.settings.options_replay = False
         agent = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
         self.assertEqual(self.house.evaluator.rung(agent.id), 1)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Structures (Sept 25, 2026, the options-desk run): a structure agent's replay, held as ONE position at
+# S = net value + collateral, filled at the CONSERVATIVE touch of every leg at once, never in the bar the
+# decision saw, settled at its value at the expiry's close, one trade a structure.
+
+from league import parameters  # noqa: E402
+from league import structure_core  # noqa: E402
+
+STRUCTURE_STRATEGY = '''
+NEEDS = {"venue": "alpaca", "horizon": "day", "style": "structure-test", "asset_class": "option", "structures": True,
+         "symbols": ["SPY"], "bars": {"timeframe": "1Day", "limit": 5}, "max_days_to_expiry": 7,
+         "parameter_rules": {"bounds": {"max_debit": [0.05, 0.95], "take_profit": [0.05, 0.95]}}}
+PARAMS = {"structure": "debit_vertical", "legs": [], "open_at": "", "close_at": "", "limit": 0.0, "close_limit": 0.0, "quantity": 1,
+          "max_debit": 0.0, "take_profit": 0.0, "width": 1, "dte_min": 0, "dte_max": 7, "entry_delta": 0.3, "profit_target": 0.5,
+          "stop_loss": 2.0, "exit_minutes_before_close": 30, "max_open": 1, "single": ""}
+
+def decide(ctx):
+    p = ctx["params"]
+    out = []
+    limit = p["limit"] or p["max_debit"]
+    if ctx["now"] == p["open_at"]:
+        out.append({"structure": p["structure"], "action": "open", "quantity": p["quantity"], "legs": p["legs"], "limit_price": limit, "reason": "test open"})
+    if ctx["now"] == p["close_at"]:
+        out.append({"structure": p["structure"], "action": "close", "quantity": p["quantity"], "legs": p["legs"],
+                    "limit_price": p["close_limit"] or p["take_profit"], "reason": "test close"})
+    if p["single"] and ctx["now"] == p["open_at"]:
+        out.append({"occ": p["single"], "side": "buy", "quantity": 1, "type": "limit", "limit_price": 0.5, "reason": "a single leg"})
+    held = [{k: x.get(k) for k in ("structure", "quantity", "average_cost", "mark", "natural_open", "natural_mark", "pnl_usd",
+                                  "max_loss_usd", "max_gain_usd", "kind", "expiry")} for x in ctx.get("positions") or [] if x.get("structure")]
+    seen = dict(ctx.get("memory") or {})
+    seen[ctx["now"]] = {"chain": sorted(r["occ"] for r in ctx.get("chain") or []), "structures": len(ctx.get("structures") or []),
+                        "held": held, "orders": [o.get("structure") for o in ctx.get("open_orders") or []]}
+    return {"intents": out, "memory": dict(list(seen.items())[-6:])}
+'''
+EXP = "2026-09-25"  # a Friday; 2026-09-22..25 is EDT (UTC-4): 14:30 New York is 18:30Z, 15:30 is 19:30Z, 16:00 is 20:00Z
+SLIMITS = {"max_position_usd": 100.0, "max_order_usd": 75.0}
+
+
+def socc(strike, right="C", expiry="260925"):
+    return f"SPY{expiry}{right}{int(strike * 1000):08d}"
+
+
+def contract(code, first="2026-09-22T13:45:00Z"):
+    parsed = oh.parse_occ(code)
+    return {"underlying": "SPY", "expiry": parsed["expiry"], "strike": parsed["strike"], "right": parsed["right"], "first_print": first}
+
+
+def stape(steps, codes, **extra):
+    return {"venue": "alpaca", "asset_class": "option", "horizon": "day", "symbols": ["SPY"], "steps": steps,
+            "contracts": {c: contract(c) for c in codes},
+            "chain_rules": {"max_days_to_expiry": 7, "moneyness": 0.2, "per_underlying": 80, "afford_per_share": None, "structures": True},
+            "spread_model": dict(oh.SPREAD_MODEL), "liquidity": dict(oh.LIQUIDITY), "fee_per_contract_usd": 0.05, "multiplier": 100,
+            "warmup_bars": {}, "half_spread_bps": 1.0, "step_seconds": 900, **extra}
+
+
+def sstep(t, prices, spot=585.40, v=50.0, n=10, volumes=None):
+    options = {code: [price, price, price, price, (volumes or {}).get(code, v), n] for code, price in prices.items()}
+    return {"t": t, "bars": {}, "execution_bars": {"SPY": bar(spot, spot, spot, spot, 1000)}, "options": options}
+
+
+def srun(steps, codes, stake=1000.0, limits=None, strategy=STRUCTURE_STRATEGY, **params):
+    result = run_replay(strategy, params, stape(steps, codes), stake=stake, limits=limits or SLIMITS, audit=True)
+    assert result["ok"], result
+    return result
+
+
+VERTICAL = [socc(585), socc(586)]
+VLEGS = [{"occ": socc(585), "role": "long"}, {"occ": socc(586), "role": "short"}]
+CONDOR = [socc(580, "P"), socc(581, "P"), socc(590), socc(591)]
+CLEGS = [{"occ": socc(580, "P"), "role": "long"}, {"occ": socc(581, "P"), "role": "short"},
+         {"occ": socc(590), "role": "short"}, {"occ": socc(591), "role": "long"}]
+VPRICES = {socc(585): 1.20, socc(586): 0.70}
+CPRICES = {socc(580, "P"): 0.10, socc(581, "P"): 0.40, socc(590): 0.35, socc(591): 0.08}
+
+
+class Structures(unittest.TestCase):
+    def test_a_debit_vertical_by_hand(self):
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES), sstep("2026-09-22T14:15:00Z", VPRICES),
+                 sstep("2026-09-22T14:30:00Z", {socc(585): 1.60, socc(586): 0.85})]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.60, close_at="2026-09-22T14:15:00Z", close_limit=0.50)
+        fills = [f for f in r["fill_log"] if f["side"] in ("buy", "sell")]
+        # opened in the NEXT bar at the conservative ask: long 1.20 + 4% = 1.248, short 0.70 - 4% = 0.672 -> 0.576
+        self.assertEqual([(f["t"], f["side"], f["price"], f["fee"]) for f in fills],
+                         [("2026-09-22T14:00:00Z", "buy", 0.576, 0.1), ("2026-09-22T14:30:00Z", "sell", 0.652, 0.1)])
+        # closed at the conservative bid: long 1.60 - 4% = 1.536, short 0.85 + 4% = 0.884 -> 0.652; ONE trade
+        self.assertEqual(r["trades"], 1)
+        self.assertAlmostEqual(r["final_equity"], 1000.0 + (0.652 - 0.576) * 100 - 0.2, places=6)
+        self.assertAlmostEqual(r["trade_returns"][0], ((0.652 - 0.576) * 100 - 0.2) / 1000.0, places=9)
+        self.assertEqual(r["options"]["structures"]["opened"], 1)
+        self.assertEqual(r["options"]["structures"]["closed"], 1)
+        # marked at the SHOWN bid: long 1.20 - 4.5% = 1.146, short 0.70 + 4.5% = 0.7315 -> 0.4145; fees in the average cost
+        held = r["final_memory"]["2026-09-22T14:00:00Z"]["held"][0]
+        self.assertEqual((held["structure"], held["kind"], held["expiry"], held["quantity"]), ("debit_vertical", "debit", EXP, 1.0))
+        self.assertAlmostEqual(held["mark"], 0.4145, places=9)
+        self.assertAlmostEqual(held["average_cost"], 0.577, places=9)
+        self.assertAlmostEqual(held["natural_open"], 0.577, places=6)
+        self.assertAlmostEqual(held["pnl_usd"], -16.25, places=6)
+        self.assertAlmostEqual(held["max_loss_usd"], 57.7, places=6)
+        self.assertAlmostEqual(held["max_gain_usd"], 42.3, places=6)
+        self.assertEqual(r["digest"]["all"]["trades"], 1)
+
+    def test_nothing_fills_in_the_decisions_bar_nor_when_a_leg_did_not_print(self):
+        only = [sstep("2026-09-22T13:45:00Z", VPRICES)]
+        self.assertEqual(srun(only, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.70)["fills"], 0)
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", {socc(585): 1.20}),
+                 sstep("2026-09-22T14:15:00Z", VPRICES)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.70)
+        self.assertEqual([f["t"] for f in r["fill_log"]], ["2026-09-22T14:15:00Z"])  # the bar where BOTH legs printed
+
+    def test_a_limit_under_the_conservative_ask_does_not_fill(self):
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.57)  # the conservative ask is 0.576
+        self.assertEqual(r["fills"], 0)
+        self.assertEqual(r["expired_orders"], 0)  # still resting: a day order ends at 16:00
+
+    def test_an_iron_condor_by_hand_settled_at_intrinsic(self):
+        steps = [sstep("2026-09-25T13:45:00Z", CPRICES), sstep("2026-09-25T14:00:00Z", CPRICES),
+                 sstep("2026-09-25T19:30:00Z", CPRICES), sstep("2026-09-25T19:45:00Z", {k: v * 1.5 for k, v in CPRICES.items()}),
+                 sstep("2026-09-25T20:00:00Z", {}, spot=585.60)]
+        r = srun(steps, CONDOR, structure="iron_condor", legs=CLEGS, open_at="2026-09-25T13:45:00Z", limit=0.30)
+        opened = [f for f in r["fill_log"] if f["side"] == "buy"]
+        # conservative ask: K 1 + long asks (0.10 + 0.01, 0.08 + 0.01) - short bids (0.40 - 0.016, 0.35 - 0.014) = 0.48:
+        # a 0.52 credit, within the 0.30 least credit (a held limit of 0.70); fee 4 contracts x $0.05
+        self.assertEqual([(f["t"], f["price"], f["fee"]) for f in opened], [("2026-09-25T14:00:00Z", 0.48, 0.2)])
+        held = r["final_memory"]["2026-09-25T14:00:00Z"]["held"][0]
+        # marked at the shown bid: 1 + 0.09 + 0.07 - 0.418 - 0.3658 (each leg's shown quote, to four places); its
+        # natural mark is what buying it back would cost
+        shown = {code: oh.display_quote(price) for code, price in CPRICES.items()}
+        mark = 1 + shown[socc(580, "P")][0] + shown[socc(591)][0] - shown[socc(581, "P")][1] - shown[socc(590)][1]
+        self.assertAlmostEqual(held["mark"], mark, places=9)
+        self.assertAlmostEqual(mark, 0.37625, places=3)
+        self.assertAlmostEqual(held["natural_mark"], 1 - mark, places=6)
+        self.assertEqual(held["kind"], "credit")
+        self.assertAlmostEqual(held["natural_open"], 1 - 0.482, places=6)  # the credit received, net of the fee a share
+        # the House offered it from 15:30 at its conservative bid (the 15:45 bar was dearer: no fill) and it
+        # was SETTLED at the close at intrinsic: SPY 585.60 is between the shorts, so S = K = 1.00
+        self.assertGreaterEqual(r["options"]["structures"]["house_close_offers"], 1)
+        settled = [f for f in r["fill_log"] if f["side"] == "settle"]
+        self.assertEqual([(f["t"], f["price"], f["fee"]) for f in settled], [("2026-09-25T20:00:00Z", 1.0, 0.0)])
+        self.assertEqual(r["trades"], 1)
+        self.assertEqual(r["options"]["structures"]["settled_at_expiry"], 1)
+        self.assertAlmostEqual(r["final_equity"], 1000.0 + (1.0 - 0.48) * 100 - 0.2, places=6)
+        self.assertEqual(r["open_positions"], 0)
+
+    def test_the_house_close_fills_at_the_conservative_bid_and_a_loser_settles_at_its_intrinsic(self):
+        steps = [sstep("2026-09-25T13:45:00Z", VPRICES), sstep("2026-09-25T14:00:00Z", VPRICES),
+                 sstep("2026-09-25T19:30:00Z", VPRICES), sstep("2026-09-25T19:45:00Z", VPRICES)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T13:45:00Z", limit=0.60)
+        sold = [f for f in r["fill_log"] if f["side"] == "sell"]
+        # offered at 15:30 at the conservative bid then (1.20 - 0.048 - (0.70 + 0.028) = 0.424), filled at 15:45 at it
+        self.assertEqual([(f["t"], f["price"]) for f in sold], [("2026-09-25T19:45:00Z", 0.424)])
+        self.assertEqual(r["trade_log"][0]["how"] if "trade_log" in r else "expiry rule", "expiry rule")
+        # a vertical still held at the close, SPY under both strikes: settled at S = 0, a loss of its debit, never more
+        steps = [sstep("2026-09-25T13:45:00Z", VPRICES), sstep("2026-09-25T14:00:00Z", VPRICES), sstep("2026-09-25T20:00:00Z", {}, spot=584.0)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T13:45:00Z", limit=0.60)
+        self.assertEqual([(f["side"], f["price"]) for f in r["fill_log"]], [("buy", 0.576), ("settle", 0.0)])
+        self.assertAlmostEqual(r["final_equity"], 1000.0 - 57.6 - 0.1, places=6)
+        self.assertEqual(r["digest"]["worst"][0]["how"], "settled at intrinsic on the underlying's close")
+
+    def test_no_structure_is_opened_on_its_expiry_day_from_1430_new_york(self):
+        steps = [sstep("2026-09-25T18:15:00Z", VPRICES), sstep("2026-09-25T18:30:00Z", VPRICES), sstep("2026-09-25T18:45:00Z", VPRICES)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T18:30:00Z", limit=0.70)
+        self.assertEqual(r["fills"], 0)
+        self.assertIn("no structure is opened on its earliest expiry day from 14:30 New York", " ".join(r["refusal_reasons"]))
+        before = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T18:15:00Z", limit=0.70)
+        self.assertEqual(before["fills"], 1)  # 14:15 New York: still open for entries
+
+    def test_participation_counts_a_butterflys_body_twice(self):
+        fly = [socc(584), socc(585), socc(586)]
+        legs = [{"occ": socc(584), "role": "long"}, {"occ": socc(585), "role": "short", "ratio": 2}, {"occ": socc(586), "role": "long"}]
+        prices = {socc(584): 1.80, socc(585): 1.20, socc(586): 0.75}
+        thin = {socc(585): 15.0}  # 10% of 15 is 1.5 contracts: one butterfly needs 2 of the body
+        steps = [sstep("2026-09-22T13:45:00Z", prices), sstep("2026-09-22T14:00:00Z", prices, volumes=thin),
+                 sstep("2026-09-22T14:15:00Z", prices, volumes={socc(585): 20.0})]
+        r = srun(steps, fly, structure="long_butterfly", legs=legs, open_at="2026-09-22T13:45:00Z", limit=0.40)
+        self.assertEqual([f["t"] for f in r["fill_log"]], ["2026-09-22T14:15:00Z"])
+        self.assertEqual(r["options"]["liquidity_misses"], 1)
+        # conservative ask: 1.80 + 0.072 + 0.75 + 0.03 - 2 x (1.20 - 0.048) = 0.348; the fee is 4 contracts
+        self.assertEqual((r["fill_log"][0]["price"], r["fill_log"][0]["fee"]), (0.348, 0.2))
+
+    def test_a_calendar_settles_at_its_far_legs_bid_less_its_near_legs_intrinsic_or_is_not_evaluated(self):
+        near, far = socc(585, expiry="260925"), socc(585, expiry="261002")
+        legs = [{"occ": near, "role": "short"}, {"occ": far, "role": "long"}]
+        prices = {near: 1.00, far: 3.00}
+        steps = [sstep("2026-09-25T13:45:00Z", prices), sstep("2026-09-25T14:00:00Z", prices), sstep("2026-09-25T20:00:00Z", {}, spot=586.0)]
+        wide = {"max_position_usd": 300.0, "max_order_usd": 250.0}
+        r = srun(steps, [near, far], structure="calendar", legs=legs, open_at="2026-09-25T13:45:00Z", limit=2.20, limits=wide)
+        # opened at 3.00 + 0.12 - (1.00 - 0.04) = 2.16; settled at the far leg's last conservative bid 2.88 less 1.00 intrinsic
+        self.assertEqual([(f["side"], f["price"]) for f in r["fill_log"]], [("buy", 2.16), ("settle", 1.88)])
+        self.assertEqual(r["trade_log"][0]["how"] if "trade_log" in r else r["digest"]["worst"][0]["how"],
+                         "settled: the far leg's bid less the near leg's intrinsic")
+        # no price of the underlying on its expiry day (the tape jumps to Monday): refunded at cost, not a trade, not a loss
+        gap = [sstep("2026-09-24T13:45:00Z", prices), sstep("2026-09-24T14:00:00Z", prices),
+               {"t": "2026-09-28T13:45:00Z", "bars": {}, "execution_bars": {}, "options": {socc(590): [0.5, 0.5, 0.5, 0.5, 50.0, 10]}}]
+        r = srun(gap, [near, far, socc(590)], structure="calendar", legs=legs, open_at="2026-09-24T13:45:00Z", limit=2.20, limits=wide)
+        self.assertEqual(r["options"]["structures"]["not_evaluated"], 1)
+        self.assertEqual(r["trades"], 0)
+        self.assertAlmostEqual(r["final_equity"], 1000.0 - 0.1, places=6)  # the fee stays paid
+        # a far leg the history never saw at all: the calendar is not evaluated (refused), never a loss
+        later = [{"occ": near, "role": "short"}, {"occ": socc(585, expiry="261023"), "role": "long"}]
+        r = srun(steps, [near, far], structure="calendar", legs=later, open_at="2026-09-25T13:45:00Z", limit=2.20, limits=wide)
+        self.assertEqual((r["fills"], r["trades"], r["options"]["structures"]["unseen_leg_refusals"]), (0, 0, 1))
+        self.assertIn("not evaluated: the history holds no prints of a leg", " ".join(r["refusal_reasons"]))
+
+    def test_the_context_is_the_houses_structure_context(self):
+        cheap, dear, today_call = socc(585), socc(575), socc(586)
+        codes = [cheap, dear, today_call, socc(584), socc(586, "C", "260922")]
+        prices = {cheap: 1.20, dear: 10.50, today_call: 0.70, socc(584): 1.80, socc(586, "C", "260922"): 0.30}
+        steps = [sstep("2026-09-22T13:45:00Z", prices), sstep("2026-09-22T18:15:00Z", prices), sstep("2026-09-22T18:30:00Z", prices)]
+        r = srun(steps, codes, open_at="never")
+        seen = r["final_memory"]
+        morning, cut = seen["2026-09-22T18:15:00Z"]["chain"], seen["2026-09-22T18:30:00Z"]["chain"]
+        self.assertIn(dear, morning)  # $10.50 a share: over a single contract's $0.75 line, shown to a structure agent
+        self.assertIn(socc(586, "C", "260922"), morning)  # expiring today, before 14:30 New York
+        self.assertNotIn(socc(586, "C", "260922"), cut)  # and not from 14:30
+        self.assertGreater(seen["2026-09-22T18:15:00Z"]["structures"], 0)  # ctx["structures"]: structure_core.candidates
+        self.assertGreater(r["options"]["structures"]["candidates_shown"], 0)
+
+    def test_the_features_and_feeds_it_declares_as_a_live_wake_sees_them(self):
+        strategy = STRUCTURE_STRATEGY.replace('"max_days_to_expiry": 7,', '"max_days_to_expiry": 7, "options_features": True, "feeds": {"earnings": ["SPY"]},')
+        strategy = strategy.replace('"held": held,', '"held": held, "iv": (ctx.get("options_features") or {}).get("SPY", {}).get("atm_iv"), '
+                                    '"feed": sorted(((ctx.get("feeds") or {}).get("earnings") or {}).get("SPY", {}).items()),')
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-23T13:45:00Z", VPRICES)]
+        tape = stape(steps, VERTICAL, options_features={"SPY": [{"t": "2026-09-22T04:00:00Z", "atm_iv": 0.11}, {"t": "2026-09-23T04:00:00Z", "atm_iv": 0.13}]},
+                     feeds={"earnings": {"SPY": [{"t": "2026-09-23T12:00:00Z", "filed": "8-K"}]}})
+        r = run_replay(strategy, {"open_at": "never"}, tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertTrue(r["ok"], r)
+        seen = r["final_memory"]
+        self.assertEqual((seen["2026-09-22T13:45:00Z"]["iv"], seen["2026-09-23T13:45:00Z"]["iv"]), (0.11, 0.13))  # never a row before it existed
+        self.assertEqual((seen["2026-09-22T13:45:00Z"]["feed"], seen["2026-09-23T13:45:00Z"]["feed"]),
+                         ([], [["filed", "8-K"], ["t", "2026-09-23T12:00:00Z"]]))
+
+    def test_the_chain_shows_at_most_eighty_an_underlying_nearest_the_money(self):
+        codes = [socc(k, right) for k in range(560, 611) for right in ("C", "P")]  # 102 contracts
+        prices = {c: 1.0 for c in codes}
+        r = srun([sstep("2026-09-22T13:45:00Z", prices), sstep("2026-09-22T14:00:00Z", prices)], codes, open_at="never")
+        chain = r["final_memory"]["2026-09-22T14:00:00Z"]["chain"]
+        self.assertEqual(len(chain), 80)
+        self.assertTrue(all(abs(int(c[-8:]) / 1000 - 585.40) <= 20.5 for c in chain))
+
+    def test_who_may_send_what(self):
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES)]
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.60, single=socc(585))
+        self.assertIn("a structure agent's book holds structures only", " ".join(r["refusal_reasons"]))
+        self.assertEqual(r["fills"], 1)  # the structure still went through
+        plain = STRUCTURE_STRATEGY.replace('"structures": True,', "")
+        self.assertNotIn('"structures": True', plain)
+        r = srun(steps, VERTICAL, strategy=plain, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.60)
+        self.assertEqual(r["fills"], 0)
+        self.assertIn("a structure intent is for a structure agent", " ".join(r["refusal_reasons"]))
+        r = srun(steps, VERTICAL, legs=[{"occ": socc(586), "role": "long"}, {"occ": socc(585), "role": "short"}],
+                 open_at="2026-09-22T13:45:00Z", limit=0.60)
+        self.assertIn("not a structure order: not a debit_vertical", " ".join(r["refusal_reasons"]))
+        r = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-22T13:45:00Z", limit=0.60, quantity=2)
+        self.assertIn("over the order cap", " ".join(r["refusal_reasons"]))  # 2 x 0.60 x 100 = $120 of maximum loss
+
+    def test_a_structure_strategys_params_are_ordinary_params_an_edit_replays(self):
+        """X1 `edit_params` (`House._edit_replay`) and the lab replay a PARAMS change of the same code: the
+        spec's structure PARAMS are plain numbers the House can bound, mutate and replay, when the
+        strategy declares their bounds (`NEEDS.parameter_rules`); `max_open` is a standard count."""
+        ns = {}
+        exec(STRUCTURE_STRATEGY, ns)  # noqa: S102 - the test's own strategy
+        needs, params = ns["NEEDS"], dict(ns["PARAMS"], legs=VLEGS, open_at="2026-09-22T13:45:00Z", max_debit=0.55, take_profit=0.5)
+        parameters.require_valid(params, needs)
+        mutable = parameters.inspect(params, needs)["mutable"]
+        self.assertTrue({"max_debit", "take_profit", "max_open"} <= set(mutable), mutable)
+        child = parameters.mutate(params, seed="structure-edit", needs=needs)
+        self.assertEqual(len([k for k in params if params[k] != child[k]]), 1)
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES)]
+        tight = srun(steps, VERTICAL, **params)  # a debit of at most 0.55 does not meet the 0.576 conservative ask
+        edited = srun(steps, VERTICAL, **dict(params, max_debit=0.60))  # the edit: the same code, one PARAM
+        self.assertEqual((tight["fills"], edited["fills"]), (0, 1))
+        self.assertEqual(edited["params"]["max_debit"], 0.60)
+        self.assertEqual(tight["code_sha256"], edited["code_sha256"])
+
+    def test_a_replay_is_the_same_in_every_process(self):
+        codes = [socc(k, right) for k in range(575, 596) for right in ("C", "P")]
+        prices = {c: round(0.2 + abs(585 - int(c[-8:]) / 1000) * 0.1, 2) for c in codes}
+        steps = [sstep("2026-09-22T13:45:00Z", prices), sstep("2026-09-22T14:00:00Z", prices)]
+        tape = json.dumps(stape(steps, codes))
+        code = "import json\nfrom league.replay import run_replay\n" \
+               f"r = run_replay({STRUCTURE_STRATEGY!r}, {{'open_at': 'never'}}, json.loads({tape!r}), stake=1000.0, limits={SLIMITS!r}, audit=True)\n" \
+               "print(json.dumps(r['final_memory'], sort_keys=True))"
+        import os
+        import subprocess
+        import sys
+        runs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                               env={**os.environ, "PYTHONHASHSEED": seed}, cwd=str(Path(__file__).resolve().parents[2])).stdout
+                for seed in ("1", "2", "3")}
+        self.assertEqual(len(runs), 1)  # a tie (a call and a put of one strike) is broken by the code, not by hashing
+
+
+class StructureTape(unittest.TestCase):
+    def test_a_structure_tape_has_no_affordability_line_and_keeps_the_chains_band(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = oh.OptionsHistory(Path(root) / "h.sqlite")
+            codes = {socc(585): 1.2, socc(575): 10.5, socc(460): 0.05, socc(585, "C", "261016"): 6.0}
+            for code in codes:
+                parsed = oh.parse_occ(code)
+                store.db.execute("INSERT INTO contracts VALUES (?, 'SPY', ?, ?, ?, 100, 'active', '')", (code, parsed["expiry"], parsed["strike"], parsed["right"]))
+            for t in ("2026-09-22T14:00:00Z", "2026-09-22T14:15:00Z"):
+                for code, price in codes.items():
+                    store.db.execute("INSERT INTO bars VALUES (?, '15Min', ?, ?, ?, ?, ?, 50, 10, ?)", (code, t, price, price, price, price, price))
+            store.db.commit()
+
+            def underlier(symbol, timeframe, start, end):
+                return [{"t": t, "o": 585.4, "h": 585.4, "l": 585.4, "c": 585.4, "v": 1000.0}
+                        for t in ("2026-09-22T14:00:00Z", "2026-09-22T14:15:00Z") if start <= t <= end]
+            needs = {"symbols": ["SPY"], "bars": {"timeframe": "15Min", "limit": 5}, "structures": True}
+            built = store.tape(needs, "2026-09-22T00:00:00Z", "2026-09-22T23:59:59Z", horizon="day", underlier_bars=underlier,
+                               execution="15Min", max_order_usd=75.0)
+            self.assertEqual(set(built["contracts"]), {socc(585), socc(575)})  # $10.50 kept; 460 is 21% away; Oct 16 past 7 days
+            self.assertEqual(built["chain_rules"]["per_underlying"], 80)
+            self.assertIsNone(built["chain_rules"]["afford_per_share"])
+            single = store.tape({**needs, "structures": False}, "2026-09-22T00:00:00Z", "2026-09-22T23:59:59Z", horizon="day",
+                                underlier_bars=underlier, execution="15Min", max_order_usd=75.0)
+            self.assertNotIn(socc(575), single["contracts"])  # a single-contract tape keeps its affordability line
+            local = oh.stored_underlier  # the local copy's reader refuses a store with no underlier bars
+            with self.assertRaises(oh.HistoryError):
+                local(store)
+
+    def test_the_faster_implied_volatility_is_the_same_number(self):
+        import random
+
+        def slow(price, spot, strike, years, right, low=0.005, high=5.0):
+            if not oh.bs_price(spot, strike, years, low, right) < price < oh.bs_price(spot, strike, years, high, right):
+                return None
+            for _ in range(80):
+                mid = 0.5 * (low + high)
+                if oh.bs_price(spot, strike, years, mid, right) < price:
+                    low = mid
+                else:
+                    high = mid
+                if high - low < 1e-7:
+                    break
+            return 0.5 * (low + high)
+        rng = random.Random(7)
+        for _ in range(1500):
+            spot = rng.uniform(5, 800)
+            args = (rng.uniform(0.01, 0.1 * spot), spot, spot * rng.uniform(0.8, 1.2), rng.uniform(1e-5, 0.1), rng.choice(("call", "put")))
+            self.assertEqual(oh.implied_vol(*args), slow(*args))
+
+
+class StructureKit(unittest.TestCase):
+    def test_the_box_replays_a_structure_with_the_kit_alone(self):
+        """In the agent's box `replay.py` runs beside its kit and nothing else: no `league`, no `ltcm`."""
+        import os
+        import subprocess
+        import sys
+        from league.sandbox import kit_files
+        files = kit_files()
+        self.assertIn("structure_core.py", files)
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES)]
+        spec = {"code": STRUCTURE_STRATEGY, "params": {"legs": VLEGS, "open_at": "2026-09-22T13:45:00Z", "limit": 0.60},
+                "tape": stape(steps, VERTICAL), "stake": 1000.0, "limits": SLIMITS, "token": "t"}
+        with tempfile.TemporaryDirectory() as box:
+            for name, source in files.items():
+                target = Path(box) / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(Path(source).read_text(encoding="utf-8"), encoding="utf-8")
+            (Path(box) / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")}
+            run = subprocess.run([sys.executable, "-s", "replay.py", "--spec", "spec.json"], cwd=box, env=env, capture_output=True, text=True, timeout=120)
+        line = [x for x in run.stdout.splitlines() if x.startswith("REPLAY-RESULT t ")][-1]
+        result = json.loads(line[len("REPLAY-RESULT t "):])
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["fills"], result["options"]["structures"]["opened"]), (1, 1))
+        self.assertEqual(structure_core.TYPES, ("debit_vertical", "long_butterfly", "calendar", "diagonal", "long_straddle",
+                                                "long_strangle", "credit_vertical", "iron_condor", "iron_butterfly"))
