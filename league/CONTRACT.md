@@ -369,7 +369,7 @@ limit more than 10% away from the structure's touch on its side: when an exit fi
 **Time.** A structure's clock is its EARLIEST expiry. No structure is opened on that day from 14:30
 New York (nor outside the regular session); from 15:30 New York that day the House sells whatever is
 still held, whole, at its bid (at least a cent), re-priced each tick until it is gone; nothing is held
-into an expiry. Write your own profit target, stop and time exit: realized P&L exists only when your
+into an expiry. On an early close (13:00 New York) both move to 90 and 30 minutes before the bell. Write your own profit target, stop and time exit: realized P&L exists only when your
 strategy closes.
 
 **What a structure agent is shown.**

@@ -771,7 +771,7 @@ class House:
         first, last = _plus_days(today, 1), _plus_days(today, days)
         if structures:
             new_york, hour = _new_york(self.clock)
-            first = new_york if hour < STRUCTURE_ENTRY_CUT_HOUR else _plus_days(new_york, 1)
+            first = new_york if hour < self._structure_hours(new_york)[0] else _plus_days(new_york, 1)
             last = _plus_days(new_york, days)
         per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
         rows: list[dict[str, Any]] = []
@@ -850,6 +850,29 @@ class House:
         niche = self.niche_of(agent)
         return niche is not None and niche.asset_class == "option"
 
+    def _structure_hours(self, day: str) -> tuple[float, float]:
+        """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
+        15:30 (`STRUCTURE_ENTRY_CUT_HOUR`, `STRUCTURE_CLOSE_HOUR`), held 90 and 30 minutes before the bell on
+        an early close (13:00 New York the day after Thanksgiving and on Christmas Eve), where a fixed 15:30
+        would come after the market had shut and leave the structure held into its expiry."""
+        hours = self.__dict__.setdefault("_structure_hours_memo", {})
+        if day not in hours:
+            cut, close = STRUCTURE_ENTRY_CUT_HOUR, STRUCTURE_CLOSE_HOUR
+            try:
+                session = us_equity_session(day)
+                if session is not None:
+                    from zoneinfo import ZoneInfo
+
+                    bell = to_datetime(session.close_at).astimezone(ZoneInfo("America/New_York"))
+                    bell_hour = bell.hour + bell.minute / 60.0
+                    cut, close = min(cut, bell_hour - 1.5), min(close, bell_hour - 0.5)
+            except Exception:  # noqa: BLE001 - a day outside the calendar keeps the regular hours
+                pass
+            if len(hours) > 64:
+                hours.clear()
+            hours[day] = (cut, close)
+        return hours[day]
+
     def _structure_book(self, agent: Agent) -> Book | None:
         """A structure agent's practice book (`book_of`, rung 1): the one the config names, None when
         that book is not open here -- `book_of` then falls back to the desk's practice book, where
@@ -917,9 +940,10 @@ class House:
                     "the open. The House wakes a desk that keeps hours a few seconds after the bell; decide it then")
         today, hour = _new_york(self.clock)
         expiry = order.spec.expiry
-        if expiry < today or (expiry == today and hour >= STRUCTURE_ENTRY_CUT_HOUR):
-            return (f"no structure is opened on its earliest expiry day ({expiry}) from 14:30 New York: the House "
-                    "closes what is still held from 15:30 and nothing is held into an expiry")
+        cut, close = self._structure_hours(today)
+        if expiry < today or (expiry == today and hour >= cut):
+            return (f"no structure is opened on its earliest expiry day ({expiry}) from {_clock_text(cut)} New York: the House "
+                    f"closes what is still held from {_clock_text(close)} and nothing is held into an expiry")
         return ""
 
     def _refuse_intent(self, agent: Agent, book: Book, intent: Intent, reason: str) -> None:
@@ -943,7 +967,7 @@ class House:
         asked = agent.needs.get("max_days_to_expiry")
         days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
         today, hour = _new_york(self.clock)
-        opening = hour < STRUCTURE_ENTRY_CUT_HOUR
+        opening = hour < self._structure_hours(today)[0]
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
                              lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
         ctx["chain"] = chain
@@ -1016,7 +1040,7 @@ class House:
         OVER the bid (it would not fill); a resting sale at or under the bid stays, since it fills at the bid on
         the next quote, and cancelling it would only restart a fill rule that waits for a newer quote."""
         inst = holding.instrument
-        if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < STRUCTURE_CLOSE_HOUR \
+        if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < self._structure_hours(today)[1] \
                 or market_hours(inst, now) is False:
             return None
         limit = self._structure_bid(book, inst)
@@ -1034,13 +1058,13 @@ class House:
         intent = self._structure_sale(
             agent_id, inst, (held.quantity if held is not None else ZERO) - resting, limit, now,
             nonce=f"structure-expiry:{inst.key}:{int(self.clock())}",
-            reason="The House's expiry rule for structures: from 15:30 New York on its earliest expiry day a structure "
-                   "is sold whole at its bid, re-priced each tick, and never held into an expiry.")
+            reason=f"The House's expiry rule for structures: from {_clock_text(self._structure_hours(today)[1])} New York on its "
+                   "earliest expiry day a structure is sold whole at its bid, re-priced each tick, and never held into an expiry.")
         told = self.__dict__.setdefault("_structure_expiry_told", set())
         if intent is not None and (agent_id, inst.key, today) not in told:
             told.add((agent_id, inst.key, today))
             self.alert("info", f"{agent_id}: {book.name} is closing its {inst.market_id} at the bid of {intent.limit_price} "
-                               "(the structure expiry rule: 15:30 New York on its earliest expiry day)")
+                               f"(the structure expiry rule: {_clock_text(self._structure_hours(today)[1])} New York on its earliest expiry day)")
         return intent
 
     def _observed(self, watched: Mapping[str, Any], needs: Mapping[str, Any]) -> dict[str, Any]:
@@ -8738,6 +8762,12 @@ def _plus_days(date: str, days: int) -> str:
     from datetime import date as _date, timedelta
 
     return (_date.fromisoformat(date) + timedelta(days=days)).isoformat()
+
+
+def _clock_text(hour: float) -> str:
+    """A New York hour as a decimal (14.5) written as a clock reads (14:30)."""
+    minutes = int(round(hour * 60))
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def _new_york(clock: Callable[[], float]) -> tuple[str, float]:

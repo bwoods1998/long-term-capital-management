@@ -537,6 +537,16 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual([(i.side, i.instrument.expiry) for i in intents], [("sell", "2026-09-11"), ("buy", "2026-09-14")])
         self.assertIn("from 14:30 New York", self.refusals(agent)[0])
 
+    def test_an_early_close_moves_the_entry_cut_and_the_house_close_before_the_bell(self):
+        """The day after Thanksgiving closes at 13:00 New York: a 15:30 close would come after the bell."""
+        self.assertEqual(self.house._structure_hours("2026-09-25"), (14.5, 15.5))
+        self.assertEqual(self.house._structure_hours("2026-11-27"), (11.5, 12.5))
+        agent = self.structure_agent()
+        self.at(1795797900.0)  # Friday Nov 27, 2026, 16:45 UTC: 11:45 in New York, in its short session
+        intents, _ = self.house._intents(agent, self.house.book_of(agent), [condor_row(expiry="2026-11-27")])
+        self.assertEqual(intents, [])
+        self.assertIn("from 11:30 New York", self.refusals(agent)[0])
+
     def test_no_open_outside_the_session(self):
         agent = self.structure_agent()
         self.at(THURSDAY_11_NY - 13 * 3600)  # Thursday 02:00 UTC
