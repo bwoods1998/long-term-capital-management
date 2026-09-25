@@ -147,6 +147,20 @@ watch.
   funded burst's settings. Ratifying re-pins the same capital to the new money digest, keeps the
   old policy in `live_ratifications` and restarts the House, which reloads those settings. It never
   enlarges the capital, and a revoked grant cannot be ratified.
+- **The scale rule (grant version 2, K5 of the Kalshi-scale run; switched off until the owner ratifies it).**
+  Version 1 of the grant says later deposits do not enlarge it. Version 2 (`league/grants.py`, `scale_tranches`)
+  lets a venue's deposit (the account's equity above its envelope) enter the envelope in tranches of
+  min(deposit left, 50% of the envelope), each when, on each of the last 3 complete UTC days, the venue's proven
+  families at capacity (members on real money x stake x the largest multiple before fills halve) use at least 70%
+  of the envelope and the venue's real P&L (equity less what was lent, losses in full) over them is positive; a
+  tranche is withdrawn if the venue's real P&L since its unlock falls below the throttle line (-0.30) x its size.
+  - Read the evidence (read-only, on the box; or `--root <copied state dir>` locally):
+    `python3 scripts/live_trading.py --scale-report [--json] [--funded kalshi=<equity>]`.
+  - Switch it on (the owner only): `python3 scripts/live_trading.py --ratify earned-live-20260921 --grant-version 2`.
+    Off again: `--grant-version 1`. A plain `--ratify` (a run's re-ratify after a promotion) never switches it on,
+    and any later money-rule change switches it off until the owner runs the version-2 ratify again.
+  - Until the allocator reads it (one line in `Allocator.grant_capital`, not yet written), a ratified version 2
+    changes the report alone: the replayed tranches, not the envelope the allocator stakes against.
 - **The allocator's deploy (Sept 23, 2026).** The `allocator` section is a money rule. Run
   `floor_box.py deploy` in the background and watch its log. At `promoted`, run
   `python3 scripts/live_trading.py --ratify earned-live-20260921` at once. Until the ratify

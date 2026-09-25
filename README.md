@@ -762,7 +762,7 @@ The `league/` modules:
 | `stats.py` | The statistics the ladder decides on: bounds, alpha spending, the loss-rate gate, deflated Sharpe, CUSUM, quarter-Kelly. |
 | `evaluator.py`, `episodes.py` | The ladder: trials, blocks and completed portfolio exposures, promotion, death and drift. |
 | `live_pilot.py` | Explicit owner activation and immutable deadline for the bounded live-learning window. |
-| `live_trading.py` | Owner activation/revocation of persistent earned trading on a fixed allocation of existing venue cash. |
+| `live_trading.py`, `grants.py` | Owner activation/revocation of persistent earned trading on a fixed allocation of existing venue cash. Version 2 of the grant (Sept 25, 2026, K5; `grants.py` holds its arithmetic beside the House-funded startup research grants) adds the scale rule: a deposit enters a venue's envelope in tranches that proven capacity and real profit unlock. Switched off: only the owner's `--ratify <grant> --grant-version 2` turns it on, and `--scale-report` reads the evidence read-only. |
 | `replay.py` | Rung 0: the mechanical replay simulator. Self-contained; runs inside the agent's box. `run_batch` (Sept 23, 2026) replays many candidates over one tape for the Alpha Lab, each exactly as a single replay would. |
 | `tapes.py` | Recorded history for replay and live snapshots of the same shape, for both venues. |
 | `paper.py` | The Kalshi shadow account: live quotes, conservative fills, no order ever sent. |
