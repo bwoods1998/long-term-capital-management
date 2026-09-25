@@ -758,7 +758,8 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
                    "held_cost": float(holding.average_cost), "mark": None if mark is None else float(mark),
                    "unrealized_usd": None if mark is None else _money((mark - holding.average_cost) * inst.multiplier * holding.quantity),
                    "expiry": spec.expiry}
-            if last is not None and spec.type not in structures.TWO_EXPIRIES:
+            if last is not None and spec.type not in structures.TWO_EXPIRIES and spec.expiry <= datetime.fromtimestamp(last.t, NEW_YORK).strftime("%Y-%m-%d"):
+                # held past its expiry day's close: the broker settles it at intrinsic on the underlying's close
                 touch = last.spot.get(spec.underlying)
                 if touch:
                     value = structures.intrinsic(spec, Decimal(str(round((touch[0] + touch[1]) / 2, 4))))
