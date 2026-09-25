@@ -478,7 +478,7 @@ class Foundry:
         for a merged corrected child admitted through `takes_strategy`)."""
         by_strategy = {name: card["id"] for name, card in self.strategy_cards().items()}
         out = {}
-        for a in self.house.registry.agents.values():
+        for a in list(self.house.registry.agents.values()):  # a copy: births land from other threads (the review of #297)
             founder = str(a.founder or "")
             if founder.startswith("card:"):
                 out[founder[5:]] = a
@@ -618,7 +618,7 @@ class Foundry:
         if isinstance(evidence, dict) and evidence.get("niche"):
             return str(evidence["niche"])
         kind, _, name = key.partition(":")
-        for agent in self.house.registry.agents.values():
+        for agent in list(self.house.registry.agents.values()):
             if (kind == "line" and (agent.line or agent.name) == name) or (kind == "family" and agent.family == name):
                 return agent.specialty
         return (self.cards().get(key) or {}).get("niche")
@@ -637,7 +637,7 @@ class Foundry:
         except ImportError:
             return set()
         out = set()
-        for agent in self.house.registry.agents.values():
+        for agent in list(self.house.registry.agents.values()):
             if self._is_retired(agent, retired):
                 text = docstring(agent.code)
                 if text:
@@ -748,7 +748,7 @@ class Foundry:
         `fast_lane_reopen_blocks` active blocks; the calls go to the open fast desks by yield."""
         def build():
             house = self.house
-            children = {a.id: a for a in house.registry.agents.values() if str(a.founder or "").startswith("card:") and a.specialty}
+            children = {a.id: a for a in list(house.registry.agents.values()) if str(a.founder or "").startswith("card:") and a.specialty}
             desks: dict[str, dict[str, Any]] = {}
             for entry in house.ledger.iter(kinds="eval.block"):
                 agent = children.get(entry.agent)
@@ -1796,7 +1796,7 @@ class Foundry:
         return result
 
     def _families(self) -> set[str]:
-        return self._folded("families", lambda: {a.family for a in self.house.registry.agents.values()}
+        return self._folded("families", lambda: {a.family for a in list(self.house.registry.agents.values())}
                             | {str(e.payload.get("family")) for e in self.house.ledger.iter(kinds="eval.trial")}
                             | {str(c.get("family")) for c in self.cards().values()})
 

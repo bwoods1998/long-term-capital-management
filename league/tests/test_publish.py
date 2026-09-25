@@ -223,7 +223,9 @@ class PublisherTest(HouseCase):
         first = [e["id"] for u, _, b in site.posts if u.endswith("/events") for e in b["events"]]
         site.posts.clear()
         self.house.publisher = self.publisher(site)  # a restart reads its cursor back
+        self.clock.advance(float(self.house.settings.publish_seconds))  # the site is checkpointed once a minute (H5)
         self.house.tick()
+        self.assertTrue(site.posts)
         second = [e["id"] for u, _, b in site.posts if u.endswith("/events") for e in b["events"]]
         self.assertFalse(set(first) & set(second))
         self.assertNotIn("secret", json.dumps([b for _, _, b in site.posts]))
@@ -466,6 +468,7 @@ class BoardTest(BoardCase):
             self.house.allocator = allocator
             site = FakeSite()
             self.house.publisher = self.publisher(site)
+            self.clock.advance(float(self.house.settings.publish_seconds))  # the site is checkpointed once a minute (H5)
             self.house.tick()
             self.assertTrue(site.posts[-1][0].endswith("/checkpoint"), "the checkpoint is published whatever the board did")
             body = site.posts[-1][2]
