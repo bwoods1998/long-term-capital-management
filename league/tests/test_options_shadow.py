@@ -16,6 +16,7 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 from ltcm.broker import Broker, BrokerError, Instrument, OrderIntent, RejectedOrder, VenueUnavailable
 
@@ -438,6 +439,27 @@ class Bookkeeping(ShadowCase):
         self.assertEqual(mode, 0o600)
         state = json.loads(self.path.read_text())
         self.assertIsInstance(state["cash"], str)
+
+    def test_a_write_that_fails_takes_the_order_and_the_fill_back(self):
+        resting = self.buy(VERTICAL, "1", "0.55")
+        self.later()
+        self.quote_vertical()
+        with mock.patch("league.options_shadow.os.replace", side_effect=OSError("No space left on device")):
+            with self.assertRaises(VenueUnavailable):
+                self.buy(VERTICAL, "1", "0.50")
+            with self.assertRaises(VenueUnavailable):
+                self.broker.advance()
+        self.assertEqual((self.cash_now(), self.held()), (D(10000), {}))
+        self.assertEqual(self.broker.get_order(resting.id).status, "accepted")
+        self.assertEqual([p.name for p in self.path.parent.iterdir()], [self.path.name])
+        self.assertEqual(self.broker.advance(), 1)  # the disk is back: the fill is made, once, on the same quote
+        self.assertEqual(self.buy(VERTICAL, "1", "0.40").broker_order_id, "options-shadow-2")
+        self.assertEqual(self.new_broker().balance().cash, self.cash_now())
+
+    def test_resting_buys_hold_their_cash(self):
+        self.buy(VERTICAL, "2", "0.55")
+        balance = self.broker.balance()
+        self.assertEqual((balance.cash, balance.buying_power), (D(10000), D(10000) - D("110.20")))
 
     def test_a_state_file_that_cannot_be_read_is_an_error_not_a_new_account(self):
         self.path.write_text("{not json")

@@ -39,9 +39,11 @@ this account says it did not. The owner (Sept 25, 2026): never relax them.
 4. No fill takes more than 10% of any leg's shown size on the side it trades (an open takes a long
    leg's ask size and a short leg's bid size; a close the reverse), divided by the leg's ratio: a
    butterfly's body of 30 contracts bid lets one structure through, not one and a half. A leg that
-   shows no size gives no fill. The 10% is shared by every order filled on that leg's same quote,
-   across passes, so a quote that does not change cannot be taken twice. What the size does not allow
-   rests: partial fills are allowed.
+   shows no size, or under ten contracts, gives no fill. The 10% is shared by every order filled on
+   that leg's same quote, across passes, so a quote that does not change cannot be taken twice. What
+   the size does not allow rests: partial fills are allowed. Measured on the House box on Sept 25, 2026
+   (the latest OPRA quotes, from the Sept 24 close): SPY's Sept 28 legs a strike or two from the money
+   showed 17 to 156 contracts a side, and one showed 2 on its ask.
 5. Day orders: what has not filled when the session of its acceptance closes is `expired` (Alpaca's
    word for a day order at the bell).
 6. No leverage and no shorts at the account level (the Book checks each agent; this is the backstop):
@@ -139,7 +141,8 @@ def _text(value: Decimal | None) -> str | None:
 
 
 def _number(value: Any) -> Decimal | None:
-    """A market-data number (JSON numbers arrive as floats) as a Decimal, or None."""
+    """A market-data number as a Decimal, or None: through the House's `VenueClient` a price arrives as a
+    Decimal and a size as an int (measured on the House box, Sept 25, 2026); plain JSON gives floats."""
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -154,7 +157,8 @@ _FRACTION = re.compile(r"(\.\d{1,6})\d*")
 
 def stamp(value: Any) -> str | None:
     """A quote time as `YYYY-MM-DDTHH:MM:SS.ffffffZ` (UTC, microseconds), or None. Alpaca stamps OPRA
-    quotes to the nanosecond, which Python 3.11's `fromisoformat` (the House box's) may not read."""
+    quotes to the nanosecond (`2026-09-24T19:59:59.992106043Z`, read on the House box Sept 25, 2026); the
+    fraction is cut to microseconds before parsing, so one quote time has one spelling whatever reads it."""
     if not isinstance(value, str) or not value.strip():
         return None
     moment = instant(_FRACTION.sub(r"\1", value.strip(), count=1))
@@ -637,6 +641,7 @@ class OptionsShadowBroker:
                 return 0
             now = self._now()
             changed = 0
+            used = dict(self._used)  # rule 4's shares, put back with the rest if the write fails
             live = []
             for order in resting:
                 close = order._raw.get("session_close")
@@ -679,7 +684,11 @@ class OptionsShadowBroker:
                     order._raw["quote_floor"] = as_of  # the rest waits for a newer quote
                 changed += 1
             if changed:
-                self._commit()
+                try:
+                    self._commit()
+                except VenueUnavailable:
+                    self._used = used
+                    raise
             return changed
 
     # ---------------------------------------------------------------- expiry
