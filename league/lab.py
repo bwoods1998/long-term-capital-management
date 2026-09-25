@@ -281,6 +281,8 @@ DEFAULTS: dict[str, Any] = {
     "sol_max_output_tokens": 16000,
 }
 
+#: The key an options tape's steps carry their signal bars under (`league/options_history.py`).
+SIGNAL_BARS = "history_bars"
 #: What Luna and Sol are told of the options desk (G-LOOP, the options-desk run, Sept 25, 2026; `Lab._desk_brief`).
 STRUCTURE_LAB_RULES = ("The lab searches this desk for STRUCTURE programs only: NEEDS must carry \"structures\": true, and each "
                        "intent is one level-3 structure with defined risk (the contract's options-structures section). Its "
@@ -733,7 +735,8 @@ def forward_cut(tape: Mapping[str, Any], cut: float) -> dict[str, Any] | None:
                     warm.setdefault(str(symbol), []).append({**bar, "t": bar.get("t") or step.get("t")})
             # An options tape's signal bars ride on its steps as `history_bars` (the bars that became available by
             # then; `league/options_history.py`): the steps before the cut hand theirs on as warm-up (G-LOOP, Sept 25, 2026).
-            for symbol, rows in (step.get("history_bars") or {}).items():
+            signals = step.get(SIGNAL_BARS) or {}  # (named once: nothing here reads the history store)
+            for symbol, rows in signals.items():
                 warm.setdefault(str(symbol), []).extend(bar for bar in rows or [] if isinstance(bar, Mapping))
         out["warmup_bars"] = {s: rows[-MAX_BARS:] for s, rows in warm.items()}
     out["forward_cut"] = _iso(cut)
