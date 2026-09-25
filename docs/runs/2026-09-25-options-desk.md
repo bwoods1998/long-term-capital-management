@@ -186,7 +186,8 @@ one deploy at a time, its start written here first.
 | # | Item | State |
 |---|---|---|
 | 0.1 | T0 recorded and committed | done |
-| 0.2 | Plan merged to main | PR #299 merged 06:16Z |
+| 0.2 | Plan merged to main | PR #299 merged 06:15:46Z |
+| P1 | The gateway's multi-leg route (`p/gateway` 5bdf70e) | built 06:26Z (180/180 gateway tests); adversarial review 06:49Z: **SHIP** (729 real adapter bodies of today's practice traffic pass unchanged; the real venue identical to before across 1,216 tricky cases with `OPTION_STRUCTURES_REAL` off; the classifier agrees with `structures.py` on 134,664 leg sets). MAJOR for Track P: Alpaca refuses a one-order close of a calendar ("mleg uncovered short contracts not allowed"), very likely also straddles, strangles and diagonals, so the practice account admits only the five types whose close is covered (verticals, iron condors, iron and long butterflies); the others trade on the shadow book. MINOR before the real switch: a real close reserves one micro-dollar and trusts the venue to refuse closing legs not held (check held legs first); an overstated comment about the sign convention's evidence |
 
 ## The scoreboard at T0
 
