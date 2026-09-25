@@ -87,7 +87,16 @@
     "cooldown_hours": 24,
     "error_cooldown_hours": 0.5,
     "min_credits_usd": "0.60",
-    "house_pays": true
+    "house_pays": true,
+    "_about_pre_pack": "Sept 25, 2026 (the forward-first run, M1/C1; league/allocator.py _audit_look): pre_pack (8, audit_bounds 5-9) is the real settlement at which the auditor's packet for a proven family's first swing entry look is prepared (the look is at allocator.family_swing.min_real_settlements, 10; each later look is prepared as far ahead of it: 13 for 15), so a passing look is not delayed by its audit -- only while the look can still meet family_swing.min_distinct_dates. The approval it brings licenses that look and later ones and lapses at a look that does not pass. The one proven family settles about 3.5 real events a day; the family audit took minutes and waits out cooldown_hours after a veto.",
+    "pre_pack": 8
+  },
+  "audit_bounds": {
+    "_about": "Checked by economy.check_bounds (and so by league.ci; Sept 25, 2026, the forward-first run, M1): each audit dial named here stays inside its range.",
+    "pre_pack": [
+      5,
+      9
+    ]
   },
   "research": {
     "profile": "pro_flex",

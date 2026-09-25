@@ -58,6 +58,13 @@ def check_bounds(game: Mapping[str, Any]) -> None:
         value = float(game["horizon"][key])
         if not float(low) <= value <= float(high):
             raise ValueError(f"game.json: horizon.{key} = {value:g} is outside [{low}, {high}]")
+    # M1 of the forward-first run (Sept 25, 2026): the audit's dials inside `audit_bounds` (`audit.pre_pack`, 5-9).
+    for key, bound in (game.get("audit_bounds") or {}).items():
+        if str(key).startswith("_") or key not in (game.get("audit") or {}):
+            continue
+        value = float(game["audit"][key])
+        if not float(bound[0]) <= value <= float(bound[1]):
+            raise ValueError(f"game.json: audit.{key} = {value:g} is outside [{bound[0]}, {bound[1]}]")
     if int(economy["min_population"]) > int(economy["max_population"]):
         raise ValueError("game.json: min_population is above max_population")
     # The Alpha Lab's dials the close-the-gaps plan bounds (Sept 24, 2026): `lab_bounds`, each checked

@@ -165,6 +165,12 @@ or never swings at all.
                     f"  the family's record SINCE then is positive over {blocks} active blocks (each such demotion, until\n"
                     f"  its own turn).\n"
                     if probe_rule.get("reseat") == "gain_since_demotion" else "")
+            if probe_rule.get("reseat") == "bound_since_demotion":
+                # M5 of the forward-first run (Sept 25, 2026): the turn is a lower bound, one observation an hour (or day).
+                held = (f"  A probe that goes back to practice for ANY reason holds its family: no probe from it is seated until\n"
+                        f"  the family's record SINCE then, one observation per hour (or day) of its members' blocks, has its\n"
+                        f"  {float(probe_rule.get('reseat_confidence', 0.8)):.0%} lower bound above zero over {blocks} or more of them (each such demotion,\n"
+                        f"  until its own turn): a few lucky hours are not a turn.\n")
             probe_gate_text = (
                 f"  NO PROBE ON A LOSING FAMILY. When your family's forward record -- the active blocks of every member\n"
                 f"  ever born, living or dead, summed -- is at or below zero after {blocks} active blocks, no probe is\n"
@@ -183,28 +189,42 @@ or never swings at all.
             entry_at = float(swing_rule.get("entry_confidence", proof.get("confidence", 0.8)))
             looks = (f"there and at every {every} more ({first}, {first + every}, {first + 2 * every}, ...)" if every > 1
                      else "there and at every settlement after it")
+            dates = int(swing_rule.get("min_distinct_dates") or 0)
+            # M1 of the forward-first run (Sept 25, 2026): every look also asks for settlement dates, a slate a day.
+            spanned = (f",\n  spanning at least {dates} distinct settlement dates (an event's own date: one slate or one city's day\n"
+                       "  counts once, however many events it holds)" if dates else "")
             family_swing_text = (
                 f"- THE FAMILY SWING. When your family is PROVEN and its REAL-money record reaches {first} independent\n"
                 f"  settlements, its entry is judged {looks}: on those first settlements,\n"
-                f"  with their lower bound at {entry_at:.0%} above zero{favourites}. If a look passes and the frontier\n"
+                f"  with their lower bound at {entry_at:.0%} above zero{favourites}{spanned}. If a look passes and the frontier\n"
                 "  auditor approves the entry on that record, the family SWINGS: every member on real money is staked\n"
                 f"  {start:g}x the bunt (${start * float(bunt['kalshi']):.0f} at Kalshi), doubled after every {swing_rule.get('doubling_every', 10)} further WINNING real\n"
                 f"  settlements while the whole real record's lower bound at {float(proof.get('confidence', 0.8)):.0%} stays above zero, up to Kelly on that\n"
                 f"  bound and {float(alloc['max_share_of_venue']):.0%} of the venue for the whole family (shared by its members on real money), and held\n"
                 f"  where the family's fills at the bigger size fall under {float(swing_rule.get('capacity_fill_ratio', 0.5)):.0%} of its fills at the smaller one.\n"
-                "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
+                + ("  Staying in the swing, and every doubling, needs the whole real record on as many dates.\n" if dates else "")
+                + "  That bound at zero or below, or the family's proof gone: back to bunts (or probes), by free cash only,\n"
                 "  and its next entry is audited again, as it is when a member of the family takes a new program or\n"
                 "  a new member is born into it. A swinging member's positions are the same share of its stake, and the\n"
                 "  real book holds it to its daily-loss line as it holds every swing.\n")
+        # M4 (Sept 25, 2026): a stock or ETF program's real stake at Alpaca, probe or bunt.
+        equity = (f"; a stock or ETF program's ${probe['alpaca_equity']}, probe or bunt" if probe.get("alpaca_equity") else "")
+        # M3 (Sept 25, 2026): a proven family's member is seated on the family's proof.
+        member = alloc.get("proven_family_member") if isinstance(alloc.get("proven_family_member"), dict) else None
+        member_text = (f"  ON YOUR FAMILY'S PROOF: a member of a PROVEN family on practice, with {int(member.get('min_practice_closed', 1))} or more closed\n"
+                       f"  practice trades and a practice wealth multiple of {float(member.get('min_w_paper', 1.0)):g} or more, running the code that entered\n  most of the"
+                       f" family's settled events, is seated as a bunt without E {float(alloc['bunt_at']):g} -- while the family holds fewer than\n"
+                       f"  its seats on real money and its proof spans {int(member.get('min_distinct_dates') or 0)} or more distinct settlement dates.\n"
+                       if member else "")
         proof_text = (f"""- YOUR FAMILY'S RECORD IS YOUR PROOF. Real money starts as a PROBE (${probe['kalshi']} at Kalshi, ${probe['alpaca']} at
-  Alpaca) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
+  Alpaca{equity}) unless your family's pooled record is PROVEN; then it is a BUNT (${bunt['kalshi']} / ${bunt['alpaca']}). A family is proven
   when all its members ever born, living or dead, have together closed {proof.get('min_independent_settlements', 10)} or more independent
   settlements (one an event; practice at {float(proof.get('practice_weight', 0.5)):g} weight, real money at {float(proof.get('real_weight', 1)):g}) and the one-sided
   {float(proof.get('confidence', 0.8)):.0%} lower bound on {measured} is above zero{lopsided}. A probe becomes a bunt the pass
   after its family is proven, and a bunt a probe when that bound falls to zero (only free cash moves;
   nothing is sold). Proof is the family's and money is yours: a mechanism is proven by many independent
   settlements, never by one agent's three lucky ones.
-{probe_gate_text}  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
+{member_text}{probe_gate_text}  A FAMILY IS ONE MECHANISM. Every lab graduate (a lab nudge of your parameters included) and every
   foundry card starts a family of its own and proves itself from zero; your research children stay in
   your family, whatever they change, and their trades add to its record (its maker and taker entries are
   pooled apart: a child that makes the market where you took it builds the maker record, and the taker
@@ -218,6 +238,12 @@ or never swings at all.
             entry_rules.append("an entry must be a POST-ONLY LIMIT (it rests on the book, or the venue refuses it)\n"
                                "    until your family's pooled TAKER record is proven positive: market orders and\n"
                                "    crossing limits are refused")
+        elif alloc.get("real_entry_liquidity") == "probe_may_take":
+            # M2 of the forward-first run (Sept 25, 2026): pocket change may take the price.
+            taker_min = int(alloc.get("taker_proof_min") or proof.get("min_independent_settlements", 10))
+            entry_rules.append("a PROBE may enter as a taker (a market order or a crossing limit), one position at its cap;\n"
+                               "    a bunt's or a swing's entry must be a POST-ONLY LIMIT until your family's pooled TAKER record\n"
+                               f"    is proven positive ({taker_min} or more independent taker events with the lower bound above zero)")
         if alloc.get("longshot_floor_real"):
             entry_rules.append(f"no entry under {float(alloc['longshot_floor_real']) * 100:.0f}c: cheap contracts lost on real money")
         if alloc.get("max_event_share"):
