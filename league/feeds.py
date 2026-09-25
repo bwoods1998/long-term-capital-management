@@ -1809,7 +1809,8 @@ class FeedRecorder:
             }
             if feed in RECORDERS:
                 out[feed]["host"] = RECORDERS[feed].host
-                out[feed]["recorded"] = "at its final time (point-in-time history)" if feed in HISTORY_FEEDS else "live, at the House's receive time"
+                out[feed]["recorded"] = ("at its final time (point-in-time history)" if feed in HISTORY_FEEDS
+                                         else getattr(RECORDERS[feed], "recorded", "live, at the House's receive time"))
                 waiting = self.waiting_for(feed)
                 if waiting:
                     out[feed]["waiting_for"] = waiting
@@ -3270,6 +3271,7 @@ class MoveFeature(Source):
 
     name = "move"
     internal = True  # recorded by the House itself, never polled; `keys` is what it has recorded
+    recorded = "live, when the House's move sensor computed it (never polled, no host)"  # describe()'s line
     what = ("not served until the Jev run's ship rule passes (then \"serve\": true in league/jev_move_model.json): every key "
             "is absent before. Per Kalshi series, whether each market's midpoint is about to move: markets[ticker] = "
             "{move_p5, move_p15, move_p60} (the probability the mid changes at all within 5, 15 and 60 minutes; not its "

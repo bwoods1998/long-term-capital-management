@@ -449,6 +449,35 @@ class MoveFeed(StoreCase):
         self.assertEqual(list(reader.coverage()["move"]), ["KXHIGHNY"])
         self.assertEqual(reader.health()["move"]["next_due"], None)
 
+    def test_an_internal_source_is_never_waiting_backing_off_or_failing(self):
+        # No key placed and an empty allowlist: a polled recorder would say it waits; move has no host to wait for.
+        store = self.recorder(None, transports=FakeTransport({}), niches={}, environ={}, allowed_hosts=())
+        t0 = self.clock()
+        for offset in (0, 300, 600):
+            store.record("move", "KXHIGHNY", started=t0 + offset - 60, finished=t0 + offset, payload=MOVE)
+        self.clock.advance(600)
+        self.assertIsNone(store.waiting_for("move"))
+        self.assertIsNone(store._host_wait("move", self.clock()))
+        store._host_result("move", "KXHIGHNY", TransportError("timed out"), self.clock())  # nothing to back off
+        self.assertEqual(store._down, {})
+        described = store.describe()["move"]
+        self.assertEqual({k: described[k] for k in ("keys", "recording", "failing_now", "host")},
+                         {"keys": ["KXHIGHNY"], "recording": ["KXHIGHNY"], "failing_now": [], "host": ""})
+        self.assertNotIn("waiting_for", described)
+        self.assertEqual(described["recorded"], "live, when the House's move sensor computed it (never polled, no host)")
+        self.assertIn("stamped when the move sensor computed it", described["point_in_time"])
+        health = store.health()["move"]
+        self.assertEqual({k: health[k] for k in ("keys", "recording", "failing", "polls", "snapshots", "next_due", "host")},
+                         {"keys": 1, "recording": 1, "failing": [], "polls": 3, "snapshots": 1, "next_due": None, "host": ""})
+        self.assertNotIn("waiting_for", health)
+        row = store.coverage()["move"]["KXHIGHNY"]
+        self.assertEqual((row["polls"], row["ok"], row["last_error"]), (3, 3, None))
+        store._after_pass({"polled": [], "failed": []})  # what a pass of the lane ends with: the hourly coverage row
+        published = self.ledger.get(f"data.coverage:feed:move:{int(self.clock() // 3600)}").payload
+        self.assertEqual((published["status"], published["host"], list(published["keys"])), ("current", "", ["KXHIGHNY"]))
+        self.assertNotIn("error", published["keys"]["KXHIGHNY"])
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM polls WHERE feed = 'move' AND ok = 0").fetchone()[0], 0)
+
 
 # ------------------------------------------------------------------ the backfilled history feeds
 HOUR_MS = 3_600_000
