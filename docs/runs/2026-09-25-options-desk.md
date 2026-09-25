@@ -360,6 +360,39 @@ Nothing here deploys inside the session. Order:
    standard PARAMS ranges for structure keys, the batch budget for ETF structure replays; and more founders that
    pass the replay on the fuller history.
 
+### Wave 2 built, reviewed and fixed (the workflow, 18:17-21:10Z, 14 agents)
+
+- **G-TRACKP (`g/trackp` 26e64ace):** structure agents on the owner's Alpaca practice account for the five closeable types,
+  behind `options_structures.practice_account` (false in Deploy G; flipped only by a later release changing nothing else);
+  migration when flat (opens kept on the old book until the close of the first full session after the move); an uneven multi-leg
+  order cancelled after 600 s with an error alert; a break writes off only holders whose own leg is missing, fewest and newest;
+  every account credits a credit structure's premium to cash as Alpaca documents. Review BLOCKER fixed by process: **never roll
+  the House back past G while alpaca-paper holds a structure** (the older release cannot fold legs and would sell a structure's
+  first leg alone). Kept by the owner's rule: an extra short on a short leg closes the whole structure.
+- **G-MONEY (`g/money` 016969e9, on b/integration):** the evidence of a structure agent pooled over every practice book it was
+  staked on; O1 `option_spreads_real` false, O2 $150, O3 1.0, O4 (counting only closes of `option_spread_real_types`, debit
+  verticals), O5 60 bps, `option_spread_real_types` ["debit_vertical"]; the House's real route behind O1 with netting refusals and
+  no real structure order without `mleg`; the gateway's `OPTION_STRUCTURES_REAL` gates opens only and a real close passes whenever
+  every leg is held (`qty_available`, a 5-second cache), so a held structure is never stranded. **Money digest `be1e3ce9`: the
+  run's change 1 of 2.** Five of the twelve founders (the debit-vertical ones) can ever reach real money.
+- **G-LOOP (`g/loop` 365b34ba, on b/integration):** edit replays of structure agents at the full rung-1 caps; the stuck-agent rewrite
+  of a structure agent gated by the replay; the lab admits structure programs (PARAMS ranges in `parameters.py`); SPY/QQQ/IWM
+  daily expiries backfilled with a bar cap applied BEFORE the build (peak 101 MB measured); review BLOCKER fixed: a structure open
+  is refused unless every leg is among the 160 contracts nearest the money at that moment (live and replay alike, no look-ahead).
+- **G-FORWARD (`g/forward` 75dba408):** `scripts/forward_structures.py` replays the recorded session through the House's own
+  context and the real OptionsShadowBroker and reproduces the live desk (krasker-29's IWM vertical within $1, krasker-32's two
+  verticals within a cent; the same words in 10 of 12 founders' thoughts). Over 136 floors: orb +$10.80 to +$16.80, condor-vrp
+  -$46.40 to +$19.60, the desk -$35.60 to +$34.40; no floor met the target. **Scoreboard row 4 measured: median bid-ask paid 5.4% of
+  premium (target 8%: met)**, but 30-73% of orb's gain. Same-day expiries carry NO greeks from Alpaca (12,882 of 12,882 index rows):
+  orb can never pick a 0-DTE strike live. The calibration refit on 82,861 of today's pairs: do NOT adopt S3's ETF table (tighter
+  than the touch 17-18.5% of the time held out); the stock buckets hold. A replay priced off the last trade cannot judge penny-wide
+  ETF structures; replaying on recorded quotes can.
+
+**Deploy G's integration (for Saturday about 07:00Z):** main after the forward-first run's B + g/money + g/loop + g/trackp
+(g/trackp's two house.py conflicts resolved as its report says) + g/forward + a structure-aware site label on top of #342 + the
+one test fix g/loop names; ratify within a minute (digest `be1e3ce9`); the gateway (caps/router) deployed before the House. Then
+a config-only release flipping `practice_account` in a quiet slot, so Monday's structures trade on the owner's practice account.
+
 ## Progress notes
 
 ## Watch log
