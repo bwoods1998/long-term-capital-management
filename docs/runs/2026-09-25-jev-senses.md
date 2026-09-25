@@ -78,10 +78,14 @@ its session.
   seat market, `house.py` (the `JevFloor` hooks it already calls are enough), the strategies and seeds of
   any desk (J1's first users are children written with each desk's owner run), the options desk.
 - **Announced deploys:** **D-J1** (House owner deploy: J0 caps + the J1 recorder; no money-digest
-  change). Requested slot: Friday Sept 25 in the gap after the options run's Deploy V (at least 30 minutes
-  after its watch ends, finished before 12:55Z), else Saturday Sept 26's quiet window after
-  forward-first's Deploy B and the options run's Deploy G, before the Kalshi run's K2. Its exact start is
-  written here first. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
+  change). **Agreed slot (06:30Z, both runs' answers):** Friday Sept 25 **12:15-12:55Z** if the options
+  run's Deploy V ends its post-promotion watch by 11:45Z (start at least 30 minutes after V's written end;
+  not started if the canary and watch could run past 12:55Z); if V ends later or is rolled back, Saturday
+  Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G, before the Kalshi
+  run's K2. The options run writes "D-J1 slot: open" or "D-J1 slot: Saturday" in its record. Nothing of
+  this run's merges to `main` before forward-first's Deploy A or the options run's V; the merge happens in
+  the slot, immediately before the deploy. After promotion: `live_trading.active` and the money digest
+  checked unchanged (forward-first's request). Its exact start is written here first. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
 
 ## Checklist
 
