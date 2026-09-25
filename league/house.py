@@ -58,6 +58,7 @@ from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxBusy, SandboxError
 from .venues import family_of, instrument_for, market_hours, min_order_usd, price_increment, snap_limit
+from .watchdog import environment  # H2: an alert about a service's own failure is marked, never a rollback
 
 #: How many bars of a watched underlier a replay tape carries per symbol, and the sizes it may
 #: choose between. A three-week window of one-minute bars is millions of rows and a box killed for
@@ -169,12 +170,18 @@ def alert_key(text: Any) -> str:
     return re.sub(r"\s+", " ", folded).strip()[:300]
 
 
-def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str) -> dict[str, Any]:
+def _count_repeat(runs: dict[str, Any], text: str, now: float, stamp: str, service: Any = None) -> dict[str, Any]:
     """Count one warning of `text`, written at `now` (`stamp` in ISO), into its run of repeats: runs
-    quiet for the window are dropped first, and a run keeps the times inside the window."""
+    quiet for the window are dropped first, and a run keeps the times inside the window. A run keeps
+    the `environment` marker (H2, Sept 25, 2026) only while every warning of it carried the same one:
+    "sailbox api 503" and "sailbox api 400" fold to one text, and a run that mixes a service's failure
+    with the House's own escalates unmarked."""
     for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
         runs.pop(quiet)
-    run = runs.setdefault(alert_key(text), {"first_seen": stamp, "count": 0, "times": [], "escalated": None})
+    marker = service if isinstance(service, str) and service else None  # the warning's `environment`, if any
+    run = runs.setdefault(alert_key(text), {"first_seen": stamp, "count": 0, "times": [], "escalated": None, "environment": marker})
+    if "environment" not in run or run["environment"] != marker:
+        run["environment"] = None  # a run of mixed kinds, or one counted before the marker existed
     run["count"] = int(run.get("count") or 0) + 1
     run["times"] = [t for t in run.get("times") or [] if now - float(t) < REPEAT_WINDOW_SECONDS][-4 * REPEAT_WARNINGS:] + [now]
     run.update(text=text[:300], last_seen=stamp, last_epoch=now)
@@ -721,7 +728,8 @@ class House:
                     try:
                         book.poll()
                     except Exception as exc:  # noqa: BLE001 - the reconcile below says what is unknown
-                        self.alert("warning", f"{name}: could not poll the venue before reconciling ({type(exc).__name__}: {str(exc)[:160]})")
+                        self.alert("warning", f"{name}: could not poll the venue before reconciling ({type(exc).__name__}: {str(exc)[:160]})",
+                                   **environment("gateway", exc))
                     book.reconcile()  # repair/check receipts before health, agent wakes or sizing
                 else:
                     book.open_baseline()
@@ -738,7 +746,8 @@ class House:
         try:
             self._population_rule()
         except Exception as exc:  # noqa: BLE001 - the ceiling stands until the next pass reads the meter
-            self.alert("warning", f"the population rule could not read Sail's runway ({type(exc).__name__}: {str(exc)[:160]})")
+            self.alert("warning", f"the population rule could not read Sail's runway ({type(exc).__name__}: {str(exc)[:160]})",
+                       **environment("sail", exc))
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
@@ -994,7 +1003,9 @@ class House:
         carrying the last warning's payload -- its traceback when the caller supplied one -- with
         `repeated` (the folded text, the count, first and last seen) and `began_at` (when the run of
         repeats began: `league/watchdog.py` counts an error whose condition began before a promotion
-        as inherited, never as the new release's doing)."""
+        as inherited, never as the new release's doing). It carries the `environment` marker (H2,
+        Sept 25, 2026: a service outside the House failed, never a rollback) only when every warning
+        of the run carried the same one."""
         row = self.ledger.append("ops.alert", {**payload, "level": level, "text": str(text)[:1000]})
         if str(level).lower() == "warning":
             self._repeating(str(text), payload, seq=getattr(row, "seq", None))
@@ -1011,14 +1022,15 @@ class House:
         key = alert_key(text)
         escalate = None
         with lock:
-            run = _count_repeat(self._repeating_runs(before=seq), text, now, now_iso(self.clock))
+            run = _count_repeat(self._repeating_runs(before=seq), text, now, now_iso(self.clock), payload.get("environment"))
             if len(run["times"]) >= REPEAT_WARNINGS and not run.get("escalated"):
                 run["escalated"] = now_iso(self.clock)
-                escalate = {k: run[k] for k in ("first_seen", "last_seen", "count")} | {"in_window": len(run["times"])}
+                escalate = {k: run.get(k) for k in ("first_seen", "last_seen", "count", "environment")} | {"in_window": len(run["times"])}
         if escalate is not None:
             minutes = int(REPEAT_WINDOW_SECONDS // 60)
+            marked = {"environment": escalate["environment"]} if escalate["environment"] else {}  # H2: a service's run stays its
             self.ledger.append("ops.alert", {
-                **payload, "level": "error",
+                **{k: v for k, v in payload.items() if k != "environment"}, **marked, "level": "error",
                 "text": f"a warning repeated {escalate['in_window']} times in {minutes} minutes: {text}"[:1000],
                 "repeated": {"text": key, "count": escalate["count"], "first_seen": escalate["first_seen"], "last_seen": escalate["last_seen"]},
                 "began_at": escalate["first_seen"]})
@@ -1055,7 +1067,7 @@ class House:
                 if escalated is not None:
                     escalated["escalated"] = entry.at
             elif level == "warning":
-                _count_repeat(runs, str(entry.payload.get("text") or ""), at, entry.at)
+                _count_repeat(runs, str(entry.payload.get("text") or ""), at, entry.at, entry.payload.get("environment"))
         now = self.clock()
         for quiet in [k for k, run in runs.items() if now - float(run.get("last_epoch") or 0) >= REPEAT_WINDOW_SECONDS]:
             runs.pop(quiet)
@@ -2075,7 +2087,7 @@ class House:
             self._defer("wakes", f"{agent.id}: {str(exc)[:200]}")
             return {"agent": agent.id, "skipped": "its box is in use by background work; woken on the next tick"}
         except SandboxError as exc:
-            self.alert("warning", f"{agent.id}: its box did not run ({str(exc)[:200]})")
+            self.alert("warning", f"{agent.id}: its box did not run ({str(exc)[:200]})", **environment("sail", exc))
             return {"agent": agent.id, "skipped": "sandbox"}
         self._charge_box(agent.id, run, note="a decision")
         result = run.result
@@ -2826,7 +2838,7 @@ class House:
             with self._box_patience():  # a pool thread of the tick: it never waits on background work
                 return self.wake(agent)
         except Exception as exc:  # noqa: BLE001 - one agent's wake must never take the tick down
-            self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})")
+            self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})", **environment("gateway", exc))
             return {"agent": agent.id, "error": str(exc)}
 
     def _holds_real_money(self, agent: Agent) -> bool:
@@ -3156,7 +3168,8 @@ class House:
         try:
             rows = self.alpaca_data.bars(list(symbols), timeframe, start=start_iso, end=end_iso, limit=MAX_OBSERVED_BARS)
         except Exception as exc:  # noqa: BLE001
-            self.alert("warning", f"the underlier bars of {', '.join(symbols)} could not be recorded ({type(exc).__name__}: {str(exc)[:160]})")
+            self.alert("warning", f"the underlier bars of {', '.join(symbols)} could not be recorded ({type(exc).__name__}: {str(exc)[:160]})",
+                       **environment("data", exc))
             return {}
         return {s: list(bars)[-MAX_OBSERVED_BARS:] for s, bars in (rows or {}).items() if bars}
 
@@ -3245,7 +3258,8 @@ class House:
                 except Exception as exc:  # noqa: BLE001
                     state = "failed"
                     try:
-                        self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})")
+                        self.alert("warning", f"{key} failed ({type(exc).__name__}: {str(exc)[:200]})",
+                                   **environment(key.split(":", 1)[0], exc))  # H2: GitHub, a data host, Sail
                     except Exception:  # noqa: BLE001 - the ledger may already be closed on the way out
                         pass
                 finally:
@@ -3316,7 +3330,7 @@ class House:
                 # strategy. Worded so `hypotheses._retire_unrunnable` does not count it against the
                 # line, and it is not a trial; the next wake tries again.
                 self.alert("warning", f"{agent.id}: its replay box did not answer, infrastructure and not a trial "
-                                      f"({type(exc).__name__}: {str(exc)[:200]})")
+                                      f"({type(exc).__name__}: {str(exc)[:200]})", **environment("sail", exc))
                 return {"agent": agent.id, "skipped": "replay box unavailable (infrastructure)"}
             self.alert("warning", f"{agent.id}: replay could not run ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "replay unavailable"}
@@ -3927,16 +3941,17 @@ class House:
             self._state[STATE_KEY] = state
 
     def _run_backup(self) -> None:
-        row = self.backup.run()
-        failed = self.backup.failures_in_a_row() if not row.get("ok") else []
-        if not row.get("ok"):
-            # `began_at` is the first failure of the run (Sept 24, 2026): the watchdog inherits an error whose condition
-            # began before a promotion, so a Sail outage that started earlier does not roll back the release under watch.
-            began = now_iso(lambda: float((failed[0] if failed else row).get("at_epoch") or self.clock()))
-            wait = int(self.backup.retry_after(max(1, len(failed))) // 60)
-            self.alert("error", f"The daily backup of the House box failed ({row.get('error')}); {max(1, len(failed))} "
-                                f"tr{'y' if len(failed) <= 1 else 'ies'} in a row since {began}, the next in {wait} minutes. The ledger "
-                                "lives on one disk until one succeeds.", began_at=began, failures=max(1, len(failed)))
+        """One backup, and what the House says about it (`Backup.notice`, H2, Sept 25, 2026): a Sail outage is ONE error
+        when it begins, a warning at each later backoff step and an info with its length when it ends, all marked
+        `environment: "sail"`, which the watchdog never rolls a release back for; a failure of the House's own code is an
+        unmarked error each time, with `began_at` (Sept 24) so one that began before a promotion is inherited. A failure
+        that came back while the House was shutting down is a warning, and a backup the shutdown cut off (`close`)
+        writes nothing: its thread dies with the process, or finds the ledger closed."""
+        before = self.backup.failures_in_a_row()
+        said = self.backup.notice(self.backup.run(closing=self._closing.is_set), before)
+        if said is not None:
+            level, text, payload = said
+            self.alert(level, text, **payload)
 
     # -------------------------------------------------------------- expedition
     def _note_stopped(self, reason: str) -> None:
@@ -4620,7 +4635,7 @@ class House:
         try:
             self.sandbox.retire(agent.id)
         except Exception as exc:  # noqa: BLE001
-            self.alert("warning", f"{agent.id}: its box could not be retired ({type(exc).__name__})")
+            self.alert("warning", f"{agent.id}: its box could not be retired ({type(exc).__name__})", **environment("sail", exc))
 
     def postmortem(self, agent: Agent, cause: str, detail: str) -> str:
         rung = self.evaluator.rung(agent.id)
@@ -4685,7 +4700,8 @@ class House:
         except SandboxBusy:
             pass  # the parent's box is in use by its own replay or research: the clean image, no wait
         except SandboxError as exc:
-            self.alert("warning", f"{child.id}: could not fork its parent's box, starting from the clean image ({str(exc)[:160]})")
+            self.alert("warning", f"{child.id}: could not fork its parent's box, starting from the clean image ({str(exc)[:160]})",
+                       **environment("sail", exc))
         self.ledger.append("agent.forked", {"child": child.id, "endowment_usd": rules["endowment_usd" if staked_by_house else "fork_endowment_usd"], "box_forked": forked,
                                             "reason": reason, "new_code": bool(code), "staked_by": "house" if staked_by_house else "parent"}, agent=parent.id)
         if passed_replay:
@@ -6339,7 +6355,8 @@ class House:
                 if raised is not None:
                     mirror("openai", raised)
             except Exception as exc:  # noqa: BLE001 - the configured line stands
-                self.alert("warning", f"the gateway's profit-indexed raise could not be mirrored ({type(exc).__name__}: {str(exc)[:160]})")
+                self.alert("warning", f"the gateway's profit-indexed raise could not be mirrored ({type(exc).__name__}: {str(exc)[:160]})",
+                           **environment("gateway", exc))
         if campaigns is not None:
             now = self.clock()
             cached = getattr(self, "_campaign_openai", None)
@@ -8022,7 +8039,7 @@ class House:
                             if stamp > str(self._state["settled"].get(name) or ""):
                                 self._state["settled"][name] = stamp
             except Exception as exc:  # noqa: BLE001 - one venue's outage must not stop the others
-                self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
+                self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})", **environment("gateway", exc))
             lap(f"poll:{name}")
         try:
             self._cancel_stale_resting()
@@ -8047,7 +8064,8 @@ class House:
             try:
                 self.frontier_tier()
             except Exception as exc:  # noqa: BLE001 - an unread month is an unread meter, never a failed tick
-                self.alert("warning", f"the gateway's frontier month could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+                self.alert("warning", f"the gateway's frontier month could not be read ({type(exc).__name__}: {str(exc)[:160]})",
+                           **environment("gateway", exc))
             lap("meter")
             self._absorb_stale_holds(sail=metered)
             lap("hold_absorb")
@@ -8263,7 +8281,7 @@ class House:
             try:
                 self.publisher.publish(self)
             except Exception as exc:  # noqa: BLE001 - the site is downstream of the floor, never upstream
-                self.alert("warning", f"publishing failed ({type(exc).__name__}: {str(exc)[:200]})")
+                self.alert("warning", f"publishing failed ({type(exc).__name__}: {str(exc)[:200]})", **environment("site", exc))
         lap("publish")
         self._health(summary)
         return summary
@@ -8391,7 +8409,15 @@ class House:
         return {"check": "lab_evaluates", "since": now_iso(lambda: since),
                 "text": f"the lab evaluated nothing in the last hour while {queued} candidates are queued (last batch {shown}{notes})"}
 
-    def close(self, *, wait: float | None = 5.0) -> None:
+    #: How long the graceful shutdown waits, in all, for the background work in flight (a backup, a replay, a research
+    #: turn) before it closes the House's stores; the process then exits and the work with it. Sept 25, 2026: the
+    #: owner's release promoted at 00:04:42Z was judged on the OLD House's backup, which had been in flight in Sail's
+    #: checkpoint call since 00:03:13Z and failed at 00:05:55Z, 3 s before that House exited. The TERM-to-exit time
+    #: (76 s there; 24-82 s over the 13 restarts from 18:43Z Sept 24) was the tick in hand, the rest of the tick's
+    #: minute (`league/__main__.py`) and `sandbox.sleep_all` (at most 60 s); this wait is the last 5 s at most.
+    SHUTDOWN_WAIT_SECONDS = 5.0
+
+    def close(self, *, wait: float | None = SHUTDOWN_WAIT_SECONDS) -> None:
         self._closing.set()
         self.wait(wait)
         self._save_state()
