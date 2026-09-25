@@ -68,6 +68,9 @@ KINDS: dict[str, bool] = {
     "agent.mutation": False,  # structural proposals refused before endowment or a paid trial
     "agent.died": True,
     "agent.postmortem": True,
+    # C8 (Sept 25, 2026; league/families.py): an agent's program filed under its mechanism's family from `since_seq`
+    # on (a birth, or an in-place rewrite), and the House's one row recording the re-key of the labels born before C8.
+    "agent.family": True,
     # The netting book.
     "book.baseline": True,  # what the venue account held that is not the book's
     "book.stake": True,  # capital the House lends an agent on a book
