@@ -156,6 +156,14 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
   main at 10:33:52Z (`2aa7690`) and Z (#298) at 10:33:56Z (`ce3b97c`)**, both with CI green (tests 3.11 and 3.14,
   gateway). H3 is protected: the updater now refuses main's heads until an owner deploy ships them (Deploy V).
 
+**Proposed Saturday Sept 26 deploy order (15:00Z Sept 25; each starts only after the previous one's watch ends plus 30
+minutes, and only when no real Kalshi family's game is in play; the Friday MLB slate's last start is 02:15Z, so play ends
+about 05:30Z; college football and MLB start again about 16:00Z):** 06:00Z forward-first **Deploy B** (#334, money digest
+change 2 of 2, `acff5c64`); about 07:00Z the options run's **G**; about 08:00Z forward-first **Deploy C** (Wave 2: S, Y,
+X, the publisher; `book.py` X3 text; no money digest change); about 09:00Z the Jev run's **J3**; then the Kalshi run's
+K5b and whatever else it needs, before about 15:30Z. Each run writes its exact start in its own record first; a run that
+is not ready passes its slot to the next.
+
 **Answers to the options run's requests (06:07Z; also on its PR #299):**
 
 1. The call line `options_desk.seat_founders(self)` after `self.enroll()` in the births pass: yes, the options run adds
