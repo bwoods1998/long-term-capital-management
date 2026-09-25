@@ -161,6 +161,10 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
    p50; each founder's replay recorded as the wait it is ("unsupported input: feeds recorded live since"), never a
    failed trial, so the forward-first run's F1/F3 ranking reads it as no replay record (asked 06:58Z). Then the gateway fetch from a research pass (the `web_fetch` ledger row).
 
+## Interruptions
+
+- **07:30-10:30Z Sept 25: the account's usage limit** (HTTP 429, "session limit, resets 3:30am America/Los_Angeles") stopped five of this run's agents mid-work (the K1 wake fix, I2, and the seat-hook, weather-seed and scale-rule reviews); the other runs stalled too (Deploy A did not happen in its 08:00-09:30Z window; main moved only by Merton's #314-316). Nothing was lost: each worktree kept its uncommitted work. Resumed at 10:32Z in priority order, Deploy K1's path first (the wake fix, the seat-hook review, the weather review), then I2 and the K5 review; the limit is shared by four runs, so this run keeps at most three agents at once from here. Two waiter loops of the K5 builder (`pgrep -f` matching its own command line, 3 h 20 min) were stopped; its `test_live_trading` run had finished (19 OK).
+
 ## Findings before the builders report
 
 - **No agent has ever declared `weather`, `nws`, `forecast` or `odds`** (every `agent.born` row to 06:30Z Sept 25:
