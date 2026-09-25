@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from league.constitution import CONSTITUTION
 from league.house import Newcomer
 from league.tests.test_house import BUYER, HouseCase
 from league.tests.test_hypotheses import FoundryCase
@@ -295,6 +296,12 @@ class AProvenFamilysNameFollowsItsProgram(ReviewCase):
     with meriwether-h2d625d dead and -2 trading, the House would breed -2's moneyline program as the proven family's."""
 
     def setUp(self):
+        # The Sept 24 rule this class pins is the label rule: C8 (the forward-first run, Sept 25, 2026; the constitution's
+        # `allocator.family_key` "mechanism") keys every birth by its mechanism instead, which league/tests/test_family_key.py
+        # tests. Without the key a birth keeps its label, with this rule for a research fork: the rollback form.
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         super().setUp()
         self.house.close(wait=None)  # a House with a Kalshi practice book too (test_seat_capacity's NewCodeFamilies)
         from pathlib import Path
