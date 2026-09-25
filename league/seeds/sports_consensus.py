@@ -26,6 +26,11 @@
 # WHAT IT NEEDS. The league's Kalshi game series (GAME, SPREAD, TOTAL), the `odds` feed (every
 # provider's line for the coming games, with when each was fetched) and the `sports` scoreboard (the
 # teams' ESPN abbreviations and names, and each game's status and start). Woken every ten minutes.
+# A game market's hours_to_close runs to the game's expected end, 3.00 hours after the start on
+# 306 of 346 NCAAF events, every MLS event and 30 of 45 NFL ones (the rest 6) that weekend; so
+# min_hours_to_close 3.0 shows a game up to its kickoff and hides it once it is on, and the wake is
+# shown up to max_markets 500 (without the two, from the noon kickoffs on Saturday the 200 markets
+# shown were all games in progress: no game it could still enter).
 #
 # HOW A MARKET IS MATCHED TO A GAME, WITHOUT GUESSING. A Kalshi ticker names its game:
 # KXNFLSPREAD-26OCT01PITCLE-PIT8 is the Oct 1 game of PIT and CLE (dates are New York dates;
@@ -81,6 +86,8 @@ NEEDS = {
     "style": "model-versus-market",
     "series": ["KXNFLGAME", "KXNFLSPREAD", "KXNFLTOTAL"],
     "max_hours_to_close": 30,
+    "min_hours_to_close": 3.0,
+    "max_markets": 500,
     "wake_minutes": 10,
     "feeds": {"odds": ["nfl"], "sports": ["nfl"]},
     "parameter_rules": {

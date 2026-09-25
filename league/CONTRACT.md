@@ -15,6 +15,8 @@ NEEDS = {
     "bars": {"timeframe": "5Min", "limit": 120},   # alpaca: 1Min 5Min 15Min 1Hour 1Day, limit <= 500
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
+    "min_hours_to_close": 3.5,    # kalshi, optional: only markets closing at least this many hours out (0 when absent)
+    "max_markets": 500,           # kalshi, optional: how many markets a wake is shown, 1 to 500 (200 when absent)
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
                                   # woken a few seconds after the regular open when its next wake would land later,
                                   # and is not woken at all while the regular session is shut)
@@ -25,6 +27,17 @@ def decide(ctx):
     ...
     return {"intents": [...], "cancels": [...], "thought": "one or two plain sentences", "memory": {...}}
 ```
+
+A Kalshi wake is shown at most `max_markets` markets (200 unless declared), the soonest to close
+first, and a game market's `hours_to_close` runs to the game's expected END. So while games are on,
+their markets come first: measured on the slate of Sept 26-27, 2026, a strategy naming the three
+college-football series was shown no game it could still enter from the noon kickoffs on Saturday.
+`min_hours_to_close` (optional, since Sept 25, 2026) hides markets closing sooner than that many hours --
+a game in progress, for a strategy that enters only before the start -- and `max_markets` (optional,
+1 to 500) sets how many are shown. Both are opt-in: a strategy that declares neither is shown exactly
+what it was. `min_hours_to_close` must be at least 0 and under `max_hours_to_close`, and `max_markets`
+a whole number from 1 to 500; the House refuses a birth whose NEEDS break either. A replay applies the
+same window at every step (and caps the markets at `max_markets` only where it is declared).
 
 Only these imports are allowed: `bisect collections datetime decimal fractions functools heapq
 itertools json math random re statistics time typing zoneinfo`. No files, no network, no

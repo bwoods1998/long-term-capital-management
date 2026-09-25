@@ -466,6 +466,8 @@
        ]
       },
       "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
       "wake_minutes": 10
      }
     },
@@ -493,6 +495,8 @@
        ]
       },
       "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
       "wake_minutes": 10
      }
     },
@@ -521,6 +525,8 @@
        ]
       },
       "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 300,
       "wake_minutes": 10
      }
     },
@@ -542,6 +548,8 @@
        ]
       },
       "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
       "wake_minutes": 10
      }
     },
@@ -563,6 +571,8 @@
        ]
       },
       "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
       "wake_minutes": 10
      }
     }
