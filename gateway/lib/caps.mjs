@@ -461,9 +461,7 @@ export function structureOrder(body) {
   const qty = parsePico(body.qty);
   if (qty === null || qty <= 0n || qty % PICO !== 0n) return { error: 'A multi-leg order\'s qty is a whole number of structures, at least one.' };
   const limit = parsePico(body.limit_price);
-  if (limit === null || limit === 0n) {
-    return { error: 'A multi-leg order needs a limit_price, a debit positive and a credit negative (Alpaca\'s convention): zero says neither.' };
-  }
+  if (limit === null) return { error: 'A multi-leg order needs a limit_price: its net a share, a debit positive and a credit negative (Alpaca\'s convention).' };
   if (!Array.isArray(body.legs) || body.legs.length < 2 || body.legs.length > 4) return { error: 'A multi-leg order has two to four legs.' };
   const legs = [];
   for (const raw of body.legs) {
@@ -494,9 +492,15 @@ export function structureOrder(body) {
   if (shape.error) return { error: shape.error };
   const { type, collateral, maxValue } = shape;
   const credit = CREDIT_STRUCTURES.includes(type);
+  // Zero says neither debit nor credit. A close at zero can only give a worthless structure away (or
+  // buy one back for nothing), which the expiry-day close of a structure bid at zero must be able to
+  // send; an open at zero is refused, as `structures.held_limit` refuses it.
+  if (limit === 0n && opening) {
+    return { error: 'A structure is not opened at a net of zero: Alpaca\'s multi-leg limit_price is a debit positive and a credit negative, and zero says neither.' };
+  }
   // Opening a debit structure or buying back a credit one pays (positive); the other two take in (negative).
   const pays = credit !== opening;
-  if ((limit > 0n) !== pays) {
+  if (limit !== 0n && (limit > 0n) !== pays) {
     const doing = opening ? `Opening ${named(type)} ${pays ? 'pays a debit' : 'takes in a credit'}`
       : `Closing ${named(type)} ${pays ? 'buys it back for a debit' : 'sells it for a credit'}`;
     return { error: `${doing}, which Alpaca's multi-leg limit_price writes as a ${pays ? 'positive' : 'negative'} number (a debit positive, a credit negative): a ${pays ? 'negative' : 'positive'} limit_price on it is the wrong sign, refused.` };

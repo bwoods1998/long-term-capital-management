@@ -157,6 +157,9 @@ test('with OPTION_STRUCTURES_REAL="debit_vertical": a $0.70 vertical is metered 
   assert.equal(close.response.status, 200);
   assert.equal(close.calls.length, 1);
   assert.deepEqual((await gate.status()).today, { day: '2026-09-25', orders: 2, notional_usd: '70.01' });
+  // A close at zero (the expiry-day close of a vertical bid at zero) passes the same way.
+  assert.equal((await call(post('alpaca', mleg(closing(VERTICAL), '0')), { settings, gate })).response.status, 200);
+  assert.equal((await gate.status()).today.orders, 3);
 
   // Every shape rule holds on the real account too.
   for (const [body, why] of [
@@ -173,7 +176,7 @@ test('with OPTION_STRUCTURES_REAL="debit_vertical": a $0.70 vertical is metered 
     else assert.equal(refused.body.error, why);
     assert.equal(refused.calls.length, 0);
   }
-  assert.equal((await gate.status()).today.orders, 2, 'no refusal reserved anything');
+  assert.equal((await gate.status()).today.orders, 3, 'no refusal reserved anything');
 });
 
 test('a structure close passes a spent day and a spent order cap, but not the kill switch', async () => {

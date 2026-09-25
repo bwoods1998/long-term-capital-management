@@ -114,9 +114,19 @@ test('a reversed vertical sent as a debit is refused: its legs make it a credit 
   assert.match(structureOrder(mleg(OPENS[0][1], '-0.55')).error, /Opening a debit_vertical pays a debit.*a negative limit_price on it is the wrong sign/);
   assert.match(structureOrder(mleg(closing(OPENS[0][1]), '0.55')).error, /Closing a debit_vertical sells it for a credit.*a positive limit_price/);
   assert.match(structureOrder(mleg(closing(OPENS[2][1]), '-0.10')).error, /Closing a credit_vertical buys it back for a debit.*a negative limit_price/);
-  // Zero says neither debit nor credit.
-  for (const limit of ['0', '0.00', '-0', 0, undefined, 'x', '']) {
+  // No limit is no order; zero says neither debit nor credit, so nothing opens at it.
+  for (const limit of [undefined, null, 'x', '', '+0.55', '1e-1']) {
     assert.match(structureOrder(mleg(OPENS[0][1], limit)).error, /needs a limit_price/, JSON.stringify(limit));
+  }
+  for (const [type, legs] of OPENS) {
+    for (const limit of ['0', '0.00', '-0', 0]) {
+      assert.match(structureOrder(mleg(legs, limit)).error, /not opened at a net of zero/, `${type} ${JSON.stringify(limit)}`);
+      // A close at zero gives a worthless structure away, or buys one back for nothing: the
+      // expiry-day close of a structure bid at zero.
+      const closed = structureOrder(mleg(closing(legs), limit));
+      assert.equal(closed.error, undefined, `${type} close at ${JSON.stringify(limit)}: ${closed.error}`);
+      assert.equal(closed.maxLossMicro, 0n);
+    }
   }
 });
 

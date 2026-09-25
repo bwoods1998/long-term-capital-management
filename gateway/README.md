@@ -163,8 +163,10 @@ named by what each leg was). Each of these is a `400` naming the reason, on both
   a leg uncovered: refused."*; a broken-wing butterfly; a calendar or diagonal whose short leg
   expires last; a diagonal whose long strike is less favourable; any leg set that is not a type;
 - legs that open and close at once (legging in or out, or a roll), mixed roots, a contract twice;
-- a `limit_price` of the wrong sign (below), zero, a credit at or over the collateral, or a debit at
-  or over a bounded structure's maximum value (the checks `structures.held_limit` makes).
+- a `limit_price` of the wrong sign (below), zero on an open, a credit at or over the collateral, or
+  a debit at or over a bounded structure's maximum value (the checks `structures.held_limit` makes).
+  A close at zero passes: it can only give a worthless structure away, or buy one back for nothing,
+  which the expiry-day close of a structure bid at zero must be able to send.
 
 **The sign of `limit_price`.** Alpaca's
 [orders reference](https://docs.alpaca.markets/reference/postorder) (read Sept 25, 2026): for `mleg`,
