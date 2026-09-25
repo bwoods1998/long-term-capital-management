@@ -149,7 +149,8 @@ counts, triage groups, the hypothesis index and exposure groups.
 - **Caps.** `config.json` `jev` caps Jev at $0.25 and 400 calls per UTC day, split per purpose
   as gate 150, triage 120, links 60 and exposure 40.
 - **Unconfirmed calls.** A call whose cost is unconfirmed counts as $0.003, the 64k-token worst
-  case.
+  case. (Sept 25, 2026: $0.01, the reservation the gateway keeps for an ambiguous call, and a refusal
+  that states its cost is booked at that cost; see section 7.)
 
 Live probe, Sept 22, from the Mac. The labels were frozen before the calls. There were two
 requests and 16 questions:
@@ -235,8 +236,10 @@ offline on held-out data before anything relied on it (`scripts/jev_lab_eval/REA
   89% of feeds and extending them to the series no rule covers
   (`docs/design/2026-09-25-kalshi-market-map.md`).
 - **Budget.** The daily pool is $1.50 and 25,000 calls (Sept 25), aligned to the funded balance; the
-  breaker is per purpose (a move failure no longer silences the research gate) and doubles from 60 s; a
-  gateway 409 is a free conflict, not an outage.
+  breaker is per purpose (a move failure no longer silences the research gate), doubles from 60 s and
+  then lets one probe through; a gateway 409 is a free conflict, not an outage; an unconfirmed call is
+  counted at the gateway's $0.01 reservation; Jev's background jobs hold at most one of the House's three
+  ops slots.
 
 The pattern so far: Jev's measured value is in reading text that has no free structure (the market map);
 where a numeric or categorical signal exists, a free model matches or beats it.
