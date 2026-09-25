@@ -964,19 +964,33 @@ watch.
     the room the book's option and stock fills of the last 6 hours leave for those fees (less the dust
     already booked on it), is booked to the House row: a `book.fill` row with `source: dust`, a
     `detail` beginning "real book:" and `unlisted_fees_usd`, and an ERROR `ops.alert` whose text begins
-    "`<book>`: -0.0300 of cash booked as dust on the House row, not a freeze". Nothing freezes. When
-    the fees are listed they find no shortfall and are not booked again.
+    "`<book>`: -0.0300 of cash booked as dust on the House row, not a freeze". Nothing freezes. The
+    dust has PAID those fees: when Alpaca lists them (ORF, CAT, TAF, REG, SEC), the next shortfall's
+    fee check marks each listing the dust covers as paid, a `venue-fee` row at no cash with
+    `covered_usd`, so a listing can never explain a second, unrelated shortfall (the review of H4 found
+    such listings taking a later real shortfall to zero with no alert, over the key when a day's fees
+    come as one row). A listing larger than what the dust paid is booked as before, against its own
+    shortfall. A stale listing (its cash absorbed before H4, like the live ledger's Sept 24 ORF $0.03)
+    booked against the cents of an option or stock fill that no clean reading has followed yet pays
+    that fill's own listings ahead the same way (`unlisted_fees_usd` on its `venue-fee` row), so the
+    stale ones do not pile up. The alert carries `began_at` (the fill's time) when no clean reading
+    had followed the fill, so the fees of a fill in the minutes before a promotion are inherited by
+    the deploy's watch; cents that appear after a clean reading, or a fill inside the watch, still
+    count as the new release's error alert and roll it back, one more reason no deploy runs in the
+    US session.
   - *Resting crypto bids.* Alpaca holds each at its notional rounded half-up to the cent, and the
     book now adds each back that way. Added back unrounded (to eighteen places) they moved the
     reading by tenths of a cent at every change of the resting bids, each booked as dust, until four
     of the eight bids resting at 02:26Z Sept 25 were cancelled or replaced over the next passes and
     the real book froze on "cash differs by 0.0149", then "0.0108", from 02:38:59Z to a restart at
     04:11:50Z, with no fill and no fee behind it. New `book.reconciled` rows carry
-    `holds: "cent"`. The first clean reading after the deploy that ships this also allows exactly the
-    sub-cent error the last reading of the release before left on the bids resting then (read from
-    the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean readings of
-    Sept 24 18:30Z-Sept 25 04:26Z), booked as ordinary dust, so the deploy's watch does not meet a
-    freeze.
+    `holds: "cent"`. The first clean reading after the deploy that ships this expects exactly the
+    sub-cent error the last reading of the release before left on the bids resting then, with its sign
+    (read from the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean
+    readings of Sept 24 18:30Z-Sept 25 04:26Z), and books it back as ordinary dust, so the deploy's
+    watch does not meet a freeze; no fee listing is booked against it. Replayed over the snapshot's
+    1,461 pairs of real readings, every one lands inside the per-fill cent around that error except
+    the readings just after the two real option fills of Sept 24, which are the at-fill fees above.
   - *A restart.* The first reading after a restart now allows a cent only for each venue fill since
     the last clean reading (the fold reads the `book.reconciled` rows). It had allowed a cent for every
     fill the book ever had, which is what "un-froze" the real Alpaca book at 04:11:50Z Sept 25 ($0.12
