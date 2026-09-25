@@ -8336,6 +8336,9 @@ class House:
             "repeating_warnings": repeating,
             "failures": failures,
             "research_economy": economy,
+            # Y2 (Sept 25, 2026): compute a day against real settled profit a day, as the hourly yield row
+            # read it (league/yield_ledger.py UnitEconomics; the site's flywheel strip reads these keys).
+            "unit_economics": (self._state.get("yield_ledger") or {}).get("unit_economics"),
         }
         health["tick_steps"] = self._tick_steps(str(summary["at"]))  # last: its `health` step is this block
         tmp = self.root / "health.tmp"

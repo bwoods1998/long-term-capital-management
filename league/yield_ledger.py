@@ -12,7 +12,7 @@ Lines. `research` is every agent's research tokens (`credit.charge` "research to
 together; the summary rows say which provider ran a session). Each of Merton's roles is its
 `merton.pass` rows (`role`: architect, engineer, consultant, teacher, foundry, toolsmith, operator,
 designer). `audits` are `audit.verdict` rows with a `cost_usd`. The lab's LLM calls live in
-`lab.sqlite`, not on the ledger, so they are not here; its graduations are.
+`lab.sqlite`, not on the ledger; since Sept 25, 2026 (Y1) the row reads them from there (`lab`).
 
 Evidence. Candidates are research summaries that retained one (`agent.research` `tool: summary`,
 `candidate: true`); replay passes are `eval.trial` rows with `passed`, credited to the line that wrote
@@ -48,12 +48,41 @@ engineer: a verified repair in the window), `no_lift` when it is not on at least
 blocks an arm (the consultant: 10 judged consults), and `insufficient` otherwise. A lane with no lift
 at the end of the run goes into `merton.paused_until_profit` (the teacher and, since Sept 25, 2026, the
 consultant are allowed there).
+
+Compute follows yield (Sept 25, 2026, the forward-first run, Y1; `throttle` on the row, `plan_throttle`).
+In the 24 hours to T0 (04:23Z) the floor spent $118.88 of compute against $21.35 of real settled profit,
+and the 24 yield rows priced each lane's positive forward blocks: the lab $4.50 of its own calls for 115
+($0.039 a block), the foundry $2.53 for 49 ($0.052), the engineer $10.09 for 56 ($0.18), research $51.33
+for 178 ($0.29), the consultant $35.44 for none on the day (F4's replay: $0.45 a positive block after its
+consults), the architect $7.38 and the teacher $2.50 for none. So at each hourly row a lane whose dollars
+per positive block over the last day exceed `economy.lane_throttle` (3, bounds 2-5) times the best lane's
+(the cheapest with at least `REFERENCE_MIN_BLOCKS` positive blocks) is halved, and one that bought no
+positive block at all is halved too, once it spent `THROTTLE_MIN_USD` in the day: research's cadence
+(league/research_gate.py: a practice agent's interval doubles, never past one session a day; an agent on
+real money keeps its pace; Luna and Sail alike, since the research line is both), the consultant's price
+(league/merton.py), each scheduled role's cadence (league/merton.py) and the engineer's pace except for a
+job about an agent on real money (league/engineer.py). Audits are never throttled; the lab and the foundry
+are measured (the lab's calls from its own store) but their dials are league/lab.py's and
+league/hypotheses.py's. A lane measured by its lift rather than by blocks (the teacher) or by blocks days
+after its spend (the consultant) is judged on F4's reading, and not throttled while that reads
+`insufficient`. The halving holds while the lane stays over the line and lifts at the first row under it;
+each change is one `ops.budget` row (`what: "lane throttle"`) naming the lane, its price, the best lane's
+and the ratio, and `throttled()` is what the lanes read.
+
+Unit economics (Y2; `unit_economics` on the row, and health.json's `unit_economics`, which the site's
+flywheel strip reads): compute a day against real settled profit a day over the last 24 hours, counted
+as the scoreboard's `unit_economics` counts them (scripts/gap_scoreboard.py `compute_per_day` and
+`real_settled`): Luna's gateway-verified requests, Merton's and the auditor's metered passes, research
+grants, the Sail meter, Jev and web-search charges and the lab's own calls; the real books' settlements
+and closing sales (`merton.RealPnl`).
 """
 
 from __future__ import annotations
 
 import math
-from collections import Counter
+import threading
+import weakref
+from collections import Counter, deque
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
@@ -90,14 +119,21 @@ def line_of(founder: Any, born_reason: Any = "", repair: bool = False) -> str:
     return "research"
 
 
-def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[str, bool] | None = None) -> dict[str, Any]:
+def fold(ledger: Any, *, since: str, until: str | None = None, repairs: Mapping[str, bool] | None = None,
+         lab_usd: Decimal | None = None) -> dict[str, Any]:
     """The spend and evidence of every line between two ledger stamps (ISO, inclusive of `since`).
 
     `by_profile` (Sept 24, 2026, L2): research by the model profile each session ran on (its summary
     row's `profile`: Sail's `pro_asap`, `flash_asap` ..., `openai_luna`): sessions, candidates,
     provider failures, the dollars its research tokens were charged (every turn of the session, even
-    one charged before the window began) and candidates per dollar."""
+    one charged before the window began) and candidates per dollar.
+
+    `lab_usd` (Sept 25, 2026, Y1): the Alpha Lab's own model calls in the window (`lab.sqlite` `calls`,
+    never on the ledger), so the lab's positive blocks have a price: $4.50 of calls and 115 positive
+    blocks in the 24 hours to T0."""
     spend: Counter = Counter()
+    if lab_usd is not None:
+        spend["lab"] += _money(lab_usd)
     evidence: dict[str, Counter] = {}
     tokens: dict[str, Decimal] = {}  # session -> its research-token charges, wherever they fall
     profiles: dict[str, Counter] = {}
@@ -395,14 +431,254 @@ def lifts(ledger: Any, *, now: float, settings: Mapping[str, Any] | None = None,
             "engineer": engineer_lift(ledger, now=now, days=days)}
 
 
+# ------------------------------------------------------------------ Y1: the lane throttle
+THROTTLE_WHAT = "lane throttle"
+#: The lanes the throttle halves, and how (the `how` of each `ops.budget` "lane throttle" row). Audits are
+#: never throttled; the lab and the foundry are priced (the best lane is usually one of them) but their
+#: dials are league/lab.py's (protected) and league/hypotheses.py's.
+THROTTLE_HOW: dict[str, str] = {
+    "research": "cadence: a practice agent's research interval doubles, never past one session a day since its last "
+                "(league/research_gate.py); an agent on real money keeps its pace; Luna and Sail alike",
+    "consultant": "budget: a consult costs the agent twice its price (league/merton.py consult_price_multiple)",
+    "engineer": "cadence: one paid patch per two intervals, except a job about an agent on real money (league/engineer.py)",
+    **{role: "cadence: its schedule doubles (league/merton.py Merton.due)"
+       for role in ("architect", "toolsmith", "operator", "designer", "teacher")},
+}
+NEVER_THROTTLED = frozenset(("audits",))
+#: The best lane is the cheapest with at least this many positive forward blocks in the day: a lane that
+#: bought two blocks for a few cents is luck, not a price (the lab had 115 and the foundry 49 at T0).
+REFERENCE_MIN_BLOCKS = 10
+#: A lane is throttled only once it spent this much in the day: halving $0.47 of toolsmith saves nothing.
+THROTTLE_MIN_USD = Decimal("1.00")
+
+
+def lane_prices(rows: Iterable[Mapping[str, Any]], lift: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Each lane's dollars and positive forward blocks over some hourly yield rows (the last day's), and
+    its dollars per positive block. The consultant's blocks come days after its consults, so it is priced
+    on F4's `consult.outcome` reading over `lift.days` (dollars of consults against the positive blocks
+    after them); the teacher is judged by its lift (a lesson arm against a control), never by blocks.
+    Either is `unmeasured` while F4 has nothing judged, and an unmeasured lane is never throttled."""
+    spend: dict[str, Decimal] = {}
+    blocks: Counter = Counter()
+    for row in rows:
+        for line, usd in (row.get("spend_usd") or {}).items():
+            spend[line] = spend.get(line, Decimal(0)) + _money(usd)
+        for line, units in (row.get("evidence") or {}).items():
+            blocks[line] += int((units or {}).get("positive_blocks") or 0)
+    out: dict[str, dict[str, Any]] = {}
+    for line in sorted(set(spend) | set(blocks)):
+        usd, n = spend.get(line, Decimal(0)), int(blocks[line])
+        out[line] = {"usd": format(usd, ".4f"), "positive_blocks": n,
+                     "usd_per_positive_block": format(usd / n, ".4f") if n else None, "basis": "the day's yield rows"}
+    lift = lift or {}
+    consultant = lift.get("consultant") or {}
+    if "consultant" in out or consultant.get("usd"):
+        if int(consultant.get("judged_blocks") or 0) > 0:
+            n = int(consultant.get("positive_blocks_after") or 0)
+            out["consultant"] = {"usd": consultant.get("usd"), "positive_blocks": n, "usd_per_positive_block": consultant.get("usd_per_positive_block"),
+                                 "basis": f"consult.outcome over {lift.get('days', 7)} days (F4): its blocks come days after its consults",
+                                 "day_usd": (out.get("consultant") or {}).get("usd")}
+        else:
+            out.setdefault("consultant", {"usd": "0.0000", "positive_blocks": 0, "usd_per_positive_block": None})
+            out["consultant"]["unmeasured"] = "no consult has its forward blocks judged yet (F4)"
+    teacher = lift.get("teacher") or {}
+    if "teacher" in out:
+        verdict = teacher.get("verdict")
+        if verdict == "lift":
+            out["teacher"]["unmeasured"] = "measured by its lift, which is positive (F4)"
+        elif verdict != "no_lift":
+            out["teacher"]["unmeasured"] = f"measured by its lift, which reads {verdict or 'nothing yet'} (F4)"
+    return out
+
+
+def plan_throttle(prices: Mapping[str, Mapping[str, Any]], multiple: float) -> dict[str, Any]:
+    """Which lanes the throttle halves: over `multiple` times the best lane's dollars per positive block,
+    or no positive block at all, having spent `THROTTLE_MIN_USD`. No lane is throttled while no lane has
+    `REFERENCE_MIN_BLOCKS` positive blocks to be the reference."""
+    reference = [(Decimal(p["usd_per_positive_block"]), lane) for lane, p in prices.items()
+                 if lane not in NEVER_THROTTLED and p.get("usd_per_positive_block") is not None and not p.get("unmeasured")
+                 and int(p.get("positive_blocks") or 0) >= REFERENCE_MIN_BLOCKS and Decimal(p["usd_per_positive_block"]) > 0]
+    best = min(reference) if reference else None
+    lanes: dict[str, dict[str, Any]] = {}
+    for lane in sorted(THROTTLE_HOW):
+        p = prices.get(lane)
+        row: dict[str, Any] = {"throttled": False}
+        if p is None:
+            row["why"] = "spent nothing in the day"
+        else:
+            row.update({k: p.get(k) for k in ("usd", "positive_blocks", "usd_per_positive_block")})
+            spent = max(_money(p.get("usd")), _money(p.get("day_usd")))
+            price = p.get("usd_per_positive_block")
+            if p.get("unmeasured"):
+                row["why"] = p["unmeasured"]
+            elif spent < THROTTLE_MIN_USD:
+                row["why"] = f"spent ${spent:.2f}, under ${THROTTLE_MIN_USD}"
+            elif best is None:
+                row["why"] = f"no lane has {REFERENCE_MIN_BLOCKS} positive blocks to be the reference"
+            elif price is None:
+                row.update(throttled=True, ratio=None, why="bought no positive forward block")
+            else:
+                ratio = Decimal(price) / best[0]
+                row.update(ratio=round(float(ratio), 2), throttled=ratio > Decimal(str(multiple)),
+                           why=f"{float(ratio):.2f}x the best lane's price")
+        lanes[lane] = row
+    return {"multiple": multiple, "best": {"lane": best[1], "usd_per_positive_block": format(best[0], ".4f")} if best else None,
+            "lanes": lanes, "prices": {lane: dict(p) for lane, p in prices.items()}}
+
+
+class _ThrottleFold:
+    """The newest `ops.budget` "lane throttle" row of each lane, folded incrementally."""
+
+    def __init__(self) -> None:
+        self.seq = 0
+        self.lanes: dict[str, dict[str, Any]] = {}
+        self.lock = threading.Lock()
+
+
+_FOLDS: "weakref.WeakKeyDictionary[Any, _ThrottleFold]" = weakref.WeakKeyDictionary()
+_FOLDS_LOCK = threading.Lock()
+
+
+def throttle_state(ledger: Any) -> dict[str, dict[str, Any]]:
+    """lane -> its newest "lane throttle" row. Asked by every due agent's research gate and every step of the
+    engineer, so it reads only the `ops.budget` rows written since the last call (one indexed query when none)."""
+    try:
+        with _FOLDS_LOCK:
+            fold_ = _FOLDS.get(ledger)
+            if fold_ is None:
+                fold_ = _FOLDS[ledger] = _ThrottleFold()
+    except TypeError:  # a ledger that cannot be weakly referenced: fold it afresh
+        fold_ = _ThrottleFold()
+    with fold_.lock:
+        newest = ledger.read(kinds="ops.budget", limit=1, newest=True)
+        if newest and newest[-1].seq > fold_.seq:
+            for entry in ledger.iter(kinds="ops.budget", after=fold_.seq):
+                fold_.seq = entry.seq
+                if entry.payload.get("what") == THROTTLE_WHAT and entry.payload.get("lane"):
+                    fold_.lanes[str(entry.payload["lane"])] = dict(entry.payload)
+        return dict(fold_.lanes)
+
+
+def throttled(ledger: Any, lane: str) -> bool:
+    """Whether `lane` is halved now (Y1). Never raises: an unreadable state throttles nothing."""
+    try:
+        return bool((throttle_state(ledger).get(lane) or {}).get("throttled"))
+    except Exception:  # noqa: BLE001 - the throttle saves money; it must never stop work by failing
+        return False
+
+
+# ------------------------------------------------------------------ Y2: unit economics
+#: The kinds the compute line reads (scripts/economics.py `spend`, as scripts/gap_scoreboard.py counts it).
+SPEND_KINDS = ("provider.request", "merton.pass", "audit.verdict", "agent.research", "ops.budget", "credit.charge")
+
+
+def spend_of(kind: str, p: Mapping[str, Any]) -> tuple[str, Decimal] | None:
+    """(provider, dollars) one ledger row adds to the compute line, or None. `sail-estimate` rows (research
+    tokens and sandbox seconds at Sail's prices) count only where no Sail meter reading covers the window,
+    as scripts/economics.py counts them."""
+    if kind == "provider.request":
+        if p.get("cost_verified") is True and p.get("cost_usd") is not None:
+            return "openai-luna", _money(p.get("cost_usd"))
+    elif kind in ("merton.pass", "audit.verdict"):
+        return "openai-astra", _money(p.get("cost_usd"))
+    elif kind == "agent.research":
+        if (p.get("tool") == "research_grant" and p.get("status") == "completed") or p.get("tool") == "semantic_question_experiment":
+            return "openai-astra", _money(p.get("cost_usd"))
+    elif kind == "ops.budget":
+        if p.get("what") == "sail" and p.get("spent_usd") is not None:
+            return "sail", _money(p.get("spent_usd"))
+        if p.get("what") not in ("sail", "payout") and p.get("cost_usd") is not None:
+            return "openai-astra", _money(p.get("cost_usd"))  # the frontier probes
+    elif kind == "credit.charge":
+        what = str(p.get("what") or "")
+        if what == "jev classification":
+            return "jev", _money(p.get("usd"))
+        if what == "web search":
+            return "web-search", _money(p.get("usd"))
+        if what in ("research tokens", "sandbox seconds"):
+            return "sail-estimate", _money(p.get("usd"))
+    return None
+
+
+def seq_at(ledger: Any, stamp: str) -> int:
+    """The last sequence number written before `stamp` (a binary search over the ledger's rows)."""
+    head = int(ledger.head()[0])
+    lo, hi = 0, head
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        rows = ledger.read(after=mid - 1, limit=1)
+        if rows and rows[0].at < stamp:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+class UnitEconomics:
+    """Compute a day against real settled profit a day over the last `hours` (Y2), folded incrementally: the
+    first reading scans the day's rows of `SPEND_KINDS` (about 57,000 at T0), later ones only the new rows.
+    `lab_usd(since_epoch, until_epoch)` gives the Alpha Lab's own calls; `real_pnl` the real books' result."""
+
+    def __init__(self, ledger: Any, clock: Any, *, real_pnl: Any = None, lab_usd: Any = None, hours: float = 24.0):
+        from .merton import RealPnl
+
+        self.ledger, self.clock, self.hours = ledger, clock, float(hours)
+        self.real_pnl = real_pnl or RealPnl(ledger, clock, hours=hours, every_seconds=0)
+        self.lab_usd = lab_usd
+        self._rows: deque = deque()
+        self._seq: int | None = None
+        self._lock = threading.Lock()
+
+    def reading(self) -> dict[str, Any]:
+        with self._lock:
+            now = self.clock()
+            since = now_iso(lambda: now - self.hours * 3600)
+            if self._seq is None:
+                self._seq = seq_at(self.ledger, since)
+            for entry in self.ledger.iter(kinds=SPEND_KINDS, after=self._seq):
+                self._seq = entry.seq
+                found = spend_of(entry.kind, entry.payload)
+                if found is not None and found[1]:
+                    self._rows.append((entry.at, found[0], found[1]))
+            while self._rows and self._rows[0][0] < since:
+                self._rows.popleft()
+            providers: dict[str, Decimal] = {}
+            for _, provider, usd in self._rows:
+                providers[provider] = providers.get(provider, Decimal(0)) + usd
+        estimate = providers.pop("sail-estimate", Decimal(0))
+        if "sail" not in providers and estimate:
+            providers["sail"] = estimate  # no meter reading in the day: Sail's own prices, an estimate
+        lab = None
+        if self.lab_usd is not None:
+            try:
+                lab = self.lab_usd(now - self.hours * 3600, now)
+            except Exception:  # noqa: BLE001 - a lab store that cannot be read is left out
+                lab = None
+        if lab is not None:
+            providers["openai-lab"] = _money(lab)
+        compute = sum(providers.values(), Decimal(0))
+        pnl, closes = self.real_pnl()
+        days = Decimal(str(self.hours / 24))
+        per_day, profit = compute / days, Decimal(pnl) / days
+        return {"at": now_iso(lambda: now), "hours": self.hours,
+                "compute_per_day_usd": round(float(per_day), 2), "profit_per_day_usd": round(float(profit), 2),
+                "compute_over_profit": round(float(per_day / profit), 2) if profit > 0 else None,
+                "providers_usd": {k: round(float(v), 4) for k, v in sorted(providers.items())}, "real_closes": closes,
+                "measure": "compute: Luna's verified requests, Merton's and the auditor's metered passes, grants, the Sail meter, "
+                           "Jev and web search, the lab's calls; profit: the real books' settlements and closing sales, net of fees"}
+
+
 class YieldLedger:
     """Writes one `ops.budget` yield row an hour (`every_seconds`), covering the hour before it, with its
-    `lift` section, after the `consult.outcome` rows that became due (Sept 25, 2026, F4)."""
+    `lift` section, after the `consult.outcome` rows that became due (Sept 25, 2026, F4); since Y1 and Y2
+    also its `throttle` (the lanes it halves, with an `ops.budget` "lane throttle" row for each change)
+    and `unit_economics`, which the House keeps for health.json."""
 
     def __init__(self, house: Any, *, every_seconds: float = 3600.0):
         self.house = house
         self.every_seconds = float(every_seconds)
         self._teacher: dict[str, Any] = {}  # `teacher_lift`'s incremental fold, for this process's life
+        self._economics: UnitEconomics | None = None  # Y2's incremental fold, built at the first row
 
     def _state(self) -> dict[str, Any]:
         with self.house._state_lock:
@@ -422,14 +698,35 @@ class YieldLedger:
             repairs = {row["name"]: isinstance(row.get("repair"), Mapping) for row in strategies.all_strategies()}
         except Exception:  # noqa: BLE001 - the strategy files are a refinement of the credit, never a reason to skip the row
             repairs = {}
-        row = fold(self.house.ledger, since=since, until=now_iso(lambda: now), repairs=repairs)
+        row = fold(self.house.ledger, since=since, until=now_iso(lambda: now), repairs=repairs,
+                   lab_usd=self._lab_usd(now - self.every_seconds, now))
         with self.house._state_lock:
             self._state()["last"] = now
-        lift = self._lift(now, row)
-        self.house.ledger.append("ops.budget", {**row, "hours": round(self.every_seconds / 3600, 3), **({"lift": lift} if lift else {})})
+        recent = [e.payload for e in self.house.ledger.read(kinds="ops.budget", limit=200, newest=True)
+                  if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
+        lift = self._lift(now, row, recent)
+        throttle = self._throttle(recent, lift)
+        unit = self._unit_economics()
+        self.house.ledger.append("ops.budget", {**row, "hours": round(self.every_seconds / 3600, 3), **({"lift": lift} if lift else {}),
+                                                **({"throttle": {k: v for k, v in throttle.items() if k != "prices"}} if throttle else {}),
+                                                **({"unit_economics": unit} if unit else {})})
+        if throttle:
+            self._apply(throttle)
         return row
 
-    def _lift(self, now: float, row: Mapping[str, Any]) -> dict[str, Any] | None:
+    def _lab_usd(self, start: float, end: float) -> Decimal | None:
+        """The Alpha Lab's own model calls between two instants (`lab.sqlite` `calls`, what the lab's
+        positive blocks cost), or None where no lab runs or its store cannot be read."""
+        lab = getattr(self.house, "lab", None)
+        if lab is None or not hasattr(lab, "_q"):
+            return None
+        try:
+            rows = lab._q("SELECT COALESCE(SUM(cost_usd), 0) AS usd FROM calls WHERE at >= ? AND at < ?", (start, end))
+            return _money(rows[0]["usd"]) if rows else Decimal(0)
+        except Exception:  # noqa: BLE001 - the lab's price is a refinement, never a reason to skip the row
+            return None
+
+    def _lift(self, now: float, row: Mapping[str, Any], recent: list[Mapping[str, Any]] | None = None) -> dict[str, Any] | None:
         """F4: write the consult outcomes that became due, then measure every lane. A failure here is an
         alert and a row without `lift`, never a missing yield row."""
         ledger = self.house.ledger
@@ -442,8 +739,9 @@ class YieldLedger:
             if "consult.outcome" in KINDS:  # the kind ships with the owner's deploy (league/ledger.py)
                 for item in consult_outcomes(ledger, now=now, settings=settings):
                     ledger.append("consult.outcome", item["payload"], agent=item["agent"], id=item["id"])
-            recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=200, newest=True)
-                      if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
+            if recent is None:
+                recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=200, newest=True)
+                          if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
             state = getattr(getattr(getattr(self.house, "jev_floor", None), "state", None), "data", None) or {}
             return lifts(ledger, now=now, settings=settings, lesson_since=state.get("lesson_arm_since"), recent=recent, cache=self._teacher)
         except Exception as exc:  # noqa: BLE001 - the measurement never costs the hour's row
@@ -452,3 +750,51 @@ class YieldLedger:
             except Exception:  # noqa: BLE001
                 pass
             return None
+
+    def _throttle(self, recent: list[Mapping[str, Any]], lift: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        """Y1: the lanes over `economy.lane_throttle` times the best lane's price. None when the dial is not
+        set (the rule is off) or the measurement failed (an alert; the lanes keep their state)."""
+        multiple = ((getattr(self.house, "game", None) or {}).get("economy") or {}).get("lane_throttle")
+        if multiple in (None, "", 0):
+            return None
+        try:
+            return plan_throttle(lane_prices(recent, lift), float(multiple))
+        except Exception as exc:  # noqa: BLE001 - the throttle saves money; it never costs the hour's row
+            try:
+                self.house.alert("warning", f"yield ledger: the lane throttle could not be measured ({type(exc).__name__}: {str(exc)[:160]})")
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+
+    def _apply(self, plan: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """One `ops.budget` "lane throttle" row for each lane whose state changes, naming its price, the best
+        lane's and the ratio. `throttled()` reads them; nothing else is written."""
+        ledger = self.house.ledger
+        current = throttle_state(ledger)
+        written = []
+        for lane, row in sorted((plan.get("lanes") or {}).items()):
+            now = bool(row.get("throttled"))
+            if bool((current.get(lane) or {}).get("throttled")) == now:
+                continue
+            payload = {"what": THROTTLE_WHAT, "lane": lane, "throttled": now, "multiple": plan.get("multiple"), "best": plan.get("best"),
+                       **{k: row.get(k) for k in ("usd", "positive_blocks", "usd_per_positive_block", "ratio", "why")},
+                       "how": THROTTLE_HOW[lane] if now else "back to its usual cadence and price"}
+            ledger.append("ops.budget", payload)
+            written.append(payload)
+        return written
+
+    def _unit_economics(self) -> dict[str, Any] | None:
+        """Y2: compute a day against real settled profit a day, kept in the House's state for health.json."""
+        try:
+            if self._economics is None:
+                self._economics = UnitEconomics(self.house.ledger, self.house.clock, lab_usd=self._lab_usd)
+            unit = self._economics.reading()
+        except Exception as exc:  # noqa: BLE001 - a reading that fails is said once an hour, never a missing row
+            try:
+                self.house.alert("warning", f"yield ledger: the unit economics could not be read ({type(exc).__name__}: {str(exc)[:160]})")
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+        with self.house._state_lock:
+            self._state()["unit_economics"] = unit
+        return unit
