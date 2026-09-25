@@ -84,7 +84,9 @@ class TheFile(unittest.TestCase):
         options = self.niches["alpaca-options"]
         self.assertFalse(options.dormant)
         self.assertFalse(options.replay)
-        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback"])
+        # The two single-leg founders, then the structure founders that passed the House's structure replay
+        # (Sept 25, 2026), which only `league/options_desk.py` seats.
+        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback", "options-gap-drift"])
         self.assertEqual(options.desk, "krasker")
         self.assertIn("LONG PREMIUM ONLY", options.brief)
         call = instrument_for("alpaca", {"occ": "F260925C00013000"})
@@ -216,7 +218,13 @@ OUTSIDER = BUYER.replace("test-buyer", "test-outsider").replace('"symbol": "BTC/
 class InTheHouse(HouseCase):
     def test_the_founders_are_the_niches_founders_with_a_family_a_program_a_specialty(self):
         rows = self.house.founders()
-        self.assertEqual(len(rows), sum(len(n.founders) for n in self.house.niches.values()))
+        from league import runner, seeds
+
+        # A structure founder (NEEDS "structures": true) is seated by league/options_desk.py, never by House.found.
+        structure = sum(1 for n in self.house.niches.values() for f in n.founders
+                        if runner.needs_of(seeds.load(f["seed"]))["needs"].get("structures") is True)
+        self.assertEqual(len(rows), sum(len(n.founders) for n in self.house.niches.values()) - structure)
+        self.assertGreaterEqual(structure, 1)
         by_key = {r["key"]: r for r in rows}
         self.assertEqual((by_key["favorites-daily"]["family"], by_key["favorites-daily"]["niche"]), ("kalshi-favorites", "kalshi-weather"))
         self.assertEqual((by_key["football-favorites"]["family"], by_key["soccer-favorites"]["family"]), ("sports-favorites", "sports-favorites"))

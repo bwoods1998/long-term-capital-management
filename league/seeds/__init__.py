@@ -1,4 +1,5 @@
-"""The founding programs: fourteen strategy files the league starts from.
+"""The founding programs: the strategy files the league starts from (fourteen of Sept 19-20, 2026,
+and the options desk's structure founders that passed the House's structure replay, Sept 25, 2026).
 
 Each file follows `league/CONTRACT.md` and passes `league.safety.check_code`. They are data, not
 modules: the House reads a seed's source with `load()` and runs it through `league.runner` or
@@ -46,6 +47,8 @@ SEEDS: list[dict] = [
      "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
     {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
+    {"name": "options-gap-drift", "family": "options-gap-drift", "file": "options_gap_drift.py",
+     "why": "Post-announcement drift (Ball and Brown 1968): after a 2-sigma, 3% news day BAC, T, F, AAL, RIVN and CCL kept drifting (+0.95% the next day, 21, fit window); a vertical with the move."},
     # Model versus market on sports (K1 of the Kalshi-scale run, Sept 25, 2026): ONE program,
     # `sports_consensus.py`, a row per league, so each league's founder is its own family.
     {"name": "consensus-nfl", "family": "sports-consensus-nfl", "file": "sports_consensus.py",

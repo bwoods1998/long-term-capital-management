@@ -320,6 +320,32 @@ day the House offers a held contract at the bid; what is unsold at the bell is w
 zero. The House replays an options candidate only where its options history covers every
 underlying over the window; elsewhere paper remains the test.
 
+### Options structures (practice, Sept 25, 2026)
+
+An options-desk strategy with `NEEDS["structures"] = True` trades level-3 structures with defined
+risk, on practice only (the full rules: `league/structures.py`). Its book holds structures only; on
+real money every structure is refused until the owner's switch.
+
+Intent: `{"structure", "action": "open"|"close", "quantity", "limit_price", "legs": [{"occ", "role":
+"long"|"short"}], "reason"}`. `limit_price` is the net a share in cents as a trader says it: opening,
+the most debit or the least credit; closing, the least to receive or the most to pay back. A close
+sends the open's legs and closes the whole structure.
+
+Types: `debit_vertical`, `credit_vertical`, `iron_condor`, `iron_butterfly`, `long_butterfly` (body
+`ratio` 2), `calendar`, `diagonal`, `long_straddle`, `long_strangle`; one underlying, 2-4 legs. A naked
+short, another ratio or a broken wing is refused.
+
+Held as ONE position at S = net value + K (K is 0 for a debit structure, the widest wing for a credit
+one), so opening costs the maximum loss, the caps meter S x 100 x quantity, the mark is the bid and a
+flat sale is ONE closed trade. Fee $0.05 a contract a leg; a limit over 10% from the touch is refused.
+
+Time: no open on the earliest expiry day from 14:30 New York; from 15:30 the House sells what is held
+at the bid. Write your own target, stop and time exit.
+
+Shown: `ctx["chain"]` (0 DTE to `max_days_to_expiry`, no affordability line), `ctx["structures"]`
+(ready-made verticals and condors within your caps: `legs`, `open_limit`, `max_loss_usd` ...),
+`ctx["structure_rules"]`, and positions with `structure`, `legs`, `natural_open`, `natural_mark`, `pnl_usd`.
+
 ### Options-derived features for equity and ETF strategies
 
 `NEEDS["options_features"] = True` adds `ctx["options_features"]`: by symbol, the latest row

@@ -227,6 +227,18 @@
   "steps": 600,
   "trades": 0
  },
+ "options-gap-drift": {
+  "blocks": 150,
+  "errors": 0,
+  "fees_usd": 0.0,
+  "fills": 0,
+  "final_equity": 200.0,
+  "maker_fills": 0,
+  "ok": true,
+  "refused": 0,
+  "steps": 600,
+  "trades": 0
+ },
  "options-pullback": {
   "blocks": 150,
   "errors": 0,
