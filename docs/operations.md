@@ -940,9 +940,14 @@ ORDER BY seq DESC LIMIT 20`.
     markets a day and profit a settlement through the desk's `capacity_rule`), and its evaluation
     (`trace.record`, task `hypothesis.evaluate`) the replay's measure (`basis: "replay"`: `trades`,
     `days`, `tape_sample`, `markets_per_day`, `profit_per_settlement_usd`, `size_usd` and its
-    `size_basis`, `usd_per_day`). A card under `hypotheses.min_capacity_usd` ($5) a day is outcome
-    `under_capacity`, with the arithmetic in `detail`, and is never born (`health.json`
-    `hypotheses.outcomes.under_capacity`; `hypotheses.min_capacity_usd` and `shares`). A call's
+    `size_basis`, `usd_per_day`, `floor_usd`). A card on a venue `hypotheses.capacity_floor_venues`
+    names (Kalshi) under `hypotheses.min_capacity_usd` ($5) a day is outcome `under_capacity`, with the
+    arithmetic in `detail`, and is never born (`health.json` `hypotheses.outcomes.under_capacity`;
+    `hypotheses.min_capacity_usd`, `capacity_floor_venues` and `shares`). An Alpaca card states and
+    measures its capacity too (`floor_usd` 0, the packet's `capacity_rule.floor_note` says why) and is
+    judged by its replay as before S1: $5 a day at the $12.50 a bunt holds is $40 a day of replay profit
+    on the $200 practice book, and the best Alpaca pass of the three days to T0 measured $0.07 (the review
+    of Deploy C). A call's
     `merton.pass` `allocation.route` is `capacity` (with `allocation.capacity`: the desk's 7-day
     blocks, growth and measured capacity), `model` (`allocation.model.feeds`), `exploration` or
     `evidence`. A card spanning two desks has `desk` (where it passed) and `tapes` (each desk's
@@ -1429,7 +1434,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `hypotheses.transfer_share` | 0 (0.3 until Sept 25, 2026) | Up to 30% of the foundry's calls port a family with an earned forward record (real money first) to the best-scored desk of its venue where it has never been tried; the packet carries its mechanism in words and asks for at least half the batch as adaptations. Offered before the fast route, then exploration, then evidence. 0 is off, as before Sept 23, 2026 |
 | | `hypotheses.capacity_share`, `capacity_days`, `capacity_min_blocks`, `capacity_weight_floor_usd` | 0.5, 7, 6, $0.25 | Half the foundry's calls go to the desks whose pooled forward record over the last 7 days is positive over 6 active blocks, in proportion to the measured capacity of the families earning there (at least $0.25 a day a desk); S1 of the forward-first run, Sept 25, 2026. 0 is off |
 | | `hypotheses.model_share`, `model_targets` | 0.3, four targets | Three tenths go to model-versus-market cards on recorded feeds, rotating over the weather ensemble (kalshi-weather), EDGAR earnings (alpaca-megacaps), DVOL and funding (alpaca-crypto-majors) and the sportsbook line (kalshi-sports, leagues no founder prices). 0 is off |
-| | `hypotheses.min_capacity_usd`, `replay_position_usd` | $5, Kalshi $30 / Alpaca $100 | A card under $5 a day of capacity (markets a day x profit a settlement x the size before fills halve / the replay's position) is refused, stated or measured. Bounds in `hypotheses_bounds`: 2-20, and Kalshi 10-100 / Alpaca 25-100 |
+| | `hypotheses.min_capacity_usd`, `capacity_floor_venues`, `replay_position_usd` | $5, Kalshi, Kalshi $30 / Alpaca $100 | A card on a venue `capacity_floor_venues` names under $5 a day of capacity (markets a day x profit a settlement x the size before fills halve / the replay's position) is refused, stated or measured. Alpaca is left out (the review of Deploy C): its fills do not halve at any size the money rules allow, so the $12.50-$50 size read there is not its capacity and the floor refused every Alpaca card; add it back once that size is measured. Bounds in `hypotheses_bounds`: 2-20, a subset of kalshi and alpaca, and Kalshi 10-100 / Alpaca 25-100 |
 | | `hypotheses.prefer_horizon` | `hour` | The horizon the foundry's packet tells Merton to prefer where a desk allows it. Empty: the desk's first listed horizon |
 | | `hypotheses.max_pending_cards` | 8 | How many cards may await replay before the next call. 0: any pending card holds the next call, as before Sept 23, 2026 |
 | | `lab.enabled`, `lab.budget_usd_per_hour` | on (with a `config.json` `lab.box_id`), $1.50 | The Alpha Lab (`league/lab.py`): its OpenAI line per trailing hour, plus royalties, inside the campaign allowance. Its Luna and Sol calls run only at frontier tier `all`; the rest of the lab (seeds, parameter children, batches, graduation) runs whatever the tier (C2, Sept 23, 2026) |

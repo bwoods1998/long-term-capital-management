@@ -20,7 +20,7 @@ from league import niches
 from league.economy import check_bounds, load_game
 from league.hypotheses import (FOUNDRY_BRIEF, PROMPT_VERSION, ROUTES, capacity_usd, default_size, halving_size,
                                replay_measure)
-from league.tests.test_hypotheses import ETF, MEGACAP, PASSER, FoundryCase, candidate
+from league.tests.test_hypotheses import ETF, MEGACAP, PASSER, WEATHER, FoundryCase, candidate
 
 #: A program on the open Alpaca desk that names four index ETFs and two coins: `niches.match` places it on the
 #: index-ETF desk (four of six), as it placed four of the open desk's cards of Sept 24, 2026.
@@ -67,6 +67,9 @@ class CapacityCase(FoundryCase):
         self.settings(**{k: deepcopy(game[k]) for k in ("capacity_share", "model_share", "exploration_share", "transfer_share",
                                                          "fast_share", "min_capacity_usd", "capacity_days", "capacity_min_blocks",
                                                          "capacity_weight_floor_usd", "replay_position_usd", "model_targets")})
+        # The tests' desk is an Alpaca desk (the crypto majors): the floor is exercised on it, where the game file holds it
+        # on Kalshi alone (`capacity_floor_venues`; `TheFloorByVenue` has the game file's).
+        self.settings(capacity_floor_venues=["kalshi", "alpaca"])
 
     def settings(self, **kw):
         from league.hypotheses import Foundry
@@ -216,6 +219,45 @@ class CardsCarryCapacity(CapacityCase):
         self.assertLess(outcome["capacity"]["usd_per_day"], 5.0)
 
 
+class TheFloorByVenue(CapacityCase):
+    """The review of Deploy C (Sept 25, 2026): on Alpaca $5 a day at the $12.50 a bunt holds needs $40 a day of replay profit
+    on the $200 practice book; the best Alpaca pass of the three days to T0 measured $0.07. The floor refused every Alpaca
+    card while their calls were paid. The game file holds it on Kalshi, where the listing and the book's depth bind."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings(capacity_floor_venues=deepcopy(load_game()["hypotheses"]["capacity_floor_venues"]))
+
+    def test_an_alpaca_card_under_five_dollars_a_day_is_measured_recorded_and_judged_by_its_replay(self):
+        self.frontier.candidates = [stating("pennies", "the crypto-alts drift, honest about its size", PASSER, markets=2.0, profit=1.0)]
+        with patch.object(self.house, "_candidate_replay", return_value=replayed(trades=70, pnl=35.0)):
+            self.call()
+        card = self.card_of("pennies")
+        self.assertEqual((card["capacity"]["usd_per_day"], card["capacity"]["floor_usd"]), (0.25, 0.0))
+        outcome = self.evaluation("pennies")
+        self.assertEqual(outcome["outcome"], "passed")
+        self.assertEqual((outcome["capacity"]["basis"], outcome["capacity"]["floor_usd"]), ("replay", 0.0))
+        self.assertAlmostEqual(outcome["capacity"]["usd_per_day"], 0.21, places=2)
+        self.assertEqual(self.foundry.inventory()[0]["desk"], self.DESK)
+        rule = self.foundry.packet(self.DESK)["capacity_rule"]
+        self.assertEqual(rule["floor_usd"], 0.0)
+        self.assertIn("no floor on alpaca", rule["floor_note"])
+
+    def test_a_kalshi_card_is_still_held_to_the_floor(self):
+        rule = self.foundry.capacity_rule("kalshi-weather")
+        self.assertEqual((rule["floor_usd"], rule["size_usd"], rule["replay_position_usd"]), (5.0, 6.0, 30.0))
+        self.assertNotIn("floor_note", rule)
+        self.assertEqual(self.foundry._stats()["capacity_floor_venues"], ["kalshi"])
+        self.frontier.candidates = [stating("pennies", "one favourite a day on one series", WEATHER, markets=1.0, profit=0.5)]
+        replays = []
+        with patch.object(self.house, "_candidate_replay", side_effect=lambda agent, code: replays.append(agent) or replayed()):
+            self.call("kalshi-weather")
+        outcome = self.evaluation("pennies")
+        self.assertEqual(outcome["outcome"], "under_capacity")
+        self.assertIn("under the $5 floor", outcome["detail"])
+        self.assertEqual(replays, [])
+
+
 class Routes(CapacityCase):
     def record_call(self, desk, route):
         self.house.ledger.append("merton.pass", {"role": "foundry", "at_epoch": self.clock(), "cost_usd": "0",
@@ -226,6 +268,7 @@ class Routes(CapacityCase):
         self.assertEqual(ROUTES, ("capacity", "model", "transfer", "fast", "exploration"))
         self.assertEqual((game["capacity_share"], game["model_share"], game["exploration_share"], game["transfer_share"],
                           game["fast_share"], game["min_capacity_usd"], game["capacity_days"]), (0.5, 0.3, 0.2, 0, 0, 5, 7))
+        self.assertEqual(game["capacity_floor_venues"], ["kalshi"])
         self.assertEqual([t["desk"] for t in game["model_targets"]],
                          ["kalshi-weather", "alpaca-megacaps", "alpaca-crypto-majors", "kalshi-sports"])
         self.assertEqual(game["model_targets"][2]["feeds"], ["vol", "funding"])
@@ -421,7 +464,7 @@ class Bounds(CapacityCase):
         game = load_game()
         check_bounds(game)
         for key, value in (("min_capacity_usd", 30), ("capacity_days", 1), ("capacity_share", 1.5),
-                           ("replay_position_usd", {"kalshi": 5, "alpaca": 100})):
+                           ("replay_position_usd", {"kalshi": 5, "alpaca": 100}), ("capacity_floor_venues", ["kalshi", "coinbase"])):
             bad = deepcopy(game)
             bad["hypotheses"][key] = value
             with self.assertRaises(ValueError, msg=key):

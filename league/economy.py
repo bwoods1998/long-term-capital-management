@@ -114,6 +114,11 @@ def check_bounds(game: Mapping[str, Any]) -> None:
     for key, bound in bounds.items():
         if str(key).startswith("_") or key not in foundry:
             continue
+        if isinstance(bound, list) and all(isinstance(v, str) for v in bound):
+            # A list dial (`capacity_floor_venues`, the review of Deploy C): a subset of the values it lists.
+            if not isinstance(foundry[key], list) or any(item not in bound for item in foundry[key]):
+                raise ValueError(f"game.json: hypotheses.{key} = {foundry[key]!r} is not a subset of {bound}")
+            continue
         for sub, (low, high) in (bound.items() if isinstance(bound, Mapping) else [(None, bound)]):
             value = float(foundry[key] if sub is None else (foundry[key] or {}).get(sub, low))
             if not float(low) <= value <= float(high):

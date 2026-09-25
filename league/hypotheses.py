@@ -174,6 +174,9 @@ DEFAULTS: dict[str, Any] = {
     "model_share": 0.0,
     "model_targets": [],
     "min_capacity_usd": 0,
+    # The venues whose cards `min_capacity_usd` refuses (the review of Deploy C, Sept 25, 2026); every venue here, as S1
+    # was built. The game file names Kalshi alone: see `Foundry._floor`.
+    "capacity_floor_venues": ["kalshi", "alpaca"],
     # The position the replay's book lets a program take, by venue, which its mean profit a settlement is
     # scaled from to the real size (`capacity_usd`): Kalshi 15% of the $200 practice stake (the brief's
     # one-loss rule for a binary position), Alpaca the practice rung's $100 position cap.
@@ -1389,11 +1392,33 @@ class Foundry:
             return hit[1]
         niche = self.house.niches[niche_id]
         size, basis, family = self._desk_size(niche)
-        rule = {"floor_usd": float(self.settings.get("min_capacity_usd") or 0), "size_usd": size, "size_basis": basis, "size_family": family,
+        floor = self._floor(niche.venue)
+        rule = {"floor_usd": floor, "size_usd": size, "size_basis": basis, "size_family": family,
                 "replay_position_usd": self._replay_position(niche.venue),
                 "formula": "usd_per_day = markets_per_day x profit_per_settlement_usd x size_usd / replay_position_usd"}
+        if not floor and float(self.settings.get("min_capacity_usd") or 0) > 0:
+            rule["floor_note"] = (f"no floor on {niche.venue}: its fills do not halve at any size the money rules let a position "
+                                  "take, so the size read here is not its capacity; the estimate is recorded, the replay judges")
         self._rules[niche_id] = (now, rule)
         return rule
+
+    def _floor(self, venue: str) -> float:
+        """The capacity floor a card on this venue is held to: `min_capacity_usd` on a venue `capacity_floor_venues` names,
+        else 0 (the estimate is still stated and measured, and recorded; nothing is refused on it).
+
+        The review of Deploy C (Sept 25, 2026): on Alpaca the capacity is the replay's profit a day x the size before fills
+        halve / its $100 position, the size being the $12.50 a bunt holds or at most the $50 of a C6 curve (4x), whose
+        fills never halved there. $5 a day then needs $40 a day of replay profit on the $200 practice book (20% a day), or
+        $10 (5%) at $50. The best Alpaca replay pass of the three days to T0 (crypto-alts, 5.89% over 21 days, 175
+        trades) measures $0.07 a day, $0.28 at $50; 23 of the 29 foundry births of the 48 hours to T0 were Alpaca's, and
+        two of the four model targets are. The floor refused every Alpaca card while the calls for them were still paid:
+        a venue switch, not a capacity test. A liquid stock or coin absorbs orders far above any position the money rules
+        allow, so its capacity is set by the stake, not the market, and is unmeasured; the floor holds on Kalshi, where
+        the listing and the book's depth bind (a Kalshi day-tape card is scaled from the tape's sample of the listing to
+        the whole of it, `replay_measure`)."""
+        floor = float(self.settings.get("min_capacity_usd") or 0)
+        venues = self.settings.get("capacity_floor_venues")
+        return floor if venues is None or venue in venues else 0.0
 
     def _desk_size(self, niche: Any) -> tuple[float, str, str | None]:
         """(size, why, family): the size before fills halve on the desk's best-measured family fill curve (C6) -- of the
@@ -2071,7 +2096,7 @@ class Foundry:
         # E2 (Sept 24, 2026): every card states the fee it pays and the edge it needs to clear it.
         if not str(raw.get("fee") or "").strip() or not str(raw.get("edge_needed") or "").strip():
             return None, "a candidate that does not state the fee it pays and the edge it needs to clear it"
-        # S1 (Sept 25, 2026): and its capacity, while the game sets a floor.
+        # S1 (Sept 25, 2026): and its capacity, while the game sets a floor (on any venue: an Alpaca card states it too).
         floor = float(self.settings.get("min_capacity_usd") or 0)
         stated = self._stated_capacity(raw, niche_id)
         if stated is None and floor > 0:
@@ -2108,7 +2133,7 @@ class Foundry:
             check_code(code)
         except (CodeRefused, SyntaxError) as exc:
             self._outcome(payload, "invalid", f"the strategy check refused it: {str(exc)[:200]}")
-        if stated is not None and floor > 0 and stated["usd_per_day"] < floor:
+        if stated is not None and float(stated["floor_usd"] or 0) > 0 and stated["usd_per_day"] < float(stated["floor_usd"]):
             # Refused before its replay, with the arithmetic (the first outcome written stands: invalid code says so first).
             self._outcome(payload, "under_capacity", "its stated capacity " + self._capacity_words(stated), capacity=stated)
         return payload, ""
@@ -2296,7 +2321,7 @@ class Foundry:
                 capacity = self._measured_capacity(view, result, result.get("needs") or needs)
             except Exception as exc:  # noqa: BLE001 - an estimate that cannot be read refuses nothing, and says why
                 capacity = {"basis": "replay", "desk": view.id, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
-            floor = float(self.settings.get("min_capacity_usd") or 0)
+            floor = float(capacity.get("floor_usd") or 0)  # the desk's venue's (`_floor`)
             if passed and floor > 0 and not card.get("strategy") and capacity.get("usd_per_day") is not None \
                     and float(capacity["usd_per_day"]) < floor:
                 outcome, detail = "under_capacity", f"it passed replay ({detail}) but its measured capacity {self._capacity_words(capacity)}"
@@ -2719,4 +2744,5 @@ class Foundry:
                 "pending": len(self.pending()), "spent_window_usd": format(self.spent(), "f"),
                 "budget_usd": str(self.settings["budget_usd"]), "retired": len(self.retired()),
                 # S1 (Sept 25, 2026): the floor a card's capacity is held to (its refusals are `outcomes.under_capacity`).
-                "min_capacity_usd": float(self.settings.get("min_capacity_usd") or 0), "shares": self.shares()}
+                "min_capacity_usd": float(self.settings.get("min_capacity_usd") or 0),
+                "capacity_floor_venues": list(self.settings.get("capacity_floor_venues") or []), "shares": self.shares()}
