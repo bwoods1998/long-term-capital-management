@@ -140,3 +140,90 @@ class TheToolsmithQueue(unittest.TestCase):
             self.ask('a1', 'same_feed')
         self.ask('a2', 'same_feed')
         self.assertTrue(all(r['asked_by_agents'] == 2 for r in self.commons.open_requests()))
+
+
+class WebFetchThroughTheGateway(unittest.TestCase):
+    """I1 (Sept 25, 2026): `web_fetch` asks the gateway for one page; every failure is an answer."""
+
+    TOKEN = "gateway-token-that-is-long-enough-1234567890"
+
+    class Reply:
+        def __init__(self, status, body):
+            self.status, self.body = status, body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, limit=-1):
+            return self.body if limit < 0 else self.body[:limit]
+
+    def opener(self, status=200, body=b"{}", raises=None):
+        sent = []
+
+        def open_(request, timeout=None):
+            sent.append((request, timeout))
+            if raises is not None:
+                raise raises
+            return self.Reply(status, body)
+        return open_, sent
+
+    def test_the_gateway_is_asked_with_the_token_and_a_json_body(self):
+        import json
+        from league.commons import gateway_fetch
+
+        page = {"url": "https://example.com/", "final_url": "https://example.com/", "status": 200, "text": "hi"}
+        open_, sent = self.opener(body=json.dumps(page).encode())
+        fetch = gateway_fetch("https://gw.example.workers.dev/", lambda: self.TOKEN, opener=open_)
+        self.assertEqual(fetch("https://example.com/", "nfl-model-2"), (200, page))
+        request, timeout = sent[0]
+        self.assertEqual((request.full_url, request.get_method(), timeout), ("https://gw.example.workers.dev/v1/web/fetch", "POST", 40.0))
+        self.assertEqual(request.get_header("Authorization"), "Bearer " + self.TOKEN)
+        self.assertEqual(json.loads(request.data), {"url": "https://example.com/", "agent": "nfl-model-2"})
+
+    def test_an_http_error_is_returned_with_its_status_and_an_oversized_answer_raises(self):
+        import io
+        import urllib.error
+        from league.commons import MAX_FETCH_ANSWER_BYTES, gateway_fetch
+
+        refused = urllib.error.HTTPError("u", 403, "Forbidden", {}, io.BytesIO(b'{"error": "The url names a loopback address.", "url": "http://127.0.0.1/"}'))
+        open_, _ = self.opener(raises=refused)
+        self.assertEqual(gateway_fetch("https://gw", lambda: self.TOKEN, opener=open_)("http://127.0.0.1/", "a")[0], 403)
+        worker = urllib.error.HTTPError("u", 500, "Error", {}, io.BytesIO(b"error code: 1101"))
+        open_, _ = self.opener(raises=worker)
+        self.assertEqual(gateway_fetch("https://gw", lambda: self.TOKEN, opener=open_)("https://example.com/", "a"), (500, {}))
+        open_, _ = self.opener(body=b"x" * (MAX_FETCH_ANSWER_BYTES + 1))
+        with self.assertRaises(ValueError):
+            gateway_fetch("https://gw", lambda: self.TOKEN, opener=open_)("https://example.com/", "a")
+
+    def test_web_fetch_answers_every_outcome_and_says_whether_the_gateway_judged_the_url(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ledger = Ledger(Path(directory.name) / "l.sqlite")
+        self.addCleanup(ledger.close)
+        page = {"url": "https://example.com/", "final_url": "https://example.com/", "status": 404, "content_type": "text/html",
+                "title": "Not Found", "text": "No such page", "truncated": False, "bytes": 40, "fetched_at": "2026-09-26T16:00:00.000Z", "extra": 1}
+        answers = iter([(200, page), (403, {"error": "The url names a private address.", "url": "http://10.0.0.1/", "refused": "url"}),
+                        (429, {"error": "Today's cap is reached.", "cap": "web_fetch_day"}), (500, {}), OSError("down")])
+
+        def fetch(url, agent):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        commons = Commons(ledger, fetch=fetch)
+        ok = commons.web_fetch("https://example.com/", "a1")
+        self.assertEqual((ok["judged"], ok["status"], ok["text"]), (True, 404, "No such page"))
+        self.assertNotIn("extra", ok)
+        refused = commons.web_fetch("http://10.0.0.1/", "a1")
+        self.assertEqual((refused["judged"], refused["refused"], refused["gateway_status"]), (True, "url", 403))
+        capped = commons.web_fetch("https://example.com/", "a1")
+        self.assertEqual((capped["judged"], capped["cap"]), (False, "web_fetch_day"))
+        self.assertEqual(commons.web_fetch("https://example.com/", "a1"), {"error": "the gateway answered HTTP 500", "gateway_status": 500, "judged": False})
+        self.assertEqual(commons.web_fetch("https://example.com/", "a1"), {"error": "the gateway could not be reached: OSError", "judged": False})
+        for url in ("", "ftp://example.com/", "https://example.com/" + "a" * 2100):
+            self.assertFalse(commons.web_fetch(url, "a1")["judged"])
+        self.assertIn("not configured", Commons(ledger).web_fetch("https://example.com/", "a1")["error"])

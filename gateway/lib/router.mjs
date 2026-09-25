@@ -12,6 +12,7 @@
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
 //   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
 //   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
+//   POST            /v1/web/fetch            one public page's text for research, capped per day (lib/fetch.mjs)
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
 //   GET             /v1/github/pr/<n>        that pull request and its CI, so the VM can watch it
 //   GET             /v1/github/pr/<n>/failures  why CI refused it: failed runs and their annotations
@@ -43,6 +44,7 @@ import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
 import * as equity from './equity.mjs';
 import * as typesafe from './typesafe.mjs';
+import * as web from './fetch.mjs';
 import * as github from './github.mjs';
 
 export const VENUES = ['kalshi', 'alpaca', 'alpaca-paper'];
@@ -151,6 +153,12 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/typesafe/systemone') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return typesafeCall(request, env, { gate, fetcher, now });
+  }
+
+  if (path === web.PATH) {
+    // Research reads one public page; it moves no money, so the kill switch does not stop it.
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return web.webFetch(request, env, { gate, fetcher, now });
   }
 
   if (path === '/v1/github/pr') {

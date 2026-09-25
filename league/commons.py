@@ -3,6 +3,10 @@
 - **Web search.** Sail's search API (real pages with excerpts), with Google News RSS as the
   fallback. The House runs the search; an agent's box has no network. Each search is charged to
   the agent that asked.
+- **Web fetch.** One public page's text, read by the gateway (`POST /v1/web/fetch`,
+  gateway/lib/fetch.mjs), never by the House box, whose egress stays exact-host. The gateway
+  refuses private and local addresses, re-checks every redirect, forwards no credential and caps
+  the text; what comes back is untrusted data from the open web.
 - **Research library.** Notes any agent writes and every agent can search: a finding costs one
   agent the compute once. Notes are rows on the ledger, so the library is public and permanent.
 - **Tool requests.** An agent that needs something the House does not offer (a data feed, an
@@ -28,6 +32,17 @@ MAX_NOTE_CHARS = 4000
 #: Sail does not publish a price for search. The House charges this per query until the usage
 #: record shows the real number; it errs high.
 SEARCH_CHARGE_USD = "0.01"
+#: The gateway's research web reader (gateway/lib/fetch.mjs).
+FETCH_PATH = "/v1/web/fetch"
+#: A page read through the gateway is charged like a search. What it costs the firm is the
+#: Worker's time, well under a cent; the page's tokens are charged as the research turns that read it.
+FETCH_CHARGE_USD = SEARCH_CHARGE_USD
+#: The gateway refuses a longer URL; the House does not send one.
+MAX_FETCH_URL_CHARS = 2048
+#: The gateway's answer: at most 200,000 characters of text, JSON-escaped, and a few fields.
+MAX_FETCH_ANSWER_BYTES = 2 * 1024 * 1024
+#: The page fields the gateway answers (gateway/lib/fetch.mjs `webFetch`).
+PAGE_FIELDS = ("url", "final_url", "status", "content_type", "title", "text", "truncated", "bytes", "fetched_at")
 WORD = re.compile(r"[a-z0-9]{3,}")
 
 
@@ -55,13 +70,45 @@ def sail_search(key_source: Callable[[], str], *, opener: Any = None, timeout: f
     return search
 
 
+def gateway_fetch(gateway_url: str, token_source: Callable[[], str], *, opener: Any = None,
+                  timeout: float = 40.0) -> Callable[[str, str], tuple[int, dict[str, Any]]]:
+    """A `fetch(url, agent) -> (HTTP status, answer)` function over the gateway's `/v1/web/fetch`.
+
+    The House calls the gateway as it does for everything else it may not do itself: the bearer
+    token and a JSON body. An HTTP error is returned with its status, not raised; a gateway that
+    cannot be reached raises (`URLError`, `OSError`), and `Commons.web_fetch` answers it."""
+    endpoint = gateway_url.rstrip("/") + FETCH_PATH
+
+    def fetch(url: str, agent: str) -> tuple[int, dict[str, Any]]:
+        request = urllib.request.Request(
+            endpoint, data=json.dumps({"url": url, "agent": agent}).encode(), method="POST",
+            headers={"Authorization": "Bearer " + token_source(), "Content-Type": "application/json", "User-Agent": "ltcm-floor/1.0"},
+        )
+        try:
+            with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
+                status = int(getattr(response, "status", None) or response.getcode())
+                raw = response.read(MAX_FETCH_ANSWER_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            status, raw = int(exc.code), exc.read(MAX_FETCH_ANSWER_BYTES + 1)
+        if len(raw) > MAX_FETCH_ANSWER_BYTES:
+            raise ValueError("the gateway's answer is larger than a page can be")
+        try:
+            answer = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            answer = {}
+        return status, answer if isinstance(answer, dict) else {}
+
+    return fetch
+
+
 class Commons:
     def __init__(self, ledger: Ledger, *, search: Callable[[str, int], list[dict[str, Any]]] | None = None, news: Any = None,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, fetch: Callable[[str, str], tuple[int, dict[str, Any]]] | None = None):
         self.ledger = ledger
         self.clock = clock
         self._search = search
         self._news = news  # an ltcm.data.news.News: the keyless fallback
+        self._fetch = fetch  # `gateway_fetch(...)`: None, and `web_fetch` says it is not configured
 
     # ------------------------------------------------------------- web search
     def web_search(self, query: str, limit: int = 5) -> dict[str, Any]:
@@ -82,6 +129,39 @@ class Commons:
             except Exception as exc:  # noqa: BLE001 - a search that fails is an answer, not a crash
                 return {"error": f"search failed: {type(exc).__name__}"}
         return {"error": f"search failed: {failure}"}
+
+    # -------------------------------------------------------------- web fetch
+    def web_fetch(self, url: str, agent: str) -> dict[str, Any]:
+        """One public page, read by the gateway: its fields (`PAGE_FIELDS`), or `{"error"}`.
+
+        Errors are answers, never exceptions. `judged` says whether the gateway answered about this
+        URL -- a page (whatever the page's own status), a refusal of the URL, a redirect or a
+        content type, or the page's host failing to answer -- as opposed to a gateway that could not
+        act at all (unreachable, its token, its day's cap, a Worker error). Every answer the gateway
+        gives about a URL names it (`url`); nothing else does. The researcher charges and counts a
+        judged fetch only."""
+        url = str(url or "").strip()
+        if not url:
+            return {"error": "give the url of one public page", "judged": False}
+        if len(url) > MAX_FETCH_URL_CHARS:
+            return {"error": f"the url is longer than {MAX_FETCH_URL_CHARS} characters", "judged": False}
+        if not url.lower().startswith(("http://", "https://")):
+            return {"error": "only a public http or https url can be read", "judged": False}
+        if self._fetch is None:
+            return {"error": "web fetch is not configured on this floor", "judged": False}
+        try:
+            status, answer = self._fetch(url, str(agent or ""))
+        except Exception as exc:  # noqa: BLE001 - a gateway that cannot be reached is an answer, not a crash
+            return {"error": f"the gateway could not be reached: {type(exc).__name__}", "judged": False}
+        judged = isinstance(answer.get("url"), str)
+        if status == 200 and judged and isinstance(answer.get("text"), str):
+            return {**{key: answer.get(key) for key in PAGE_FIELDS}, "judged": True}
+        error = str(answer.get("error") or f"the gateway answered HTTP {status}")[:400]
+        out: dict[str, Any] = {"error": error, "gateway_status": status, "judged": judged}
+        for key in ("url", "final_url", "status", "content_type", "refused", "cap"):
+            if answer.get(key) is not None:
+                out[key] = answer[key] if not isinstance(answer[key], str) else answer[key][:400]
+        return out
 
     # ---------------------------------------------------------------- library
     def library_write(self, agent: str, title: str, text: str, tags: list[str] | None = None, *, niche: str | None = None) -> dict[str, Any]:

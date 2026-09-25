@@ -149,7 +149,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from .auditor import Auditor
     from .budget import Budget
     from .campaigns import CampaignBudget
-    from .commons import Commons
+    from .commons import Commons, gateway_fetch
     from .funded import FundedTransport
     from .frontier import Frontier
     from .paper import KalshiShadowBroker
@@ -225,8 +225,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     )
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
+    # `fetch`: research's `web_fetch` reads one public page through the gateway (I1, Sept 25, 2026).
     house.commons = Commons(house.ledger, news=News(cache_dir=root / "cache"),
-                            clock=house.clock)
+                            clock=house.clock, fetch=gateway_fetch(gateway_url, token))
     if house.researcher is not None:
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)
