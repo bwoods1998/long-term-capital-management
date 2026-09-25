@@ -1,4 +1,5 @@
 {
+ "serve": false,
  "version": "move-v1-20260924",
  "fitted_on": {
   "rows": {

@@ -19,7 +19,10 @@
 Every switch defaults on and can be turned off in config without a code change; with "jev"
 "enabled": false the House behaves exactly as before this module existed. The move sensor and the
 shared memory are the exceptions: each is off unless `"move"` / `"memory"` says `"enabled": true`, so
-a config without the key runs as before.
+a config without the key runs as before. The move sensor is handed the House's feed store
+(`house.feeds`), through which it serves `ctx["feeds"]["move"]` only once `league/jev_move_model.json`
+says `"serve": true`: not until the Jev run's ship rule passes (`league/jev_features.py`). Jev has no
+authority there either: the feature informs, code decides.
 """
 
 from __future__ import annotations
@@ -70,7 +73,8 @@ class JevFloor:
 
                 closing = getattr(house, "_closing", None)  # a cycle stops asking once the House begins to close
                 self.move = MoveSensor(root, sensor, clock=house.clock, alert=house.alert, settings=move,
-                                       closing=(lambda: bool(closing.is_set())) if closing is not None else None)
+                                       closing=(lambda: bool(closing.is_set())) if closing is not None else None,
+                                       feeds=getattr(house, "feeds", None))  # served only once the model file says so
             except Exception as exc:  # noqa: BLE001
                 house.alert("warning", f"the Jev move sensor is off ({type(exc).__name__}: {str(exc)[:160]})")
         memory = dict(self.settings.get("memory") or {})

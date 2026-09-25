@@ -380,6 +380,105 @@ class Requests(StoreCase):
         self.assertIn("ctx['feeds']['sports']", answer["outcome"])
 
 
+MOVE = {"markets": {"KXHIGHNY-26SEP22-B72.5": {"move_p5": 0.1234, "move_p15": 0.2345, "move_p60": 0.3456}},
+        "model": "move-v1-20260924"}
+
+
+class MoveFeed(StoreCase):
+    """J1's move feature (the Jev-senses run, Sept 25, 2026): a live feed the House's own move sensor
+    records per Kalshi series (league/jev_features.py), never polled by the feeds lane, held to the
+    same three rules as every live feed."""
+
+    def test_move_is_a_live_feed_without_a_host_keyed_by_kalshi_series(self):
+        self.assertIn("move", feeds.FEEDS)
+        self.assertNotIn("move", feeds.HISTORY_FEEDS)
+        source = feeds.RECORDERS["move"]
+        self.assertEqual((source.host, source.internal, feeds.GAP_SECONDS["move"]), ("", True, 900.0))
+        self.assertTrue(feeds.WHAT["move"].startswith("not served until the Jev run's ship rule passes"))
+        self.assertIn("nothing is back-filled", feeds.POINT_IN_TIME["move"])
+        self.assertEqual(requested({"Move": ["kxhighny", "KXHIGHNY-26SEP22-B72.5", "KXBTCD", "", None, "not a series!", 7]}),
+                         {"move": ["KXHIGHNY", "KXBTCD"]})  # a ticker names its series; anything else is dropped
+        self.assertEqual(requested({"move": "KXBTCD"}), {"move": ["KXBTCD"]})
+        self.assertEqual(len(requested({"move": [f"KXS{n}" for n in range(10)]})["move"]), feeds.MAX_KEYS)
+        self.assertIsNone(request_feed("move_probability"))  # no tool request is answered with it
+
+    def test_a_series_never_recorded_is_absent_and_a_row_is_seen_only_from_its_t(self):
+        store = self.recorder(None)
+        t0 = self.clock()
+        wanted = {"move": ["KXHIGHNY", "KXBTCD"]}
+        self.assertEqual((store.latest(wanted, t0 + 3600), store.keys("move")), ({}, []))
+        self.assertTrue(store.record("move", "KXHIGHNY", started=t0, finished=t0 + 12.3451, payload=MOVE))
+        self.assertEqual(store.latest(wanted, t0 + 12.345), {})  # computed a fraction of a millisecond later: not yet
+        row = store.latest(wanted, t0 + 12.346)["move"]
+        self.assertEqual(row, {"KXHIGHNY": {**MOVE, "t": "2026-09-22T12:00:12.346Z"}})  # KXBTCD: absent, never zero
+        self.assertEqual(store.keys("move"), ["KXHIGHNY"])
+        self.assertEqual(store.series(wanted, t0 - 3600, t0 + 12, 300), {})  # a tape ending before it never carries it
+        tape = store.series(wanted, t0 - 3600, t0 + 3600, 300)["move"]
+        self.assertEqual((list(tape), [r["t"] for r in tape["KXHIGHNY"]]), (["KXHIGHNY"], ["2026-09-22T12:00:12.346Z"]))
+
+    def test_unchanged_move_content_is_stored_once_and_each_record_covers_three_cycles(self):
+        store = self.recorder(None)
+        t0 = self.clock()
+        moved = {**MOVE, "markets": {"KXHIGHNY-26SEP22-B72.5": {"move_p5": 0.2, "move_p15": 0.3, "move_p60": 0.4}}}
+        for offset, payload in ((0, MOVE), (300, MOVE), (600, MOVE), (900, moved)):
+            store.record("move", "KXHIGHNY", started=t0 + offset - 60, finished=t0 + offset, payload=payload)
+        row = store.coverage({"move": ["KXHIGHNY"]}, t0, t0 + 3600)["move"]["KXHIGHNY"]
+        self.assertEqual((row["polls"], row["ok"], row["snapshots"], row["covered_seconds"]), (4, 4, 2, 1800.0))
+        rows = store.series({"move": ["KXHIGHNY"]}, t0 - 1, t0 + 3600, 1)["move"]["KXHIGHNY"]
+        self.assertEqual([(r["t"][11:19], r["markets"]["KXHIGHNY-26SEP22-B72.5"]["move_p15"]) for r in rows],
+                         [("12:00:00", 0.2345), ("12:15:00", 0.3)])  # t: when that content was first computed
+        self.assertEqual(store.latest({"move": ["KXHIGHNY"]}, t0 + 899)["move"]["KXHIGHNY"]["t"], "2026-09-22T12:00:00.000Z")
+
+    def test_the_feeds_lane_never_polls_move_and_describe_lists_what_it_recorded(self):
+        # Asked to "poll" move, the lane still plans nothing: an empty transport would fail any request.
+        store = self.recorder({"move": ["KXHIGHNY"]}, transports=FakeTransport({}))
+        store.record("move", "KXHIGHNY", started=self.clock() - 60, finished=self.clock(), payload=MOVE)
+        self.assertEqual(store._plan(), [])
+        self.assertFalse(store.due())
+        self.clock.advance(3600)
+        self.assertEqual({k: v for k, v in store.run().items() if k != "stored"}, {"polled": [], "failed": []})
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM polls WHERE feed = 'move'").fetchone()[0], 1)
+        reader = FeedRecorder(path=store.path, clock=self.clock, niches={}, environ={}, allowed_hosts=())
+        self.addCleanup(reader.close)
+        self.assertEqual(reader.keys("move"), ["KXHIGHNY"])  # what the sensor recorded, not a poll plan
+        self.assertNotIn("move", {feed for feed, _ in reader._plan()})
+        described = reader.describe()["move"]
+        self.assertEqual((described["keys"], described["recording"], described["host"]), (["KXHIGHNY"], ["KXHIGHNY"], ""))
+        self.assertIn("not served", described["what"])
+        self.assertIn("computed", described["point_in_time"])
+        self.assertEqual(list(reader.coverage()["move"]), ["KXHIGHNY"])
+        self.assertEqual(reader.health()["move"]["next_due"], None)
+
+    def test_an_internal_source_is_never_waiting_backing_off_or_failing(self):
+        # No key placed and an empty allowlist: a polled recorder would say it waits; move has no host to wait for.
+        store = self.recorder(None, transports=FakeTransport({}), niches={}, environ={}, allowed_hosts=())
+        t0 = self.clock()
+        for offset in (0, 300, 600):
+            store.record("move", "KXHIGHNY", started=t0 + offset - 60, finished=t0 + offset, payload=MOVE)
+        self.clock.advance(600)
+        self.assertIsNone(store.waiting_for("move"))
+        self.assertIsNone(store._host_wait("move", self.clock()))
+        store._host_result("move", "KXHIGHNY", TransportError("timed out"), self.clock())  # nothing to back off
+        self.assertEqual(store._down, {})
+        described = store.describe()["move"]
+        self.assertEqual({k: described[k] for k in ("keys", "recording", "failing_now", "host")},
+                         {"keys": ["KXHIGHNY"], "recording": ["KXHIGHNY"], "failing_now": [], "host": ""})
+        self.assertNotIn("waiting_for", described)
+        self.assertEqual(described["recorded"], "live, when the House's move sensor computed it (never polled, no host)")
+        self.assertIn("stamped when the move sensor computed it", described["point_in_time"])
+        health = store.health()["move"]
+        self.assertEqual({k: health[k] for k in ("keys", "recording", "failing", "polls", "snapshots", "next_due", "host")},
+                         {"keys": 1, "recording": 1, "failing": [], "polls": 3, "snapshots": 1, "next_due": None, "host": ""})
+        self.assertNotIn("waiting_for", health)
+        row = store.coverage()["move"]["KXHIGHNY"]
+        self.assertEqual((row["polls"], row["ok"], row["last_error"]), (3, 3, None))
+        store._after_pass({"polled": [], "failed": []})  # what a pass of the lane ends with: the hourly coverage row
+        published = self.ledger.get(f"data.coverage:feed:move:{int(self.clock() // 3600)}").payload
+        self.assertEqual((published["status"], published["host"], list(published["keys"])), ("current", "", ["KXHIGHNY"]))
+        self.assertNotIn("error", published["keys"]["KXHIGHNY"])
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM polls WHERE feed = 'move' AND ok = 0").fetchone()[0], 0)
+
+
 # ------------------------------------------------------------------ the backfilled history feeds
 HOUR_MS = 3_600_000
 DVOL_URL = "https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=BTC&resolution=3600"
@@ -917,6 +1016,27 @@ class InTheHouse(HouseCase):
             received.append(at)
             at += every
         return received
+
+    def test_a_strategy_declaring_move_waits_for_recorded_blocks_like_any_live_feed(self):
+        recorder = self.attach(None)
+        wanted = {"move": ["KXHIGHNY"]}
+        needs = {"venue": "kalshi", "horizon": "hour", "series": ["KXHIGHNY"], "feeds": wanted}
+
+        def shortfall():
+            start, end = self.house._live_window(needs)
+            return self.house._feeds_shortfall(needs, wanted, recorder.coverage(wanted, start, end))
+
+        self.clock.now = epoch("2026-09-12T12:00:00Z")
+        self.assertTrue(shortfall().startswith("unsupported input: feeds not recorded: move KXHIGHNY; the House records move nothing"))
+        at = epoch("2026-09-12T09:00:00Z")
+        while at <= epoch("2026-09-13T08:00:00Z"):  # a record every 5-minute cycle, never back-filled
+            recorder.record("move", "KXHIGHNY", started=at - 60, finished=at, payload={**MOVE, "n": int(at) % 7})
+            if at == epoch("2026-09-12T12:00:00Z"):
+                self.assertTrue(shortfall().startswith(f"{feeds.WAITING} 2026-09-12T09:00:00.000Z"), shortfall())
+                self.assertIn("needs 20 hour blocks of them and has 3.0", shortfall())
+            at += 300
+        self.clock.now = epoch("2026-09-13T08:00:00Z")
+        self.assertEqual(shortfall(), "")  # 23 hours recorded: a replay may use it, each row from its t
 
     def test_ctx_feeds_appears_only_when_declared(self):
         recorder = self.attach({"perps": ["BTC", "ETH"], "sports": ["nfl"]})

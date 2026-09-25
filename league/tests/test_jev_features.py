@@ -25,6 +25,9 @@ from league.semantic_lab import QUESTION_GUARD, SemanticLab
 from league.tests.fakes import Clock
 
 SERVED, SHADOW = MoveModel.load(MODEL_PATH), MoveModel.load(SHADOW_PATH)
+#: sha256 of league/jev_move_model.json as analysed and deployed (D-J1, Sept 25, 2026): what the live
+#: store's move_models holds for move-v1-20260924, and what the ship rule's rows carry.
+RECORDED_DIGEST = "902fe283d127ff71bb7e19b00586a81c4c0eb7fc5bf4fa4c445502e9b26e0936"
 STATIC = ["continuous_threshold", "relative_return", "discrete_event", "ambiguous_settlement", "related_exposure",
           "missing_catalyst_context"]
 ANSWERS = {"continuous_threshold": 0.9, "relative_return": 0.1, "discrete_event": 0.2, "ambiguous_settlement": 0.3,
@@ -184,8 +187,7 @@ class ModelTest(unittest.TestCase):
             self.assertIn("unreadable", MoveModel.load(Path(tmp) / "bad.json").why_not)
 
     def test_a_model_is_its_version_and_digest_with_a_training_window(self):
-        import hashlib
-        self.assertEqual(SERVED.digest, hashlib.sha256(MODEL_PATH.read_bytes()).hexdigest())
+        self.assertEqual(SERVED.digest, RECORDED_DIGEST, "the identity the live store recorded; the serve line is not in it")
         self.assertEqual(SERVED.fitted_to, parse_time("2026-09-22T06:57:00Z"))
         self.assertEqual(len(SERVED.fit_events), 1059, "every event of the fit's rows")
         self.assertEqual(SERVED.fit_events, SHADOW.fit_events)
@@ -198,6 +200,32 @@ class ModelTest(unittest.TestCase):
             self.assertFalse(model.ready)
             self.assertIsNone(model.baseline)
             self.assertIn("fitted_on.to", model.why_not)
+
+    def test_the_serve_switch_is_off_and_never_part_of_the_models_identity(self):
+        import hashlib
+        raw = MODEL_PATH.read_bytes()
+        self.assertTrue(raw.startswith(b'{\n "serve": false,\n "version": "move-v1-20260924",'))
+        self.assertEqual((SERVED.serve, SHADOW.serve), (False, False))
+        self.assertEqual(hashlib.sha256(raw.replace(b' "serve": false,\n', b"", 1)).hexdigest(), RECORDED_DIGEST)
+        with tempfile.TemporaryDirectory() as tmp:
+            on = Path(tmp) / "on.json"
+            on.write_bytes(raw.replace(b'"serve": false,', b'"serve": true,', 1))  # the one-line PR, once the ship rule passes
+            model = MoveModel.load(on)
+            self.assertEqual((model.serve, model.digest, model.problems, model.ready), (True, RECORDED_DIGEST, [], True))
+            for label, text in (("not a bool", raw.replace(b'"serve": false,', b'"serve": "yes",', 1)),
+                                ("not its own line", raw.replace(b'\n "serve": false,\n "version"', b'\n "serve": true, "version"', 1)),
+                                ("nested", raw.replace(b' "serve": false,\n', b"", 1).replace(b'"fitted_on": {\n', b'"fitted_on": {\n  "serve": true,\n', 1)
+                                 .replace(b'{\n "version"', b'{\n "serve": 1,\n "version"', 1))):
+                with self.subTest(label):
+                    on.write_bytes(text)
+                    model = MoveModel.load(on)
+                    self.assertFalse(model.serve)
+                    self.assertTrue(model.ready, "a bad switch keeps serving off; the model still records")
+                    self.assertTrue(any(p.startswith("serve switch refused") for p in model.problems), model.problems)
+                    self.assertNotEqual(model.digest, RECORDED_DIGEST, "a switch that is not its own line is part of the bytes")
+        data = json.loads(raw)
+        self.assertEqual(MoveModel({**data, "serve": True}).digest, MoveModel({k: v for k, v in data.items() if k != "serve"}).digest)
+        self.assertTrue(MoveModel({**data, "serve": True}).serve)
 
     def test_logistic_clips_and_needs_every_input(self):
         block = {"features": ["mid"], "mean": [0.0], "sd": [1.0], "weights": [0.0, 1000.0]}
@@ -251,10 +279,10 @@ class MoveCase(unittest.TestCase):
         kw = {"daily_usd": "1.50", "daily_calls": 25000, "purpose_calls": {"move": 7500}, **kw}
         return Sensor(self.root / "jev.sqlite", client, clock=self.clock, **kw)
 
-    def move(self, **settings):
+    def move(self, feeds=None, **settings):
         # min_free_bytes 0: the tests' temporary directory may be a small tmpfs (the guard has its own test).
         return MoveSensor(self.root, self.sensor, clock=self.clock, alert=lambda level, text: self.alerts.append(text),
-                          settings={"interval_seconds": 300, "daily_usd": "0.75", "min_free_bytes": 0, **settings})
+                          settings={"interval_seconds": 300, "daily_usd": "0.75", "min_free_bytes": 0, **settings}, feeds=feeds)
 
     def show(self, *markets, source="markets:KXBTCD:24"):
         return self.recorder.record(source, list(markets), started=self.clock())
@@ -597,6 +625,93 @@ class RecorderTest(MoveCase):
         self.assertFalse(move.due())
         self.clock.advance(1)
         self.assertTrue(move.due())
+
+
+class ServeTest(MoveCase):
+    """Serving `ctx["feeds"]["move"]` through the feeds store: off until the model file says so."""
+
+    def switched_on(self, data=None):
+        path = self.root / "serving.json"
+        raw = MODEL_PATH.read_bytes() if data is None else json.dumps(data, indent=1).encode()
+        path.write_bytes(raw.replace(b'"serve": false,', b'"serve": true,', 1))
+        return str(path)
+
+    def store(self):
+        from league.feeds import FeedRecorder
+        store = FeedRecorder(path=self.root / "feeds.sqlite", clock=self.clock, keys={})
+        self.addCleanup(store.close)
+        return store
+
+    def test_off_by_default_nothing_reaches_the_feeds_store(self):
+        store = self.store()
+        move = self.move(feeds=store, **self.NO_SAMPLE)
+        self.assertEqual((move.serving, move.stats()["serving"]), (False, False))
+        self.assertIn("serve false", move.stats()["serving_why"])
+        self.started(move)
+        self.show(market("KXBTCD-26SEP10-T60000"))
+        cycle = move.run()
+        self.assertEqual((cycle["rows"], cycle["move_rows"]), (1, 1))
+        self.assertNotIn("served", cycle)
+        self.assertEqual(store.db.execute("SELECT COUNT(*) FROM polls").fetchone()[0], 0)
+        self.assertEqual(store.latest({"move": ["KXBTCD"]}, self.clock() + 3600), {})
+        # Switched on without a feed store, or for a model the store knows under another digest: still off, said once.
+        alone = self.move(model_path=self.switched_on(), **self.NO_SAMPLE)
+        self.assertEqual((alone.serving, alone.serving_why), (False, "off: this House keeps no feed store"))
+        changed = json.loads(MODEL_PATH.read_text())
+        changed["horizons"]["15"]["weights"][0] += 0.5
+        refused = self.move(feeds=store, model_path=self.switched_on(changed), **self.NO_SAMPLE)
+        self.assertFalse(refused.serving)
+        self.assertIn("is not ready", refused.serving_why)
+        self.assertEqual(sum("switched on" in a and "but not served" in a for a in self.alerts), 2)
+
+    def test_switched_on_each_series_is_recorded_once_a_cycle_from_its_rows(self):
+        from league.feeds import stamp
+        store = self.store()
+        move = self.move(feeds=store, model_path=self.switched_on(), **self.NO_SAMPLE)
+        self.assertTrue(move.serving)
+        self.assertEqual(move.served.digest, RECORDED_DIGEST, "the switch is not the model's identity")
+        self.started(move)
+        self.show(market("KXBTCD-26SEP10-T60000"), market("KXBTCD-26SEP10-T61000", 0.30, 0.34),
+                  market("KXHIGHNY-26SEP10-B72.5", 0.20, 0.25), market("KXETHD-26SEP10-T3000", hours=0.0))
+        cycle = move.run()
+        self.assertEqual(cycle["served"], {"series": 2, "stored": 2, "failed": 0})
+        rows = {r["market"]: r for r in self.rows(move)}
+        recorded_at = rows["KXBTCD-26SEP10-T60000"]["recorded_at"]
+        got = store.latest({"move": ["KXBTCD", "KXHIGHNY", "KXETHD"]}, recorded_at)["move"]
+        self.assertEqual(sorted(got), ["KXBTCD", "KXHIGHNY"], "KXETHD: the model applies to none of its markets, so absent")
+        self.assertEqual((got["KXBTCD"]["model"], got["KXBTCD"]["t"]), (SERVED.version, stamp(recorded_at)))
+        self.assertEqual(sorted(got["KXBTCD"]["markets"]), ["KXBTCD-26SEP10-T60000", "KXBTCD-26SEP10-T61000"])
+        for ticker, values in got["KXBTCD"]["markets"].items():
+            self.assertEqual(values, {f"move_p{h}": round(rows[ticker][f"move_p{h}"], 4) for h in HORIZONS})
+        self.assertEqual(store.latest({"move": ["KXBTCD"]}, recorded_at - 0.001), {}, "never before it was computed")
+        self.assertEqual(store.db.execute("SELECT key, started, ok FROM polls ORDER BY key").fetchall(),
+                         [("KXBTCD", cycle["at"], 1), ("KXHIGHNY", cycle["at"], 1)])  # started: the cycle's start
+        self.clock.advance(300)
+        self.show(market("KXBTCD-26SEP10-T60000", 0.41, 0.45))
+        self.assertEqual(move.run()["served"]["series"], 1)
+        self.assertEqual(store.db.execute("SELECT key, COUNT(*) FROM polls GROUP BY key ORDER BY key").fetchall(),
+                         [("KXBTCD", 2), ("KXHIGHNY", 1)], "once per series the cycle saw")
+        self.assertEqual(move.stats()["serving"], True)
+
+    def test_a_record_that_fails_is_one_alert_and_the_rows_are_kept(self):
+        class Broken:
+            calls = 0
+
+            def record(self, *args, **kwargs):
+                Broken.calls += 1
+                raise sqlite3.OperationalError("database is locked")
+
+        move = self.move(feeds=Broken(), model_path=self.switched_on(), **self.NO_SAMPLE)
+        self.started(move)
+        for n in range(2):
+            self.show(market("KXBTCD-26SEP10-T60000", 0.40 + 0.01 * n, 0.44 + 0.01 * n))
+            cycle = move.run()
+            self.assertEqual(cycle["served"], {"series": 1, "stored": 0, "failed": 1})
+            self.clock.advance(300)
+        self.assertEqual((len(self.rows(move)), Broken.calls), (2, 2))
+        failed = [a for a in self.alerts if "into the feeds store failed" in a]
+        self.assertEqual(len(failed), 1, "one alert until a clean publish")
+        self.assertIn("database is locked", failed[0])
 
 
 class EvaluateTest(unittest.TestCase):
