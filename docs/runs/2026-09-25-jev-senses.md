@@ -74,6 +74,12 @@ its session.
 | J5 (gateway) | after the options run's and the Kalshi run's gateway deploys | `gateway/lib/typesafe.mjs` (the `score` answer), `TYPESAFE_PILOT_USD` in `gateway/wrangler.jsonc` (to $41), `gateway/test/` Jev cases |
 | Hooks (J1 serving, J2, J3) | after their owners' waves merge | one hook each in `league/feeds.py` (Kalshi run, after K1), `league/research_gate.py` (forward-first F2, after Deploy B), `league/lab.py` (forward-first F1, after Deploy B), each a small PR read by the owner run first |
 
+- **The Kalshi run's answers (06:29Z):** J1's serving hook `ctx["feeds"]["move"]` is agreed as a small
+  PR after K1 merges, posted on its K1 PR for a read first, registered as a `Source`-style entry beside the
+  existing ones, keeping `league/feeds.py`'s point-in-time rules (a key never recorded is absent, never
+  zero; `t` stamped when the feature was computed), rebased on its I2 hunk (`league/open_feeds.py` into
+  `RECORDERS`) if that has landed. J4 after I2 (its Deploy K2). Its gateway `web_fetch` deploys before this
+  run's gateway change. D-J1 never within 30 minutes of K1.
 - **Not touched by this run:** the allocator, families, book, constitution, grants, live trading, the
   seat market, `house.py` (the `JevFloor` hooks it already calls are enough), the strategies and seeds of
   any desk (J1's first users are children written with each desk's owner run), the options desk.
