@@ -3046,10 +3046,12 @@ class Book:
         return {}
 
     def _contracts_in_flight(self) -> set[str]:
-        """The contracts an open order of this book trades: a difference on one may be a fill not yet booked."""
+        """The contracts an open order of this book trades, or one closed as never arrived that the book
+        still asks the venue about (`_recheck_never_arrived`): a difference on one may be a fill not yet
+        booked, which the next poll books."""
         busy: set[str] = set()
         for working in self.orders.values():
-            if working.open:
+            if working.open or working.order_id in self._never_arrived:
                 busy.update(self._contract_signs(working.instrument))
         return busy
 
@@ -3163,7 +3165,8 @@ class Book:
                 legs_of.setdefault(position_key(leg.instrument), []).append(key)
         house = self.accounts.get(HOUSE)
         remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}
-        busy = self._contracts_in_flight() | {position_key(w.instrument) for w in self.orders.values() if w.open}
+        busy = self._contracts_in_flight() | {position_key(w.instrument) for w in self.orders.values()
+                                               if w.open or w.order_id in self._never_arrived}
         found = {key: diff for key, diff in diffs.items()
                  if key.startswith("option:") and "|" not in key and key not in busy
                  and (key in legs_of or key in remains or self._venue_positions.get(key, ZERO) < 0)}

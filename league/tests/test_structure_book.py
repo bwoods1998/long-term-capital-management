@@ -392,6 +392,20 @@ class Broken(StructureBookCase):
         self.assertIn(CONDOR.key, self.book.account("a1").holdings)
         self.assertFalse([a for a in self.alerts() if a.get("structure_break")])
 
+    def test_nothing_is_done_while_an_order_closed_as_never_arrived_may_yet_be_found(self):
+        self.open_condor()
+        order_id = next(iter(self.book.orders))
+        self.book._never_arrived[order_id] = iso(self.clock)  # the book still asks the venue about it
+        self.broker.held.pop(contract(580, "P").key)
+        for _ in range(3):
+            self.assertFalse(self.book.reconcile().ok)
+        self.assertIn(CONDOR.key, self.book.account("a1").holdings)
+        self.book._never_arrived.clear()  # the window closed: two readings from now it is a break
+        self.book.reconcile()
+        self.assertIn(CONDOR.key, self.book.account("a1").holdings)
+        self.book.reconcile()
+        self.assertNotIn(CONDOR.key, self.book.account("a1").holdings)
+
     def test_outside_the_session_the_house_waits_to_close(self):
         self.open_condor()
         self.broker.held.pop(contract(580, "P").key)
