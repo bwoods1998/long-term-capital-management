@@ -420,7 +420,7 @@ class Founders(unittest.TestCase):
 
     def test_each_founder_is_seated_on_the_sports_desk_with_its_league(self):
         desk = niches.load()["kalshi-sports"]
-        self.assertEqual(desk.max_members, 24)
+        self.assertEqual(desk.max_members, 25)  # 19, the five founders here, and the UFC founder (test_sports_h2h.py)
         for league in self.LEAGUES:
             with self.subTest(league):
                 row = founder(league)

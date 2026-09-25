@@ -296,8 +296,8 @@ class SeatCaps(unittest.TestCase):
         niches = {row["id"]: row for row in json.loads((root / "niches.json").read_text())["niches"]}
         # R2 (Sept 24, 2026): the seats follow the waiters that remain once the search's closed desks are taken out
         # (niches.json `_about` has the 15:06Z count behind each), and fewer where the search is closed.
-        # Sept 25, 2026 (K1): sports 19 -> 24, a seat for each of the five sports-consensus founders.
-        for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 24, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
+        # Sept 25, 2026 (K1): sports 19 -> 24, a seat for each of the five sports-consensus founders; 25 with the UFC founder (K1c).
+        for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 25, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
                           "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 8, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
                           "kalshi-attention": 4}.items():
             self.assertEqual(niches[desk]["max_members"], cap, desk)

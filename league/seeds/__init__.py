@@ -55,6 +55,11 @@ SEEDS: list[dict] = [
      "why": "Unmeasured: the sportsbook line as a second price. MLS home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
     {"name": "consensus-ligamx", "family": "sports-consensus-ligamx", "file": "sports_consensus.py",
      "why": "Unmeasured: the sportsbook line as a second price. Liga MX home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
+    # The same idea for a sport whose sides are people (K1c, Sept 25, 2026): `sports_h2h.py`, a fight
+    # found by its fighters' names. UFC is the one individual sport ESPN prices (tennis, golf, cricket
+    # and F1 have boards but no line there).
+    {"name": "h2h-ufc", "family": "sports-h2h-ufc", "file": "sports_h2h.py",
+     "why": "Unmeasured: the sportsbook line as a second price. Each UFC fight's two contracts priced from DraftKings' de-vigged moneyline (a draw or no contest settles 50/50 on Kalshi, so the fair leans to half by the void share), the fight found by its fighters' names, never guessed; bid post-only where Kalshi is off the line by more than the fee and a margin. Measured once, on the Sept 26 card: Kalshi's mid within 1.1 cents of the line on 16 of 18 markets."},
 ]
 
 _HERE = Path(__file__).resolve().parent

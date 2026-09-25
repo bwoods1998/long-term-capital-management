@@ -277,6 +277,13 @@ SPORTS_LEAGUES: dict[str, str] = {
     "championship": "soccer/eng.2", "ligamx": "soccer/mex.1", "eredivisie": "soccer/ned.1",
     "ligaportugal": "soccer/por.1", "scottishprem": "soccer/sco.1",
 }
+#: Individual sports whose Kalshi markets ESPN can PRICE (K1c of the Kalshi-scale run, probed live Sept
+#: 25, 2026): UFC, whose board is a card of bouts (`ltcm.data.sports.bout_rows`, a row a bout) and whose
+#: core-API odds carry DraftKings' moneyline for each bout (10 of 12 on the Sept 26 card). Tennis, golf,
+#: cricket and F1 have ESPN scoreboards but no line there (the core API's odds were empty for every
+#: match, tournament and race probed), so they stay unmapped: a board alone prices nothing.
+SPORTS_SERIES += (("KXUFC", "ufc"),)
+SPORTS_LEAGUES["ufc"] = "mma/ufc"
 #: A Kalshi crypto series names its coin between `KX` and an optional `D` (daily) or `15M` suffix.
 #: (A coin ending in D would read wrongly as a daily series -- none trades on Kalshi, Sept 22, 2026.)
 _KALSHI_COIN = re.compile(r"^KX([A-Z]{2,5}?)(?:D|15M)?$")
@@ -487,7 +494,7 @@ _VOL_COINS = frozenset(("btc", "eth", "bitcoin", "ethereum", "ether", "crypto", 
 #: player props, history before recording began, or a sport no scoreboard here covers.
 _NOT_FEEDS = frozenset(("lineup", "lineups", "injury", "injuries", "inactive", "inactives", "prop", "props", "player",
                         "players", "tennis", "atp", "wta", "cricket", "esports", "lol", "cs2", "dota", "dota2", "valorant",
-                        "ufc", "mma", "golf", "f1", "nascar", "boxing", "ncaab", *_HISTORY))
+                        "golf", "f1", "nascar", "boxing", "ncaab", *_HISTORY))
 
 
 def request_feed(name: Any) -> str | None:
@@ -2772,7 +2779,7 @@ class SportsOdds(Source):
             for event in self.due(games, held, now)[:self.MAX_FETCHES]:
                 asked += 1
                 try:
-                    lines = fetcher.core_odds(path, event["id"])
+                    lines = fetcher.core_odds(path, event["id"], card=event.get("card_id"))  # a bout: its card's id too
                     predicted = fetcher.core_predictor(path, event["id"]) if path.split("/")[0] in self.PREDICTED else None
                 except Exception as exc:  # noqa: BLE001 - this game keeps its last lines; the pass goes on
                     failed = exc
