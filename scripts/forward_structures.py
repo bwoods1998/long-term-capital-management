@@ -700,8 +700,413 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
             "bars_from_snapshot_mids": dict(sorted(data.from_mids.items()))}
 
 
+# ------------------------------------------------------------------------------------------ the live House's day
+#: The read-only queries the forward test's inputs came from, run on the House box through the session's
+#: `rx.py` (sqlite `mode=ro`; no order, no write): the House's recorded bars of the day (argv[1]: the bar keys,
+#: `;`-separated, as `bar_keys()` prints them) and the live structure founders' day (krasker-22..33).
+BARS_QUERY = r'''# READ-ONLY (sqlite mode=ro): the underlying bars and features the House showed today's structure founders, as it
+# recorded them (recordings.sqlite, `House._cached`), the earliest and the latest recording of each key since 13:00Z;
+# and the options feature rows available since Sept 24 12:00Z for the skew founder's symbols. No order, no write.
+import gzip, json, sqlite3, sys, time
+keys = sys.argv[1].split(";")
+since = 1790341200.0  # 2026-09-25T13:00:00Z
+db = sqlite3.connect('file:/workspace/state/recordings.sqlite?mode=ro', uri=True)
+out = {"bars": {}, "features": []}
+for key in keys:
+    got = {}
+    for label, order in (("earliest", "ASC"), ("latest", "DESC")):
+        row = db.execute(f"SELECT received, payload FROM snapshots WHERE source = ? AND received >= ? ORDER BY received {order} LIMIT 1", (key, since)).fetchone()
+        if row:
+            got[label] = {"received": row[0], "value": json.loads(gzip.decompress(row[1]))}
+    out["bars"][key] = got
+oh = sqlite3.connect('file:/workspace/state/options_history.sqlite?mode=ro', uri=True)
+for r in oh.execute("SELECT symbol, day, version, available_at, payload FROM features WHERE available_at >= '2026-09-24T12:00:00Z' AND symbol IN ('F','AAL','CCL','RIVN','SPY','QQQ','IWM','BAC','T','PFE','SOFI','SNAP','INTC','HOOD')"):
+    out["features"].append({"symbol": r[0], "day": r[1], "version": r[2], "available_at": r[3], "payload": json.loads(r[4])})
+print(json.dumps(out, separators=(",", ":")))
+'''
+LIVE_QUERY = r'''# READ-ONLY (sqlite mode=ro): what the live structure founders krasker-22..33 did today on options-shadow: birth
+# (founder, family, code sha), strategy changes, wakes, intents, House/book refusals, fills, the latest marks and
+# thoughts. No order, no write.
+import json, sqlite3
+db = sqlite3.connect('file:/workspace/state/ledger.sqlite?mode=ro', uri=True)
+agents = [f"krasker-{i}" for i in range(22, 34)]
+marks = ",".join("?" * len(agents))
+out = {a: {"born": None, "strategy": [], "woke": [], "intents": [], "refused": [], "fills": [], "orders": [], "mark": None, "thoughts": []} for a in agents}
+for at, kind, agent, payload in db.execute(
+        f"SELECT at, kind, agent, payload FROM ledger WHERE at >= '2026-09-25T13:00:00Z' AND agent IN ({marks}) AND kind IN "
+        "('agent.born','agent.strategy','agent.woke','agent.intent','book.refused','book.fill','book.order','book.mark','agent.thought') ORDER BY seq", agents):
+    p = json.loads(payload)
+    row = out[agent]
+    if kind == "agent.born":
+        row["born"] = {"at": at, "founder": p.get("founder"), "family": p.get("family"), "code_sha256": p.get("code_sha256"), "style": p.get("style")}
+    elif kind == "agent.strategy":
+        row["strategy"].append({"at": at, "code_sha256": p.get("code_sha256"), "note": str(p.get("note") or p.get("reason") or "")[:200],
+                                "control": p.get("control"), "family": p.get("family")})
+    elif kind == "agent.woke":
+        row["woke"].append([at, p.get("ok"), p.get("intents"), p.get("book"), (p.get("dropped") or [])[:2]])
+    elif kind == "agent.intent":
+        inst = p.get("instrument") or {}
+        row["intents"].append({"at": at, "book": p.get("book"), "market_id": inst.get("market_id"), "side": p.get("side"), "quantity": p.get("quantity"),
+                               "limit_price": p.get("limit_price"), "reason": str(p.get("reason") or "")[:200], "id": p.get("id")})
+    elif kind == "book.refused":
+        row["refused"].append({"at": at, "reasons": p.get("reasons"), "market_id": (p.get("instrument") or {}).get("market_id")})
+    elif kind == "book.fill":
+        inst = p.get("instrument") or {}
+        row["fills"].append({"at": at, "book": p.get("book"), "market_id": inst.get("market_id"), "side": p.get("side"), "quantity": p.get("quantity"),
+                             "price": p.get("price"), "fee_usd": p.get("fee_usd"), "realized": p.get("realized"), "flat": p.get("flat"),
+                             "reason": str(p.get("reason") or "")[:160], "intent_id": p.get("intent_id")})
+    elif kind == "book.order":
+        row["orders"].append({"at": at, "status": p.get("status"), "market_id": (p.get("instrument") or {}).get("market_id"), "side": p.get("side"),
+                              "reason": str(p.get("reason") or "")[:160]})
+    elif kind == "book.mark" and p.get("book") == "options-shadow":
+        row["mark"] = {"at": at, "equity": p.get("equity"), "cash": p.get("cash"), "realized": p.get("realized"), "fees": p.get("fees"), "holdings": p.get("holdings")}
+    elif kind == "agent.thought":
+        row["thoughts"] = (row["thoughts"] + [[at, str(p.get("text") or "")[:500]]])[-4:]
+for at, agent, payload in db.execute(f"SELECT at, agent, payload FROM ledger WHERE kind = 'agent.born' AND agent IN ({marks})", agents):
+    p = json.loads(payload)
+    if out[agent]["born"] is None:
+        out[agent]["born"] = {"at": at, "founder": p.get("founder"), "family": p.get("family"), "code_sha256": p.get("code_sha256"), "style": p.get("style")}
+print(json.dumps(out, separators=(",", ":")))
+'''
+
+
+def bar_keys(founders: Sequence[str] = FOUNDERS) -> str:
+    """The `House._cached` keys of the founders' bars (`House.snapshot`), for BARS_QUERY."""
+    keys = set()
+    for name in founders:
+        needs = load_founder(name).needs
+        bars = dict(needs.get("bars") or {})
+        symbols = [str(s) for s in (needs.get("symbols") or [])][:12]
+        keys.add(f"bars:{','.join(symbols)}:{bars.get('timeframe') or '5Min'}:{max(1, min(int(bars.get('limit') or 120), 500))}")
+    return ";".join(sorted(keys))
+
+
+def live_summary(live: Mapping[str, Any], *, since: str = "") -> dict[str, dict[str, Any]]:
+    """What each live structure founder did (LIVE_QUERY's rows), by its founder: its agent, birth, first wake, wakes,
+    intents, the House's and the book's refusals, its fills on options-shadow (opens, closes, realized after fees), the
+    structures it still held at the last row, strategy changes (a rewrite, a pause), and its latest thought."""
+    out = {}
+    for agent, row in sorted(live.items()):
+        founder = (row.get("born") or {}).get("founder") or (row.get("born") or {}).get("family")
+        if not founder:
+            continue
+        woke = [w for w in row.get("woke") or [] if w[0] >= since]
+        fills = [f for f in row.get("fills") or [] if f.get("book") == BOOK and f["at"] >= since]
+        held: dict[str, float] = {}
+        for f in fills:
+            held[f["market_id"]] = held.get(f["market_id"], 0.0) + (1 if f["side"] == "buy" else -1) * float(f["quantity"])
+        reasons: dict[str, int] = {}
+        for r in row.get("refused") or []:
+            if r["at"] >= since:
+                for reason in r.get("reasons") or ["?"]:
+                    reasons[str(reason)[:160]] = reasons.get(str(reason)[:160], 0) + 1
+        closes = [f for f in fills if f["side"] == "sell"]
+        out[founder] = {"agent": agent, "born": (row.get("born") or {}).get("at"), "first_wake_today": woke[0][0] if woke else None,
+                        "wakes": len(woke), "intents": sum(1 for i in row.get("intents") or [] if i["at"] >= since and i.get("book") == BOOK),
+                        "refusals": reasons, "opens": sum(1 for f in fills if f["side"] == "buy"), "closes": len(closes),
+                        "closed_structures": sum(1 for f in closes if f.get("flat")),
+                        "realized_usd": round(sum(float(f["realized"]) for f in closes if f.get("realized") is not None), 2),
+                        "fees_usd": round(sum(float(f.get("fee_usd") or 0) for f in fills), 2),
+                        "fills": [{k: f.get(k) for k in ("at", "side", "market_id", "quantity", "price", "fee_usd", "realized", "flat", "reason")} for f in fills],
+                        "held_at_end": [code for code, q in held.items() if q > 0],
+                        "strategy_changes": [{k: c.get(k) for k in ("at", "control", "code_sha256", "note")} for c in row.get("strategy") or []],
+                        "last_mark": row.get("mark"), "last_thought": (row.get("thoughts") or [[None, None]])[-1]}
+    return out
+
+
+def compare(session: Mapping[str, Any], from_birth: Mapping[str, Any] | None, live: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """One row a founder: the forward test over the whole recorded session, the forward test from the live founder's
+    first wake, and the live founder."""
+    def brief(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {"wakes": row["wakes"], "opens": row["opens"], "closes": row["closes"], "closed_structures": row["closed_structures"],
+                "realized_usd": row["realized_usd"], "held_at_end": [h["market_id"] for h in row["held_at_end"]],
+                "unrealized_usd": round(sum(h["unrealized_usd"] or 0 for h in row["held_at_end"]), 2), "refusals": sum(row["refusals"].values())}
+    by = lambda result: {f["founder"]: f for f in (result or {}).get("founders") or []}  # noqa: E731
+    a, b = by(session), by(from_birth)
+    out = []
+    for founder in sorted(set(a) | set(live)):
+        mine = live.get(founder)
+        out.append({"founder": founder, "forward_session": brief(a.get(founder)), "forward_from_birth": brief(b.get(founder)),
+                    "live": None if mine is None else {k: mine[k] for k in ("agent", "first_wake_today", "wakes", "intents", "opens", "closes",
+                                                                             "closed_structures", "realized_usd", "held_at_end", "refusals",
+                                                                             "strategy_changes")}})
+    return out
+
+
+# ------------------------------------------------------------------------------------------ the calibration refit
+def load_fit(path: str | Path | None) -> Any:
+    """The module holding `fit_spread_calibration` and `CALIBRATED_SPREADS`: `league.options_history` once
+    `s3/calibration` is merged, else that branch's file (`git show origin/s3/calibration:league/options_history.py`),
+    loaded as it is: standard library only."""
+    import league.options_history as main_history
+
+    if path is None and hasattr(main_history, "fit_spread_calibration"):
+        return main_history
+    if path is None:
+        raise SystemExit("league.options_history has no fit_spread_calibration on this branch: pass --fit-from (s3/calibration's file)")
+    spec = importlib.util.spec_from_file_location("s3_options_history", Path(path).expanduser())
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
+
+
+def _sec(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_calibration_store(snapshots: str | Path, store_path: str | Path, fit: Any, *, local_store: str | Path | None) -> dict[str, Any]:
+    """A scratch options-history store (the House's SCHEMA) holding the day's recorded quotes and the 15-minute
+    bars of its contracts built from the snapshots, plus (with `local_store`) the local copy's recorded quotes of
+    Sept 22-24 and their contracts' 15-minute bars: what `fit_spread_calibration` reads.
+
+    The day's bars, close-stamped as the store keeps them: each contract's minute bars (`mbar`, the most complete
+    reading of each minute: the one with the largest volume) grouped into 15-minute windows the recorder saw whole
+    (from the first snapshot to the last); o the first minute's open, h and l the extremes, c the last minute's
+    close, v the minutes' volumes summed, and n the trades SEEN (distinct latest-trade times) or the minutes with
+    volume, the larger. v and n are lower bounds (a snapshot a minute sees the latest minute bar and the latest trade
+    only), so a window can fail the tape's liquidity rule (5 contracts in 2 trades) that the real bar passed: fewer
+    pairs, never a looser one. A quote is kept once a contract and second (the store's key), two-sided (0 < bid < ask)."""
+    store = fit.OptionsHistory(store_path)
+    db = store.db
+    minutes: dict[tuple[str, int], tuple[float, float, float, float, float]] = {}
+    trades: dict[str, set[float]] = {}
+    spots: dict[str, list[tuple[float, float]]] = {}
+    first = last = None
+    quotes = 0
+    for snap in read_snapshots(snapshots):
+        if snap.version < 2:
+            continue
+        first = snap.at if first is None else first
+        last = snap.at
+        for symbol, (bid, ask) in snap.spot.items():
+            spots.setdefault(symbol, []).append((snap.at, (bid + ask) / 2))
+        batch = []
+        for occ, row in snap.rows.items():
+            bid, ask, as_of = row.get("bid"), row.get("ask"), row.get("as_of")
+            if bid is not None and ask is not None and as_of and 0 < float(bid) < float(ask):
+                batch.append((occ, as_of[:19] + "Z", float(bid), float(ask), "recorded snapshot (forward_structures)"))
+            if row.get("last_t") and row.get("last") is not None:
+                moment = parse_ts(row["last_t"])
+                if moment is not None:
+                    trades.setdefault(occ, set()).add(moment)
+            bar = row.get("mbar") or {}
+            begun = parse_ts(bar.get("t")) if bar.get("t") else None
+            if begun is not None and bar.get("c") is not None:
+                key = (occ, int(begun))
+                volume = float(bar.get("v") or 0)
+                if key not in minutes or volume >= minutes[key][4]:
+                    minutes[key] = (float(bar["o"]), float(bar["h"]), float(bar["l"]), float(bar["c"]), volume)
+        db.executemany("INSERT OR IGNORE INTO quotes (occ, t, bid, ask, source) VALUES (?, ?, ?, ?, ?)", batch)
+        quotes += len(batch)
+    windows: dict[tuple[str, int], list[tuple[int, tuple]]] = {}
+    for (occ, begun), bar in minutes.items():
+        start = begun - begun % 900
+        if first is None or start < first or start + 900 > (last or 0) + 60:
+            continue  # a window the recorder did not see whole
+        windows.setdefault((occ, start), []).append((begun, bar))
+    rows = []
+    for (occ, start), members in windows.items():
+        members.sort()
+        seen = sum(1 for t in trades.get(occ, ()) if start <= t < start + 900)
+        n = max(seen, sum(1 for _, bar in members if bar[4] > 0))
+        rows.append((occ, "15Min", _sec(start + 900), members[0][1][0], max(b[1] for _, b in members), min(b[2] for _, b in members),
+                     members[-1][1][3], sum(b[4] for _, b in members), n, None))
+    db.executemany("INSERT OR IGNORE INTO bars (occ, timeframe, t, o, h, l, c, v, n, vw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    db.commit()
+    copied = {}
+    if local_store:  # read through its own read-only connection: the local copy is never written
+        local = sqlite3.connect(f"file:{Path(local_store).expanduser()}?mode=ro", uri=True)
+        try:
+            recorded = local.execute("SELECT occ, t, bid, ask, source FROM quotes").fetchall()
+            db.executemany("INSERT OR IGNORE INTO quotes (occ, t, bid, ask, source) VALUES (?, ?, ?, ?, ?)", recorded)
+            names = sorted({row[0] for row in recorded})
+            count = 0
+            for i in range(0, len(names), 400):
+                group = names[i:i + 400]
+                found = local.execute(f"SELECT occ, timeframe, t, o, h, l, c, v, n, vw FROM bars WHERE timeframe = '15Min' AND t >= '2026-09-15' "
+                                      f"AND occ IN ({','.join('?' * len(group))})", group).fetchall()
+                db.executemany("INSERT OR IGNORE INTO bars (occ, timeframe, t, o, h, l, c, v, n, vw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", found)
+                count += len(found)
+            copied = {"quotes": len(recorded), "bars": count}
+            db.commit()
+        finally:
+            local.close()
+    return {"store": store, "spots": spots, "quotes_read": quotes, "bars_built": len(rows), "first": _sec(first) if first else None,
+            "last": _sec(last) if last else None, "copied_from_local": copied}
+
+
+def _underlier(fit: Any, local_store: str | Path | None, spots: Mapping[str, Sequence[tuple[float, float]]]) -> Callable[..., list[dict[str, Any]]]:
+    """`underlier_bars(symbol, "15Min", start, end)` for the fit's moneyness: the local copy's bars through Sept 24,
+    then the day's 15-minute closes of the snapshots' mids (close-stamped)."""
+    stored = fit.stored_underlier(fit.OptionsHistory(Path(local_store).expanduser())) if local_store else None
+    built: dict[str, list[dict[str, Any]]] = {}
+    for symbol, points in spots.items():
+        closes: dict[int, float] = {}
+        for t, mid in points:
+            closes[int(t - t % 900) + 900] = mid
+        built[symbol] = [{"t": _sec(t), "c": c} for t, c in sorted(closes.items())]
+
+    def underlier_bars(symbol: str, timeframe: str, start: str, end: str) -> list[dict[str, Any]]:
+        rows = list(stored(symbol, timeframe, start, end) if stored else [])
+        after = rows[-1]["t"] if rows else ""
+        rows += [bar for bar in built.get(symbol, []) if bar["t"] > after and start <= bar["t"] <= end]
+        return rows
+
+    return underlier_bars
+
+
+def calibration_pairs(fit: Any, store: Any, underlier: Callable[..., list[dict[str, Any]]], *, start: str, end: str,
+                      max_gap: float = 300.0) -> list[dict[str, Any]]:
+    """The pairs `fit_spread_calibration` fits on (its own pairing, restated so a table can be judged on them): each
+    recorded quote with its contract's last qualifying 15-minute bar closed at most `max_gap` seconds before it."""
+    import bisect as _bisect
+
+    live = dict(fit.LIQUIDITY)
+    quotes: dict[str, list[tuple[str, float, float]]] = {}
+    for occ, t, bid, ask in store.db.execute("SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? ORDER BY occ, t", (start, end)):
+        quotes.setdefault(occ, []).append((t, float(bid), float(ask)))
+    if not quotes:
+        return []
+    first = min(rows[0][0] for rows in quotes.values())
+    last_t = max(rows[-1][0] for rows in quotes.values())
+    bars_from = fit.iso(fit._ts(first) - 7 * 86400)
+    spots = {}
+    for root in sorted({occ[:-15] for occ in quotes}):
+        rows = underlier(root, "15Min", bars_from, last_t) or []
+        spots[root] = ([fit._ts(r["t"]) for r in rows], [float(r["c"]) for r in rows])
+    pairs = []
+    names = list(quotes)
+    for i in range(0, len(names), 400):
+        group = names[i:i + 400]
+        printed: dict[str, list[tuple]] = {}
+        for occ, t, h, l, c in store.db.execute(
+                f"SELECT occ, t, h, l, c FROM bars WHERE timeframe = '15Min' AND t >= ? AND t <= ? AND v >= ? AND n >= ? "
+                f"AND occ IN ({','.join('?' * len(group))}) ORDER BY occ, t",
+                (bars_from, last_t, float(live["min_volume"]), int(live["min_trades"]), *group)):
+            printed.setdefault(occ, []).append((fit._ts(t), float(h), float(l), float(c)))
+        for occ in group:
+            mine = printed.get(occ)
+            if not mine:
+                continue
+            stamps = [b[0] for b in mine]
+            parsed = fit.parse_occ(occ)
+            times, closes = spots.get(parsed["underlying"], ([], []))
+            for t, bid, ask in quotes[occ]:
+                at = fit._ts(t)
+                k = _bisect.bisect_right(stamps, at) - 1
+                if k < 0 or at - stamps[k] > max_gap:
+                    continue
+                j = _bisect.bisect_right(times, at) - 1
+                ranges = [max(0.0, b[1] - b[2]) for b in mine[max(0, k - int(fit.SPREAD_MODEL["range_bars"])):k]]
+                pairs.append({"root": parsed["underlying"], "c": mine[k][3], "strike": parsed["strike"], "spot": closes[j] if j >= 0 else None,
+                              "bid": bid, "ask": ask, "day": t[:10], "age": at - stamps[k], "expiry": parsed["expiry"],
+                              "current": fit.estimate_quote({"c": mine[k][3]}, ranges)[2]})
+    return pairs
+
+
+def judge(fit: Any, pairs: Sequence[Mapping[str, Any]], table: Mapping[str, Any] | None) -> dict[str, Any]:
+    """How often a half-spread rule is tighter than the real touch on `pairs` (a buy at c + h under the ask, a sell
+    at c - h over the bid), by class and by bucket: `table` (a calibration), or the current estimate when None."""
+    etf = set((table or fit.CALIBRATED_SPREADS).get("etf") or ("SPY", "QQQ", "IWM"))
+
+    def half(p: Mapping[str, Any]) -> float:
+        if table is None:
+            return p["current"]
+        measured = fit.calibrated_half(table, p["root"], p["c"], p["strike"], p["spot"])
+        return p["current"] if measured is None else max(fit.tick(p["c"]), measured)
+
+    def tally(group: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        halves = [half(p) for p in group]
+        short = [x for p, h in zip(group, halves) for x in (p["ask"] - (p["c"] + h), (p["c"] - h) - p["bid"]) if x > 1e-9]
+        return {"quotes": len(group), "median_half": fit._quantile(halves, 0.5),
+                "buy_tighter": round(sum(1 for p, h in zip(group, halves) if p["c"] + h < p["ask"] - 1e-9) / len(group), 4) if group else None,
+                "sell_tighter": round(sum(1 for p, h in zip(group, halves) if p["c"] - h > p["bid"] + 1e-9) / len(group), 4) if group else None,
+                "median_shortfall": fit._quantile(short, 0.5) or 0.0}
+
+    out: dict[str, Any] = {}
+    for kind in ("etf", "stock"):
+        group = [p for p in pairs if (p["root"] in etf) == (kind == "etf")]
+        if group:
+            out[kind] = tally(group)
+    buckets = {"etf": sorted(etf), "buckets": [dict(b, index=n) for n, b in enumerate(fit.SPREAD_BUCKETS)]}
+    by_bucket: dict[int, list[Mapping[str, Any]]] = {}
+    for p in pairs:
+        row = fit.spread_bucket(buckets, p["root"], p["c"], p["strike"], p["spot"])
+        if row is not None:
+            by_bucket.setdefault(row["index"], []).append(p)
+    out["buckets"] = [{**{k: v for k, v in fit.SPREAD_BUCKETS[n].items()}, **tally(group)} for n, group in sorted(by_bucket.items())]
+    return out
+
+
+def need_by_group(fit: Any, pairs: Sequence[Mapping[str, Any]], *, day: str, quantile: float) -> list[dict[str, Any]]:
+    """The fit's measure (the `quantile` of the larger one-sided need, ask - c and c - bid) by class, days to expiry
+    and the print's age (seconds from the bar's close to the quote), with the median quoted half-spread: whether a
+    bucket moved because the day had 0-DTE legs, or because a print a snapshot a minute saw is up to a minute older
+    than the bar's real close (the need grows with the print's age)."""
+    from datetime import date as _date
+
+    etf = set(fit.CALIBRATED_SPREADS.get("etf") or ())
+    groups: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    for p in pairs:
+        dte = (_date.fromisoformat(p["expiry"]) - _date.fromisoformat(day)).days
+        band = "0" if dte <= 0 else "1-3" if dte <= 3 else "4-7" if dte <= 7 else "8+"
+        age = "0-60s" if p["age"] < 60 else "60-180s" if p["age"] < 180 else "180-300s"
+        premium = "under 0.5" if p["c"] < 0.5 else "0.5-3" if p["c"] < 3 else "3+"
+        kind = "etf" if p["root"] in etf else "stock"
+        for key in ((kind, f"dte {band}", premium), (kind, f"age {age}", premium)):
+            groups.setdefault(key, []).append(p)
+    out = []
+    for (kind, split, premium), group in sorted(groups.items()):
+        need = max(fit._quantile([p["ask"] - p["c"] for p in group], quantile) or 0.0, fit._quantile([p["c"] - p["bid"] for p in group], quantile) or 0.0)
+        out.append({"class": kind, "split": split, "premium": premium, "quotes": len(group), "need": round(max(0.01, need), 4),
+                    "quoted_half_median": fit._quantile([(p["ask"] - p["bid"]) / 2 for p in group], 0.5)})
+    return out
+
+
+def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store: str | Path | None, work: str | Path | None,
+              quantile: float = 0.975, max_gap: float = 300.0, day: str = "2026-09-25") -> dict[str, Any]:
+    """Refit s3/calibration's fill half-spread table with the day's recorded quotes and say how its buckets move:
+    the fit on S3's own days again (a control: the same table must come back), on the day alone, and on every day;
+    and S3's table, the current estimate and the day's refit judged on the day's pairs (S3's table held out on a new
+    day, a Friday with 0-DTE legs)."""
+    fit = load_fit(fit_from)
+    tmp = tempfile.TemporaryDirectory(prefix="forward-calibration-", dir=work)
+    try:
+        built = build_calibration_store(snapshots, Path(tmp.name) / "calibration.sqlite", fit, local_store=local_store)
+        store = built.pop("store")
+        underlier = _underlier(fit, local_store, built.pop("spots"))
+        out: dict[str, Any] = {"built": built, "s3_table": fit.CALIBRATED_SPREADS, "quantile": quantile, "max_gap_seconds": max_gap}
+        before = f"{day}T00:00:00Z"
+        runs = {"s3_days_again": ("", before)} if local_store else {}
+        runs.update({"day_only": (before, "9999"), **({"all_days": ("", "9999")} if local_store else {})})
+        for name, (start, end) in runs.items():
+            table = fit.fit_spread_calibration(store, underlier, quantile=quantile, max_gap=max_gap, start=start, end=end)
+            out[name] = table
+        pairs = calibration_pairs(fit, store, underlier, start=before, end="9999", max_gap=max_gap)
+        out["day_pairs"] = {"pairs": len(pairs), "fit_paired": out["day_only"]["fitted_on"]["quotes_paired"],
+                            "zero_dte": sum(1 for p in pairs if p["expiry"] == day),
+                            "by_root": {root: sum(1 for p in pairs if p["root"] == root) for root in sorted({p["root"] for p in pairs})}}
+        out["held_out_on_the_day"] = {"s3_table": judge(fit, pairs, fit.CALIBRATED_SPREADS), "current_estimate": judge(fit, pairs, None),
+                                      "day_refit": judge(fit, pairs, out["day_only"]),
+                                      **({"all_days_refit": judge(fit, pairs, out["all_days"])} if "all_days" in out else {})}
+        out["need_by_group"] = need_by_group(fit, pairs, day=day, quantile=quantile)
+        zero = [p for p in pairs if p["expiry"] == day]
+        if zero:
+            out["held_out_zero_dte"] = {"s3_table": judge(fit, zero, fit.CALIBRATED_SPREADS), "current_estimate": judge(fit, zero, None)}
+        return out
+    finally:
+        tmp.cleanup()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys"))
+    parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, when main has no fit")
+    parser.add_argument("--live", default=None, help="the live founders' day (JSON of LIVE_QUERY's output): compared, and --from-birth reads it")
+    parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake (the comparison run)")
     parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
     parser.add_argument("--house-bars", default=None, help="the House's recorded bars of the day (JSON from a read-only query)")
     parser.add_argument("--local-store", default=str(Path("~/Work/.options-history/options_history.sqlite").expanduser()))
@@ -717,12 +1122,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.starts:
         starts = {k: parse_ts(v) for k, v in json.loads(Path(args.starts).read_text() if Path(args.starts).exists() else args.starts).items()}
     began = time.time()
-    result = run(args.snapshots, house_bars=args.house_bars, local_store=args.local_store,
-                 founders=[f for f in args.founders.split(",") if f], work=args.work,
-                 start=parse_ts(args.start) if args.start else None, until=parse_ts(args.until) if args.until else None, starts=starts,
-                 log=lambda text: print(text, file=sys.stderr, flush=True))
-    result["run"] = {"label": args.label, "snapshots_file": str(args.snapshots), "seconds": round(time.time() - began, 1),
-                     "starts": {k: iso(v) for k, v in (starts or {}).items() if v}}
+    if args.command == "bar-keys":
+        print(bar_keys([f for f in args.founders.split(",") if f]))
+        return 0
+    if args.command == "calibrate":
+        result = calibrate(args.snapshots, fit_from=args.fit_from, local_store=args.local_store, work=args.work)
+        result["run"] = {"snapshots_file": str(args.snapshots), "seconds": round(time.time() - began, 1)}
+        text = json.dumps(result, indent=1, default=str)
+        if args.out:
+            Path(args.out).write_text(text + "\n", encoding="utf-8")
+        else:
+            print(text)
+        return 0
+    founders = [f for f in args.founders.split(",") if f]
+    common = dict(house_bars=args.house_bars, local_store=args.local_store, founders=founders, work=args.work,
+                  start=parse_ts(args.start) if args.start else None, until=parse_ts(args.until) if args.until else None,
+                  log=lambda text: print(text, file=sys.stderr, flush=True))
+    session = run(args.snapshots, starts=starts, **common)
+    session["run"] = {"label": args.label, "seconds": round(time.time() - began, 1), "starts": {k: iso(v) for k, v in (starts or {}).items() if v}}
+    if not args.live:
+        result = session
+    else:
+        live = live_summary(json.loads(Path(args.live).read_text(encoding="utf-8")))
+        result = {"session": session, "live": live}
+        if args.from_birth:
+            births = {founder: parse_ts(row["first_wake_today"]) for founder, row in live.items() if row.get("first_wake_today")}
+            began = time.time()
+            result["from_birth"] = run(args.snapshots, starts=births, **common)
+            result["from_birth"]["run"] = {"label": "from each live founder's first wake", "seconds": round(time.time() - began, 1),
+                                           "starts": {k: iso(v) for k, v in births.items() if v}}
+        result["comparison"] = compare(session, result.get("from_birth"), live)
+    result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live}
     text = json.dumps(result, indent=1, default=str)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
