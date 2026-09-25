@@ -3129,9 +3129,10 @@ class Book:
 
     def _mend_structures(self, result: Reconciliation) -> bool:
         """A structure the venue no longer holds whole is BROKEN: it goes to the House row and what is
-        left of it is closed at once; a short contract no structure explains is closed with it (the
-        owner's rule, Sept 25, 2026: never a naked short leg, and never a freeze that stops every agent
-        on the venue). Returns whether rows were written, so the caller reads the venue again.
+        left of it is closed at once; a short contract no structure explains is closed with it, and so
+        are the shares an exercise or assignment of one of those legs left (the owner's rule, Sept 25,
+        2026: never a naked short leg, and never a freeze that stops every agent on the venue). Returns
+        whether rows were written, so the caller reads the venue again.
 
         Which contracts: a difference on a contract that is a leg of a structure the book holds (a leg
         assigned, exercised, expired, or filled apart from the rest) or that the House row holds from a
@@ -3145,8 +3146,9 @@ class Book:
         row takes each contract's difference (the leg the venue no longer shows, the short it shows
         beyond the book), so the book says exactly what the venue holds -- a short there is never a
         baseline and never an agent's, and is bought back first (`_close_break_units`); and an error
-        alert says what was found and done. A share position an exercise or assignment left is not
-        closed here: it stays a difference, and the alert names it."""
+        alert says what was found and done. The CASH an exercise or assignment moved (a strike's
+        hundred shares bought or sold) is no fill the book saw: on a practice book it is adopted after
+        `ADOPT_AFTER` readings, as any unexplained cash is; on a real book it freezes for the owner."""
         diffs = {key: money(value) for key, value in (result.position_diffs or {}).items()}
         legs_of: dict[str, list[str]] = {}
         for key, (instrument, _) in self._held_structures().items():
@@ -3154,10 +3156,15 @@ class Book:
                 legs_of.setdefault(position_key(leg.instrument), []).append(key)
         house = self.accounts.get(HOUSE)
         remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}
-        busy = self._contracts_in_flight()
+        busy = self._contracts_in_flight() | {position_key(w.instrument) for w in self.orders.values() if w.open}
         found = {key: diff for key, diff in diffs.items()
                  if key.startswith("option:") and "|" not in key and key not in busy
                  and (key in legs_of or key in remains or self._venue_positions.get(key, ZERO) < 0)}
+        # The shares an exercise or an assignment of such a leg leaves (a short call assigned is a
+        # hundred shares short): the same underlying's stock difference, beside the legs, and only then.
+        underlyings = {key.split(":")[1] for key in found} | {key.split(":")[1] for key in remains}
+        found.update({key: diff for key, diff in diffs.items()
+                      if key.startswith("equity:") and key.split(":")[1] in underlyings and key not in busy})
         self._break_readings = {key: self._break_readings.get(key, 0) + 1 for key in found}
         due = {key: diff for key, diff in found.items() if self._break_readings[key] >= BREAK_AFTER}
         if not due:
@@ -3180,13 +3187,15 @@ class Book:
                 "book": self.name, "source": BREAK_SOURCE, "instrument": instrument.to_dict(), "side": "buy" if diff > 0 else "sell",
                 "quantity": text(abs(diff)), "price": "0", "fee_usd": "0", "cash_delta": "0", "position_delta": text(diff), "realized": None,
                 "real_money": self.real_money,
-                "detail": ("the venue holds this contract apart from the book's structures; the House row takes the difference to close it"
+                "detail": ("shares an exercise or assignment of a structure's leg left; the House row takes them to close them"
+                           if key.startswith("equity:") else
+                           "the venue holds this contract apart from the book's structures; the House row takes the difference to close it"
                            if diff < 0 or key not in legs_of else "a leg the venue no longer shows: written off the House row")}})
         for entry in self.ledger.append_many(rows) if rows else []:
             self._apply(entry.kind, entry.agent, entry.payload, entry.at)
         for key in due:
             self._break_readings.pop(key, None)
-        others = sorted(k for k in diffs if not k.startswith("option:"))
+        others = sorted(k for k in diffs if k not in due and not k.startswith("option:"))
         self.ledger.append("ops.alert", {
             "level": "error", "book": self.name, "structure_break": {"contracts": {k: text(v) for k, v in due.items()}, "written_off": written_off},
             "text": (f"{self.name}: a structure broke at the venue (contracts apart from the book: {apart}); "
@@ -3197,9 +3206,9 @@ class Book:
 
     def _close_break_units(self, result: Reconciliation) -> int:
         """Send the House row's closing orders for what it holds of broken structures: every SHORT
-        contract first, each a single buy-back at the ask (an exit, which the adapter sends as
-        `buy_to_close`), and only once no short is left every long contract, each a single sale at the
-        bid. One order a contract at a time, in the regular session only (the venue takes option
+        contract (or short shares an assignment left) first, each a single buy-back at the ask (an exit,
+        which the adapter sends as `buy_to_close`), and only once no short is left every long contract
+        and share, each a single sale at the bid. One order a contract at a time, in the regular session only (the venue takes option
         orders then; outside it this waits), and never a contract the last reading (`result`) found
         apart from the venue: what the venue no longer holds (a leg expired or assigned) is mended
         first, never traded. Returns the orders sent.
@@ -3215,7 +3224,7 @@ class Book:
         if account is None:
             return 0
         units = [(h.instrument, h.quantity) for key, h in account.holdings.items()
-                 if key in self._break_keys and h.quantity != 0 and h.instrument.asset_class == "option"]
+                 if key in self._break_keys and h.quantity != 0 and h.instrument.asset_class in ("option", "equity")]
         if not units:
             return 0
         now = now_iso(self.clock)
@@ -3234,8 +3243,10 @@ class Book:
                 continue  # no touch to take: asked again at the next reading
             intent = Intent.new(agent=HOUSE, instrument=instrument, side=side, quantity=abs(quantity), order_type="limit",
                                 limit_price=price, time_in_force="day", created_at=now, nonce=f"{BREAK_SOURCE}:{now}",
-                                reason=("the House buys back a short leg a broken structure left" if side == "buy" else
-                                        "the House sells a long leg a broken structure left"))
+                                reason=(f"the House buys back {'shares' if instrument.asset_class == 'equity' else 'a short leg'} "
+                                        "a broken structure left" if side == "buy" else
+                                        f"the House sells {'shares' if instrument.asset_class == 'equity' else 'a long leg'} "
+                                        "a broken structure left"))
             if side == "buy":
                 self._closing_buys.add(intent.id)
             self._route([intent], [abs(quantity)], now)

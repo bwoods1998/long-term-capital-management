@@ -286,7 +286,7 @@ class Broken(StructureBookCase):
         self.assertTrue(self.book.reconcile().ok)
 
     def house(self):
-        return {k: h.quantity for k, h in self.book.account(HOUSE).holdings.items() if h.instrument.asset_class == "option"}
+        return {k: h.quantity for k, h in self.book.account(HOUSE).holdings.items() if h.instrument.asset_class in ("option", "equity")}
 
     def test_a_long_leg_gone_breaks_the_structure_and_the_house_closes_the_rest_shorts_first(self):
         self.open_condor()
@@ -353,6 +353,26 @@ class Broken(StructureBookCase):
         self.assertFalse([k for k, v in self.book.baseline_positions.items() if v < 0])
         self.assertEqual(self.house(), {})
         self.assertEqual({k: v for k, (i, v) in self.broker.held.items() if v}, {})
+
+    def test_an_assigned_short_call_leaves_shares_the_house_buys_back_with_the_rest(self):
+        self.open_condor()
+        spy = Instrument("equity", "SPY", V)
+        self.broker.set_quote(spy, "589.90", "590.10")
+        self.broker.held.pop(contract(590, "C").key)  # the short 590 call assigned: a hundred shares sold at 590
+        self.broker.held[spy.key] = (spy, D(-100))
+        self.broker.cash += D("59000")
+        self.assertFalse(self.book.reconcile().ok)
+        second = self.book.reconcile()
+        self.assertEqual(second.position_diffs, {})  # every contract and the shares agree; the $59,000 waits
+        buys = [i for i in self.broker.submitted if i.side == "buy" and not structures.is_structure(i.instrument)]
+        self.assertEqual(sorted((i.instrument.asset_class, i.quantity, i.purpose) for i in buys),
+                         [("equity", D(100), "exit"), ("option", D(1), "exit")])
+        for _ in range(4):
+            final = self.book.reconcile()  # the longs next; the cash adopted after three readings
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(self.house(), {})
+        self.assertEqual({k: v for k, (i, v) in self.broker.held.items() if v}, {})
+        self.assertFalse([k for k, v in self.book.baseline_positions.items() if v < 0])
 
     def test_nothing_is_done_while_an_order_on_the_contract_is_open(self):
         self.open_condor()
