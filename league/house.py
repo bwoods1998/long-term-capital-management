@@ -2395,6 +2395,7 @@ class House:
     def snapshot(self, agent: Agent, book: Book) -> dict[str, Any]:
         """Everything a strategy sees, as plain data (floats: the box converts nothing back)."""
         from .auditor import order_outcomes
+        from .execution import fill_stats, real_fill_stats
         needs = agent.needs
         account = book.account(agent.id)
         limits = book.limits.get(agent.id) or self._limits(1, agent)
@@ -2413,6 +2414,11 @@ class House:
             "positions": [],
             "open_orders": [],
             "recent_order_outcomes": order_outcomes(self.ledger, agent.id, book.name),
+            # X1 of the forward-first run (Sept 25, 2026; `league/execution.py`): its own fill rate and median time to fill
+            # over seven days on its venue's REAL book (the crypto-alts probes filled 0-18% of their real bids at T0 and
+            # could not see it), and on the practice book it trades now, whose fills are the House's model.
+            "execution": {"real": real_fill_stats(self.ledger, agent.id, agent.venue, self.clock()),
+                          **({} if book.real_money else {"practice": fill_stats(self.ledger, agent.id, book.name, self.clock())})},
             # What the venue asks of an order, by tradeable symbol, where it is known (`_venue_rules`).
             # Empty for a Kalshi or options agent: a market's or a contract's grid is not known up front.
             "venue_rules": {},
