@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| S | The search looks for capacity (foundry brief `foundry-2026-09-25.1`; alpaca-open 12 seats) | built, PR #331 (CI green; on #324); Deploy C |
 | Y | Compute follows yield (lane throttle, trigger skip, unit economics, the contract by section) | built, PR #330 (CI green; built on #311); Deploy C |
 | F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
 | B | Deploy B integration (`b/integration`) | Deploy A + C8/C6 + F1 (+review) + F2/F4/X2 (+review) + F3/C7; money digest `555b7aac` before C-money; C-money and the Wave 1 money review to come |
@@ -405,6 +406,18 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   section for Merton and the engineer: 10.77 MB -> 6.26 MB a day of prompt (-42%), about $1.19-14.83 a day, and $0.73
   off the average engineer hold. Open: the researcher's prompt (the Kalshi run's file) still sends the whole contract
   (about 89 KB a turn); the foundry and the lab too.
+
+- **S (#331, Wave 2).** Every foundry card states its capacity (markets a day x profit a settlement x the size before
+  fills halve, from the desk's C6 curve or $6 Kalshi / $12.50 Alpaca) and is refused under `min_capacity_usd` $5 a day
+  (bounds 2-20), before replay on its stated number or after on the replay's measured one (`under_capacity`). Calls:
+  half capacity (desks with a positive pooled 7-day record over 6+ active blocks, weighted by their families' measured
+  capacity, never a family by name), three tenths model-versus-market (weather ensemble, EDGAR earnings, DVOL and
+  funding, the sportsbook line on leagues no founder prices), two tenths exploration. `alpaca-open` 8 -> 12 (the Kalshi
+  run owns `kalshi-open`); a card spanning two desks is replayed on both. **On the T0 snapshot none of the last day's 55
+  replayed cards measures $5 a day** (best $4.15 on the closed crypto-15m desk; weather's best $0.47): expect few
+  foundry births until cards with more markets or larger edges come; the floor stays $5 and is watched. At T0 about 93%
+  of capacity calls would go to kalshi-sports, weighted by the MLB-totals regime families; it fades with the 7-day
+  window. At T0 the foundry refused every call ("no seat is open on any eligible desk"): F3 frees seats first.
 
 ## Progress notes
 
