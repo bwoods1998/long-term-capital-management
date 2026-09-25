@@ -2263,6 +2263,12 @@ class Lab:
             if mechanism is not None and mechanism[0] <= 0:
                 return (f"forward: it has no window of its own, and the {mechanism[1]} forward window(s) of its mechanism on {niche} "
                         f"(the same code beyond PARAMS) lose {mechanism[0]:+.6f} a block on average; the search tape only admits")
+            # F3 (the forward-first run, Sept 25, 2026): a graduate the House's seat market let go after waiting its day for a
+            # seat (`House.waiter_aged`) is a lab candidate again, held here until its own forward window wins.
+            aged = getattr(self.house, "waiter_aged", None)
+            why = aged("graduates", ident) if aged is not None else None
+            if isinstance(why, str) and why:
+                return f"aged: {why}"
         idle = self._idle_desk(niche)
         if idle:
             return f"idle: {idle}"
