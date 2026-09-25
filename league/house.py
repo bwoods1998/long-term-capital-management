@@ -8425,8 +8425,13 @@ class House:
                 if allowed is not None and role not in allowed:
                     continue  # the month's last dollars are kept for code, audits and winners
                 # One role at a time against today's allowance: a pass is a dime to a few dollars,
-                # and its cost is only known when it ends.
-                if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive() for key, job in self._jobs.items()):
+                # and its cost is only known when it ends. The jobs are copied before they are walked
+                # (the review of #297, Sept 25, 2026): the House lane queues research beside the tick
+                # (`_schedule_research`), and a key it added mid-walk raised "dictionary changed size
+                # during iteration" -- a failed tick, an error alert inside a deploy's watch. Nearly
+                # every research job a process queues is a new key: 26 restarts a day, one process an hour.
+                if self.pacer.may_spend("openai") and not any(key.startswith("merton:") and key != "merton:follow" and job.is_alive()
+                                                              for key, job in list(self._jobs.items())):
                     self._background(f"merton:{role}", self.merton.run, role)
             self._background("merton:follow", self.merton.follow)
         if open_for_business and self.engineer is not None and self.engineer.due():

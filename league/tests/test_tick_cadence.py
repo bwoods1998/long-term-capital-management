@@ -366,3 +366,29 @@ class SessionsAcrossARestart(HouseCase):
         self.house.tick()
         told = warnings(self.house, "lost to the restart", session, "candidate commit unconfirmed")
         self.assertEqual(len(told), 1)
+
+
+class TheReviewOfH5(HouseCase):
+    """The adversarial review of #297 (Sept 25, 2026): what the House lane and a thirty-second tick broke."""
+
+    def test_a_job_the_house_lane_lands_while_the_tick_asks_about_merton_does_not_fail_the_tick(self):
+        # The tick asked "is a Merton role running?" by walking `_jobs` live. Since H5 the House lane queues
+        # research beside it (`_schedule_research` -> `_background`), and a key added mid-walk raised
+        # "dictionary changed size during iteration": a failed tick, and an error alert inside a deploy's watch.
+        started = []
+        self.house.merton = SimpleNamespace(due=lambda: ["teacher"], run=lambda role: started.append(role),
+                                            follow=lambda: None)
+        jobs = self.house._jobs
+
+        class Landing:
+            """A finished Merton job, asked whether it is alive while the lane lands a research job."""
+
+            def is_alive(self):
+                jobs.setdefault("research:newcomer", threading.Thread(target=lambda: None))
+                return False
+
+        jobs["merton:auditor"] = Landing()
+        with patch.object(self.house.pacer, "may_spend", return_value=True):  # today's frontier allowance is open
+            self.house.tick()
+        self.house.wait(10)
+        self.assertEqual(started, ["teacher"])
