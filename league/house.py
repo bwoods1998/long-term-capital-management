@@ -600,10 +600,10 @@ class House:
                 continue
             if real and not getattr(self.sandbox, "secure", False):
                 raise RuntimeError("real money needs agents in sealed Sailboxes, not the local sandbox")
-            # A practice option fill pays the OCC clearing fee the paper account takes at the fill
-            # (`league/fees.py`, Sept 24, 2026); when a real account takes it is not measured yet.
+            # An Alpaca option fill pays the OCC clearing fee the account takes at the fill (`league/fees.py`):
+            # the paper account since Sept 24, 2026, the real one since H4 (measured there on Sept 24).
             self.books[name] = Book(
-                name, broker, self.ledger, fees=Fees(family_of(name), option_clearing=not real), real_money=real, clock=clock,
+                name, broker, self.ledger, fees=Fees(family_of(name), option_clearing=True), real_money=real, clock=clock,
                 market_open=market_hours, kill_switch=kill_switch,
                 resolves_at=self._resolves_at if family_of(name) == "kalshi" else None,
                 event_capital_budget=(lambda venue=family_of(name): self._event_capital_budget(venue)) if family_of(name) == 'kalshi' else None,
