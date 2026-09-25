@@ -32,8 +32,9 @@ class FakeJev:
         self.calls.append((ident, request))
         if self.fail:
             raise TimeoutError("gateway timed out")
-        items = request["state"]["items"]
-        answers = {name: {"type": "noul", "noul": self.p(items[name]) if callable(self.p) else self.p}
+        # `ask` sends items; `ask_state` sends one lab-shaped state, and p(text) then sees the question's name.
+        items = request["state"].get("items") or {} if isinstance(request["state"], dict) else {}
+        answers = {name: {"type": "noul", "noul": self.p(items.get(name, name)) if callable(self.p) else self.p}
                    for name in request["questions"]}
         return {"model": MODEL, "answers": answers, "usage": {"input_tokens": 100}}, Decimal(self.cost)
 
@@ -99,6 +100,157 @@ class SensorTest(unittest.TestCase):
         other.ask("gate", {}, {"k0": ("t", "q?")})
         self.assertNotIn(jev.calls[-1][0], [ident for ident, _ in jev.calls[:-1]])
         self.assertEqual(Sensor(Path(self.dir.name) / "fresh.sqlite", jev, clock=self.clock).salt, other.salt, "stable per store")
+
+
+class AskStateTest(unittest.TestCase):
+    """Sept 25, 2026 (J1): one lab-format state, several named questions, one request; the cap
+    checks read an in-memory tally that must agree with the store."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.clock = Clock()
+        self.state = {"observed_minute": 1789000020, "market": {"market": "KXBTCD-26SEP25-T60000", "yes_bid": 0.4, "yes_ask": 0.42}}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def sensor(self, client, name="jev.sqlite", **kw):
+        return Sensor(Path(self.dir.name) / name, client, clock=self.clock, **kw)
+
+    def test_one_lab_shaped_request_cached_per_question(self):
+        jev = FakeJev(0.8)
+        sensor = self.sensor(jev)
+        receipt = {}
+        got = sensor.ask_state("move", "s1", self.state, {"a": "Question a?", "b": "Question b?"}, receipt=receipt,
+                               keys={"a": "market:KXBTCD:a"})
+        self.assertEqual(got, {"a": 0.8, "b": 0.8})
+        self.assertEqual(len(jev.calls), 1)
+        request = jev.calls[0][1]
+        # Exactly SemanticLab.enqueue's body: the state untouched, noul questions keyed by name.
+        self.assertEqual(set(request), {"model", "state", "questions"})
+        self.assertEqual(request["model"], MODEL)
+        self.assertEqual(request["state"], self.state)
+        self.assertEqual(request["questions"], {"a": {"type": "noul", "instructions": "Question a?"},
+                                                "b": {"type": "noul", "instructions": "Question b?"}})
+        self.assertEqual((receipt["calls"], receipt["bought"], receipt["cost"]), (1, 2, Decimal("0.0001")))
+        self.assertEqual(sensor.cached(["market:KXBTCD:a", "s1:b"]), {"market:KXBTCD:a": 0.8, "s1:b": 0.8})
+        self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?", "b": "Question b?"},
+                                          keys={"a": "market:KXBTCD:a"}), {"a": 0.8, "b": 0.8})
+        self.assertEqual(len(jev.calls), 1, "both answers come from the cache")
+        # A new state of the same market: only its own question is bought.
+        sensor.ask_state("move", "s2", {**self.state, "observed_minute": 1789000080}, {"a": "Question a?", "b": "Question b?"},
+                         keys={"a": "market:KXBTCD:a"})
+        self.assertEqual(list(jev.calls[-1][1]["questions"]), ["b"])
+        stats = sensor.stats()
+        self.assertEqual(stats["today"]["move"]["cache_hits"], 3)
+        self.assertEqual(stats["today"]["move"]["questions"], 3)
+        self.assertEqual(stats["today"]["move"]["cache_hit_rate"], 0.5)
+        self.assertEqual(stats["cache_hit_rate"], 0.5)
+
+    def test_more_than_sixteen_questions_split_over_the_same_state(self):
+        jev = FakeJev(0.3)
+        sensor = self.sensor(jev)
+        got = sensor.ask_state("move", "s", self.state, {f"q{n}": f"Question {n}?" for n in range(20)})
+        self.assertEqual(set(got.values()), {0.3})
+        self.assertEqual([len(r["questions"]) for _, r in jev.calls], [16, 4])
+        self.assertTrue(all(r["state"] == self.state for _, r in jev.calls))
+
+    def test_caps_breaker_identity_and_size_are_the_same_as_ask(self):
+        capped = self.sensor(FakeJev(0.5), "capped.sqlite", purpose_calls={"move": 1})
+        capped.ask_state("move", "s1", self.state, {"a": "Question a?"})
+        receipt = {}
+        self.assertEqual(capped.ask_state("move", "s2", self.state, {"a": "Question a?"}, receipt=receipt), {"a": None})
+        self.assertIn("daily move call cap 1 reached", receipt["refused"])
+        self.assertEqual(capped.calls_today("move"), 1)
+
+        jev = FakeJev(fail=True)
+        sensor = self.sensor(jev, cooldown_seconds=600)
+        receipt = {}
+        self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt), {"a": None})
+        self.assertTrue(receipt["failed"])
+        self.assertIn("failed", receipt["refused"])
+        self.assertEqual(sensor.spent_today("move"), Decimal("0.003"), "an unconfirmed call counts at the worst case")
+        receipt = {}
+        sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}, receipt=receipt)
+        self.assertIn("breaker", receipt["refused"])
+        self.assertEqual(len(jev.calls), 1)
+        self.clock.advance(601)
+        jev.fail = False
+        self.assertEqual(sensor.ask_state("move", "s1", self.state, {"a": "Question a?"}), {"a": 0.9})
+        self.assertNotEqual(jev.calls[0][0], jev.calls[1][0], "a re-bought body gets a new identity")
+        self.assertTrue(jev.calls[1][0].startswith(f"sensor-{sensor.salt}-"))
+
+        receipt = {}
+        huge = {**self.state, "peers": ["x" * 70_000]}
+        self.assertEqual(sensor.ask_state("move", "big", huge, {"a": "Question a?"}, receipt=receipt), {"a": None})
+        self.assertIn("too large", receipt["refused"])
+        self.assertEqual(len(jev.calls), 2, "a state too large is never sent (nor shortened: it would not be the lab's)")
+
+    def counted(self, path, day):
+        import sqlite3
+        db = sqlite3.connect(path)
+        rows = db.execute("SELECT purpose, cost FROM calls WHERE day=?", (day,)).fetchall()
+        db.close()
+        usd = lambda purpose=None: sum((Decimal(c) if c is not None else Decimal("0.003") for p, c in rows  # noqa: E731
+                                        if purpose is None or p == purpose), Decimal(0))
+        return {"calls": len(rows), "gate": sum(p == "gate" for p, _ in rows), "move": sum(p == "move" for p, _ in rows),
+                "usd": usd(), "usd_gate": usd("gate"), "usd_move": usd("move")}
+
+    def tally(self, sensor):
+        return {"calls": sensor.calls_today(), "gate": sensor.calls_today("gate"), "move": sensor.calls_today("move"),
+                "usd": sensor.spent_today(), "usd_gate": sensor.spent_today("gate"), "usd_move": sensor.spent_today("move")}
+
+    def test_the_in_memory_tally_equals_the_store_across_a_restart_and_a_day_change(self):
+        path = Path(self.dir.name) / "jev.sqlite"
+        answers = {"mode": "ok"}
+
+        def client(ident, body):
+            request = json.loads(body)
+            if answers["mode"] == "fail":
+                raise TimeoutError("gateway timed out")
+            if answers["mode"] == "midnight":  # the receipt arrives on the next UTC day
+                self.clock.advance(86400)
+            model = MODEL if answers["mode"] != "bad" else "other-model"  # rejected, at a known cost
+            return {"model": model, "answers": {n: {"type": "noul", "noul": 0.5} for n in request["questions"]}}, Decimal("0.00007")
+
+        sensor = Sensor(path, client, clock=self.clock, cooldown_seconds=0)
+        day = sensor._day()
+        sensor.ask("gate", {}, {"k1": ("t", "q?")})
+        sensor.ask_state("move", "s1", self.state, {"a": "Question a?"})
+        answers["mode"] = "fail"
+        sensor.ask_state("move", "s2", self.state, {"a": "Question a?"})
+        answers["mode"] = "bad"
+        sensor.ask("gate", {}, {"k2": ("t", "q?")})
+        self.assertEqual(self.tally(sensor), self.counted(path, day))
+        self.assertEqual(self.tally(sensor)["usd"], Decimal("0.00007") * 3 + Decimal("0.003"))
+        restarted = Sensor(path, client, clock=self.clock)
+        self.assertEqual(self.tally(restarted), self.counted(path, day))
+        # A call that starts before midnight and settles after it stays on its own day.
+        answers["mode"] = "midnight"
+        sensor.ask_state("move", "s3", self.state, {"a": "Question a?"})
+        tomorrow = sensor._day()
+        self.assertNotEqual(tomorrow, day)
+        self.assertEqual(self.tally(sensor), self.counted(path, tomorrow))
+        self.assertEqual(sensor.calls_today(), 0)
+        self.assertEqual(self.counted(path, day)["calls"], 5)
+        answers["mode"] = "ok"
+        sensor.ask_state("move", "s4", self.state, {"a": "Question a?"})
+        self.assertEqual(self.tally(sensor), self.counted(path, tomorrow))
+        self.assertEqual(self.tally(Sensor(path, client, clock=self.clock)), self.counted(path, tomorrow))
+        stats = sensor.stats()
+        self.assertEqual(stats["calls_lifetime"], 6)
+        self.assertEqual(stats["completed_lifetime"], 4)
+        self.assertEqual(Decimal(stats["spent_lifetime_usd"]), Decimal("0.00007") * 5 + Decimal("0.003"))
+        self.assertEqual(sensor.headroom("move"), sensor.daily_calls - 1)
+
+    def test_forget_drops_only_old_answers_under_a_prefix(self):
+        sensor = self.sensor(FakeJev(0.6))
+        sensor.ask_state("move", "move:s:x", self.state, {"a": "Question a?"}, keys={})
+        sensor.ask("gate", {}, {"move:s-lookalike": ("t", "q?")})
+        self.clock.advance(100)
+        sensor.ask_state("move", "move:s:y", self.state, {"a": "Question a?"})
+        self.assertEqual(sensor.forget("move:s:", self.clock() - 50), 1)
+        self.assertEqual(set(sensor.cached(["move:s:x:a", "move:s:y:a", "move:s-lookalike"])), {"move:s:y:a", "move:s-lookalike"})
 
 
 def summary(ledger, agent, *, candidate=False, trials=0, reason="finished", text="No credits are worth spending now."):
