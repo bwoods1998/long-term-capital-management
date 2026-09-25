@@ -141,6 +141,12 @@ test of every founder on true touches.
   Sept 28 282/283 put debit vertical at 0.46 on options-shadow (16:43:48Z).
   V3's watch verdict **promoted 16:48:14Z** (reasons none). The floor's release from then: `20260925T163626Z-46eda79f4052`
   (main `9d8b1d3`). RSS 922 MB at 16:47:52Z, growth flattening. No further deploy of this run today.
+  **Memory, context (16:55Z):** the supervisor's log shows out-of-memory kills (exit 137) before this run existed:
+  2026-09-20T00:19:55Z and 2026-09-24T14:57:03Z (mid-session), then 2026-09-25T14:37:30Z; and one SIGTERM (143) today.
+  So the House's memory is a floor-wide defect this run's structure tapes likely aggravated, not one it introduced. After
+  V3 the House grew 553 MB -> 1,341 MB in 10 minutes (16:43-16:53Z) with no options tape kept: other caches grow too.
+  Watched through the session (a kill restarts the House with its state, as at 14:37Z); the growth is diagnosed after
+  the close, not by another deploy today.
 
 ## Coordination with the forward-first run
 
