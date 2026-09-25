@@ -447,6 +447,33 @@ def _params() -> dict[str, Any]:
     }
 
 
+def member_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """`allocator.proven_family_member` (M3 of the forward-first run, Sept 25, 2026), or None where the constitution has
+    none: then every agent needs E >= `bunt_at` for a real seat, as before. `same_code` holds unless it is False."""
+    rule = rules(constitution).get("proven_family_member")
+    if not isinstance(rule, Mapping):
+        return None
+    return {"min_practice_closed": max(1, int(rule.get("min_practice_closed", 1))), "min_w_paper": float(rule.get("min_w_paper", 1.0)),
+            "min_distinct_dates": max(0, int(rule.get("min_distinct_dates", 0))), "same_code": rule.get("same_code") is not False}
+
+
+def equity_program(agent: Any, niche: Any) -> bool:
+    """M4 of the forward-first run (Sept 25, 2026): whether an Alpaca program trades stocks and ETFs, so its real stake is
+    `probe_bunt_usd.alpaca_equity`: its desk's asset class is "equity" (`niches.json`: alpaca-index-etfs, alpaca-megacaps),
+    or it sits on an open Alpaca desk and every symbol its NEEDS names is a stock or ETF ticker, none a coin against the
+    dollar ("BTC/USD"). Crypto programs stay at `probe_bunt_usd.alpaca`, options at `option_bunt_usd`."""
+    if agent is None or niche is None or getattr(agent, "venue", None) != "alpaca":
+        return False
+    if getattr(niche, "asset_class", None) == "equity":
+        return True
+    if getattr(niche, "open", False) and "equity" in tuple(getattr(niche, "asset_classes", ()) or ()):
+        from .niches import _COIN_NAME, _EQUITY_NAME
+
+        symbols = [str(s).strip().upper() for s in ((getattr(agent, "needs", None) or {}).get("symbols") or ())]
+        return bool(symbols) and all(_EQUITY_NAME.match(s) and not _COIN_NAME.match(s) for s in symbols)
+    return False
+
+
 def bunt_ready(ev: Evidence, p: Mapping[str, Any]) -> bool:
     """Paper -> bunt: E at or above `bunt_at` on enough closed trades (or, on an event book, enough
     settlements: a settlement is the market's verdict)."""
@@ -587,9 +614,11 @@ class Allocator:
         #: gate could not be read this pass (a failed fold or forward read: no probe is seated until it can be).
         self._forward: dict[str, tuple[int, float]] | None = None
         self._since: dict[tuple[str, int], tuple[bool, int, float]] = {}
+        self._bound_since: dict[tuple[str, int], tuple[int, float | None]] = {}  # M5: (periods, lower bound) of each record since
         self._gate_fault: str | None = None
         self._waiting_flat: set[str] = set()  # probes on a losing family told once that they go back once flat
         self._first_real: dict[tuple[str, str], float] = {}  # a family's first real dollar, once found (R3's clock)
+        self._codes: dict[tuple[str, str], dict[str, Any]] = {}  # each family's proven code, once a pass (M3, `proven_code`)
         if self.state.get("families") is None:
             # A first start under the mechanism ledger: the states the ledger's last `family.record` rows say.
             self.state["families"] = families.restore_states(getattr(house, "ledger", None))
@@ -749,6 +778,7 @@ class Allocator:
             self._through = self._tape.cursor
             tape_fault = f"the family records' tape ({type(exc).__name__})"
         self._families = {}
+        self._codes = {}
         self._released = None
         self._released = self._swing_released()  # the grant's rung-3 release, read once a pass
         try:
@@ -899,7 +929,7 @@ class Allocator:
         hold = released and families.swing_ready(record, rule)
         proven = bool(record.get("proven"))
         before = previous.get("state") if previous.get("state") in families.STATES else ("proven" if proven else "unproven")
-        approved, lapse = self._swing_approval(key, family, venue)
+        approved, lapse = self._swing_approval(key, family, venue, (record.get("real") or {}).get("entry"))
         state = families.next_state(before, proven=proven, entry=entry, hold=hold, approved=approved)
         stamp = now_iso(self.house.clock)
         since = previous.get("since") if state == before and previous.get("since") else stamp
@@ -940,9 +970,12 @@ class Allocator:
                 self._lapse_approval(key, f"the family left the swing ({state})")
             elif lapse:
                 self._lapse_approval(key, lapse)
-            if proven and entry and state != "swing":
+            # The audit is asked for at a passing look, or ahead of the next look (`audit.pre_pack`, M1 of the forward-first
+            # run): the look it is prepared for rides on its state (`_swing_approval`).
+            look = self._audit_look(record, rule, entry) if proven and released and state != "swing" else None
+            if look is not None:
                 try:
-                    self._request_family_audit(key, out, members_real)
+                    self._request_family_audit(key, out, members_real, look=look)
                 except Exception as exc:  # noqa: BLE001 - asking for the audit is not the record (review of #242)
                     # A failure here (the member's evidence unreadable, say) used to make the whole family unreadable
                     # for money: its proven members were swept to probes at every pass it lasted. It is told once and
@@ -1005,15 +1038,29 @@ class Allocator:
     def family_taker(self, agent_id: str) -> dict[str, Any] | None:
         """The agent's family's pooled TAKER record, for the book's `real_entry_liquidity` rule (P3, Sept 24,
         2026: a real entry on an event book is post-only unless this is `positive`): {"family", "positive",
-        "n", "mean_log", "bound"}. None while the allocator is off or for an agent it does not know."""
+        "n", "mean_log", "bound", "band", "may_take", "proof_min"}. None while the allocator is off or for an agent it
+        does not know.
+
+        M2 of the forward-first run (Sept 25, 2026): `positive` is the family's taker proof -- `taker_proof_min` (5)
+        independent taker events with the honest bound above zero (`families.family_record`) -- and `may_take` whether
+        this agent may enter as a taker now: under `real_entry_liquidity: "probe_may_take"` a PROBE always may (its one
+        position is the book's cap, `position_share_event` of its stake), a bunt or a swing only on the family's proof.
+        `band` is the agent's real band ("probe", "bunt" or "swing"; None below real money), so the book's refusal names
+        it."""
         if not enabled():
             return None
         agent = self.house.registry.get(agent_id)
         if agent is None:
             return None
         taker = self.family(agent.family, agent.venue)["taker"]
-        return {"family": agent.family, "positive": bool(taker["positive"]), "n": int(taker["n"]),
-                "mean_log": float(taker["mean_log"]), "bound": taker["bound"]}
+        positive = bool(taker["positive"])
+        rung = self.house.evaluator.rung(agent_id)
+        band = ("swing" if rung >= 3 else self.rung2_band(agent)) if rung >= 2 else None
+        probes_take = str(rules().get("real_entry_liquidity") or "") == "probe_may_take"
+        return {"family": agent.family, "positive": positive, "n": int(taker["n"]),
+                "mean_log": float(taker["mean_log"]), "bound": taker["bound"], "band": band,
+                "may_take": positive or (probes_take and band == "probe"),
+                "proof_min": int(rules().get("taker_proof_min") or families.proof_rule()["min_independent_settlements"])}
 
     def _family_note(self, agent: Any) -> str:
         r = self.family(agent.family, agent.venue)
@@ -1036,18 +1083,60 @@ class Allocator:
         except Exception:  # noqa: BLE001 - an unreadable grant releases nothing above the bunt
             return False
 
-    def _swing_approval(self, key: str, family: str, venue: str) -> tuple[bool, str | None]:
+    def _pre_pack(self) -> int:
+        """`game.json` `audit.pre_pack` (M1 of the forward-first run, Sept 25, 2026): the real settlement at which the
+        auditor's packet for the swing's FIRST look is prepared, inside its bounds (`audit_bounds.pre_pack`, 5-9); later looks
+        are prepared as far ahead of them. 0 (no pre-pack: the audit is asked for at a passing look) without the key."""
+        game = getattr(self.house, "game", None) or {}
+        value = (game.get("audit") or {}).get("pre_pack")
+        if value is None:
+            return 0
+        low, high = ((game.get("audit_bounds") or {}).get("pre_pack") or (5, 9))[:2]
+        return int(min(max(int(value), int(low)), int(high)))
+
+    def _audit_look(self, record: Mapping[str, Any], rule: Mapping[str, Any] | None, entry: bool) -> int | None:
+        """The swing's entry look an audit of the family is asked for now, or None (M1 of the forward-first run, Sept 25,
+        2026). A look that passed (`entry`) is audited at once, as before. Ahead of the NEXT look -- from `audit.pre_pack`
+        real settlements before the first (8 for the look at 10) and as many before each later one (13 for 15) -- the
+        packet is prepared so a passing look is not delayed by its audit (the auditor took minutes; the sports family
+        settles ~3.5 real events a day), but only while that look can still meet `min_distinct_dates`: the events it
+        will read span the dates they span now plus at most one new date an event (the sports family's looks at 10 and
+        15 cannot, and are not audited ahead). The approval it brings licenses that look and later ones and lapses at a
+        look that does not pass (`_swing_approval`)."""
+        look = (record.get("real") or {}).get("entry") or {}
+        if entry:
+            return int(look["checkpoint"]) if look.get("checkpoint") is not None else None
+        pre = self._pre_pack()
+        if rule is None or pre <= 0 or look.get("next_checkpoint") is None:
+            return None
+        upcoming, n = int(look["next_checkpoint"]), int((record.get("real") or {}).get("n") or 0)
+        lead = max(int(rule["min_real_settlements"]) - pre, 0)
+        if n < upcoming - lead or n >= upcoming:
+            return None
+        if int(look.get("dates_so_far") or 0) + (upcoming - n) < int(rule.get("min_distinct_dates") or 0):
+            return None
+        return upcoming
+
+    def _swing_approval(self, key: str, family: str, venue: str, look: Mapping[str, Any] | None = None) -> tuple[bool, str | None]:
         """(whether an approved audit licenses the family's entry into the swing now, why an approval on record no
         longer does). The entry is audited on the family's REAL record (C2, Sept 24, 2026), and an approval licenses
         entries until it lapses (the main session's decision on the review of #242): when the family leaves the swing
         (`_decorate` lapses it), or when a member of the family takes a new program (`agent.strategy`) or is BORN into it
         (`agent.born`: a research child is how a real-money line changes its code) after the audit looked at the family
         (its `started_seq`), as the agent-level route voids an approval on new code. A swing already running is untouched:
-        the lapse makes its next entry ask for a new audit. A veto waits out the audit cooldown before it is asked again."""
+        the lapse makes its next entry ask for a new audit. A veto waits out the audit cooldown before it is asked again.
+
+        An audit asked for a LOOK (`look` on its state: M1's pre-pack, Sept 25, 2026, `_audit_look`) licenses that look and
+        later ones, and lapses at a look at or after it that does not pass (`look`: the record's entry look now): an
+        approval prepared at the 8th real settlement for the look at 10 is not carried to the look at 15 over a failed
+        look at 10; the next look's packet is prepared again."""
         with self._lock:
             audit = dict((self.state.get("family_audits") or {}).get(key) or {})
         if audit.get("status") != "done" or audit.get("approve") is not True:
             return False, None
+        prepared, at = audit.get("look"), (look or {}).get("checkpoint")
+        if prepared is not None and at is not None and int(at) >= int(prepared) and not (look or {}).get("ready"):
+            return False, f"its approval was prepared for the look at {prepared} real settlements, and the look at {at} did not pass"
         since = int(audit.get("started_seq") or 0)
         members = self._members(family, venue)
         changed = sorted(a.id for a in members if self._tape.programs.get(a.id, 0) > since)
@@ -1080,9 +1169,10 @@ class Allocator:
         rules_ = (getattr(self.house, "game", None) or {}).get("audit") or {}
         return float(rules_.get("error_cooldown_hours", 0.5) if error else rules_.get("cooldown_hours", 72))
 
-    def _request_family_audit(self, key: str, record: Mapping[str, Any], members_real: int) -> None:
+    def _request_family_audit(self, key: str, record: Mapping[str, Any], members_real: int, *, look: int | None = None) -> None:
         """Start the family's swing audit unless one runs, has approved, or waits out its cooldown. Without an
-        auditor there is no family swing: a gate that fails open is not a gate."""
+        auditor there is no family swing: a gate that fails open is not a gate. `look`: the entry look it is asked for
+        (`_audit_look`: a look that passed, or the next one ahead of it, M1's pre-pack), kept on its state."""
         house = self.house
         if getattr(house, "auditor", None) is None or not hasattr(house, "_background"):
             return
@@ -1108,9 +1198,9 @@ class Allocator:
         agent = self._family_representative(record)
         if agent is None:
             return
-        verdict = self._family_swing_verdict(agent, record, key, members_real)
+        verdict = self._family_swing_verdict(agent, record, key, members_real, look=look)
         running = {"status": "running", "agent": agent.id, "started_seq": int(house.ledger.head()[0]),
-                   "started_at": now_iso(house.clock), "at_epoch": house.clock()}
+                   "started_at": now_iso(house.clock), "at_epoch": house.clock(), "look": look}
         with self._lock:
             self.state["family_audits"][key] = running
         if not house._background(self.FAMILY_AUDIT + key, self._run_family_audit, key, agent.id, verdict):
@@ -1153,8 +1243,10 @@ class Allocator:
                 "at": now_iso(house.clock), "at_epoch": house.clock()}
         with self._lock:
             audits = self.state.setdefault("family_audits", {})
-            # Where the audit looked at the family: a member's program changed after it lapses the approval.
+            # Where the audit looked at the family: a member's program changed after it lapses the approval. And the look it
+            # was asked for (M1's pre-pack): a look at or after it that does not pass lapses it (`_swing_approval`).
             done["started_seq"] = (audits.get(key) or {}).get("started_seq")
+            done["look"] = (audits.get(key) or {}).get("look")
             audits[key] = done
         try:
             house.alert("info", f"allocator: the {key} family swing's audit {'approved' if done['approve'] else 'did not approve'} "
@@ -1175,14 +1267,18 @@ class Allocator:
                 parsed = instant(entry.at)
                 return {"status": "done", "agent": agent, "approve": p.get("approve") is True and not p.get("error"),
                         "error": bool(p.get("error")), "summary": str(p.get("summary") or "")[:300], "at": entry.at,
-                        "at_epoch": parsed.timestamp() if parsed else self.house.clock(), "started_seq": audit.get("started_seq")}
+                        "at_epoch": parsed.timestamp() if parsed else self.house.clock(), "started_seq": audit.get("started_seq"),
+                        "look": audit.get("look")}
         return None
 
-    def _family_swing_verdict(self, agent: Any, record: Mapping[str, Any], key: str, members_real: int) -> Any:
+    def _family_swing_verdict(self, agent: Any, record: Mapping[str, Any], key: str, members_real: int, *,
+                              look: int | None = None) -> Any:
         """What the auditor judges: the family packet -- its REAL record, event by event, every member's real
         closes, its capacity -- with `allocation_context`, the stake the family swing would take (the Sept 23
         lesson: without the allocator's context the auditor judged a bunt against the legacy tuition and
-        vetoed on capacity it could not see)."""
+        vetoed on capacity it could not see). Asked AHEAD of a look (M1's pre-pack, Sept 25, 2026: `look` above the
+        record's passing checkpoint), the reason says so, and `pre_pack` rides on the numbers: the auditor judges the
+        mechanism and the record so far, and the family enters only if that look then passes."""
         from .evaluator import Verdict
 
         family, venue = record["family"], record["venue"]
@@ -1195,14 +1291,27 @@ class Allocator:
                                       venue_capital=self.capital(venue), members_real=max(members_real, 1),
                                       entered_seq=None, rates=rates)
         real = record.get("real") or {}
-        look = real.get("entry") or {}
-        why = (f"the {family} family is proven and its REAL record qualifies for the family swing: its first {look.get('checkpoint')} "
-               f"of {real.get('n')} independent real settlements clear the entry's {float(look.get('confidence') or 0):.0%} lower bound "
-               f"({float(look.get('honest_bound') or 0):+.5f} a dollar at risk; the whole record's bound at "
-               f"{float((record.get('rule') or {}).get('confidence') or 0.8):.0%} is {float(real.get('honest_bound') or 0):+.5f})")
+        look_row = real.get("entry") or {}
+        # Ahead of its look: the look the audit is asked for has not passed on the record yet (`_audit_look`).
+        ahead = look is not None and not (look_row.get("ready") and look_row.get("checkpoint") == look)
+        if ahead:
+            dates = int(rule.get("min_distinct_dates") or 0)
+            why = (f"the {family} family is proven and its REAL record nears the family swing's entry look at {look} independent "
+                   f"real settlements ({real.get('n')} so far, on {real.get('dates') or 0} distinct settlement dates): this audit is "
+                   f"prepared AHEAD of that look (game.json audit.pre_pack) so a passing look is not delayed by it. The family enters "
+                   f"only if the look passes -- its first {look} real events' lower bound at {float(rule.get('entry_confidence') or 0.9):.0%} "
+                   f"above zero" + (f", on at least {dates} distinct settlement dates" if dates else "")
+                   + " -- and an approval lapses at a look that does not pass. Judge the mechanism and the record so far.")
+        else:
+            why = (f"the {family} family is proven and its REAL record qualifies for the family swing: its first {look_row.get('checkpoint')} "
+                   f"of {real.get('n')} independent real settlements clear the entry's {float(look_row.get('confidence') or 0):.0%} lower bound "
+                   f"({float(look_row.get('honest_bound') or 0):+.5f} a dollar at risk; the whole record's bound at "
+                   f"{float((record.get('rule') or {}).get('confidence') or 0.8):.0%} is {float(real.get('honest_bound') or 0):+.5f})")
         numbers = {"via": "family_swing", "book": REAL_BOOK[venue], "evidence": ev.row(), "E": ev.e, "band_to": "swing",
                    "family_swing": key, "family_packet": self._family_packet(record),
                    "allocation_context": self._family_swing_context(agent, ev, record, entry, members_real)}
+        if ahead:
+            numbers["pre_pack"] = {"look": look, "real_n": real.get("n"), "dates": real.get("dates")}
         return Verdict(agent.id, 2, "eligible", why, numbers)
 
     def _family_packet(self, record: Mapping[str, Any]) -> dict[str, Any]:
@@ -1362,6 +1471,122 @@ class Allocator:
                 return self.family_score(agent.family, agent.venue)
         return 0
 
+    # ------------------------------------------------ a proven family's members (M3)
+    def proven_code(self, family: str, venue: str) -> dict[str, Any]:
+        """The PROVEN CODE of a family (M3 of the forward-first run, Sept 25, 2026; `allocator.proven_family_member`
+        `same_code`): the program (`code_sha256`: the strategy's code, PARAMS apart) that entered a MAJORITY of the
+        family's settled observations -- its independent events closed on the practice and the real book since each
+        member's evidence cutoff, counted as `families.family_record` counts them, each credited to the code its member
+        ran at the event's first entry (`agent.born` and `agent.strategy` rows). {"code": the digest or None when no
+        program entered more than half of them, "events": that code's count, "of": the family's, "codes": every code's}.
+        Once a pass (the pass's tape, through its ledger position). On the T0 snapshot (04:23Z Sept 25): the run-unders'
+        25 events all entered by 6d65362f (the founder; -3, -5 and -6 run it; -4 rewrote itself into 26152cae at
+        02:37Z), megacaps-chip-demand-relay's 13 all by 333e1b78, mcentee-hddb4ae's code since 14:39Z Sept 23."""
+        key = (family, venue)
+        cached = self._codes.get(key)
+        if cached is not None:
+            return cached
+        from .evaluator import closed_trade_rows, event_key, per_event, staked_base
+
+        tape, through = self._tape, self._through
+        events: set[str] = set()
+        by_code: dict[str, set[str]] = {}
+        for agent in self._members(family, venue):
+            rows = tape.rows.get(agent.id) or []
+            if not rows:
+                continue
+            cutoffs = tape.cutoffs.get(agent.id) or {}
+            history = [(e.seq, str(e.payload["code_sha256"])) for e in self.house.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=agent.id)
+                       if e.payload.get("code_sha256")]
+            for book in (PAPER_BOOK[venue], REAL_BOOK[venue]):
+                stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
+                if staked_base(stakes, through) <= 0:
+                    continue
+                closed, _ = closed_trade_rows((r for r in rows if r.kind != "book.stake"), book, since_seq=cutoffs.get(book, 0),
+                                              until_seq=through)
+                by_event = per_event(book)
+                for row in closed:
+                    if staked_base(stakes, row["seq"]) <= 0:
+                        continue
+                    event = (event_key(row["instrument"]) if by_event else None) or f"{book}:{agent.id}:{row['seq']}"
+                    opened = row["entry_seq"] if row["entry_seq"] is not None else row["seq"]
+                    code = next((c for s, c in reversed(history) if s <= opened), None)
+                    events.add(event)
+                    if code:
+                        by_code.setdefault(code, set()).add(event)
+        counts = {code: len(found) for code, found in by_code.items()}
+        best, most = max(counts.items(), key=lambda item: (item[1], item[0]), default=(None, 0))
+        out = {"code": best if most * 2 > len(events) else None, "events": most, "of": len(events), "codes": counts}
+        self._codes[key] = out
+        return out
+
+    def _member_ups(self, living: Sequence[Any], evid: Mapping[str, Evidence], taken: set[str],
+                    p: Mapping[str, Any]) -> list[tuple[Any, Evidence, str]]:
+        """M3 of the forward-first run (Sept 25, 2026; `allocator.proven_family_member`): the practice members a PROVEN (or
+        swinging) family may seat on its proof this pass, best W_paper first within each family: [(agent, evidence, why)].
+        A member qualifies with `min_practice_closed` closed practice trades of its own, W_paper at or above `min_w_paper`
+        and E at or above the bunt band's exit line (`bunt_at` x `hysteresis`: one the exit sent back waits for its own E),
+        when the family's POOLED proof spans `min_distinct_dates` distinct settlement dates and the member runs the family's
+        proven code (`proven_code`). One that qualifies but for the dates or the code is told why on its promotion status
+        (a `progress` row only when the reason changes). The seats (`game.json` `economy.proven_family_members`) are counted
+        as each is seated (`_member_seat_free`). `taken`: the agents the pass already moves up on their own E."""
+        rule = member_rule()
+        cap = int(((getattr(self.house, "game", None) or {}).get("economy") or {}).get("proven_family_members") or 0)
+        if rule is None or cap <= 0:
+            return []
+        house, line = self.house, float(p["bunt_at"]) * float(p["hysteresis"])
+        groups: dict[tuple[str, str], list[tuple[Any, Evidence]]] = {}
+        for agent in living:
+            ev = evid.get(agent.id)
+            if ev is None or ev.rung != 1 or agent.id in taken or ev.cooling or house.evaluator.rung(agent.id) != 1:
+                continue
+            if ev.paper_trades < rule["min_practice_closed"] or ev.w_paper < rule["min_w_paper"] or ev.e < line:
+                continue
+            if self.family_state(agent) not in ("proven", "swing") or self.family(agent.family, agent.venue).get("error"):
+                continue
+            groups.setdefault((agent.family, agent.venue), []).append((agent, ev))
+        out: list[tuple[Any, Evidence, str]] = []
+        for (family, venue), members in sorted(groups.items()):
+            record = self.family(family, venue)
+            dates = int(record.get("dates") or 0)
+            code = self.proven_code(family, venue) if rule["same_code"] else None
+            members.sort(key=lambda row: (-row[1].w_paper, row[0].id))
+            for agent, ev in members:
+                verdict = _verdict(agent.id, 1, "a proven family's member", ev)
+                if dates < rule["min_distinct_dates"]:
+                    house._promotion_status(agent, verdict, "family_dates",
+                                            f"its family {family} is proven on {record.get('n')} independent settlements that span "
+                                            f"{dates} distinct settlement dates: a member is seated on the family's proof once they "
+                                            f"span {rule['min_distinct_dates']} (allocator.proven_family_member)",
+                                            family_dates=dates)
+                    continue
+                if code is not None and agent.code_sha256 != code["code"]:
+                    held = (f"no one program entered more than half of the family's {code['of']} settled observations"
+                            if code["code"] is None else
+                            f"it runs {agent.code_sha256[:8]}, not the family's proven code {code['code'][:8]} (which entered "
+                            f"{code['events']} of its {code['of']} settled observations)")
+                    house._promotion_status(agent, verdict, "family_code",
+                                            f"{held}: only a member running the proven code is seated on the family's proof "
+                                            "(allocator.proven_family_member)")
+                    continue
+                proof = (f"its family {family} is proven over {record.get('n')} independent settlements on {dates} distinct dates"
+                         + (f" and it runs the code that entered {code['events']} of them ({code['code'][:8]})" if code else ""))
+                out.append((agent, ev, f"seated on its family's proof (allocator.proven_family_member): W_paper {ev.w_paper:.4f} on "
+                                       f"{ev.paper_trades} closed practice trades; {proof}"))
+        return out
+
+    def _member_seat_free(self, agent: Any, ev: Evidence) -> bool:
+        """Whether the agent's family holds fewer than `economy.proven_family_members` living members on real money now (M3);
+        when it does not, the member's promotion status says so."""
+        cap = int(((getattr(self.house, "game", None) or {}).get("economy") or {}).get("proven_family_members") or 0)
+        seated = self._members_real(agent.family, agent.venue)
+        if seated < cap:
+            return True
+        self.house._promotion_status(agent, _verdict(agent.id, 1, "a proven family's member", ev), "family_seats",
+                                     f"its family {agent.family} already holds {seated} of its {cap} seats on real money "
+                                     "(allocator.proven_family_member; game.json economy.proven_family_members)")
+        return False
+
     # ------------------------------------------------------------ the probe gate
     def forward(self, family: str) -> tuple[int, float]:
         """(active blocks, summed log growth): the family's pooled forward record as the pass read it (`family_forward`,
@@ -1384,7 +1609,13 @@ class Allocator:
         and of the 12 demotions from rung 2, 3 turned earlier block by block, 2 of them (huang-hd8ff7c-3 and -4) at
         04:02:35Z on a prefix while their record since was at or below zero at every pass. A House that lost
         `allocator.json` reads each hold again at its first pass on the record as it then stands: a hold that had ended
-        and whose record since has fallen back holds again, the safe side. Once a pass a demotion."""
+        and whose record since has fallen back holds again, the safe side. Once a pass a demotion.
+
+        Under `reseat: "bound_since_demotion"` (M5 of the forward-first run, Sept 25, 2026) the record since is read one
+        observation a block PERIOD -- the mean of the family's active blocks of that hour or day (`TradeTape.periods`; a
+        block without one is its own) -- and has turned when `minimum` or more periods have a one-sided `reseat_confidence`
+        (80%) lower bound above zero (`families.bound_gaining`): the members of one program in one hour are one
+        observation, as one event is in the family's proof. `bound_since` keeps (periods, bound) for the gate's words."""
         key = (family, int(seq))
         cached = self._since.get(key)
         if cached is not None:
@@ -1392,20 +1623,37 @@ class Allocator:
         registry = self.house.registry
         with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
             members = [a.id for a in list(registry.agents.values()) if a.family == family]
-        values = [value for member in members for _, _, active, value, began in self._tape.blocks.get(member) or ()
-                  if active and began > seq]
-        blocks, growth = len(values), math.fsum(values)
-        self._since[key] = (families.gaining(blocks, growth, minimum), blocks, growth)
+        rows = [(member, block, value) for member in members for block, _, active, value, began in self._tape.blocks.get(member) or ()
+                if active and began > seq]
+        blocks, growth = len(rows), math.fsum(value for _, _, value in rows)
+        rule = families.probe_rule()
+        if rule is not None and rule.get("bound"):
+            periods: dict[str, list[float]] = {}
+            for member, block, value in rows:
+                periods.setdefault(self._tape.periods.get((member, block)) or f"#{block}", []).append(value)
+            series = [math.fsum(v) / len(v) for v in periods.values()]
+            turned, bound = families.bound_gaining(series, minimum, rule["confidence"])
+            self._bound_since[key] = (len(series), bound)
+        else:
+            turned = families.gaining(blocks, growth, minimum)
+            self._bound_since.pop(key, None)
+        self._since[key] = (turned, blocks, growth)
         return self._since[key]
 
     def _fold_demotions(self) -> None:
         """Fold the ledger's probe demotions since the last fold into `state["probe_holds"]` (`fold_demotions`); the first
-        fold reads the whole ledger, so the holds are the ledger's and a restart forgets nothing."""
+        fold reads the whole ledger, so the holds are the ledger's and a restart forgets nothing. The holds were pruned
+        under the `reseat` rule they carry: under another (M5's deploy, Sept 25, 2026: "gain_since_demotion" to
+        "bound_since_demotion") the whole ledger is folded again, so every demotion a turn under the old rule released is
+        judged again under the new one (the T0 snapshot: crypto-15m-doge-flat-spot-no, crypto-15m-lab-335592 and
+        crypto-15m-prior-window-reset had turned on sums with 80% bounds below zero)."""
         rule = families.probe_rule()
         if rule is None or not rule["hold"]:
             return
         with self._lock:
             kept = dict(self.state.get("probe_holds") or {})
+        if kept.get("reseat", "gain_since_demotion") != rule["reseat"]:
+            kept = {}
         holds = {family: (list(v) if isinstance(v, list) else [dict(v)]) for family, v in (kept.get("families") or {}).items() if v}
         states = dict(kept.get("states") or {})
         registry = self.house.registry
@@ -1416,10 +1664,11 @@ class Allocator:
 
         last = fold_demotions(self.house.ledger.iter(kinds=("eval.verdict", "family.record"), after=int(kept.get("cursor") or 0)),
                               holds, states, family_of)
-        if last is None:
+        if last is None and kept:
             return
         with self._lock:
-            self.state["probe_holds"] = {"cursor": last, "families": holds, "states": states}
+            self.state["probe_holds"] = {"cursor": last if last is not None else int(kept.get("cursor") or 0), "families": holds,
+                                         "states": states, "reseat": rule["reseat"]}
 
     def _prune_holds(self) -> None:
         """Drop the demotions whose family record has turned since (`_turned`): a turn is for good, so a hold that ended
@@ -1456,7 +1705,10 @@ class Allocator:
         for demotion in demotions:
             turned, blocks, growth = self._turned(family, int(demotion["seq"]), rule["losing_min_blocks"])
             if not turned:
-                pending.append({**demotion, "blocks": blocks, "growth": growth})
+                row = {**demotion, "blocks": blocks, "growth": growth}
+                if rule.get("bound"):  # M5: the record since, one observation a block period, and its lower bound
+                    row["periods"], row["bound"] = self._bound_since.get((family, int(demotion["seq"])), (0, None))
+                pending.append(row)
         if not pending:
             return None
         return {**pending[0], "pending": len(pending)}
@@ -1506,6 +1758,15 @@ class Allocator:
         if gate["gate"] == "unreadable":
             return "family_unreadable", (f"the probe gate could not be read this pass ({gate['why']}): no probe is seated "
                                          "until it can be (allocator.family_probe)")
+        if "periods" in gate:
+            # M5 (Sept 25, 2026): the record since, one observation a block period, must have its 80% lower bound above zero.
+            bound = "no bound yet" if gate.get("bound") is None else f"bound {gate['bound']:+.6f}"
+            rule = families.probe_rule() or {}
+            return "family_held", (f"{gate['agent']}, a probe of its family {agent.family}, went back to practice at {gate['at']}: "
+                                   f"no probe is seated from the family until its pooled forward record since then has a one-sided "
+                                   f"{float(rule.get('confidence', 0.8)):.0%} lower bound above zero over {gate['minimum']} or more "
+                                   f"block periods (it is {gate['growth']:+.4f} over {gate['blocks']} active blocks in {gate['periods']} "
+                                   f"periods, {bound}; allocator.family_probe)")
         return "family_held", (f"{gate['agent']}, a probe of its family {agent.family}, went back to practice at {gate['at']}: "
                                f"no probe is seated from the family until its pooled forward record since then is positive over "
                                f"{gate['minimum']} active blocks (it is {gate['growth']:+.4f} over {gate['blocks']}; "
@@ -1625,6 +1886,12 @@ class Allocator:
             # too (Sept 24, 2026): a probe cannot hold a smaller contract than a bunt.
             base = max(base, p["option_bunt_usd"])
             p = {**p, "bunt_usd": {**p["bunt_usd"], agent.venue: base}}
+        elif "alpaca_equity" in p["probe_bunt_usd"] and equity_program(agent, niche):
+            # M4 of the forward-first run (Sept 25, 2026): a stock or ETF program's real stake is `probe_bunt_usd.
+            # alpaca_equity` ($50), probe or bunt -- a proven family's bunt is never staked less than an unproven family's
+            # probe of its class, as the options bunt above. Its position stays half the stake (`limits_for`: $25).
+            base = max(base, p["probe_bunt_usd"]["alpaca_equity"])
+            p = {**p, "bunt_usd": {**p["bunt_usd"], agent.venue: base}}
         if band in ("swing", "star") and ev is not None:
             stake = swing_stake(ev, self.capital(agent.venue), p)
             if swing:
@@ -1641,6 +1908,8 @@ class Allocator:
             probe = p["probe_bunt_usd"].get(agent.venue, p["bunt_usd"].get(agent.venue, _d("10")))
             if niche is not None and niche.asset_class == "option":
                 probe = max(probe, p["option_bunt_usd"])
+            elif "alpaca_equity" in p["probe_bunt_usd"] and equity_program(agent, niche):
+                probe = max(probe, p["probe_bunt_usd"]["alpaca_equity"])  # M4: a stock program's probe
             stake = min(stake, probe)
         if self.state.get("throttle"):
             # Halved, but never under the smallest stake that can still trade: a position is at most
@@ -1814,7 +2083,14 @@ class Allocator:
                     ups.append((ev.e, agent, ev, band, why))
             ups.sort(key=lambda row: -row[0])
             displaced_at: set[str] = set()
-            for _, agent, ev, band, why in ups:
+            # M3 (Sept 25, 2026; `allocator.proven_family_member`): after the moves up on their own E, a proven family's
+            # practice members seated on the family's proof, best W_paper first, while the family has seats left.
+            moves = [(agent, ev, band, why, False) for _, agent, ev, band, why in ups]
+            try:
+                moves += [(agent, ev, "bunt", why, True) for agent, ev, why in self._member_ups(living, evid, {row[1].id for row in ups}, p)]
+            except Exception as exc:  # noqa: BLE001 - the members' route is a second door; a fault in it never stops the pass
+                self._family_error("the proven families' members", "", exc, then="no member is seated on its family's proof this pass")
+            for agent, ev, band, why, on_proof in moves:
                 if not live_ok.get(agent.venue):
                     continue
                 since = self.paused_since(agent.id)
@@ -1825,7 +2101,10 @@ class Allocator:
                                             f"its entries are paused (since {now_iso(lambda: since)}): a paused agent is promoted to "
                                             "no real band; resume_entries lets the allocator weigh it again")
                     continue
-                if band == "bunt":
+                if on_proof:
+                    if house.evaluator.rung(agent.id) == 1 and self._member_seat_free(agent, ev):
+                        self._bunt(agent, ev, why, p, summary, displaced_at, extra={"rule": "allocator.proven_family_member"})
+                elif band == "bunt":
                     self._bunt(agent, ev, why, p, summary, displaced_at)
                 elif band == "swing":
                     self._swing(agent, ev, why, summary)
@@ -1901,7 +2180,10 @@ class Allocator:
         # The last board's band while it is still the agent's rung's (a star is a swing); else the rung's.
         return band if band is not None and RUNG_OF.get(band) == ev.rung else band_of_rung(ev.rung)
 
-    def _bunt(self, agent: Any, ev: Evidence, why: str, p: Mapping[str, Any], summary: dict[str, Any], displaced_at: set[str]) -> None:
+    def _bunt(self, agent: Any, ev: Evidence, why: str, p: Mapping[str, Any], summary: dict[str, Any], displaced_at: set[str],
+              extra: Mapping[str, Any] | None = None) -> None:
+        """Paper -> a probe, a bunt or (a swinging family's newcomer) its member. `extra`: what rides on the promotion's
+        numbers (M3: the rule that seated a member on its family's proof)."""
         house = self.house
         venue = agent.venue
         stake = self.target_stake(agent, "bunt", ev)  # what `seat` will lend: the same target
@@ -1973,7 +2255,7 @@ class Allocator:
                                     f"the {venue} account's free cash cannot take another ${stake} stake now")
             return
         tier = self.rung2_band(agent)  # "probe", "bunt", or "swing" for a swinging family's newcomer (C2, Sept 24, 2026)
-        numbers = self._numbers(ev, "paper", tier, stake, why, agent)
+        numbers = {**self._numbers(ev, "paper", tier, stake, why, agent), **dict(extra or {})}
         house.evaluator.promote(agent.id, 2, f"{tier}: {why}; {self._family_note(agent)}", numbers)
         if source is not None:
             house._move_books(agent, source)  # winds the paper account down; seat() lends the bunt stake
