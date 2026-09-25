@@ -69,7 +69,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
 | H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
-| H2 | A vendor's outage never rolls back a release | built, PR #307 (CI green); adversarial review running |
+| H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
 | A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
@@ -306,6 +306,17 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   ($14.19); engineer 155 of 207 ($16.98); consultant 23 of 112 (30 led to a replay-passed candidate). The consultant
   looks productive by outcome while F4's forward-lift reading says no lift: the pause decision reads both. Jev builds
   no pre-filter (it does not beat these free rules).
+
+- **H2 review (two lenses, then a skeptic-fixer).** Found the hole the plan did not foresee: marking the TRADING
+  path's failures as environment (a wake's box run, `_wake_safely`, the venue polls) let a release that breaks every
+  wake with a service-shaped error be promoted: e.g. `wake_workers` 6 -> 32 makes Sail answer 429 to every box run, or
+  a 2 s order-path timeout makes every wake time out at the gateway; the repeat escalation was the only signal that
+  caught either, and it carried the marker. Fixed: those four sites are unmarked again (the backup, publish, updater,
+  background jobs, replay, fork, retire, Sail's runway and the gateway meters stay marked, where a rollback cannot
+  help); `service_failed` now follows `__context__` only under `raise ... from None` (a BookError or RuntimeError raised
+  inside a timeout handler was being marked). Tests: every box run refused with 429 rolls back; a wake timing out at
+  the gateway rolls back and a canary refuses it. Open, low: HTTP 5xx from the venue and data clients carries no
+  status (they err toward rollback, as before); a bare builtin `TimeoutError` still reads as a service's.
 
 ## Progress notes
 
