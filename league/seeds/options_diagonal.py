@@ -1,4 +1,4 @@
-# options-diagonal: in a stock's trend, sell a 1-3 day option and own a 5-11 day one at a better strike (a diagonal).
+# options-diagonal: in a stock's trend, sell a 1-4 day option and own a 5-11 day one at a better strike (a diagonal).
 #
 # THE IDEA. An option loses its time value fastest in its last days. Short the near option `entry_delta` out of the
 # money in the trend's direction and own a later one at least `width` nearer the money: the near leg's decay pays
@@ -133,8 +133,8 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-diagonal", "asse
                                         "exit_dte": [0, 3], "max_open": [1, 3], "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05],
                                         "trend_days": [10, 30], "slope_days": [1, 10], "both_sides": [0, 1]},
                              "ordered": [["dte_min", "dte_max"], ["near_dte_min", "near_dte_max"]]}}
-PARAMS = {"structure": "diagonal", "width": 0.5, "dte_min": 5, "dte_max": 11, "near_dte_min": 1, "near_dte_max": 3, "entry_delta": 0.3,
-          "profit_target": 0.4, "stop_loss": 0.5, "exit_minutes_before_close": 120, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 60.0,
+PARAMS = {"structure": "diagonal", "width": 0.5, "dte_min": 5, "dte_max": 11, "near_dte_min": 1, "near_dte_max": 4, "entry_delta": 0.35,
+          "profit_target": 0.4, "stop_loss": 0.5, "exit_minutes_before_close": 120, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 75.0,
           "slip": 0.01, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "both_sides": 1, "entry_start": 600, "entry_end": 840}
 
 def _diagonal(ctx, under, bullish, kind, p, ny, budget):
