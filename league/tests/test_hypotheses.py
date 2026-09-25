@@ -761,6 +761,7 @@ class Gates(FoundryCase):
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
+        self.clock.advance(float(self.house.settings.house_job_seconds))  # the foundry steps once a minute (H5), inside its cadence
         self.house.tick()
         self.house.wait()
         self.assertEqual(len(self.frontier.asked), 1)
