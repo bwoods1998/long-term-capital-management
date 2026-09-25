@@ -48,7 +48,9 @@ rules (`league/options_shadow.py`), each HELD AS ONE POSITION at S = net value +
   conservative bid. At most `max_participation` of each leg's bar volume for the leg's contracts
   (quantity x ratio), one contract on a quote alone (its size was not recorded); all or nothing;
   `fee_per_contract_usd` a contract a leg a fill; day orders. Marks at the structure's SHOWN bid.
-- Opens are refused from 14:30 New York on the earliest expiry day; from 15:30 the House offers the
+- Opens are refused from 14:30 New York on the earliest expiry day, and a RESTING open of a structure
+  expiring today is cancelled at that cut (after the bar closing at it is worked), as the House cancels
+  it live; closes stay. From 15:30 the House offers the
   structure at its conservative bid (at least a cent), re-priced each step; what is still held at that
   session's end is SETTLED -- at `intrinsic` on the underlying's close (one expiry), or at the far
   legs' bid less the near legs' intrinsic (a calendar or diagonal) -- never written off at zero. A
@@ -108,7 +110,7 @@ class _Book:
         self.held: dict[str, dict[str, Any]] = {}     # structures held, by code (the held instrument's market_id)
         self.sorders: dict[str, dict[str, Any]] = {}  # structure orders, by order id
         self.seq = self.fills = self.refused = self.expired_orders = self.written_off = self.forced = 0
-        self.settled = self.not_evaluated = self.structures_opened = self.structures_closed = self.unseen = 0
+        self.settled = self.not_evaluated = self.structures_opened = self.structures_closed = self.unseen = self.cut_opens = 0
         self.fees_usd = 0.0
         self.reasons: dict[str, int] = {}
         self.trade_returns: list[float] = []
@@ -693,6 +695,15 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                         quote_fills += 1
         if book.sorders:
             structure_work(now)
+            # The House's entry cut (`House._cancel_structure_opens_at_cut`, review of Sept 25, 2026): from the
+            # cut (14:30 New York, 90 minutes before an early close) no OPEN of a structure expiring today
+            # rests; the bar that closed at the cut was worked first (it traded before the cut). Closes stay.
+            moment = _ny(now_ts)
+            if moment.hour * 60 + moment.minute >= structure_hours(today)[0]:
+                for order_id in [k for k, o in book.sorders.items() if o["side"] == "buy" and o["spec"].expiry <= today]:
+                    del book.sorders[order_id]
+                    book.expired_orders += 1
+                    book.cut_opens += 1
         for order_id in [k for k, o in book.orders.items() if now_ts >= o["expires_ts"]]:
             del book.orders[order_id]
             book.expired_orders += 1
@@ -846,6 +857,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         result["options"]["structures"] = {
             "opened": book.structures_opened, "closed": book.structures_closed, "settled_at_expiry": book.settled,
             "not_evaluated": book.not_evaluated, "unseen_leg_refusals": book.unseen, "house_close_offers": house_offers,
+            "opens_cancelled_at_the_cut": book.cut_opens,
             "candidates_shown": structures_shown,
             "execution": ("structures: later bars only; every leg printed in the bar or quoted after the decision; long legs at "
                           "the conservative ask and short legs at the conservative bid to open, the reverse to close; "

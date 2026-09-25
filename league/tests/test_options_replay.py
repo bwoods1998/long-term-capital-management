@@ -848,6 +848,38 @@ class Structures(unittest.TestCase):
         before = srun(steps, VERTICAL, legs=VLEGS, open_at="2026-09-25T18:15:00Z", limit=0.70)
         self.assertEqual(before["fills"], 1)  # 14:15 New York: still open for entries
 
+    def test_a_resting_zero_day_open_does_not_fill_after_the_cut(self):
+        """The review's ReplayEntryCut (Sept 25, 2026): the House cancels a RESTING open of a structure expiring
+        today at the 14:30 cut (`House._cancel_structure_opens_at_cut`); the replay used to refuse only NEW opens,
+        so a 0-DTE open placed at 14:15 still filled at 14:45."""
+        steps = [sstep("2026-09-25T18:15:00Z", {socc(585): 1.20, socc(586): 0.70}),  # 14:15 NY: rests (ask 0.576 > 0.50)
+                 sstep("2026-09-25T18:30:00Z", {socc(585): 1.20, socc(586): 0.70}),  # 14:30: the cut
+                 sstep("2026-09-25T18:45:00Z", {socc(585): 1.00, socc(586): 0.65})]  # 14:45: conservative ask 0.416
+        r = run_replay(STRUCTURE_STRATEGY, {"legs": VLEGS, "open_at": "2026-09-25T18:15:00Z", "limit": 0.50},
+                       stape(steps, VERTICAL), stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual([f for f in r["fill_log"] if f["side"] == "buy"], [])
+        self.assertEqual((r["options"]["structures"]["opens_cancelled_at_the_cut"], r["expired_orders"]), (1, 1))
+        # the bar that CLOSES at the cut traded before it: an open marketable there still fills
+        steps[1] = sstep("2026-09-25T18:30:00Z", {socc(585): 1.00, socc(586): 0.65})
+        r = run_replay(STRUCTURE_STRATEGY, {"legs": VLEGS, "open_at": "2026-09-25T18:15:00Z", "limit": 0.50},
+                       stape(steps, VERTICAL), stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual([(f["t"], f["side"]) for f in r["fill_log"] if f["side"] == "buy"], [("2026-09-25T18:30:00Z", "buy")])
+        # a structure expiring LATER keeps its resting open past today's cut; a resting close is never cut
+        later = [{"occ": socc(585, expiry="260928"), "role": "long"}, {"occ": socc(586, expiry="260928"), "role": "short"}]
+        codes = [socc(585, expiry="260928"), socc(586, expiry="260928")]
+        steps = [sstep("2026-09-25T18:15:00Z", {codes[0]: 1.20, codes[1]: 0.70}), sstep("2026-09-25T18:30:00Z", {codes[0]: 1.20, codes[1]: 0.70}),
+                 sstep("2026-09-25T18:45:00Z", {codes[0]: 1.00, codes[1]: 0.65})]
+        r = run_replay(STRUCTURE_STRATEGY, {"legs": later, "open_at": "2026-09-25T18:15:00Z", "limit": 0.50},
+                       stape(steps, codes), stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual([(f["t"], f["side"]) for f in r["fill_log"]], [("2026-09-25T18:45:00Z", "buy")])
+        steps = [sstep("2026-09-25T17:45:00Z", VPRICES), sstep("2026-09-25T18:00:00Z", VPRICES), sstep("2026-09-25T18:15:00Z", VPRICES),
+                 sstep("2026-09-25T18:30:00Z", VPRICES), sstep("2026-09-25T18:45:00Z", {socc(585): 1.60, socc(586): 0.85})]
+        r = run_replay(STRUCTURE_STRATEGY, {"legs": VLEGS, "open_at": "2026-09-25T17:45:00Z", "limit": 0.60,
+                                            "close_at": "2026-09-25T18:15:00Z", "close_limit": 0.60}, stape(steps, VERTICAL),
+                       stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual([(f["t"], f["side"]) for f in r["fill_log"]], [("2026-09-25T18:00:00Z", "buy"), ("2026-09-25T18:45:00Z", "sell")])
+
     def test_an_early_close_moves_the_entry_cut_and_the_house_close(self):
         # 13:00 New York bell (the tape carries the House calendar's early closes): cut 11:30, close 12:30
         steps = [sstep("2026-09-25T15:15:00Z", VPRICES), sstep("2026-09-25T15:30:00Z", VPRICES), sstep("2026-09-25T15:45:00Z", VPRICES),
