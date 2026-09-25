@@ -50,7 +50,7 @@ import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 from zoneinfo import ZoneInfo
 
 NY = ZoneInfo("America/New_York")
@@ -111,16 +111,29 @@ STRUCTURE_BAND = 0.20
 #: (168 bytes a bar) and 170 MB resident (301 bytes a bar; 184 MB at the build's peak), 9.3 s of CPU. With every expiry of
 #: SPY, QQQ and IWM ingested (`DAILY_EXPIRIES`) it will grow: the recorder's snapshots of Sept 25 show a weekday expiry
 #: trading 0.36-1.16 times its Friday's (4.2 Fridays a week in all), and a reach shared by five expiries was measured as
-#: one a fifth as wide on the weekly store (354,246 bars, 383 bytes a bar resident): some 1.5 M bars for the whole window,
-#: 450-570 MB. So 800,000 bars at most: some 140 MB live and at most 240-310 MB resident, one tape under ~300 MB; over it
-#: the OLDEST steps go (`bounded`), which for a 0-7 day SPY/QQQ/IWM tape of every expiry is estimated to keep the last two
-#: to three months of the House's four.
+#: one a fifth as wide on the weekly store (354,246 bars, 383 bytes a bar resident): an ESTIMATE of some 1.5 M bars for the
+#: whole window. So 800,000 bars at most; over it the OLDEST steps go (`bounded`), which for a 0-7 day SPY/QQQ/IWM tape of
+#: every expiry is estimated to keep the last two to three months of the House's four.
+#: The cap is applied BEFORE any bar is read (the review of G-LOOP, Sept 25, 2026: applied after the build, a tape capped
+#: at 150,000 bars still peaked at the uncapped 184 MB and kept 141 MB resident): `_structure_reach` counts what each step
+#: would keep and `tape` reads bars only after the last step the cap drops. What a build then holds is the kept bars (168
+#: bytes a bar live, 239-383 resident: some 135 MB live and 190-310 MB resident at the cap) plus the reach walk's own index
+#: of the prints (4 bytes a print, a few hundred bytes a contract: 11 MB at its peak for the 768,652 prints above). Measured
+#: after the fix on the same copy and window (`pin.py`, `measure_tape.py`): uncapped, 565,906 bars, peak RSS 151 MB (135 MB
+#: resident, 8.3 s of CPU); capped at 150,000, 149,875 bars kept and a peak of 101 MB, where the review measured 184 MB for
+#: both. The weekly store only: no copy holds every expiry yet, so that peak is to be measured on the box after the backfill.
 STRUCTURE_TAPE_MAX_BARS = 800_000
 #: A structure agent is shown the 80 contracts of an underlying nearest the money (`House._chain`, `options_replay`
 #: STRUCTURE_CHAIN_PER_UNDERLYING), across every expiry it may trade. A structure tape keeps a contract's bars only if it
 #: is ever among the `STRUCTURE_REACH` nearest (twice the 80: a leg a strategy names a few strikes past what it was shown
 #: still has its market) of what the replay's chain could show at a step, from `STRUCTURE_LEAD_BARS` prints (the spread
 #: estimate's `range_bars`) and the start of its New York day before it first is (`_structure_reach`, G-LOOP, Sept 25, 2026).
+#: It is also a RULE, the same live and in replay (the review of G-LOOP, Sept 25, 2026): a structure is opened only when
+#: every leg is among the `STRUCTURE_REACH` contracts of its underlying nearest the money that the chain could show at that
+#: moment (`House._structure_reach_refusal`, `options_replay`). Without the rule, a leg past the reach was priced on a
+#: reach-filtered tape only when the underlying LATER came near it (a look-ahead: the review's demonstration kept the
+#: winning side of two far verticals and refused the losing one, in either direction); with it, which legs a structure
+#: may name at a step depends only on the chain up to that step, and a tape keeps every bar such a leg could need.
 STRUCTURE_REACH = 160
 STRUCTURE_LEAD_BARS = 5
 #: The replay's structure entry cut, New York minutes (`options_replay.STRUCTURE_ENTRY_CUT`, `House._structure_hours`).
@@ -136,6 +149,23 @@ DAILY_EXPIRIES = ("SPY", "QQQ", "IWM")
 #: store's `max_days` (45), as before. It holds the daily ingest to about a third of the 4.5 M bars (0.8-1 GB) the study
 #: estimated for every expiry at 45 days.
 DAILY_MAX_DAYS = 14
+#: The most days to expiry a STRUCTURE program trading any of `DAILY_EXPIRIES` is shown (`structure_days`: the House's
+#: chain, the tape and the replay alike): a weekday expiry's bars start `DAILY_MAX_DAYS` days before it, and a tape reads
+#: a contract from four days before it may be shown (its spread estimate's history), so 10. Asking more, a program would
+#: see Monday-Thursday expiries live from its `max_days_to_expiry` out and in replay only from 14 days out, without their
+#: spread history (the review of G-LOOP, Sept 25, 2026). Every living structure agent that day asked 10 or fewer.
+DAILY_SHOWN_DAYS = DAILY_MAX_DAYS - 4
+
+
+def structure_days(asked: Any, symbols: Iterable[Any]) -> int:
+    """How many days of expiries a STRUCTURE program with this `max_days_to_expiry` and these symbols is shown: its own
+    answer (7 when unstated; 0 is a 0-DTE strategy's own answer, not "unsaid"), 45 at most, and `DAILY_SHOWN_DAYS` at
+    most when any of its first eight symbols has every expiry ingested (`DAILY_EXPIRIES`). `House._structure_context`,
+    `OptionsHistory.tape` and `options_replay` all read it, so the live chain and the replay's agree."""
+    days = max(0, min(int(7 if asked is None else asked), 45))
+    if any(str(s).upper() in DAILY_EXPIRIES for s in list(symbols or [])[:8]):
+        days = min(days, DAILY_SHOWN_DAYS)
+    return days
 #: Alpaca charges no options commission (`league/fees.py`); the regulatory and clearing
 #: pass-through (ORF, OCC, TAF) is not yet measured on this account. Assumed, per contract per fill.
 FEE_PER_CONTRACT_USD = 0.05
@@ -143,6 +173,15 @@ FEE_PER_CONTRACT_USD = 0.05
 
 class HistoryError(RuntimeError):
     """The venue refused or could not answer; the chunk stays unfinished."""
+
+
+class StructureReach(NamedTuple):
+    """What `OptionsHistory._structure_reach` found: occ -> the first bar kept; occ -> the step it was first among the
+    reach; the last step the bar cap drops (None: none); the bars the tape would hold uncapped."""
+    keep: dict[str, str]
+    reached: dict[str, str]
+    after: str | None
+    total: int
 
 
 # ------------------------------------------------------------------------------ small helpers
@@ -806,24 +845,43 @@ class OptionsHistory:
         return out
 
     # -- the options desk's replay tape ------------------------------------------------------------
+    def _every_expiry(self, symbol: str, execution: str, start: str, end: str) -> bool:
+        """Whether a tape of `symbol` over [start, end] carries every expiry, not its weekly ones alone: always, unless the
+        store's coverage of it is weekly -- recorded, yet not with every expiry across the window (`covers`; the G-LOOP
+        review of Sept 25, 2026: while SPY, QQQ and IWM are backfilled with every expiry, a tape carries their Fridays
+        alone, as it did before, rather than weekdays for part of its window). A store with no coverage row at all (a
+        test's) is taken as it is."""
+        if not self.coverage(symbol):
+            return True
+        return bool(self.covers([symbol], execution, start, end, every_expiry=True)) or not self.covers([symbol], execution, start, end)
+
     def _structure_reach(self, symbols: Sequence[str], listings: Mapping[str, Mapping[str, Mapping[str, Any]]],
                          closes: Mapping[str, Sequence[tuple[str, float]]], step_times: set[str], execution: str, start: str,
-                         end: str, days: int, live: Mapping[str, Any], hours: Mapping[str, Sequence[int]]) -> dict[str, str]:
-        """occ -> the first bar a structure tape keeps of it, for the contracts its chain could ever REACH; none else.
+                         end: str, days: int, live: Mapping[str, Any], hours: Mapping[str, Sequence[int]], *,
+                         model: Mapping[str, Any] | None = None, cap: int | None = None) -> StructureReach:
+        """Which contracts a structure tape keeps, from when, and where its bar cap cuts it (G-LOOP, Sept 25, 2026).
 
-        G-LOOP (Sept 25, 2026). With every expiry of SPY, QQQ and IWM ingested (`DAILY_EXPIRIES`), a 0-7 day structure
-        tape over the House's window was estimated at 4-5 times today's 768,652 bars (282 MB resident, measured on the
-        local copy): some 1.4 GB, for a House killed for memory at 14:37Z that day. Yet a structure agent is shown only
-        the 80 contracts of an underlying nearest the money, across all its expiries, and a contract never shown is
-        never held. So this walks the steps as `options_replay` does -- the same bars (qualifying prints inside the
-        tape's band and each contract's `days + 4`), a contract listed from its print within the quote age (or a
-        recorded quote no older than its print), a bid shown, the expiry rules (none past, today's only before the
-        entry cut, at most `days` out), the chain's 20% around the underlying's last close -- and keeps each contract
-        that is ever among the `STRUCTURE_REACH` nearest (ties as the replay breaks them), from `STRUCTURE_LEAD_BARS`
-        prints and the start of its New York day before its first such step: its spread estimate, its day's volume and
-        its quote are then what the whole tape would have given it. A strategy that trades what it was shown replays on
-        the kept bars exactly as on all of them (`test_structure_loop`); a leg named far outside the chain may find no
-        market and is not evaluated, never filled."""
+        With every expiry of SPY, QQQ and IWM ingested (`DAILY_EXPIRIES`), a 0-7 day structure tape over the House's window
+        was estimated at 4-5 times today's 768,652 bars (282 MB resident, measured on the local copy): some 1.4 GB, for a
+        House killed for memory at 14:37Z that day. Yet a structure agent is shown only the 80 contracts of an underlying
+        nearest the money, across all its expiries, and may open a structure only on legs among the `STRUCTURE_REACH`
+        nearest at that moment (the rule, live and in replay). So this walks the steps as `options_replay` does -- the same
+        bars (qualifying prints inside the tape's band and each contract's `days + 4`), a contract listed from its print
+        within the quote age (or a recorded quote no older than its print), a bid shown (`display_quote` on the tape's own
+        spread model), the expiry rules (none past, today's only before the entry cut, at most `days` out), the chain's 20%
+        around the underlying's last close -- and ranks, at every step, the `STRUCTURE_REACH` nearest (ties as the replay
+        breaks them). Returned:
+
+        - `keep`: occ -> the first bar kept, for each contract that is ever among them: `STRUCTURE_LEAD_BARS` prints and the
+          start of its New York day before its first such step, so its spread estimate, its day's volume and its quote are
+          then what the whole tape would have given it. No other contract's bar is kept.
+        - `reached`: occ -> that first step. The replay lists a contract, and lets a leg be opened, only from it (and only
+          while it is among the nearest), so a bar kept for a later reach is never shown or traded before it: nothing a
+          strategy sees or may open at a step depends on where the market went after it (the review of G-LOOP: without
+          this, a far leg was priced only when the underlying later came near it).
+        - `after`, `total`: with `cap`, the last step whose bars the cap drops (the OLDEST go: `bounded`), None when all fit,
+          and how many bars the tape would hold uncapped. Counted here so `tape` never reads a dropped bar (the review:
+          a cap applied after the build bounded neither the build's peak memory nor what the process kept)."""
         import heapq
         from array import array
         from collections import deque
@@ -862,7 +920,7 @@ class OptionsHistory:
                         codes.append(occ)
                         info.append((symbol, float(row["strike"]), str(row["expiry"]), _day(row["expiry"])))
                     code = ident[occ] + 1
-                    prints.setdefault(t, array("i")).append(-code if c is None or display_quote(float(c))[0] is None else code)
+                    prints.setdefault(t, array("i")).append(-code if c is None or display_quote(float(c), model)[0] is None else code)
         ordered = sorted(times)
         quoted: dict[str, list[tuple[int, float]]] = {}  # step stamp -> (id, the quote's stamp): the last in (previous step, step]
         names = list(ident)
@@ -882,8 +940,9 @@ class OptionsHistory:
         seen: dict[int, tuple[float, bool]] = {}  # id -> (its last print's stamp, its shown bid was None)
         recorded: dict[int, float] = {}  # id -> its last recorded quote's stamp
         recent: deque[tuple[float, list[int]]] = deque()  # (stamp, ids printed or quoted then), within the quote age
-        lead: dict[int, deque[str]] = {}  # id -> the stamps of its last prints before it is first reached
-        out: dict[str, str] = {}
+        lead: dict[int, list[str]] = {}  # id -> the stamps of its last prints before it is first reached
+        keep: dict[int, str] = {}  # id -> the first bar kept
+        reached: dict[str, str] = {}
         for t in ordered:
             now = _ts(t)
             moment = datetime.fromtimestamp(now, NY)
@@ -894,8 +953,11 @@ class OptionsHistory:
                 number = abs(code) - 1
                 seen[number] = (now, code < 0)
                 touched.append(number)
-                if codes[number] not in out:
-                    lead.setdefault(number, deque(maxlen=STRUCTURE_LEAD_BARS)).append(t)
+                if number not in keep:
+                    stamps_before = lead.setdefault(number, [])
+                    stamps_before.append(t)
+                    if len(stamps_before) > STRUCTURE_LEAD_BARS:
+                        del stamps_before[0]
             for number, stamp in quoted.get(t, ()):
                 recorded[number] = stamp
                 touched.append(number)
@@ -921,10 +983,24 @@ class OptionsHistory:
                     ranked.setdefault(symbol, []).append((distance, expiry, codes[number], number))
             for rows in ranked.values():
                 for _, _, occ, number in heapq.nsmallest(STRUCTURE_REACH, rows):
-                    if occ not in out:
+                    if number not in keep:
                         day = iso(datetime.combine(moment.date(), datetime.min.time(), NY).timestamp())
-                        out[occ] = min([day, *(lead.pop(number, None) or (t,))])
-        return out
+                        keep[number] = min([day, *(lead.pop(number, None) or (t,))])
+                        reached[occ] = t
+        # What the tape would hold (a print kept from its contract's first kept bar on), and where the cap cuts it.
+        counts: dict[str, int] = {}
+        for t, batch in prints.items():
+            n = sum(1 for code in batch if keep.get(abs(code) - 1, "~") <= t)
+            if n:
+                counts[t] = n
+        total, after, held = sum(counts.values()), None, 0
+        if cap is not None and total > cap:
+            for t in sorted(counts, reverse=True):
+                held += counts[t]
+                if held > cap:
+                    after = t  # this step's bars and every earlier one's are dropped
+                    break
+        return StructureReach({codes[number]: stamp for number, stamp in keep.items()}, reached, after, total)
 
     def tape(self, needs: Mapping[str, Any], start: str, end: str, *, horizon: str, underlier_bars: Callable[..., list[dict[str, Any]]],
              warmup: int = 70, execution: str = "15Min", max_order_usd: float = 75.0, spread: Mapping[str, Any] | None = None,
@@ -943,15 +1019,20 @@ class OptionsHistory:
         within the chain's 20% of the underlying's last close then (`STRUCTURE_BAND`), which bounds a
         month of SPY, QQQ and IWM 0-7 day contracts to about 80,000, 75,000 and 25,000 bars (measured on
         the local copy, Sept 25, 2026). Of those it keeps only the contracts its chain could ever reach, from a few prints
-        before they first could (`_structure_reach`, G-LOOP, Sept 25, 2026: `reached` says how many). A structure tape is
-        also held to `STRUCTURE_TAPE_MAX_BARS` option bars (`max_option_bars`): over it, the OLDEST steps are dropped
-        (their signal bars joining the warmup) and the tape says so under `bounded`."""
+        before they first could, each carrying the step it first could (`reached`: the replay lists and trades it only from
+        then; `_structure_reach`, G-LOOP, Sept 25, 2026). A structure tape is also held to `STRUCTURE_TAPE_MAX_BARS` option
+        bars (`max_option_bars`): over it, the OLDEST steps are dropped (their signal bars joining the warmup), no bar of them
+        is ever read, and the tape says so under `bounded`. A structure agent's days are `structure_days`'s.
+
+        SPY, QQQ and IWM (`DAILY_EXPIRIES`) carry their weekly expiries alone until the store holds every expiry across the
+        tape's window (`covers(every_expiry=True)`): while the backfill runs, part of a window would otherwise show a
+        weekday expiry and the rest not (the review of G-LOOP, Sept 25, 2026). `every_expiry` says which each carries.
+        NEEDS `structures` is read as the House reads it: `True` alone (1 or "true" is a single-contract program)."""
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
-        structural = bool(needs.get("structures"))
+        structural = needs.get("structures") is True  # as `House.is_structure_agent` (the review of G-LOOP, Sept 25, 2026)
         asked = needs.get("max_days_to_expiry")
         # A structure agent's 0 is a 0-DTE strategy's own answer, not "unsaid" (`House._structure_context`).
-        days = (max(0, min(int(7 if asked is None else asked), 45)) if structural
-                else max(2, min(int(asked or 21), 45)))
+        days = structure_days(asked, symbols) if structural else max(2, min(int(asked or 21), 45))
         timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
         afford = float("inf") if structural else float(max_order_usd) / MULTIPLIER
         start_ts, end_ts = _ts(start), _ts(end)
@@ -979,10 +1060,19 @@ class OptionsHistory:
         closes: dict[str, list[tuple[str, float]]] = {s: sorted((t, float(v["execution_bars"][s]["c"])) for t, v in by_time.items()
                                                               if s in v["execution_bars"]) for s in symbols}
         listings = {symbol: {r["occ"]: r for r in self.contracts(symbol, first_day, last_day)} for symbol in symbols}
+        every_expiry = {symbol: self._every_expiry(symbol, execution, iso(start_ts), end) for symbol in symbols if symbol in DAILY_EXPIRIES}
+        for symbol, every in every_expiry.items():
+            if not every:
+                weekly = _weeklies(r["expiry"] for r in self.contracts(symbol, first_day, (_day(last_day) + timedelta(days=6)).isoformat()))
+                listings[symbol] = {occ: r for occ, r in listings[symbol].items() if r["expiry"] in weekly}
+        spread_model = {**SPREAD_MODEL, **dict(spread or {})}
+        cap = STRUCTURE_TAPE_MAX_BARS if max_option_bars is None else int(max_option_bars)
         # A structure tape keeps only the contracts its chain could ever reach (`_structure_reach`): occ -> the first
-        # bar kept. Any other bar is dropped ("~" sorts after every stamp).
+        # bar kept. Any other bar is dropped ("~" sorts after every stamp); so is every bar at or before `floor`, the
+        # last step the cap drops (never read).
         reach = (self._structure_reach(symbols, listings, closes, set(by_time), execution, iso(start_ts), end, days, live,
-                                       structure_hours(first_day, last_day)) if structural else None)
+                                       structure_hours(first_day, last_day), model=spread_model, cap=cap) if structural else None)
+        floor = (reach.after or "") if reach is not None else ""
         for symbol in symbols:
             listed = listings[symbol]
             stamps = [t for t, _ in closes.get(symbol, [])]
@@ -1003,7 +1093,7 @@ class OptionsHistory:
                 # Only bars that can quote or fill ride on the tape (46% of the 15-minute bars
                 # cannot, Sept 22, 2026), as compact rows, read one contract at a time.
                 cur = self.db.execute(f"SELECT occ, t, o, h, l, c, v, n FROM bars WHERE timeframe = ? AND t >= ? AND t <= ? AND occ IN ({marks}) "
-                                      "AND v >= ? AND n >= ? ORDER BY occ, t", (*window, float(live["min_volume"]), int(live["min_trades"])))
+                                      "AND v >= ? AND n >= ? AND t > ? ORDER BY occ, t", (*window, float(live["min_volume"]), int(live["min_trades"]), floor))
                 current, kept = None, []
 
                 def flush(occ: str | None, rows: list[tuple]) -> None:
@@ -1014,7 +1104,8 @@ class OptionsHistory:
                         return
                     row = listed[occ]
                     contracts[occ] = {"underlying": symbol, "expiry": row["expiry"], "strike": row["strike"], "right": row["right"],
-                                      "first_print": first.get(occ) or rows[0][0]}
+                                      "first_print": first.get(occ) or rows[0][0],
+                                      **({"reached": reach.reached[occ]} if reach is not None else {})}
                     for t, o, h, l, c, v, n in rows:
                         step = by_time.get(t)
                         if step is None and _in_session(_ts(t)):
@@ -1030,7 +1121,7 @@ class OptionsHistory:
                         current, kept = occ, []
                         shown_from = _shown_from(listed[occ]["expiry"], days)
                         if reach is not None:
-                            shown_from = max(shown_from, reach.get(occ, "~"))
+                            shown_from = max(shown_from, reach.keep.get(occ, "~"))
                     if t >= shown_from and (not structural or near(t, float(listed[occ]["strike"]))):
                         kept.append((t, o, h, l, c, v, int(n or 0)))
                 flush(current, kept)
@@ -1044,8 +1135,8 @@ class OptionsHistory:
         for i in range(0, len(names), 500):
             group = names[i:i + 500]
             marks = ",".join("?" * len(group))
-            for occ, t, bid, ask in self.db.execute(f"SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? AND occ IN ({marks}) ORDER BY occ, t",
-                                                    (iso(start_ts), end, *group)):
+            for occ, t, bid, ask in self.db.execute(f"SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? AND occ IN ({marks}) AND t > ? "
+                                                    "ORDER BY occ, t", (iso(start_ts), end, *group, floor)):
                 recorded += 1
                 index = bisect.bisect_left(times, t)  # the first step at or after the quote
                 if index < len(times):
@@ -1062,10 +1153,12 @@ class OptionsHistory:
                 cursors[symbol] = index
             steps.append(entry)
         bounded = None
-        cap = STRUCTURE_TAPE_MAX_BARS if max_option_bars is None else int(max_option_bars)
-        total = sum(len(entry["options"]) for entry in steps)
+        kept = sum(len(entry["options"]) for entry in steps)
+        total = reach.total if reach is not None and reach.after else kept
         if structural and total > cap:
-            first, kept = 0, total
+            # The steps the cap drops (`floor`: their bars were never read), then -- only should the reach have counted fewer
+            # bars than were read, which `test_structure_loop` pins never happens -- the oldest of the rest, as before.
+            first = bisect.bisect_right([entry["t"] for entry in steps], floor) if floor else 0
             while first < len(steps) and kept > cap:
                 kept -= len(steps[first]["options"])
                 first += 1
@@ -1080,15 +1173,17 @@ class OptionsHistory:
                        "why": "a structure tape is held to what a box replays well inside its time and memory"}
         coverage = {s: [r for r in self.coverage(s) if r.get("timeframe") == execution] for s in symbols}
         if reach is not None:
-            reached = {"contracts": len(reach), "listed": sum(len(v) for v in listings.values()), "reach": STRUCTURE_REACH,
-                       "why": "a structure tape keeps the contracts its chain could reach, from a few prints before they first could"}
+            reached = {"contracts": len(reach.keep), "listed": sum(len(v) for v in listings.values()), "reach": STRUCTURE_REACH,
+                       "why": ("a structure tape keeps the contracts its chain could reach, from a few prints before they first could; "
+                               "each is listed and traded only from the step it first could (`reached`)")}
         return {
             "venue": "alpaca", "asset_class": "option", "horizon": horizon, "timeframe": timeframe, "execution_timeframe": execution,
             "step_seconds": TIMEFRAMES[execution], "symbols": symbols, "warmup_bars": warmup_bars, "warmup_requested": warmup,
             "half_spread_bps": 1.0, "steps": steps, "contracts": contracts,
-            "chain_rules": ({"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 80, "afford_per_share": None, "structures": True}
+            "chain_rules": ({"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 80, "afford_per_share": None, "structures": True,
+                             "reach": STRUCTURE_REACH}
                             if structural else {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford}),
-            "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": live,
+            "spread_model": spread_model, "liquidity": live,
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
             "recorded_quotes": recorded,
             "provenance": {"options": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "quotes": SPREAD_MODEL["kind"],
@@ -1100,8 +1195,17 @@ class OptionsHistory:
             **({"options_features": self.feature_series(symbols)} if needs.get("options_features") else {}),
             **({"bounded": bounded} if bounded else {}),
             **({"reached": reached} if reach is not None else {}),
+            **({"every_expiry": every_expiry} if every_expiry else {}),
             **({"structure_hours": structure_hours(first_day, last_day)} if structural else {}),
         }
+
+
+def _weeklies(expiries: Iterable[str]) -> set[str]:
+    """The last listed expiry of each ISO week (`ingest`'s `weekly_only`)."""
+    last: dict[tuple[int, int], str] = {}
+    for expiry in sorted(set(expiries)):
+        last[_day(expiry).isocalendar()[:2]] = expiry
+    return set(last.values())
 
 
 def _shown_from(expiry: str, days: int) -> str:

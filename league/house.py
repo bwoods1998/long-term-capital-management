@@ -860,7 +860,7 @@ class House:
         self._health({"at": now_iso(self.clock)})
 
     def _chain(self, symbols: list[str], days: int, afford: float | None, quotes: Mapping[str, Any], *,
-               structures: bool = False) -> list[dict[str, Any]]:
+               structures: bool = False, per_underlying: int | None = None) -> list[dict[str, Any]]:
         """The option contracts an agent may consider: its underlyings, expiring after today and
         within `days`, within a fifth of the underlying's price, two-sided, and affordable in one
         order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list.
@@ -871,7 +871,8 @@ class House:
         from tomorrow after it) to `days` ahead, and at most `STRUCTURE_CHAIN_PER_UNDERLYING` an
         underlying. The venue's chain is read by `_expiry_chain`, shared by every structure agent for two
         minutes: one ranged request an underlying, split by expiry only where the adapter's one call would
-        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain)."""
+        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain). `per_underlying`: another
+        count than 80 or 40 nearest, the same ranking (`_note_structure_reach`'s 160, G-LOOP's review, Sept 25, 2026)."""
         broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
         if broker is None:
             return []
@@ -881,7 +882,8 @@ class House:
             new_york, hour = _new_york(self.clock)
             first = new_york if hour < self._structure_hours(new_york)[0] else _plus_days(new_york, 1)
             last = _plus_days(new_york, days)
-        per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
+        if per_underlying is None:
+            per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
         rows: list[dict[str, Any]] = []
         for symbol in symbols:
             touch = quotes.get(symbol) or {}
@@ -995,6 +997,47 @@ class House:
         return (isinstance(needs, Mapping) and needs.get("structures") is True and niche is not None
                 and niche.asset_class == "option")
 
+    def _note_structure_reach(self, agent: Agent, symbols: list[str], days: int, key: str, quotes: Mapping[str, Any]) -> None:
+        """Keep, for this wake's intents, the contracts a structure agent may open legs on (`_structure_reach_refusal`): the
+        `options_history.STRUCTURE_REACH` (160) of each underlying nearest the money in the chain this wake read, ranked as
+        its 80 are (`_chain`, the venue's chain cached two minutes, so no request more). Called by `_structure_context`,
+        which every wake of a structure agent runs before its decision."""
+        from .options_history import STRUCTURE_REACH
+
+        seen = self.__dict__.setdefault("_structure_reach_seen", {})
+        if not any(family_of(name) == "alpaca" and hasattr(b.broker, "option_chain") for name, b in self.books.items()):
+            seen.pop(agent.id, None)  # no venue here lists a chain (a test's House): there is no reach to hold it to
+            return
+        reach = self._cached(f"structure-reach:{key}", 120,
+                             lambda: frozenset(str(r.get("occ") or r.get("symbol") or "").upper()
+                                               for r in self._chain(symbols[:8], days, None, quotes, structures=True, per_underlying=STRUCTURE_REACH)),
+                             record=False)  # the chain itself is recorded (`_structure_context`); this is only its ranking
+        if len(seen) > 512:
+            seen.clear()
+        seen[agent.id] = reach
+
+    def _structure_reach_refusal(self, agent: Agent, order: Any) -> str:
+        """Why a structure OPEN is refused for its legs (empty when it is not; G-LOOP's review, Sept 25, 2026): a leg outside
+        the `options_history.STRUCTURE_REACH` (160) contracts of its underlying nearest the money in the chain the agent's
+        wake read (`_note_structure_reach`; it is shown the 80 nearest). The options replay refuses such an open alike, at
+        its step (`options_replay`), so live and replay agree -- and a replay tape that keeps only what the chain could
+        reach can never price a leg because the market LATER came near it (the review's look-ahead). A close is never
+        refused for it: it only takes risk off. An intent with no wake behind it in this process (a test's) is not
+        judged by it: every wake of a structure agent reads its chain before its decision."""
+        if order.action != "open":
+            return ""
+        reach = (self.__dict__.get("_structure_reach_seen") or {}).get(agent.id)
+        if reach is None:
+            return ""
+        from .options_history import STRUCTURE_REACH
+
+        outside = sorted({leg.occ for leg in order.spec.legs if str(leg.occ).upper() not in reach})
+        if not outside:
+            return ""
+        return (f"outside the chain's reach: every leg of a structure you open must be among the {STRUCTURE_REACH} contracts of its "
+                f"underlying nearest the money in the chain the House read this wake (you are shown the {STRUCTURE_CHAIN_PER_UNDERLYING} "
+                f"nearest); {', '.join(outside[:4])} {'is' if len(outside) == 1 else 'are'} not. The replay refuses it alike")
+
     def _structure_hours(self, day: str) -> tuple[float, float]:
         """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
         15:30 (`STRUCTURE_ENTRY_CUT_HOUR`, `STRUCTURE_CLOSE_HOUR`), held 90 and 30 minutes before the bell on
@@ -1056,7 +1099,7 @@ class House:
                             limit_price=order.held_limit, reason=order.reason, created_at=now, nonce=f"{now}:{index}")
         if order.action == "open" and self.registry.entries_paused(agent.id):
             return False  # held like any paused buy (X1): not sent, and not a refusal
-        refusal = self._structure_refusal(agent, book, order, instrument, now)
+        refusal = self._structure_refusal(agent, book, order, instrument, now) or self._structure_reach_refusal(agent, order)
         if refusal:
             self._refuse_intent(agent, book, intent, refusal)
             return False
@@ -1110,13 +1153,15 @@ class House:
         from . import structures
 
         asked = agent.needs.get("max_days_to_expiry")
-        days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
+        from .options_history import structure_days
+        days = structure_days(asked, symbols)  # 0 is a 0-DTE strategy's own answer, not "unsaid"; 10 at most on SPY, QQQ, IWM
         today, hour = _new_york(self.clock)
         cut, close = self._structure_hours(today)
         opening = hour < cut
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
                              lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
         ctx["chain"] = chain
+        self._note_structure_reach(agent, symbols, days, f"{','.join(symbols)}:{days}:{today}:{int(opening)}", ctx["quotes"])
         try:
             ctx["structures"] = structures.candidates(chain, max_loss_usd=min(max_order, max_position), today=today)
         except Exception as exc:  # noqa: BLE001 - a candidate that cannot be built costs the list, not the wake
