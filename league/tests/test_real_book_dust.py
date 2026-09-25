@@ -7,10 +7,11 @@ The evidence, read on the House box and the real Alpaca account (GET only):
   then "0.0108" (cash_venue 465.627638403755211532 against 465.61688803) every five minutes, frozen,
   with no fill and no fee in those hours. The book adds back the cash behind each resting crypto bid
   at `remaining x limit` to eighteen places; Alpaca holds each at that notional rounded half-up to
-  the cent. Every reading booked the sum of those sub-cent errors as dust, and when four of eight
-  bids were cancelled in one pass the error they took with them (-0.01075037) was left standing.
-  With the holds rounded as the venue rounds them, every reading of 339 between Sept 24 00:00Z and
-  04:26Z Sept 25 with no fill between reads the account's cash unchanged (465.63 since 18:52Z Sept 24).
+  the cent. Every reading booked the sum of those sub-cent errors as dust, and when four of the eight
+  bids resting at 02:26Z were cancelled or replaced over the next passes, the error booked on them
+  (-0.01075037) was left standing. With the holds rounded as the venue rounds them, the account's
+  cash is unchanged across all 339 pairs of consecutive readings between Sept 24 00:00Z and 04:26Z
+  Sept 25 with no fill between them (465.63 since 18:52Z Sept 24).
 - 04:11:50Z Sept 25, 1.2 s after the House restarted: the same +0.0108 was booked as dust and the
   book reconciled. `_fold` had counted every venue fill the book ever had (12) as "since the last
   reconciliation", so the first reading of the new process allowed $0.12 (and $0.12 of limit-fill

@@ -3012,12 +3012,14 @@ class Book:
             # back until then. At 04:37Z the account read $317.95 of cash beside twelve resting bids:
             # the bids' notionals rounded half-up sum to $147.68, and $317.95 + $147.68 = $465.63, what
             # its own activities add up to (the $500 deposit, each fill's cash to the cent, the fees);
-            # rounded up, down or not at all they do not. Read that way, every one of the 339 readings
-            # from Sept 24 00:00Z to Sept 25 04:26Z with no fill between them shows the account's cash
-            # unchanged; read unrounded it moved 66 times, a few tenths of a cent a bid, each booked as
-            # dust, until four of eight bids were cancelled in one pass (02:33-02:49Z Sept 25) and took
-            # a cent of that error with them: "cash differs by 0.0108", a frozen real book and every
-            # Alpaca real entry refused for 82 minutes, with no fill and no fee behind it.
+            # rounded up, down or not at all they do not. Read that way, the account's cash is unchanged
+            # across every one of the 339 pairs of consecutive readings from Sept 24 00:00Z to Sept 25
+            # 04:26Z with no fill between them; read unrounded it moved across 66, a few tenths of a cent
+            # a bid, each booked as dust. Then four of the eight bids resting at 02:26Z Sept 25 were
+            # cancelled or replaced within a few passes (02:33-02:49Z), the error booked on them
+            # (-0.01075037) was left standing, and the real book froze on "cash differs by 0.0149",
+            # "0.0168", then "0.0108": every Alpaca real entry refused for 93 minutes (02:38:59-04:11:50Z)
+            # with no fill and no fee behind it.
             for order in self.broker.open_orders():
                 if order.instrument.asset_class == "crypto" and order.side == "buy" and order.limit_price is not None:
                     held = money(order.remaining) * money(order.limit_price) * order.instrument.multiplier
