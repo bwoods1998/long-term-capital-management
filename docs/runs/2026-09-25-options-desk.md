@@ -139,6 +139,8 @@ test of every founder on true touches.
   eleven retirements plus krasker-13's this morning: the rule's cap of 12 reached); the options desk at 15 living.
   RSS 553 MB at 16:43:50Z with all births done (the hotfix holds). First new structure fill: krasker-29 bought an IWM
   Sept 28 282/283 put debit vertical at 0.46 on options-shadow (16:43:48Z).
+  V3's watch verdict **promoted 16:48:14Z** (reasons none). The floor's release from then: `20260925T163626Z-46eda79f4052`
+  (main `9d8b1d3`). RSS 922 MB at 16:47:52Z, growth flattening. No further deploy of this run today.
 
 ## Coordination with the forward-first run
 
