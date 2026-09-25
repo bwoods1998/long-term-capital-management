@@ -238,11 +238,25 @@ ORDER BY seq DESC LIMIT 20`.
   - A re-ratification keeps what came before it: the grant's earlier version-2 intervals are replayed first, so a
     withdrawal still holds the next tranche for 3 fresh days. `--capacity-json` (K2's curves) is a what-if beside the
     rule's own reading, the family records' capacity; it never decides a tranche or a deposit.
-  - Until the allocator reads it, a ratified version 2 changes the report alone: the replayed tranches, not the
-    envelope the allocator stakes against. The allocator's line (`Allocator.grant_capital`, not yet written) takes
-    `live_trading.scale_unlocked(root, venue)` -- $0 unless version 2 is in force, $0 on any failure -- and records
-    what it added on the board's envelope row (`unlocked_usd`); `House.tuition` still caps promotions at the grant's
-    venue capital until it reads the same number.
+  - What a ratified version 2 moves (K5b): `Allocator.grant_capital(venue)` is the grant's venue capital plus
+    `live_trading.scale_unlocked(root, venue)`, and the envelope every band reads, `House.tuition`'s loss line (every
+    promotion to real money, a new rung-2 seat too) and the throttle's dollar line (-0.30 x the envelope summed over
+    the venues) all read it, so a tranche raises each by the same amount. The daily `real_halt` basis
+    (`halt_basis_usd`) and the seat count stay the ratified grant. The board's envelope row names the tranche inside
+    `capital_usd` as `unlocked_usd`, which the rule subtracts so it never reads its own tranche as base. Unratified,
+    every line is the grant's number byte for byte and the ledger is not read.
+  - How the line reads the rule (the ratified `scale_tranches.reading`): the decision (the report's own replay) is
+    taken once a UTC day, at the first read at or after 00:00Z, and at the owner's ratification, and recorded in the
+    state directory as `scale-decided.json`. Between decisions, at most every five minutes, the line reads the grant's
+    version and, from the ledger rows appended since, the relock line and the equity cap (about 2 ms on a 7-day,
+    1.06M-row ledger; the daily replay 0.6 s there, growing about 0.09 s a day of ledger since the ratification's
+    first window). A read that fails moves nothing: the recorded decision stands, a failed decision adds no
+    tranche, and a live tranche stays until its relock line is read below. It adds $0 with no record, a record made
+    under another ratification, or one whose last successful read is more than a day old; switched off (`--grant-version 1`
+    or a moved money rule), $0 from the next read and the record is removed.
+  - The legacy rung-3 sizing (`capital.resize`, used only while the allocator is disabled) ignores tranches in its
+    Kelly basis (it caps venue cash at the ratified venue capital plus realized profit); its room is the tuition
+    headroom, which does read them.
 - **The allocator's deploy (Sept 23, 2026).** The `allocator` section is a money rule. Run
   `floor_box.py deploy` in the background and watch its log. At `promoted`, run
   `python3 scripts/live_trading.py --ratify earned-live-20260921` at once. Until the ratify

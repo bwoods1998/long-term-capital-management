@@ -974,16 +974,22 @@ class AllocatorLine(PhaseCase):
         self.assertEqual(live_trading.scale_unlocked(self.root, 'alpaca', now=NOW), Decimal(0))
         with patch('league.live_trading.scale_state', side_effect=AssertionError('cached')):
             self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW + 299), Decimal('273.41'))
+        decided = self.root / live_trading.DECIDED_FILE
+        self.assertTrue(decided.is_file())  # the decision, recorded
+        # Before any decision (no record), any failure is $0, and a failing read is not retried on every envelope call.
         for fault in (RuntimeError('boom'), KeyError('venues'), sqlite3_error()):
             live_trading._UNLOCKED_CACHE.clear()
+            decided.unlink(missing_ok=True)
             with self.subTest(fault=fault), patch('league.live_trading.scale_state', side_effect=fault) as state:
                 self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
                 self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW + 1), Decimal(0))
-                self.assertEqual(state.call_count, 1)  # a failing read is remembered, never retried on every envelope call
+                self.assertEqual(state.call_count, 1)
+                self.assertFalse(decided.exists())  # a failed decision records nothing
         live_trading._UNLOCKED_CACHE.clear()
         with patch('league.live_trading.scale_state', return_value={'venues': {'kalshi': {'unlocked_usd': 'NaN'}}}):
             self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))
         live_trading._UNLOCKED_CACHE.clear()
+        decided.unlink(missing_ok=True)
         (self.root / 'ledger.sqlite').rename(self.root / 'ledger.moved')
         (self.root / 'allocator-board.json').unlink()
         self.assertEqual(live_trading.scale_unlocked(self.root, 'kalshi', now=NOW), Decimal(0))  # no board: $0, not a guess
@@ -1086,6 +1092,7 @@ class AllocatorTranches(PhaseCase):
         for name in ('ledger.sqlite', 'campaigns.sqlite'):
             for suffix in ('', '-wal', '-shm'):
                 (self.root / f'{name}{suffix}').unlink(missing_ok=True)
+        (self.root / live_trading.DECIDED_FILE).unlink(missing_ok=True)
         live_trading._UNLOCKED_CACHE.clear()
 
     def lines(self, house):
@@ -1131,6 +1138,7 @@ class AllocatorTranches(PhaseCase):
                 self.assertTrue(grant.called)  # the grant's version was read (campaigns.sqlite), and nothing more
                 rows.assert_not_called()
                 state.assert_not_called()
+                self.assertFalse((self.root / live_trading.DECIDED_FILE).exists())  # and nothing is written
                 self.assertEqual(after, before)
                 shown = json.loads(after)
                 self.assertEqual(shown['grant_capital'], {'None': '1017.75', 'alpaca': '500.00', 'kalshi': '517.75'})
@@ -1196,6 +1204,9 @@ class AllocatorTranches(PhaseCase):
         self.reset(house)
         house = self.floor(version=2, equity='700.00')
         self.assertEqual(str(house.allocator.grant_capital('kalshi')), '670.92')  # 517.75 + 153.17
+        # The tranche itself is the deposit left (not half the envelope, capped afterwards), and so is its relock line.
+        (kept,) = json.loads((self.root / live_trading.DECIDED_FILE).read_text())['venues']['kalshi']['tranches']
+        self.assertEqual((kept['usd'], Decimal(kept['line'])), ('153.17', Decimal('-0.3') * Decimal('153.17')))
 
     def test_the_allocators_own_row_is_never_read_as_base(self):
         """The allocator's envelope row, on the board and on the ledger's `alloc.board` row, leaves the tranche as it was.
@@ -1272,3 +1283,174 @@ class AllocatorTranches(PhaseCase):
 
     def fixture_board(self):
         (self.root / 'allocator-board.json').write_text(json.dumps(board()), encoding='utf-8')
+
+    # ---- the review of K5b (Sept 26, 2026): a failed read moves no money; a read between decisions is cheap
+    def mark_pass(self, t, a1_equity):
+        """One more hourly mark pass of the fixture's real Kalshi book (`rising`: a1 up, a2 flat), at `t`."""
+        from league.ledger import Ledger
+        ledger = Ledger(self.root / 'ledger.sqlite')
+        for account, equity, staked in (('a1', a1_equity, '30'), ('a2', '10', '10')):
+            ledger.append('book.mark', {'book': 'kalshi', 'equity': str(equity), 'staked': staked, 'real_money': True,
+                                        'cash': str(equity), 'realized': '0', 'fees': '0', 'holdings': 0}, agent=account, at=stamp(t))
+        ledger.close()
+
+    def test_a_transient_failure_with_a_tranche_live_moves_nothing(self):
+        """The builder's concern 1: at $0 on a failed read, tuition closed, every real agent at the venue was demoted and
+        the throttle's line narrowed by -0.30 x the tranche (and hysteresis kept it on). Now the recorded decision stands:
+        in memory, across a restart (the record on disk), and when the next day's decision itself fails."""
+        import sqlite3
+        house = self.floor(version=2, staked={'kalshi': Decimal('500')})
+        live = self.lines(house)  # the decision: $273.41
+        self.assertEqual(json.loads(live)['grant_capital']['kalshi'], '791.16')
+        self.assertTrue(self.throttled_at(house, '-387.35') and not self.throttled_at(house, '-387.34'))
+        faults = [('_read_grant', sqlite3.OperationalError('database is locked')), ('_LedgerRows', sqlite3.OperationalError('disk I/O error')),
+                  ('scale_state', RuntimeError('boom')), ('grants.watch', KeyError('tranches')), ('_last_seq', OSError('gone'))]
+        for later in (300, 3600, grants.midnight('2026-09-26') + 60 - NOW):  # the next reads, and the next day's decision
+            for name, fault in faults:
+                live_trading._UNLOCKED_CACHE.clear()  # the next read (or a restart: the record comes from disk)
+                self.now[0] = NOW + later
+                target = f'league.{name}' if name.startswith('grants.') else f'league.live_trading.{name}'
+                with self.subTest(later=later, fault=name), patch(target, side_effect=fault):
+                    self.assertEqual(self.lines(house), live)
+                    self.assertTrue(self.throttled_at(house, '-387.35'))
+                    self.assertFalse(self.throttled_at(house, '-387.34'))  # the line as ratified, not narrowed
+        for later in (600, grants.midnight('2026-09-26') + 120 - NOW):  # an unreadable ledger, not a patched one
+            live_trading._UNLOCKED_CACHE.clear()
+            self.now[0] = NOW + later
+            path = self.root / 'ledger.sqlite'
+            kept = path.read_bytes()
+            path.write_bytes(b'\x00 not a ledger \x00' * 64)
+            with self.subTest(broken='ledger.sqlite', later=later):
+                self.assertEqual(self.lines(house), live)
+            path.write_bytes(kept)
+        # A failed decision added nothing: the day's decision is retried at the next read, and it is the replay's.
+        live_trading._UNLOCKED_CACHE.clear()
+        self.now[0] = grants.midnight('2026-09-26') + 900
+        self.assertEqual(house.allocator.scale_unlocked('kalshi'),
+                         Decimal(scale_report(self.root, now=self.now[0])['venues']['kalshi']['unlocked_usd']))
+        self.assertEqual(json.loads((self.root / live_trading.DECIDED_FILE).read_text())['day'], '2026-09-26')
+
+    def test_a_failure_before_any_decision_or_under_another_ratification_or_a_day_stale_adds_nothing(self):
+        import sqlite3
+        house = self.floor(version=2)
+        with self.pre_k5b():
+            base = self.lines(house)
+        decided = self.root / live_trading.DECIDED_FILE
+        for name in ('scale_state', '_LedgerRows', '_read_grant'):  # no decision yet: $0, and nothing recorded
+            live_trading._UNLOCKED_CACHE.clear()
+            with self.subTest(before=name), patch(f'league.live_trading.{name}', side_effect=sqlite3.OperationalError('locked')):
+                self.assertEqual(self.lines(house), base)
+            self.assertFalse(decided.exists())
+        live_trading._UNLOCKED_CACHE.clear()
+        self.assertEqual(house.allocator.scale_unlocked('kalshi'), self.TRANCHE)  # decided and recorded
+        # A record whose last successful read is more than a day old is no longer the rule's reading.
+        for age, kept in ((DAY - 1, self.TRANCHE), (DAY + 1, Decimal(0))):
+            live_trading._UNLOCKED_CACHE.clear()
+            self.now[0] = NOW + age
+            with self.subTest(age=age), patch('league.live_trading._read_grant', side_effect=sqlite3.OperationalError('locked')):
+                self.assertEqual(house.allocator.scale_unlocked('kalshi'), kept)
+        self.now[0] = NOW
+        record = decided.read_bytes()  # the decision under the owner's first ratification ($273.41 live)
+        # Switched off: $0 from the next read, the record dropped, and a failure after it still $0.
+        ratify_version(house.campaigns, ID, 1)
+        live_trading._UNLOCKED_CACHE.clear()
+        self.assertEqual(house.allocator.scale_unlocked('kalshi'), Decimal(0))
+        self.assertFalse(decided.exists())
+        live_trading._UNLOCKED_CACHE.clear()
+        with patch('league.live_trading._read_grant', side_effect=sqlite3.OperationalError('locked')):
+            self.assertEqual(self.lines(house), base)
+        # The owner's new ratification: a record left from the first is not its decision, so a failed decision is $0.
+        ratify_version(house.campaigns, ID, 2)
+        decided.write_bytes(record)
+        live_trading._UNLOCKED_CACHE.clear()
+        with patch('league.live_trading.scale_state', side_effect=RuntimeError('boom')):
+            self.assertEqual(self.lines(house), base)
+        live_trading._UNLOCKED_CACHE.clear()
+        self.assertEqual(house.allocator.scale_unlocked('kalshi'),  # its own decision, the replay's (the rule re-earns it)
+                         Decimal(scale_report(self.root, now=NOW)['venues']['kalshi']['unlocked_usd']))
+
+    def test_a_relock_between_decisions_still_withdraws_the_tranche_as_the_replay_does(self):
+        house = self.floor(version=2, staked={'kalshi': Decimal('500')})
+        alloc = house.allocator
+        self.assertEqual(alloc.scale_unlocked('kalshi'), self.TRANCHE)
+        kept = json.loads((self.root / live_trading.DECIDED_FILE).read_text())['venues']['kalshi']
+        (tranche,) = kept['tranches']
+        self.assertEqual(Decimal(tranche['line']), Decimal('-0.3') * self.TRANCHE)  # -$82.023
+        at_unlock = Decimal(tranche['pnl_at_unlock'])
+        # One pass a cent above the line: the tranche stays (the watch reads it, the replay agrees).
+        self.mark_pass(NOW + 300, Decimal('30') + at_unlock - Decimal('82.02'))
+        live_trading._UNLOCKED_CACHE.clear()
+        self.now[0] = NOW + 400
+        with patch('league.live_trading.scale_state', side_effect=AssertionError('no replay between decisions')):
+            self.assertEqual(alloc.scale_unlocked('kalshi'), self.TRANCHE)
+        self.assertEqual(scale_report(self.root, now=NOW + 400)['venues']['kalshi']['unlocked_usd'], str(self.TRANCHE))
+        # A half-written pass (one account of two) is left out, as the replay leaves it out.
+        from league.ledger import Ledger
+        ledger = Ledger(self.root / 'ledger.sqlite')
+        ledger.append('book.mark', {'book': 'kalshi', 'equity': '-500', 'staked': '30', 'real_money': True, 'cash': '0',
+                                    'realized': '0', 'fees': '0', 'holdings': 0}, agent='a1', at=stamp(NOW + 3900))
+        ledger.close()
+        live_trading._UNLOCKED_CACHE.clear()
+        self.now[0] = NOW + 3950
+        with patch('league.live_trading.scale_state', side_effect=AssertionError('no replay between decisions')):
+            self.assertEqual(alloc.scale_unlocked('kalshi'), self.TRANCHE)
+        # The pass completed below the line: withdrawn at the next read, and the throttle's line is the grant's again.
+        ledger = Ledger(self.root / 'ledger.sqlite')
+        ledger.append('book.mark', {'book': 'kalshi', 'equity': '10', 'staked': '10', 'real_money': True, 'cash': '10',
+                                    'realized': '0', 'fees': '0', 'holdings': 0}, agent='a2', at=stamp(NOW + 3900))
+        ledger.close()
+        live_trading._UNLOCKED_CACHE.clear()
+        self.now[0] = NOW + 4300
+        with patch('league.live_trading.scale_state', side_effect=AssertionError('no replay between decisions')):
+            self.assertEqual(alloc.scale_unlocked('kalshi'), Decimal(0))
+            self.assertEqual(str(alloc.grant_capital('kalshi')), '517.75')
+            self.assertTrue(self.throttled_at(house, '-305.33'))
+        replayed = scale_report(self.root, now=NOW + 4300)['venues']['kalshi']
+        self.assertEqual(replayed['unlocked_usd'], '0.00')
+        self.assertEqual(replayed['tranches'][0]['relocked_at'], stamp(NOW + 3900)[:19] + 'Z')
+        self.assertEqual(json.loads((self.root / live_trading.DECIDED_FILE).read_text())['venues']['kalshi']['tranches'], [])
+
+    def test_a_read_after_the_decision_does_not_scan_the_ledger(self):
+        """The builder's concern 2: the replay scans every `family.record` row and every `book.mark` row since the
+        ratification's window. It runs once a UTC day; a read between decisions reads the rows appended since."""
+        house = self.floor(version=2, staked={'kalshi': Decimal('500')})
+        alloc = house.allocator
+        with patch('league.live_trading.scale_state', wraps=live_trading.scale_state) as state:
+            self.assertEqual(alloc.scale_unlocked('kalshi'), self.TRANCHE)
+            self.assertEqual(state.call_count, 1)
+            through = json.loads((self.root / live_trading.DECIDED_FILE).read_text())['venues']['kalshi']['through']
+            self.assertEqual(through, grants.midnight(TODAY) + 6 * 3600)  # the last complete pass: 06:00Z
+            self.mark_pass(NOW + 300, '40')
+            calls = []
+            real_pnl = live_trading._LedgerRows.pnl
+
+            def pnl(rows, venues, since, until):
+                calls.append(since)
+                return real_pnl(rows, venues, since, until)
+
+            for k, later in enumerate((301, 900, 3600, 7200)):
+                live_trading._UNLOCKED_CACHE.clear()
+                self.now[0] = NOW + later
+                with patch.object(live_trading._LedgerRows, 'family_rows', side_effect=AssertionError('a scan')), \
+                        patch.object(live_trading._LedgerRows, 'pnl', pnl):
+                    self.assertEqual(alloc.grant_capital('kalshi'), Decimal('517.75') + self.TRANCHE)
+            self.assertEqual(state.call_count, 1)  # no replay between decisions
+            self.assertEqual(calls[0], through)  # the relock read starts at the last pass read, not the window's start
+            self.assertEqual(calls[1:], [NOW + 300] * 3)
+            # The next UTC day: one replay, then reads again.
+            live_trading._UNLOCKED_CACHE.clear()
+            self.now[0] = grants.midnight('2026-09-26') + 60
+            alloc.scale_unlocked('kalshi')
+            self.assertEqual(state.call_count, 2)
+            live_trading._UNLOCKED_CACHE.clear()
+            self.now[0] += 300
+            alloc.scale_unlocked('kalshi')
+            self.assertEqual(state.call_count, 2)
+
+    def test_the_owner_ratifies_how_the_line_reads_the_rule_in_plain_words(self):
+        reading = policy(LIVE_CAPITAL, version=2)['scale_tranches']['reading']
+        for words in ('once a UTC day', "at the owner's ratification", 'scale-decided.json', 'A read that fails moves nothing',
+                      'a decision that fails adds no tranche', 'stays until its relock line is read below',
+                      'more than a day old', 'adds $0 when there is none'):
+            self.assertIn(words, reading)
+        self.assertNotIn('scale_tranches', policy(LIVE_CAPITAL))  # version 1 is untouched

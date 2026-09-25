@@ -19,18 +19,25 @@ three UTC days, the tranche it would unlock today and the deposit that would put
 
 What reads version 2 at run time (K5b, Sept 26, 2026): one line. The allocator's envelope
 (`Allocator.grant_capital`, the forward-first run's file) adds `scale_unlocked(root, venue)` -- $0
-unless version 2 is in force, $0 on any failure, read at most every five minutes -- and records what
-it added on the board's envelope row (`unlocked_usd`), which `base_envelope` subtracts. `House.tuition`
-and the throttle read `grant_capital`, so a tranche raises the envelope, the tuition line and the
-throttle's dollar line by the same amount; the daily `real_halt` basis stays the ratified capital.
+unless version 2 is in force; the rule's decision, taken once a UTC day and at the owner's
+ratification and recorded in the state directory (`scale-decided.json`); between decisions, reads of
+the rows appended since (the relock line, the equity cap) at most every five minutes; a failed read
+keeps the recorded decision (a day at most) and adds nothing, and with no decision it is $0 -- and
+records what it added on the board's envelope row (`unlocked_usd`), which `base_envelope` subtracts.
+`House.tuition` and the throttle read `grant_capital`, so a tranche raises the envelope, the tuition
+line and the throttle's dollar line by the same amount; the daily `real_halt` basis stays the ratified
+capital. The legacy rung-3 sizing (`capital.resize`, only while the allocator is disabled) caps its
+Kelly basis at the ratified venue capital and ignores tranches; its room reads the tuition line.
 K2's capacity study, given to the report, is a what-if beside the rule's own reading (the family
 records' capacity): it never decides a tranche or a deposit.
 """
 from decimal import Decimal, ROUND_DOWN
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
+import threading
 import time
 import urllib.parse
 
@@ -269,11 +276,16 @@ class _LedgerRows:
         rows = self.db.execute("SELECT at, payload FROM ledger WHERE kind='family.record' ORDER BY seq").fetchall()
         return [(_epoch(at), json.loads(payload)) for at, payload in rows if _epoch(at) <= until]
 
-    def envelopes(self, since, until):
-        """{venue: [(t, capital)]}: the allocator's envelope at each `alloc.board` row."""
+    def last_seq(self):
+        return int(self.db.execute('SELECT COALESCE(MAX(seq), 0) FROM ledger').fetchone()[0])
+
+    def envelopes(self, since, until, *, after_seq=None):
+        """{venue: [(t, capital)]}: the allocator's envelope at each `alloc.board` row (from `since`, or after the row
+        `after_seq`)."""
         out = {}
         for at, envelope in self.db.execute("SELECT at, json_extract(payload, '$.envelope') FROM ledger "
-                                            "WHERE kind='alloc.board' AND seq>=? ORDER BY seq", (self.seq_at(since),)):
+                                            "WHERE kind='alloc.board' AND seq>=? ORDER BY seq",
+                                            (self.seq_at(since) if after_seq is None else int(after_seq) + 1,)):
             t = _epoch(at)
             if t > until:
                 continue
@@ -311,11 +323,13 @@ class _LedgerRows:
             out[venue] = series
         return out
 
-    def funded(self, since, until):
-        """{venue: [(t, equity)]}: the venue account's equity at each `floor.mark` row."""
+    def funded(self, since, until, *, after_seq=None):
+        """{venue: [(t, equity)]}: the venue account's equity at each `floor.mark` row (from `since`, or after the row
+        `after_seq`)."""
         out = {}
         for at, venues in self.db.execute("SELECT at, json_extract(payload, '$.venues') FROM ledger "
-                                          "WHERE kind='floor.mark' AND seq>=? ORDER BY seq", (self.seq_at(since),)):
+                                          "WHERE kind='floor.mark' AND seq>=? ORDER BY seq",
+                                          (self.seq_at(since) if after_seq is None else int(after_seq) + 1,)):
             t = _epoch(at)
             if t > until:
                 continue
@@ -462,6 +476,7 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
             'window': window, 'window_pnl_usd': decision.get('window_pnl_usd') if decision else None,
             'pnl_window_to_now_usd': None if start is None or end is None else str(end - start),
             'decision': decision, 'tranches': state['tranches'] if state else [],
+            'watch': state['watch'] if state else None,  # what the allocator's line keeps between decisions (`scale_unlocked`)
             'decisions': [{k: d.get(k) for k in ('at', 'today', 'unlock', 'tranche_usd')} | {'fails': [f['text'] for f in d['fails']]}
                           for d in state['decisions']] if state else [],
         }
@@ -471,40 +486,169 @@ def scale_state(root, *, now=None, board=None, funded=None, grant=None, study=No
             'switch_off': f"python scripts/live_trading.py --ratify {grant.get('id') or '<grant-id>'} --grant-version 1"}
 
 
-#: `scale_unlocked` reads the evidence at most this often per state directory (a mark pass: `mark_every_seconds`).
+#: `scale_unlocked` reads at most this often per state directory (a mark pass: `mark_every_seconds`).
 UNLOCKED_CACHE_SECONDS = 300.0
+#: A recorded decision whose last successful read is older than this adds $0 (K5b review: a day, the decision's period).
+DECISION_KEPT_SECONDS = 86400.0
+#: The allocator's line's durable record of the rule's last decision, in the House's state directory.
+DECIDED_FILE = 'scale-decided.json'
 _UNLOCKED_CACHE = {}
+_UNLOCKED_LOCK = threading.Lock()
+
+
+def _identity(grant):
+    """The ratification a decision was taken under: the grant, the owner's last version row, its earlier intervals."""
+    return _digest({'id': grant.get('id'), 'policy': grant.get('policy_digest'), 'proposed': grant.get('proposed_digest'),
+                    'ratified': grant.get('ratified'), 'earlier': grant.get('earlier') or []})
+
+
+def _load_decided(root):
+    try:
+        record = json.loads((Path(root) / DECIDED_FILE).read_text(encoding='utf-8'))
+        return record if isinstance(record, dict) and isinstance(record.get('venues'), dict) else None
+    except Exception:  # noqa: BLE001 - no record (or an unreadable one) is no decision: $0
+        return None
+
+
+def _save_decided(root, record):
+    path = Path(root) / DECIDED_FILE
+    tmp = path.with_name(DECIDED_FILE + '.tmp')
+    tmp.write_text(json.dumps(record, sort_keys=True), encoding='utf-8')
+    os.replace(tmp, path)
+
+
+def _kept(record, now):
+    """What a failed read leaves in force: the recorded decision, while its last successful read is under a day old."""
+    if record is None or not now - float(record.get('checked_at') or 0) < DECISION_KEPT_SECONDS:
+        return {}
+    return {v: Decimal(str(row.get('unlocked_usd') or 0)) for v, row in record['venues'].items()}
+
+
+def _last_seq(root):
+    path = Path(root) / 'ledger.sqlite'
+    if not path.is_file():
+        return 0
+    ledger = _LedgerRows(path)
+    try:
+        return ledger.last_seq()
+    finally:
+        ledger.close()
+
+
+def _decide_now(root, grant, identity, now):
+    """The rule's decision (`scale_state`'s full replay, the report's own reading), as the record the next reads keep:
+    with the ledger's last row before the replay (`seq`), after which the next read takes the envelope and equity."""
+    seq = _last_seq(root)
+    state = scale_state(root, now=now, grant=grant)
+    return {'identity': identity, 'day': _day(now), 'decided_at': now, 'checked_at': now, 'seq': seq,
+            'venues': {v: {**(row.get('watch') or {'through': None, 'base_usd': None, 'funded_usd': None, 'tranches': []}),
+                           'unlocked_usd': str(max(Decimal(0), Decimal(str(row['unlocked_usd']))))}
+                       for v, row in state['venues'].items()}}
+
+
+def _watch(root, record, now):
+    """Between decisions: per venue with a live tranche, the mark passes from the recorded one on (the relock line) and
+    the `alloc.board` and `floor.mark` rows after the recorded row (the equity cap) -- the rows appended since, never the
+    ledger's history (`grants.watch`)."""
+    from . import grants
+    ledger_path = Path(root) / 'ledger.sqlite'
+    if not ledger_path.is_file():
+        raise FileNotFoundError(f'no ledger at {ledger_path}')
+    venues = {}
+    ledger = _LedgerRows(ledger_path)
+    try:
+        seq = ledger.last_seq()
+        for venue, kept in record['venues'].items():
+            if not kept.get('tranches'):
+                venues[venue] = {**kept, 'unlocked_usd': '0'}
+                continue
+            after = int(record.get('seq') or 0)
+            pnl = ledger.pnl([venue], float(kept['through']), now).get(venue, []) if kept.get('through') is not None else []
+            base = [b for _, b in ledger.envelopes(now, now, after_seq=after).get(venue, [])]
+            funded = [e for _, e in ledger.funded(now, now, after_seq=after).get(venue, [])]
+            watched, live = grants.watch(kept, pnl, now=now, base=base[-1] if base else None,
+                                         funded=funded[-1] if funded else None)
+            venues[venue] = {**watched, 'unlocked_usd': str(max(Decimal(0), live))}
+    finally:
+        ledger.close()
+    return {**record, 'checked_at': now, 'seq': seq, 'venues': venues}
+
+
+def _day(t):
+    from .grants import day_of
+    return day_of(t)
+
+
+def _reading(root, now, record):
+    """One read of the rule for the allocator's line: ({venue: dollars}, the record to keep). Never raises."""
+    try:
+        grant = _read_grant(root, now)
+    except Exception:  # noqa: BLE001 - the grant unread: the recorded decision stands (a day at most)
+        return _kept(record, now), record
+    if grant.get('version') != 2 or not grant.get('scale_policy'):
+        if record is not None:
+            try:
+                (Path(root) / DECIDED_FILE).unlink(missing_ok=True)  # switched off: no decision is kept
+            except OSError:
+                pass
+        return {}, None
+    identity = _identity(grant)
+    if record is not None and record.get('identity') != identity:
+        record = None  # decided under another ratification: nothing of it is kept
+    if record is None or record.get('day') != _day(now):
+        try:
+            record = _decide_now(root, grant, identity, now)
+        except Exception:  # noqa: BLE001 - a decision that fails adds no tranche; one already decided stands
+            if record is None:
+                return {}, None
+        else:
+            try:
+                _save_decided(root, record)
+            except OSError:
+                pass
+            return _kept(record, now), record
+    try:
+        record = _watch(root, record, now)
+    except Exception:  # noqa: BLE001 - the relock and cap unread: the recorded decision stands (a day at most)
+        return _kept(record, now), record
+    try:
+        _save_decided(root, record)
+    except OSError:
+        pass
+    return _kept(record, now), record
 
 
 def scale_unlocked(root, venue, *, now=None):
     """The dollars the version-2 tranches add to `venue`'s envelope now: the ONE reading the allocator's line
-    (`Allocator.grant_capital`, forward-first's file, after its Deploy B) is to take, and nothing else. Never raises:
+    (`Allocator.grant_capital`) takes, and nothing else. Never raises, never negative, never a guess:
 
     - $0 unless version 2 is in force (`grant_version`: the owner ratified it, and it is still the code's version 2 under
-      the money rules now); the ledger is then never read, so an unratified version 2 leaves the envelope as it is;
-    - $0 on ANY failure of the scale rule's code or its reads (never a guess, never the last value);
-    - else `scale_state`'s `unlocked_usd` for the venue: the tranches the ratified `scale_tranches` block unlocked,
-      replayed from the ledger, capped at the account's equity above the base envelope.
+      the money rules now); the ledger is then never read and nothing is written, so an unratified version 2 leaves the
+      envelope as it is;
+    - the rule's DECISION (`scale_state`'s replay, the report's own reading: the tranches the ratified `scale_tranches`
+      block unlocked, capped at the account's equity above the base envelope) is taken once a UTC day, at the first read
+      at or after 00:00Z, and under each new ratification, and recorded in the state directory (`DECIDED_FILE`);
+    - between decisions a read (at most every `UNLOCKED_CACHE_SECONDS`) takes the grant's version and the rows appended
+      since the last read -- the relock line and the equity cap (`grants.watch`) -- never the ledger's history;
+    - a read that FAILS moves nothing (K5b review, Sept 26, 2026: a transient failure at $0 closed tuition, demoted a
+      venue's real agents and could switch the hysteretic throttle on): the recorded decision stands, a failed decision
+      adds no tranche, and a live tranche stays until its relock line is read below. That is not a guess: it is the
+      rule's own last decision, which the rule keeps until a relock. $0 with no record, a record under another
+      ratification, or one whose last successful read is more than `DECISION_KEPT_SECONDS` old.
 
-    Read at most every `UNLOCKED_CACHE_SECONDS` per state directory. The line must also record what it added on the
-    board's envelope row (`unlocked_usd` beside `capital_usd`): `base_envelope` subtracts it, so the rule never reads
-    its own tranche as base."""
+    The line also records what it added on the board's envelope row (`unlocked_usd` beside `capital_usd`):
+    `base_envelope` subtracts it, so the rule never reads its own tranche as base."""
     try:
         now = time.time() if now is None else float(now)
         key = str(Path(root).resolve())
-        hit = _UNLOCKED_CACHE.get(key)
-        if hit is None or not 0 <= now - hit[0] < UNLOCKED_CACHE_SECONDS:
-            values = {}
-            try:
-                grant = _read_grant(root, now)
-                if grant.get('version') == 2 and grant.get('scale_policy'):
-                    state = scale_state(root, now=now, grant=grant)
-                    values = {v: max(Decimal(0), Decimal(str(row['unlocked_usd']))) for v, row in state['venues'].items()}
-            except Exception:  # noqa: BLE001 - $0, and remembered: a failing read is not retried on every envelope call
-                values = {}
-            hit = _UNLOCKED_CACHE[key] = (now, values)
+        with _UNLOCKED_LOCK:
+            hit = _UNLOCKED_CACHE.get(key)
+            if hit is None or not 0 <= now - hit[0] < UNLOCKED_CACHE_SECONDS:
+                record = hit[2] if hit is not None else _load_decided(root)
+                values, record = _reading(root, now, record)
+                hit = _UNLOCKED_CACHE[key] = (now, values, record)
         value = hit[1].get(venue, Decimal(0))
-        return value if value.is_finite() else Decimal(0)
+        return value if isinstance(value, Decimal) and value.is_finite() and value > 0 else Decimal(0)
     except Exception:  # noqa: BLE001 - the scale rule never costs the envelope a dollar it cannot prove: $0
         return Decimal(0)
 

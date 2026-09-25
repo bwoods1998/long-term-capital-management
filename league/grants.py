@@ -256,6 +256,15 @@ def scale_tranches(constitution: Mapping[str, Any] | None = None) -> dict[str, A
                   f'{_d(throttle["halve_below"])} and restore_above x the envelope summed over the venues), which widen in '
                   'proportion. The daily real_halt basis is unchanged: it stays the grant\'s ratified venue capital, and '
                   'so does the seat count (max_agents).'),
+        # How the allocator's line reads the rule, and what a failed read does (K5b review, Sept 26, 2026).
+        'reading': ('the allocator reads the rule\'s decision, taken once a UTC day (at its first reading at or after '
+                    '00:00Z) and at the owner\'s ratification, replayed from the ledger and recorded in the House\'s state '
+                    'directory (scale-decided.json); between decisions, at most every five minutes, it reads the grant\'s '
+                    'version, and the relock line and the equity cap from the ledger rows appended since. A read that fails '
+                    'moves nothing: the recorded decision stands, a decision that fails adds no tranche, and a tranche '
+                    'already unlocked stays until its relock line is read below. The record adds $0 when there is none, '
+                    'when it was made under another ratification, or when its last successful read is more than a day old; '
+                    'version 2 switched off adds $0 from the next read.'),
     }
 
 
@@ -543,13 +552,43 @@ def replay(block: Mapping[str, Any], days: Mapping[str, Day], *, pnl: Sequence[t
     _relock(tranches, pnl, now)
     base, equity = value_before(envelopes, now), value_before(funded, now)
     live = unlocked_usd(tranches, now, base=base, funded=equity)
+    # What the allocator's line keeps between decisions (K5b review, Sept 26, 2026: `live_trading.scale_unlocked`): the
+    # tranches live now with their relock lines, the last complete mark pass this replay read (`through`: the next watch
+    # reads the passes after it, and re-reads it so that a pass still being written is left out), the base and equity.
+    through = pnl[-1][0] if pnl else None
+    watch = {'through': through, 'base_usd': None if base is None else str(base),
+             'funded_usd': None if equity is None else str(equity),
+             'tranches': [{'n': x['n'], 'usd': x['usd'], 'line': str(x['line']), 'pnl_at_unlock': str(x['pnl_at_unlock']),
+                           'unlocked_at': x['unlocked_at'], 'checked_to': max(x['unlocked_at'], through or x['unlocked_at'])}
+                          for x in tranches if _live(x, now)]}
     shown = [{'n': x['n'], 'unlocked_at': iso(x['unlocked_at']), 'usd': x['usd'], 'relock_line_usd': str(x['line']),
               'pnl_since_usd': (None if x['relocked_at'] is not None or x.get('ended_at') is not None or not pnl
                                 else str(value_before(pnl, now) - x['pnl_at_unlock'])),
               'relocked_at': None if x['relocked_at'] is None else iso(x['relocked_at']),
               'pnl_at_relock_usd': None if x['pnl_at_relock'] is None else str(x['pnl_at_relock']),
               'switched_off_at': None if x.get('ended_at') is None else iso(x['ended_at'])} for x in tranches]
-    return {'tranches': shown, 'unlocked_usd': str(live), 'decisions': decisions}
+    return {'tranches': shown, 'unlocked_usd': str(live), 'decisions': decisions, 'watch': watch}
+
+
+def watch(kept: Mapping[str, Any], pnl: Sequence[tuple[float, Decimal]], *, now: float, base: Any = None,
+          funded: Any = None) -> tuple[dict[str, Any], Decimal]:
+    """Between two decisions (K5b review, Sept 26, 2026): the relock line and the equity cap on the tranches the last
+    decision left live (`replay`'s `watch`, as the allocator's line recorded it), over the mark passes read since
+    (`pnl`: the pass at `kept['through']` and every complete pass after it). The same arithmetic `replay` does at `now`
+    (`_relock`, then `unlocked_usd` on the base and equity last read; `base`/`funded` None keep the ones recorded),
+    without replaying the days: no decision is taken here, so nothing is ever added. Returns the next `watch` and the
+    dollars live now."""
+    tranches = [{**x, 'line': Decimal(str(x['line'])), 'pnl_at_unlock': Decimal(str(x['pnl_at_unlock'])), 'relocked_at': None,
+                 'pnl_at_relock': None, 'ended_at': None, 'track_until': float('inf')} for x in kept.get('tranches') or ()]
+    through = max([t for t in (kept.get('through'), pnl[-1][0] if pnl else None) if t is not None], default=None)
+    if through is not None:
+        _relock(tranches, pnl, through)
+    base = _d(base) if base is not None else _d(kept.get('base_usd'))
+    funded = _d(funded) if funded is not None else _d(kept.get('funded_usd'))
+    live = unlocked_usd(tranches, now, base=base, funded=funded)
+    return ({'through': through, 'base_usd': None if base is None else str(base), 'funded_usd': None if funded is None else str(funded),
+             'tranches': [{k: x[k] for k in ('n', 'usd', 'unlocked_at', 'checked_to')} | {'line': str(x['line']),
+                           'pnl_at_unlock': str(x['pnl_at_unlock'])} for x in tranches if _live(x, now)]}, live)
 
 
 def _decide(block: Mapping[str, Any], days: Mapping[str, Day], tranches: list[dict[str, Any]], decisions: list[dict[str, Any]],

@@ -696,7 +696,9 @@ class Allocator:
     def scale_unlocked(self, venue: str) -> Decimal:
         """The dollars the owner's version-2 tranches add to `venue`'s envelope now (K5, `live_trading.scale_unlocked`,
         over the House's state directory on the House's clock): $0 unless the owner ratified version 2 -- the ledger is
-        then not read -- and $0 on any failure of the scale rule, never a guess and never negative."""
+        then not read -- else the rule's recorded decision (taken once a UTC day and at the ratification; between
+        decisions only the relock line and the equity cap are read, from the rows appended since). A failed read keeps
+        that decision (a day at most) and adds nothing; with no decision, and on any failure here, $0. Never negative."""
         pinned = self._unlocked_pin
         if pinned is not None and venue in pinned:
             return pinned[venue]
