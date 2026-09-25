@@ -154,6 +154,9 @@ REPEAT_WARNINGS = 10
 REPEAT_WINDOW_SECONDS = 1800.0
 #: A session the provider broke gives the agent its turn back this soon (`House.research`).
 PROVIDER_RETRY_SECONDS = 900.0
+#: A stop of the floor's paid work is told once it has lasted this long (`House._note_stopped`): the three
+#: sixty-second ticks it waited for until H5 (Sept 25, 2026) halved the tick.
+STOPPED_TELL_SECONDS = 120.0
 #: H6 (Sept 25, 2026): how a research session in flight at a restart ends when it cannot be resumed safely
 #: (`House._session_lost`). `provider: campaign_post_unconfirmed`: the restart killed the model call's POST
 #: after its campaign hold was written and before Sail's answer was linked, and a second POST could be a
@@ -2387,7 +2390,7 @@ class House:
           no wake for `QUIET_ROUND_THE_CLOCK_SECONDS` while the House is not paused, told once a desk
           per that long. The stamps are `desk_woke` (set by `wake`); a pause, and the House's own
           start, reset the clock, since neither is a scheduler fault. A closed compute allowance
-          stops wakes too (`_note_stopped` says so after three ticks): this says which markets it
+          stops wakes too (`_note_stopped` says so after two minutes): this says which markets it
           is leaving unattended. So does the birth of the desk's oldest living member (a desk with no
           member has no one to wake), and a desk is late only at twice its briskest member's
           `wake_minutes`. Sept 24, 2026: kalshi-open's first member ever was born at 14:12:14Z and the
@@ -4018,8 +4021,15 @@ class House:
         Every tick summary read "stopped", every alert stayed quiet, and it was found 23 minutes
         later by reading the ledger. A warning, not an error: a vendor-side stop is no reason to
         roll back the release being watched. A maintenance pause is the operator's own act and is
-        not announced."""
+        not announced.
+
+        "Three ticks" were two minutes of a stop while ticks were sixty seconds apart (the stop seen at
+        0, 60 and 120 s); since H5 (Sept 25, 2026) ticks are thirty seconds apart, and three of them
+        would tell a stop of one minute -- a Sail meter read that failed twice (it is read at most once a
+        minute, `FundedTransport.refresh`). So the stop is told once it has lasted `STOPPED_TELL_SECONDS`
+        (the review of #297), whatever the tick."""
         tell = told = None
+        now = self.clock()
         with self._state_lock:
             row = dict(self._state.get("stopped") or {"reason": "", "ticks": 0, "told": False})
             if not reason:
@@ -4027,14 +4037,17 @@ class House:
                     told = row.get("reason")
                 self._state["stopped"] = {"reason": "", "ticks": 0, "told": False}
             else:
-                row["ticks"] = int(row.get("ticks") or 0) + 1 if row.get("reason") == reason else 1
+                same = row.get("reason") == reason
+                row["ticks"] = int(row.get("ticks") or 0) + 1 if same else 1
+                # A row an older release wrote has no `since`: its stop is timed from now.
+                row["since"] = float(row.get("since") or now) if same else now
                 row["reason"] = reason
-                if row["ticks"] >= 3 and not row.get("told") and not reason.startswith("maintenance pause"):
+                if now - row["since"] >= STOPPED_TELL_SECONDS and not row.get("told") and not reason.startswith("maintenance pause"):
                     row["told"] = True
-                    tell = row["ticks"]
+                    tell = (row["ticks"], now - row["since"])
                 self._state["stopped"] = row
         if tell:
-            self.alert("warning", f"the floor has stopped buying work for {tell} ticks: {reason}. "
+            self.alert("warning", f"the floor has stopped buying work for {tell[1] / 60:.0f} minutes ({tell[0]} ticks): {reason}. "
                                   "No research, Merton, births or payouts; exits and reconciliation go on.")
         if told:
             self.alert("info", f"the floor is open for business again (it had stopped: {told})")

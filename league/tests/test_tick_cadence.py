@@ -392,3 +392,18 @@ class TheReviewOfH5(HouseCase):
             self.house.tick()
         self.house.wait(10)
         self.assertEqual(started, ["teacher"])
+
+    def test_a_stop_is_told_once_it_has_lasted_as_long_as_three_sixty_second_ticks_did(self):
+        # "Three ticks" were two minutes of a stop at sixty-second ticks; at thirty they would be one.
+        reason = "the campaign's Sail meter is unread or failed (meter_health in campaigns.sqlite)"
+        for _ in range(4):  # 0, 30, 60 and 90 s of the stop
+            self.house._note_stopped(reason)
+            self.clock.advance(30)
+        self.assertEqual(warnings(self.house, "stopped buying work"), [])
+        self.house._note_stopped(reason)  # 120 s
+        told = warnings(self.house, "stopped buying work")
+        self.assertEqual(len(told), 1)
+        self.assertIn("for 2 minutes (5 ticks)", told[0]["text"])
+        self.clock.advance(30)
+        self.house._note_stopped(reason)
+        self.assertEqual(len(warnings(self.house, "stopped buying work")), 1)  # told once
