@@ -284,7 +284,21 @@ def _seat_needed(house: Any) -> tuple[bool, bool]:
 def seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
     """Birth at most `per_tick` of the options desk's structure founders not yet born, retiring a resident by
     the seat rule for each when the league is full (the module's docstring); returns those born. Called
-    from the House's births pass, inside its probe-box turn."""
+    from the House's births pass, inside its probe-box turn (one line after `House.enroll`). A Sail error
+    is the births pass's to defer (it is infrastructure); any other failure here is said once as a warning
+    and costs only this step, never the rest of the births pass or the tick."""
+    from .sandbox import SandboxError
+
+    try:
+        return _seat_founders(house, per_tick=per_tick)
+    except SandboxError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the options desk's seating never stops the House's population step
+        house.alert("warning", f"the options desk's founder seating failed this tick ({type(exc).__name__}: {str(exc)[:200]})")
+        return []
+
+
+def _seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
     from .house import PROBE_BOX
 
     wanted = owed(house)

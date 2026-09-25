@@ -130,6 +130,16 @@ class Births(SeatCase):
                 mock.patch.object(self.house.sandbox, "needs", side_effect=AssertionError("probed")):
             self.assertEqual(options_desk.seat_founders(self.house), [])
 
+    def test_a_failure_costs_only_this_step_and_a_sail_error_is_the_births_passs_to_defer(self):
+        from league.sandbox import SandboxError
+
+        with mock.patch.object(options_desk, "owed", side_effect=RuntimeError("a bug")):
+            self.assertEqual(options_desk.seat_founders(self.house), [])
+        self.assertTrue([e for e in self.house.ledger.iter(kinds="ops.alert") if "founder seating failed" in str(e.payload)])
+        with mock.patch.object(self.house.sandbox, "needs", side_effect=SandboxError("Sail is down")):
+            with self.assertRaises(SandboxError):
+                options_desk.seat_founders(self.house)
+
     def test_a_founder_that_cannot_be_born_is_told_once_and_not_tried_again_until_its_code_changes(self):
         niche = self.house.niches[options_desk.OPTIONS_DESK]
         niche.founders = tuple(f for f in niche.founders if f["key"] != "test-condor")
