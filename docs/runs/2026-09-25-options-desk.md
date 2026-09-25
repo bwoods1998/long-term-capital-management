@@ -148,8 +148,17 @@ run's `config.json` change is its own new `options_structures` key).
   `3d24d49c-cdc9-469f-9766-6e1edf3c3118`; 180/180 gateway tests on main; `OPTION_STRUCTURES_REAL` "off"; status
   fine, kill switch off). Three practice orders passed through it by 11:06:56Z, none refused. **House owner deploy started
   11:07Z** (`floor_box.py deploy` via the ratify wrapper; no money-rule change, so any ratify is a no-op).
+  **Deploy V done:** release `20260925T110706Z-c7adcaf627d5` staged 11:07:10Z, canary passed, promoted
+  11:08:45.2Z (was `main-47c52e860764`), ratify at 11:08:48Z returned active on `535a7f15` (unchanged),
+  `ops.started` 11:09:50Z with books alpaca, alpaca-paper, kalshi, kalshi-shadow, options-shadow; the watch's
+  verdict **promoted 11:18:45Z** (reasons none). Every book unfrozen at 11:17Z (the real Alpaca book had shown
+  H4's $0.0135 cents freeze in the old House's last reading). The founder: krasker-22 (options-gap-drift) born
+  11:11:03Z, seated at rung 1 on options-shadow with a $200 practice stake; the House's replay of it on the box
+  11:13:43Z (86 blocks, deflated Sharpe 0.80); the seat rule retired krasker-13 (options-pullback, 7-day -0.111,
+  nothing held) with cause `options_seat`, one retirement. H3 on the floor: the updater held (release train until
+  14:00:29Z, session hold to 20:05Z; next eligible 20:05Z). Harness incidents caused by this run: 0.
   **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
-  otherwise Saturday after Deploy B and Deploy G. State (10:33Z): **Saturday** (the outage below delayed V). Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
+  otherwise Saturday after Deploy B and Deploy G. State (10:33Z): Saturday; **reopened 11:20Z**: V's watch ended 11:18:45Z, so the slot is open from 11:48:45Z if finished before 12:55Z. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
