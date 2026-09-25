@@ -43,6 +43,7 @@ from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
 from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, shards as shards_module
 from . import parameters
+from . import kalshi_founders
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
@@ -7641,6 +7642,7 @@ class House:
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()
+        kalshi_founders.seat(self)  # K1: one flagged founder row (`seat_full_league`) a pass, into a full league too; never raises
         self._refill(rules)
 
     def _seal_applies(self, agent: Agent) -> bool:
