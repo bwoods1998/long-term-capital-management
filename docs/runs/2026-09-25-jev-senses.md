@@ -94,7 +94,7 @@ its session.
   this run's merges to `main` before forward-first's Deploy A or the options run's V; the merge happens in
   the slot, immediately before the deploy. After promotion: `live_trading.active` and the money digest
   checked unchanged (forward-first's request). Its exact start is written here first.
-  **D-J2 (House owner deploy; Saturday Sept 26 about 09:00Z, the order forward-first proposed at 14:47Z and
+  **D-J2 (House owner deploy; Saturday Sept 26 about 09:00Z, the order forward-first proposed at 14:45Z and
   this run accepts):** B 06:00Z, the options run's G about 07:00Z, forward-first's C about 08:00Z, **this run's
   D-J2 about 09:00Z**, then the Kalshi run's before about 15:30Z; each starts 30 minutes after the previous
   watch ends. D-J2 carries J3 (#322), its `researcher.py` hook (#328) and J1's serving hook switched off (#327),
