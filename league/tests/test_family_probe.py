@@ -727,7 +727,9 @@ class ProbeGateOnOptions(ForwardBlocks, HouseCaseReal):
         return agent
 
     def losing_like_krasker_14(self):
-        self.blocks("options-pullback", *([-0.02] * 18 + [-0.0229]), book="alpaca-paper", code=IDLE)  # 19 blocks, -0.3829
+        # A dead member running the family's own program carries the losing record: under C8 (Sept 25, 2026) a member with
+        # other code is a family of its own, and the forward record it carries is not options-pullback's.
+        self.blocks("options-pullback", *([-0.02] * 18 + [-0.0229]), book="alpaca-paper", code=seeds.load("options-breakout"))  # 19 blocks, -0.3829
 
     def test_an_options_probe_from_a_losing_family_is_refused(self):
         self.losing_like_krasker_14()
