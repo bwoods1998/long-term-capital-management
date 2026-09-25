@@ -104,6 +104,22 @@ desk's structures go to, so the choice is made at the deploy and undone by a rol
 Read before every merge and deploy: the forward-first record's "Coordination with the options-desk
 run" section (its current wave, file owners and announced deploys).
 
+**Three runs (the owner's message, about 06:12Z):** a third run executes `docs/goals/LTCM_KALSHI_SCALE.md`
+(branch `goal/kalshi-scale-2026-09-25`; record `docs/runs/<date>-kalshi-scale.md` on its run branch). The
+coordination rules now span three runs: before each merge and deploy, read all three records (current
+waves, file owners, announced deploys); one deploy at a time across the three, none 13:25-20:05Z on a
+trading day, and **none while a real Kalshi family's game is in play**, except a rollback; after any
+promotion that leaves the grant inactive, ratify `earned-live-20260921` only if every changed money rule
+is a row of one of the THREE plans' tables (forward-first, options desk, Kalshi scale), else roll back and
+record why. The Kalshi run owns: Kalshi strategies and founders in `league/strategies/`, the Kalshi desks'
+seats in `league/niches.json` (with forward-first's F3), `league/feeds.py`, `ltcm/data/sports.py`,
+`ltcm/data/weather.py`, `league/shards.py`, new capacity scripts, the gateway's new `web_fetch` route,
+`LEAGUE_HOSTS` additions, and after forward-first's Deploy B the scale rule in `league/live_trading.py` and
+`league/grants.py`. **The gateway:** its `web_fetch` route and this run's multi-leg route both touch
+`gateway/`; whichever deploys the gateway second rebases on the first and re-runs the gateway tests. This
+run's founders live in `league/seeds/` (options only) and its seats in the `alpaca-options` row, so no
+file of the Kalshi run's is touched.
+
 **This run's current wave, file owners and deploys (kept current):**
 
 | Wave | State | Files owned |
