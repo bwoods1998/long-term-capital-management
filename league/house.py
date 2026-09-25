@@ -100,6 +100,12 @@ SETTLE_LAGS_FILE = "settle_lags.json"
 #: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
 #: passed or not, so it cannot search its parameters in place for a lucky look that is no trial.
 EDIT_REPLAY_NOTIONAL = 0.5
+#: A STRUCTURE agent's edit is replayed at the full practice caps instead (G-LOOP, Sept 25, 2026): the program as it
+#: would trade. At half notional its order cap is $37.50, and a structure's cost is its maximum loss: a $1-wide iron
+#: condor or credit vertical at the founders' 0.15-0.30 short deltas takes $0.25-0.45 of credit, so it costs $55-75 to
+#: hold and cannot be opened at all; its edit's replay traded nothing and failed on trade count, whatever the edit was
+#: (builder S3's finding, the options-desk run record, row S3).
+EDIT_REPLAY_STRUCTURE_NOTIONAL = 1.0
 EDIT_REPLAY_EVERY_SECONDS = 24 * 3600.0
 #: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
 #: called a mismatch (`reconcile_with_second_look`).
@@ -3952,7 +3958,8 @@ class House:
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
                     scale: float = 1.0) -> tuple[dict[str, Any], str]:
         """`scale` sizes the replay's book: the practice rung's stake and caps times it (an in-place edit
-        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's)."""
+        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`, a structure agent's at the full caps,
+        `EDIT_REPLAY_STRUCTURE_NOTIONAL`; everything else at the practice book's)."""
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
@@ -4246,7 +4253,9 @@ class House:
 
         The agent keeps its seat, its record and its code; only numeric PARAMS that `parameters.inspect`
         lists as mutable change, each inside its bounds. The House replays the code with the edited
-        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`), on the
+        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`; a structure
+        agent's at the full practice stake and caps, `EDIT_REPLAY_STRUCTURE_NOTIONAL`: at half, most of its
+        structures cost more than the order cap and its replay could not open one), on the
         tape its replays use -- the development window, never the sealed holdout -- and judges it by
         the replay gate against the line's trials with this look, and every earlier edit look of the
         line, counted in the deflation (`evaluator.replay_gate`, counted=False, `looks`). It records no
@@ -4299,8 +4308,9 @@ class House:
         niche = self.niche_of(current)
         if niche is not None and not self._replayable(niche, current.needs):
             return {"error": "this specialty has no replay to judge an edit by: an edit here waits for one"}
+        scale = EDIT_REPLAY_STRUCTURE_NOTIONAL if self.is_structure_agent(current) else EDIT_REPLAY_NOTIONAL
         try:
-            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=EDIT_REPLAY_NOTIONAL)
+            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=scale)
         except Exception as exc:  # noqa: BLE001 - a replay that cannot run is no look, and changes nothing
             return {"error": f"the edit's replay could not run (not a look; nothing changed): {type(exc).__name__}: {str(exc)[:200]}"}
         crash = self._crashed(result)
@@ -4314,7 +4324,8 @@ class House:
                    "deflated_sharpe": None if deflated is None else deflated["dsr"], "return_pct": result.get("return_pct"),
                    "max_drawdown": result.get("max_drawdown"), "oos_mean_log_growth": oos.get("mean_log_growth"),
                    "fees_usd": result.get("fees_usd"), "tape": tape_id, "tape_source": result.get("tape_source"),
-                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * EDIT_REPLAY_NOTIONAL}
+                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * scale,
+                   "max_order_usd": float(CONSTITUTION["rungs"]["1"]["max_order_usd"]) * scale}
         self.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": passed, "reasons": reasons,
                                               "params": edited, "was": dict(current.params), **numbers}, agent=current.id)
         return {"passed": passed, "reasons": reasons, "params": edited, "was": dict(current.params),
@@ -8929,7 +8940,8 @@ class House:
         paused = self.registry.entries_paused(agent.id)
         out: dict[str, Any] = {"state": "paused" if paused else "open",
                                "tools": "pause_entries / resume_entries hold and release your buys (your sells always go on); edit_params "
-                                        "changes your PARAMS in place once its replay at half notional passes"}
+                                        "changes your PARAMS in place once its replay at "
+                                        + ("the full practice caps" if self.is_structure_agent(agent) else "half notional") + " passes"}
         if paused:
             since = str(paused.get("since") or "")
             held = sum(int(e.payload.get("held") or 0) for e in self.ledger.read(kinds="agent.woke", agent=agent.id, limit=2000, newest=True)
