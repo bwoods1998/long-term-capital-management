@@ -850,9 +850,13 @@
     {
      "seed": "options-pullback",
      "key": "options-pullback"
+    },
+    {
+     "seed": "options-gap-drift",
+     "key": "options-gap-drift"
     }
    ],
-   "founders_note": "STRUCTURE FOUNDERS GO HERE (Sept 25, 2026): the integrator appends to `founders` a row {\"seed\": <its SEEDS name>, \"key\": <the same>} for each structure founder of S4's reports (branches s4a/founders and s4b/founders), each a seed whose NEEDS carry \"structures\": true; `league/options_desk.py` seats them, one a tick. Nothing reads this note.",
+   "founders_note": "Structure founders (Sept 25, 2026): a founder whose seed's NEEDS carry \"structures\": true is seated only by `league/options_desk.py`, one a tick, never by `House.found`. Of twelve written, options-gap-drift passed the House's structure replay; the eleven others are on branches s4a/founders and s4b/founders with their replays in docs/runs/data/2026-09-25-structure-founders-{a,b}.json. Nothing reads this note.",
    "replay": false,
    "desk": "krasker",
    "desk_note": "William Krasker, the model builder: nothing is priced here without one",
