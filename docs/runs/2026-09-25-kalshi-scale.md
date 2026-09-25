@@ -157,7 +157,8 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 5. **Verify in the window:** `ops.started` on the release; one founder born a births pass, each displacement by rule
    (reason names the founder); the college board and the odds rows covering Saturday's slate (≥ 60 games with
    lines); the founders' first wakes offered markets, their intents and practice orders; no new error alerts; tick
-   p50. Then the gateway fetch from a research pass (the `web_fetch` ledger row).
+   p50; each founder's replay recorded as the wait it is ("unsupported input: feeds recorded live since"), never a
+   failed trial, so the forward-first run's F1/F3 ranking reads it as no replay record (asked 07:12Z). Then the gateway fetch from a research pass (the `web_fetch` ledger row).
 
 ## Findings before the builders report
 
