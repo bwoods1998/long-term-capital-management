@@ -556,6 +556,28 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual((closed.side, closed.limit_price), ("sell", D("0.90")))
         self.assertEqual(opened.reason, "a test condor")
 
+    def test_a_limit_further_through_the_touch_than_the_books_band_is_re_priced_to_its_edge(self):
+        """Sept 25, 2026 (17:47-18:14Z): krasker-29's close of an IWM put vertical "at 0.28 or better" against a bid
+        near 0.54 was refused five times by the book's 10% limit band; the House now re-prices a structure order that
+        is further through its touch than the band to the band's edge, which fills at the touch all the same."""
+        from league import structures
+
+        agent = self.structure_agent()
+        book = self.house.book_of(agent)
+        inst = structures.instrument(structures.parse("options-shadow", condor_row()).spec, "options-shadow")
+        self.shadow.set_quote(inst, "0.54", "0.60")
+        row = condor_row(action="close", limit=0.72)   # a credit structure: buying back for at most 0.72 sells S at 0.28
+        (close,), dropped = self.house._intents(agent, book, [row])
+        self.assertEqual(dropped, [])
+        self.assertEqual((close.side, close.limit_price), ("sell", D("0.49")))  # ceil(0.54 x 0.90)
+        self.assertIn("re-priced the limit 0.28 to 0.49", close.reason)
+        within, = self.house._intents(agent, book, [condor_row(action="close", limit=0.50)])[0]
+        self.assertEqual(within.limit_price, D("0.50"))                        # 0.50 is inside the band: unchanged
+        resting, = self.house._intents(agent, book, [condor_row(action="close", limit=0.20)])[0]
+        self.assertEqual(resting.limit_price, D("0.80"))                       # a far target on the resting side: the book's to judge
+        opening, = self.house._intents(agent, book, [condor_row(limit=0.30)])[0]   # a 0.30 credit is S 0.70, over 1.10 x the 0.60 ask
+        self.assertEqual(opening.limit_price, D("0.66"))
+
     def test_a_net_price_is_never_snapped_to_a_single_contracts_grid(self):
         agent = self.structure_agent()
         book = self.house.book_of(agent)
