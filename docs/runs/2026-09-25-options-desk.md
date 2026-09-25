@@ -407,5 +407,13 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
   28 at 12.8% against Oct 5 at 16.4% (0.78x; a kink is 1.10x)"; trend-vertical and diagonal "no pullback inside a
   trend"; orb holding IWM at +$0.05 a share; skew holding AAL and RIVN at -$0.05 each. House RSS 2,147 MB (17:30Z).
 - **18:01Z (17:30-18:01):** 38 wakes, 2 intents; no structure fill. No structure closed on the day; singles -$41.15. House RSS about 2.3 GB, flat since 17:20Z.
+- **A defect found at 18:18Z:** from 17:47Z krasker-29 (options-orb) tried five times to close its IWM Sept 28 put vertical,
+  bought at 0.46, "at 0.28 a share or better" with the bid near 0.54, a profitable close, and the book refused each ("limit
+  price deviates 48.15-50.00% from reference"): the book's 10% limit band (`ltcm.risk.rule_limit_sanity`) refuses an exit
+  priced well through the touch, and the founders price stops and exits to fill. Fix PR #339 (`v/exitfit`): the House
+  re-prices a structure order further THROUGH its touch than the band to the band's edge (a close to 0.9 x bid, an open to
+  1.1 x ask), which fills at the touch all the same; a resting-side limit is left to the book. CI from 18:22Z; an owner
+  deploy in the session under the owner's lifted rule for today. (Merton's architect had merged #338 at about 18:10Z, a
+  corrected child of krasker-29 with touch-priced exits: the loop found the same defect in that strategy by itself.)
 
 ## Report
