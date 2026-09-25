@@ -412,6 +412,7 @@ Friday Sept 25, 13:30-20:00Z, every 30 minutes (`optwatch.py` in the session scr
 - **19:01Z (18:30-19:01):** 35 wakes, 1 intent: krasker-29's close, re-priced by the House and filled at 0.52 (18:49:36Z):
   **structures on the day +$5.80 on 1 close**; singles -$41.15 on 7. Open structures: krasker-22's CCL condor (marked at
   its maximum loss), krasker-32's AAL and RIVN put verticals (Oct 2). Options desk 15 living.
+- **19:31Z (19:00-19:31):** 41 wakes, 0 intents, 3 dropped (krasker-22's condor buy-back over its wing); structures +$5.80 on 1 close; House RSS about 1.8 GB.
 - **A defect found at 18:18Z:** from 17:47Z krasker-29 (options-orb) tried five times to close its IWM Sept 28 put vertical,
   bought at 0.46, "at 0.28 a share or better" with the bid near 0.54, a profitable close, and the book refused each ("limit
   price deviates 48.15-50.00% from reference"): the book's 10% limit band (`ltcm.risk.rule_limit_sanity`) refuses an exit
