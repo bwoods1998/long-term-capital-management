@@ -756,13 +756,25 @@ class OptionsHistory:
         summed over the ingested band only (not the whole chain). NOT AVAILABLE: vendor greeks,
         point-in-time open interest, and the direction of any trade. Caveat: an option's close is
         its LAST print, which can be hours before the underlying's close; contracts with fewer
-        than 5 prints that day are left out of the IV fields."""
+        than 5 prints that day are left out of the IV fields.
+
+        SPY, QQQ and IWM (`DAILY_EXPIRIES`) are read on their WEEKLY expiries alone (the last listed of each week, as
+        `ingest`'s `weekly_only`), whatever else the store holds: every stored row was made from the weekly store, and
+        `compute_features` never remakes a day, so counting the weekday expiries once they are ingested would step
+        `option_volume`, `contracts_printed` and `put_call_volume_ratio` up between old days and new (the adversarial
+        review of Deploy G, Sept 25, 2026, on a synthetic every-expiry copy: SPY Sept 21 option_volume 702,366 ->
+        2,461,369, contracts_printed 393 -> 1,024; QQQ Sept 18 put/call 1.84 -> 2.43), and replay (`feature_series`)
+        and live (`features_at`) would read different series. `atm_iv` and `skew_25d` are unchanged by it."""
         symbol = symbol.upper()
         stamp = close_stamp(f"{day}T12:00:00Z", "1Day")  # available at the NY midnight after the session
         at_ts = datetime.combine(_day(day), datetime.min.time(), NY).replace(hour=16).timestamp()
         cur = self.db.execute("SELECT c.occ, c.expiry, c.strike, c.right, b.c, b.v, b.n FROM bars b JOIN contracts c ON c.occ = b.occ "
                               "WHERE c.underlying = ? AND b.timeframe = '1Day' AND b.t = ? AND c.expiry > ?", (symbol, stamp, day))
         rows = [dict(zip(("occ", "expiry", "strike", "right", "c", "v", "n"), r)) for r in cur]
+        if symbol in DAILY_EXPIRIES and rows:
+            listed = self.db.execute("SELECT DISTINCT expiry FROM contracts WHERE underlying = ? AND expiry > ?", (symbol, day))
+            weekly = _weeklies(expiry for (expiry,) in listed)
+            rows = [r for r in rows if r["expiry"] in weekly]
         if not rows or not spot or spot <= 0:
             return None
         volume = {"call": sum(r["v"] for r in rows if r["right"] == "call"), "put": sum(r["v"] for r in rows if r["right"] == "put")}

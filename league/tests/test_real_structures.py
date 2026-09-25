@@ -296,6 +296,12 @@ class RealStructuresHouse(unittest.TestCase):
     def rung(self, agent):
         return self.house.evaluator.rung(agent.id)
 
+    def on_real_money(self, agent):
+        """The agent on rung 2, where only the allocator's seat puts it: no structure order of a rung-1 agent goes to a real
+        book (`House._structure_refusal`, the review of Deploy G, Sept 25, 2026)."""
+        self.house.evaluator.seat(agent.id, 2, "a test: seated on real money")
+        return agent
+
     def promoted(self, agent):
         return [e.payload for e in self.house.ledger.iter(kinds="eval.verdict", agent=agent.id) if e.payload.get("decision") == "promote"]
 
@@ -510,7 +516,7 @@ class TheHouseOnRealMoney(RealStructuresHouse):
         return [r for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id) for r in e.payload["reasons"]]
 
     def test_opens_wait_for_the_switch_and_closes_always_go(self):
-        agent = self.structure_agent("test-real")
+        agent = self.on_real_money(self.structure_agent("test-real"))
         real = self.house.books["alpaca"]
         intents, dropped = self.house._intents(agent, real, [vertical_row(), vertical_row(action="close", limit=0.40)])
         self.assertEqual(dropped, [])
@@ -518,7 +524,7 @@ class TheHouseOnRealMoney(RealStructuresHouse):
         self.assertIn("owner's switch (O1: allocator.option_spreads_real is off)", self.refusals(agent)[0])
 
     def test_with_o1_on_a_debit_vertical_goes_to_the_real_book_and_a_credit_type_is_refused(self):
-        agent = self.structure_agent("test-real-on")
+        agent = self.on_real_money(self.structure_agent("test-real-on"))
         real = self.house.books["alpaca"]
         with switched(True):
             intents, dropped = self.house._intents(agent, real, [vertical_row(), condor_row()])
@@ -541,7 +547,7 @@ class TheHouseOnRealMoney(RealStructuresHouse):
         that is legging OUT, which leaves the short leg naked (the review of g/money, Sept 25, 2026, MINOR: until then the
         close went). The agent's close, the House's expiry close and its wind-down all hold back, with one error a day."""
         house = self.house
-        agent = self.structure_agent("test-real-legs")
+        agent = self.on_real_money(self.structure_agent("test-real-legs"))
         real = house.books["alpaca"]
         self.real.caps.discard("mleg")
         with switched(True):
@@ -710,7 +716,7 @@ class TheReviewOfGMoney(RealStructuresHouse):
         holder = self.structure_agent("test-holder")
         held = structures.instrument(structures.parse("alpaca", vertical_row(low=580)).spec, "alpaca")  # long 580C, short 581C
         real.account(holder.id).holdings[held.key] = Holding(held, D(1), D("46"))
-        opener = self.structure_agent("test-opener")
+        opener = self.on_real_money(self.structure_agent("test-opener"))
         with switched(True):
             intents, _ = house._intents(opener, real, [vertical_row(low=581), vertical_row(low=579), vertical_row(low=582)])
         # 581/582 buys the 581C held short; 579/580 sells the 580C held long; 582/583 touches neither.
@@ -737,6 +743,41 @@ class TheReviewOfGMoney(RealStructuresHouse):
                          [structures.instrument(structures.parse("alpaca", vertical_row(low=low)).spec, "alpaca").market_id for low in (590, 595)])
         self.assertIn(f"{occ('2026-09-11', 'call', 591)} is opened on the other side by this same decision on alpaca",
                       [e.payload["reasons"][0] for e in house.ledger.iter(kinds="book.refused", agent=opener.id)][-1])
+
+
+class TheReviewOfDeployG(RealStructuresHouse):
+    """The adversarial review of Deploy G (Sept 25, 2026), MINOR 1 and 2: a structure order of a rung-1 agent never goes to
+    the real book, and `options_structures.book` names a practice book or none (its demonstration: named `alpaca`, a rung-1
+    agent was staked $150 on the real book and, with O1 on, its open filled there); a moving stamp goes at a promotion."""
+
+    def test_a_rung_1_structure_agent_sends_nothing_to_the_real_book_open_or_close(self):
+        agent = self.structure_agent("test-rung-1")
+        real = self.house.books["alpaca"]
+        with switched(True):
+            intents, dropped = self.house._intents(agent, real, [vertical_row(), vertical_row(action="close", limit=0.40)])
+        self.assertEqual((intents, dropped), ([], []))
+        refused = [r for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id) for r in e.payload["reasons"]]
+        self.assertEqual(len(refused), 2)
+        for reason in refused:
+            self.assertIn("a structure agent on rung 1 trades on practice, never on the real alpaca book", reason)
+        self.on_real_money(agent)
+        with switched(True):
+            intents, _ = self.house._intents(agent, real, [vertical_row()])
+        self.assertEqual([(i.side, i.instrument.venue) for i in intents], [("buy", "alpaca")])
+
+    def test_a_book_named_alpaca_stakes_no_real_money(self):
+        self.house.structure_book_name = "alpaca"  # the review's MisnamedBook
+        agent = self.structure_agent("test-misnamed")  # book_of: options-shadow, and seated there
+        self.assertEqual([e.payload["book"] for e in self.house.ledger.iter(kinds="book.stake", agent=agent.id)], ["options-shadow"])
+        self.assertNotIn(agent.id, self.house.books["alpaca"].accounts)
+
+    def test_a_moving_stamp_goes_when_it_is_promoted(self):
+        agent = self.structure_agent("test-moving")
+        with self.house._state_lock:  # as `_structure_move` stamps an agent holding on the book it is leaving
+            self.house._state.setdefault("structure_moving", {})[agent.id] = self.clock()
+        self.on_real_money(agent)
+        self.house.seat(agent)  # its real book: not moving between practice books
+        self.assertNotIn(agent.id, self.house._state["structure_moving"])
 
 
 if __name__ == "__main__":

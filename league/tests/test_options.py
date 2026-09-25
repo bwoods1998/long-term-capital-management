@@ -726,6 +726,8 @@ class StructuresInTheHouse(StructureHouseCase):
         from types import SimpleNamespace
 
         agent = self.structure_agent()
+        # On rung 2, where only the allocator seats it: a rung-1 agent sends nothing to a real book (the review of Deploy G).
+        self.house.evaluator.seat(agent.id, 2, "a test: seated on real money")
         # An adapter that sends a structure as one multi-leg order (`mleg`): without it no real structure order, open or
         # close, is sent (the review of g/money, Sept 25, 2026; test_real_structures).
         real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca", capabilities=lambda: {"mleg"}))
@@ -738,12 +740,15 @@ class StructuresInTheHouse(StructureHouseCase):
 
     def test_a_missing_structure_book_refuses_and_never_sends_to_alpaca_paper(self):
         agent = self.structure_agent()
+        # A name that is no practice book is the options shadow book (the review of Deploy G, Sept 25, 2026: test_structure_
+        # practice), which is not open on this House here.
         self.house.structure_book_name = "no-such-book"
+        self.house.books.pop("options-shadow")
         book = self.house.book_of(agent)
         self.assertIs(book, self.house.books["alpaca-paper"])  # seated on the desk's practice book...
         intents, _ = self.house._intents(agent, book, [condor_row()])
         self.assertEqual(intents, [])  # ...where nothing it sends goes
-        self.assertIn("no-such-book book, which is not open on this House", self.refusals(agent)[0])
+        self.assertIn("options-shadow book, which is not open on this House", self.refusals(agent)[0])
 
     def test_a_paused_agents_open_is_held_and_its_close_goes(self):
         agent = self.structure_agent()
