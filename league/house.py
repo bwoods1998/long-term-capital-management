@@ -1063,6 +1063,24 @@ class House:
         return Intent.new(agent=agent_id, instrument=inst, side="sell", quantity=quantity, order_type="limit", limit_price=limit,
                           reason=reason, created_at=now, nonce=nonce)
 
+    def _cancel_structure_opens_at_cut(self, book: Book, agent_id: str, today: str, hour: float) -> int:
+        """At the entry cut (`_structure_hours`: 14:30 New York, 90 minutes before an early close) the agent's
+        RESTING structure opens whose earliest expiry is today are cancelled, saying why on their cancelled row;
+        its closes stay. An open placed before the cut could otherwise fill after it, near the close, and be
+        settled at once. Returns how many were cancelled. The book refuses a new open after the cut as well
+        (`book._structure_entry_refusal`: the same calendar and the same numbers)."""
+        if hour < self._structure_hours(today)[0]:
+            return 0
+        cancelled = 0
+        for working in book.open_orders(agent_id):
+            inst = working.instrument
+            if working.side == "buy" and is_structure(inst) and str(inst.expiry or "") <= today:
+                outcome = book.cancel(agent_id, working.order_id, why=(
+                    f"the House's entry cut for structures: no open of a structure expiring today rests past "
+                    f"{_clock_text(self._structure_hours(today)[0])} New York"))
+                cancelled += outcome.status == "cancelled"
+        return cancelled
+
     def _structure_expiry_close(self, book: Book, agent_id: str, holding: Any, today: str, hour: float, now: str) -> Intent | None:
         """The House's expiry rule for a structure (`_enforce_horizon`), in place of the single contract's
         14:30 sale: from 15:30 New York (`STRUCTURE_CLOSE_HOUR`) on its EARLIEST expiry day, in the session,
@@ -3232,6 +3250,7 @@ class House:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
+        structural = option and needs.get("structures") is True  # a structure agent's options tape (Sept 25, 2026)
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
         # window (the backfilled history feeds cover the live window): a strategy that reads either is
@@ -3253,6 +3272,13 @@ class House:
             warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
             timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
             key = f"options:{','.join(under)}:{timeframe}:{int(needs.get('max_days_to_expiry') or 21)}:{warmup}:{horizon}:{start_iso[:10]}:{execution}"
+            # What else the options tape is built from (Sept 25, 2026): a structure agent's tape carries other
+            # contracts (no affordability line, from 0 DTE, its own days: a 0 is a 0-DTE strategy's own answer)
+            # and a tape asked with options features carries them; neither may share a single contract's tape.
+            if structural:
+                key += f":structures:{needs.get('max_days_to_expiry')!r}"
+            if needs.get("options_features"):
+                key += ":options-features"
             build = lambda: self.options_history.tape(needs, start_iso, end_iso, horizon=horizon, warmup=warmup, execution=execution,  # noqa: E731
                                                       underlier_bars=adapter_from(self.alpaca_data),
                                                       max_order_usd=float(CONSTITUTION["rungs"]["1"]["max_order_usd"]))
@@ -3298,7 +3324,9 @@ class House:
                     tape["observed_bars"] = bars
                     tape["observed_timeframe"] = observed_timeframe
                 return tape
-        if wanted and self.feeds is not None and not option:
+        if wanted and self.feeds is not None and (not option or structural):
+            # A structure agent's options tape carries its feeds too (Sept 25, 2026: the post-earnings founder
+            # reads EDGAR's earnings rows), which the options replay shows it at each step (`options_replay`).
             # The recorded live feeds ride on the tape (`league/feeds.py`), each row stamped with when
             # the House received it, over the window this tape was asked for. The key says whether
             # they spanned the replay gate then: a tape built before they did is not reused for a day
@@ -3374,8 +3402,8 @@ class House:
         feeds these NEEDS declare can carry their replay."""
         if self.feeds is None:
             raise ValueError("unsupported input: this House records no live feeds, so NEEDS['feeds'] cannot be replayed")
-        if str(needs.get("asset_class") or "") == "option":
-            raise ValueError("unsupported input: the options replay tape carries no live feeds")
+        if str(needs.get("asset_class") or "") == "option" and needs.get("structures") is not True:
+            raise ValueError("unsupported input: the options replay tape carries no live feeds (a structure agent's does)")
         short = self._feeds_shortfall(needs, wanted, coverage)
         if short:
             raise ValueError(short)
@@ -4511,6 +4539,7 @@ class House:
         # with no bid left is worthless and is written off once the venue has cleared it.
         today, hour = _new_york(self.clock)
         for agent_id in book.agents():
+            self._cancel_structure_opens_at_cut(book, agent_id, today, hour)
             for holding in list(book.account(agent_id).holdings.values()):
                 inst = holding.instrument
                 if is_structure(inst):  # a structure's own rule, from 15:30 on its earliest expiry day (Sept 25, 2026)

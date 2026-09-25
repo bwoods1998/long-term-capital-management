@@ -356,6 +356,62 @@ class InTheHouse(HouseCase):
         self.assertIs(open_now["numbers"]["untested"], False)
 
 
+class OptionsTapes(HouseCase):
+    """The replay's options tape (`House.tape_for`) for a structure agent (Sept 25, 2026): its own cache key,
+    and the feeds it declares."""
+
+    NEEDS = {"venue": "alpaca", "horizon": "day", "asset_class": "option", "symbols": ["SPY"], "max_days_to_expiry": 7}
+
+    def setUp(self):
+        super().setUp()
+        built = self.built = []
+
+        class History:
+            def tape(self, needs, start, end, **kw):
+                built.append(dict(needs))
+                return {"steps": [], "structures": bool(needs.get("structures"))}
+
+            def feature_series(self, symbols):
+                return {}
+
+        self.house.options_history = History()
+
+    def test_a_structure_agent_and_a_single_contract_agent_never_share_a_tape(self):
+        single, _ = self.house.tape_for(self.NEEDS)
+        structural, tape = self.house.tape_for({**self.NEEDS, "structures": True})
+        zero, _ = self.house.tape_for({**self.NEEDS, "structures": True, "max_days_to_expiry": 0})
+        unsaid, _ = self.house.tape_for({k: v for k, v in {**self.NEEDS, "structures": True}.items() if k != "max_days_to_expiry"})
+        featured, _ = self.house.tape_for({**self.NEEDS, "structures": True, "options_features": True})
+        self.assertEqual(len({single, structural, zero, unsaid, featured}), 5)
+        self.assertEqual(len(self.built), 5)
+        self.assertTrue(tape["structures"])
+        self.assertEqual(self.house.tape_for({**self.NEEDS, "structures": True})[0], structural)  # and a tape is still shared
+        self.assertEqual(len(self.built), 5)
+
+    def test_a_structure_agents_tape_carries_its_feeds_and_a_single_contract_agents_is_refused_them(self):
+        class Feeds:
+            def coverage(self, wanted, start, end):
+                return {"earnings": {"INTC": {"first_ok": "2026-09-01T00:00:00Z"}}}
+
+            def series(self, wanted, start, end, step):
+                return {"earnings": {"INTC": [{"t": "2026-09-09T20:05:00Z", "item": "2.02"}]}}
+
+            def close(self):
+                pass
+
+        self.house.feeds = Feeds()
+        self.house._feeds_wanted = lambda needs: {"earnings": ["INTC"]} if needs.get("feeds") else {}
+        self.house._feeds_shortfall = lambda needs, wanted, coverage: ""
+        needs = {**self.NEEDS, "structures": True, "feeds": {"earnings": ["INTC"]}}
+        _, tape = self.house.tape_for(needs)
+        self.assertEqual(tape["feeds"]["earnings"]["INTC"][0]["item"], "2.02")
+        self.house._require_feeds(needs, {"earnings": ["INTC"]}, tape["feeds_coverage"])  # no refusal
+        _, plain = self.house.tape_for({**self.NEEDS, "feeds": {"earnings": ["INTC"]}})
+        self.assertNotIn("feeds", plain)
+        with self.assertRaises(ValueError):
+            self.house._require_feeds({**self.NEEDS, "feeds": {"earnings": ["INTC"]}}, {"earnings": ["INTC"]}, {})
+
+
 # ------------------------------------------------------------------ structures (Sept 25, 2026)
 #: A structure agent: the options desk, `"structures": True` in its NEEDS. It sends what a test put in its memory.
 STRUCTURE_AGENT = '''
@@ -798,6 +854,31 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual(book.account(other.id).holdings, {})  # ...and the other's still went
         warned = [e.payload for e in self.house.ledger.iter(kinds="ops.alert") if "could not run this pass" in str(e.payload)]
         self.assertEqual(len(warned), 1)
+
+    def test_at_the_entry_cut_resting_opens_expiring_today_are_cancelled_and_closes_stay(self):
+        from league import structures
+
+        agent = self.structure_agent()
+        book, inst = self.held_condor(agent)
+        later = structures.instrument(structures.parse("options-shadow", condor_row(expiry="2026-09-14")).spec, "options-shadow")
+        self.shadow.set_quote(later, "0.55", "0.62")
+        vertical = {"structure": "debit_vertical", "action": "open", "quantity": 1, "limit_price": 0.30, "reason": "a Friday vertical",
+                    "legs": [{"occ": occ("2026-09-11", "call", 590), "role": "long"}, {"occ": occ("2026-09-11", "call", 591), "role": "short"}]}
+        self.shadow.set_quote(structures.instrument(structures.parse("options-shadow", vertical).spec, "options-shadow"), "0.25", "0.32")
+        rows = [vertical, condor_row(expiry="2026-09-14", limit=0.40), condor_row(action="close", limit=0.40)]
+        outcomes = book.submit(self.house._intents(agent, book, rows)[0])  # opens at 0.60 under the ask, a close at 0.60 over the bid
+        self.assertEqual([o.status for o in outcomes], ["resting"] * 3)
+        today_open, monday_open, close = (o.order_id for o in outcomes)
+        self.at(THURSDAY_11_NY + 86400 + 3.4 * 3600)  # Friday 14:24 New York: before the cut nothing is cancelled
+        self.house._enforce_horizon()
+        self.assertEqual(len(book.open_orders(agent.id)), 3)
+        self.at(THURSDAY_11_NY + 86400 + 3.6 * 3600)  # 14:36
+        self.house._enforce_horizon()
+        self.assertEqual(sorted(o.order_id for o in book.open_orders(agent.id)), sorted([monday_open, close]))
+        self.assertIn(today_open, self.shadow.cancelled)
+        cancelled = [e.payload for e in self.house.ledger.iter(kinds="book.order") if e.payload.get("order_id") == today_open
+                     and e.payload.get("status") == "cancelled"]
+        self.assertIn("entry cut for structures", str(cancelled[-1]))
 
     def test_a_dead_agents_structure_waits_for_the_open(self):
         agent = self.structure_agent()
