@@ -43,6 +43,7 @@ from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
 from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, research_gate, shards as shards_module
 from . import parameters
+from . import options_desk
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
@@ -58,6 +59,7 @@ from .pacer import Pacer
 from .rules import rules_text
 from .sandbox import SandboxBusy, SandboxError
 from .venues import family_of, instrument_for, market_hours, min_order_usd, price_increment, snap_limit
+from .structures import is_structure
 
 #: How many bars of a watched underlier a replay tape carries per symbol, and the sizes it may
 #: choose between. A three-week window of one-minute bars is millions of rows and a box killed for
@@ -136,6 +138,18 @@ PRICE_GRID_TTL_SECONDS = 600.0
 #: Which book an agent trades on, by venue family and rung.
 PRACTICE_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
+#: The options desk's structures (Sept 25, 2026; `league/structures.py`, `House.is_structure_agent`): the practice
+#: book when `league/config.json` `options_structures.book` names none; no structure is opened on its earliest
+#: expiry day from 14:30 New York, and the House sells what is still held from 15:30 (hours as decimals); a
+#: structure agent is shown at most 80 contracts an underlying (0-7 day SPY lists over a thousand).
+STRUCTURE_BOOK_DEFAULT = "options-shadow"
+STRUCTURE_ENTRY_CUT_HOUR = 14.5
+STRUCTURE_CLOSE_HOUR = 15.5
+STRUCTURE_CHAIN_PER_UNDERLYING = 80
+#: A structure agent's chain is one ranged request an underlying over this many days (`House._expiry_chain`), split
+#: into one request an expiry only when it returns this many rows or more (near the adapter's 1,000-snapshot page).
+STRUCTURE_CHAIN_WINDOW_DAYS = 7
+STRUCTURE_CHAIN_SPLIT_ROWS = 600
 PROBE_BOX = "house-probe"
 #: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
 #: how often they run, how many ledger rows the first pass reads back (never the whole ledger),
@@ -742,34 +756,395 @@ class House:
         # Alive, with its books open: the watchdog reads this file, and a House's first tick is its slowest.
         self._health({"at": now_iso(self.clock)})
 
-    def _chain(self, symbols: list[str], days: int, afford: float, quotes: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def _chain(self, symbols: list[str], days: int, afford: float | None, quotes: Mapping[str, Any], *,
+               structures: bool = False) -> list[dict[str, Any]]:
         """The option contracts an agent may consider: its underlyings, expiring after today and
         within `days`, within a fifth of the underlying's price, two-sided, and affordable in one
-        order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list."""
+        order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list.
+
+        `structures` (a structure agent, Sept 25, 2026: `is_structure_agent`): no affordability line
+        (`afford` None; a structure's legs are not bought alone, and the book meters the structure's
+        maximum loss), expiries from TODAY in New York until the entry cut (`STRUCTURE_ENTRY_CUT_HOUR`,
+        from tomorrow after it) to `days` ahead, and at most `STRUCTURE_CHAIN_PER_UNDERLYING` an
+        underlying. The venue's chain is read by `_expiry_chain`, shared by every structure agent for two
+        minutes: one ranged request an underlying, split by expiry only where the adapter's one call would
+        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain)."""
         broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
         if broker is None:
             return []
         today = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
         first, last = _plus_days(today, 1), _plus_days(today, days)
+        if structures:
+            new_york, hour = _new_york(self.clock)
+            first = new_york if hour < self._structure_hours(new_york)[0] else _plus_days(new_york, 1)
+            last = _plus_days(new_york, days)
+        per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
         rows: list[dict[str, Any]] = []
         for symbol in symbols:
             touch = quotes.get(symbol) or {}
             spot = ((touch.get("bid") or 0) + (touch.get("ask") or 0)) / 2 or None
             try:
-                chain = broker.option_chain(symbol, expiry_from=first, expiry_to=last)
+                chain = (self._expiry_chain(broker, symbol, first, last, spot) if structures
+                         else broker.option_chain(symbol, expiry_from=first, expiry_to=last))
             except Exception as exc:  # noqa: BLE001 - one underlying's outage is not the wake's
                 self.alert("warning", f"option chain {symbol}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
-            if self.options_history is not None:
-                try:  # the quotes are already in hand: keeping them is the options replay's quote history
-                    self.options_history.record_quotes([c for c in chain if spot is None or abs(c["strike"] / spot - 1) <= 0.20],
-                                                       source=str(getattr(broker, "option_feed", "") or ""))
-                except Exception as exc:  # noqa: BLE001 - a full disk is not the wake's problem
-                    self.alert("warning", f"option quotes not kept ({type(exc).__name__}: {str(exc)[:120]})")
-            near = [c for c in chain if c["ask"] <= afford and (spot is None or abs(c["strike"] / spot - 1) <= 0.20)]
+            if self.options_history is not None and not structures:
+                self._keep_option_quotes(broker, chain, spot)
+            near = [c for c in chain if (afford is None or c["ask"] <= afford) and (spot is None or abs(c["strike"] / spot - 1) <= 0.20)]
             near.sort(key=lambda c: (abs(c["strike"] / spot - 1) if spot else 0, c["expiry"]))
-            rows += [{**c, "occ": c["symbol"], "underlying_price": spot} for c in near[:40]]
+            rows += [{**c, "occ": c["symbol"], "underlying_price": spot} for c in near[:per_underlying]]
         return rows
+
+    def _keep_option_quotes(self, broker: Any, chain: list[dict[str, Any]], spot: float | None) -> None:
+        """The quotes are already in hand: keeping them is the options replay's quote history."""
+        try:
+            self.options_history.record_quotes([c for c in chain if spot is None or abs(c["strike"] / spot - 1) <= 0.20],
+                                               source=str(getattr(broker, "option_feed", "") or ""))
+        except Exception as exc:  # noqa: BLE001 - a full disk is not the wake's problem
+            self.alert("warning", f"option quotes not kept ({type(exc).__name__}: {str(exc)[:120]})")
+
+    def _expiry_chain(self, broker: Any, symbol: str, first: str, last: str, spot: float | None) -> list[dict[str, Any]]:
+        """A structure agent's chain of one underlying (`_chain`), shared by every structure agent for two minutes.
+
+        ONE ranged request first, over `STRUCTURE_CHAIN_WINDOW_DAYS` from `first` (or the agent's own days if
+        longer), so agents asking 2, 4 or 7 days share it; each agent keeps the expiries up to its own `last`.
+        Only when that request comes back near the adapter's page (`STRUCTURE_CHAIN_SPLIT_ROWS` rows: the adapter
+        stops at its first 1,000 snapshots and drops the one-sided ones before returning, so a cut chain returns
+        fewer than 1,000) is the underlying read one expiry at a time, on the House's trading days only
+        (`us_equity_session`), each expiry cached two minutes; and such an underlying is read that way for the
+        rest of the New York day without asking the ranged request again. The adversarial review of Sept 25, 2026
+        counted 42 requests for one cold wake of a 10-day, six-underlying agent when every weekday was asked
+        apart; on the box that day an SPY, QQQ or IWM expiry lists 164-586 contracts, a small stock's far fewer."""
+        window_end = max(last, _plus_days(first, STRUCTURE_CHAIN_WINDOW_DAYS))
+        split = self.__dict__.setdefault("_structure_split", {})
+        if split.get(symbol) != first:
+            ranged = self._cached(f"structure-range:{symbol}:{first}:{window_end}", 120,
+                                  lambda: self._read_expiry(broker, symbol, first, spot, until=window_end), record=False)
+            if len(ranged) < STRUCTURE_CHAIN_SPLIT_ROWS:
+                return [c for c in ranged if str(c.get("expiry") or "") <= last]
+            if len(split) > 256:
+                split.clear()
+            split[symbol] = first  # too long for one page: by expiry until the New York day changes
+        out: list[dict[str, Any]] = []
+        for day in self._trading_days(first, last):
+            out += self._cached(f"expiry-chain:{symbol}:{day}", 120, lambda day=day: self._read_expiry(broker, symbol, day, spot), record=False)
+        return out
+
+    def _trading_days(self, first: str, last: str) -> list[str]:
+        """The dates from `first` to `last` with a regular session by the House's calendar (`us_equity_session`;
+        a date it cannot answer for counts when it is a weekday): no option expires on a holiday or a weekend."""
+        from datetime import date as _date
+
+        days, day = [], first
+        while day <= last:
+            try:
+                open_day = us_equity_session(day) is not None
+            except Exception:  # noqa: BLE001 - outside the computed calendar: a weekday is asked
+                open_day = _date.fromisoformat(day).weekday() < 5
+            if open_day:
+                days.append(day)
+            day = _plus_days(day, 1)
+        return days
+
+    def _read_expiry(self, broker: Any, symbol: str, day: str, spot: float | None, *, until: str | None = None) -> list[dict[str, Any]]:
+        """One request to the venue: the contracts of `symbol` expiring on `day` (through `until` when given),
+        kept in the options history as a single-leg chain is."""
+        chain = list(broker.option_chain(symbol, expiry_from=day, expiry_to=until or day))
+        if self.options_history is not None:
+            self._keep_option_quotes(broker, chain, spot)
+        return chain
+
+    # ------------------------------------------------------------ structures (the options desk, Sept 25, 2026)
+    # A structure agent (an agent of the options desk whose NEEDS say `"structures": True`) trades level-3
+    # structures with defined risk, each held as ONE position (`league/structures.py`), on the book
+    # `league/config.json` `options_structures.book` names (the options shadow book by default) while it
+    # is on practice. These hooks are its intent, its book, its context and the House's expiry-day close.
+
+    #: Set once from `league/config.json` (`_structure_book_name`); a test sets it directly.
+    structure_book_name: str | None = None
+
+    def _structure_book_name(self) -> str:
+        """The practice book a structure agent's structures go to: `league/config.json`
+        `options_structures.book` (`options-shadow` or `alpaca-paper`), read once, the options shadow book
+        when the key is absent or unreadable. The switch is the deploy's: a rollback undoes it."""
+        if self.structure_book_name is None:
+            try:
+                config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
+                named = (config.get("options_structures") or {}).get("book")
+            except Exception:  # noqa: BLE001 - an unreadable config is the default book, never alpaca-paper by accident
+                named = None
+            self.structure_book_name = str(named or STRUCTURE_BOOK_DEFAULT)
+        return self.structure_book_name
+
+    def is_structure_agent(self, agent: Agent | None) -> bool:
+        """Whether `agent` trades structures: on the options desk, with `"structures": True` in its NEEDS."""
+        if agent is None or (agent.needs or {}).get("structures") is not True:
+            return False
+        niche = self.niche_of(agent)
+        return niche is not None and niche.asset_class == "option"
+
+    def _structure_hours(self, day: str) -> tuple[float, float]:
+        """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
+        15:30 (`STRUCTURE_ENTRY_CUT_HOUR`, `STRUCTURE_CLOSE_HOUR`), held 90 and 30 minutes before the bell on
+        an early close (13:00 New York the day after Thanksgiving and on Christmas Eve), where a fixed 15:30
+        would come after the market had shut and leave the structure held into its expiry."""
+        hours = self.__dict__.setdefault("_structure_hours_memo", {})
+        if day not in hours:
+            cut, close = STRUCTURE_ENTRY_CUT_HOUR, STRUCTURE_CLOSE_HOUR
+            try:
+                session = us_equity_session(day)
+                if session is not None:
+                    from zoneinfo import ZoneInfo
+
+                    bell = to_datetime(session.close_at).astimezone(ZoneInfo("America/New_York"))
+                    bell_hour = bell.hour + bell.minute / 60.0
+                    cut, close = min(cut, bell_hour - 1.5), min(close, bell_hour - 0.5)
+            except Exception:  # noqa: BLE001 - a day outside the calendar keeps the regular hours
+                pass
+            if len(hours) > 64:
+                hours.clear()
+            hours[day] = (cut, close)
+        return hours[day]
+
+    def _structure_book(self, agent: Agent) -> Book | None:
+        """A structure agent's practice book (`book_of`, rung 1): the one the config names, None when
+        that book is not open here -- `book_of` then falls back to the desk's practice book, where
+        `_structure_intent` refuses every one of its intents, saying so."""
+        if not self.is_structure_agent(agent):
+            return None
+        return self.books.get(self._structure_book_name())
+
+    def _structure_intent(self, agent: Agent, book: Book, row: Mapping[str, Any], now: str, index: int) -> Intent | bool | None:
+        """A decision row as a structure intent (`_intents`): None when the row is none of a structure's
+        business (the single-leg path, unchanged); an `Intent` for the book, of the ONE held instrument
+        (`structures.instrument`), bought to open and sold to close, a LIMIT at the natural limit turned
+        into the held price S (`Order.held_limit`), never snapped to a single contract's grid (a net price
+        trades in cents); False when it was refused (a `book.refused` row, as the book's own) or held (an
+        open while the agent's entries are paused). A row that is not a well-formed structure raises, and
+        `_intents` drops it with the reason, as any malformed intent. The book stays the judge: its caps
+        meter S x 100 x quantity, the structure's maximum loss."""
+        from . import structures
+
+        named = bool(row.get("structure") or row.get("spread"))
+        if not named and not self.is_structure_agent(agent):
+            return None
+        if not named:
+            instrument = instrument_for(book.broker.venue, dict(row))
+            side = str(row.get("side") or "").lower()
+            intent = Intent.new(agent=agent.id, instrument=instrument, side=side or "buy", quantity=row.get("quantity") or 1,
+                                order_type=str(row.get("type") or "limit").lower(),
+                                limit_price=None if row.get("limit_price") is None else money(str(row["limit_price"])),
+                                reason=str(row.get("reason") or ""), created_at=now, nonce=f"{now}:{index}")
+            self._refuse_intent(agent, book, intent, "a structure agent's book holds structures only: send a structure "
+                                "intent (`structure`, `action`, `legs`, `limit_price`: league/CONTRACT.md, Options structures)")
+            return False
+        order = structures.parse(book.broker.venue, row)
+        instrument = structures.instrument(order.spec, book.broker.venue)
+        intent = Intent.new(agent=agent.id, instrument=instrument, side=order.side, quantity=order.quantity, order_type="limit",
+                            limit_price=order.held_limit, reason=order.reason, created_at=now, nonce=f"{now}:{index}")
+        if order.action == "open" and self.registry.entries_paused(agent.id):
+            return False  # held like any paused buy (X1): not sent, and not a refusal
+        refusal = self._structure_refusal(agent, book, order, instrument, now)
+        if refusal:
+            self._refuse_intent(agent, book, intent, refusal)
+            return False
+        return intent
+
+    def _structure_refusal(self, agent: Agent, book: Book, order: Any, instrument: Instrument, now: str) -> str:
+        """Why the House does not send this structure order (empty when it does): not a structure agent; on real
+        money (O1: the owner's switch); not on the structure book; an open outside the specialty, outside the
+        session, or on its earliest expiry day from `STRUCTURE_ENTRY_CUT_HOUR` New York (or after that expiry)."""
+        if not self.is_structure_agent(agent):
+            return ("a structure intent comes only from a structure agent: an agent of the options desk whose NEEDS "
+                    "carry \"structures\": true")
+        if book.real_money:
+            return "structures on real money wait for the owner's switch (O1): nothing is sent to a real account"
+        wanted = self._structure_book_name()
+        if book.name != wanted:
+            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
+                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+        if order.action != "open":
+            return ""
+        niche = self.niche_of(agent)
+        if niche is not None and not niche.holds(instrument):
+            return f"{instrument.symbol} is outside the {niche.id} specialty"
+        if market_hours(instrument, now) is False:
+            return ("outside the regular session no stock or option entry is sent: it could not trade before "
+                    "the open. The House wakes a desk that keeps hours a few seconds after the bell; decide it then")
+        today, hour = _new_york(self.clock)
+        expiry = order.spec.expiry
+        cut, close = self._structure_hours(today)
+        if expiry < today or (expiry == today and hour >= cut):
+            return (f"no structure is opened on its earliest expiry day ({expiry}) from {_clock_text(cut)} New York: the House "
+                    f"closes what is still held from {_clock_text(close)} and nothing is held into an expiry")
+        return ""
+
+    def _refuse_intent(self, agent: Agent, book: Book, intent: Intent, reason: str) -> None:
+        """A House refusal on the record, in the shape of the book's own row (`book.refused`), so the strategy (its
+        `recent_order_outcomes`), the pre-audit and the site read it the same way; it was never sent."""
+        try:
+            self.ledger.append("book.refused", {"book": book.name, "intent_id": intent.id, "reasons": [reason],
+                                                "instrument": intent.instrument.to_dict()},
+                               agent=agent.id, id=f"refused:{intent.id}")
+        except LedgerConflict:
+            pass  # this very intent was refused already
+
+    def _structure_context(self, agent: Agent, ctx: dict[str, Any], symbols: list[str], max_order: Decimal,
+                           max_position: Decimal) -> None:
+        """A structure agent's options block (`snapshot`): `ctx["chain"]`, not filtered by a single contract's
+        affordability, 0 to `max_days_to_expiry` days (today until 14:30 New York), at most 80 contracts an
+        underlying; `ctx["structures"]`, the ready-made candidates within its caps (`structures.candidates`,
+        the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee."""
+        from . import structures
+
+        asked = agent.needs.get("max_days_to_expiry")
+        days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
+        today, hour = _new_york(self.clock)
+        cut, close = self._structure_hours(today)
+        opening = hour < cut
+        chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
+                             lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
+        ctx["chain"] = chain
+        try:
+            ctx["structures"] = structures.candidates(chain, max_loss_usd=min(max_order, max_position), today=today)
+        except Exception as exc:  # noqa: BLE001 - a candidate that cannot be built costs the list, not the wake
+            ctx["structures"] = []
+            self.alert("warning", f"{agent.id}: no structure candidates this wake ({type(exc).__name__}: {str(exc)[:160]})")
+        ctx["structure_rules"] = {
+            "entry_cut_new_york": f"{_clock_text(cut)} on the structure's earliest expiry day (today's hours)",
+            "house_close_new_york": f"{_clock_text(close)} on the structure's earliest expiry day, at its bid, re-priced each tick",
+            "fee_per_contract_leg_usd": float(structures.FEE_PER_CONTRACT),
+            "book": self._structure_book_name(),
+        }
+
+    def _structure_row(self, inst: Instrument, *, average_cost: Decimal | None = None, mark: Decimal | None = None,
+                       quantity: Decimal | None = None, limit: Decimal | None = None, side: str | None = None) -> dict[str, Any]:
+        """What a position or an open order in a structure shows its strategy (`snapshot`), besides its held
+        prices: the type, the legs as an intent names them (a close sends them back as they are), the underlying
+        and the earliest expiry; a position its natural open (the debit paid or the credit received a share),
+        the natural price at the mark, and its P&L at the mark; an order its action and natural limit."""
+        from . import structures
+
+        spec = structures.spec_of(inst)
+        row: dict[str, Any] = {"structure": spec.type, "legs": spec.intent_legs(), "symbol": spec.underlying, "expiry": spec.expiry,
+                               "kind": "credit" if spec.credit else "debit", "market_id": inst.market_id}
+        if average_cost is not None and mark is not None and quantity is not None:
+            multiplier = inst.multiplier
+            gain = structures.max_gain(spec, average_cost)
+            row.update(natural_open=float(structures.natural_price(spec, average_cost)),
+                       natural_mark=float(structures.natural_price(spec, mark)),
+                       pnl_usd=float(((mark - average_cost) * multiplier * quantity).quantize(CENT)),
+                       max_loss_usd=float((average_cost * multiplier * quantity).quantize(CENT)),
+                       max_gain_usd=None if gain is None else float((gain * multiplier * quantity).quantize(CENT)))
+        if side is not None:
+            row["action"] = "open" if side == "buy" else "close"
+            if limit is not None:
+                row["natural_limit"] = float(structures.natural_price(spec, limit))
+        return row
+
+    def _structure_bid(self, book: Book, inst: Instrument) -> Decimal | None:
+        """The price the House sells a held structure at: its bid (the book's venue's quote of the held
+        instrument, what all its legs trade at together), at least a cent; a cent when a leg has no bid.
+        None when no quote can be read this tick (the next tick tries again)."""
+        try:
+            quote = book.broker.quote(inst)
+        except Exception:  # noqa: BLE001 - no quote this tick
+            return None
+        bid = getattr(quote, "bid", None) if quote is not None else None
+        return max(money(bid), CENT) if bid is not None else CENT
+
+    def _structure_resting(self, book: Book, agent_id: str, inst: Instrument, limit: Decimal) -> Decimal:
+        """Before the House sells a structure at `limit` (its bid): the agent's resting buys of it are cancelled,
+        and so is a resting sale of it OVER the bid (it would never fill); a resting sale at or under the bid is
+        KEPT, and its unfilled quantity is returned, so the House sends only the rest. Kept, because the options
+        shadow account fills an order only on a quote strictly newer than the one it was accepted in: a sale
+        cancelled and sent again each tick would never have a newer quote to fill on."""
+        resting = ZERO
+        for working in book.open_orders(agent_id):
+            if working.instrument.key != inst.key:
+                continue
+            if working.side == "sell" and working.limit_price is not None and working.limit_price <= limit:
+                resting += sum((share.quantity - share.filled for share in working.shares if share.agent == agent_id), ZERO)
+                continue
+            book.cancel(agent_id, working.order_id)
+        return resting
+
+    def _structure_wind_down_bids(self, agent: Agent, book: Book) -> dict[str, Decimal]:
+        """A dead agent's structures in the session, by key: the bid the wind-down sells each at (`_structure_bid`),
+        after cancelling a resting sale of it over that bid (`_structure_resting`), so the wind-down's own
+        reservation of what is already being sold counts only a sale that can fill. Outside the session, none:
+        the wind-down holds them for the open."""
+        now = now_iso(self.clock)
+        out: dict[str, Decimal] = {}
+        for holding in list(book.account(agent.id).holdings.values()):
+            inst = holding.instrument
+            if not is_structure(inst) or holding.quantity <= 0 or market_hours(inst, now) is False:
+                continue
+            limit = self._structure_bid(book, inst)
+            if limit is not None:
+                self._structure_resting(book, agent.id, inst, limit)
+                out[inst.key] = limit
+        return out
+
+    def _structure_sale(self, agent_id: str, inst: Instrument, quantity: Decimal, limit: Decimal | None, now: str, *,
+                        reason: str, nonce: str) -> Intent | None:
+        """The House's sale of `quantity` of a held structure, whole, at `limit` (`_structure_bid`): the expiry-day
+        close (`_structure_expiry_close`) and a dead agent's wind-down (`_wind_down`). None when nothing is to be
+        sold or there is no price."""
+        if quantity <= 0 or limit is None:
+            return None
+        return Intent.new(agent=agent_id, instrument=inst, side="sell", quantity=quantity, order_type="limit", limit_price=limit,
+                          reason=reason, created_at=now, nonce=nonce)
+
+    def _cancel_structure_opens_at_cut(self, book: Book, agent_id: str, today: str, hour: float) -> int:
+        """At the entry cut (`_structure_hours`: 14:30 New York, 90 minutes before an early close) the agent's
+        RESTING structure opens whose earliest expiry is today are cancelled, saying why on their cancelled row;
+        its closes stay. An open placed before the cut could otherwise fill after it, near the close, and be
+        settled at once. Returns how many were cancelled. The book refuses a new open after the cut as well
+        (`book._structure_entry_refusal`: the same calendar and the same numbers)."""
+        if hour < self._structure_hours(today)[0]:
+            return 0
+        cancelled = 0
+        for working in book.open_orders(agent_id):
+            inst = working.instrument
+            if working.side == "buy" and is_structure(inst) and str(inst.expiry or "") <= today:
+                outcome = book.cancel(agent_id, working.order_id, why=(
+                    f"the House's entry cut for structures: no open of a structure expiring today rests past "
+                    f"{_clock_text(self._structure_hours(today)[0])} New York"))
+                cancelled += outcome.status == "cancelled"
+        return cancelled
+
+    def _structure_expiry_close(self, book: Book, agent_id: str, holding: Any, today: str, hour: float, now: str) -> Intent | None:
+        """The House's expiry rule for a structure (`_enforce_horizon`), in place of the single contract's
+        14:30 sale: from 15:30 New York (`STRUCTURE_CLOSE_HOUR`) on its EARLIEST expiry day, in the session,
+        the whole structure is sold at its bid, re-priced each tick until it is gone, and said once on the
+        record (an info alert; the order's reason names the rule). A calendar's or a diagonal's near leg is its
+        clock: its far leg is sold with it. What is still held after that close is the broker's to settle.
+
+        Re-priced, not re-sent: the agent's resting buys of it are cancelled, and so is any resting sale of it
+        OVER the bid (it would not fill); a resting sale at or under the bid stays, since it fills at the bid on
+        the next quote, and cancelling it would only restart a fill rule that waits for a newer quote."""
+        inst = holding.instrument
+        if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < self._structure_hours(today)[1] \
+                or market_hours(inst, now) is False:
+            return None
+        limit = self._structure_bid(book, inst)
+        if limit is None:
+            return None
+        resting = self._structure_resting(book, agent_id, inst, limit)
+        held = book.account(agent_id).holdings.get(inst.key)
+        intent = self._structure_sale(
+            agent_id, inst, (held.quantity if held is not None else ZERO) - resting, limit, now,
+            nonce=f"structure-expiry:{inst.key}:{int(self.clock())}",
+            reason=f"The House's expiry rule for structures: from {_clock_text(self._structure_hours(today)[1])} New York on its "
+                   "earliest expiry day a structure is sold whole at its bid, re-priced each tick, and never held into an expiry.")
+        told = self.__dict__.setdefault("_structure_expiry_told", set())
+        if intent is not None and (agent_id, inst.key, today) not in told:
+            told.add((agent_id, inst.key, today))
+            self.alert("info", f"{agent_id}: {book.name} is closing its {inst.market_id} at the bid of {intent.limit_price} "
+                               f"(the structure expiry rule: {_clock_text(self._structure_hours(today)[1])} New York on its earliest expiry day)")
+        return intent
 
     def _observed(self, watched: Mapping[str, Any], needs: Mapping[str, Any]) -> dict[str, Any]:
         """What a strategy may watch and may not trade: bars and the touch of any Alpaca symbol,
@@ -1141,13 +1516,19 @@ class House:
 
     # ------------------------------------------------------------ population
     def founders(self) -> list[dict[str, Any]]:
-        """Every founder of every open specialty: a seed's program pointed at the niche's markets."""
+        """Every founder of every open specialty: a seed's program pointed at the niche's markets. Not the options
+        desk's structure founders (Sept 25, 2026): `options_desk.seat_founders` births them one a tick, and a fresh
+        House under `min_population` (a canary) would otherwise probe all twelve in its first tick."""
+        from .options_desk import is_structure_founder
+
         rows = {row["name"]: row for row in seeds_module.SEEDS}
         out = []
         for niche in self.niches.values():
             if niche.dormant:
                 continue
             for founder in niche.founders:
+                if is_structure_founder(founder):
+                    continue  # seated one a tick by league/options_desk.py, never all at once by `found` (a canary's first tick)
                 seed = rows[founder["seed"]]
                 # One family a program a specialty: real-money records are pooled among agents that
                 # run the same idea on the same kind of market. (Replay trials are counted by line.)
@@ -1626,7 +2007,8 @@ class House:
         rung = self.evaluator.rung(agent.id)
         if rung >= 2 and REAL_BOOK[agent.venue] in self.books:
             return self.books[REAL_BOOK[agent.venue]]
-        return self.books.get(PRACTICE_BOOK[agent.venue])
+        # A structure agent practises on the structure book (`_structure_book`, Sept 25, 2026).
+        return self._structure_book(agent) or self.books.get(PRACTICE_BOOK[agent.venue])
 
     def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
         """The seat's own caps, which `seat` writes into the book and the book enforces as "this
@@ -1827,6 +2209,14 @@ class House:
             }
             if inst.asset_class == "event":
                 row.update(market=inst.market_id or inst.symbol, leg=inst.right or "yes")
+            elif is_structure(inst):  # the held price S, with the natural prices and P&L a strategy exits by
+                # A structure's mark of 0 is the book's word (its bid comes to nothing), never a missing mark: the
+                # adversarial review of Sept 25, 2026 found `or average_cost` showing a worthless condor at its
+                # cost, no loss, and no stop firing. Only a mark not yet read falls back to the cost.
+                mark = book.marks.get(inst.key)
+                mark = holding.average_cost if mark is None else mark
+                row["mark"] = float(mark)
+                row.update(self._structure_row(inst, average_cost=holding.average_cost, mark=mark, quantity=holding.quantity))
             elif inst.asset_class == "option":
                 row.update(occ=occ_symbol(inst), symbol=inst.symbol, expiry=inst.expiry, strike=float(inst.strike), right=inst.right)
             else:
@@ -1841,6 +2231,8 @@ class House:
             }
             if inst.asset_class == "event":
                 row.update(market=inst.market_id or inst.symbol, leg=inst.right or "yes")
+            elif is_structure(inst):
+                row.update(self._structure_row(inst, limit=working.limit_price, side=working.side))
             elif inst.asset_class == "option":
                 row.update(occ=occ_symbol(inst), symbol=inst.symbol)
             else:
@@ -1872,7 +2264,9 @@ class House:
                 ctx["options_features"] = self._cached(f"options-features:{','.join(symbols)}", 300,
                                                        lambda: self.options_history.features_at(symbols, self.clock()))
             niche = self.niche_of(agent)
-            if niche is not None and niche.asset_class == "option":
+            if niche is not None and niche.asset_class == "option" and self.is_structure_agent(agent):
+                self._structure_context(agent, ctx, symbols, max_order, max_position)  # its chain and ctx["structures"]
+            elif niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
                 # A contract is 100 shares: what one contract may cost a share, by the same number the
                 # agent is shown, so the chain holds nothing the book would refuse on size (an options
@@ -2473,6 +2867,12 @@ class House:
         now = now_iso(self.clock)
         for index, row in enumerate(rows):
             try:
+                # A structure intent, or any intent of a structure agent (Sept 25, 2026): `_structure_intent`.
+                structure = self._structure_intent(agent, book, row, now, index)
+                if structure is not None:
+                    if isinstance(structure, Intent):
+                        intents.append(structure)
+                    continue
                 instrument = instrument_for(book.broker.venue, dict(row))
                 side = str(row.get("side") or "").lower()
                 if (book.real_money and side == "buy" and self.campaigns
@@ -2620,7 +3020,10 @@ class House:
         """The price grid of this book's venue for this instrument at this price
         (`venues.price_increment`), with what only the venue can say: a coin's asset record (the
         adapter's cached `asset`; fakes, the simulator and the Kalshi shadow have none, so a coin's
-        increment is then unknown) and a Kalshi market's price bands."""
+        increment is then unknown) and a Kalshi market's price bands. A structure has none (Sept 25, 2026):
+        its held price is a net in cents, and can be over the $3 where a single contract ticks in nickels."""
+        if is_structure(instrument):
+            return None
         if instrument.asset_class == "crypto":
             lookup = getattr(book.broker, "asset", None)
             asset = None
@@ -2892,6 +3295,7 @@ class House:
         """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
+        structural = option and needs.get("structures") is True  # a structure agent's options tape (Sept 25, 2026)
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
         # window (the backfilled history feeds cover the live window): a strategy that reads either is
@@ -2913,6 +3317,13 @@ class House:
             warmup = max(1, min(500, int((needs.get("bars") or {}).get("limit") or 120)))
             timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
             key = f"options:{','.join(under)}:{timeframe}:{int(needs.get('max_days_to_expiry') or 21)}:{warmup}:{horizon}:{start_iso[:10]}:{execution}"
+            # What else the options tape is built from (Sept 25, 2026): a structure agent's tape carries other
+            # contracts (no affordability line, from 0 DTE, its own days: a 0 is a 0-DTE strategy's own answer)
+            # and a tape asked with options features carries them; neither may share a single contract's tape.
+            if structural:
+                key += f":structures:{needs.get('max_days_to_expiry')!r}"
+            if needs.get("options_features"):
+                key += ":options-features"
             build = lambda: self.options_history.tape(needs, start_iso, end_iso, horizon=horizon, warmup=warmup, execution=execution,  # noqa: E731
                                                       underlier_bars=adapter_from(self.alpaca_data),
                                                       max_order_usd=float(CONSTITUTION["rungs"]["1"]["max_order_usd"]))
@@ -2958,7 +3369,9 @@ class House:
                     tape["observed_bars"] = bars
                     tape["observed_timeframe"] = observed_timeframe
                 return tape
-        if wanted and self.feeds is not None and not option:
+        if wanted and self.feeds is not None and (not option or structural):
+            # A structure agent's options tape carries its feeds too (Sept 25, 2026: the post-earnings founder
+            # reads EDGAR's earnings rows), which the options replay shows it at each step (`options_replay`).
             # The recorded live feeds ride on the tape (`league/feeds.py`), each row stamped with when
             # the House received it, over the window this tape was asked for. The key says whether
             # they spanned the replay gate then: a tape built before they did is not reused for a day
@@ -3034,8 +3447,8 @@ class House:
         feeds these NEEDS declare can carry their replay."""
         if self.feeds is None:
             raise ValueError("unsupported input: this House records no live feeds, so NEEDS['feeds'] cannot be replayed")
-        if str(needs.get("asset_class") or "") == "option":
-            raise ValueError("unsupported input: the options replay tape carries no live feeds")
+        if str(needs.get("asset_class") or "") == "option" and needs.get("structures") is not True:
+            raise ValueError("unsupported input: the options replay tape carries no live feeds (a structure agent's does)")
         short = self._feeds_shortfall(needs, wanted, coverage)
         if short:
             raise ValueError(short)
@@ -4132,50 +4545,74 @@ class House:
         for book in self.books.values():
             if family_of(book.name) != "alpaca":
                 continue
-            exits = []
-            now = now_iso(self.clock)
-            for agent_id in book.agents():
-                for holding in list(book.account(agent_id).holdings.values()):
-                    if holding.instrument.asset_class != "crypto" or not holding.opened_at or holding.quantity <= 0:
+            # One book at a time, each on its own (Sept 25, 2026): a quote or a venue that raises on one book is a
+            # warning, and the books after it still have their exits (a structure's quote reads four legs).
+            try:
+                closed += self._horizon_exits(book, hours)
+            except Exception as exc:  # noqa: BLE001 - one book's failure never costs the others their exits
+                self.alert("warning", f"{book.name}: the House's horizon and expiry exits could not run this pass "
+                                      f"({type(exc).__name__}: {str(exc)[:160]})")
+        return closed
+
+    def _horizon_exits(self, book: Book, hours: float) -> int:
+        """`_enforce_horizon` on one book: the crypto horizon, the single contract's 14:30 sale and a structure's
+        own close (`_structure_expiry_close`), then the book's write-off of what has expired."""
+        closed = 0
+        exits = []
+        now = now_iso(self.clock)
+        for agent_id in book.agents():
+            for holding in list(book.account(agent_id).holdings.values()):
+                if holding.instrument.asset_class != "crypto" or not holding.opened_at or holding.quantity <= 0:
+                    continue
+                held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
+                if held <= hours:
+                    continue
+                for working in book.open_orders(agent_id):
+                    if working.instrument.key == holding.instrument.key:
+                        book.cancel(agent_id, working.order_id)
+                quantity = book.account(agent_id).holdings.get(holding.instrument.key)
+                if quantity is None or quantity.quantity <= 0:
+                    continue
+                exits.append(Intent.new(
+                    agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
+                    reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
+                    created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
+                ))
+        # A long option is sold before it can expire: in the money at the bell it would be
+        # exercised into a hundred shares this account cannot carry. From 14:30 New York on
+        # its last day the House sells it at the bid, again each tick until it is gone; one
+        # with no bid left is worthless and is written off once the venue has cleared it.
+        today, hour = _new_york(self.clock)
+        for agent_id in book.agents():
+            self._cancel_structure_opens_at_cut(book, agent_id, today, hour)
+            for holding in list(book.account(agent_id).holdings.values()):
+                inst = holding.instrument
+                if is_structure(inst):  # a structure's own rule, from 15:30 on its earliest expiry day (Sept 25, 2026)
+                    try:
+                        close = self._structure_expiry_close(book, agent_id, holding, today, hour, now)
+                    except Exception as exc:  # noqa: BLE001 - one structure's failure never costs the others their close
+                        self.alert("warning", f"{agent_id}: the House's close of {inst.market_id} on {book.name} could not run this "
+                                              f"pass ({type(exc).__name__}: {str(exc)[:160]})")
                         continue
-                    held = (self.clock() - _epoch(holding.opened_at)) / 3600.0
-                    if held <= hours:
-                        continue
-                    for working in book.open_orders(agent_id):
-                        if working.instrument.key == holding.instrument.key:
-                            book.cancel(agent_id, working.order_id)
-                    quantity = book.account(agent_id).holdings.get(holding.instrument.key)
-                    if quantity is None or quantity.quantity <= 0:
-                        continue
-                    exits.append(Intent.new(
-                        agent=agent_id, instrument=holding.instrument, side="sell", quantity=quantity.quantity,
-                        reason=f"The House's horizon rule: held {held:.0f} hours, and a crypto position is closed after {hours:g}.",
-                        created_at=now, nonce=f"horizon:{holding.opened_at}:{int(self.clock()) // 3600}",
-                    ))
-            # A long option is sold before it can expire: in the money at the bell it would be
-            # exercised into a hundred shares this account cannot carry. From 14:30 New York on
-            # its last day the House sells it at the bid, again each tick until it is gone; one
-            # with no bid left is worthless and is written off once the venue has cleared it.
-            today, hour = _new_york(self.clock)
-            for agent_id in book.agents():
-                for holding in list(book.account(agent_id).holdings.values()):
-                    inst = holding.instrument
-                    if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
-                        continue
-                    for working in book.open_orders(agent_id):
-                        if working.instrument.key == inst.key:
-                            book.cancel(agent_id, working.order_id)
-                    quote = book.broker.quote(inst)
-                    if quote.bid is None or quote.bid <= 0:
-                        continue
-                    exits.append(Intent.new(
-                        agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
-                        reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
-                        created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
-                    ))
-            if exits:
-                closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
-            closed += book.expire_options()
+                    if close is not None:
+                        exits.append(close)
+                    continue
+                if inst.asset_class != "option" or holding.quantity <= 0 or str(inst.expiry or "9999") > today or hour < 14.5:
+                    continue
+                for working in book.open_orders(agent_id):
+                    if working.instrument.key == inst.key:
+                        book.cancel(agent_id, working.order_id)
+                quote = book.broker.quote(inst)
+                if quote.bid is None or quote.bid <= 0:
+                    continue
+                exits.append(Intent.new(
+                    agent=agent_id, instrument=inst, side="sell", quantity=holding.quantity, order_type="limit", limit_price=quote.bid,
+                    reason="The House's expiry rule: a long option is sold on its last afternoon, never left to be exercised.",
+                    created_at=now, nonce=f"expiry:{inst.key}:{int(self.clock() // 600)}",
+                ))
+        if exits:
+            closed += sum(1 for o in book.submit(exits) if o.status not in ("refused", "duplicate"))
+        closed += book.expire_options()
         return closed
 
     # ---------------------------------------------------------------- tuition
@@ -4343,6 +4780,7 @@ class House:
         for working in book.open_orders(agent.id):
             if working.side == "buy":
                 book.cancel(agent.id, working.order_id)
+        structure_bids = self._structure_wind_down_bids(agent, book)  # a structure's sale over its bid is re-priced (Sept 25, 2026)
         reserved: dict[str, Decimal] = {}
         for working in book.open_orders(agent.id):
             if working.side == "sell":
@@ -4375,6 +4813,16 @@ class House:
                 # mark pass would within five minutes anyway. The hold is kept in house.json, so a
                 # restart keeps it; a coin or a Kalshi position is not held (their markets never close).
                 held_back[holding.instrument.key] = quantity
+                continue
+            if is_structure(holding.instrument):
+                # A structure is sold whole, at its bid (at least a cent), in the session (Sept 25, 2026): its
+                # bid can be zero while its legs still trade, and a debit structure worth nothing is sold for a cent.
+                # A sale of it resting at or under the bid is kept across passes (it fills there, and `quantity` is
+                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`).
+                sale = self._structure_sale(agent.id, holding.instrument, quantity, structure_bids.get(holding.instrument.key), now,
+                                            nonce=f"wind-down:{now}", reason="the House is closing this account: the whole structure at its bid")
+                if sale is not None:
+                    exits.append(sale)
                 continue
             if holding.instrument.asset_class == "option":
                 # An option sells only at a limit (`Book.check`), so a market wind-down was refused on
@@ -7642,6 +8090,7 @@ class House:
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()
+        options_desk.seat_founders(self)  # the options desk's structure founders, one a tick (league/options_desk.py)
         self._refill(rules)
 
     def _seal_applies(self, agent: Agent) -> bool:
@@ -8439,6 +8888,12 @@ def _plus_days(date: str, days: int) -> str:
     from datetime import date as _date, timedelta
 
     return (_date.fromisoformat(date) + timedelta(days=days)).isoformat()
+
+
+def _clock_text(hour: float) -> str:
+    """A New York hour as a decimal (14.5) written as a clock reads (14:30)."""
+    minutes = int(round(hour * 60))
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def _new_york(clock: Callable[[], float]) -> tuple[str, float]:

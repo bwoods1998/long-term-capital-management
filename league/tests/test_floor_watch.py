@@ -233,5 +233,69 @@ class TickStepsLine(unittest.TestCase):
         self.assertNotIn("## tick steps", floor_watch.render(box, {}, {}))
 
 
+
+class TheReleasesLine(unittest.TestCase):
+    """H3 of the forward-first run (Sept 25, 2026): the harness row is at most six restarts a day and
+    none inside a US session. The watch printed neither the restarts nor the updater: 26 `ops.started`
+    rows in the 24 hours to 04:23Z Sept 25 were read by hand. It prints the restarts in the last day
+    (health.json `restarts_24h` when the House writes it, else the ledger's `ops.started`), the
+    updater's last ship and launch, what holds the next release and when it may go."""
+
+    def setUp(self):
+        from league.tests.fakes import Clock
+        from league.watchdog import Releases
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.base = Path(self.dir.name)
+        self.state = self.base / "state"
+        self.state.mkdir()
+        self.clock = Clock(1790257200.0)  # 2026-09-24T13:40:00Z, a Thursday: inside the US session
+        self.ledger = Ledger(self.state / "ledger.sqlite", clock=self.clock)
+        self.releases = Releases(self.base, clock=self.clock)
+
+    def tearDown(self):
+        self.ledger.close()
+        self.dir.cleanup()
+
+    def read(self, health):
+        (self.state / "health.json").write_text(json.dumps({"at": "2026-09-24T15:00:00Z", "release": "r", **health}))
+        run = subprocess.run([sys.executable, "-c", floor_watch.BOX_SNIPPET, "2026-09-24T00:00:00", str(self.state), str(self.clock())],
+                             capture_output=True, text=True, timeout=120, cwd=ROOT)
+        self.assertEqual(run.returncode, 0, run.stderr[-2000:])
+        return json.loads(run.stdout.strip().splitlines()[-1])
+
+    def test_the_restarts_the_last_ship_and_the_next_eligible_time(self):
+        self.clock.advance(-2 * 86400)
+        self.ledger.append("ops.started", {"release": "two days ago"})
+        self.clock.advance(2 * 86400 - 3 * 3600)  # 10:40Z
+        deploy = {"deploy": "main-0e1aec8b9e98@1", "release": "main-0e1aec8b9e98", "sha": "8" * 40}
+        for stage in ("start", "promote", "verdict"):
+            self.releases.record({**deploy, "stage": stage, "ok": True, "verdict": "promoted"})
+        self.ledger.append("ops.deploy", {"action": "deploying", "release": "main-0e1aec8b9e98", "sha": "8" * 40})
+        self.ledger.append("ops.started", {"release": "main-0e1aec8b9e98"})
+        self.clock.advance(3 * 3600 - 20 * 60)  # 13:20Z
+        self.ledger.append("ops.started", {"release": "main-0e1aec8b9e98"})
+        self.ledger.append("ops.deploy", {"action": "held", "release": "main-c7bee60611db", "sha": "9" * 40,
+                                          "reasons": ["the House started at 2026-09-24T13:20:00Z", "next eligible 2026-09-24T20:05:00Z"]})
+        self.clock.advance(20 * 60)  # 13:40Z
+        box = self.read({})
+        train = box["train"]
+        self.assertEqual((train["restarts_24h"], train["restarts_source"]), (2, "ops.started"))
+        self.assertEqual(train["last_ship"]["release"], "main-0e1aec8b9e98")
+        self.assertEqual(train["last_ship"]["at"], "2026-09-24T10:40:00Z")
+        self.assertEqual(train["next_eligible_at"], "2026-09-24T20:05:00Z")
+        self.assertEqual(sorted(h["hold"] for h in train["holds"]), ["recent_start", "session", "train"])
+        self.assertEqual(train["last_launch"]["release"], "main-0e1aec8b9e98")
+        text = floor_watch.render(box, {}, {})
+        self.assertIn("## releases: restarts in 24 h 2 (ops.started; last start 2026-09-24T13:20:00", text)
+        self.assertIn("last updater ship 2026-09-24T10:40:00Z main-0e1aec8b9e98 (promoted)", text)
+        self.assertIn("next eligible 2026-09-24T20:05:00Z (train 4 h)", text)
+        self.assertIn("held now (session until 2026-09-24T20:05:00Z)", text)
+        self.assertIn("last hold on the ledger", text)
+        # The House's own count, when health.json carries it, is the one printed.
+        box = self.read({"restarts_24h": 5})
+        self.assertEqual((box["train"]["restarts_24h"], box["train"]["restarts_source"], box["train"]["starts_24h"]), (5, "health.json", 2))
+
+
 if __name__ == "__main__":
     unittest.main()

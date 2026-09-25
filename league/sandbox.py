@@ -37,7 +37,10 @@ from . import safety as safety_module
 KIT_FILES = {"runner.py": runner_module.__file__, "replay.py": replay_module.__file__, "safety.py": safety_module.__file__,
              # The options desk's simulator and the estimates it shares with the House's tape builder.
              "options_replay.py": str(Path(__file__).resolve().parent / "options_replay.py"),
-             "options_history.py": str(Path(__file__).resolve().parent / "options_history.py")}
+             "options_history.py": str(Path(__file__).resolve().parent / "options_history.py"),
+             # The structure rules (Sept 25, 2026): `structures.py` delegates to this standard-library
+             # core, and `options_replay.py` imports it in the box, so both hold one structure alike.
+             "structure_core.py": str(Path(__file__).resolve().parent / "structure_core.py")}
 TOOLS_DIR = Path(__file__).resolve().parent / "tools"
 
 
