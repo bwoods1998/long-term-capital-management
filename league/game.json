@@ -1,5 +1,5 @@
 {
-  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns. Sept 24, 2026 (the close-the-gaps run, R2 and R3): economy.proven_family_members (4, bounds 1-8) is how many living members a proven family's program runs on before the House stops breeding it first (`House._proven_births`: House mutations of the program that proved the family, first in the seat queue on its desk; at 15:06Z the one proven family, sports-central-run-under, ran its program on one member and needed 15 real independent settlements for its swing, with 5); economy.population_runway_days (1.5, bounds 1.5-7) is the Sail runway (days of the measured burn over the reserve) above which the population grows toward turbo.json max_population, and economy.max_population_short_runway (112, bounds 64-128) is where it is held otherwise (`House._population_rule`; 4.5 days at 15:06Z).",
+  "_about": "The tunable rules of the game. Merton, as game designer, may propose changes to this file by pull request, inside the bounds in `bounds`. Nothing here is constitutional: the constitution is league/constitution.py. Sept 23, 2026 (the seat market follows evidence): economy.losing_family_min_blocks (6) is the pooled active forward blocks after which a family with a negative record is not bred again by a House mutation, parameter fork or revival (analyst B: 44 births followed evidence deaths in two families, every family with two forward-tested passes negative); economy.seat_waiters_warning (8) is the number of newcomers waiting for seats past which, after an hour, the House warns. Sept 24, 2026 (the close-the-gaps run, R2 and R3): economy.proven_family_members (4, bounds 1-8) is how many living members a proven family's program runs on before the House stops breeding it first (`House._proven_births`: House mutations of the program that proved the family, first in the seat queue on its desk; at 15:06Z the one proven family, sports-central-run-under, ran its program on one member and needed 15 real independent settlements for its swing, with 5); economy.population_runway_days (1.5, bounds 1.5-7) is the Sail runway (days of the measured burn over the reserve) above which the population grows toward turbo.json max_population, and economy.max_population_short_runway (112, bounds 64-128) is where it is held otherwise (`House._population_rule`; 4.5 days at 15:06Z). Sept 25, 2026 (the forward-first run, F3; `House._desk_capacity`, `_strategy_births`, `_expiry`): economy.strategies_reserved_seats (1, bounds 0-2; 0 turns the quota off) is how many of a desk's free seats, with its never-traded residents past their fair chance, are kept for the merged strategies ready for it, which the quota births first of every class but a proven family's (at T0 18 waited, 13 with a passed card counted twice and 5 with a failed one counted for good); economy.waiter_expiry_hours (24, bounds 12-72) is the wait after which a graduate, a retained candidate or a card goes back to the Alpha Lab as a candidate, its forward record kept (the longest wait at T0 was 60.6 h); economy.desk_capacity_days (7, bounds 3-14) is the window of a desk's pooled forward record, desk_capacity_shrink_blocks (100, bounds 50-400) and desk_capacity_grow_blocks (30, bounds 10-100) the active blocks a negative record needs to cut a seat and a positive one to add one, desk_capacity_seats_a_day (2, bounds 0-4; 0 turns it off) how many seats a desk's cap moves a day, desk_capacity_floor (4, bounds 2-8) the cap a desk is never cut under, and desk_capacity_max_gain (4, bounds 0-8) how far over its niches.json cap a positive desk may grow (at T0 kalshi-crypto-15m was -4.04 over 307 blocks and kalshi-sports +1.87 over 61).",
   "economy": {
     "epoch_seconds": 21600,
     "daily_pool_usd": "0.50",
@@ -30,7 +30,15 @@
     "seat_waiters_warning": 8,
     "proven_family_members": 4,
     "population_runway_days": 1.5,
-    "max_population_short_runway": 112
+    "max_population_short_runway": 112,
+    "strategies_reserved_seats": 1,
+    "waiter_expiry_hours": 24,
+    "desk_capacity_days": 7,
+    "desk_capacity_shrink_blocks": 100,
+    "desk_capacity_grow_blocks": 30,
+    "desk_capacity_seats_a_day": 2,
+    "desk_capacity_floor": 4,
+    "desk_capacity_max_gain": 4
   },
   "bounds": {
     "daily_pool_usd": [
@@ -80,6 +88,38 @@
     "max_population_short_runway": [
       64,
       128
+    ],
+    "strategies_reserved_seats": [
+      0,
+      2
+    ],
+    "waiter_expiry_hours": [
+      12,
+      72
+    ],
+    "desk_capacity_days": [
+      3,
+      14
+    ],
+    "desk_capacity_shrink_blocks": [
+      50,
+      400
+    ],
+    "desk_capacity_grow_blocks": [
+      10,
+      100
+    ],
+    "desk_capacity_seats_a_day": [
+      0,
+      4
+    ],
+    "desk_capacity_floor": [
+      2,
+      8
+    ],
+    "desk_capacity_max_gain": [
+      0,
+      8
     ]
   },
   "audit": {

@@ -67,7 +67,7 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass, asdict
 from decimal import Decimal
-from typing import Any, Mapping, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 from .agents import Agent, niche_of
 from .constitution import CONSTITUTION
@@ -1820,24 +1820,32 @@ class Foundry:
 
     # ------------------------------------------------------------------ refill
     def refill(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
-               mutations: bool = True, reserved: Sequence[str] = ()) -> Agent | None:
+               mutations: bool = True, reserved: Sequence[str] = (), only: Collection[str] | None = None,
+               seat_chosen: bool = False) -> Agent | None:
         """The newcomer, when routine refill is the foundry's: a replay-passing card first (best desk
         evidence first), else an evidence-driven mutation inside its share, else nobody.
 
         `mutations` off and `reserved` (Sept 23, 2026, the seat market): while a lab graduate waits
-        for a seat the House stakes no mutation, and the desks graduates wait for are theirs first."""
-        child = self._admit(rules, living=living, loser=loser, reserved=reserved)
+        for a seat the House stakes no mutation, and the desks graduates wait for are theirs first.
+
+        `only` and `seat_chosen` (F3, the forward-first run, Sept 25, 2026: the House's seat market): only
+        these cards may be admitted -- the waiters the House still counts, never one that left its queue --
+        and, `seat_chosen`, into the seat the House chose (`loser`, None for a free one): its quota for a
+        merged strategy's card (`House._strategy_births`)."""
+        child = self._admit(rules, living=living, loser=loser, reserved=reserved, only=only, seat_chosen=seat_chosen)
         if child is None and mutations:
             child = self._evidence_mutation(rules, living=living, loser=loser)
-        if child is not None:
+        if child is not None and not seat_chosen:  # the quota's birth is not the refill's: its cadence stands
             with self.house._state_lock:
                 self.house._state.setdefault("last_newcomer", {})["at"] = self._now()
         return child
 
     def _admit(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
-               reserved: Sequence[str] = ()) -> Agent | None:
+               reserved: Sequence[str] = (), only: Collection[str] | None = None, seat_chosen: bool = False) -> Agent | None:
         house = self.house
         waiting = self.inventory()
+        if only is not None:
+            waiting = [c for c in waiting if c["id"] in only]  # F3: the waiters the House's seat market still counts
         if not waiting:
             return None
         rank = {d.niche: (d.score, d) for d in self.desk_scores()}
@@ -1854,7 +1862,7 @@ class Foundry:
                 continue  # a lab graduate waits for this desk: its next seat is the graduate's
             evaluation = self.evaluations()[card["id"]]
             displaced = loser
-            if members.get(niche.id, 0) >= niche.max_members:
+            if not seat_chosen and members.get(niche.id, 0) >= niche.max_members:
                 # A full desk makes room from its own weakest (which also frees a full league's
                 # seat). The card passed replay: a replay-only or never-traded resident makes way
                 # inside its grace (`House._weakest`, `evidenced`, Sept 23, 2026).
