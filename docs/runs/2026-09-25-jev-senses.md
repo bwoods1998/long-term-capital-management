@@ -329,6 +329,17 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   K1 and a slot). Open PRs: #304 (J5), #322 (J3), #327 (J1 serving), #328 (J3 hook). Next House deploy: Saturday's
   window after forward-first's B and the options run's G.
 
+- **22:21Z (T0 + 16 h; the 18:17Z note was missed: nothing needed action between 16:45Z and 22:15Z, and the
+  watch was quiet).** The move sensor ran through two other runs' restarts (the options run's 16:39Z, the Kalshi
+  run's K1 at 20:54Z) without an alert: 56,021 rows over 3,424 markets by 22:15Z, cycles 2-24 s, no refusal, no
+  breaker, 0 gate decisions without Jev. Jev spend today $0.474 (move $0.443 of its $0.75); the gateway's Jev line
+  $16.980 over 146,524 calls, +$0.750 since T0 (House about $0.47 today, this run's offline analyses about $0.26).
+  Runway at today's pace (about $0.60 a day once the move sensor's first-day labelling burst passes; $0.75 + $0.20
+  + the gate's and triage's cents at the caps): the ~$24.25 left of funded money lasts about 30-40 days; at the
+  $1.50 pool's ceiling, 16 days. K1 merged 20:22:34Z; forward-first merged its Deploy B (#334) to main at 22:18:39Z
+  and asked that nobody owner-deploy main before its B at 06:00Z (it holds B's money rules unreleased); this run's
+  D-J2 stays at about 09:00Z. Next: retarget #327 and #328 to main, rebase #322, CI.
+
 ## Deploy log
 
 - **D-J1 (House owner deploy; J0 + J1; no money rule).** Pre-checks: CI green on `18d4b3f` (rebased on the
