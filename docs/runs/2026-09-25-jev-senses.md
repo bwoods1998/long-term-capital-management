@@ -291,6 +291,19 @@ works; those rows are too few to decide anything and the reading is not the deci
   deploys). D-J1 moved to Saturday's window. Jev spent by this run so far: $0.23 of the gateway line (analyses
   from the Mac); the House's own Jev line is unchanged (still capped at $0.25 a day until D-J1).
 
+- **14:03Z (T0 + 7 h 46 m; the 14:17Z reading, early).** D-J1 has run 2 h 10 m with no alert: the move sensor
+  holds 10,222 rows over 1,429 markets (cycles 2-16 s, none refused since the first), no research-gate decision
+  made without Jev since the restart (the old cap bound 127 a day), no breaker opened. Scoreboard: (1) Sensor calls
+  today 2,077 by 14:02Z (gate 230, links 101, triage 76, exposure 7, move 1,663), $0.169 spent, cache hit rate 22%
+  (move's once-per-market labels are mostly new markets; triage 48%, exposure 99%); the gateway's Jev line
+  $16.669 over 142,838 calls (+$0.157 since 11:09Z). The plan's 10,000-calls-a-day target assumed per-state Jev
+  labels; J1's evidence moved that spend to $0 (a free model), so the run will not buy calls to meet it. (2) 0
+  gate decisions without Jev since 11:52Z. (3) J1 post-ship AUC: not read until the ship rule's first read (not
+  before 11:53Z Sept 26). (4) 0 strategies use a Jev feature (serving is off by rule). (5) Research + Astra
+  dollars: no Jev filter (J2); forward-first's F2 carries the free cut. (6) J3 not deployed (#322, #328 wait for
+  K1 and a slot). Open PRs: #304 (J5), #322 (J3), #327 (J1 serving), #328 (J3 hook). Next House deploy: Saturday's
+  window after forward-first's B and the options run's G.
+
 ## Deploy log
 
 - **D-J1 (House owner deploy; J0 + J1; no money rule).** Pre-checks: CI green on `18d4b3f` (rebased on the
