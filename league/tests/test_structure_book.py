@@ -280,9 +280,9 @@ class Entries(StructureBookCase):
 class Broken(StructureBookCase):
     """A structure the venue no longer holds whole is closed at once; nothing is ever adopted short."""
 
-    def open_condor(self):
-        self.seat("a1")
-        self.assertEqual(self.trade("a1", CONDOR, "buy", "1", "0.62").status, "filled")
+    def open_condor(self, agent="a1"):
+        self.seat(agent)
+        self.assertEqual(self.trade(agent, CONDOR, "buy", "1", "0.62").status, "filled")
         self.assertTrue(self.book.reconcile().ok)
 
     def house(self):
@@ -316,6 +316,14 @@ class Broken(StructureBookCase):
         self.assertEqual(self.house(), {})
         self.assertEqual({k: v for k, (i, v) in self.broker.held.items() if v}, {})
         self.assertEqual(final.cash_diff, D(0))
+
+    def test_a_long_agent_name_still_fits_the_ledgers_id(self):
+        name = "krasker-" + "x" * 90  # the settle's id was the agent and the condor's 140-character key: over 200
+        self.open_condor(name)
+        self.broker.held.pop(contract(580, "P").key)
+        self.book.reconcile()
+        self.assertTrue(self.book.reconcile().ok)
+        self.assertNotIn(CONDOR.key, self.book.account(name).holdings)
 
     def test_a_short_no_structure_explains_is_bought_back_and_never_adopted(self):
         self.open_condor()
@@ -406,6 +414,30 @@ class Broken(StructureBookCase):
         final = self.book.reconcile()
         self.assertTrue(final.ok, final.detail)
         self.assertEqual(self.house(), {})
+
+
+class ShadowExpiry(unittest.TestCase):
+    def test_a_structure_on_a_book_whose_venue_holds_it_whole_expires_under_an_id_that_fits(self):
+        """The options shadow book's venue holds the structure itself (no `structure_legs`): an expired
+        structure there is written off as a long option is, under a ledger id of at most 200 characters."""
+        with tempfile.TemporaryDirectory() as folder:
+            clock = Clock(SESSION)
+            ledger = Ledger(Path(folder) / "ledger.sqlite", clock=clock)
+            try:
+                broker = FakeBroker("options-shadow")
+                book = Book("options-shadow", broker, ledger, fees=Fees("alpaca"), real_money=False, clock=clock)
+                inst = structures.instrument(structures.spec_of(CONDOR), "options-shadow")
+                agent = "krasker-" + "y" * 60
+                book.stake(agent, "100")
+                entry = ledger.append("book.fill", {"book": "options-shadow", "source": "venue", "instrument": inst.to_dict(), "side": "buy",
+                                                    "quantity": "1", "price": "0.61", "fee_usd": "0", "cash_delta": "-61", "position_delta": "1"},
+                                      agent=agent)
+                book._apply(entry.kind, agent, entry.payload, entry.at)
+                clock.now = SESSION + 4 * 86400
+                self.assertEqual(book.expire_options(), 1)
+                self.assertNotIn(inst.key, book.account(agent).holdings)
+            finally:
+                ledger.close()
 
 
 class VenueAnswers(StructureBookCase):

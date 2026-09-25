@@ -2937,7 +2937,12 @@ class Book:
                     "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)),
                     "reason": holding.reason, "opened_at": holding.opened_at, "real_money": self.real_money,
                 }
-                entry = self.ledger.append("book.settle", payload, agent=agent, id=f"expire:{self.name}:{agent}:{key}", at=at)
+                entry_id = f"expire:{self.name}:{agent}:{key}"
+                if len(entry_id) > 200:
+                    # A structure's key names every leg (about 140 characters for a condor), and a ledger id
+                    # is at most 200: such an id is hashed, as deterministic as the one it replaces.
+                    entry_id = f"expire:{self.name}:" + hashlib.sha256(f"{agent}|{key}".encode()).hexdigest()[:32]
+                entry = self.ledger.append("book.settle", payload, agent=agent, id=entry_id, at=at)
                 self._apply(entry.kind, agent, entry.payload, entry.at)
                 self.marks.pop(key, None)
                 expired += 1
@@ -3104,7 +3109,9 @@ class Book:
         spec = structures.spec_of(instrument)
         now = now_iso(self.clock)
         rows: list[dict[str, Any]] = [{
-            "kind": "book.settle", "agent": agent, "id": f"break:{self.name}:{agent}:{instrument.key}:{now}",
+            # A ledger id is at most 200 characters, and a condor's key alone is about 140.
+            "kind": "book.settle", "agent": agent,
+            "id": f"break:{self.name}:" + hashlib.sha256(f"{agent}|{instrument.key}|{now}".encode()).hexdigest()[:32],
             "payload": {"book": self.name, "instrument": instrument.to_dict(), "result": "broken", "quantity": text(quantity),
                         "cost": text(q_cash(holding.cost)), "payout": "0", "pnl": text(q_cash(-holding.cost)), "reason": holding.reason,
                         "opened_at": holding.opened_at, "real_money": self.real_money, "detail": why[:500]},
