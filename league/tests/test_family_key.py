@@ -292,6 +292,8 @@ class RekeyedTape(Scenario):
         self.assertEqual(tape.spans(misfiled.id, FAMILY), [], "a birth re-keyed from its first row leaves the label no stretch")
         self.assertIsNone(tape.spans(founder.id), "an agent that never changed family: all of its rows")
         self.assertEqual(tape.current(rewriter.id), wnba)
+        self.assertEqual((tape.family_at(rewriter.id, rewrite - 1), tape.family_at(rewriter.id, rewrite)), (FAMILY, wnba))
+        self.assertIsNone(tape.family_at(founder.id, rewrite))
         head = self.ledger.head()[0]
         self.assertEqual(tape.spans(rewriter.id, FAMILY, through=rewrite + 1), [(born, float("inf"))],
                          "read through a position before the re-key's rows, the label held all of it")

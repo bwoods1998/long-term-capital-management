@@ -340,6 +340,16 @@ class TradeTape:
             family = kept[-1][1] if kept else None
         return segment_spans(kept, family) if family is not None else []
 
+    def family_at(self, agent: str, seq: int) -> str | None:
+        """The family `agent`'s rows at ledger position `seq` belong to (C8), or None for an agent with no `agent.family`
+        row (its label's, all of it): what a probe demotion at `seq` holds (`allocator.fold_demotions` reads the agent's
+        family now)."""
+        found = None
+        for since, family, _ in self.segments.get(str(agent)) or ():
+            if since <= seq:
+                found = family
+        return found
+
     def current(self, agent: str, *, through: int | None = None) -> str | None:
         """The family `agent` belongs to now (its last `agent.family` row up to `through`), or None when it has none."""
         segments = [s for s in self.segments.get(str(agent)) or () if through is None or s[2] <= through]
