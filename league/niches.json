@@ -139,7 +139,12 @@
     "KXLOWTNOLA",
     "KXLOWTDC",
     "KXLOWTBOS",
-    "KXLOWTHOU"
+    "KXLOWTHOU",
+    "KXLOWTPHIL",
+    "KXLOWTDEN",
+    "KXLOWTSEA",
+    "KXLOWTMIN",
+    "KXLOWTSFO"
    ],
    "brief": "Daily high and low temperature and rain markets for about twenty US cities: roughly $1M a day, stop trading the evening before and pay the next afternoon from the NWS climate report. Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Weather was the BEST favourites group in the first run (+$23.78 on 16 outcomes). What does NOT work, measured over 8 cities and 68 days: forecasting the temperature yourself. The market beat every forecast and observation signal, and point-forecast bets at about 50 cents lost real money. A specialist should stay on the favourite side and learn: which cities and which hours before the close a 93-cent favourite is safest, how the intraday observation already in hand (the high is usually set by 4pm local) makes a favourite nearly certain, and the rounding rules of the NWS report.",
    "founders": [
@@ -162,6 +167,146 @@
       "max_hours_to_close": 30
      },
      "key": "weather-no"
+    },
+    {
+     "seed": "weather-ensemble-east",
+     "key": "weather-ensemble-east",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHNY",
+       "KXLOWTNYC",
+       "KXHIGHMIA",
+       "KXLOWTMIA",
+       "KXHIGHPHIL",
+       "KXLOWTPHIL",
+       "KXHIGHTATL",
+       "KXLOWTATL",
+       "KXHIGHTBOS",
+       "KXLOWTBOS",
+       "KXHIGHTDC",
+       "KXLOWTDC"
+      ],
+      "feeds": {
+       "weather": [
+        "KNYC",
+        "KMIA",
+        "KPHL",
+        "KATL",
+        "KBOS",
+        "KDCA"
+       ],
+       "nws": [
+        "KNYC",
+        "KMIA",
+        "KPHL",
+        "KATL",
+        "KBOS",
+        "KDCA"
+       ]
+      }
+     }
+    },
+    {
+     "seed": "weather-ensemble-central",
+     "key": "weather-ensemble-central",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHCHI",
+       "KXLOWTCHI",
+       "KXHIGHTMIN",
+       "KXLOWTMIN",
+       "KXHIGHTOKC",
+       "KXLOWTOKC",
+       "KXHIGHTNOLA",
+       "KXLOWTNOLA"
+      ],
+      "feeds": {
+       "weather": [
+        "KMDW",
+        "KMSP",
+        "KOKC",
+        "KMSY"
+       ],
+       "nws": [
+        "KMDW",
+        "KMSP",
+        "KOKC",
+        "KMSY"
+       ]
+      }
+     }
+    },
+    {
+     "seed": "weather-ensemble-texas",
+     "key": "weather-ensemble-texas",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHAUS",
+       "KXLOWTAUS",
+       "KXHIGHTHOU",
+       "KXLOWTHOU",
+       "KXHIGHTDAL",
+       "KXLOWTDAL",
+       "KXHIGHTSATX",
+       "KXLOWTSATX"
+      ],
+      "feeds": {
+       "weather": [
+        "KAUS",
+        "KHOU",
+        "KDFW",
+        "KSAT"
+       ],
+       "nws": [
+        "KAUS",
+        "KHOU",
+        "KDFW",
+        "KSAT"
+       ]
+      }
+     }
+    },
+    {
+     "seed": "weather-ensemble-west",
+     "key": "weather-ensemble-west",
+     "seat_full_league": true,
+     "needs": {
+      "series": [
+       "KXHIGHDEN",
+       "KXLOWTDEN",
+       "KXHIGHTPHX",
+       "KXLOWTPHX",
+       "KXHIGHLAX",
+       "KXLOWTLAX",
+       "KXHIGHTSEA",
+       "KXLOWTSEA",
+       "KXHIGHTLV",
+       "KXLOWTLV",
+       "KXHIGHTSFO",
+       "KXLOWTSFO"
+      ],
+      "feeds": {
+       "weather": [
+        "KDEN",
+        "KPHX",
+        "KLAX",
+        "KSEA",
+        "KLAS",
+        "KSFO"
+       ],
+       "nws": [
+        "KDEN",
+        "KPHX",
+        "KLAX",
+        "KSEA",
+        "KLAS",
+        "KSFO"
+       ]
+      }
+     }
     }
    ],
    "maker_fee_series": [],
@@ -171,7 +316,7 @@
    "category": "Climate and Weather",
    "desk": "mullins",
    "desk_note": "David Mullins, Vice Chairman of the Federal Reserve before he joined",
-   "max_members": 17
+   "max_members": 21
   },
   {
    "id": "kalshi-sports",

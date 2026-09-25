@@ -8,6 +8,9 @@ Four trade Kalshi (three expressions of the first run's one measured edge, resti
 favourites above 90 cents, and one control with no measured edge), four trade Alpaca crypto and
 four trade Alpaca equities. Every `why` says where the idea comes from; "published" means outside
 research the league still has to confirm, not something this firm has measured.
+
+Rows appended later may share a file: `weather_ensemble.py` is seated as four founders of the weather desk
+(Sept 25, 2026), one family per group of stations.
 """
 
 from __future__ import annotations
@@ -43,6 +46,16 @@ SEEDS: list[dict] = [
      "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
     {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
+    # K3 of the Kalshi-scale run (Sept 25, 2026): one program, weather_ensemble.py, seated as four founders of the weather
+    # desk, one family each (their series are disjoint: the forward-first run's C8 keys a family by its mechanism and series).
+    {"name": "weather-ensemble-east", "family": "weather-ensemble-east", "file": "weather_ensemble.py",
+     "why": "The foundry's first transfer: price every daily high and low bracket of New York, Miami, Philadelphia, Atlanta, Boston and Washington from the 82 GFS and ECMWF ensemble members, calibrated to Kalshi's own settlements, and rest maker bids where the fair clears the price. A proxy lost to the market mid on 16 days: unproven."},
+    {"name": "weather-ensemble-central", "family": "weather-ensemble-central", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Chicago, Minneapolis, Oklahoma City and New Orleans highs and lows: bias-corrected members, a kernel, the NWS forecast blended in, shrunk toward the market mid; maker entries held to settlement. Unproven."},
+    {"name": "weather-ensemble-texas", "family": "weather-ensemble-texas", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Austin, Houston, Dallas and San Antonio highs and lows: bias-corrected members, a kernel, the NWS forecast blended in, shrunk toward the market mid; maker entries held to settlement. Unproven."},
+    {"name": "weather-ensemble-west", "family": "weather-ensemble-west", "file": "weather_ensemble.py",
+     "why": "The ensemble-priced weather card on Denver, Phoenix, Los Angeles, Seattle, Las Vegas and San Francisco highs and lows: bias-corrected members (Los Angeles runs 3.6 F cool of the models), shrunk toward the market mid; maker entries. Unproven."},
 ]
 
 _HERE = Path(__file__).resolve().parent
