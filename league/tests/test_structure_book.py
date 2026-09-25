@@ -453,8 +453,11 @@ class Broken(StructureBookCase):
             self.broker.held.pop(key)  # expired worthless: the venue shows none of its legs
         self.clock.now = SESSION + 4 * 86400  # Tuesday Sept 29, 15:00Z: the day after its expiry
         self.broker.clock_iso = iso(self.clock)
-        self.assertEqual(self.book.expire_options(), 1)
+        # The condor is broken (its legs to the House row), and the four legs the venue no longer shows
+        # are then written off the House row as any expired contract is.
+        self.assertEqual(self.book.expire_options(), 5)
         self.assertNotIn(CONDOR.key, self.book.account("a1").holdings)
+        self.assertEqual(self.house(), {})
         self.book.reconcile()
         final = self.book.reconcile()
         self.assertTrue(final.ok, final.detail)
