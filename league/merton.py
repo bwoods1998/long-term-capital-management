@@ -31,7 +31,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -40,6 +40,7 @@ from . import ci
 from .frontier import Frontier, FrontierError
 from .ledger import Ledger
 from .safety import CodeRefused, check_code, check_strategy_code
+from .yield_ledger import throttled
 
 REPO = Path(__file__).resolve().parents[1]
 CONTRACT = (Path(__file__).resolve().parent / "CONTRACT.md")
@@ -65,6 +66,147 @@ Give "files": [] when the evidence does not justify a change. Doing nothing is a
 every change you propose costs the owner money to test and may cost more if it is wrong."""
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+
+# ------------------------------------------------------------------ the contract, by section
+#: Sept 25, 2026 (the forward-first run, Y; the Kalshi run found it at 12:1xZ). Every architect, toolsmith,
+#: consultant and engineer call sent league/CONTRACT.md whole as its system prompt: 69.0 KB on main and
+#: growing as each run adds a section, about 17,000 tokens a call, and the engineer reserves its worst case
+#: from those bytes (`engineer.hold_usd`: $25 a million for Astra, $1.73 of every hold before a word of the
+#: job), so a repair's third attempt met the $5.00 per-job ceiling. A call is now sent the sections its job
+#: needs, whole, and the others by id and heading; a job that finds it needs one asks, once
+#: (`asked_sections`), and is asked again with it. The sections are the contract's own headings, so a run
+#: that adds one needs no change here: a section is `core` unless its heading (or its parent's) names a
+#: topic in `CONTRACT_TOPICS`. The researcher's agents keep the whole file (league/researcher.py): the
+#: Alpha Lab and the seat are theirs.
+CONTRACT_TOPICS = (("options", ("option",)), ("feeds", ("feed",)), ("open", ("open desk",)), ("agent", ("alpha lab", "your seat")))
+ASK_SECTIONS = """
+Sections of the contract listed above by id only are not included. If the code you write depends on one
+of them, answer ONLY with {"contract_sections": ["<id>", ...]} (or ["all"]) and nothing else: you will
+be asked once more, with those sections in full. Do not ask for what you do not need."""
+
+
+@dataclass(frozen=True)
+class Section:
+    id: str
+    title: str
+    level: int
+    topic: str
+    text: str
+
+
+def contract_sections(text: str) -> list[Section]:
+    """The contract cut at its markdown headings (never inside a code fence), each with its topic: its own
+    heading's, else its parent's, else `core`."""
+    sections: list[Section] = []
+    parents: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    lines = str(text or "").split("\n")
+    start, head, fence = 0, None, False
+
+    def close(end: int) -> None:
+        body = "\n".join(lines[start:end]).strip("\n")
+        if not body.strip():
+            return
+        if head is None:
+            level, title = 0, ""
+        else:
+            level, title = head
+        lowered = title.lower()
+        topic = next((name for name, words in CONTRACT_TOPICS if any(w in lowered for w in words)), None)
+        while parents and parents[-1][0] >= level:
+            parents.pop()
+        topic = topic or (parents[-1][1] if parents and level > 1 else "core")
+        parents.append((level, topic))
+        slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")[:48] or "preamble"
+        ident, n = slug, 2
+        while ident in seen:
+            ident, n = f"{slug}-{n}", n + 1
+        seen.add(ident)
+        sections.append(Section(ident, title or "(preamble)", level, topic, body))
+
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+        match = None if fence else re.match(r"^(#{1,4}) +(.+?)\s*$", line)
+        if match:
+            close(i)
+            start, head = i, (len(match.group(1)), match.group(2))
+    close(len(lines))
+    return sections
+
+
+def contract_for(text: str, topics: Iterable[str] = (), *, extra: Iterable[str] = (), index: bool = True) -> tuple[str, dict[str, Any]]:
+    """(the contract a call is sent, what was sent): every `core` section and those of `topics`, core first
+    so calls of one role share the longest prefix the provider can cache, then `extra` sections by id (or
+    everything, for "all"), then the others by id and heading. With `index` False the others are left out."""
+    sections = contract_sections(text)
+    extra = {str(x) for x in extra}
+    wanted = set(topics)
+    if "all" in extra:
+        chosen = list(sections)
+    else:
+        chosen = [s for s in sections if s.topic == "core"] + [s for s in sections if s.topic != "core" and s.topic in wanted]
+        chosen += [s for s in sections if s.id in extra and s not in chosen]
+    left = [s for s in sections if s not in chosen]
+    body = "\n\n".join(s.text for s in chosen)
+    if left and index:
+        body += ("\n\nTHE CONTRACT'S OTHER SECTIONS (not included here), by id:\n"
+                 + "\n".join(f"- {s.id}: {s.title} ({len(s.text.encode('utf-8'))} bytes)" for s in left))
+    return body, {"sections": [s.id for s in chosen], "left": [s.id for s in left], "bytes": len(body.encode("utf-8")),
+                  "full_bytes": len(str(text or "").encode("utf-8"))}
+
+
+def contract_topics(needs: Mapping[str, Any] | None, niche: Any = None) -> set[str]:
+    """The topics a strategy's own sections are about: options for an options program or desk, feeds when
+    its NEEDS name any, the open desks when it sits on one."""
+    needs = dict(needs or {})
+    niche = str(niche or "")
+    topics = set()
+    if str(needs.get("asset_class") or "") == "option" or "options" in niche or needs.get("options") or needs.get("chain"):
+        topics.add("options")
+    if needs.get("feeds"):
+        topics.add("feeds")
+    if niche.endswith("-open"):
+        topics.add("open")
+    return topics
+
+
+def asked_sections(answer_text: str) -> list[str]:
+    """The section ids an answer asks for (`ASK_SECTIONS`), or [] when it is an answer. Only an answer
+    that is nothing but the request counts: one that also carries files or code is taken as it is."""
+    from .frontier import extract_json
+
+    try:
+        found = extract_json(str(answer_text or ""))
+    except FrontierError:
+        return []
+    wanted = found.get("contract_sections")
+    if not isinstance(wanted, list) or any(found.get(k) for k in ("files", "code", "answer", "summary")):
+        return []
+    return [str(x)[:64] for x in wanted if isinstance(x, str)][:24]
+
+
+def ask_with_contract(frontier: Any, *, head: str, contract: str, topics: Iterable[str], user: str, agent: str,
+                      max_output_tokens: int, effort: str, tail: str = "") -> tuple[Any, dict[str, Any]]:
+    """One call with the contract a job needs; a second, once, when its answer asks for more sections. The
+    answer returned carries the cost of both. A failed second call raises FrontierError with the first's cost
+    as `spent_usd`, so nothing paid goes unrecorded."""
+    body, meta = contract_for(contract, topics)
+    ask = ASK_SECTIONS if meta["left"] else ""
+    reply = frontier.ask(system=head + "\n\nTHE STRATEGY CONTRACT\n\n" + body + ask + tail, user=user, agent=agent,
+                         max_output_tokens=max_output_tokens, effort=effort)
+    wanted = asked_sections(getattr(reply, "text", "")) if ask else []
+    if not wanted:
+        return reply, meta
+    body, again = contract_for(contract, topics, extra=wanted, index=False)
+    meta = {**meta, "asked": wanted, "sections": again["sections"], "bytes_second": again["bytes"]}
+    try:
+        second = frontier.ask(system=head + "\n\nTHE STRATEGY CONTRACT\n\n" + body + tail, user=user, agent=agent,
+                              max_output_tokens=max_output_tokens, effort=effort)
+    except FrontierError as exc:
+        exc.spent_usd = reply.cost_usd  # type: ignore[attr-defined]
+        raise
+    return replace(second, cost_usd=reply.cost_usd + second.cost_usd), meta
 
 BRIEFS: dict[str, str] = {
     "architect": """You are the architect of a small real-money trading league. You do not pick trades. You read the league
@@ -499,18 +641,22 @@ class Merton:
         """One agent hires Merton with its own credits. Returns `{"answer", "code", "confidence",
         "cost_usd"}`; `code` is empty unless Merton wrote a whole strategy file. Never raises: a
         refused call costs nothing; an unreadable paid answer retains its metered cost."""
-        system = CONSULT + "\n\nTHE STRATEGY CONTRACT (the file format any code you write must follow)\n\n" + contract
         reply = None
         effort = effort if effort in ("low", "medium", "high") else CONSULT_EFFORT
+        # Sept 25, 2026 (Y): the sections a file for this agent's venue and desk needs, the rest on request.
+        topics = contract_topics(getattr(agent, "needs", None), getattr(agent, "niche", None))
+        sent: dict[str, Any] = {}
         try:
-            reply = self.frontier.ask(system=system, user=json.dumps({"question": question, "evidence": evidence}, default=str),
-                                      agent=f"consult-{agent.id}", max_output_tokens=max(4000, min(int(max_output_tokens), 16000)),
-                                      effort=effort)
+            reply, sent = ask_with_contract(self.frontier, head=CONSULT, contract=contract, topics=topics,
+                                            user=json.dumps({"question": question, "evidence": evidence}, default=str),
+                                            agent=f"consult-{agent.id}", max_output_tokens=max(4000, min(int(max_output_tokens), 16000)),
+                                            effort=effort)
             answer = reply.json()
         except FrontierError as exc:
             detail = "could not be reached" if reply is None else "returned an unreadable answer"
+            spent = reply.cost_usd if reply is not None else getattr(exc, "spent_usd", None)
             row = {"answer": f"Merton {detail} ({exc}).", "code": "", "confidence": "low",
-                   "cost_usd": format(reply.cost_usd, "f") if reply is not None else "0", "error": True}
+                   "cost_usd": format(spent, "f") if spent is not None else "0", "error": True}
             self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(), **row})
             return row
         code = str(answer.get("code") or "")
@@ -524,7 +670,7 @@ class Merton:
         }
         self.ledger.append("merton.pass", {"role": "consultant", "agent": agent.id, "at_epoch": self.clock(),
                                            "question": str(question)[:600], "wrote_code": bool(code.strip()),
-                                           **{k: v for k, v in row.items() if k != "code"}})
+                                           **{k: v for k, v in row.items() if k != "code"}, **_contract_note(sent)})
         return row
 
     def consult_paused(self) -> bool:
@@ -549,7 +695,11 @@ class Merton:
             if verdict["productive"]:
                 break
             k += 1
-        return int(min(2 ** k, max(1, int(self.lift["consult_max_multiple"])))), k
+        multiple = int(min(2 ** k, max(1, int(self.lift["consult_max_multiple"]))))
+        # Y1 (Sept 25, 2026; league/yield_ledger.py): while the hourly yield row has the consultant's lane
+        # throttled (13.2x the best lane's price per positive block replayed at T0), every consult costs its
+        # agent twice as much: a budget halved in the credits agents earned by trading.
+        return multiple * (2 if throttled(self.ledger, "consultant") else 1), k
 
     # ---------------------------------------------------------------- schedule
     def last_pass(self, role: str) -> float | None:
@@ -576,9 +726,15 @@ class Merton:
             if last is None:
                 if running_hours >= self.first_after_hours.get(role, 0):
                     out.append(role)
-            elif now - last >= self.schedule_hours[role] * self._pace() * self.backoff(role) * 3600:
+            elif now - last >= self.schedule_hours[role] * self._pace() * self.backoff(role) * self.throttle(role) * 3600:
                 out.append(role)
         return out
+
+    def throttle(self, role: str) -> int:
+        """Y1 (Sept 25, 2026): twice its usual wait while the hourly yield row has this role's lane throttled
+        (its dollars per positive forward block over the day above `economy.lane_throttle` times the best
+        lane's, or none bought; league/yield_ledger.py). Replayed at T0: the architect's $7.38 bought none."""
+        return 2 if throttled(self.ledger, role) else 1
 
     def _held(self) -> frozenset[str]:
         """The roles of `paused_until_profit` while the floor's 24-hour real P&L is not positive,
@@ -649,18 +805,26 @@ class Merton:
         if role == "toolsmith" and not evidence.get("open_requests"):
             return self._record(role, {"summary": "no tool requests are waiting", "cost_usd": "0", "files": 0, "skipped": True})
         system = BRIEFS[role] + "\n\n" + ANSWER
-        if role in ("architect", "toolsmith"):
-            system += "\n\nTHE STRATEGY CONTRACT\n\n" + CONTRACT.read_text(encoding="utf-8")
         answer = None
+        sent: dict[str, Any] = {}
         try:
-            answer = self.frontier.ask(system=system, user=json.dumps(evidence, default=str), agent=f"merton-{role}",
-                                       max_output_tokens=12000 if role in ("architect", "toolsmith") else 5000,
-                                       effort=str(self.effort.get(role) or "medium"))
+            user = json.dumps(evidence, default=str)
+            if role in ("architect", "toolsmith"):
+                # Sept 25, 2026 (Y): the contract's core sections (the architect's with the open desks), the
+                # rest by id and on request (`ask_with_contract`).
+                answer, sent = ask_with_contract(self.frontier, head=system, contract=CONTRACT.read_text(encoding="utf-8"),
+                                                 topics={"open"} if role == "architect" else set(), user=user, agent=f"merton-{role}",
+                                                 max_output_tokens=12000, effort=str(self.effort.get(role) or "medium"))
+            else:
+                answer = self.frontier.ask(system=system, user=user, agent=f"merton-{role}", max_output_tokens=5000,
+                                           effort=str(self.effort.get(role) or "medium"))
             proposal = parse_proposal(role, answer.json(), answer.cost_usd)
         except FrontierError as exc:
+            spent = answer.cost_usd if answer is not None else getattr(exc, "spent_usd", None)
             return self._record(role, {"summary": f"the pass failed: {exc}",
-                                      "cost_usd": format(answer.cost_usd, "f") if answer is not None else "0", "files": 0, "error": True})
-        row = {"summary": proposal.summary, "cost_usd": format(proposal.cost_usd, "f"), "files": len(proposal.files), "dropped": proposal.dropped[:10]}
+                                      "cost_usd": format(spent, "f") if spent is not None else "0", "files": 0, "error": True})
+        row = {"summary": proposal.summary, "cost_usd": format(proposal.cost_usd, "f"), "files": len(proposal.files), "dropped": proposal.dropped[:10],
+               **_contract_note(sent)}
         answers = []
         if role == "toolsmith":
             waiting = {r.get("id") for r in evidence.get("open_requests") or []
@@ -782,6 +946,15 @@ class Merton:
         deployed = {**row, "status": "deployed"}
         self.ledger.append("merton.change", deployed)
         return deployed
+
+
+def _contract_note(sent: Mapping[str, Any] | None) -> dict[str, Any]:
+    """What a pass row says of the contract it was sent (Y, Sept 25, 2026): bytes against the whole file's,
+    and the sections it asked for, if any."""
+    if not sent:
+        return {}
+    return {"contract": {"bytes": sent.get("bytes"), "full_bytes": sent.get("full_bytes"), "left_out": len(sent.get("left") or []),
+                         **({"asked": sent["asked"]} if sent.get("asked") else {})}}
 
 
 def _epoch(iso: str) -> float:

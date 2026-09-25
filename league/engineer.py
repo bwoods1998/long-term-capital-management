@@ -45,7 +45,9 @@ from typing import Any, Callable, Iterable, Mapping
 from . import ci
 from .frontier import MODEL_CEILINGS, FrontierError
 from .ledger import now_iso
+from .merton import ASK_SECTIONS, asked_sections, contract_for, contract_topics
 from .worklist import Job, Worklist
+from .yield_ledger import throttled
 
 REPO = Path(__file__).resolve().parents[1]
 SETTINGS_PATH = Path(__file__).resolve().parent / "engineer.json"
@@ -80,6 +82,8 @@ CORE_REFUSALS = ("has no seat on the", "is frozen until it reconciles")
 #: The kinds whose fix is a corrected child of one agent's strategy.
 STRATEGY_KINDS = ("strategy_defect", "audit_veto")
 NEEDS_CORE = "needs core authority"
+#: The real-money books (`House.REAL_BOOKS`): a repair about them is never throttled (Y1).
+REAL_BOOKS = ("kalshi", "alpaca")
 
 BRIEF = """You are the repair engineer of a small real-money trading league. You are given ONE job from its repair
 worklist: a defect or missing input the floor's own records keep reporting, with the original evidence, the agents
@@ -328,7 +332,15 @@ class Engineer:
         prior = job.state
         packet = self._packet(job)
         user = json.dumps(packet, default=str)
-        system = BRIEF + "\n\nTHE STRATEGY CONTRACT\n\n" + (CONTRACT.read_text(encoding="utf-8") if CONTRACT.exists() else "")
+        # Sept 25, 2026 (Y): the contract's core sections and those of the job's agents' topics (options,
+        # feeds, the open desks), the rest by id; sections a previous attempt asked for come whole. The hold
+        # below is priced on these bytes: 37.9 KB of core against the whole file's 67.3 KB on this branch.
+        contract = CONTRACT.read_text(encoding="utf-8") if CONTRACT.exists() else ""
+        topics = self._topics(job)
+        extra = [str(x) for x in (job.carry.get("_contract_sections") or []) if isinstance(x, str)]
+        body, sent = contract_for(contract, topics, extra=extra)
+        ask = ASK_SECTIONS if sent["left"] else ""
+        system = BRIEF + "\n\nTHE STRATEGY CONTRACT\n\n" + body + ask
         max_out = int(settings["max_output_tokens"])
         model = getattr(self.frontier, "model", "gpt-6-astra")
         worst = Decimal(0) if scripted else hold_usd(model, len(system.encode()) + len(user.encode()) + 400, max_out)
@@ -337,8 +349,8 @@ class Engineer:
             return self._dormant(job, f"per-job spend limit: ${job.cost_usd:.4f} spent of ${ceiling}; the next attempt could cost up to ${worst:.4f}")
         if not scripted and not self.may_spend():
             return None  # the day's allowance or the frontier tier says not now; the job waits
-        if not scripted and self.clock() - self.last_call() < float(settings["min_seconds_between_calls"]):
-            return None  # paced: one paid patch per interval, across restarts
+        if not scripted and self.clock() - self.last_call() < float(settings["min_seconds_between_calls"]) * self._throttle(job):
+            return None  # paced: one paid patch per interval (two while the lane is throttled), across restarts
         attempt = job.attempt + 1
         self._asked = True
         self.worklist.transition(job.key, "reproducing", attempt=job.attempt, pr=job.pr,
@@ -358,8 +370,20 @@ class Engineer:
                     reply = self.frontier.ask(system=system, user=user, agent="merton-engineer", max_output_tokens=max_out,
                                               effort=str(settings["effort"]))
                     cost = reply.cost_usd
+                    wanted = asked_sections(reply.text) if ask else []
+                    if wanted:
+                        again = self._with_sections(job, attempt, contract, topics, extra + wanted, user, max_out, cost, ceiling)
+                        if isinstance(again, str):
+                            return again  # no room left under the per-job ceiling: the next attempt carries them
+                        reply = again
+                        cost += reply.cost_usd
                     answer = reply.json()
                 except FrontierError as exc:
+                    spent = getattr(exc, "spent_usd", None)
+                    if spent is not None:
+                        # The follow-up call failed after the first was bought: the attempt counts, with its cost.
+                        self._pass(job, attempt, spent, f"the follow-up call with the asked sections failed: {exc}", error=True)
+                        return self._after_failure(job, attempt, spent, f"patch {attempt}'s follow-up call failed ({str(exc)[:200]})")
                     if reply is None and not _ambiguous(exc):
                         # Refused before anything was bought (the campaign's line, the gateway's 4xx):
                         # the attempt is not counted, and the job waits.
@@ -380,6 +404,55 @@ class Engineer:
             self._pass(job, attempt, cost, f"the attempt failed: {type(exc).__name__}", error=True)
             return self._after_failure(job, attempt, cost, f"patch {attempt} failed: {type(exc).__name__}: {str(exc)[:200]}")
         return self._propose(job, attempt, cost, answer)
+
+    def _with_sections(self, job: Job, attempt: int, contract: str, topics: set[str], wanted: list[str], user: str,
+                       max_out: int, spent: Decimal, ceiling: Decimal) -> Any:
+        """The one follow-up call of an attempt whose answer asked for contract sections (`asked_sections`), or
+        the state the job moves to when the per-job ceiling has no room for it (the next attempt is sent them).
+        A follow-up that fails raises FrontierError with the first call's cost as `spent_usd`."""
+        body, _ = contract_for(contract, topics, extra=wanted, index=False)
+        system = BRIEF + "\n\nTHE STRATEGY CONTRACT\n\n" + body
+        worst = hold_usd(getattr(self.frontier, "model", "gpt-6-astra"), len(system.encode()) + len(user.encode()) + 400, max_out)
+        if job.cost_usd + spent + worst > ceiling:
+            self._pass(job, attempt, spent, f"asked for contract sections {', '.join(wanted[:6])}; no room for the follow-up call", error=True)
+            return self._after_failure(job, attempt, spent, f"patch {attempt} asked for contract sections {', '.join(wanted[:6])}; "
+                                       f"the per-job ceiling left no room to ask again now", _contract_sections=wanted)
+        try:
+            return self.frontier.ask(system=system, user=user, agent="merton-engineer", max_output_tokens=max_out,
+                                     effort=str(self.settings["effort"]))
+        except FrontierError as exc:
+            exc.spent_usd = spent  # type: ignore[attr-defined]
+            raise
+
+    def _topics(self, job: Job) -> set[str]:
+        """The contract topics of the agents a job concerns (`merton.contract_topics`)."""
+        topics: set[str] = set()
+        for agent in sorted(job.agents)[:3]:
+            found = self.code_of(agent) or {}
+            topics |= contract_topics(found.get("needs"), found.get("niche"))
+        return topics
+
+    def _throttle(self, job: Job) -> int:
+        """Y1 (Sept 25, 2026; league/yield_ledger.py): twice the pace between paid patches while the hourly
+        yield row has the engineer's lane throttled (4.7x the best lane's price per positive block replayed at
+        T0), except for a job about an agent on real money, whose repair is never throttled."""
+        if not throttled(self.ledger, "engineer"):
+            return 1
+        return 1 if self._real_money(job) else 2
+
+    def _real_money(self, job: Job) -> bool:
+        """Whether a job concerns real money: a refusal on a real book (`order_refusal:kalshi:...`), a job whose
+        details name one, or an agent whose latest wake was on one (the real books are `kalshi` and `alpaca`)."""
+        parts = job.key.split(":")
+        if job.kind == "order_refusal" and len(parts) > 1 and parts[1] in REAL_BOOKS:
+            return True
+        if str(job.details.get("book") or "") in REAL_BOOKS:
+            return True
+        for agent in sorted(job.agents)[:6]:
+            woke = self.ledger.last("agent.woke", agent=agent)
+            if woke is not None and woke.payload.get("book") in REAL_BOOKS:
+                return True
+        return False
 
     def _parent_idle(self, job: Job) -> str:
         """Why a strategy defect is not worth a paid patch now, or "" when its parent is alive and
