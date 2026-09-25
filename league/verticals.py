@@ -1,51 +1,44 @@
-"""Level-3 debit verticals: the pure pieces, on a branch that nothing in the House imports.
+"""Level-3 debit verticals: what one IS, what it can lose, and how the House holds it.
 
-Sept 23, 2026 (the learn-and-unblock run, workstream O). Both Alpaca accounts are approved for
-options level 3 and the House uses level 2: it buys calls and puts and sells them back. A debit
-vertical is the first level-3 strategy the proposal admits (`docs/proposals/
-2026-09-23-alpaca-stocks-and-level-3-options.md`, B1), and `docs/design/
-2026-09-24-level-3-debit-verticals.md` is its design against the code as it is. This module is the
-part of that design that can be written and tested without a venue: what a debit vertical IS, what
-it can lose, whether it fits the caps, the multi-leg order it would be, and how one spread's
-per-leg fills count as one trade.
-
-**Nothing in the House imports this module** (`league/tests/test_verticals.py` pins it), and no
-multi-leg order goes to either account from this branch, practice included. A vertical's sold leg
-is a negative position, which the practice book refuses to adopt (`league/book.py`
-`_adopt_the_venue`: "a negative baseline leaves phantom holdings"), so a spread reaching the shared
-practice account would freeze every Alpaca practice agent for as long as it was open. The gateway
-refuses multi-leg orders before pricing (#187, `gateway/lib/caps.mjs` `alpacaShapeError`) and keeps
-refusing them until the owner ratifies maximum-loss metering (the proposal's B2).
+Sept 23, 2026 (the learn-and-unblock run, workstream O) wrote the pure pieces on a branch nothing
+imported; Sept 25, 2026 (the options-desk run, `docs/goals/LTCM_OPTIONS_DESK.md`) puts them to work.
+The design is `docs/design/2026-09-24-level-3-debit-verticals.md`.
 
 **A debit vertical** is two option contracts on one underlying, one expiry and one right (two calls
-or two puts), one bought and one sold in equal numbers, opened and closed as ONE multi-leg order.
-The bought leg is the dearer contract: the lower strike of two calls, the higher strike of two
-puts. That is what makes the order a net DEBIT and bounds its loss at that debit, and it is the
-proposal's "long leg nearer the money" exactly when both legs are out of the money (the usual case
-inside the chain's 20% moneyness filter) and the rule that needs no spot price in every case. The
-same two legs the other way round are a credit spread, a written option with a hedge, which B1
-does not admit and `parse_vertical` refuses.
+or two puts), one bought and one sold in equal numbers, opened and closed as ONE order. The bought
+leg is the dearer contract: the lower strike of two calls, the higher strike of two puts. That is
+what makes the order a net DEBIT and bounds its loss at that debit. The same two legs the other way
+round are a credit spread, a written option with a hedge, which is not admitted: `parse_vertical`
+refuses it and `DebitVertical` cannot represent it.
 
-**Maximum loss** is the net debit x 100 x quantity. On a cash account it is paid in full when the
-spread is opened, and it is all a debit vertical can ever lose, however far the underlying moves,
-provided both legs are closed together and before expiry day (the design's exit rules). **Maximum
-gain** is the strike width less the debit, x 100 x quantity. The caps mean this: the gateway's and
-the rung's ORDER cap bounds the maximum loss of one opening order (what it can spend, as a long
-option's premium x 100 is today); the rung's POSITION cap bounds the maximum loss of the spreads
-held plus this one. Neither is the gross of the two legs' premiums. A close is never metered: it
-takes risk off, as `ltcm.risk.reduces_exposure` lets an exit through the single-leg rules.
+**Maximum loss** is the net debit x 100 x quantity, paid in full when the spread is opened, and all
+a debit vertical can ever lose provided both legs are closed together and before expiry day.
+**Maximum gain** is the strike width less the debit, x 100 x quantity. The caps read the maximum
+loss: the ORDER cap bounds one opening order, the POSITION cap the spreads held plus this one.
+Neither is the gross of the two legs' premiums, and a close is never metered.
 
-**One spread is one trade.** `count_trades` folds per-leg fills into per-contract positions and
-counts one closed trade each time a pair that was open (one leg long, its partner short, same
-underlying, expiry and right) is flat on both legs, however many fill rows the open and the close
-took. A contract bought and sold on its own is never a spread and is not counted here: the
-allocator's `closed_trades` counts it, as it does today. The fill shape assumed is Alpaca's
-documented one, one FILL activity per leg with the leg's own OCC symbol, side and quantity
-(`ltcm/adapters/alpaca.py` `fills`), and it is UNVERIFIED until the first practice multi-leg order.
+**How the House holds one (Sept 25, 2026): one position, never two legs.** A spread is booked as
+ONE option-class `Instrument` (`spread_instrument`): the underlying, the long leg's expiry, right and
+strike, a multiplier of 100, and a `market_id` naming both legs' OCC codes, `LONG/SHORT`. Its price
+is the NET a share: the long leg's price less the short's. So every rule the book already keeps for
+a long option holds of the whole spread with nothing new: what it costs to open is its maximum loss
+(the order and position caps meter it exactly), it can only be bought to open and sold to close (no
+short position exists anywhere, so no negative leg can freeze a book), its mark is its bid, and a
+sale that leaves it flat is ONE closed trade for the evaluator, the allocator and the family record.
+`spread_quote` is its touch: bid = long bid - short ask, ask = long ask - short bid, the prices at
+which both legs could trade at once. `legs_of` recovers the two contracts; `vertical_of` the whole
+`DebitVertical` for an order on a held spread. On the practice side the House's own options shadow
+book (`league/options_shadow.py`) is the only venue that ever sees one; the shared practice account
+never does (a multi-leg order there would leave a sold leg that freezes every Alpaca practice agent).
+
+`mleg_body` is the multi-leg order Alpaca documents, for the real route (the plan's G1-G3), and
+`count_trades` folds per-leg venue fills into closed spreads: the reference the real book's leg
+adoption is tested against. Alpaca's multi-leg shapes stay UNVERIFIED until the first real order.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
@@ -232,6 +225,68 @@ def fits_caps(vertical: DebitVertical, order_cap: Decimal, position_cap: Decimal
     return cap_refusal(vertical, order_cap, position_cap, held_max_loss=held_max_loss) is None
 
 
+# ------------------------------------------------------------------------- one position, one price
+#: `market_id` of a spread held as one position: the long leg's OCC code, a slash, the short leg's.
+SPREAD_ID = re.compile(r"^([A-Z]{1,6}[0-9]{6}[CP][0-9]{8})/([A-Z]{1,6}[0-9]{6}[CP][0-9]{8})$")
+
+
+def spread_id(vertical: DebitVertical) -> str:
+    """The `market_id` that names this spread's two contracts, `LONG/SHORT` in OCC codes."""
+    return f"{alpaca_symbol(vertical.long)}/{alpaca_symbol(vertical.short)}"
+
+
+def spread_instrument(vertical: DebitVertical, venue: str | None = None) -> Instrument:
+    """The ONE instrument a book holds for this spread (the module's docstring says why): an option
+    on the underlying at the long leg's expiry, strike and right, x100, named by both legs. Priced
+    at the net a share. `venue` is the book's venue (the options shadow book's, or later the real
+    account's); by default the legs' own."""
+    return Instrument("option", vertical.underlying, venue or vertical.venue, multiplier=vertical.multiplier,
+                      expiry=vertical.expiry, strike=vertical.long.strike, right=vertical.right, market_id=spread_id(vertical))
+
+
+def is_spread(instrument: Any) -> bool:
+    """Is this instrument a spread held as one position (`spread_instrument`)?"""
+    return (getattr(instrument, "asset_class", None) == "option"
+            and bool(SPREAD_ID.match(str(getattr(instrument, "market_id", None) or ""))))
+
+
+def legs_of(instrument: Instrument) -> tuple[Instrument, Instrument]:
+    """The (long, short) contracts of a spread instrument, on the instrument's venue."""
+    found = SPREAD_ID.match(str(instrument.market_id or ""))
+    if instrument.asset_class != "option" or not found:
+        raise ValueError(f"not a spread held as one position: {instrument.key}")
+    return instrument_for(instrument.venue, {"occ": found.group(1)}), instrument_for(instrument.venue, {"occ": found.group(2)})
+
+
+def vertical_of(instrument: Instrument, *, quantity: Any, net: Any, side: str, reason: str = "") -> DebitVertical:
+    """The `DebitVertical` for an order on a spread instrument: `side` buy opens more, sell closes;
+    `net` the limit a share. Its invariants hold again (the long leg the dearer), so a spread
+    instrument whose name was reversed can never be traded."""
+    long, short = legs_of(instrument)
+    return DebitVertical(long=long, short=short, quantity=money(quantity), net_debit=money(net), side=side, reason=reason)
+
+
+def spread_quote(long_bid: Any, long_ask: Any, short_bid: Any, short_ask: Any) -> tuple[Decimal | None, Decimal | None]:
+    """The spread's touch from its legs' touches, a share: (bid, ask). The bid is what closing it
+    gets when both legs trade at once (sell the long at its bid, buy the short back at its ask); the
+    ask is what opening it costs (buy the long at its ask, sell the short at its bid). A side with a
+    leg's price missing is None; a bid under zero is zero (the spread is never worth less)."""
+    def _d(value: Any) -> Decimal | None:
+        return None if value is None else money(value)
+    lb, la, sb, sa = _d(long_bid), _d(long_ask), _d(short_bid), _d(short_ask)
+    bid = None if lb is None or sa is None else max(ZERO, lb - sa)
+    ask = None if la is None or sb is None else la - sb
+    return bid, ask
+
+
+def intrinsic(instrument: Instrument, spot: Any) -> Decimal:
+    """A spread's value a share at expiry with the underlying at `spot`: between zero and the width."""
+    long, short = legs_of(instrument)
+    width = abs(long.strike - short.strike)
+    gain = (money(spot) - long.strike) if long.right == "call" else (long.strike - money(spot))
+    return min(width, max(ZERO, gain))
+
+
 # ------------------------------------------------------------------------------------- the order
 def mleg_body(vertical: DebitVertical, *, client_order_id: str) -> dict[str, Any]:
     """The multi-leg order Alpaca documents for `POST /v2/orders`, as the adapter would send it: no
@@ -299,4 +354,5 @@ def count_trades(fills: Iterable[Any]) -> int:
     return trades
 
 
-__all__ = ["DebitVertical", "SPREADS", "ROLES", "parse_vertical", "max_loss", "max_gain", "cap_refusal", "fits_caps", "mleg_body", "count_trades"]
+__all__ = ["DebitVertical", "SPREADS", "ROLES", "SPREAD_ID", "parse_vertical", "max_loss", "max_gain", "cap_refusal", "fits_caps",
+           "spread_id", "spread_instrument", "is_spread", "legs_of", "vertical_of", "spread_quote", "intrinsic", "mleg_body", "count_trades"]
