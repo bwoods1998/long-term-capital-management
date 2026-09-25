@@ -281,6 +281,24 @@ works; those rows are too few to decide anything and the reading is not the deci
   has its 95% lower bound above zero on the same population; otherwise the shadow's spend goes to $0 after
   3 days of post-ship rows (Monday Sept 28 11:53Z).
 
+### Which uses of Jev earned their keep (14:44Z; read-only, Sept 22 00:00Z to Sept 25 14:40Z)
+
+| Use | Jev volume and cost | What it produced | Verdict |
+|---|---|---|---|
+| Research gate note relevance | 683 calls, $0.039 | 170 extra sessions ($5.24 of research): candidate 8.3%, replay pass 4.7%, the same as the gate's random 10% sample of would-be skips (6.6% / 4.5%, n 1,481) and a fifth of the free triggers (about 23%); $0.66 of research per replay pass against $0.16-0.19 for free triggers | **No value; costs research dollars.** D-J1's higher cap let it wake 4 sessions in its first 3 h (0 in the same hours before). Sent to forward-first 14:45Z: drop it in F2's gate, or this run sets the gate's Jev cap back to 150 in its next deploy |
+| Triage bug classifier | part of 408 calls, $0.027 | 96 bug groups; 13 reached Merton's engineer ($2.06), 7 verified (against audit's 14 of 164 and refusals' 6 of 26); the fixes are child strategies with 8 fills, −$11.00 | **Earned its keep as a cheap engineering feed; no trading value yet** |
+| Triage request merges | 176 pairs asked | 27 aliases, but every merged name stays its own worklist job; 0 engineer passes | No value |
+| Hypothesis links | 291 calls, $0.009 | 541 links (28 rewording); 0 cards grouped, blocked or retired; `failure_history` has no caller | No value |
+| Exposure groups | 101 calls, $0.003 | 0 pairs at the 0.7 line; no consumer reads it | No value (no consumer) |
+| Researchers' `classify` tool | 515 calls, $0.084 charged to 111 agents | Raw lift (replay pass 20.8% vs 12.4%) vanishes when sessions are matched on cost (87 vs 92 expected) | Cannot tell (confounded; no lift once effort is controlled) |
+| J1 move shadow | 1,963 calls, $0.175 (Sept 25) | recorded beside the free served model | Cannot tell yet (the ship rule's read) |
+| Semantic lab (Sept 20-22, off) | $6.20 since Sept 22 ($13.93 in all) | the Sept 22 move result, which a free model matches | No value over free features |
+
+Everything measured to earn its keep so far is free: the gate's deterministic triggers, the audit and refusal
+reporters, the free move model. The only Jev use with a positive reading is triage's bug classifier, and its
+dollars are cents. Cut-backs this run proposes for its next deploy: exposure and hypothesis links off (no
+consumer, no effect), the gate's relevance question dropped (by the gate's owner) or capped back to 150.
+
 ## Progress notes
 
 - **10:32Z (T0 + 4 h 16 m; the 10:17Z note was late: a usage limit stopped this session and its agents
