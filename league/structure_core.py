@@ -500,18 +500,28 @@ def candidates(chain: Sequence[Mapping[str, Any]], *, max_loss_usd: Any, today: 
         value = row.get("delta")
         return None if value is None else float(value)
 
+    known: dict[tuple[int, str], Decimal] = {}
+
+    def num(row: Mapping[str, Any], key: str) -> Decimal:
+        """`money(str(row[key]))`, read once a row (a row is in up to four pairs: the replay calls this
+        every step, and the Decimal parsing was a fifth of its time, Sept 25, 2026)."""
+        found = known.get((id(row), key))
+        if found is None:
+            found = known[(id(row), key)] = money(str(row[key]))
+        return found
+
     for (under, expiry, right), rows in groups.items():
         rows = sorted(rows, key=lambda r: float(r["strike"]))
         spot = spots.get(under)
         dte = _day_count(today, expiry)
         for low, high in zip(rows, rows[1:]):
-            width = money(str(high["strike"])) - money(str(low["strike"]))
+            width = num(high, "strike") - num(low, "strike")
             if width <= 0:
                 continue
             dearer, cheaper = (low, high) if right == "call" else (high, low)
             # the debit vertical: long the dearer at its ask, short the cheaper at its bid
-            debit = money(str(dearer["ask"])) - money(str(cheaper["bid"]))
-            value = max(ZERO, money(str(dearer["bid"])) - money(str(cheaper["ask"])))
+            debit = num(dearer, "ask") - num(cheaper, "bid")
+            value = max(ZERO, num(dearer, "bid") - num(cheaper, "ask"))
             if ZERO < debit < width and debit * HUNDRED <= cap:
                 row = {"structure": "debit_vertical", "kind": "debit",
                        "legs": [{"occ": code(dearer), "role": "long"}, {"occ": code(cheaper), "role": "short"}],
@@ -521,8 +531,8 @@ def candidates(chain: Sequence[Mapping[str, Any]], *, max_loss_usd: Any, today: 
                 out.append((abs(float(dearer["strike"]) - spot) if spot else 0.0, row))
             # the credit vertical: short the dearer at its bid, long the cheaper at its ask; out of the money only
             out_of_money = spot is None or (float(dearer["strike"]) >= spot if right == "call" else float(dearer["strike"]) <= spot)
-            credit = money(str(dearer["bid"])) - money(str(cheaper["ask"]))
-            buy_back = money(str(dearer["ask"])) - money(str(cheaper["bid"]))
+            credit = num(dearer, "bid") - num(cheaper, "ask")
+            buy_back = num(dearer, "ask") - num(cheaper, "bid")
             if out_of_money and ZERO < credit < width and (width - credit) * HUNDRED <= cap:
                 row = {"structure": "credit_vertical", "kind": "credit",
                        "legs": [{"occ": code(dearer), "role": "short"}, {"occ": code(cheaper), "role": "long"}],

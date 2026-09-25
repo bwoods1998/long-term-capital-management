@@ -99,6 +99,9 @@ SPREAD_MODEL = {
     # strategy is shown -- so a stressed run changes costs and not the strategy's decisions.
     "stress": 1.0,
 }
+#: A structure tape keeps a contract's bar only within this fraction of the underlying's price then:
+#: the chain's own moneyness line (`House._chain`), so nothing a structure agent could be shown is lost.
+STRUCTURE_BAND = 0.20
 LIQUIDITY = {"min_volume": 5.0, "min_trades": 2, "max_participation": 0.10, "quote_age_seconds": 1500}
 #: Alpaca charges no options commission (`league/fees.py`); the regulatory and clearing
 #: pass-through (ORF, OCC, TAF) is not yet measured on this account. Assumed, per contract per fill.
@@ -195,11 +198,24 @@ def implied_vol(price: float, spot: float, strike: float, years: float, right: s
     discounted intrinsic value, or a stale print -- rather than a number made up to fit."""
     if not (price > 0 and spot > 0 and strike > 0 and years > 0):
         return None
-    if not bs_price(spot, strike, years, low, right, rate=rate, q=q) < price < bs_price(spot, strike, years, high, right, rate=rate, q=q):
+    # `bs_price` with what does not depend on the volatility worked out once: the same operations in
+    # the same order, so the same bits, at half the cost (the options replay solves one a shown print;
+    # this was two thirds of a structure replay's time, Sept 25, 2026).
+    root, moneyness, carry, grow, discount = math.sqrt(years), math.log(spot / strike), (rate - q), math.exp(-q * years), math.exp(-rate * years)
+
+    def value(vol: float) -> float:
+        sq = vol * root
+        d1 = (moneyness + (carry + 0.5 * vol * vol) * years) / sq
+        d2 = d1 - sq
+        if right == "call":
+            return spot * grow * _cdf(d1) - strike * discount * _cdf(d2)
+        return strike * discount * _cdf(-d2) - spot * grow * _cdf(-d1)
+
+    if not value(low) < price < value(high):
         return None
     for _ in range(80):
         mid = 0.5 * (low + high)
-        if bs_price(spot, strike, years, mid, right, rate=rate, q=q) < price:
+        if value(mid) < price:
             low = mid
         else:
             high = mid
@@ -752,11 +768,20 @@ class OptionsHistory:
         Steps are the regular-session closes of the underlyings' `execution` bars. A step carries
         the underlyings' bars (`execution_bars`), the signal bars that became available by then
         (`history_bars`), and the option bars that closed at it (`options`). `contracts` says
-        when each contract first printed, which is when the replay may show it."""
+        when each contract first printed, which is when the replay may show it.
+
+        A STRUCTURE agent's tape (NEEDS `"structures": true`, Sept 25, 2026) carries what its live chain
+        can show (`House._chain(structures=True)`): no single-contract affordability line (a leg is not
+        bought alone), 0 to `max_days_to_expiry` days (7 when unstated), and only bars whose strike is
+        within the chain's 20% of the underlying's last close then (`STRUCTURE_BAND`), which bounds a
+        month of SPY, QQQ and IWM 0-7 day contracts to about 80,000, 75,000 and 25,000 bars (measured on
+        the local copy, Sept 25, 2026)."""
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
-        days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
+        structural = bool(needs.get("structures"))
+        days = (max(0, min(int(needs.get("max_days_to_expiry") or 7), 45)) if structural
+                else max(2, min(int(needs.get("max_days_to_expiry") or 21), 45)))
         timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
-        afford = float(max_order_usd) / MULTIPLIER
+        afford = float("inf") if structural else float(max_order_usd) / MULTIPLIER
         start_ts, end_ts = _ts(start), _ts(end)
         warm_reach = warmup * (1.6 if timeframe == "1Day" else 1.0) * TIMEFRAMES.get(timeframe, 86400) + 7 * 86400
         signals, warmup_bars, execution_rows = {}, {}, {}
@@ -772,8 +797,18 @@ class OptionsHistory:
             for bar in rows:
                 by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}})["execution_bars"][symbol] = {k: bar[k] for k in ("o", "h", "l", "c", "v")}
         first_day, last_day = ny_date(start_ts), (_day(ny_date(end_ts)) + timedelta(days=days)).isoformat()
+        closes: dict[str, list[tuple[str, float]]] = {s: sorted((t, float(v["execution_bars"][s]["c"])) for t, v in by_time.items()
+                                                              if s in v["execution_bars"]) for s in symbols}
         for symbol in symbols:
             listed = {r["occ"]: r for r in self.contracts(symbol, first_day, last_day)}
+            stamps = [t for t, _ in closes.get(symbol, [])]
+            prices = [c for _, c in closes.get(symbol, [])]
+
+            def near(t: str, strike: float) -> bool:
+                """A structure tape keeps a bar only where the chain could show its contract: within
+                STRUCTURE_BAND of the underlying's last close at or before it (kept when none is known)."""
+                index = bisect.bisect_right(stamps, t) - 1
+                return index < 0 or abs(strike / prices[index] - 1.0) <= STRUCTURE_BAND
             names = list(listed)
             for i in range(0, len(names), 500):
                 group = names[i:i + 500]
@@ -809,7 +844,7 @@ class OptionsHistory:
                         flush(current, kept)
                         current, kept = occ, []
                         shown_from = iso(datetime.combine(_day(listed[occ]["expiry"]) - timedelta(days=days + 4), datetime.min.time(), NY).timestamp())
-                    if t >= shown_from:
+                    if t >= shown_from and (not structural or near(t, float(listed[occ]["strike"]))):
                         kept.append((t, o, h, l, c, v, int(n or 0)))
                 flush(current, kept)
         # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
@@ -837,7 +872,8 @@ class OptionsHistory:
             "venue": "alpaca", "asset_class": "option", "horizon": horizon, "timeframe": timeframe, "execution_timeframe": execution,
             "step_seconds": TIMEFRAMES[execution], "symbols": symbols, "warmup_bars": warmup_bars, "warmup_requested": warmup,
             "half_spread_bps": 1.0, "steps": steps, "contracts": contracts,
-            "chain_rules": {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford},
+            "chain_rules": ({"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 80, "afford_per_share": None, "structures": True}
+                            if structural else {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford}),
             "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": live,
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
             "recorded_quotes": sum(len(r) for r in recorded.values()),
