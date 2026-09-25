@@ -118,6 +118,17 @@ test of every founder on true touches.
   CI, one House restart, canary and watch; start and release id written here first.
   **Started 16:19:40Z:** PR #336 merged 16:19:25Z (`a31b9d2`, CI green 16:19Z, 3 of 3), owner deploy from
   `~/Work/ltcm-deploy` at `origin/main`; no gateway change; no money-rule change.
+  **Deploy V2:** release `20260925T161943Z-125ad1d7a935` promoted 16:21:29Z (was `20260925T114915Z-007e06151f53`), the
+  ratify a no-op (digest `535a7f15`); the old House took until about 16:22:30Z to finish its tick; `ops.started`
+  16:23:09Z, every book unfrozen. First new founder krasker-23 (options-condor-vrp) born 16:24:29Z, the seat rule
+  retiring krasker-10 (options-pullback, 7-day -0.174). House RSS 731 MB at two minutes.
+- **The 14:37Z restart, found at 16:20Z:** the supervisor's log says "the House exited (137)" at 14:37:30Z: killed for
+  memory mid-session (the restart at 14:38:13Z on the same release, no deploy). At 16:19Z the process stood at 4.1 GB
+  RSS of the box's 6.2 GB after 1 h 44 min. `House.tape_for` kept every replay tape for a day with no bound, and a
+  structure agent's options tape holds up to 2 M option bars (this run's S3), every distinct NEEDS a new key; structure
+  research replays ran 12:59-13:30Z. A harness incident this run most likely helped cause. **Hotfix PR #337**
+  (`v/tapecache`): an options tape is built for its call and never kept; the cache keeps at most 24 tapes; test
+  added; CI started 16:22Z; owner deploy after V2's watch (the owner's lifted rule for today).
 
 ## Coordination with the forward-first run
 
@@ -283,7 +294,7 @@ session (13:30-20:00Z) as the day's baseline.
 | 5 | **The amended target at 20:00Z:** agents with positive realized P&L on >= 2 closed structures; the desk's closed-structure total | Sept 24 single contracts on practice: 16 closes, +$1.97 in all; positive on >= 2 closes: krasker-11 (+$14.00 on 3), krasker-6 (+$14.00 on 3), krasker-14 (+$12.00 on 4); krasker-16 +$16.97 on 1 | >= 3 agents, each >= 2 closed STRUCTURES, positive; desk total positive |
 | 6 | Structure families meeting O4 by Monday 13:00Z | 0 | >= 1, or the numbers why not |
 | 7 | Real options activity Monday | krasker-14's two contracts (AAL, $34), draining | real structures by an O4 family, or the numbers why not |
-| 8 | Harness incidents this run caused | - | 0 |
+| 8 | Harness incidents this run caused | - | 0 (see the 14:37Z out-of-memory restart: likely one) |
 
 ## After 20:05Z Friday: the fix list and Wave 2 (G)
 
