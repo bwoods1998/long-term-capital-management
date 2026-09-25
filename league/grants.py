@@ -248,6 +248,14 @@ def scale_tranches(constitution: Mapping[str, Any] | None = None) -> dict[str, A
         'pnl': 'the venue\'s real book: every account\'s equity less what it was lent (book.mark), realized plus marked, losses in full',
         'deposit': 'the venue account\'s equity above the envelope in force (floor.mark); tranches never lift the envelope above it',
         'relock': 'a tranche is withdrawn when the venue\'s real P&L since its unlock falls below relock_share x its size',
+        # What a tranche moves once ratified (K5b, Sept 26, 2026: the allocator's line, `Allocator.grant_capital`).
+        'reach': ('unlocked tranches raise the envelope, the tuition line and the throttle\'s dollar line by the same amount: '
+                  'the allocator\'s envelope at the venue (Allocator.grant_capital, the grant\'s venue capital plus the '
+                  'tranches), which every band\'s stakes and headroom read; the House\'s tuition loss line, under which '
+                  'every promotion to real money, a new rung-2 seat too, must fit; and the throttle\'s lines (halve_below '
+                  f'{_d(throttle["halve_below"])} and restore_above x the envelope summed over the venues), which widen in '
+                  'proportion. The daily real_halt basis is unchanged: it stays the grant\'s ratified venue capital, and '
+                  'so does the seat count (max_agents).'),
     }
 
 

@@ -83,7 +83,7 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import families
+from . import families, live_trading
 from .constitution import CONSTITUTION
 from .ledger import HOUSE, now_iso
 
@@ -675,13 +675,40 @@ class Allocator:
         return guard.live_authorization() if guard else None
 
     def grant_capital(self, venue: str | None = None) -> Decimal:
+        """The grant's capital at `venue` (every venue it names when None) plus the tranches the owner's version-2
+        ratification unlocked there (K5b, Sept 26, 2026: `scale_unlocked`, $0 until the owner ratifies version 2, when
+        this is the ratified number byte for byte). The envelope every band reads, the House's tuition line
+        (`House.tuition`) and the throttle's dollar line (`_throttle`) all read it, so a tranche raises each by the same
+        amount; the daily halt's basis (`halt_basis_usd`) reads the ratified capital alone."""
         grant = self.grant()
         caps = (grant or {}).get("policy", {}).get("venue_capital_usd") or {}
         if venue is not None and venue in caps:
-            return _d(caps[venue])
+            return self._with_tranches(_d(caps[venue]), (venue,))
         if grant:
-            return sum((_d(v) for v in caps.values()), ZERO) if caps else _d(grant["policy"]["max_loss_usd"])
+            return (self._with_tranches(sum((_d(v) for v in caps.values()), ZERO), caps) if caps
+                    else _d(grant["policy"]["max_loss_usd"]))
         return _d(CONSTITUTION["tuition"]["max_loss_usd"])
+
+    #: The tranches of ONE reading while a board's envelope row is written (`_envelope_row`), so that the row's
+    #: `capital_usd` and its `unlocked_usd` are the same dollars; None otherwise.
+    _unlocked_pin: dict[str, Decimal] | None = None
+
+    def scale_unlocked(self, venue: str) -> Decimal:
+        """The dollars the owner's version-2 tranches add to `venue`'s envelope now (K5, `live_trading.scale_unlocked`,
+        over the House's state directory on the House's clock): $0 unless the owner ratified version 2 -- the ledger is
+        then not read -- and $0 on any failure of the scale rule, never a guess and never negative."""
+        pinned = self._unlocked_pin
+        if pinned is not None and venue in pinned:
+            return pinned[venue]
+        try:
+            value = live_trading.scale_unlocked(self.path.parent, venue, now=self.house.clock())
+            return value if isinstance(value, Decimal) and value.is_finite() and value > 0 else ZERO
+        except Exception:  # noqa: BLE001 - the scale rule never costs the envelope a dollar it cannot prove: $0
+            return ZERO
+
+    def _with_tranches(self, capital: Decimal, venues: Iterable[str]) -> Decimal:
+        unlocked = sum((self.scale_unlocked(v) for v in venues), ZERO)
+        return capital + unlocked if unlocked > 0 else capital  # nothing unlocked: the ratified number, byte for byte
 
     def realized(self, venue: str) -> Decimal:
         """Realized real P&L at a venue: every real account's realized result (settlements and
@@ -2655,8 +2682,7 @@ class Allocator:
         board = {"enabled": True, "agents": agents, "moves": moves, "bands": bands, "families": self.families_board(),
                  "throttle": {"active": bool(throttle), "floor_pnl_usd": self.floor_pnl(), "envelope_usd": envelope},
                  "at": now_iso(house.clock),
-                 "envelope": {v: {"capital_usd": str(self.capital(v)), "committed_usd": str(self.committed(v))} for v in REAL_BOOK
-                              if house.books.get(REAL_BOOK[v]) is not None}}
+                 "envelope": {v: self._envelope_row(v) for v in REAL_BOOK if house.books.get(REAL_BOOK[v]) is not None}}
         with self._lock:
             self._board = board
         now = house.clock()
@@ -2674,6 +2700,21 @@ class Allocator:
             os.replace(tmp, self.path.with_name("allocator-board.json"))
         except OSError:
             pass
+
+    def _envelope_row(self, venue: str) -> dict[str, str]:
+        """A venue's row of the board's `envelope` (and of the `alloc.board` ledger row): its capital and what is
+        committed of it, on one reading of the owner's version-2 tranches, which the row names as `unlocked_usd` while
+        there are any (K5b, Sept 26, 2026): the scale rule subtracts it from `capital_usd`, so it never reads its own
+        tranche as base. With none unlocked the row is the row before K5b, byte for byte."""
+        unlocked = self.scale_unlocked(venue)
+        self._unlocked_pin = {venue: unlocked}
+        try:
+            row = {"capital_usd": str(self.capital(venue)), "committed_usd": str(self.committed(venue))}
+        finally:
+            self._unlocked_pin = None
+        if unlocked > 0:
+            row["unlocked_usd"] = str(unlocked)
+        return row
 
     def _moves(self) -> list[dict[str, Any]]:
         """The last band moves, from the ledger (promote/demote rows the allocator wrote, and any

@@ -5131,8 +5131,12 @@ class House:
             # erase its losses, reserved stakes or abandoned positions from the experiment.
             rules['max_loss_usd'] = pilot['policy']['max_loss_usd']
             rules['max_agents'] = pilot['policy']['max_agents']
-            if venue is not None and 'venue_capital_usd' in pilot['policy']:
-                rules['max_loss_usd'] = pilot['policy']['venue_capital_usd'][venue]
+            if 'venue_capital_usd' in pilot['policy']:
+                # The allocator's envelope line, the same number (K5b, Sept 26, 2026): the grant's capital at the venue
+                # (all of it for venue=None, the grant's max_loss_usd) plus the tranches the owner's version-2
+                # ratification unlocked, so a tranche reaches every band, a new rung-2 seat too. Until the owner
+                # ratifies version 2 it is the grant's own number, byte for byte.
+                rules['max_loss_usd'] = self.allocator.grant_capital(venue)
         active = {agent.id for agent in self.registry.living()
                   if (venue is None or agent.venue == venue)
                   and (self.evaluator.rung(agent.id) == 2 or pilot and self.evaluator.rung(agent.id) >= 3)}

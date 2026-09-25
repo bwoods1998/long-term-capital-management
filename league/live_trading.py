@@ -17,11 +17,12 @@ moves switches it off until the owner ratifies again, and a run's own re-ratify 
 `--scale-report` is read-only: per venue, the envelope, proven capacity, the evidence of the last
 three UTC days, the tranche it would unlock today and the deposit that would put it to work.
 
-What reads version 2 at run time: nothing yet. The allocator's envelope (`Allocator.grant_capital`,
-the forward-first run's file) is to add `scale_unlocked(root, venue)` -- $0 unless version 2 is in
-force, $0 on any failure, read at most every five minutes -- and record what it added on the board's
-envelope row (`unlocked_usd`), which `base_envelope` subtracts. That line lands with that run's
-agreement after its Deploy B, and until it does a ratified version 2 changes the report alone.
+What reads version 2 at run time (K5b, Sept 26, 2026): one line. The allocator's envelope
+(`Allocator.grant_capital`, the forward-first run's file) adds `scale_unlocked(root, venue)` -- $0
+unless version 2 is in force, $0 on any failure, read at most every five minutes -- and records what
+it added on the board's envelope row (`unlocked_usd`), which `base_envelope` subtracts. `House.tuition`
+and the throttle read `grant_capital`, so a tranche raises the envelope, the tuition line and the
+throttle's dollar line by the same amount; the daily `real_halt` basis stays the ratified capital.
 K2's capacity study, given to the report, is a what-if beside the rule's own reading (the family
 records' capacity): it never decides a tranche or a deposit.
 """
@@ -606,8 +607,10 @@ def render_scale_report(report):
                          f"{_money(v['capacity_used_usd'])}, with the venue's real P&L positive over them)")
         else:
             lines.append('  deposit that would put it to work: $0.00 (none until the conditions above hold)')
-    lines += ['', "The owner's ratification (switches the scale rule on; nothing else does):", f"  {report['ratify']}",
-              f"Switch it off again: {report['switch_off']}"]
+    lines += ['', "The owner's ratification (switches the scale rule on; nothing else does):", f"  {report['ratify']}"]
+    if rule.get('reach'):
+        lines.append(f"  Once ratified, {rule['reach']}")
+    lines.append(f"Switch it off again: {report['switch_off']}")
     return '\n'.join(lines)
 
 

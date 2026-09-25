@@ -739,19 +739,24 @@ class ScaleNeverBreaksTheGrant(PhaseCase):
 
 class NothingElseReadsIt(TestCase):
     def test_no_module_but_the_grant_and_its_owner_command_names_the_scale_rule(self):
-        """Switched off in code as well as in state: the House, the allocator, the book and every other module name
-        neither version 2 nor its reader, so a ratification changes the report alone until its wiring is reviewed."""
+        """Switched off in code as well as in state: the House, the book and every other module name neither version 2
+        nor its reader. The allocator names its one reading and nothing else of the rule (K5b, Sept 26, 2026):
+        `Allocator.grant_capital` adds `live_trading.scale_unlocked`, and the House's tuition and the throttle read the
+        rule only through `grant_capital`."""
         names = re.compile(r'scale_tranches|grant_version|live_grant_versions|scale_state|scale_unlocked|base_envelope|'
                            r'ratify_version|SCALE_VERSION|policy\([^)]*version\s*=')
         allowed = {'league/grants.py', 'league/live_trading.py', 'scripts/live_trading.py'}
         found = []
         for path in [*REPO.glob('league/**/*.py'), *REPO.glob('scripts/**/*.py'), *REPO.glob('ltcm/**/*.py')]:
             rel = path.relative_to(REPO).as_posix()
-            if rel in allowed or rel.startswith('league/tests/'):
+            if rel in allowed or rel.startswith('league/tests/') or rel == 'league/allocator.py':
                 continue
             if names.search(path.read_text(encoding='utf-8', errors='replace')):
                 found.append(rel)
         self.assertEqual(found, [])
+        source = (REPO / 'league' / 'allocator.py').read_text(encoding='utf-8')
+        self.assertEqual({m.group(0) for m in names.finditer(source)}, {'scale_unlocked'})
+        self.assertEqual(set(re.findall(r'live_trading\.\w+', source)), {'live_trading.scale_unlocked'})
 
 
 # ------------------------------------------------------------------ the adversarial review of #313 (Sept 25, 2026)
@@ -994,3 +999,276 @@ class GrantsAreProtected(TestCase):
         from league.ci import FORBIDDEN
         self.assertIn('league/grants.py', FORBIDDEN)
         self.assertIn('league/live_trading.py', FORBIDDEN)
+
+
+# ------------------------------------------------------------------ K5b: the allocator's line (Sept 26, 2026)
+def _pre_k5b_grant_capital(alloc, venue=None):
+    """`Allocator.grant_capital` as Deploy B left it (b/integration 4731f2b), before K5b: the golden for "unchanged"."""
+    from league.allocator import ZERO, _d
+    grant = alloc.grant()
+    caps = (grant or {}).get("policy", {}).get("venue_capital_usd") or {}
+    if venue is not None and venue in caps:
+        return _d(caps[venue])
+    if grant:
+        return sum((_d(v) for v in caps.values()), ZERO) if caps else _d(grant["policy"]["max_loss_usd"])
+    return _d(CONSTITUTION["tuition"]["max_loss_usd"])
+
+
+class AllocatorTranches(PhaseCase):
+    """K5b: `Allocator.grant_capital` is the grant's venue capital plus `scale_unlocked`; the board's envelope row names
+    the tranche (`unlocked_usd`); `House.tuition` and the throttle read `grant_capital`. On K5's fixture: a proven family
+    at 13 x $30 = 71.3% of $546.83 on Sept 22-24, real P&L +$2 a day, the Kalshi account at $1,546.83, the grant
+    Alpaca $500 / Kalshi $517.75, version 2 ratified on Sept 24 at 12:00Z: a tranche of $273.41 (half of $546.83)."""
+
+    TRANCHE = Decimal('273.41')
+
+    def setUp(self):
+        super().setUp()
+        live_trading._UNLOCKED_CACHE.clear()
+        self.addCleanup(live_trading._UNLOCKED_CACHE.clear)
+
+    def floor(self, *, version, equity='1546.83', staked=None):
+        """K5's fixture (`AllocatorLine.ratified`) at `version`, and a House stand-in on it at NOW: the real allocator
+        and the House's own `tuition`, on the grant's campaign database, with real books holding `staked`
+        ({venue: Decimal}, one rung-2 account each) and nothing else."""
+        from types import SimpleNamespace
+        from league.allocator import Allocator
+        from league.house import House
+        from league.tests.test_live_trading import research_policy
+        start = grants.midnight('2026-09-21')
+        many = family(members=13)
+        (self.root / 'allocator-board.json').write_text(json.dumps(board({'kalshi': {'sports-central-run-under': dict(many)}})),
+                                                        encoding='utf-8')
+        write_ledger(self.root / 'ledger.sqlite', family_rows=[(start + 1800, many)], pnl=rising(),
+                     equity=lambda t: {'kalshi': equity, 'alpaca': '500'})
+        self.now[0] = start
+        guard = self.budget()
+        burst = guard.activate_burst('original-night', research_policy())
+        self.now[0] = max(burst['ends'] + 3600, grants.midnight('2026-09-24') + 12 * 3600)
+        guard.activate_live_trading(ID, LIVE_CAPITAL)
+        if version:
+            ratify_version(guard, ID, version)
+        self.now[0] = NOW
+        staked = staked or {}
+        accounts = {v: SimpleNamespace(staked=usd, cash=usd, funded=True, swept=False, holdings={}, realized=Decimal(0))
+                    for v, usd in staked.items()}
+
+        def book(venue):
+            held = {f'{venue}-seat': accounts[venue]} if venue in accounts else {}
+            return SimpleNamespace(name=venue, real_money=True, venue_cash=None, agents=lambda: list(held),
+                                   account=held.__getitem__, equity=lambda a: held[a].cash, open_orders=lambda a: [])
+
+        seats = [SimpleNamespace(id=f'{v}-seat', venue=v, alive=True) for v in accounts]
+        self.rows = []
+        house = SimpleNamespace(
+            campaigns=guard, clock=self.clock, books={'alpaca': book('alpaca'), 'kalshi': book('kalshi')},
+            registry=SimpleNamespace(living=lambda: list(seats), get=lambda a: next((s for s in seats if s.id == a), None)),
+            evaluator=SimpleNamespace(rung=lambda a: 2 if a.endswith('-seat') else 0, max_rung=lambda a: 2),
+            ledger=SimpleNamespace(append=lambda kind, payload, **kw: self.rows.append((kind, payload)),
+                                   read=lambda **kw: []))
+        house.allocator = Allocator(house, self.root)
+        house.tuition = lambda venue=None: House.tuition(house, venue)
+        return house
+
+    @staticmethod
+    def pre_k5b():
+        """The code before K5b: `grant_capital` as Deploy B left it, and no tranche anywhere."""
+        from contextlib import ExitStack
+        from league.allocator import Allocator
+        stack = ExitStack()
+        stack.enter_context(patch.object(Allocator, 'grant_capital', _pre_k5b_grant_capital))
+        stack.enter_context(patch.object(Allocator, 'scale_unlocked', return_value=Decimal(0)))
+        return stack
+
+    def reset(self, house):
+        """Drop the fixture's state so `floor` can write it afresh."""
+        house.campaigns.close()
+        for name in ('ledger.sqlite', 'campaigns.sqlite'):
+            for suffix in ('', '-wal', '-shm'):
+                (self.root / f'{name}{suffix}').unlink(missing_ok=True)
+        live_trading._UNLOCKED_CACHE.clear()
+
+    def lines(self, house):
+        """Every line K5b touches, as text: the envelope, the tuition, the board's envelope row, the throttle's envelope."""
+        alloc = house.allocator
+        out = {'grant_capital': {str(v): str(alloc.grant_capital(v)) for v in (None, 'alpaca', 'kalshi')},
+               'capital': {v: str(alloc.capital(v)) for v in ('alpaca', 'kalshi')},
+               'headroom': {v: str(alloc.headroom(v)) for v in ('alpaca', 'kalshi')},
+               'tuition': {str(v): repr(house.tuition(v)) for v in (None, 'alpaca', 'kalshi')},
+               'rows': {v: alloc._envelope_row(v) for v in ('alpaca', 'kalshi')},
+               'throttle_envelope': str(sum((alloc.grant_capital(v) for v in ('alpaca', 'kalshi')), Decimal(0))),
+               'halt_basis': {v: str(alloc.halt_basis_usd(v)) for v in ('alpaca', 'kalshi')}}
+        return json.dumps(out, sort_keys=True)
+
+    def throttled_at(self, house, pnl):
+        from league.allocator import Allocator
+        alloc = house.allocator
+        alloc.state['throttle'] = False
+        with patch.object(Allocator, 'floor_pnl', return_value=Decimal(pnl)):
+            return alloc._throttle()
+
+    # (a) version 2 unratified: nothing moves and the ledger is not read
+    def test_unratified_every_line_is_the_grants_byte_for_byte_and_the_ledger_is_never_read(self):
+        from league.allocator import Allocator
+        from league.constitution import PINNED_DIGEST, digest, money_digest
+        for label, versions in (('never ratified', None), ('ratified, then switched off', (2, 1))):
+            with self.subTest(label):
+                live_trading._UNLOCKED_CACHE.clear()
+                house = self.floor(version=versions and versions[0], staked={'kalshi': Decimal('500')})
+                if versions:
+                    ratify_version(house.campaigns, ID, versions[1])
+                    self.assertEqual(grant_version(house.campaigns.db, now=NOW)['version'], 1)
+                with self.pre_k5b():
+                    before = self.lines(house)
+                    self.assertFalse(self.throttled_at(house, '-305.32'))
+                    self.assertTrue(self.throttled_at(house, '-305.33'))  # -0.30 x $1,017.75 = -$305.325
+                live_trading._UNLOCKED_CACHE.clear()
+                with patch('league.live_trading._LedgerRows') as rows, patch('league.live_trading.scale_state') as state, \
+                        patch('league.live_trading._read_grant', wraps=live_trading._read_grant) as grant:
+                    after = self.lines(house)
+                    self.assertFalse(self.throttled_at(house, '-305.32'))
+                    self.assertTrue(self.throttled_at(house, '-305.33'))  # the same line
+                self.assertTrue(grant.called)  # the grant's version was read (campaigns.sqlite), and nothing more
+                rows.assert_not_called()
+                state.assert_not_called()
+                self.assertEqual(after, before)
+                shown = json.loads(after)
+                self.assertEqual(shown['grant_capital'], {'None': '1017.75', 'alpaca': '500.00', 'kalshi': '517.75'})
+                self.assertEqual(shown['rows']['kalshi'], {'capital_usd': '517.75', 'committed_usd': '500.00'})  # no unlocked_usd
+                self.assertIn("'limit_usd': Decimal('517.75')", shown['tuition']['kalshi'])
+                self.assertIn("'limit_usd': Decimal('1017.75')", shown['tuition']['None'])
+                self.assertEqual(shown['throttle_envelope'], '1017.75')
+                # No money rule moved: the constitution is the pinned one and the grant still matches it (no ratify).
+                self.assertEqual(digest(), PINNED_DIGEST)
+                self.assertEqual(house.campaigns.live_trading()['policy']['constitution_digest'], money_digest())
+                self.assertTrue(house.campaigns.live_trading()['active'])
+                self.reset(house)
+
+    # (b) the scale rule failing adds exactly $0
+    def test_any_failure_of_the_scale_rule_adds_exactly_nothing(self):
+        import sqlite3
+        from league.allocator import Allocator
+        house = self.floor(version=2, staked={'kalshi': Decimal('500')})
+        with self.pre_k5b():
+            base = self.lines(house)
+        faults = [('scale_state', RuntimeError('boom')), ('scale_state', KeyError('venues')),
+                  ('scale_state', sqlite3.OperationalError('database is locked')), ('_read_grant', sqlite3.DatabaseError('file is not a database')),
+                  ('scale_unlocked', RuntimeError('boom')), ('scale_unlocked', Decimal('NaN')), ('scale_unlocked', Decimal('-5')),
+                  ('scale_unlocked', Decimal('Infinity')), ('scale_unlocked', '273.41'), ('scale_unlocked', None)]
+        for name, fault in faults:
+            live_trading._UNLOCKED_CACHE.clear()
+            effect = {'side_effect': fault} if isinstance(fault, BaseException) else {'return_value': fault}
+            with self.subTest(name=name, fault=repr(fault)), patch(f'league.live_trading.{name}', **effect):
+                self.assertEqual(self.lines(house), base)
+                self.assertTrue(self.throttled_at(house, '-305.33'))
+        for broken in ('allocator-board.json', 'ledger.sqlite'):  # an unreadable state, not a patched one
+            live_trading._UNLOCKED_CACHE.clear()
+            path = self.root / broken
+            kept = path.read_bytes()
+            path.write_bytes(b'\x00 not a board, not a ledger \x00' * 64)
+            with self.subTest(broken=broken):
+                self.assertEqual(self.lines(house), base)
+            path.write_bytes(kept)
+        live_trading._UNLOCKED_CACHE.clear()
+        self.assertNotEqual(self.lines(house), base)  # the fixture itself does unlock: the faults above are what held it
+
+    # (c) capped by the grant as ratified; a tranche adds exactly what the ratification pinned
+    def test_a_tranche_adds_exactly_what_the_ratified_rule_unlocked_on_the_ratified_capital(self):
+        house = self.floor(version=2)
+        alloc = house.allocator
+        pinned = Decimal(scale_report(self.root, now=NOW)['venues']['kalshi']['unlocked_usd'])
+        self.assertEqual(pinned, self.TRANCHE)
+        caps = house.campaigns.live_authorization()['policy']['venue_capital_usd']
+        self.assertEqual(alloc.grant_capital('kalshi'), Decimal(caps['kalshi']) + pinned)  # $791.16
+        self.assertEqual(str(alloc.grant_capital('kalshi')), '791.16')
+        self.assertEqual(str(alloc.grant_capital('alpaca')), '500.00')  # no tranche there: the ratified capital
+        self.assertEqual(str(alloc.grant_capital()), '1291.16')
+        self.assertEqual(alloc.halt_basis_usd('kalshi'), Decimal('517.75'))  # the daily real_halt basis never moves
+        row = alloc._envelope_row('kalshi')
+        self.assertEqual(row, {'capital_usd': '791.16', 'committed_usd': '0.00', 'unlocked_usd': '273.41'})
+        self.assertEqual(live_trading.base_envelope(row), Decimal('517.75'))
+        self.assertNotIn('unlocked_usd', alloc._envelope_row('alpaca'))
+        # Never more: a far larger deposit still unlocks one tranche, half the envelope the rule read.
+        self.reset(house)
+        house = self.floor(version=2, equity='25000.00')
+        self.assertEqual(str(house.allocator.grant_capital('kalshi')), '791.16')
+        # And never above the account's equity: $700 leaves $153.17 above the $546.83 the rule read as base.
+        self.reset(house)
+        house = self.floor(version=2, equity='700.00')
+        self.assertEqual(str(house.allocator.grant_capital('kalshi')), '670.92')  # 517.75 + 153.17
+
+    def test_the_allocators_own_row_is_never_read_as_base(self):
+        """The allocator's envelope row, on the board and on the ledger's `alloc.board` row, leaves the tranche as it was.
+        Without `unlocked_usd` the rule would read the $791.16 it wrote as base and cap the tranche at the equity above
+        it: $1,000 - $791.16 = $208.84."""
+        from league.allocator import _params
+        from league.ledger import Ledger
+        house = self.floor(version=2, equity='1000.00')
+        alloc = house.allocator
+        self.assertEqual(alloc.scale_unlocked('kalshi'), self.TRANCHE)
+        alloc._publish_board({}, _params(), False)
+        written = json.loads((self.root / 'allocator-board.json').read_text(encoding='utf-8'))
+        self.assertEqual(written['envelope']['kalshi'], {'capital_usd': '791.16', 'committed_usd': '0.00', 'unlocked_usd': '273.41'})
+        self.assertEqual(written['envelope']['alpaca'], {'capital_usd': '500.00', 'committed_usd': '0.00'})
+        self.assertEqual(written['throttle']['envelope_usd'], '1291.16')
+        payload = [p for kind, p in self.rows if kind == 'alloc.board'][-1]
+        self.assertEqual(payload['envelope'], written['envelope'])
+
+        def reread(row):
+            live_trading._UNLOCKED_CACHE.clear()
+            ledger = Ledger(self.root / 'ledger.sqlite')
+            ledger.append('alloc.board', {**payload, 'envelope': {**payload['envelope'], 'kalshi': row}}, agent='house',
+                          at=stamp(NOW + 1))
+            ledger.close()
+            self.now[0] = NOW + 2
+            return alloc.scale_unlocked('kalshi')
+
+        self.assertEqual(reread(written['envelope']['kalshi']), self.TRANCHE)
+        self.assertEqual(reread({'capital_usd': '791.16', 'committed_usd': '0.00'}), Decimal('208.84'))  # what the key prevents
+
+    # (d) the tuition line and (e) the throttle's dollar line move by the tranche, and only then
+    def test_the_tuition_line_moves_by_the_tranche_and_seats_a_new_member_only_then(self):
+        seat = Decimal(CONSTITUTION['rungs']['2']['stake_usd'])
+        held = Decimal('517.75') - seat + Decimal('1')  # one dollar short of room for another rung-2 seat on the grant
+        off = self.floor(version=None, staked={'kalshi': held})
+        before = {v: off.tuition(v) for v in (None, 'kalshi', 'alpaca')}
+        self.assertFalse(before['kalshi']['room'])
+        self.reset(off)
+        on = self.floor(version=2, staked={'kalshi': held})
+        after = {v: on.tuition(v) for v in (None, 'kalshi', 'alpaca')}
+        for venue, moved in ((None, self.TRANCHE), ('kalshi', self.TRANCHE), ('alpaca', Decimal(0))):
+            with self.subTest(venue=venue):
+                self.assertEqual(after[venue]['limit_usd'] - before[venue]['limit_usd'], moved)
+                self.assertEqual(after[venue]['headroom_usd'] - before[venue]['headroom_usd'], moved)
+                self.assertEqual(after[venue]['limit_usd'], on.allocator.grant_capital(venue))  # the same number
+                self.assertEqual({k: v for k, v in after[venue].items() if k not in ('limit_usd', 'headroom_usd', 'room')},
+                                 {k: v for k, v in before[venue].items() if k not in ('limit_usd', 'headroom_usd', 'room')})
+        self.assertTrue(after['kalshi']['room'] and after[None]['room'])  # a new rung-2 seat fits inside the tranche
+
+    def test_the_throttles_dollar_line_moves_by_the_tranche_and_only_then(self):
+        off = self.floor(version=None)
+        # -0.30 x $1,017.75 = -$305.325
+        self.assertEqual((self.throttled_at(off, '-305.32'), self.throttled_at(off, '-305.33')), (False, True))
+        self.assertTrue(self.throttled_at(off, '-350'))
+        self.assertEqual(off.allocator.halt_basis_usd('kalshi'), Decimal('517.75'))
+        self.reset(off)
+        on = self.floor(version=2)
+        # -0.30 x ($1,017.75 + $273.41) = -$387.348: the line moved by -0.30 x the tranche, -$82.023
+        self.assertEqual((self.throttled_at(on, '-387.34'), self.throttled_at(on, '-387.35')), (False, True))
+        self.assertFalse(self.throttled_at(on, '-350'))
+        self.assertEqual(on.allocator.halt_basis_usd('kalshi'), Decimal('517.75'))  # the daily real_halt basis: unchanged
+
+    def test_the_owner_ratifies_the_reach_of_a_tranche_in_plain_words(self):
+        reach = policy(LIVE_CAPITAL, version=2)['scale_tranches']['reach']
+        self.assertTrue(reach.startswith('unlocked tranches raise the envelope, the tuition line and the throttle\'s dollar '
+                                         'line by the same amount'))
+        self.assertIn('The daily real_halt basis is unchanged', reach)
+        self.assertIn('halve_below -0.3', reach)
+        self.assertNotIn('reach', policy(LIVE_CAPITAL))  # version 1 is untouched
+        self.fixture_board()
+        text = render_scale_report(scale_report(self.root, now=NOW))
+        self.assertIn('  python scripts/live_trading.py --ratify <grant-id> --grant-version 2\n  Once ratified, unlocked tranches '
+                      "raise the envelope, the tuition line and the throttle's dollar line by the same amount", text)
+
+    def fixture_board(self):
+        (self.root / 'allocator-board.json').write_text(json.dumps(board()), encoding='utf-8')
