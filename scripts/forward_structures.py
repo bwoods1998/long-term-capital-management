@@ -40,14 +40,16 @@ the live House's ticks ran 60-200 s); all twelve wake on one clock from the firs
 
 The comparison with the live House: the live structure founders' own rows (`LIVE_QUERY`), a second run from each
 live founder's first wake (`--from-birth`), and the chains the House recorded against the forward chain
-(`CHAINS_QUERY`, `compare_chains`). A labelled what-if (`--what-if-sane-limits`, never the House) sends the orders the
-book's 10% limit-sanity rule refuses at the rule's line. `calibrate` refits s3/calibration's fill half-spread table
-with the day's recorded quotes.
+(`CHAINS_QUERY`, `compare_chains`). The House changed in the session: from 18:33:52Z (Deploy V4, PR #339) it re-prices a
+structure limit further through its touch than the book's 10% band to the band's edge (`House._fit_structure_limit`);
+`HouseShim.reprice_from` runs the House of either release, or the switch as the floor made it. A labelled what-if
+(`--what-if-0dte-greeks`, never the House) gives today's expiries greeks. `calibrate` refits s3/calibration's fill
+half-spread table with the day's recorded quotes.
 
 Usage (ONE process at a time on the shared machine; it streams the file, about 100 MB of memory, 25 s a run):
     python3 scripts/forward_structures.py query-bars|query-live|query-chains   # the read-only queries' text (rx.py)
-    python3 scripts/forward_structures.py --house-bars bars.json --live live.json --from-birth --what-if-sane-limits \
-        --house-chains chains.json --until 2026-09-25T20:00:00Z --out forward.json
+    python3 scripts/forward_structures.py --house-bars bars.json --live live.json --from-birth --before-v4 \
+        --what-if-0dte-greeks --house-chains chains.json --until 2026-09-25T20:00:00Z --out forward.json
     python3 scripts/forward_structures.py calibrate --fit-from s3_options_history.py --out calibration.json
 """
 
@@ -460,12 +462,27 @@ class HouseShim:
         self._opens: dict[str, Any] = {}
         self._state: dict[str, Any] = {"memory": {}}
         self.alerts: list[tuple[str, str, str]] = []
+        self.repriced: dict[str, int] = {}  # agent -> structure limits the House re-priced to the book's band
 
     def alert(self, level: str, text: str) -> None:
         self.alerts.append((iso(self.clock()), level, text[:400]))
 
     def _keep_option_quotes(self, broker: Any, chain: Any, spot: Any) -> None:
         return None  # the live House keeps them in its options history; the forward test writes nothing
+
+    #: From when the House re-prices a structure order further through its touch than the book's 10% band to the
+    #: band's edge (`House._fit_structure_limit`, PR #339, on the floor from 18:33:52Z Sept 25 with release
+    #: 20260925T183013Z-19fb86ee4720): None always (the House on main now), `float("inf")` never (the House of
+    #: 16:36-18:33Z, release 20260925T163626Z-46eda79f4052), or the epoch it began (the day as the floor ran it).
+    reprice_from: float | None = None
+
+    def _fit_structure_limit(self, book: Any, intent: Any, *, nonce: str) -> Any:
+        if self.reprice_from is not None and self.clock() < self.reprice_from:
+            return intent
+        fitted = vars(House)["_fit_structure_limit"](self, book, intent, nonce=nonce)
+        if fitted is not intent:
+            self.repriced[intent.agent] = self.repriced.get(intent.agent, 0) + 1
+        return fitted
 
 
 for _name in BORROWED:
@@ -502,56 +519,19 @@ class Tally:
     dropped: list[str] = field(default_factory=list)
     thoughts: list[tuple[str, str]] = field(default_factory=list)
     decisions: list[dict[str, Any]] = field(default_factory=list)
-    touched: int = 0  # limits the what-if sent at the book's 10% line instead (`sane_limit`)
-
-
-def sane_limit(row: Mapping[str, Any], snap: Snapshot, tally: Tally | None = None, *, deviation: Decimal = Decimal("0.10")) -> Mapping[str, Any]:
-    """WHAT-IF (not the House): a structure intent priced through the structure's touch in `snap` by more than the
-    book's limit-sanity rule allows (`book.DEFAULT_RULES["max_limit_deviation_pct"]`, 10% of the held price: a stop
-    sold at half the mark, a condor opened with a slip on each leg) sent at the rule's line instead: an open at most
-    10% over the held ask, a close at least 10% under the held bid, in whole cents inside the line. The shadow account
-    fills a marketable limit AT the touch of a newer quote, so this never improves a fill; it only lets an order the
-    book refuses as "a typo" through, as marketable as the rule allows."""
-    try:
-        order = core.parse(row)
-    except (ValueError, ArithmeticError):
-        return row
-    opening = order.action == "open"
-    touches = {}
-    for leg in order.spec.legs:
-        quote = snap.rows.get(leg.occ) or {}
-        bid = Decimal(str(quote["bid"])) if quote.get("bid") not in (None, 0, 0.0) else None
-        ask = Decimal(str(quote["ask"])) if quote.get("ask") not in (None, 0, 0.0) else None
-        touches[leg.occ] = (bid, ask)
-    bid, ask = core.quote(order.spec, touches)
-    held = order.held_limit
-    if opening:
-        if ask is None or ask <= 0 or held <= ask * (1 + deviation):
-            return row
-        line = (ask * (1 + deviation)).quantize(core.CENT, rounding="ROUND_FLOOR")
-    else:
-        if bid is None or bid <= 0 or held >= bid * (1 - deviation):
-            return row
-        line = (bid * (1 - deviation)).quantize(core.CENT, rounding="ROUND_CEILING")
-    natural = core.natural_price(order.spec, line)
-    if natural <= 0 or (order.spec.credit and natural >= order.spec.collateral):
-        return row
-    if tally is not None:
-        tally.touched += 1
-    return {**row, "limit_price": float(natural)}
 
 
 # ------------------------------------------------------------------------------------------ the run
 def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: str | Path | None, founders: Sequence[str] = FOUNDERS,
         work: str | Path | None = None, start: float | None = None, until: float | None = None, starts: Mapping[str, float] | None = None,
         mark_every: float = MARK_EVERY, keep_thoughts: int = 6, log: Callable[[str], None] | None = None,
-        decide_override: Mapping[str, Callable[[dict], dict]] | None = None, sane_limits: bool = False,
+        decide_override: Mapping[str, Callable[[dict], dict]] | None = None, reprice_from: float | None = None,
         zero_dte_greeks: bool = False) -> dict[str, Any]:
     """The forward test. `start`/`until` bound the simulated session (epoch seconds); `starts` holds a founder back
     until its own first wake (the live birth, for the comparison); `decide_override` replaces a founder's decide (the
-    tests). `sane_limits` is a WHAT-IF, not the House: a structure limit through the touch of the snapshot its decision
-    saw by more than the book's 10% limit-sanity rule allows is sent at the rule's line (`sane_limit`); `zero_dte_greeks`,
-    another, gives today's expiries Black-Scholes greeks the live feed does not carry.
+    tests). `reprice_from` says from when the House re-prices a structure limit beyond the book's band
+    (`HouseShim.reprice_from`); `zero_dte_greeks` is a WHAT-IF, not the House: Black-Scholes greeks on today's
+    expiries, which the live feed does not carry.
     Returns the result document (`summarize`)."""
     say = log or (lambda text: None)
     clock = SimClock()
@@ -574,6 +554,7 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
     book = Book(BOOK, broker, ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=clock, market_open=market_hours)
     books = {"alpaca-paper": _ChainBook(chain_broker), BOOK: book}
     shim = HouseShim(clock, ledger, books, data, Features(local_store))
+    shim.reprice_from = reprice_from
     tallies = {a.id: Tally() for a in agents}
     next_wake: dict[str, float] = {}
     last_mark = -1e18
@@ -656,8 +637,6 @@ def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: st
                     if isinstance(order_id, str):
                         book.cancel(agent.id, order_id)
                 rows = [r for r in (answer.get("intents") or []) if isinstance(r, Mapping)]
-                if sane_limits:
-                    rows = [sane_limit(r, snap, tally) for r in rows]
                 intents, dropped = shim._intents(agent, book, rows)
                 tally.intents += len(rows)
                 tally.dropped += dropped
@@ -775,7 +754,7 @@ def summarize(agents, book: Book, broker: OptionsShadowBroker, ledger: Ledger, s
         out.append({
             "founder": agent.founder, "seed": agent.seed, "wake_minutes": agent.wake_minutes, "wakes": tally.wakes, "decide_errors": tally.errors,
             "last_error": tally.last_error, "intents_asked": tally.intents, "dropped": tally.dropped[:10], "refusals": reasons,
-            "limits_moved_to_the_rule_line": tally.touched,
+            "limits_repriced_by_the_house": shim.repriced.get(agent.id, 0),
             "opens": sum(1 for t in trades if t["action"] == "open"), "closes": sum(1 for t in trades if t["action"] == "close"),
             "closed_structures": len(closes), "realized_usd": _money(account.realized), "fees_usd": _money(account.fees),
             "closed_realized_usd": [t["realized_usd"] for t in closes],
@@ -1281,92 +1260,82 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
         tmp.cleanup()
 
 
+#: When the floor began re-pricing structure limits beyond the book's band (`House._fit_structure_limit`, PR #339):
+#: `ops.started` of release 20260925T183013Z-19fb86ee4720 (Deploy V4), read from the House's ledger.
+V4_STARTED = "2026-09-25T18:33:52.705Z"
+
+
+def _write(result: Mapping[str, Any], out: str | None) -> None:
+    text = json.dumps(result, indent=1, default=str)
+    if out:
+        Path(out).write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys", "query-bars", "query-live", "query-chains"))
-    parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, when main has no fit")
-    parser.add_argument("--live", default=None, help="the live founders' day (JSON of LIVE_QUERY's output): compared, and --from-birth reads it")
+    parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
+    parser.add_argument("--house-bars", default=None, help="the House's recorded bars of the day (BARS_QUERY's output)")
+    parser.add_argument("--local-store", default=str(Path("~/Work/.options-history/options_history.sqlite").expanduser()))
+    parser.add_argument("--live", default=None, help="the live founders' day (LIVE_QUERY's output): compared, and read by --from-birth")
+    parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake, as the floor ran the day")
+    parser.add_argument("--v4-at", default=V4_STARTED, help="when the floor began re-pricing structure limits (the --from-birth run)")
+    parser.add_argument("--before-v4", action="store_true", help="also run the session as the House ran before V4 (no re-pricing)")
     parser.add_argument("--what-if-0dte-greeks", action="store_true", help="also run the session with greeks on today's expiries (a what-if)")
     parser.add_argument("--house-chains", default=None, help="the House's recorded structure chains (CHAINS_QUERY's output): compared")
-    parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake (the comparison run)")
-    parser.add_argument("--what-if-sane-limits", action="store_true", help="also run the session with limits the book's 10%% rule refuses sent at its line (a what-if)")
-    parser.add_argument("--snapshots", default=str(Path("~/Work/.options-history/live-2026-09-25.jsonl").expanduser()))
-    parser.add_argument("--house-bars", default=None, help="the House's recorded bars of the day (JSON from a read-only query)")
-    parser.add_argument("--local-store", default=str(Path("~/Work/.options-history/options_history.sqlite").expanduser()))
     parser.add_argument("--founders", default=",".join(FOUNDERS))
     parser.add_argument("--start", default=None, help="ISO time: simulate from here")
     parser.add_argument("--until", default=None, help="ISO time: simulate to here")
-    parser.add_argument("--starts", default=None, help="JSON {founder family: ISO first wake} (the live births)")
-    parser.add_argument("--work", default=None, help="where the run's ledger and book file live (deleted after)")
+    parser.add_argument("--work", default=None, help="where a run's ledger and book file live (deleted after)")
+    parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, while main has no fit")
     parser.add_argument("--out", default=None)
-    parser.add_argument("--label", default="forward")
     args = parser.parse_args(argv)
-    starts = None
-    if args.starts:
-        starts = {k: parse_ts(v) for k, v in json.loads(Path(args.starts).read_text() if Path(args.starts).exists() else args.starts).items()}
-    began = time.time()
+    founders = [f for f in args.founders.split(",") if f]
     if args.command == "bar-keys":
-        print(bar_keys([f for f in args.founders.split(",") if f]))
+        print(bar_keys(founders))
         return 0
     if args.command.startswith("query-"):  # the read-only query's text, to run on the box through rx.py
         print({"query-bars": BARS_QUERY, "query-live": LIVE_QUERY, "query-chains": CHAINS_QUERY}[args.command])
         return 0
     if args.command == "calibrate":
+        began = time.time()
         result = calibrate(args.snapshots, fit_from=args.fit_from, local_store=args.local_store, work=args.work)
         result["run"] = {"snapshots_file": str(args.snapshots), "seconds": round(time.time() - began, 1)}
-        text = json.dumps(result, indent=1, default=str)
-        if args.out:
-            Path(args.out).write_text(text + "\n", encoding="utf-8")
-        else:
-            print(text)
+        _write(result, args.out)
         return 0
-    founders = [f for f in args.founders.split(",") if f]
     common = dict(house_bars=args.house_bars, local_store=args.local_store, founders=founders, work=args.work,
                   start=parse_ts(args.start) if args.start else None, until=parse_ts(args.until) if args.until else None,
                   log=lambda text: print(text, file=sys.stderr, flush=True))
-    session = run(args.snapshots, starts=starts, **common)
-    session["run"] = {"label": args.label, "seconds": round(time.time() - began, 1), "starts": {k: iso(v) for k, v in (starts or {}).items() if v}}
-    if not args.live:
-        result = session
-    else:
+
+    def timed(label: str, **kw: Any) -> dict[str, Any]:
+        began = time.time()
+        out = run(args.snapshots, **common, **kw)
+        out["run"] = {"label": label, "seconds": round(time.time() - began, 1),
+                      "starts": {k: iso(v) for k, v in (kw.get("starts") or {}).items() if v},
+                      "reprice_from": None if kw.get("reprice_from") is None else ("never" if kw["reprice_from"] == float("inf") else iso(kw["reprice_from"]))}
+        return out
+
+    result: dict[str, Any] = {"session": timed("every founder over the whole recorded session, under the House on main (re-pricing from the start)")}
+    if args.before_v4:
+        result["session_before_v4"] = timed("the same, under the House before V4 (no re-pricing: release 20260925T163626Z)", reprice_from=float("inf"))
+    if args.live:
         live = live_summary(json.loads(Path(args.live).read_text(encoding="utf-8")))
-        result = {"session": session, "live": live}
+        result["live"] = live
         if args.from_birth:
             births = {founder: parse_ts(row["first_wake_today"]) for founder, row in live.items() if row.get("first_wake_today")}
-            began = time.time()
-            result["from_birth"] = run(args.snapshots, starts=births, **common)
-            result["from_birth"]["run"] = {"label": "from each live founder's first wake", "seconds": round(time.time() - began, 1),
-                                           "starts": {k: iso(v) for k, v in births.items() if v}}
-        result["comparison"] = compare(session, result.get("from_birth"), live)
-    if args.what_if_sane_limits:
-        result = {"session": result} if not args.live else result
-        result["what_if_sane_limits"] = {}
-        runs = {"session": starts}
-        if args.live and args.from_birth:
-            runs["from_birth"] = {founder: parse_ts(row["first_wake_today"]) for founder, row in result["live"].items() if row.get("first_wake_today")}
-        for name, begin in runs.items():
-            began = time.time()
-            what_if = run(args.snapshots, starts=begin, sane_limits=True, **common)
-            what_if["run"] = {"label": f"WHAT-IF, not the House ({name}): limits through the touch by more than the book's 10% sent at the 10% line",
-                              "seconds": round(time.time() - began, 1)}
-            result["what_if_sane_limits"][name] = what_if
+            result["from_birth"] = timed("each founder from its live first wake, the House re-pricing from V4 as the floor did",
+                                         starts=births, reprice_from=parse_ts(args.v4_at))
+        result["comparison"] = compare(result["session"], result.get("from_birth"), live)
     if args.what_if_0dte_greeks:
-        result = {"session": result} if "session" not in result else result
-        began = time.time()
-        what_if = run(args.snapshots, starts=starts, zero_dte_greeks=True, **common)
-        what_if["run"] = {"label": "WHAT-IF, not the House (session): Black-Scholes greeks on today's expiries, which the live feed does not carry",
-                          "seconds": round(time.time() - began, 1)}
-        result["what_if_0dte_greeks"] = what_if
+        result["what_if_0dte_greeks"] = timed("WHAT-IF, not the House: the session with Black-Scholes greeks on today's expiries, which the live "
+                                              "feed does not carry", zero_dte_greeks=True)
     if args.house_chains:
-        result = {"session": result} if "session" not in result else result
         result["chains_against_the_house"] = compare_chains(args.snapshots, json.loads(Path(args.house_chains).read_text(encoding="utf-8")))
     result["inputs"] = {"snapshots_file": str(args.snapshots), "house_bars": args.house_bars, "local_store": args.local_store, "live": args.live,
-                        "house_chains": args.house_chains}
-    text = json.dumps(result, indent=1, default=str)
-    if args.out:
-        Path(args.out).write_text(text + "\n", encoding="utf-8")
-    else:
-        print(text)
+                        "house_chains": args.house_chains, "v4_at": args.v4_at}
+    _write(result, args.out)
     return 0
 
 

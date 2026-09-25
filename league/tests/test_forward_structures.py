@@ -118,7 +118,7 @@ class Harness(unittest.TestCase):
         self.assertEqual(founder["fills"][0]["held_price"], 0.57)
         self.assertEqual(founder["fills"][0]["fee_usd"], 0.10)  # $0.05 a contract a leg
 
-    def test_a_close_far_under_the_bid_is_refused_by_the_book_and_the_what_if_sends_it_at_the_rule_line(self):
+    def test_a_close_far_under_the_bid_is_refused_before_v4_and_re_priced_to_the_band_by_the_house_on_main(self):
         def probe(ctx):
             memory = ctx.get("memory") or {}
             legs = [{"occ": LOW, "role": "long"}, {"occ": HIGH, "role": "short"}]
@@ -135,18 +135,19 @@ class Harness(unittest.TestCase):
             at, quoted = f"2026-09-25T15:{m:02d}:00Z", f"2026-09-25T{14 + (m > 0)}:{(m - 1) % 60:02d}:59Z"
             lines.append(line(at, [row(LOW, 1.00, 1.05, quoted), row(HIGH, 0.50, 0.52, quoted)]))
         self.write(lines)  # the structure: ask 1.05 - 0.50 = 0.55, bid 1.00 - 0.52 = 0.48
-        house = self.run_probe(probe)
-        [founder] = house["founders"]
+        before = fwd.run(self.path, house_bars=None, local_store=None, founders=["options_condor_vrp"], work=self.dir.name,
+                         decide_override={"options_condor_vrp": probe}, reprice_from=float("inf"))  # the House of 16:36-18:33Z
+        [founder] = before["founders"]
         self.assertEqual((founder["opens"], founder["closes"]), (1, 0))
         self.assertTrue(any("limit price deviates" in reason for reason in founder["refusals"]), founder["refusals"])
-        what_if = fwd.run(self.path, house_bars=None, local_store=None, founders=["options_condor_vrp"], work=self.dir.name,
-                          decide_override={"options_condor_vrp": probe}, sane_limits=True)
-        [founder] = what_if["founders"]
+        now = self.run_probe(probe)  # the House on main: `_fit_structure_limit` (PR #339)
+        [founder] = now["founders"]
         self.assertEqual((founder["opens"], founder["closes"], founder["refusals"]), (1, 1, {}))
+        self.assertEqual(founder["limits_repriced_by_the_house"], 1)  # 0.25 raised to 0.44, the band's edge under the bid 0.48
         close = founder["fills"][1]
         self.assertEqual(close["action"], "close")
         self.assertEqual(close["held_price"], 0.48)  # at the bid of a newer snapshot, never the 0.25 asked
-        self.assertEqual(what_if["checks"]["fills_failing_audit"], 0)
+        self.assertEqual(now["checks"]["fills_failing_audit"], 0)
 
     def test_nothing_starts_on_a_snapshot_without_sizes(self):
         calls = []

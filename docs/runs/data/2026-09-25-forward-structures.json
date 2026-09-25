@@ -1,0 +1,7026 @@
+{
+ "what": "The structure founders' forward test on the recorded live OPRA snapshots of Sept 25, 2026 (15:11-20:00Z), and the refit of s3/calibration's fill half-spread table with the day's recorded quotes (scripts/forward_structures.py, g/forward).",
+ "reading": {
+  "written": "2026-09-25T20:13Z, builder G-FORWARD, branch g/forward on main d6f8acd5",
+  "inputs": "291 recorded snapshots 15:10:21-20:00:02Z (the first without leg sizes, so nothing starts on it; the forward test stops at 20:00:00Z, the last snapshot 19:59:13Z); the House's recorded bars and structure chains of the day and the live founders' ledger rows, read-only through rx.py after 20:02Z; the local options history copy.",
+  "checks": "17 fills across the four forward runs: 0 made on the snapshot the decision saw, 0 failing the audit that re-derives each fill from the raw snapshot (the touch, every leg quoted after the order's acceptance, 10x the contracts shown). The harness's tests (league/tests/test_forward_structures.py, 8) pin no look-ahead and the newer-snapshot rule.",
+  "fidelity": "Run from each live founder's first wake with the House re-pricing from 18:33:52Z as the floor did, the forward test reproduces the live options desk: orb bought the same IWM Sept 28 282/283 put vertical (0.47 at 16:38:14Z; live 0.46 at 16:43:48Z) and sold it at 0.52 (18:51:14Z; live 0.52 at 18:49:36Z): +4.80 (live +5.80, the cent on the open); skew bought the same RIVN Oct 2 15/15.5 (0.23; live 0.24) and AAL Oct 2 13.5/14 (0.27; live 0.27) put verticals and holds both; nine founders sent nothing in either; their thoughts give the same reasons at matching minutes, the numbers within a minute's drift. The chains agree: Black-Scholes deltas within 0.0025 (ETF) and 0.0011 (stock) of Alpaca's at the median, p90 0.010, 0.1-0.2% over 0.05; mids within $0.01 at the median.",
+  "differences": [
+   "Wake timing: condor-vrp's forward twin decided at 16:36:13Z (SPY 0-DTE implied move 1.18x realized, a 768/769/773/772 condor for 0.38) while the live krasker-23 did not wake between 16:25:03Z and 16:46:01Z (the V3 restart); by 16:46Z the premium was 1.08x, under its 1.10. The forward order was refused anyway (limit 14.81% through the ask, before V4).",
+   "gap-drift: live krasker-22 rewrote itself at 15:34:48Z (the stuck-agent rule) and opened a CCL Oct 2 condor at 15:48:59Z (held all day, marked at its 0 bid); the founder's code never trades (no 2-sigma, 3% move on its six stocks).",
+   "skew and diagonal paused their own entries at 16:59Z (research); their forward twins, which never pause, sent nothing after 16:59Z either.",
+   "The recorder's bands miss 36% of the stock rows and 11% of the ETF rows the House showed (4%/12% of spot against 20%), and the ETF expiries stop at Oct 2 (calendar-term's live IWM back month was Oct 5): no founder's trade used a missing row.",
+   "The forward tick is one a snapshot (60 s) where the live floor's ran 60-200 s: fills land within minutes of the live ones, earlier or later (orb's open 5.5 minutes earlier, its close 1.6 minutes later; skew's 0.5 and 4.5 minutes later)."
+  ],
+  "findings": [
+   "1. The book's 10% limit band refused every structure exit and slipped entry priced through the touch until V4 (18:33Z): over the whole session under the House before V4, orb's exits were refused 37 times (its signal exit at half the mark, its clock exit at 0.01) and it holds its IWM vertical into the weekend; condor-vrp's slipped condor entry was refused. Under the House on main (V4's re-pricing all day) the same session closes 2 structures: condor-vrp -43.40 (a 0-DTE SPY condor opened 15:45Z, stopped at 16:13Z) and orb +10.80: desk -32.60 on 2 closed, 2 skew verticals open at -21.20.",
+   "2. The live chain has NO greeks on a contract expiring today (12,882 of 12,882 0-DTE index rows and 7,986 of 7,986 0-DTE stock rows in the House's 248 recorded chains): the six S4b founders (orb, gap-drift, reversal, skew, trend-vertical, diagonal) pick strikes by the chain's delta, so they can never trade a 0-DTE structure live. The six S4a founders compute their own. What-if (not the House): with Black-Scholes greeks on today's expiries, orb trades a 0-DTE IWM 281/282 call vertical 15:26-16:01Z for +27.80 instead of the 3-day one. The deltas the forward test computes match Alpaca's within 0.003 where Alpaca gives them, so the House could compute them the same way.",
+   "3. Target (3 agents, 2+ closed structures each, positive): 0 in every run and live. Live options desk on structures: 1 closed (orb +5.80), 3 open (skew's two verticals, krasker-22's CCL condor). No structure evidence today bears on O4.",
+   "4. Calibration: S3's table must NOT be adopted for the ETFs. Refit on 82,861 of the day's pairs (17,843 on 0-DTE legs), the ETF buckets move from 0.02/0.07/0.25/2.79 to 0.07/0.31/1.11/1.98; S3's own ETF buckets, held out on the day, are tighter than the real touch 17.0% (buy) and 18.5% (sell) of the time against its 2.5% design (the current estimate 12.9%/13.6%). The stock buckets hold (S3's table 1.8%/1.2% held out; refit 0.07/0.14/0.29/0.45/0.83 against 0.06/0.14/0.46/1.02/1.86). The ETF need is price drift since the print, not spread: the quoted half-spread is $0.005 while the 97.5th percentile need on $0.5-3 legs grows 0.15 -> 0.27 -> 0.44 as the print ages 0-60 -> 60-180 -> 180-300 s (0-DTE 0.57). Fitted within a minute of the bar's close only: 0.04/0.15/0.98/1.93 (ETF). A print-priced replay cannot judge penny-wide ETF structures honestly; a replay on recorded quotes (this harness) can. Control: the same code on S3's days returns S3's table exactly (11,111 pairs, every bucket equal)."
+  ],
+  "caveats": [
+   "Practice evidence on a simulated book, never a real result; the forward test is the founders' code, not the live agents' after rewrites.",
+   "The day's 15-minute option bars are built from one snapshot a minute: volume and trade counts are lower bounds and a bar's close is about 45 s older than the real one, which inflates the ETF need a little (the age split shows how much).",
+   "Session runs use main d6f8acd5 (V4's structure code plus Deploy A, whose book and fee hunks do not touch the options-shadow book)."
+  ]
+ },
+ "forward": {
+  "session": {
+   "founders": [
+    {
+     "founder": "options-butterfly-pin",
+     "seed": "options_butterfly_pin",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Pin butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-calendar-term",
+     "seed": "options_calendar_term",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Term calendar. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-condor-vrp",
+     "seed": "options_condor_vrp",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 2,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": -43.4,
+     "fees_usd": 0.4,
+     "closed_realized_usd": [
+      -43.4
+     ],
+     "equity_usd": 156.6,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [
+      {
+       "at": "2026-09-25T15:45:15.081Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "iron_condor",
+       "market_id": "iron_condor|-1SPY260925C00769000|+1SPY260925C00770000|+1SPY260925P00764000|-1SPY260925P00765000",
+       "quantity": 1.0,
+       "held_price": 0.6,
+       "natural_price": 0.4,
+       "fee_usd": 0.2,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "Selling the SPY 2026-09-25 764/765/770/769 iron condor for 0.35 (the touches and a slip): the implied move to expiry 0.38% is 1.16x the 0.33% the last 5 sessions imply; short deltas -0.15/+0.37; expected +0.025 a share at expiry after costs"
+      },
+      {
+       "at": "2026-09-25T16:13:22.608Z",
+       "side": "sell",
+       "action": "close",
+       "structure": "iron_condor",
+       "market_id": "iron_condor|-1SPY260925C00769000|+1SPY260925C00770000|+1SPY260925P00764000|-1SPY260925P00765000",
+       "quantity": 1.0,
+       "held_price": 0.17,
+       "natural_price": 0.83,
+       "fee_usd": 0.2,
+       "realized_usd": -43.4,
+       "flat": true,
+       "reason": "Closing the iron_condor SPY 2026-09-25 marketable (pay at most 0.93 a share; the touch from the legs' touches): the stop: buying it back costs 0.85, 2.0x the 0.40 credit. [the House re-priced the limit 0.07 to 0.14, the edge of the book's 1"
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:44:13.414620Z",
+       "snapshot": 34,
+       "asked": [
+        {
+         "structure": "iron_condor",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.35,
+         "legs": [
+          {
+           "occ": "SPY260925P00764000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925P00765000",
+           "role": "short"
+          },
+          {
+           "occ": "SPY260925C00770000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925C00769000",
+           "role": "short"
+          }
+         ],
+         "reason": "Selling the SPY 2026-09-25 764/765/770/769 iron condor for 0.35 (the touches and a slip): the implied move to expiry 0.38% is 1.16x the 0.33% the last 5 sessions imply; short deltas -0.15/+0.37; expected +0.025 a share at expiry after costs; at most $65 can be lost. Out at 50% of the credit, 2.0x it, or 30 minutes before its close."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:12:14.177921Z",
+       "snapshot": 62,
+       "asked": [
+        {
+         "structure": "iron_condor",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.93,
+         "legs": [
+          {
+           "occ": "SPY260925C00769000",
+           "role": "short"
+          },
+          {
+           "occ": "SPY260925C00770000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925P00764000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925P00765000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the iron_condor SPY 2026-09-25 marketable (pay at most 0.93 a share; the touch from the legs' touches): the stop: buying it back costs 0.85, 2.0x the 0.40 credit."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ]
+     ]
+    },
+    {
+     "founder": "options-diagonal",
+     "seed": "options_diagonal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options diagonal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-gap-drift",
+     "seed": "options_gap_drift",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options gap drift. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-ironfly-quiet",
+     "seed": "options_ironfly_quiet",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Quiet iron butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-orb",
+     "seed": "options_orb",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 1,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 10.8,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [
+      10.8
+     ],
+     "equity_usd": 210.8,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [
+      {
+       "at": "2026-09-25T15:12:13.461Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|+1IWM260928C00281000|-1IWM260928C00282000",
+       "quantity": 1.0,
+       "held_price": 0.49,
+       "natural_price": 0.49,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 3-day call debit_vertical at 0.51 (281 strike, delta +0.54); it can lose $51."
+      },
+      {
+       "at": "2026-09-25T16:02:15.129Z",
+       "side": "sell",
+       "action": "close",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|+1IWM260928C00281000|-1IWM260928C00282000",
+       "quantity": 1.0,
+       "held_price": 0.6,
+       "natural_price": 0.6,
+       "fee_usd": 0.1,
+       "realized_usd": 10.8,
+       "flat": true,
+       "reason": "Closing the IWM debit_vertical at 0.24 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work. [the House re-priced the limit 0.24 to 0.51, the edge of the book's 10% band from the bid 0.56; it fills at t"
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:11:25.796198Z",
+       "snapshot": 1,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.51,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 3-day call debit_vertical at 0.51 (281 strike, delta +0.54); it can lose $51."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:00:17.831961Z",
+       "snapshot": 50,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.24,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.24 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Options ORB. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-putspread-dip",
+     "seed": "options_putspread_dip",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Put spread on the dip. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-reversal",
+     "seed": "options_reversal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options reversal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-skew",
+     "seed": "options_skew",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [],
+     "equity_usd": 178.8,
+     "stake_usd": 200.0,
+     "held_at_end": [
+      {
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.441,
+       "mark": 0.33,
+       "unrealized_usd": -11.1,
+       "expiry": "2026-10-02"
+      },
+      {
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.201,
+       "mark": 0.1,
+       "unrealized_usd": -10.1,
+       "expiry": "2026-10-02"
+      }
+     ],
+     "fills": [
+      {
+       "at": "2026-09-25T15:23:12.646Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "quantity": 1.0,
+       "held_price": 0.44,
+       "natural_price": 0.44,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+      },
+      {
+       "at": "2026-09-25T15:35:13.570Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "quantity": 1.0,
+       "held_price": 0.2,
+       "natural_price": 0.2,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:22:12.418122Z",
+       "snapshot": 12,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.23,
+         "legs": [
+          {
+           "occ": "AAL261002P00013500",
+           "role": "long"
+          },
+          {
+           "occ": "AAL261002P00013000",
+           "role": "short"
+          }
+         ],
+         "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+        },
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.46,
+         "legs": [
+          {
+           "occ": "RIVN261002P00015500",
+           "role": "long"
+          },
+          {
+           "occ": "RIVN261002P00014500",
+           "role": "short"
+          }
+         ],
+         "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options skew. RIVN debit_vertical: holding at -0.07 a share; AAL debit_vertical: holding at -0.09 a share."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options skew. RIVN debit_vertical: holding at -0.08 a share; AAL debit_vertical: holding at -0.11 a share."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options skew. RIVN debit_vertical: holding at -0.09 a share; AAL debit_vertical: holding at -0.10 a share."
+      ]
+     ]
+    },
+    {
+     "founder": "options-strangle-cheap",
+     "seed": "options_strangle_cheap",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Cheap strangle. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-trend-vertical",
+     "seed": "options_trend_vertical",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options trend vertical. nothing to do."
+      ]
+     ]
+    }
+   ],
+   "desk": {
+    "closed_structures": 2,
+    "realized_usd": -32.6,
+    "agents_positive_on_2_closed": 0,
+    "held_at_end": 2,
+    "unrealized_usd_at_end": -21.2
+   },
+   "broker": {
+    "orders": 6,
+    "statuses": {
+     "filled": 6
+    },
+    "fills": 6
+   },
+   "checks": {
+    "decisions": 436,
+    "decision_snapshot_after_clock": 0,
+    "fills": 6,
+    "fills_not_on_newer_snapshot": 0,
+    "fills_failing_audit": 0,
+    "snapshots": 290,
+    "first_snapshot": "2026-09-25T15:10:26.000000Z",
+    "last_snapshot": "2026-09-25T19:59:13.673183Z",
+    "sized_from": "2026-09-25T15:11:25.796198Z",
+    "leg_reads": 80,
+    "fill_log": [
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-67620693d2cff3820f902001824d5048",
+      "side": "buy",
+      "submitted_snapshot": 1,
+      "filled_snapshot": 2,
+      "at": "2026-09-25T15:12:13.461Z",
+      "price": "0.49",
+      "audit": {
+       "ok": true,
+       "touch": "0.49",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-46fb317191195214579c85d54bcece09",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 13,
+      "at": "2026-09-25T15:23:12.646Z",
+      "price": "0.44",
+      "audit": {
+       "ok": true,
+       "touch": "0.44",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-4b98e2cbb830fe6142146ee00095dcf0",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 25,
+      "at": "2026-09-25T15:35:13.570Z",
+      "price": "0.20",
+      "audit": {
+       "ok": true,
+       "touch": "0.20",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-condor-vrp",
+      "order_id": "ord-42ac479b28ba737529eb6b44fabf661b",
+      "side": "buy",
+      "submitted_snapshot": 34,
+      "filled_snapshot": 35,
+      "at": "2026-09-25T15:45:15.081Z",
+      "price": "0.60",
+      "audit": {
+       "ok": true,
+       "touch": "0.60",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-f274a3e4cdfee8c1f14386805090064b",
+      "side": "sell",
+      "submitted_snapshot": 50,
+      "filled_snapshot": 52,
+      "at": "2026-09-25T16:02:15.129Z",
+      "price": "0.60",
+      "audit": {
+       "ok": true,
+       "touch": "0.60",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-condor-vrp",
+      "order_id": "ord-28de45d1f461b30775b8faaf55f68e63",
+      "side": "sell",
+      "submitted_snapshot": 62,
+      "filled_snapshot": 63,
+      "at": "2026-09-25T16:13:22.608Z",
+      "price": "0.17",
+      "audit": {
+       "ok": true,
+       "touch": "0.17",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     }
+    ],
+    "decision_snapshots": {
+     "fwd-options-butterfly-pin": 53,
+     "fwd-options-calendar-term": 28,
+     "fwd-options-condor-vrp": 53,
+     "fwd-options-diagonal": 28,
+     "fwd-options-gap-drift": 28,
+     "fwd-options-ironfly-quiet": 53,
+     "fwd-options-orb": 53,
+     "fwd-options-putspread-dip": 28,
+     "fwd-options-reversal": 28,
+     "fwd-options-skew": 28,
+     "fwd-options-strangle-cheap": 28,
+     "fwd-options-trend-vertical": 28
+    }
+   },
+   "alerts": [],
+   "bar_sources": {
+    "AAL:15Min": {
+     "house": 73,
+     "local": 5029
+    },
+    "AAL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "BAC:15Min": {
+     "house": 73,
+     "local": 4597
+    },
+    "BAC:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "CCL:15Min": {
+     "local": 4886
+    },
+    "CCL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "F:15Min": {
+     "house": 513,
+     "local": 4490
+    },
+    "F:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "INTC:15Min": {
+     "house": 513,
+     "local": 4818
+    },
+    "INTC:1Day": {
+     "local": 82
+    },
+    "IWM:15Min": {
+     "house": 514,
+     "local": 4815
+    },
+    "IWM:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "IWM:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "PFE:15Min": {
+     "house": 513,
+     "local": 4698
+    },
+    "PFE:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "QQQ:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "QQQ:1Day": {
+     "local": 82
+    },
+    "QQQ:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "RIVN:15Min": {
+     "local": 5135
+    },
+    "RIVN:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SNAP:15Min": {
+     "house": 73,
+     "local": 5039
+    },
+    "SNAP:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SOFI:15Min": {
+     "house": 513,
+     "local": 4816
+    },
+    "SOFI:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "SPY:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "SPY:1Day": {
+     "local": 82
+    },
+    "SPY:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "T:15Min": {
+     "house": 513,
+     "local": 4241
+    },
+    "T:1Day": {
+     "house": 60,
+     "local": 23
+    }
+   },
+   "bars_from_snapshot_mids": {},
+   "run": {
+    "label": "every founder over the whole recorded session, under the House on main (re-pricing from the start)",
+    "seconds": 30.2,
+    "starts": {},
+    "reprice_from": null
+   }
+  },
+  "session_before_v4": {
+   "founders": [
+    {
+     "founder": "options-butterfly-pin",
+     "seed": "options_butterfly_pin",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Pin butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-calendar-term",
+     "seed": "options_calendar_term",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Term calendar. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-condor-vrp",
+     "seed": "options_condor_vrp",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 1,
+     "dropped": [],
+     "refusals": {
+      "limit price deviates 10.17% from reference": 1
+     },
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:44:13.414620Z",
+       "snapshot": 34,
+       "asked": [
+        {
+         "structure": "iron_condor",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.35,
+         "legs": [
+          {
+           "occ": "SPY260925P00764000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925P00765000",
+           "role": "short"
+          },
+          {
+           "occ": "SPY260925C00770000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925C00769000",
+           "role": "short"
+          }
+         ],
+         "reason": "Selling the SPY 2026-09-25 764/765/770/769 iron condor for 0.35 (the touches and a slip): the implied move to expiry 0.38% is 1.16x the 0.33% the last 5 sessions imply; short deltas -0.15/+0.37; expected +0.025 a share at expiry after costs; at most $65 can be lost. Out at 50% of the credit, 2.0x it, or 30 minutes before its close."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ]
+     ]
+    },
+    {
+     "founder": "options-diagonal",
+     "seed": "options_diagonal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options diagonal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-gap-drift",
+     "seed": "options_gap_drift",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options gap drift. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-ironfly-quiet",
+     "seed": "options_ironfly_quiet",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Quiet iron butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-orb",
+     "seed": "options_orb",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 38,
+     "dropped": [],
+     "refusals": {
+      "limit price deviates 57.14% from reference": 1,
+      "limit price deviates 55.56% from reference": 1,
+      "limit price deviates 52.94% from reference": 1,
+      "limit price deviates 50.72% from reference": 1,
+      "limit price deviates 46.03% from reference": 1,
+      "limit price deviates 51.52% from reference": 1,
+      "limit price deviates 28.26% from reference": 1,
+      "limit price deviates 64.62% from reference": 1,
+      "limit price deviates 49.23% from reference": 1,
+      "limit price deviates 45.00% from reference": 1,
+      "limit price deviates 53.12% from reference": 1,
+      "limit price deviates 47.54% from reference": 1,
+      "limit price deviates 52.38% from reference": 1,
+      "limit price deviates 48.39% from reference": 1,
+      "limit price deviates 49.18% from reference": 1,
+      "limit price deviates 49.15% from reference": 2,
+      "limit price deviates 51.67% from reference": 2,
+      "limit price deviates 45.28% from reference": 1,
+      "limit price deviates 53.45% from reference": 1,
+      "limit price deviates 51.72% from reference": 3,
+      "limit price deviates 50.00% from reference": 2,
+      "limit price deviates 49.12% from reference": 1,
+      "limit price deviates 48.21% from reference": 1,
+      "limit price deviates 50.82% from reference": 3,
+      "limit price deviates 48.28% from reference": 1,
+      "limit price deviates 98.28% from reference": 1,
+      "limit price deviates 98.33% from reference": 1,
+      "limit price deviates 98.44% from reference": 1,
+      "limit price deviates 98.36% from reference": 1,
+      "limit price deviates 98.31% from reference": 1
+     },
+     "limits_repriced_by_the_house": 0,
+     "opens": 1,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.1,
+     "closed_realized_usd": [],
+     "equity_usd": 207.9,
+     "stake_usd": 200.0,
+     "held_at_end": [
+      {
+       "market_id": "debit_vertical|+1IWM260928C00281000|-1IWM260928C00282000",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.491,
+       "mark": 0.57,
+       "unrealized_usd": 7.9,
+       "expiry": "2026-09-28"
+      }
+     ],
+     "fills": [
+      {
+       "at": "2026-09-25T15:12:13.461Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|+1IWM260928C00281000|-1IWM260928C00282000",
+       "quantity": 1.0,
+       "held_price": 0.49,
+       "natural_price": 0.49,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 3-day call debit_vertical at 0.51 (281 strike, delta +0.54); it can lose $51."
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:11:25.796198Z",
+       "snapshot": 1,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.51,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 3-day call debit_vertical at 0.51 (281 strike, delta +0.54); it can lose $51."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:00:17.831961Z",
+       "snapshot": 50,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.24,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.24 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:06:21.046012Z",
+       "snapshot": 56,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.28,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.28 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:12:14.177921Z",
+       "snapshot": 62,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.32,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.32 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:17:14.704104Z",
+       "snapshot": 67,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.34,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.34 a share or better: 283.23 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:22:14.941153Z",
+       "snapshot": 72,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.34,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.34 a share or better: 283.23 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:28:14.800256Z",
+       "snapshot": 78,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.32,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.32 a share or better: 283.23 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:34:12.119562Z",
+       "snapshot": 84,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.33,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.33 a share or better: 283.00 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:39:14.550979Z",
+       "snapshot": 89,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.23,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.23 a share or better: 283.00 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:44:18.795110Z",
+       "snapshot": 94,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.33,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.33 a share or better: 283.00 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:50:15.801211Z",
+       "snapshot": 100,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.33,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.33 a share or better: 282.68 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:55:16.250451Z",
+       "snapshot": 105,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.3,
+         "legs": [
+          {
+           "occ": "IWM260928C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.30 a share or better: 282.68 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Options ORB. IWM debit_vertical: closing, 3 days to its first expiry at 15:47 New York: out before the close."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Options ORB. IWM debit_vertical: closing, 3 days to its first expiry at 15:52 New York: out before the close."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Options ORB. IWM debit_vertical: closing, 3 days to its first expiry at 15:58 New York: out before the close."
+      ]
+     ]
+    },
+    {
+     "founder": "options-putspread-dip",
+     "seed": "options_putspread_dip",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Put spread on the dip. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-reversal",
+     "seed": "options_reversal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options reversal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-skew",
+     "seed": "options_skew",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [],
+     "equity_usd": 178.8,
+     "stake_usd": 200.0,
+     "held_at_end": [
+      {
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.441,
+       "mark": 0.33,
+       "unrealized_usd": -11.1,
+       "expiry": "2026-10-02"
+      },
+      {
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.201,
+       "mark": 0.1,
+       "unrealized_usd": -10.1,
+       "expiry": "2026-10-02"
+      }
+     ],
+     "fills": [
+      {
+       "at": "2026-09-25T15:23:12.646Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "quantity": 1.0,
+       "held_price": 0.44,
+       "natural_price": 0.44,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+      },
+      {
+       "at": "2026-09-25T15:35:13.570Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "quantity": 1.0,
+       "held_price": 0.2,
+       "natural_price": 0.2,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:22:12.418122Z",
+       "snapshot": 12,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.23,
+         "legs": [
+          {
+           "occ": "AAL261002P00013500",
+           "role": "long"
+          },
+          {
+           "occ": "AAL261002P00013000",
+           "role": "short"
+          }
+         ],
+         "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+        },
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.46,
+         "legs": [
+          {
+           "occ": "RIVN261002P00015500",
+           "role": "long"
+          },
+          {
+           "occ": "RIVN261002P00014500",
+           "role": "short"
+          }
+         ],
+         "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options skew. RIVN debit_vertical: holding at -0.07 a share; AAL debit_vertical: holding at -0.09 a share."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options skew. RIVN debit_vertical: holding at -0.08 a share; AAL debit_vertical: holding at -0.11 a share."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options skew. RIVN debit_vertical: holding at -0.09 a share; AAL debit_vertical: holding at -0.10 a share."
+      ]
+     ]
+    },
+    {
+     "founder": "options-strangle-cheap",
+     "seed": "options_strangle_cheap",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Cheap strangle. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-trend-vertical",
+     "seed": "options_trend_vertical",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options trend vertical. nothing to do."
+      ]
+     ]
+    }
+   ],
+   "desk": {
+    "closed_structures": 0,
+    "realized_usd": 0.0,
+    "agents_positive_on_2_closed": 0,
+    "held_at_end": 3,
+    "unrealized_usd_at_end": -13.3
+   },
+   "broker": {
+    "orders": 3,
+    "statuses": {
+     "filled": 3
+    },
+    "fills": 3
+   },
+   "checks": {
+    "decisions": 436,
+    "decision_snapshot_after_clock": 0,
+    "fills": 3,
+    "fills_not_on_newer_snapshot": 0,
+    "fills_failing_audit": 0,
+    "snapshots": 290,
+    "first_snapshot": "2026-09-25T15:10:26.000000Z",
+    "last_snapshot": "2026-09-25T19:59:13.673183Z",
+    "sized_from": "2026-09-25T15:11:25.796198Z",
+    "leg_reads": 73,
+    "fill_log": [
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-67620693d2cff3820f902001824d5048",
+      "side": "buy",
+      "submitted_snapshot": 1,
+      "filled_snapshot": 2,
+      "at": "2026-09-25T15:12:13.461Z",
+      "price": "0.49",
+      "audit": {
+       "ok": true,
+       "touch": "0.49",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-46fb317191195214579c85d54bcece09",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 13,
+      "at": "2026-09-25T15:23:12.646Z",
+      "price": "0.44",
+      "audit": {
+       "ok": true,
+       "touch": "0.44",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-4b98e2cbb830fe6142146ee00095dcf0",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 25,
+      "at": "2026-09-25T15:35:13.570Z",
+      "price": "0.20",
+      "audit": {
+       "ok": true,
+       "touch": "0.20",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     }
+    ],
+    "decision_snapshots": {
+     "fwd-options-butterfly-pin": 53,
+     "fwd-options-calendar-term": 28,
+     "fwd-options-condor-vrp": 53,
+     "fwd-options-diagonal": 28,
+     "fwd-options-gap-drift": 28,
+     "fwd-options-ironfly-quiet": 53,
+     "fwd-options-orb": 53,
+     "fwd-options-putspread-dip": 28,
+     "fwd-options-reversal": 28,
+     "fwd-options-skew": 28,
+     "fwd-options-strangle-cheap": 28,
+     "fwd-options-trend-vertical": 28
+    }
+   },
+   "alerts": [],
+   "bar_sources": {
+    "AAL:15Min": {
+     "house": 73,
+     "local": 5029
+    },
+    "AAL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "BAC:15Min": {
+     "house": 73,
+     "local": 4597
+    },
+    "BAC:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "CCL:15Min": {
+     "local": 4886
+    },
+    "CCL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "F:15Min": {
+     "house": 513,
+     "local": 4490
+    },
+    "F:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "INTC:15Min": {
+     "house": 513,
+     "local": 4818
+    },
+    "INTC:1Day": {
+     "local": 82
+    },
+    "IWM:15Min": {
+     "house": 514,
+     "local": 4815
+    },
+    "IWM:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "IWM:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "PFE:15Min": {
+     "house": 513,
+     "local": 4698
+    },
+    "PFE:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "QQQ:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "QQQ:1Day": {
+     "local": 82
+    },
+    "QQQ:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "RIVN:15Min": {
+     "local": 5135
+    },
+    "RIVN:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SNAP:15Min": {
+     "house": 73,
+     "local": 5039
+    },
+    "SNAP:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SOFI:15Min": {
+     "house": 513,
+     "local": 4816
+    },
+    "SOFI:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "SPY:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "SPY:1Day": {
+     "local": 82
+    },
+    "SPY:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "T:15Min": {
+     "house": 513,
+     "local": 4241
+    },
+    "T:1Day": {
+     "house": 60,
+     "local": 23
+    }
+   },
+   "bars_from_snapshot_mids": {},
+   "run": {
+    "label": "the same, under the House before V4 (no re-pricing: release 20260925T163626Z)",
+    "seconds": 30.1,
+    "starts": {},
+    "reprice_from": "never"
+   }
+  },
+  "from_birth": {
+   "founders": [
+    {
+     "founder": "options-butterfly-pin",
+     "seed": "options_butterfly_pin",
+     "wake_minutes": 5.0,
+     "wakes": 38,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Pin butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-calendar-term",
+     "seed": "options_calendar_term",
+     "wake_minutes": 10.0,
+     "wakes": 20,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Term calendar. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-condor-vrp",
+     "seed": "options_condor_vrp",
+     "wake_minutes": 5.0,
+     "wakes": 39,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 1,
+     "dropped": [],
+     "refusals": {
+      "limit price deviates 14.81% from reference": 1
+     },
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T16:36:13.872786Z",
+       "snapshot": 86,
+       "asked": [
+        {
+         "structure": "iron_condor",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.38,
+         "legs": [
+          {
+           "occ": "SPY260925P00768000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925P00769000",
+           "role": "short"
+          },
+          {
+           "occ": "SPY260925C00773000",
+           "role": "long"
+          },
+          {
+           "occ": "SPY260925C00772000",
+           "role": "short"
+          }
+         ],
+         "reason": "Selling the SPY 2026-09-25 768/769/773/772 iron condor for 0.38 (the touches and a slip): the implied move to expiry 0.37% is 1.18x the 0.31% the last 5 sessions imply; short deltas -0.24/+0.36; expected +0.012 a share at expiry after costs; at most $62 can be lost. Out at 50% of the credit, 2.0x it, or 30 minutes before its close."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ]
+     ]
+    },
+    {
+     "founder": "options-diagonal",
+     "seed": "options_diagonal",
+     "wake_minutes": 10.0,
+     "wakes": 19,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options diagonal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-gap-drift",
+     "seed": "options_gap_drift",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options gap drift. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-ironfly-quiet",
+     "seed": "options_ironfly_quiet",
+     "wake_minutes": 5.0,
+     "wakes": 38,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Quiet iron butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-orb",
+     "seed": "options_orb",
+     "wake_minutes": 5.0,
+     "wakes": 37,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 7,
+     "dropped": [],
+     "refusals": {
+      "limit price deviates 50.91% from reference": 1,
+      "limit price deviates 50.00% from reference": 3,
+      "limit price deviates 49.09% from reference": 1
+     },
+     "limits_repriced_by_the_house": 1,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 4.8,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [
+      4.8
+     ],
+     "equity_usd": 204.8,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [
+      {
+       "at": "2026-09-25T16:38:14.849Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1IWM260928P00282000|+1IWM260928P00283000",
+       "quantity": 1.0,
+       "held_price": 0.47,
+       "natural_price": 0.47,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "IWM 283.00 broke above its opening range 281.42-282.69: fading it: a 3-day put debit_vertical at 0.49 (283 strike, delta -0.52); it can lose $49."
+      },
+      {
+       "at": "2026-09-25T18:51:14.532Z",
+       "side": "sell",
+       "action": "close",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1IWM260928P00282000|+1IWM260928P00283000",
+       "quantity": 1.0,
+       "held_price": 0.52,
+       "natural_price": 0.52,
+       "fee_usd": 0.1,
+       "realized_usd": 4.8,
+       "flat": true,
+       "reason": "Closing the IWM debit_vertical at 0.27 a share or better: 282.05 is back at the range's middle 282.06: the fade has done its work. [the House re-priced the limit 0.27 to 0.47, the edge of the book's 10% band from the bid 0.52; it fills at t"
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T16:36:13.872786Z",
+       "snapshot": 86,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.49,
+         "legs": [
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "IWM 283.00 broke above its opening range 281.42-282.69: fading it: a 3-day put debit_vertical at 0.49 (283 strike, delta -0.52); it can lose $49."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T17:48:14.686989Z",
+       "snapshot": 158,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.27,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.27 a share or better: 281.98 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T17:54:13.943503Z",
+       "snapshot": 164,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.28,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.28 a share or better: 281.98 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T17:59:14.630165Z",
+       "snapshot": 169,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.28,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.28 a share or better: 281.98 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T18:05:14.682167Z",
+       "snapshot": 175,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.28,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.28 a share or better: 282.00 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T18:10:15.497486Z",
+       "snapshot": 180,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.28,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.28 a share or better: 282.00 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T18:50:16.177631Z",
+       "snapshot": 220,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.27,
+         "legs": [
+          {
+           "occ": "IWM260928P00282000",
+           "role": "short"
+          },
+          {
+           "occ": "IWM260928P00283000",
+           "role": "long"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.27 a share or better: 282.05 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Options ORB. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-putspread-dip",
+     "seed": "options_putspread_dip",
+     "wake_minutes": 10.0,
+     "wakes": 20,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:29:13.718428Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:39:20.173054Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:50:14.664526Z",
+       "Put spread on the dip. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-reversal",
+     "seed": "options_reversal",
+     "wake_minutes": 10.0,
+     "wakes": 19,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:30:16.114881Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:41:13.888090Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Options reversal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-skew",
+     "seed": "options_skew",
+     "wake_minutes": 10.0,
+     "wakes": 19,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [],
+     "equity_usd": 189.8,
+     "stake_usd": 200.0,
+     "held_at_end": [
+      {
+       "market_id": "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.231,
+       "mark": 0.2,
+       "unrealized_usd": -3.1,
+       "expiry": "2026-10-02"
+      },
+      {
+       "market_id": "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.271,
+       "mark": 0.2,
+       "unrealized_usd": -7.1,
+       "expiry": "2026-10-02"
+      }
+     ],
+     "fills": [
+      {
+       "at": "2026-09-25T16:45:16.532Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500",
+       "quantity": 1.0,
+       "held_price": 0.23,
+       "natural_price": 0.23,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.26 (15.5 strike, delta -0.49); it can lose $26."
+      },
+      {
+       "at": "2026-09-25T16:49:14.541Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000",
+       "quantity": 1.0,
+       "held_price": 0.27,
+       "natural_price": 0.27,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.29 (14 strike, delta -0.56); it can lose $29."
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T16:44:18.795110Z",
+       "snapshot": 94,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.29,
+         "legs": [
+          {
+           "occ": "AAL261002P00014000",
+           "role": "long"
+          },
+          {
+           "occ": "AAL261002P00013500",
+           "role": "short"
+          }
+         ],
+         "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.29 (14 strike, delta -0.56); it can lose $29."
+        },
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.26,
+         "legs": [
+          {
+           "occ": "RIVN261002P00015500",
+           "role": "long"
+          },
+          {
+           "occ": "RIVN261002P00015000",
+           "role": "short"
+          }
+         ],
+         "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.26 (15.5 strike, delta -0.49); it can lose $26."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options skew. RIVN debit_vertical: holding at -0.00 a share; AAL debit_vertical: holding at -0.08 a share."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options skew. RIVN debit_vertical: holding at -0.01 a share; AAL debit_vertical: holding at -0.06 a share."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options skew. RIVN debit_vertical: holding at -0.02 a share; AAL debit_vertical: holding at -0.06 a share."
+      ]
+     ]
+    },
+    {
+     "founder": "options-strangle-cheap",
+     "seed": "options_strangle_cheap",
+     "wake_minutes": 10.0,
+     "wakes": 20,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:29:13.718428Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:39:20.173054Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:50:14.664526Z",
+       "Cheap strangle. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-trend-vertical",
+     "seed": "options_trend_vertical",
+     "wake_minutes": 10.0,
+     "wakes": 19,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:29:13.718428Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:39:20.173054Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:50:14.664526Z",
+       "Options trend vertical. nothing to do."
+      ]
+     ]
+    }
+   ],
+   "desk": {
+    "closed_structures": 1,
+    "realized_usd": 4.8,
+    "agents_positive_on_2_closed": 0,
+    "held_at_end": 2,
+    "unrealized_usd_at_end": -10.2
+   },
+   "broker": {
+    "orders": 4,
+    "statuses": {
+     "filled": 4
+    },
+    "fills": 4
+   },
+   "checks": {
+    "decisions": 316,
+    "decision_snapshot_after_clock": 0,
+    "fills": 4,
+    "fills_not_on_newer_snapshot": 0,
+    "fills_failing_audit": 0,
+    "snapshots": 290,
+    "first_snapshot": "2026-09-25T15:10:26.000000Z",
+    "last_snapshot": "2026-09-25T19:59:13.673183Z",
+    "sized_from": "2026-09-25T15:11:25.796198Z",
+    "leg_reads": 58,
+    "fill_log": [
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-2bacd311ee6f5c51a4d143b60963eed6",
+      "side": "buy",
+      "submitted_snapshot": 86,
+      "filled_snapshot": 88,
+      "at": "2026-09-25T16:38:14.849Z",
+      "price": "0.47",
+      "audit": {
+       "ok": true,
+       "touch": "0.47",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-bf705007cc89cea7f601b5acd74f34a9",
+      "side": "buy",
+      "submitted_snapshot": 94,
+      "filled_snapshot": 95,
+      "at": "2026-09-25T16:45:16.532Z",
+      "price": "0.23",
+      "audit": {
+       "ok": true,
+       "touch": "0.23",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-c544f3fbedb64544fb77db5e0c51d9b6",
+      "side": "buy",
+      "submitted_snapshot": 94,
+      "filled_snapshot": 99,
+      "at": "2026-09-25T16:49:14.541Z",
+      "price": "0.27",
+      "audit": {
+       "ok": true,
+       "touch": "0.27",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-fb671ef520bc9f06453cad19f442f4d5",
+      "side": "sell",
+      "submitted_snapshot": 220,
+      "filled_snapshot": 221,
+      "at": "2026-09-25T18:51:14.532Z",
+      "price": "0.52",
+      "audit": {
+       "ok": true,
+       "touch": "0.52",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     }
+    ],
+    "decision_snapshots": {
+     "fwd-options-gap-drift": 28,
+     "fwd-options-condor-vrp": 39,
+     "fwd-options-putspread-dip": 20,
+     "fwd-options-ironfly-quiet": 38,
+     "fwd-options-strangle-cheap": 20,
+     "fwd-options-butterfly-pin": 38,
+     "fwd-options-calendar-term": 20,
+     "fwd-options-orb": 37,
+     "fwd-options-trend-vertical": 19,
+     "fwd-options-reversal": 19,
+     "fwd-options-skew": 19,
+     "fwd-options-diagonal": 19
+    }
+   },
+   "alerts": [],
+   "bar_sources": {
+    "AAL:15Min": {
+     "house": 73,
+     "local": 5029
+    },
+    "AAL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "BAC:15Min": {
+     "house": 73,
+     "local": 4597
+    },
+    "BAC:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "CCL:15Min": {
+     "local": 4886
+    },
+    "CCL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "F:15Min": {
+     "house": 513,
+     "local": 4490
+    },
+    "F:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "INTC:15Min": {
+     "house": 513,
+     "local": 4818
+    },
+    "INTC:1Day": {
+     "local": 82
+    },
+    "IWM:15Min": {
+     "house": 514,
+     "local": 4815
+    },
+    "IWM:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "IWM:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "PFE:15Min": {
+     "house": 513,
+     "local": 4698
+    },
+    "PFE:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "QQQ:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "QQQ:1Day": {
+     "local": 82
+    },
+    "QQQ:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "RIVN:15Min": {
+     "local": 5135
+    },
+    "RIVN:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SNAP:15Min": {
+     "house": 73,
+     "local": 5039
+    },
+    "SNAP:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SOFI:15Min": {
+     "house": 513,
+     "local": 4816
+    },
+    "SOFI:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "SPY:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "SPY:1Day": {
+     "local": 82
+    },
+    "SPY:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "T:15Min": {
+     "house": 513,
+     "local": 4241
+    },
+    "T:1Day": {
+     "house": 60,
+     "local": 23
+    }
+   },
+   "bars_from_snapshot_mids": {},
+   "run": {
+    "label": "each founder from its live first wake, the House re-pricing from V4 as the floor did",
+    "seconds": 27.6,
+    "starts": {
+     "options-gap-drift": "2026-09-25T13:32:37.377000Z",
+     "options-condor-vrp": "2026-09-25T16:25:03.019000Z",
+     "options-putspread-dip": "2026-09-25T16:27:34.542000Z",
+     "options-ironfly-quiet": "2026-09-25T16:29:46.309000Z",
+     "options-strangle-cheap": "2026-09-25T16:29:53.321000Z",
+     "options-calendar-term": "2026-09-25T16:33:03.883000Z",
+     "options-butterfly-pin": "2026-09-25T16:33:04.109000Z",
+     "options-orb": "2026-09-25T16:35:51.349000Z",
+     "options-trend-vertical": "2026-09-25T16:37:43.436000Z",
+     "options-reversal": "2026-09-25T16:41:49.315000Z",
+     "options-skew": "2026-09-25T16:43:53.617000Z",
+     "options-diagonal": "2026-09-25T16:44:53.348000Z"
+    },
+    "reprice_from": "2026-09-25T18:33:52.705000Z"
+   }
+  },
+  "what_if_0dte_greeks": {
+   "founders": [
+    {
+     "founder": "options-butterfly-pin",
+     "seed": "options_butterfly_pin",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Pin butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Pin butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-calendar-term",
+     "seed": "options_calendar_term",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Term calendar. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Term calendar. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-condor-vrp",
+     "seed": "options_condor_vrp",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+      ]
+     ]
+    },
+    {
+     "founder": "options-diagonal",
+     "seed": "options_diagonal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options diagonal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options diagonal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-gap-drift",
+     "seed": "options_gap_drift",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options gap drift. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options gap drift. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-ironfly-quiet",
+     "seed": "options_ironfly_quiet",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Quiet iron butterfly. No entries now."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Quiet iron butterfly. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-orb",
+     "seed": "options_orb",
+     "wake_minutes": 5.0,
+     "wakes": 53,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 3,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 2,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 27.8,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [
+      27.8
+     ],
+     "equity_usd": 227.8,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [
+      {
+       "at": "2026-09-25T15:26:13.088Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|+1IWM260925C00281000|-1IWM260925C00282000",
+       "quantity": 1.0,
+       "held_price": 0.46,
+       "natural_price": 0.46,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 0-day call debit_vertical at 0.46 (281 strike, delta +0.56); it can lose $46."
+      },
+      {
+       "at": "2026-09-25T16:01:15.117Z",
+       "side": "sell",
+       "action": "close",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|+1IWM260925C00281000|-1IWM260925C00282000",
+       "quantity": 1.0,
+       "held_price": 0.74,
+       "natural_price": 0.74,
+       "fee_usd": 0.1,
+       "realized_usd": 27.8,
+       "flat": true,
+       "reason": "Closing the IWM debit_vertical at 0.22 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work. [the House re-priced the limit 0.22 to 0.58, the edge of the book's 10% band from the bid 0.64; it fills at t"
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:11:25.796198Z",
+       "snapshot": 1,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.46,
+         "legs": [
+          {
+           "occ": "IWM260925C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260925C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "IWM 281.06 broke below its opening range 281.42-282.69: fading it: a 0-day call debit_vertical at 0.46 (281 strike, delta +0.56); it can lose $46."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:00:17.831961Z",
+       "snapshot": 50,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "close",
+         "quantity": 1,
+         "limit_price": 0.22,
+         "legs": [
+          {
+           "occ": "IWM260925C00281000",
+           "role": "long"
+          },
+          {
+           "occ": "IWM260925C00282000",
+           "role": "short"
+          }
+         ],
+         "reason": "Closing the IWM debit_vertical at 0.22 a share or better: 282.16 is back at the range's middle 282.06: the fade has done its work."
+        }
+       ]
+      },
+      {
+       "at": "2026-09-25T16:17:14.704104Z",
+       "snapshot": 67,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.15,
+         "legs": [
+          {
+           "occ": "SOFI260925P00017000",
+           "role": "long"
+          },
+          {
+           "occ": "SOFI260925P00016500",
+           "role": "short"
+          }
+         ],
+         "reason": "SOFI 16.87 broke above its opening range 16.64-16.81: fading it: a 0-day put debit_vertical at 0.15 (17 strike, delta -0.63); it can lose $15."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:47:13.633971Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:52:13.819713Z",
+       "Options ORB. nothing to do."
+      ],
+      [
+       "2026-09-25T19:58:14.222343Z",
+       "Options ORB. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-putspread-dip",
+     "seed": "options_putspread_dip",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Put spread on the dip. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Put spread on the dip. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-reversal",
+     "seed": "options_reversal",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options reversal. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options reversal. nothing to do."
+      ]
+     ]
+    },
+    {
+     "founder": "options-skew",
+     "seed": "options_skew",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 2,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.2,
+     "closed_realized_usd": [],
+     "equity_usd": 178.8,
+     "stake_usd": 200.0,
+     "held_at_end": [
+      {
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.441,
+       "mark": 0.33,
+       "unrealized_usd": -11.1,
+       "expiry": "2026-10-02"
+      },
+      {
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "structure": "debit_vertical",
+       "quantity": 1.0,
+       "held_cost": 0.201,
+       "mark": 0.1,
+       "unrealized_usd": -10.1,
+       "expiry": "2026-10-02"
+      }
+     ],
+     "fills": [
+      {
+       "at": "2026-09-25T15:23:12.646Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+       "quantity": 1.0,
+       "held_price": 0.44,
+       "natural_price": 0.44,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+      },
+      {
+       "at": "2026-09-25T15:35:13.570Z",
+       "side": "buy",
+       "action": "open",
+       "structure": "debit_vertical",
+       "market_id": "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500",
+       "quantity": 1.0,
+       "held_price": 0.2,
+       "natural_price": 0.2,
+       "fee_usd": 0.1,
+       "realized_usd": null,
+       "flat": false,
+       "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+      }
+     ],
+     "decisions_with_intents": [
+      {
+       "at": "2026-09-25T15:22:12.418122Z",
+       "snapshot": 12,
+       "asked": [
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.23,
+         "legs": [
+          {
+           "occ": "AAL261002P00013500",
+           "role": "long"
+          },
+          {
+           "occ": "AAL261002P00013000",
+           "role": "short"
+          }
+         ],
+         "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.23 (13.5 strike, delta -0.48); it can lose $23."
+        },
+        {
+         "structure": "debit_vertical",
+         "action": "open",
+         "quantity": 1,
+         "limit_price": 0.46,
+         "legs": [
+          {
+           "occ": "RIVN261002P00015500",
+           "role": "long"
+          },
+          {
+           "occ": "RIVN261002P00014500",
+           "role": "short"
+          }
+         ],
+         "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.46 (15.5 strike, delta -0.56); it can lose $46."
+        }
+       ]
+      }
+     ],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options skew. RIVN debit_vertical: holding at -0.07 a share; AAL debit_vertical: holding at -0.09 a share."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options skew. RIVN debit_vertical: holding at -0.08 a share; AAL debit_vertical: holding at -0.11 a share."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options skew. RIVN debit_vertical: holding at -0.09 a share; AAL debit_vertical: holding at -0.10 a share."
+      ]
+     ]
+    },
+    {
+     "founder": "options-strangle-cheap",
+     "seed": "options_strangle_cheap",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Cheap strangle. No entries now."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Cheap strangle. No entries now."
+      ]
+     ]
+    },
+    {
+     "founder": "options-trend-vertical",
+     "seed": "options_trend_vertical",
+     "wake_minutes": 10.0,
+     "wakes": 28,
+     "decide_errors": 0,
+     "last_error": "",
+     "intents_asked": 0,
+     "dropped": [],
+     "refusals": {},
+     "limits_repriced_by_the_house": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "fees_usd": 0.0,
+     "closed_realized_usd": [],
+     "equity_usd": 200.0,
+     "stake_usd": 200.0,
+     "held_at_end": [],
+     "fills": [],
+     "decisions_with_intents": [],
+     "last_thoughts": [
+      [
+       "2026-09-25T19:34:13.944151Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:45:15.168218Z",
+       "Options trend vertical. nothing to do."
+      ],
+      [
+       "2026-09-25T19:56:14.135529Z",
+       "Options trend vertical. nothing to do."
+      ]
+     ]
+    }
+   ],
+   "desk": {
+    "closed_structures": 1,
+    "realized_usd": 27.8,
+    "agents_positive_on_2_closed": 0,
+    "held_at_end": 2,
+    "unrealized_usd_at_end": -21.2
+   },
+   "broker": {
+    "orders": 5,
+    "statuses": {
+     "filled": 4,
+     "cancelled": 1
+    },
+    "fills": 4
+   },
+   "checks": {
+    "decisions": 436,
+    "decision_snapshot_after_clock": 0,
+    "fills": 4,
+    "fills_not_on_newer_snapshot": 0,
+    "fills_failing_audit": 0,
+    "snapshots": 290,
+    "first_snapshot": "2026-09-25T15:10:26.000000Z",
+    "last_snapshot": "2026-09-25T19:59:13.673183Z",
+    "sized_from": "2026-09-25T15:11:25.796198Z",
+    "leg_reads": 106,
+    "fill_log": [
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-46fb317191195214579c85d54bcece09",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 13,
+      "at": "2026-09-25T15:23:12.646Z",
+      "price": "0.44",
+      "audit": {
+       "ok": true,
+       "touch": "0.44",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-eccd473d19b1dfed6708bbbeaa1d09d4",
+      "side": "buy",
+      "submitted_snapshot": 1,
+      "filled_snapshot": 16,
+      "at": "2026-09-25T15:26:13.088Z",
+      "price": "0.46",
+      "audit": {
+       "ok": true,
+       "touch": "0.46",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-skew",
+      "order_id": "ord-4b98e2cbb830fe6142146ee00095dcf0",
+      "side": "buy",
+      "submitted_snapshot": 12,
+      "filled_snapshot": 25,
+      "at": "2026-09-25T15:35:13.570Z",
+      "price": "0.20",
+      "audit": {
+       "ok": true,
+       "touch": "0.20",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     },
+     {
+      "agent": "fwd-options-orb",
+      "order_id": "ord-c05524f1a3442ac6463142290db2ddb9",
+      "side": "sell",
+      "submitted_snapshot": 50,
+      "filled_snapshot": 51,
+      "at": "2026-09-25T16:01:15.117Z",
+      "price": "0.74",
+      "audit": {
+       "ok": true,
+       "touch": "0.74",
+       "legs_newer_than_acceptance": true,
+       "legs_short_of_size": []
+      }
+     }
+    ],
+    "decision_snapshots": {
+     "fwd-options-butterfly-pin": 53,
+     "fwd-options-calendar-term": 28,
+     "fwd-options-condor-vrp": 53,
+     "fwd-options-diagonal": 28,
+     "fwd-options-gap-drift": 28,
+     "fwd-options-ironfly-quiet": 53,
+     "fwd-options-orb": 53,
+     "fwd-options-putspread-dip": 28,
+     "fwd-options-reversal": 28,
+     "fwd-options-skew": 28,
+     "fwd-options-strangle-cheap": 28,
+     "fwd-options-trend-vertical": 28
+    }
+   },
+   "alerts": [],
+   "bar_sources": {
+    "AAL:15Min": {
+     "house": 73,
+     "local": 5029
+    },
+    "AAL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "BAC:15Min": {
+     "house": 73,
+     "local": 4597
+    },
+    "BAC:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "CCL:15Min": {
+     "local": 4886
+    },
+    "CCL:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "F:15Min": {
+     "house": 513,
+     "local": 4490
+    },
+    "F:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "INTC:15Min": {
+     "house": 513,
+     "local": 4818
+    },
+    "INTC:1Day": {
+     "local": 82
+    },
+    "IWM:15Min": {
+     "house": 514,
+     "local": 4815
+    },
+    "IWM:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "IWM:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "PFE:15Min": {
+     "house": 513,
+     "local": 4698
+    },
+    "PFE:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "QQQ:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "QQQ:1Day": {
+     "local": 82
+    },
+    "QQQ:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "RIVN:15Min": {
+     "local": 5135
+    },
+    "RIVN:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SNAP:15Min": {
+     "house": 73,
+     "local": 5039
+    },
+    "SNAP:1Day": {
+     "house": 40,
+     "local": 43
+    },
+    "SOFI:15Min": {
+     "house": 513,
+     "local": 4816
+    },
+    "SOFI:1Day": {
+     "house": 60,
+     "local": 23
+    },
+    "SPY:15Min": {
+     "house": 514,
+     "local": 4817
+    },
+    "SPY:1Day": {
+     "local": 82
+    },
+    "SPY:1Hour": {
+     "house": 403,
+     "local": 929
+    },
+    "T:15Min": {
+     "house": 513,
+     "local": 4241
+    },
+    "T:1Day": {
+     "house": 60,
+     "local": 23
+    }
+   },
+   "bars_from_snapshot_mids": {},
+   "run": {
+    "label": "WHAT-IF, not the House: the session with Black-Scholes greeks on today's expiries, which the live feed does not carry",
+    "seconds": 29.2,
+    "starts": {},
+    "reprice_from": null
+   }
+  },
+  "live": {
+   "options-gap-drift": {
+    "agent": "krasker-22",
+    "born": "2026-09-25T11:11:03.337Z",
+    "first_wake_today": "2026-09-25T13:32:37.377Z",
+    "wakes": 32,
+    "intents": 1,
+    "refusals": {},
+    "opens": 1,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0.2,
+    "fills": [
+     {
+      "at": "2026-09-25T15:48:59.128Z",
+      "side": "buy",
+      "market_id": "iron_condor|-1CCL261002C00022500|+1CCL261002C00023000|+1CCL261002P00021500|-1CCL261002P00022000",
+      "quantity": "1",
+      "price": "0.17",
+      "fee_usd": "0.20",
+      "realized": null,
+      "flat": null,
+      "reason": "Short-dated defined-risk premium sale; credit at least $0.15/share, short-leg absolute delta no greater than 0.50, and maximum loss within the $35 risk budget."
+     }
+    ],
+    "held_at_end": [
+     "iron_condor|-1CCL261002C00022500|+1CCL261002C00023000|+1CCL261002P00021500|-1CCL261002P00022000"
+    ],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T15:34:48.199Z",
+      "control": null,
+      "code_sha256": "2a4f6dfa22343630dea9779f9d544e78e88bcc2b553968dfe886f62f7bbaded9",
+      "note": "Replace the barren, two-sigma earnings-gap trigger with a falsifiable, bounded-risk credit-spread hypothesis: repeatedly sell short-dated defined-risk premium only when the available structure has mea"
+     },
+     {
+      "at": "2026-09-25T15:34:48.201Z",
+      "control": null,
+      "code_sha256": "2a4f6dfa22343630dea9779f9d544e78e88bcc2b553968dfe886f62f7bbaded9",
+      "note": "it rewrote itself: its own rules had not fired in 11 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "182.80000000",
+     "cash": "182.80000000",
+     "realized": "0.00000000",
+     "fees": "0.20000000",
+     "holdings": 1
+    },
+    "last_thought": [
+     "2026-09-25T19:58:49.803Z",
+     "Defined-risk short-premium test. closing held structure; one position already held; no additional entry"
+    ]
+   },
+   "options-condor-vrp": {
+    "agent": "krasker-23",
+    "born": "2026-09-25T16:24:29.940Z",
+    "first_wake_today": "2026-09-25T16:25:03.019Z",
+    "wakes": 30,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T19:37:31.448Z",
+      "control": null,
+      "code_sha256": "0d08d10e264f30ae68291bed3444095a483a061ad37f0dd41208f2d99367a957",
+      "note": "Switch the iron-condor variance-premium harvester from index ETFs (SPY/QQQ/IWM) to the calm, high-VRP single names the desk measured live (krasker-2: VRP ~2x on F/T/AAL/CCL/VALE, tight near-ATM spread"
+     },
+     {
+      "at": "2026-09-25T19:37:31.471Z",
+      "control": null,
+      "code_sha256": "0d08d10e264f30ae68291bed3444095a483a061ad37f0dd41208f2d99367a957",
+      "note": "it rewrote itself: its own rules had not fired in 26 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:59:00.355Z",
+     "Condor VRP. No entries now (entries 10:00-14:00 New York)."
+    ]
+   },
+   "options-putspread-dip": {
+    "agent": "krasker-24",
+    "born": "2026-09-25T16:25:51.179Z",
+    "first_wake_today": "2026-09-25T16:27:34.542Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T19:30:33.831Z",
+      "control": null,
+      "code_sha256": "1baf412fcf2859d01353322e1d707973949850ef0c930a6114e891144774373a",
+      "note": "Replace the anti-correlated trailing-realized-vol edge gate (which never let the put-spread-dip family trade) with a direct credit-yield screen: sell the post-dip put vertical only when credit >= yiel"
+     },
+     {
+      "at": "2026-09-25T19:30:33.835Z",
+      "control": null,
+      "code_sha256": "1baf412fcf2859d01353322e1d707973949850ef0c930a6114e891144774373a",
+      "note": "it rewrote itself: its own rules had not fired in 15 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:50:11.799Z",
+     "Put spread on the dip. No entries now."
+    ]
+   },
+   "options-ironfly-quiet": {
+    "agent": "krasker-25",
+    "born": "2026-09-25T16:26:19.680Z",
+    "first_wake_today": "2026-09-25T16:29:46.309Z",
+    "wakes": 29,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:55:22.005Z",
+     "Quiet iron butterfly. No entries now."
+    ]
+   },
+   "options-strangle-cheap": {
+    "agent": "krasker-26",
+    "born": "2026-09-25T16:27:46.444Z",
+    "first_wake_today": "2026-09-25T16:29:53.321Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T20:01:06.112Z",
+      "control": null,
+      "code_sha256": "2f3308e0ba21dd722ae2c7990d396802a8e575f38972bbb03021d47dbc4180f7",
+      "note": "The IV-vs-RV gate (rich_min) never fired on the estimated-quote replay tape (0 trades), because print-estimated quotes do not embed a real variance risk premium. To test whether a short-dated theta se"
+     },
+     {
+      "at": "2026-09-25T20:01:06.121Z",
+      "control": null,
+      "code_sha256": "2f3308e0ba21dd722ae2c7990d396802a8e575f38972bbb03021d47dbc4180f7",
+      "note": "it rewrote itself: its own rules had not fired in 17 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:50:00.290Z",
+     "Cheap strangle. No entries now."
+    ]
+   },
+   "options-calendar-term": {
+    "agent": "krasker-27",
+    "born": "2026-09-25T16:28:27.750Z",
+    "first_wake_today": "2026-09-25T16:33:03.883Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:53:22.153Z",
+     "Term calendar. No entries now."
+    ]
+   },
+   "options-butterfly-pin": {
+    "agent": "krasker-28",
+    "born": "2026-09-25T16:31:06.936Z",
+    "first_wake_today": "2026-09-25T16:33:04.109Z",
+    "wakes": 29,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:55:25.047Z",
+     "Pin butterfly. No entries now."
+    ]
+   },
+   "options-orb": {
+    "agent": "krasker-29",
+    "born": "2026-09-25T16:33:50.674Z",
+    "first_wake_today": "2026-09-25T16:35:51.349Z",
+    "wakes": 29,
+    "intents": 7,
+    "refusals": {
+     "limit price deviates 48.15% from reference": 1,
+     "limit price deviates 50.00% from reference": 3,
+     "limit price deviates 47.17% from reference": 1
+    },
+    "opens": 1,
+    "closes": 1,
+    "closed_structures": 1,
+    "realized_usd": 5.8,
+    "fees_usd": 0.2,
+    "fills": [
+     {
+      "at": "2026-09-25T16:43:48.882Z",
+      "side": "buy",
+      "market_id": "debit_vertical|-1IWM260928P00282000|+1IWM260928P00283000",
+      "quantity": "1",
+      "price": "0.46",
+      "fee_usd": "0.10",
+      "realized": null,
+      "flat": null,
+      "reason": "IWM 283.00 broke above its opening range 281.42-282.69: fading it: a 3-day put debit_vertical at 0.48 (283 strike, delta -0.52); it can lose $48."
+     },
+     {
+      "at": "2026-09-25T18:49:36.016Z",
+      "side": "sell",
+      "market_id": "debit_vertical|-1IWM260928P00282000|+1IWM260928P00283000",
+      "quantity": "1",
+      "price": "0.52",
+      "fee_usd": "0.10",
+      "realized": "5.80000000",
+      "flat": true,
+      "reason": "Closing the IWM debit_vertical at 0.27 a share or better: 282.05 is back at the range's middle 282.06: the fade has done its work. [the House re-priced the limi"
+     }
+    ],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "205.80000000",
+     "cash": "205.80000000",
+     "realized": "5.80000000",
+     "fees": "0.20000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:56:41.804Z",
+     "Options ORB. nothing to do."
+    ]
+   },
+   "options-trend-vertical": {
+    "agent": "krasker-30",
+    "born": "2026-09-25T16:36:05.127Z",
+    "first_wake_today": "2026-09-25T16:37:43.436Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:53:18.192Z",
+     "Options trend vertical. nothing to do."
+    ]
+   },
+   "options-reversal": {
+    "agent": "krasker-31",
+    "born": "2026-09-25T16:41:20.164Z",
+    "first_wake_today": "2026-09-25T16:41:49.315Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:55:20.211Z",
+     "Options reversal. nothing to do."
+    ]
+   },
+   "options-skew": {
+    "agent": "krasker-32",
+    "born": "2026-09-25T16:42:08.928Z",
+    "first_wake_today": "2026-09-25T16:43:53.617Z",
+    "wakes": 17,
+    "intents": 2,
+    "refusals": {},
+    "opens": 2,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0.2,
+    "fills": [
+     {
+      "at": "2026-09-25T16:44:43.459Z",
+      "side": "buy",
+      "market_id": "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000",
+      "quantity": "1",
+      "price": "0.27",
+      "fee_usd": "0.10",
+      "realized": null,
+      "flat": null,
+      "reason": "AAL's 25-delta skew -0.078 is cheap (-2.2 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.29 (14 strike, delta -0.57); it can lose $"
+     },
+     {
+      "at": "2026-09-25T16:44:43.459Z",
+      "side": "buy",
+      "market_id": "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500",
+      "quantity": "1",
+      "price": "0.24",
+      "fee_usd": "0.10",
+      "realized": null,
+      "flat": null,
+      "reason": "RIVN's 25-delta skew -0.050 is cheap (-1.6 sd under 0.020): buying protection on sale: a 7-day put debit_vertical at 0.26 (15.5 strike, delta -0.49); it can los"
+     }
+    ],
+    "held_at_end": [
+     "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000",
+     "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500"
+    ],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T16:59:15.978Z",
+      "control": "pause_entries",
+      "code_sha256": "c5915b967fbfe68dd54c73b6110f7019737e0e261a5ea1894a8341d6de2d88df",
+      "note": "My strategy buys premium on BOTH skew arms (rich skew \u2192 call debit vertical, cheap skew \u2192 put debit vertical). Buying premium structurally pays the spread (~9%+ even on tight live-OPRA legs per kraske"
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "185.80000000",
+     "cash": "148.80000000",
+     "realized": "0.00000000",
+     "fees": "0.20000000",
+     "holdings": 2
+    },
+    "last_thought": [
+     "2026-09-25T19:56:35.752Z",
+     "Options skew. AAL debit_vertical: holding at -0.07 a share; RIVN debit_vertical: holding at -0.05 a share."
+    ]
+   },
+   "options-diagonal": {
+    "agent": "krasker-33",
+    "born": "2026-09-25T16:43:10.302Z",
+    "first_wake_today": "2026-09-25T16:44:53.348Z",
+    "wakes": 17,
+    "intents": 0,
+    "refusals": {},
+    "opens": 0,
+    "closes": 0,
+    "closed_structures": 0,
+    "realized_usd": 0,
+    "fees_usd": 0,
+    "fills": [],
+    "held_at_end": [],
+    "strategy_changes": [
+     {
+      "at": "2026-09-25T16:59:22.671Z",
+      "control": "pause_entries",
+      "code_sha256": "6081845aafa972cb238a53aa6fa4e579c489bdffa12a9a68948ba3941bafee1c",
+      "note": "The deployed options-diagonal is a net-DEBIT (long-premium) structure, an option buyer. My own replay returned -89.81% over 20 trades (-0.03%/block OOS), and the desk's measured evidence (krasker-10: "
+     }
+    ],
+    "last_mark": {
+     "at": "2026-09-25T20:01:33.808Z",
+     "equity": "200.00000000",
+     "cash": "200.00000000",
+     "realized": "0.00000000",
+     "fees": "0.00000000",
+     "holdings": 0
+    },
+    "last_thought": [
+     "2026-09-25T19:58:49.488Z",
+     "Options diagonal. nothing to do."
+    ]
+   }
+  },
+  "comparison": [
+   {
+    "founder": "options-butterfly-pin",
+    "forward_session": {
+     "wakes": 53,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 38,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-28",
+     "first_wake_today": "2026-09-25T16:33:04.109Z",
+     "wakes": 29,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": []
+    }
+   },
+   {
+    "founder": "options-calendar-term",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 20,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-27",
+     "first_wake_today": "2026-09-25T16:33:03.883Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": []
+    }
+   },
+   {
+    "founder": "options-condor-vrp",
+    "forward_session": {
+     "wakes": 53,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": -43.4,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 39,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 1
+    },
+    "live": {
+     "agent": "krasker-23",
+     "first_wake_today": "2026-09-25T16:25:03.019Z",
+     "wakes": 30,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T19:37:31.448Z",
+       "control": null,
+       "code_sha256": "0d08d10e264f30ae68291bed3444095a483a061ad37f0dd41208f2d99367a957",
+       "note": "Switch the iron-condor variance-premium harvester from index ETFs (SPY/QQQ/IWM) to the calm, high-VRP single names the desk measured live (krasker-2: VRP ~2x on F/T/AAL/CCL/VALE, tight near-ATM spread"
+      },
+      {
+       "at": "2026-09-25T19:37:31.471Z",
+       "control": null,
+       "code_sha256": "0d08d10e264f30ae68291bed3444095a483a061ad37f0dd41208f2d99367a957",
+       "note": "it rewrote itself: its own rules had not fired in 26 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-diagonal",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 19,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-33",
+     "first_wake_today": "2026-09-25T16:44:53.348Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T16:59:22.671Z",
+       "control": "pause_entries",
+       "code_sha256": "6081845aafa972cb238a53aa6fa4e579c489bdffa12a9a68948ba3941bafee1c",
+       "note": "The deployed options-diagonal is a net-DEBIT (long-premium) structure, an option buyer. My own replay returned -89.81% over 20 trades (-0.03%/block OOS), and the desk's measured evidence (krasker-10: "
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-gap-drift",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-22",
+     "first_wake_today": "2026-09-25T13:32:37.377Z",
+     "wakes": 32,
+     "intents": 1,
+     "opens": 1,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [
+      "iron_condor|-1CCL261002C00022500|+1CCL261002C00023000|+1CCL261002P00021500|-1CCL261002P00022000"
+     ],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T15:34:48.199Z",
+       "control": null,
+       "code_sha256": "2a4f6dfa22343630dea9779f9d544e78e88bcc2b553968dfe886f62f7bbaded9",
+       "note": "Replace the barren, two-sigma earnings-gap trigger with a falsifiable, bounded-risk credit-spread hypothesis: repeatedly sell short-dated defined-risk premium only when the available structure has mea"
+      },
+      {
+       "at": "2026-09-25T15:34:48.201Z",
+       "control": null,
+       "code_sha256": "2a4f6dfa22343630dea9779f9d544e78e88bcc2b553968dfe886f62f7bbaded9",
+       "note": "it rewrote itself: its own rules had not fired in 11 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-ironfly-quiet",
+    "forward_session": {
+     "wakes": 53,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 38,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-25",
+     "first_wake_today": "2026-09-25T16:29:46.309Z",
+     "wakes": 29,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": []
+    }
+   },
+   {
+    "founder": "options-orb",
+    "forward_session": {
+     "wakes": 53,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 10.8,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 37,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 4.8,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 5
+    },
+    "live": {
+     "agent": "krasker-29",
+     "first_wake_today": "2026-09-25T16:35:51.349Z",
+     "wakes": 29,
+     "intents": 7,
+     "opens": 1,
+     "closes": 1,
+     "closed_structures": 1,
+     "realized_usd": 5.8,
+     "held_at_end": [],
+     "refusals": {
+      "limit price deviates 48.15% from reference": 1,
+      "limit price deviates 50.00% from reference": 3,
+      "limit price deviates 47.17% from reference": 1
+     },
+     "strategy_changes": []
+    }
+   },
+   {
+    "founder": "options-putspread-dip",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 20,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-24",
+     "first_wake_today": "2026-09-25T16:27:34.542Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T19:30:33.831Z",
+       "control": null,
+       "code_sha256": "1baf412fcf2859d01353322e1d707973949850ef0c930a6114e891144774373a",
+       "note": "Replace the anti-correlated trailing-realized-vol edge gate (which never let the put-spread-dip family trade) with a direct credit-yield screen: sell the post-dip put vertical only when credit >= yiel"
+      },
+      {
+       "at": "2026-09-25T19:30:33.835Z",
+       "control": null,
+       "code_sha256": "1baf412fcf2859d01353322e1d707973949850ef0c930a6114e891144774373a",
+       "note": "it rewrote itself: its own rules had not fired in 15 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-reversal",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 19,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-31",
+     "first_wake_today": "2026-09-25T16:41:49.315Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": []
+    }
+   },
+   {
+    "founder": "options-skew",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [
+      "debit_vertical|-1RIVN261002P00014500|+1RIVN261002P00015500",
+      "debit_vertical|-1AAL261002P00013000|+1AAL261002P00013500"
+     ],
+     "unrealized_usd": -21.2,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 19,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [
+      "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500",
+      "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000"
+     ],
+     "unrealized_usd": -10.2,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-32",
+     "first_wake_today": "2026-09-25T16:43:53.617Z",
+     "wakes": 17,
+     "intents": 2,
+     "opens": 2,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [
+      "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000",
+      "debit_vertical|-1RIVN261002P00015000|+1RIVN261002P00015500"
+     ],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T16:59:15.978Z",
+       "control": "pause_entries",
+       "code_sha256": "c5915b967fbfe68dd54c73b6110f7019737e0e261a5ea1894a8341d6de2d88df",
+       "note": "My strategy buys premium on BOTH skew arms (rich skew \u2192 call debit vertical, cheap skew \u2192 put debit vertical). Buying premium structurally pays the spread (~9%+ even on tight live-OPRA legs per kraske"
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-strangle-cheap",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 20,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-26",
+     "first_wake_today": "2026-09-25T16:29:53.321Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": [
+      {
+       "at": "2026-09-25T20:01:06.112Z",
+       "control": null,
+       "code_sha256": "2f3308e0ba21dd722ae2c7990d396802a8e575f38972bbb03021d47dbc4180f7",
+       "note": "The IV-vs-RV gate (rich_min) never fired on the estimated-quote replay tape (0 trades), because print-estimated quotes do not embed a real variance risk premium. To test whether a short-dated theta se"
+      },
+      {
+       "at": "2026-09-25T20:01:06.121Z",
+       "control": null,
+       "code_sha256": "2f3308e0ba21dd722ae2c7990d396802a8e575f38972bbb03021d47dbc4180f7",
+       "note": "it rewrote itself: its own rules had not fired in 17 wakes with a live market in front of them, it had no record to protect, and this file at least trades"
+      }
+     ]
+    }
+   },
+   {
+    "founder": "options-trend-vertical",
+    "forward_session": {
+     "wakes": 28,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "forward_from_birth": {
+     "wakes": 19,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0.0,
+     "held_at_end": [],
+     "unrealized_usd": 0,
+     "refusals": 0
+    },
+    "live": {
+     "agent": "krasker-30",
+     "first_wake_today": "2026-09-25T16:37:43.436Z",
+     "wakes": 17,
+     "intents": 0,
+     "opens": 0,
+     "closes": 0,
+     "closed_structures": 0,
+     "realized_usd": 0,
+     "held_at_end": [],
+     "refusals": {},
+     "strategy_changes": []
+    }
+   }
+  ],
+  "chains_against_the_house": {
+   "counts": {
+    "chains_before_the_first_snapshot": 9,
+    "chains": 239,
+    "stock_rows": 23171,
+    "stock_rows_not_recorded": 8387,
+    "stock_0dte_rows": 4478,
+    "stock_0dte_rows_house_no_delta": 4478,
+    "stock_rows_delta_missing_house": 704,
+    "stock_rows_delta_missing_forward": 52,
+    "etf_rows": 21200,
+    "etf_0dte_rows": 10690,
+    "etf_0dte_rows_house_no_delta": 10690,
+    "etf_rows_not_recorded": 2398,
+    "etf_rows_delta_missing_house": 54,
+    "etf_rows_delta_missing_forward": 20
+   },
+   "differences": {
+    "stock": {
+     "abs_mid_difference": {
+      "n": 14784,
+      "median": 0.0,
+      "p90": 0.005,
+      "share_over_0.05": 0.0101
+     },
+     "abs_delta_difference": {
+      "n": 9550,
+      "median": 0.0011,
+      "p90": 0.0091,
+      "share_over_0.05": 0.0021
+     },
+     "abs_iv_difference": {
+      "n": 9550,
+      "median": 0.0032,
+      "p90": 0.0145,
+      "share_over_0.05": 0.0099
+     }
+    },
+    "etf": {
+     "abs_mid_difference": {
+      "n": 18802,
+      "median": 0.01,
+      "p90": 0.09,
+      "share_over_0.05": 0.1891
+     },
+     "abs_delta_difference": {
+      "n": 8038,
+      "median": 0.0025,
+      "p90": 0.01,
+      "share_over_0.05": 0.0012
+     },
+     "abs_iv_difference": {
+      "n": 8038,
+      "median": 0.0013,
+      "p90": 0.0035,
+      "share_over_0.05": 0.0014
+     }
+    }
+   }
+  },
+  "inputs": {
+   "snapshots_file": "/home/bwoods1998/Work/.options-history/live-2026-09-25.jsonl",
+   "house_bars": "/tmp/claude-1000/-home-bwoods1998-Work/980ee0b7-fe23-41bc-aba1-bd649e686926/scratchpad/gf/house_bars_final.json",
+   "local_store": "/home/bwoods1998/Work/.options-history/options_history.sqlite",
+   "live": "/tmp/claude-1000/-home-bwoods1998-Work/980ee0b7-fe23-41bc-aba1-bd649e686926/scratchpad/gf/live_final.json",
+   "house_chains": "/tmp/claude-1000/-home-bwoods1998-Work/980ee0b7-fe23-41bc-aba1-bd649e686926/scratchpad/gf/house_chains_final.json",
+   "v4_at": "2026-09-25T18:33:52.705Z"
+  }
+ },
+ "calibration": {
+  "built": {
+   "quotes_read": 682420,
+   "bars_built": 28214,
+   "first": "2026-09-25T15:11:21Z",
+   "last": "2026-09-25T20:00:02Z",
+   "copied_from_local": {
+    "quotes": 316141,
+    "bars": 115786
+   }
+  },
+  "s3_table": {
+   "version": "opra-quotes-2026-09-22..24-q0.975-gap300s",
+   "quantile": 0.975,
+   "max_gap_seconds": 300.0,
+   "min_quotes": 60,
+   "etf": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "buckets": [
+    {
+     "class": "etf",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.02,
+     "quotes": 108
+    },
+    {
+     "class": "etf",
+     "premium": [
+      0.5,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 99
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.25,
+     "quotes": 66
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 2.79,
+     "quotes": 29
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.06,
+     "quotes": 6437
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.5,
+      1.0
+     ],
+     "moneyness": null,
+     "half": 0.14,
+     "quotes": 1612
+    },
+    {
+     "class": "stock",
+     "premium": [
+      1.0,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.46,
+     "quotes": 1499
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 1.02,
+     "quotes": 622
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 1.86,
+     "quotes": 639
+    }
+   ]
+  },
+  "quantile": 0.975,
+  "max_gap_seconds": 300.0,
+  "s3_days_again": {
+   "version": "opra-quotes-q0.975-gap300s",
+   "quantile": 0.975,
+   "max_gap_seconds": 300.0,
+   "min_quotes": 60,
+   "etf": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "buckets": [
+    {
+     "class": "etf",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.02,
+     "quotes": 108,
+     "quoted_half_median": 0.005000000000000001
+    },
+    {
+     "class": "etf",
+     "premium": [
+      0.5,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 99,
+     "quoted_half_median": 0.0050000000000000044
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.25,
+     "quotes": 66,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 2.79,
+     "quotes": 29,
+     "quoted_half_median": 1.9800000000000004
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.06,
+     "quotes": 6437,
+     "quoted_half_median": 0.009999999999999995
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.5,
+      1.0
+     ],
+     "moneyness": null,
+     "half": 0.14,
+     "quotes": 1612,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "stock",
+     "premium": [
+      1.0,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.46,
+     "quotes": 1499,
+     "quoted_half_median": 0.030000000000000027
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 1.02,
+     "quotes": 622,
+     "quoted_half_median": 0.07499999999999996
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 1.86,
+     "quotes": 639,
+     "quoted_half_median": 0.09999999999999964
+    }
+   ],
+   "fitted_on": {
+    "from": "2026-09-22T14:55:23Z",
+    "to": "2026-09-24T19:59:59Z",
+    "days": [
+     "2026-09-22",
+     "2026-09-23",
+     "2026-09-24"
+    ],
+    "quotes_recorded": 316141,
+    "quotes_paired": 11111
+   },
+   "check": {
+    "calibrated": {
+     "etf": {
+      "quotes": 302,
+      "median_half": 0.07,
+      "buy_tighter": 0.0563,
+      "sell_tighter": 0.0762,
+      "median_shortfall": 0.46479999999999677
+     },
+     "stock": {
+      "quotes": 10809,
+      "median_half": 0.06,
+      "buy_tighter": 0.0233,
+      "sell_tighter": 0.0133,
+      "median_shortfall": 0.04000000000000001
+     }
+    },
+    "current": {
+     "etf": {
+      "quotes": 302,
+      "median_half": 0.075,
+      "buy_tighter": 0.0662,
+      "sell_tighter": 0.0927,
+      "median_shortfall": 0.3276000000000039
+     },
+     "stock": {
+      "quotes": 10809,
+      "median_half": 0.02,
+      "buy_tighter": 0.2723,
+      "sell_tighter": 0.2535,
+      "median_shortfall": 0.01999999999999999
+     }
+    }
+   }
+  },
+  "day_only": {
+   "version": "opra-quotes-q0.975-gap300s",
+   "quantile": 0.975,
+   "max_gap_seconds": 300.0,
+   "min_quotes": 60,
+   "etf": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "buckets": [
+    {
+     "class": "etf",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 16342,
+     "quoted_half_median": 0.005000000000000001
+    },
+    {
+     "class": "etf",
+     "premium": [
+      0.5,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.31,
+     "quotes": 22549,
+     "quoted_half_median": 0.0050000000000000044
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 1.11,
+     "quotes": 24021,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 1.98,
+     "quotes": 1454,
+     "quoted_half_median": 0.46499999999999986
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 8244,
+     "quoted_half_median": 0.009999999999999995
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.5,
+      1.0
+     ],
+     "moneyness": null,
+     "half": 0.14,
+     "quotes": 2953,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "stock",
+     "premium": [
+      1.0,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.29,
+     "quotes": 3781,
+     "quoted_half_median": 0.029999999999999916
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.45,
+     "quotes": 2007,
+     "quoted_half_median": 0.050000000000000266
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 0.83,
+     "quotes": 1510,
+     "quoted_half_median": 0.07500000000000018
+    }
+   ],
+   "fitted_on": {
+    "from": "2026-09-25T15:08:57Z",
+    "to": "2026-09-25T19:59:59Z",
+    "days": [
+     "2026-09-25"
+    ],
+    "quotes_recorded": 675232,
+    "quotes_paired": 82861
+   },
+   "check": {
+    "calibrated": {
+     "etf": {
+      "quotes": 64366,
+      "median_half": 0.31,
+      "buy_tighter": 0.0238,
+      "sell_tighter": 0.0184,
+      "median_shortfall": 0.14000000000000057
+     },
+     "stock": {
+      "quotes": 18495,
+      "median_half": 0.14,
+      "buy_tighter": 0.0227,
+      "sell_tighter": 0.0167,
+      "median_shortfall": 0.04999999999999982
+     }
+    },
+    "current": {
+     "etf": {
+      "quotes": 64366,
+      "median_half": 0.14,
+      "buy_tighter": 0.1292,
+      "sell_tighter": 0.1362,
+      "median_shortfall": 0.0708000000000002
+     },
+     "stock": {
+      "quotes": 18495,
+      "median_half": 0.035,
+      "buy_tighter": 0.2333,
+      "sell_tighter": 0.221,
+      "median_shortfall": 0.01999999999999999
+     }
+    }
+   }
+  },
+  "all_days": {
+   "version": "opra-quotes-q0.975-gap300s",
+   "quantile": 0.975,
+   "max_gap_seconds": 300.0,
+   "min_quotes": 60,
+   "etf": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "buckets": [
+    {
+     "class": "etf",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 16450,
+     "quoted_half_median": 0.005000000000000001
+    },
+    {
+     "class": "etf",
+     "premium": [
+      0.5,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.31,
+     "quotes": 22648,
+     "quoted_half_median": 0.0050000000000000044
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 1.11,
+     "quotes": 24087,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 2.12,
+     "quotes": 1483,
+     "quoted_half_median": 0.48499999999999943
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.07,
+     "quotes": 14681,
+     "quoted_half_median": 0.009999999999999995
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.5,
+      1.0
+     ],
+     "moneyness": null,
+     "half": 0.13,
+     "quotes": 4565,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "stock",
+     "premium": [
+      1.0,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.32,
+     "quotes": 5280,
+     "quoted_half_median": 0.030000000000000027
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.54,
+     "quotes": 2629,
+     "quoted_half_median": 0.050000000000000266
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 1.2,
+     "quotes": 2149,
+     "quoted_half_median": 0.07500000000000018
+    }
+   ],
+   "fitted_on": {
+    "from": "2026-09-22T14:55:23Z",
+    "to": "2026-09-25T19:59:59Z",
+    "days": [
+     "2026-09-22",
+     "2026-09-23",
+     "2026-09-24",
+     "2026-09-25"
+    ],
+    "quotes_recorded": 991373,
+    "quotes_paired": 93972
+   },
+   "check": {
+    "calibrated": {
+     "etf": {
+      "quotes": 64668,
+      "median_half": 0.31,
+      "buy_tighter": 0.0237,
+      "sell_tighter": 0.0183,
+      "median_shortfall": 0.14000000000000057
+     },
+     "stock": {
+      "quotes": 29304,
+      "median_half": 0.07,
+      "buy_tighter": 0.0224,
+      "sell_tighter": 0.0144,
+      "median_shortfall": 0.04999999999999999
+     }
+    },
+    "current": {
+     "etf": {
+      "quotes": 64668,
+      "median_half": 0.14,
+      "buy_tighter": 0.1289,
+      "sell_tighter": 0.136,
+      "median_shortfall": 0.07119999999999993
+     },
+     "stock": {
+      "quotes": 29304,
+      "median_half": 0.0288,
+      "buy_tighter": 0.2476,
+      "sell_tighter": 0.233,
+      "median_shortfall": 0.01999999999999999
+     }
+    }
+   }
+  },
+  "day_only_gap60": {
+   "version": "opra-quotes-q0.975-gap60s",
+   "quantile": 0.975,
+   "max_gap_seconds": 60.0,
+   "min_quotes": 60,
+   "etf": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "buckets": [
+    {
+     "class": "etf",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.04,
+     "quotes": 3282,
+     "quoted_half_median": 0.005000000000000001
+    },
+    {
+     "class": "etf",
+     "premium": [
+      0.5,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.15,
+     "quotes": 4493,
+     "quoted_half_median": 0.0050000000000000044
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.98,
+     "quotes": 4802,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "etf",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 1.93,
+     "quotes": 296,
+     "quoted_half_median": 0.4900000000000002
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.0,
+      0.5
+     ],
+     "moneyness": null,
+     "half": 0.06,
+     "quotes": 1697,
+     "quoted_half_median": 0.009999999999999995
+    },
+    {
+     "class": "stock",
+     "premium": [
+      0.5,
+      1.0
+     ],
+     "moneyness": null,
+     "half": 0.12,
+     "quotes": 610,
+     "quoted_half_median": 0.020000000000000018
+    },
+    {
+     "class": "stock",
+     "premium": [
+      1.0,
+      3.0
+     ],
+     "moneyness": null,
+     "half": 0.26,
+     "quotes": 756,
+     "quoted_half_median": 0.030000000000000027
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.0,
+      0.03
+     ],
+     "half": 0.36,
+     "quotes": 393,
+     "quoted_half_median": 0.050000000000000266
+    },
+    {
+     "class": "stock",
+     "premium": [
+      3.0,
+      null
+     ],
+     "moneyness": [
+      0.03,
+      null
+     ],
+     "half": 0.78,
+     "quotes": 299,
+     "quoted_half_median": 0.07500000000000018
+    }
+   ],
+   "fitted_on": {
+    "from": "2026-09-25T15:08:57Z",
+    "to": "2026-09-25T19:59:59Z",
+    "days": [
+     "2026-09-25"
+    ],
+    "quotes_recorded": 675232,
+    "quotes_paired": 16628
+   },
+   "check": {
+    "calibrated": {
+     "etf": {
+      "quotes": 12873,
+      "median_half": 0.15,
+      "buy_tighter": 0.0203,
+      "sell_tighter": 0.021,
+      "median_shortfall": 0.08999999999999986
+     },
+     "stock": {
+      "quotes": 3755,
+      "median_half": 0.12,
+      "buy_tighter": 0.02,
+      "sell_tighter": 0.0152,
+      "median_shortfall": 0.03999999999999998
+     }
+    },
+    "current": {
+     "etf": {
+      "quotes": 12873,
+      "median_half": 0.14,
+      "buy_tighter": 0.0778,
+      "sell_tighter": 0.0892,
+      "median_shortfall": 0.04239999999999977
+     },
+     "stock": {
+      "quotes": 3755,
+      "median_half": 0.0348,
+      "buy_tighter": 0.2104,
+      "sell_tighter": 0.2,
+      "median_shortfall": 0.01759999999999995
+     }
+    }
+   }
+  },
+  "day_pairs": {
+   "pairs": 82861,
+   "fit_paired": 82861,
+   "zero_dte": 17843,
+   "by_root": {
+    "AAL": 1082,
+    "BAC": 1163,
+    "CCL": 1142,
+    "F": 811,
+    "HOOD": 4391,
+    "INTC": 4905,
+    "IWM": 7329,
+    "PFE": 958,
+    "QQQ": 26697,
+    "RIVN": 1137,
+    "SNAP": 332,
+    "SOFI": 2214,
+    "SPY": 30340,
+    "T": 360
+   }
+  },
+  "held_out_on_the_day": {
+   "s3_table": {
+    "etf": {
+     "quotes": 64366,
+     "median_half": 0.07,
+     "buy_tighter": 0.1695,
+     "sell_tighter": 0.1852,
+     "median_shortfall": 0.10000000000000009
+    },
+    "stock": {
+     "quotes": 18495,
+     "median_half": 0.14,
+     "buy_tighter": 0.0181,
+     "sell_tighter": 0.0123,
+     "median_shortfall": 0.03
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 16342,
+      "median_half": 0.02,
+      "buy_tighter": 0.0998,
+      "sell_tighter": 0.1047,
+      "median_shortfall": 0.020000000000000018
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 22549,
+      "median_half": 0.07,
+      "buy_tighter": 0.1632,
+      "sell_tighter": 0.1969,
+      "median_shortfall": 0.06000000000000005
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 24021,
+      "median_half": 0.25,
+      "buy_tighter": 0.2191,
+      "sell_tighter": 0.2237,
+      "median_shortfall": 0.23000000000000043
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1454,
+      "median_half": 1.076,
+      "buy_tighter": 0.2311,
+      "sell_tighter": 0.273,
+      "median_shortfall": 0.2607999999999997
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 8244,
+      "median_half": 0.06,
+      "buy_tighter": 0.0301,
+      "sell_tighter": 0.0199,
+      "median_shortfall": 0.020000000000000018
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 2953,
+      "median_half": 0.14,
+      "buy_tighter": 0.0227,
+      "sell_tighter": 0.0132,
+      "median_shortfall": 0.040000000000000036
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 3781,
+      "median_half": 0.46,
+      "buy_tighter": 0.005,
+      "sell_tighter": 0.005,
+      "median_shortfall": 0.2300000000000002
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 2007,
+      "median_half": 1.02,
+      "buy_tighter": 0.0,
+      "sell_tighter": 0.0025,
+      "median_shortfall": 0.11000000000000032
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1510,
+      "median_half": 1.86,
+      "buy_tighter": 0.0,
+      "sell_tighter": 0.0,
+      "median_shortfall": 0.0
+     }
+    ]
+   },
+   "current_estimate": {
+    "etf": {
+     "quotes": 64366,
+     "median_half": 0.14,
+     "buy_tighter": 0.1292,
+     "sell_tighter": 0.1362,
+     "median_shortfall": 0.0708000000000002
+    },
+    "stock": {
+     "quotes": 18495,
+     "median_half": 0.035,
+     "buy_tighter": 0.2333,
+     "sell_tighter": 0.221,
+     "median_shortfall": 0.01999999999999999
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 16342,
+      "median_half": 0.015,
+      "buy_tighter": 0.1002,
+      "sell_tighter": 0.103,
+      "median_shortfall": 0.014999999999999986
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 22549,
+      "median_half": 0.095,
+      "buy_tighter": 0.1248,
+      "sell_tighter": 0.1467,
+      "median_shortfall": 0.04920000000000002
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 24021,
+      "median_half": 0.3584,
+      "buy_tighter": 0.1467,
+      "sell_tighter": 0.1407,
+      "median_shortfall": 0.19160000000000021
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1454,
+      "median_half": 1.076,
+      "buy_tighter": 0.2311,
+      "sell_tighter": 0.273,
+      "median_shortfall": 0.2607999999999997
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 8244,
+      "median_half": 0.0108,
+      "buy_tighter": 0.2325,
+      "sell_tighter": 0.212,
+      "median_shortfall": 0.010000000000000009
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 2953,
+      "median_half": 0.0324,
+      "buy_tighter": 0.3021,
+      "sell_tighter": 0.3139,
+      "median_shortfall": 0.01760000000000006
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 3781,
+      "median_half": 0.0808,
+      "buy_tighter": 0.2235,
+      "sell_tighter": 0.2298,
+      "median_shortfall": 0.04039999999999999
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 2007,
+      "median_half": 0.176,
+      "buy_tighter": 0.1724,
+      "sell_tighter": 0.1599,
+      "median_shortfall": 0.06399999999999961
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1510,
+      "median_half": 0.3,
+      "buy_tighter": 0.2079,
+      "sell_tighter": 0.1477,
+      "median_shortfall": 0.1039999999999992
+     }
+    ]
+   },
+   "day_refit": {
+    "etf": {
+     "quotes": 64366,
+     "median_half": 0.31,
+     "buy_tighter": 0.0238,
+     "sell_tighter": 0.0184,
+     "median_shortfall": 0.14000000000000057
+    },
+    "stock": {
+     "quotes": 18495,
+     "median_half": 0.14,
+     "buy_tighter": 0.0227,
+     "sell_tighter": 0.0167,
+     "median_shortfall": 0.04999999999999982
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 16342,
+      "median_half": 0.07,
+      "buy_tighter": 0.0227,
+      "sell_tighter": 0.012,
+      "median_shortfall": 0.03999999999999998
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 22549,
+      "median_half": 0.31,
+      "buy_tighter": 0.0235,
+      "sell_tighter": 0.0159,
+      "median_shortfall": 0.10999999999999988
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 24021,
+      "median_half": 1.11,
+      "buy_tighter": 0.0246,
+      "sell_tighter": 0.0247,
+      "median_shortfall": 0.3200000000000003
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1454,
+      "median_half": 1.98,
+      "buy_tighter": 0.0248,
+      "sell_tighter": 0.0248,
+      "median_shortfall": 0.35999999999999943
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 8244,
+      "median_half": 0.07,
+      "buy_tighter": 0.0215,
+      "sell_tighter": 0.0147,
+      "median_shortfall": 0.020000000000000018
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 2953,
+      "median_half": 0.14,
+      "buy_tighter": 0.0227,
+      "sell_tighter": 0.0132,
+      "median_shortfall": 0.040000000000000036
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 3781,
+      "median_half": 0.29,
+      "buy_tighter": 0.0243,
+      "sell_tighter": 0.0238,
+      "median_shortfall": 0.06000000000000005
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 2007,
+      "median_half": 0.45,
+      "buy_tighter": 0.0224,
+      "sell_tighter": 0.0169,
+      "median_shortfall": 0.10000000000000009
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1510,
+      "median_half": 0.83,
+      "buy_tighter": 0.0252,
+      "sell_tighter": 0.0166,
+      "median_shortfall": 0.16999999999999993
+     }
+    ]
+   },
+   "all_days_refit": {
+    "etf": {
+     "quotes": 64366,
+     "median_half": 0.31,
+     "buy_tighter": 0.0237,
+     "sell_tighter": 0.0182,
+     "median_shortfall": 0.14000000000000057
+    },
+    "stock": {
+     "quotes": 18495,
+     "median_half": 0.13,
+     "buy_tighter": 0.0184,
+     "sell_tighter": 0.0134,
+     "median_shortfall": 0.03000000000000025
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 16342,
+      "median_half": 0.07,
+      "buy_tighter": 0.0227,
+      "sell_tighter": 0.012,
+      "median_shortfall": 0.03999999999999998
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 22549,
+      "median_half": 0.31,
+      "buy_tighter": 0.0235,
+      "sell_tighter": 0.0159,
+      "median_shortfall": 0.10999999999999988
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 24021,
+      "median_half": 1.11,
+      "buy_tighter": 0.0246,
+      "sell_tighter": 0.0247,
+      "median_shortfall": 0.3200000000000003
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1454,
+      "median_half": 2.12,
+      "buy_tighter": 0.0213,
+      "sell_tighter": 0.0179,
+      "median_shortfall": 0.28999999999999915
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 8244,
+      "median_half": 0.07,
+      "buy_tighter": 0.0215,
+      "sell_tighter": 0.0147,
+      "median_shortfall": 0.020000000000000018
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 2953,
+      "median_half": 0.13,
+      "buy_tighter": 0.0254,
+      "sell_tighter": 0.0159,
+      "median_shortfall": 0.03999999999999998
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 3781,
+      "median_half": 0.32,
+      "buy_tighter": 0.018,
+      "sell_tighter": 0.0143,
+      "median_shortfall": 0.09000000000000008
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 2007,
+      "median_half": 0.54,
+      "buy_tighter": 0.0095,
+      "sell_tighter": 0.013,
+      "median_shortfall": 0.10999999999999988
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 1510,
+      "median_half": 1.2,
+      "buy_tighter": 0.0007,
+      "sell_tighter": 0.0,
+      "median_shortfall": 0.03000000000000025
+     }
+    ]
+   }
+  },
+  "need_by_group": [
+   {
+    "class": "etf",
+    "split": "age 0-60s",
+    "premium": "0.5-3",
+    "quotes": 4493,
+    "need": 0.15,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "age 0-60s",
+    "premium": "3+",
+    "quotes": 5094,
+    "need": 1.21,
+    "quoted_half_median": 0.020000000000000462
+   },
+   {
+    "class": "etf",
+    "split": "age 0-60s",
+    "premium": "under 0.5",
+    "quotes": 3260,
+    "need": 0.04,
+    "quoted_half_median": 0.005000000000000001
+   },
+   {
+    "class": "etf",
+    "split": "age 180-300s",
+    "premium": "0.5-3",
+    "quotes": 9055,
+    "need": 0.44,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "age 180-300s",
+    "premium": "3+",
+    "quotes": 10215,
+    "need": 1.37,
+    "quoted_half_median": 0.024999999999999467
+   },
+   {
+    "class": "etf",
+    "split": "age 180-300s",
+    "premium": "under 0.5",
+    "quotes": 6573,
+    "need": 0.1,
+    "quoted_half_median": 0.005000000000000001
+   },
+   {
+    "class": "etf",
+    "split": "age 60-180s",
+    "premium": "0.5-3",
+    "quotes": 9001,
+    "need": 0.27,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "age 60-180s",
+    "premium": "3+",
+    "quotes": 10166,
+    "need": 1.29,
+    "quoted_half_median": 0.02499999999999858
+   },
+   {
+    "class": "etf",
+    "split": "age 60-180s",
+    "premium": "under 0.5",
+    "quotes": 6509,
+    "need": 0.07,
+    "quoted_half_median": 0.005000000000000001
+   },
+   {
+    "class": "etf",
+    "split": "dte 0",
+    "premium": "0.5-3",
+    "quotes": 1826,
+    "need": 0.57,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "dte 0",
+    "premium": "3+",
+    "quotes": 4234,
+    "need": 1.39,
+    "quoted_half_median": 0.05499999999999994
+   },
+   {
+    "class": "etf",
+    "split": "dte 0",
+    "premium": "under 0.5",
+    "quotes": 5926,
+    "need": 0.06,
+    "quoted_half_median": 0.005
+   },
+   {
+    "class": "etf",
+    "split": "dte 1-3",
+    "premium": "0.5-3",
+    "quotes": 3961,
+    "need": 0.31,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "dte 1-3",
+    "premium": "3+",
+    "quotes": 4029,
+    "need": 1.35,
+    "quoted_half_median": 0.019999999999999574
+   },
+   {
+    "class": "etf",
+    "split": "dte 1-3",
+    "premium": "under 0.5",
+    "quotes": 5400,
+    "need": 0.05,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "etf",
+    "split": "dte 4-7",
+    "premium": "0.5-3",
+    "quotes": 16762,
+    "need": 0.25,
+    "quoted_half_median": 0.009999999999999787
+   },
+   {
+    "class": "etf",
+    "split": "dte 4-7",
+    "premium": "3+",
+    "quotes": 17212,
+    "need": 1.28,
+    "quoted_half_median": 0.020000000000000018
+   },
+   {
+    "class": "etf",
+    "split": "dte 4-7",
+    "premium": "under 0.5",
+    "quotes": 5016,
+    "need": 0.09,
+    "quoted_half_median": 0.0050000000000000044
+   },
+   {
+    "class": "stock",
+    "split": "age 0-60s",
+    "premium": "0.5-3",
+    "quotes": 1356,
+    "need": 0.2,
+    "quoted_half_median": 0.025000000000000022
+   },
+   {
+    "class": "stock",
+    "split": "age 0-60s",
+    "premium": "3+",
+    "quotes": 690,
+    "need": 0.5,
+    "quoted_half_median": 0.07499999999999996
+   },
+   {
+    "class": "stock",
+    "split": "age 0-60s",
+    "premium": "under 0.5",
+    "quotes": 1679,
+    "need": 0.06,
+    "quoted_half_median": 0.009999999999999995
+   },
+   {
+    "class": "stock",
+    "split": "age 180-300s",
+    "premium": "0.5-3",
+    "quotes": 2718,
+    "need": 0.26,
+    "quoted_half_median": 0.025000000000000022
+   },
+   {
+    "class": "stock",
+    "split": "age 180-300s",
+    "premium": "3+",
+    "quotes": 1441,
+    "need": 0.65,
+    "quoted_half_median": 0.07499999999999996
+   },
+   {
+    "class": "stock",
+    "split": "age 180-300s",
+    "premium": "under 0.5",
+    "quotes": 3298,
+    "need": 0.08,
+    "quoted_half_median": 0.009999999999999995
+   },
+   {
+    "class": "stock",
+    "split": "age 60-180s",
+    "premium": "0.5-3",
+    "quotes": 2660,
+    "need": 0.24,
+    "quoted_half_median": 0.025000000000000022
+   },
+   {
+    "class": "stock",
+    "split": "age 60-180s",
+    "premium": "3+",
+    "quotes": 1386,
+    "need": 0.55,
+    "quoted_half_median": 0.07499999999999996
+   },
+   {
+    "class": "stock",
+    "split": "age 60-180s",
+    "premium": "under 0.5",
+    "quotes": 3267,
+    "need": 0.07,
+    "quoted_half_median": 0.009999999999999995
+   },
+   {
+    "class": "stock",
+    "split": "dte 0",
+    "premium": "0.5-3",
+    "quotes": 1738,
+    "need": 0.4,
+    "quoted_half_median": 0.040000000000000036
+   },
+   {
+    "class": "stock",
+    "split": "dte 0",
+    "premium": "3+",
+    "quotes": 849,
+    "need": 0.98,
+    "quoted_half_median": 0.07500000000000018
+   },
+   {
+    "class": "stock",
+    "split": "dte 0",
+    "premium": "under 0.5",
+    "quotes": 3270,
+    "need": 0.09,
+    "quoted_half_median": 0.009999999999999995
+   },
+   {
+    "class": "stock",
+    "split": "dte 4-7",
+    "premium": "0.5-3",
+    "quotes": 4065,
+    "need": 0.15,
+    "quoted_half_median": 0.020000000000000018
+   },
+   {
+    "class": "stock",
+    "split": "dte 4-7",
+    "premium": "3+",
+    "quotes": 2053,
+    "need": 0.49,
+    "quoted_half_median": 0.050000000000000266
+   },
+   {
+    "class": "stock",
+    "split": "dte 4-7",
+    "premium": "under 0.5",
+    "quotes": 3796,
+    "need": 0.04,
+    "quoted_half_median": 0.009999999999999981
+   },
+   {
+    "class": "stock",
+    "split": "dte 8+",
+    "premium": "0.5-3",
+    "quotes": 931,
+    "need": 0.17,
+    "quoted_half_median": 0.02999999999999997
+   },
+   {
+    "class": "stock",
+    "split": "dte 8+",
+    "premium": "3+",
+    "quotes": 615,
+    "need": 0.5,
+    "quoted_half_median": 0.07500000000000018
+   },
+   {
+    "class": "stock",
+    "split": "dte 8+",
+    "premium": "under 0.5",
+    "quotes": 1178,
+    "need": 0.04,
+    "quoted_half_median": 0.01
+   }
+  ],
+  "held_out_zero_dte": {
+   "s3_table": {
+    "etf": {
+     "quotes": 11986,
+     "median_half": 0.07,
+     "buy_tighter": 0.1805,
+     "sell_tighter": 0.1833,
+     "median_shortfall": 0.16000000000000014
+    },
+    "stock": {
+     "quotes": 5857,
+     "median_half": 0.06,
+     "buy_tighter": 0.0468,
+     "sell_tighter": 0.0359,
+     "median_shortfall": 0.030000000000000027
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 5926,
+      "median_half": 0.02,
+      "buy_tighter": 0.0562,
+      "sell_tighter": 0.0602,
+      "median_shortfall": 0.03
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 1826,
+      "median_half": 0.07,
+      "buy_tighter": 0.2979,
+      "sell_tighter": 0.3231,
+      "median_shortfall": 0.11000000000000032
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 3914,
+      "median_half": 0.25,
+      "buy_tighter": 0.3176,
+      "sell_tighter": 0.3094,
+      "median_shortfall": 0.2599999999999998
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 320,
+      "median_half": 1.0056,
+      "buy_tighter": 0.1344,
+      "sell_tighter": 0.1219,
+      "median_shortfall": 0.4616000000000007
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 3270,
+      "median_half": 0.06,
+      "buy_tighter": 0.0618,
+      "sell_tighter": 0.0459,
+      "median_shortfall": 0.02999999999999997
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 845,
+      "median_half": 0.14,
+      "buy_tighter": 0.0627,
+      "sell_tighter": 0.0426,
+      "median_shortfall": 0.040000000000000036
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 893,
+      "median_half": 0.46,
+      "buy_tighter": 0.0213,
+      "sell_tighter": 0.0213,
+      "median_shortfall": 0.2300000000000002
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 134,
+      "median_half": 1.02,
+      "buy_tighter": 0.0,
+      "sell_tighter": 0.0373,
+      "median_shortfall": 0.11000000000000032
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 715,
+      "median_half": 1.86,
+      "buy_tighter": 0.0,
+      "sell_tighter": 0.0,
+      "median_shortfall": 0.0
+     }
+    ]
+   },
+   "current_estimate": {
+    "etf": {
+     "quotes": 11986,
+     "median_half": 0.155,
+     "buy_tighter": 0.0946,
+     "sell_tighter": 0.0802,
+     "median_shortfall": 0.18920000000000137
+    },
+    "stock": {
+     "quotes": 5857,
+     "median_half": 0.04,
+     "buy_tighter": 0.2469,
+     "sell_tighter": 0.2409,
+     "median_shortfall": 0.03500000000000003
+    },
+    "buckets": [
+     {
+      "class": "etf",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 5926,
+      "median_half": 0.015,
+      "buy_tighter": 0.0245,
+      "sell_tighter": 0.0174,
+      "median_shortfall": 0.01999999999999999
+     },
+     {
+      "class": "etf",
+      "premium": [
+       0.5,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 1826,
+      "median_half": 0.27,
+      "buy_tighter": 0.1221,
+      "sell_tighter": 0.1161,
+      "median_shortfall": 0.12
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 3914,
+      "median_half": 0.4468,
+      "buy_tighter": 0.1847,
+      "sell_tighter": 0.1551,
+      "median_shortfall": 0.27
+     },
+     {
+      "class": "etf",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 320,
+      "median_half": 1.0056,
+      "buy_tighter": 0.1344,
+      "sell_tighter": 0.1219,
+      "median_shortfall": 0.4616000000000007
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.0,
+       0.5
+      ],
+      "moneyness": null,
+      "quotes": 3270,
+      "median_half": 0.02,
+      "buy_tighter": 0.1908,
+      "sell_tighter": 0.1976,
+      "median_shortfall": 0.020000000000000004
+     },
+     {
+      "class": "stock",
+      "premium": [
+       0.5,
+       1.0
+      ],
+      "moneyness": null,
+      "quotes": 845,
+      "median_half": 0.038,
+      "buy_tighter": 0.3763,
+      "sell_tighter": 0.3491,
+      "median_shortfall": 0.032399999999999984
+     },
+     {
+      "class": "stock",
+      "premium": [
+       1.0,
+       3.0
+      ],
+      "moneyness": null,
+      "quotes": 893,
+      "median_half": 0.135,
+      "buy_tighter": 0.3292,
+      "sell_tighter": 0.3012,
+      "median_shortfall": 0.09120000000000017
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.0,
+       0.03
+      ],
+      "quotes": 134,
+      "median_half": 0.158,
+      "buy_tighter": 0.2612,
+      "sell_tighter": 0.4478,
+      "median_shortfall": 0.19500000000000028
+     },
+     {
+      "class": "stock",
+      "premium": [
+       3.0,
+       null
+      ],
+      "moneyness": [
+       0.03,
+       null
+      ],
+      "quotes": 715,
+      "median_half": 0.2828,
+      "buy_tighter": 0.2448,
+      "sell_tighter": 0.1972,
+      "median_shortfall": 0.1379999999999999
+     }
+    ]
+   }
+  },
+  "run": {
+   "snapshots_file": "/home/bwoods1998/Work/.options-history/live-2026-09-25.jsonl",
+   "seconds": 68.4
+  }
+ }
+}
