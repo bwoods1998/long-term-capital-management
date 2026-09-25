@@ -54,7 +54,10 @@ class SeatCase(StructureHouseCase):
 
     def plant(self, *names):
         niche = self.house.niches[options_desk.OPTIONS_DESK]
-        niche.founders = tuple(niche.founders) + tuple({"seed": name, "key": name} for name in names)
+        # The desk's two single-leg founders stay; its real structure founders (options-gap-drift since Sept 25,
+        # 2026) are left out so each test seats exactly the planted ones.
+        kept = tuple(f for f in niche.founders if f["key"] in ("options-breakout", "options-pullback") or f["key"] in TEST_SEEDS)
+        niche.founders = kept + tuple({"seed": name, "key": name} for name in names if name not in {f["key"] for f in kept})
 
     def born(self):
         return {a.founder: a for a in self.house.registry.agents.values() if a.founder in TEST_SEEDS}
