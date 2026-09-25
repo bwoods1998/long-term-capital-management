@@ -196,6 +196,15 @@ ACTIVITY_FIELDS = ("id", "order_id", "symbol", "side", "qty", "price", "cum_qty"
 REMEMBERED_ORDERS = 2000
 #: How many times a type's first fill reads the FILL activities for the owner's record.
 ACTIVITY_READS = 5
+#: The structure types this venue is sent, to OPEN: those whose close as ONE multi-leg order has every
+#: sell covered by a buy in the same order. Alpaca's covered check reads the legs' buy and sell sides,
+#: not their position intent: a calendar's one-order close was refused "mleg uncovered short contracts
+#: not allowed, please use single leg order" (https://forum.alpaca.markets/t/16802, Apr 21, 2025), and
+#: by the same rule a diagonal's, and a long straddle's or strangle's (two sells, no buy), would be too.
+#: The owner forbids legging out, so such a structure could never be closed here and would be held into
+#: its expiry: those four trade on the House's options shadow book instead (the integrator's decision,
+#: Sept 25, 2026). A close of any type is sent as it is.
+MLEG_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
 
 
 def _structures() -> Any:
@@ -245,6 +254,9 @@ def mleg_body(intent: OrderIntent) -> dict[str, Any]:
     if getattr(intent, "post_only", False):
         raise RejectedOrder("alpaca: a multi-leg order cannot be post-only")
     opening = intent.side == "buy"
+    if opening and spec.type not in MLEG_TYPES:
+        raise RejectedOrder(f"alpaca: a {spec.type} is not opened here: its close as one multi-leg order sells a leg no buy in the "
+                            "order covers, which Alpaca refuses, and legging out is not allowed (it trades on the options shadow book)")
     return {
         "order_class": "mleg",
         "qty": text(money(intent.quantity)),
@@ -285,6 +297,9 @@ def _first_cost(rows: "list[tuple[Decimal, Decimal]]", contracts: Decimal) -> De
 
 class AlpacaBroker:
     """A `Broker` over Alpaca's trading and market-data APIs."""
+
+    #: The structure types a book may open on this venue (`MLEG_TYPES`), read by `Book.check`.
+    structure_types = MLEG_TYPES
 
     def __init__(
         self,
@@ -1139,6 +1154,7 @@ __all__ = [
     "is_structure",
     "mleg_body",
     "mleg_limit",
+    "MLEG_TYPES",
     "AlpacaCredentials",
     "alpaca_symbol",
     "instrument_for",

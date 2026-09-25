@@ -63,6 +63,9 @@ class LegsBroker(FakeBroker):
     order back as ONE fill of the held instrument at S = K + sum(sign x ratio x leg price), which is
     what `AlpacaBroker.parse_order` reports."""
 
+    #: The types Alpaca can close as one covered order (`ltcm.adapters.alpaca.MLEG_TYPES`).
+    from ltcm.adapters.alpaca import MLEG_TYPES as structure_types
+
     def __init__(self, *args, option_clearing=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.caps |= {"structure_legs", "mleg"}
@@ -277,6 +280,18 @@ class Entries(StructureBookCase):
         self.assertIn("one net position a contract", outcome.detail)
         # The same side is no conflict: a second short 581 put nets to -2 and each closes as its own.
         self.assertEqual(self.trade("a2", PUT_CREDIT, "buy", "1", "0.72").status, "filled")
+
+    def test_a_type_the_venue_cannot_close_as_one_order_is_not_opened_on_this_book(self):
+        self.seat("a1")
+        strangle = held("long_strangle", [leg(592, "long", "C"), leg(578, "long", "P")])
+        self.broker.leg_quote(592, "C", "0.20", "0.22")
+        self.broker.leg_quote(578, "P", "0.20", "0.22")
+        outcome = self.trade("a1", strangle, "buy", "1", "0.44")  # $44: inside every cap
+        self.assertEqual(outcome.status, "refused")
+        self.assertEqual(outcome.detail, "a long_strangle is not opened on the alpaca-paper book: the venue cannot close it as one order "
+                                         "(its close sells a leg no buy covers) and legging out is not allowed; it trades on the "
+                                         "options shadow book")
+        self.assertFalse([i for i in self.broker.submitted if i.instrument == strangle])
 
     def test_a_structure_expiring_today_is_entered_only_until_1430_new_york(self):
         today = held("iron_condor", [leg(580, "long", "P", expiry="260925"), leg(581, "short", "P", expiry="260925"),

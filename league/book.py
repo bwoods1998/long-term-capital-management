@@ -3076,13 +3076,21 @@ class Book:
 
     def _structure_entry_reasons(self, intent: Intent, now: str) -> list[str]:
         """A structure's own rules at the book (the spec's section 4): its clock is its EARLIEST expiry;
-        it may be entered on that day until 14:30 New York, never after, and never once expired."""
+        it may be entered on that day until 14:30 New York, never after, and never once expired; and on
+        a venue that holds legs, only a type the venue can close as one order is opened."""
         try:
-            structures.spec_of(intent.instrument)
+            spec = structures.spec_of(intent.instrument)
         except ValueError as exc:
             return [f"not a structure this book can hold: {exc}"]
         if intent.side != "buy":
             return []
+        # A venue that holds legs says which types it can take and give back as one order each way
+        # (`AlpacaBroker.structure_types`: a calendar, a diagonal, a long straddle or strangle cannot be
+        # closed there as one covered order, and legging out is not allowed, Sept 25, 2026).
+        admitted = getattr(self.broker, "structure_types", None) if self._legs_at_venue() else None
+        if admitted is not None and spec.type not in admitted:
+            return [f"a {spec.type} is not opened on the {self.name} book: the venue cannot close it as one order (its close sells "
+                    "a leg no buy covers) and legging out is not allowed; it trades on the options shadow book"]
         expiry, today = str(intent.instrument.expiry or ""), _new_york_date(now)
         if expiry < today:
             return ["this structure's earliest leg has expired"]

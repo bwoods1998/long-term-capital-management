@@ -18,7 +18,7 @@ from decimal import Decimal
 
 from league import structures
 from ltcm.adapters import AlpacaCredentials, PURPOSE_HEADER
-from ltcm.adapters.alpaca import DATA_BASE, PAPER_BASE, AlpacaBroker, is_structure, mleg_body, mleg_limit
+from ltcm.adapters.alpaca import DATA_BASE, MLEG_TYPES, PAPER_BASE, AlpacaBroker, is_structure, mleg_body, mleg_limit
 from ltcm.broker import Instrument, OrderIntent, RejectedOrder, UnknownOutcome
 from ltcm.data import TransportError
 from ltcm.tests.fakes import FakeTransport
@@ -105,12 +105,13 @@ def condor_order(*, status="new", filled=("0", "0", "0", "0"), prices=(None, Non
 
 
 class TheOrderSent(unittest.TestCase):
-    def test_every_type_opens_as_one_multi_leg_order_at_the_signed_net(self):
+    def test_every_type_the_venue_can_close_as_one_order_opens_as_one_at_the_signed_net(self):
         # K and the natural price per type: S = K + net value, and Alpaca's limit is S - K on an open
         # (a debit positive, a credit negative).
         natural = {"debit_vertical": "0.40", "credit_vertical": "0.35", "iron_condor": "0.38", "iron_butterfly": "0.60",
-                   "long_butterfly": "0.20", "calendar": "0.90", "diagonal": "1.30", "long_straddle": "4.10", "long_strangle": "1.20"}
-        for kind in TYPES:
+                   "long_butterfly": "0.20"}
+        self.assertEqual(sorted(MLEG_TYPES), sorted(natural))
+        for kind in natural:
             with self.subTest(kind):
                 sp = spec(kind)
                 limit = structures.held_limit(sp, "open", natural[kind])
@@ -128,6 +129,30 @@ class TheOrderSent(unittest.TestCase):
                     self.assertEqual(row["ratio_qty"], str(part.ratio))
                     self.assertEqual((row["side"], row["position_intent"]),
                                      ("buy", "buy_to_open") if part.sign > 0 else ("sell", "sell_to_open"))
+
+    def test_a_type_whose_one_order_close_is_uncovered_is_never_opened_here(self):
+        """Alpaca refused a calendar's close as one multi-leg order ("mleg uncovered short contracts not
+        allowed", https://forum.alpaca.markets/t/16802): its covered check reads sides, and the close of a
+        calendar, a diagonal, a straddle or a strangle sells a leg no buy in the order covers. Legging out
+        is not allowed, so they are not opened here at all (they trade on the options shadow book)."""
+        client, transport = broker({})
+        for kind in ("calendar", "diagonal", "long_straddle", "long_strangle"):
+            with self.subTest(kind):
+                limit = structures.held_limit(spec(kind), "open", "0.90")
+                with self.assertRaises(RejectedOrder) as refused:
+                    client.submit(order_intent(kind, limit=str(limit)))
+                self.assertIn("legging out is not allowed", str(refused.exception))
+                closing = mleg_body(order_intent(kind, side="sell", limit=str(limit)))  # a close is sent as it is
+                self.assertEqual({r["position_intent"] for r in closing["legs"]} <= {"sell_to_close", "buy_to_close"}, True)
+        self.assertEqual(transport.calls, [])
+        self.assertEqual(AlpacaBroker.structure_types, MLEG_TYPES)
+
+    def test_the_close_sign_is_the_gateways_a_credit_buy_back_positive_a_debit_sale_negative(self):
+        # The House floors its expiry-day close at S = 0.01 (the integrator, Sept 25): a credit structure
+        # sold at 0.01 pays at most K - 0.01 to buy it back (positive); a debit one receives at least 0.01.
+        self.assertEqual(mleg_body(order_intent("iron_condor", side="sell", limit="0.01"))["limit_price"], "0.99")
+        self.assertEqual(mleg_body(order_intent("debit_vertical", side="sell", limit="0.01"))["limit_price"], "-0.01")
+        self.assertEqual(mleg_body(order_intent("credit_vertical", side="sell", limit="1.00"))["limit_price"], "0.00")
 
     def test_a_close_reverses_every_leg_and_the_sign(self):
         body = mleg_body(order_intent("iron_condor", side="sell", limit="0.80"))
