@@ -1592,10 +1592,12 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
         # on pairs within a minute of the bar's close (the pairing at max_gap 60 is the pairing at max_gap 300 cut to
         # those pairs), without the day's own expiries, and S3's table judged in sample on S3's own days.
         near = [p for p in pairs if p["age"] <= 60.0]
+        etf = set(fit.CALIBRATED_SPREADS.get("etf") or ("SPY", "QQQ", "IWM"))
         s3_pairs = calibration_pairs(fit, store, underlier, start="", end=before, max_gap=max_gap) if local_store else []
         out["held_out_age_matched"] = {
-            "median_pair_age_seconds": {"day": _median([p["age"] for p in pairs]), "day_within_60s": _median([p["age"] for p in near]),
-                                        "s3_days": _median([p["age"] for p in s3_pairs])},
+            "median_pair_age_seconds": {name: {"all": _median([p["age"] for p in group]),
+                                               **{kind: _median([p["age"] for p in group if (p["root"] in etf) == (kind == "etf")]) for kind in ("etf", "stock")}}
+                                        for name, group in (("day", pairs), ("day_within_60s", near), ("s3_days", s3_pairs))},
             "day_within_60s": {"pairs": len(near), "s3_table": judge(fit, near, fit.CALIBRATED_SPREADS),
                                "s3_table_without_the_days_expiries": judge(fit, [p for p in near if p["expiry"] != day], fit.CALIBRATED_SPREADS),
                                "current_estimate": judge(fit, near, None)},
