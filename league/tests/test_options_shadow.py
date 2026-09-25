@@ -263,6 +263,17 @@ class Opens(ShadowCase):
         self.quote_vertical()
         self.assertEqual(self.broker.advance(), 1)
 
+    def test_a_quote_newer_than_the_accounts_cache_but_not_than_the_order_does_not_fill_it(self):
+        self.broker.quote(structures.instrument(VERTICAL, V))  # the account's cache: the quote of 10:00:00
+        self.later(2)
+        self.quote_vertical()  # re-quoted at 10:00:02, as the House's chain showed it to the deciding agent
+        self.buy(VERTICAL, "1", "0.55")  # accepted at 10:00:02, inside the cache's five seconds
+        self.later()
+        self.assertEqual(self.broker.advance(), 0)  # the quote the decision saw never fills it
+        self.later()
+        self.quote_vertical()
+        self.assertEqual(self.broker.advance(), 1)
+
     def test_a_leg_quote_that_does_not_change_is_not_newer(self):
         self.buy(VERTICAL, "1", "0.55")
         self.later()
@@ -369,6 +380,18 @@ class Sizes(ShadowCase):
         self.assertEqual(self.broker.get_order(first.id).status, "filled")
         self.assertEqual(self.broker.get_order(second.id).status, "partially_filled")
         self.assertEqual(self.held(), {VERTICAL.code: D(4)})
+
+    def test_a_restart_does_not_give_the_same_quotes_ten_percent_twice(self):
+        self.quote_vertical(ask_size="20", bid_size="20")
+        first = self.buy(VERTICAL, "2", "0.55")
+        second = self.buy(VERTICAL, "2", "0.55")
+        self.later()
+        self.quote_vertical(ask_size="20", bid_size="20")
+        self.broker.advance()
+        self.assertEqual([self.broker.get_order(o.id).filled_quantity for o in (first, second)], [D(2), D(0)])
+        again = self.new_broker()
+        self.assertEqual(again.advance(), 0)  # the same quote, after a restart: its 10% is spent
+        self.assertEqual(again.get_order(second.id).filled_quantity, D(0))
 
     def test_a_leg_that_shows_no_size_gives_no_fill(self):
         self.buy(VERTICAL, "1", "0.55")
@@ -534,6 +557,26 @@ class Expiry(ShadowCase):
         self.legs.set(far, "1.80", "1.90")
         self.assertEqual(self.broker.structure_settlements(), {CALENDAR.code: D("0.80")})  # 1.80 - (581 - 580)
 
+    def test_a_calendar_whose_far_leg_cannot_be_read_waits_and_is_never_valued_at_zero_for_it(self):
+        far = occ(580, "C", "261002")
+        self.legs.set(occ(580), "2.00", "2.05")
+        self.legs.set(far, "2.60", "2.66")
+        self.buy(CALENDAR, "1", "0.66")
+        self.later()
+        self.legs.touch(occ(580))
+        self.legs.touch(far)
+        self.broker.advance()
+        self.clock.now = epoch("2026-09-29T04:30:00Z")
+        self.closes.prices[("SPY", "2026-09-28")] = D("581.00")
+        self.legs.down = True
+        self.assertEqual(self.broker.structure_settlements(), {})  # the source is down: wait
+        self.legs.down = False
+        self.legs.rows.pop(far)
+        self.assertEqual(self.broker.structure_settlements(), {})  # no quote for the far leg: wait
+        self.assertEqual(self.held(), {CALENDAR.code: D(1)})
+        self.legs.set(far, None, "0.10")  # quoted with no bid: worth nothing to sell, and 1.00 owed on the near leg
+        self.assertEqual(self.broker.structure_settlements(), {CALENDAR.code: D(0)})
+
     def test_the_production_readers(self):
         class Client:
             def __init__(self):
@@ -658,6 +701,46 @@ class ThroughTheBook(ShadowCase):
         self.reconciled(book)
         self.assertEqual(book.account("alice").holdings, {})
         self.assertEqual(book.account("alice").realized, (D("0.52") - D("0.55")) * 100 - D("0.20"))
+
+    def test_a_structure_is_never_crossed_inside_the_house(self):
+        """Both orders go to the account and each fills against the market alone (review of Sept 25, 2026: the
+        House's D3 cross filled the bidder under the ask and the seller in the quote its decision saw)."""
+        self.book.stake("bob", "200")
+        self.book.limits["bob"] = Limits(D(100), D(75), asset_classes=("option",))
+        self.book.submit([self.wish("buy", "1", "0.55")])
+        self.requote()
+        self.n += 1
+        [bid] = self.book.submit([Intent.new(agent="bob", instrument=self.vertical, side="buy", quantity="1", order_type="limit",
+                                             limit_price="0.50", reason="bob", created_at=now_iso(self.clock), nonce=str(self.n))])
+        self.assertEqual(bid.status, "resting", bid.detail)
+        [sale] = self.book.submit([self.wish("sell", "1", "0.46")])  # at or under bob's 0.50: it would have crossed
+        self.assertEqual(sale.status, "resting", sale.detail)
+        self.assertEqual(len(self.book.open_orders()), 2)
+        self.assertEqual([p for p in self.fills() if p["side"] == "sell"], [])
+        self.assertFalse([row for row in self.ledger.iter(kinds=("book.cross_plan",))])
+        self.requote(low=("1.51", "1.57"))  # bid 0.47, ask 0.57: the sale fills at the bid; bob's bid does not
+        self.assertEqual(self.book.account("alice").holdings, {})
+        self.assertEqual(self.book.account("bob").holdings, {})
+        self.assertEqual(len(self.book.open_orders("bob")), 1)
+        self.reconciled()
+
+    def test_a_structure_on_a_book_without_the_settlement_hook_expires_as_before(self):
+        from league.tests.fakes import FakeBroker
+
+        fake = FakeBroker("alpaca-paper")
+        fake.clock_iso = now_iso(self.clock)
+        paper = Book("alpaca-paper", fake, self.ledger, fees=Fees("alpaca"), real_money=False, clock=self.clock)
+        paper.limits["alice"] = Limits(D(100), D(75), asset_classes=("option",))
+        paper.stake("alice", "200")
+        held = structures.instrument(VERTICAL, "alpaca-paper")
+        fake.set_quote(held, "0.46", "0.55")
+        [outcome] = paper.submit([Intent.new(agent="alice", instrument=held, side="buy", quantity="1", order_type="limit",
+                                             limit_price="0.55", reason="x", created_at=now_iso(self.clock), nonce="x")])
+        self.assertEqual(outcome.status, "filled", outcome.detail)
+        fake.held.clear()  # the venue no longer shows it
+        self.clock.now = epoch("2026-09-29T04:30:00Z")
+        self.assertEqual(paper.expire_options(), 1)
+        self.assertEqual(paper.account("alice").holdings, {})
 
     def test_a_partial_fill_is_booked_as_it_comes_and_reconciles_each_time(self):
         cheap = {"low": ("1.20", "1.30"), "ask_size": "10", "bid_size": "10"}  # ask 1.30 - 1.00 = 0.30; one structure a quote
@@ -788,6 +871,7 @@ class Service(unittest.TestCase):
             self.assertEqual((book.fees.family, book.fees.option_clearing), ("alpaca", True))
             self.assertEqual(book.baseline_cash, D(service.load_config()["options_structures"]["shadow"]["starting_cash"]))
             self.assertIn("kalshi-shadow", house.books)
+            self.assertEqual(list(house.books)[-1], V)  # after every other book: the House walks them in this order
         self.assertIn(service.load_config()["options_structures"]["book"], (V, "alpaca-paper"))
         self.assertIsNone(service.options_shadow_broker(Path("/nonexistent"), {"options_structures": {"shadow": {"enabled": False}}}, None, None))
 

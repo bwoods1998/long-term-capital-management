@@ -29,9 +29,10 @@ this account says it did not. The owner (Sept 25, 2026): never relax them.
    (`ltcm.data.market_open_at`). Anything else raises `RejectedOrder` and no order is recorded; so does
    a structure whose earliest expiry's session has closed.
 2. `submit` is idempotent on the intent id and NEVER fills: nothing fills in the quote the decision
-   saw. The order rests (`accepted`) with the time of the quote in hand when it was accepted (the
-   structure's, its oldest leg's; the submission time when none can be read), and it may fill only in
-   `advance()`, on a quote strictly NEWER than that. The rule is applied to closes as to opens: a close
+   saw. The order rests (`accepted`) with a floor: the later of its submission time and the time of
+   the structure's quote (its oldest leg's) read fresh as it is accepted, and it may fill only in
+   `advance()`, on a quote strictly NEWER than that: every leg quoted again after the order was
+   accepted, so no quote the decision could have seen fills it (the House's chain is its own read). The rule is applied to closes as to opens: a close
    filled in the quote its decision saw would flatter a profit target exactly as an open would flatter
    an entry. After each fill the rest waits for a quote newer than the one that filled.
 3. A BUY (an open) fills when the structure's ask <= its limit, AT that ask; a SELL (a close) when the
@@ -60,7 +61,8 @@ One still held once that expiry's session has closed is settled by `structure_se
 book calls from `Book.expire_options` (never at zero there: it books the value this account paid, as a
 `book.settle`): a single-expiry structure at `structures.intrinsic(spec, close)` on the underlying's
 regular-session close (`alpaca_underlying_close`), a calendar or diagonal at what closing it then would
-get, the far leg's bid less the near leg's intrinsic (plus K), floored at zero; the value a share is
+get, the far leg's bid less the near leg's intrinsic (plus K), floored at zero (a far leg the source
+cannot quote waits for a read: it is never valued at zero for want of one); the value a share is
 floored to $0.0001. Resting orders on it expire with it. It settles only when asked: settled on its own
 at the bell, it would disagree with the book until the book's next New York day and freeze the book.
 
@@ -300,6 +302,8 @@ class OptionsShadowBroker:
             },
             "orders": [_order_to_dict(order) for order in self._orders.values()],
             "fills": [fill.to_dict() for fill in self._fills],
+            # Rule 4's shares of the leg quotes last filled on, so a restart cannot take the same quote's 10% twice.
+            "used": [[occ, side, as_of, _text(used)] for (occ, side), (as_of, used) in sorted(self._used.items())],
             "settlements": [
                 {**row, "instrument": row["instrument"].to_dict(), **{k: _text(row[k]) for k in ("quantity", "price", "spot", "cost", "value")}}
                 for row in self._settlements
@@ -351,6 +355,7 @@ class OptionsShadowBroker:
                 if order.broker_order_id:
                     self._by_broker_id[order.broker_order_id] = order.id
             self._fills = [_fill_from_dict(row) for row in state["fills"]]
+            self._used = {(str(occ), str(side)): (as_of, money(used)) for occ, side, as_of, used in state.get("used") or []}
             self._settlements = [
                 {**row, "instrument": Instrument.from_dict(row["instrument"]),
                  **{k: money(row[k]) for k in ("quantity", "price", "spot", "cost", "value")}}
@@ -561,16 +566,20 @@ class OptionsShadowBroker:
                 return self._copy(stored)
             now = self._now()
             spec = self._validate(intent, now)
-            # The quote in hand at acceptance: a fill needs a strictly newer one (rule 2).
+            # Rule 2's floor: the later of the submission time and the quote read fresh now. The decision may
+            # have seen a quote newer than anything this account had cached (the House's chain is its own
+            # read), so only a quote of every leg made after the order was accepted can fill it.
             try:
-                in_hand = self._oldest(spec, self._read_legs([leg.occ for leg in spec.legs]))
+                in_hand = self._oldest(spec, self._read_legs([leg.occ for leg in spec.legs], fresh=True))
             except Exception:  # noqa: BLE001 - no quote in hand: the submission time is the floor
                 in_hand = None
+            if in_hand is None or not _newer(in_hand, stamp(now)):
+                in_hand = stamp(now)
             session = us_equity_session(instant(now))  # New York's day: a datetime, never the UTC date of a string
             order.broker_order_id = f"{self.venue}-{self._next_order}"
             self._next_order += 1
             order.submitted_at = order.updated_at = now
-            order._raw = {"quote_floor": in_hand or stamp(now), "session_close": session.close_at if session else now,
+            order._raw = {"quote_floor": in_hand, "session_close": session.close_at if session else now,
                           "post_only": bool(intent.post_only)}
             self._orders[order.id] = order
             self._by_broker_id[order.broker_order_id] = order.id
@@ -627,6 +636,11 @@ class OptionsShadowBroker:
             room = units if room is None else min(room, units)
         return max(ZERO, room or ZERO)
 
+    def _prune_used(self, now: str) -> None:
+        """Rule 4's shares of quotes older than a day can never be met again: they leave the file."""
+        cutoff = instant(now) - timedelta(days=1)
+        self._used = {key: row for key, row in self._used.items() if row[0] and instant(row[0]) is not None and instant(row[0]) > cutoff}
+
     def _take(self, spec: structures.Spec, side: str, rows: Mapping[str, Mapping[str, Any]], units: Decimal) -> None:
         for leg in spec.legs:
             takes_ask = (leg.sign > 0) == (side == "buy")
@@ -645,7 +659,6 @@ class OptionsShadowBroker:
                 return 0
             now = self._now()
             changed = 0
-            used = dict(self._used)  # rule 4's shares, put back with the rest if the write fails
             live = []
             for order in resting:
                 close = order._raw.get("session_close")
@@ -688,11 +701,8 @@ class OptionsShadowBroker:
                     order._raw["quote_floor"] = as_of  # the rest waits for a newer quote
                 changed += 1
             if changed:
-                try:
-                    self._commit()
-                except VenueUnavailable:
-                    self._used = used
-                    raise
+                self._prune_used(now)
+                self._commit()  # rule 4's shares are in the file too: a failed write takes them back with the fill
             return changed
 
     # ---------------------------------------------------------------- expiry
@@ -720,16 +730,18 @@ class OptionsShadowBroker:
             far = [leg for leg in spec.legs if leg.expiry != spec.expiry]
             try:
                 rows = self._read_legs([leg.occ for leg in far], fresh=True)
-            except Exception:  # noqa: BLE001 - a far leg that cannot be read: its bid counts nothing
-                rows = {}
+            except Exception:  # noqa: BLE001 - a far leg that cannot be read now is read again next time
+                return None
+            if any(not rows.get(leg.occ) for leg in far):
+                return None  # the source has no quote for it: never valued at zero for want of a read
             value = spec.collateral
             for leg in spec.legs:
                 if leg.expiry == spec.expiry:
                     worth = max(ZERO, spot - leg.strike) if leg.right == "call" else max(ZERO, leg.strike - spot)
                 else:
                     bid, ask = self._touches(spec, rows)[leg.occ]
-                    # What closing it would get: a long far leg sells at its bid (nothing without one); a
-                    # short far leg (none is admitted) would buy back at its ask.
+                    # What closing it would get: a long far leg sells at its bid (nothing when the venue shows it
+                    # with no bid); a short far leg (none is admitted) would buy back at its ask.
                     worth = (bid or ZERO) if leg.sign > 0 else ask
                     if worth is None:
                         return None

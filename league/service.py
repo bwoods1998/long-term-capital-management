@@ -207,13 +207,15 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
                                option_feed=config.get('alpaca_option_feed', 'indicative'))
     brokers: dict[str, Any] = {"alpaca-paper": paper, "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data)}
-    shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
-    if shadow_options is not None:
-        brokers[shadow_options.venue] = shadow_options
     if real_money:
         brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
                                           option_feed=config.get('alpaca_option_feed', 'indicative'))
         brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
+    # Last: the House's passes walk the books in this order (the horizon rule's has no guard of its own for one
+    # book), and practice must never stand in front of real money.
+    shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
+    if shadow_options is not None:
+        brokers[shadow_options.venue] = shadow_options
 
     if local_sandbox:
         sandbox: Any = LocalSandbox(root / "boxes")

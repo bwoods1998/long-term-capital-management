@@ -1522,6 +1522,14 @@ class Book:
         space for Kalshi legs), best price for the intent first -- a sell meets the highest bid first,
         as at the venue -- then the earliest, then by id; an unpriced order (a market order in flight)
         last."""
+        from .structures import is_structure
+
+        if is_structure(intent.instrument) and "shadow" in self.broker.capabilities():
+            # A structure on the options shadow book (`league/options_shadow.py`, Sept 25, 2026) never meets one of
+            # the House's own orders: that account fills each order against the market alone. Crossed inside the
+            # House, the bidder would buy under the market's ask and the seller sell in the quote its decision saw,
+            # which the account's fill rules never allow; the sell goes to the account as asked.
+            return []
         side, price = yes_space(intent.instrument, intent.side, intent.limit_price)
         key = market_key(intent.instrument)
         found: list[tuple[tuple[Any, ...], Working]] = []
@@ -2890,7 +2898,7 @@ class Book:
             for agent, key, holding in due:
                 inst = holding.instrument
                 payout = ZERO
-                if is_structure(inst):
+                if is_structure(inst) and settle is not None:
                     if str(inst.market_id) not in valued:
                         continue
                     payout = q_cash(money(valued[str(inst.market_id)]) * inst.multiplier * holding.quantity)
