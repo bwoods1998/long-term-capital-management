@@ -308,9 +308,11 @@ def seat_founders(house: Any, *, per_tick: int = 1) -> list[Agent]:
         if (full or desk_full) and len(retired) >= RETIRE_CAP:
             _wait(house, len(wanted) - len(born), f"the seat rule has retired its {RETIRE_CAP} residents, its cap")
             break
-        if (full or desk_full) and retiree(house, desk_only=desk_full)[0] is None:  # a cheap look before the probe
-            _wait(house, len(wanted) - len(born), retiree(house, desk_only=desk_full)[1])
-            break
+        if full or desk_full:
+            candidate, why, _ = retiree(house, desk_only=desk_full)  # a look before the probe, which costs a box
+            if candidate is None:
+                _wait(house, len(wanted) - len(born), why)
+                break
         described = house.sandbox.needs(PROBE_BOX, row["code"])  # outside the lock: about 20 s of Sail
         with house._lifecycle_lock:
             if row["key"] in {agent.founder for agent in house.registry.agents.values()}:

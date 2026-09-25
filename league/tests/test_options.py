@@ -618,6 +618,8 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertTrue(all(0 < row["max_loss_usd"] <= cap for row in ctx["structures"]))
         self.assertEqual({row["structure"] for row in ctx["structures"]} - {"debit_vertical", "credit_vertical", "iron_condor"}, set())
         self.assertEqual(ctx["structure_rules"]["book"], "options-shadow")
+        self.assertIn("14:30", ctx["structure_rules"]["entry_cut_new_york"])
+        self.assertIn("15:30", ctx["structure_rules"]["house_close_new_york"])
         single = self.house.spawn("options-breakout", "options-breakout", seeds.load("options-breakout"), reason="test", specialty="alpaca-options")
         self.house.seat(single)
         plain = self.house.snapshot(single, self.house.book_of(single))

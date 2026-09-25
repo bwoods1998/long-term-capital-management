@@ -967,7 +967,8 @@ class House:
         asked = agent.needs.get("max_days_to_expiry")
         days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
         today, hour = _new_york(self.clock)
-        opening = hour < self._structure_hours(today)[0]
+        cut, close = self._structure_hours(today)
+        opening = hour < cut
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
                              lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
         ctx["chain"] = chain
@@ -977,8 +978,8 @@ class House:
             ctx["structures"] = []
             self.alert("warning", f"{agent.id}: no structure candidates this wake ({type(exc).__name__}: {str(exc)[:160]})")
         ctx["structure_rules"] = {
-            "entry_cut_new_york": "14:30 on the structure's earliest expiry day",
-            "house_close_new_york": "15:30 on the structure's earliest expiry day, at its bid, re-priced each tick",
+            "entry_cut_new_york": f"{_clock_text(cut)} on the structure's earliest expiry day (today's hours)",
+            "house_close_new_york": f"{_clock_text(close)} on the structure's earliest expiry day, at its bid, re-priced each tick",
             "fee_per_contract_leg_usd": float(structures.FEE_PER_CONTRACT),
             "book": self._structure_book_name(),
         }
