@@ -407,3 +407,23 @@ class TheReviewOfH5(HouseCase):
         self.clock.advance(30)
         self.house._note_stopped(reason)
         self.assertEqual(len(warnings(self.house, "stopped buying work")), 1)  # told once
+
+
+class TheScanMemoAndTheHouseLane(SeatCase):
+    def test_research_queued_mid_pass_protects_a_replay_only_resident_as_a_fresh_scan_does(self):
+        # An evidenced newcomer never displaces a replay-only resident whose research is queued or under way.
+        # The House lane queues research while the births pass goes on (H5), with no birth and no death, so the
+        # pass's kept answer must not hand that resident over.
+        young = self.house.spawn("young", "test-family", BUYER, reason="a House mutation")  # rung 0
+        self.clock.advance(4000)
+        self.house._scan_memo = {"thread": threading.get_ident(), "roster": None, "scans": {}}
+        try:
+            first = [row[-1].id for row in self.house._displaceable(self.rules, evidenced=True)]
+            self.assertIn(young.id, first)
+            self.house.research_jobs.enqueue(young.id, self.house._generation(young.id))  # the lane, mid-pass
+            kept = [row[-1].id for row in self.house._displaceable(self.rules, evidenced=True)]
+        finally:
+            self.house._scan_memo = None
+        fresh = [row[-1].id for row in self.house._displaceable(self.rules, evidenced=True)]
+        self.assertNotIn(young.id, fresh)
+        self.assertEqual(kept, fresh)

@@ -5064,15 +5064,21 @@ class House:
         # the T0 snapshot -- so the pass keeps each answer (`_scan_memo`) while no one is born or dies. The
         # question is the desk, whether the newcomer is evidenced, whether its family is proven and its
         # forward score; `exclude` only drops residents from the answer, so it is applied to the kept one.
+        # The review of #297: one thing the kept answer can miss with nobody born or dead is a research job the House
+        # lane queues beside the pass (`_schedule_research`), which protects a replay-only resident from an evidenced
+        # newcomer ("research in flight" below); before H5 research was queued on the tick, before the pass, so no
+        # scan inside the pass could miss it. A kept answer asks the research queue again for those rows. Under a
+        # burst the rule reads the queue for paper residents too, and no answer is kept.
         memo, question = self._scan_memo, None
-        if why is None and memo is not None and memo["thread"] == threading.get_ident():
+        if why is None and memo is not None and memo["thread"] == threading.get_ident() and not self._burst:
             roster = self._roster()
             if memo["roster"] != roster:
                 memo["roster"], memo["scans"] = roster, {}
             question = (specialty, bool(evidenced), bool(newcomer_proven), newcomer.forward, id(rules))
             kept_answer = memo["scans"].get(question)
             if kept_answer is not None:
-                return [row for row in kept_answer if row[-1].id not in exclude]
+                return [row for row in kept_answer if row[-1].id not in exclude
+                        and not (evidenced and row[2] == 0 and self.research_jobs.active(row[-1].id))]
         skip = () if question is not None else exclude
         losing_blocks = int(rules.get("losing_family_min_blocks", 6))
         pooled = self.family_forward()
