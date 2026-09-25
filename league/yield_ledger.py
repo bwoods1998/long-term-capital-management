@@ -200,7 +200,7 @@ def _arm(values: list[float]) -> dict[str, Any]:
     mean = _mean(values)
     var = sum((v - mean) ** 2 for v in values) / (len(values) - 1) if len(values) > 1 and mean is not None else None
     return {"blocks": len(values), "mean_log_growth": round(mean, 6) if mean is not None else None,
-            "_var": var}
+            "_mean": mean, "_var": var}
 
 
 def _lower(lift: float | None, *variances_over_n: float | None) -> float | None:
@@ -210,36 +210,57 @@ def _lower(lift: float | None, *variances_over_n: float | None) -> float | None:
     return lift - Z80 * math.sqrt(sum(variances_over_n))
 
 
+def _teacher_tape(ledger: Any, cache: dict[str, Any], keep_after: float) -> dict[str, Any]:
+    """What the teacher's lift reads, folded incrementally into `cache` (the `YieldLedger` keeps one,
+    so an hourly row reads only the rows since the last): each agent's lesson words, birth and death,
+    its active forward blocks since `keep_after`, and each teacher's lesson with its terms. The first
+    fold reads the whole history (about 4 s on the T0 snapshot, most of it agent.born's code)."""
+    from .research_gate import lesson_terms, lesson_words
+
+    for key in ("words", "born", "died", "blocks"):
+        cache.setdefault(key, {})
+    cache.setdefault("lessons", [])
+    for entry in ledger.iter(kinds=("agent.born", "agent.died", "eval.block", "playbook.entry"), after=int(cache.get("seq") or 0)):
+        cache["seq"] = entry.seq
+        p = entry.payload
+        if entry.kind == "agent.born":
+            cache["words"][entry.agent] = lesson_words(entry.agent, p.get("specialty"), p.get("niche"), p.get("family"))
+            cache["born"][entry.agent] = _epoch(entry.at)
+        elif entry.kind == "agent.died":
+            cache["died"][entry.agent] = _epoch(entry.at)
+        elif entry.kind == "eval.block":
+            if p.get("active") and _epoch(entry.at) >= keep_after:
+                cache["blocks"].setdefault(entry.agent, []).append((entry.seq, _epoch(entry.at), float(p.get("log_growth") or 0)))
+        elif p.get("source") == "teacher":
+            cache["lessons"].append((_epoch(entry.at), lesson_terms(entry)))
+    for agent, rows in list(cache["blocks"].items()):
+        kept = [row for row in rows if row[1] >= keep_after]
+        if kept:
+            cache["blocks"][agent] = kept
+        else:
+            del cache["blocks"][agent]
+    return cache
+
+
 def teacher_lift(ledger: Any, *, now: float, since: str | None, days: float = 7, teacher_days: float = 3,
-                 min_blocks: int = MIN_BLOCKS) -> dict[str, Any]:
+                 min_blocks: int = MIN_BLOCKS, cache: dict[str, Any] | None = None) -> dict[str, Any]:
     """F4: forward growth over `teacher_days` after each teacher's lesson written in the last `days`
     (and after `since`, when the gate first split the arms), of the agents it names, by
     `research_gate.lesson_arm`. A block counts once per arm however many lessons name its agent."""
-    from .research_gate import lesson_arm, lesson_terms, lesson_words
+    from .research_gate import lesson_arm
 
     if not since:
         return {"verdict": "not_started", "note": "the research gate has not split the lesson arms (research.gate.lesson_arm)"}
     start = max(_epoch(since), now - days * 86400)
-    lessons = [e for e in ledger.iter(kinds="playbook.entry") if e.payload.get("source") == "teacher" and _epoch(e.at) >= start]
-    words: dict[str, set[str]] = {}
-    born: dict[str, float] = {}
-    for entry in ledger.iter(kinds="agent.born"):
-        p = entry.payload
-        words[entry.agent] = lesson_words(entry.agent, p.get("specialty"), p.get("niche"), p.get("family"))
-        born[entry.agent] = _epoch(entry.at)
-    died = {e.agent: _epoch(e.at) for e in ledger.iter(kinds="agent.died")}
-    blocks: dict[str, list[tuple[int, float, float]]] = {}
-    for entry in ledger.iter(kinds="eval.block"):
-        if entry.payload.get("active"):
-            blocks.setdefault(entry.agent, []).append((entry.seq, _epoch(entry.at), float(entry.payload.get("log_growth") or 0)))
+    tape = _teacher_tape(ledger, cache if cache is not None else {}, now - (days + teacher_days + 1) * 86400)
+    words, born, died, blocks = tape["words"], tape["born"], tape["died"], tape["blocks"]
+    lessons = [(at, terms) for at, terms in tape["lessons"] if at >= start]
     seen: dict[str, dict[tuple[str, int], float]] = {"lesson": {}, "control": {}}
     agents: dict[str, set[str]] = {"lesson": set(), "control": set()}
     complete = 0
-    for lesson in lessons:
-        at = _epoch(lesson.at)
+    for at, terms in lessons:
         complete += at + teacher_days * 86400 <= now
-        terms = lesson_terms(lesson)  # as the gate's `lesson_names` reads it
-        for agent, named in words.items():
+        for agent, named in words.items():  # a lesson names an agent as the gate's `lesson_names` reads it
             if born[agent] > at or died.get(agent, float("inf")) < at or not any(word in terms for word in named):
                 continue
             arm = lesson_arm(agent)
@@ -248,8 +269,7 @@ def teacher_lift(ledger: Any, *, now: float, since: str | None, days: float = 7,
                 if at < t <= at + teacher_days * 86400:
                     seen[arm][(agent, seq)] = growth
     treated, control = _arm(list(seen["lesson"].values())), _arm(list(seen["control"].values()))
-    lift = (treated["mean_log_growth"] - control["mean_log_growth"]
-            if treated["mean_log_growth"] is not None and control["mean_log_growth"] is not None else None)
+    lift = treated["_mean"] - control["_mean"] if treated["_mean"] is not None and control["_mean"] is not None else None
     lower = _lower(lift, *(a["_var"] / a["blocks"] if a["_var"] is not None else None for a in (treated, control)))
     enough = min(treated["blocks"], control["blocks"]) >= min_blocks
     verdict = "lift" if lower is not None and lower > 0 else "no_lift" if enough else "insufficient"
@@ -361,7 +381,7 @@ def research_usd_per_positive_block(rows: Iterable[Mapping[str, Any]]) -> str | 
 
 
 def lifts(ledger: Any, *, now: float, settings: Mapping[str, Any] | None = None, lesson_since: str | None = None,
-          recent: Iterable[Mapping[str, Any]] = ()) -> dict[str, Any]:
+          recent: Iterable[Mapping[str, Any]] = (), cache: dict[str, Any] | None = None) -> dict[str, Any]:
     """The `lift` section of the hourly yield row (F4): the teacher, the consultant and the engineer
     over the last `days`, and research's dollars per positive forward block over `recent` rows."""
     from .merton import LIFT
@@ -370,7 +390,7 @@ def lifts(ledger: Any, *, now: float, settings: Mapping[str, Any] | None = None,
     days = float(s["days"])
     research = research_usd_per_positive_block(recent)
     return {"days": days, "research_usd_per_positive_block_24h": research,
-            "teacher": teacher_lift(ledger, now=now, since=lesson_since, days=days, teacher_days=float(s["teacher_days"])),
+            "teacher": teacher_lift(ledger, now=now, since=lesson_since, days=days, teacher_days=float(s["teacher_days"]), cache=cache),
             "consultant": consultant_lift(ledger, now=now, days=days, research_usd_per_positive_block=research),
             "engineer": engineer_lift(ledger, now=now, days=days)}
 
@@ -382,6 +402,7 @@ class YieldLedger:
     def __init__(self, house: Any, *, every_seconds: float = 3600.0):
         self.house = house
         self.every_seconds = float(every_seconds)
+        self._teacher: dict[str, Any] = {}  # `teacher_lift`'s incremental fold, for this process's life
 
     def _state(self) -> dict[str, Any]:
         with self.house._state_lock:
@@ -424,7 +445,7 @@ class YieldLedger:
             recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=200, newest=True)
                       if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
             state = getattr(getattr(getattr(self.house, "jev_floor", None), "state", None), "data", None) or {}
-            return lifts(ledger, now=now, settings=settings, lesson_since=state.get("lesson_arm_since"), recent=recent)
+            return lifts(ledger, now=now, settings=settings, lesson_since=state.get("lesson_arm_since"), recent=recent, cache=self._teacher)
         except Exception as exc:  # noqa: BLE001 - the measurement never costs the hour's row
             try:
                 self.house.alert("warning", f"yield ledger: the lanes' lift could not be measured ({type(exc).__name__}: {str(exc)[:160]})")

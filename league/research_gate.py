@@ -251,13 +251,14 @@ def lesson_words(agent_id: str, *names: Any) -> set[str]:
 
 
 def lesson_terms(entry: Any) -> set[str]:
-    """Every run of whole hyphenated words in a lesson's title and text ("kalshi-crypto-15m-lab" gives
-    "crypto-15m", "kalshi-crypto" ...), so a name matches only on word boundaries and by set lookup."""
+    """Every run of up to six whole hyphenated words in a lesson's title and text ("kalshi-crypto-15m-lab"
+    gives "crypto-15m", "kalshi-crypto" ...), so a name matches only on word boundaries and by set lookup.
+    Desk, family and agent names run to four words."""
     text = f"{entry.payload.get('title') or ''} {entry.payload.get('text') or ''}".lower()
     terms: set[str] = set()
     for token in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text):
         parts = token.split("-")[:12]
-        terms.update("-".join(parts[i:j]) for i in range(len(parts)) for j in range(i + 1, len(parts) + 1))
+        terms.update("-".join(parts[i:j]) for i in range(len(parts)) for j in range(i + 1, min(len(parts), i + 6) + 1))
     return terms
 
 
