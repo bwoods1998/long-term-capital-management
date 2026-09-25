@@ -3250,6 +3250,20 @@ class Book:
                 busy.update(self._contract_signs(working.instrument))
         return busy
 
+    def _structure_order_contracts(self, *, in_flight: bool) -> set[str]:
+        """The contracts that are legs of this book's structure orders: with `in_flight`, only of those still
+        open (or closed as never arrived and still asked about); else of every structure order it has sent.
+        Wave 2, Sept 25, 2026 (`reconcile`, `_mend_structures`): a difference on such a contract is a leg of
+        a multi-leg order, never a single contract the venue happens to hold."""
+        out: set[str] = set()
+        for working in self.orders.values():
+            if not structures.is_structure(working.instrument):
+                continue
+            if in_flight and not (working.open or working.order_id in self._never_arrived):
+                continue
+            out.update(self._contract_signs(working.instrument))
+        return out
+
     def _netting_reason(self, instrument: Instrument) -> str | None:
         """Why an entry may not be sent to a venue that holds one net position a contract: it would be
         long a contract this book is short (in a structure, or a broken one's leg on the House row), or
@@ -3378,9 +3392,13 @@ class Book:
         remains = {position_key(h.instrument) for key, h in (house.holdings.items() if house else ()) if key in self._break_keys}
         busy = self._contracts_in_flight() | {position_key(w.instrument) for w in self.orders.values()
                                                if w.open or w.order_id in self._never_arrived}
+        # A leg a multi-leg order of this book left when its legs filled unevenly and the order ended (Wave 2,
+        # Sept 25, 2026): a LONG one too is taken and closed here, never adopted into a practice book's baseline,
+        # where nothing would ever close it and it would be held into its expiry.
+        legged = self._structure_order_contracts(in_flight=False)
         found = {key: diff for key, diff in diffs.items()
                  if key.startswith("option:") and "|" not in key and key not in busy
-                 and (key in legs_of or key in remains or self._venue_positions.get(key, ZERO) < 0)}
+                 and (key in legs_of or key in remains or key in legged or self._venue_positions.get(key, ZERO) < 0)}
         # The shares an exercise or an assignment of such a leg leaves (a short call assigned is a
         # hundred shares short): the same underlying's stock difference, beside the legs, and only then.
         underlyings = {key.split(":")[1] for key in found} | {key.split(":")[1] for key in remains}
@@ -3830,6 +3848,14 @@ class Book:
             if result.ok:
                 self._unreconciled = 0
                 return result
+            if (self._legs_at_venue() and result.position_diffs
+                    and set(result.position_diffs) <= self._structure_order_contracts(in_flight=True)):
+                # A multi-leg order's legs mid-fill (Wave 2, Sept 25, 2026): a leg ahead of the others is a fill the
+                # book books with the rest (`AlpacaBroker.parse_order`), not a position it lost. The book stays
+                # frozen for entries until the order completes or ends, and a practice book never adopts the leg:
+                # taken into the baseline, the healthy structure it completes would read as broken and be closed.
+                # Measured in test_structure_practice: three readings with a late short leg adopted the long one.
+                return result
             # Counted before the never-traded re-read, not inside the other branch: a position the
             # venue holds that the ledger never learned about leaves every account empty, so
             # `_traded_yet` is false, so the counter never moved -- and the re-read below corrects
@@ -4023,7 +4049,7 @@ class Book:
                 unset = self._collateral_not_offset
                 if unset > 0 and abs(cash_diff - unset) < tolerance:
                     # Wave 2, Sept 25, 2026: the one reading that tells whether a cash account adds a credit to cash.
-                    problems[-1] += (f" (exactly the ${q_cash(unset)} collateral of the credit structures held, which this account was "
+                    problems[-1] += (f" (exactly the ${unset:.2f} collateral of the credit structures held, which this account was "
                                      "read not to add to cash: it does, as a margin account; nothing is booked for it)")
             if diffs:
                 problems.append("positions differ: " + ", ".join(f"{k} {v}" for k, v in diffs.items()))

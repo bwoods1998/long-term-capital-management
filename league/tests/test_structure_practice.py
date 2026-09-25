@@ -1,0 +1,722 @@
+"""Structures on the owner's Alpaca practice account (Wave 2 of the options desk, Sept 25, 2026).
+
+Track P built the adapter (`ltcm/adapters/alpaca.py`: one multi-leg order, its legs read back as ONE fill
+of the held structure) and the structure-aware book (`league/book.py`: the venue's legs folded into the
+structures held, a broken structure closed at once). This module pins what Wave 2 adds on top and what
+the owner asked to see before the switch is flipped:
+
+- The switch, `league/config.json` `options_structures.practice_account`, and the routing it drives
+  (`House._structure_target`): a structure agent trades on `alpaca-paper` only when its program's
+  `PARAMS["structure"]` is a type that account opens (the five Alpaca closes as ONE covered order);
+  every other structure agent stays on the options shadow book.
+- The migration (`House._structure_move`): an agent holding structures on its old book closes there,
+  opens nothing more there, and is re-seated on the new book once flat; never positions or orders on
+  two books.
+- The whole path House -> adapter -> book over a fake of the practice account in Alpaca's documented
+  shapes (`Venue`, P2's `FakeAlpaca` with the account's type, FILL activities per leg and legs filled
+  one at a time): per-leg fills, a partial fill, a late leg, a restart mid-order, a broken structure,
+  an unmatched short leg, the expiry-day close, and the owner's record of the venue's answers.
+- Cash against margin: the practice account (multiplier 4) adds a credit to cash and the book offsets
+  the open credit structures' collateral; the real account (multiplier 1, what the owner calls cash)
+  reconciles a debit vertical with no offset, and refuses a credit structure before anything is sent
+  unless `allocator.option_spread_real_types` admits it.
+
+No test order was sent anywhere: every venue here is a fake.
+"""
+
+import dataclasses
+import unittest
+import urllib.parse
+from decimal import ROUND_CEILING, Decimal
+from pathlib import Path
+from unittest import mock
+
+from league import structures
+from league.book import ADOPT_AFTER, Book, Intent, Limits
+from league.fees import Fees
+from league.ledger import HOUSE, Ledger
+from league.tests.fakes import Clock, FakeBroker, iso, without_real_entry_rules
+from league.tests.test_options import STRUCTURE_AGENT, THURSDAY_11_NY, StructureHouseCase, condor_row, occ
+from league.tests.test_structure_book import FakeAlpaca
+
+D = Decimal
+PRACTICE = "alpaca-paper"
+SHADOW = "options-shadow"
+#: The condor's legs (Friday Sept 11, 2026 expiry) and their touches: opened at the ask it is held at
+#: 1 + 0.11 + 0.13 - 0.29 - 0.34 = 0.61 (a 0.39 credit); its bid is 1 + 0.09 + 0.11 - 0.31 - 0.36 = 0.53.
+LEGS = {occ("2026-09-11", "put", 580): ("0.09", "0.11"), occ("2026-09-11", "put", 581): ("0.29", "0.31"),
+        occ("2026-09-11", "call", 590): ("0.34", "0.36"), occ("2026-09-11", "call", 591): ("0.11", "0.13")}
+#: A call debit vertical on the same expiry: long 585 at 0.62 ask, short 586 at 0.20 bid, 0.42 to open.
+VERTICAL_LEGS = {occ("2026-09-11", "call", 585): ("0.60", "0.62"), occ("2026-09-11", "call", 586): ("0.20", "0.22")}
+
+
+def vertical_row(*, action="open", limit=0.45, quantity=1):
+    legs = [{"occ": occ("2026-09-11", "call", 585), "role": "long"}, {"occ": occ("2026-09-11", "call", 586), "role": "short"}]
+    return {"structure": "debit_vertical", "action": action, "quantity": quantity, "limit_price": limit, "legs": legs,
+            "reason": "a test vertical"}
+
+
+def agent_code(kind):
+    """A structure agent whose program names `kind` (None: names no type at all)."""
+    params = "{}" if kind is None else f'{{"structure": "{kind}", "width": 1.0}}'
+    return STRUCTURE_AGENT.replace('PARAMS = {"structure": "iron_condor", "width": 1.0}', f"PARAMS = {params}")
+
+
+class Venue(FakeAlpaca):
+    """P2's fake practice account (`FakeAlpaca`: a multi-leg order fills every leg at once when its signed net
+    meets the touches, a credit ADDS to cash, positions one row a contract, orders read back nested) with what
+    Wave 2 needs besides: the account's `multiplier` and `options_trading_level` on `GET /v2/account`
+    (https://docs.alpaca.markets/reference/getaccount-1); one FILL activity per leg, carrying the LEG's order id
+    (the docs do not say which id a leg's FILL carries; the adapter reads both); legs filled one at a time
+    (`fill_legs`); and, for a cash account, the maximum loss of a credit structure set aside from cash
+    (`sets_aside`), the spec's model of a cash account."""
+
+    def __init__(self, clock, *, multiplier="4", level="3", sets_aside=False):
+        super().__init__(clock)
+        self.multiplier, self.level, self.sets_aside = multiplier, level, sets_aside
+        self.activities: list[dict] = []
+        self.n_activity = 0
+
+    def __call__(self, method, url, body):
+        path = urllib.parse.urlsplit(url).path
+        if path == "/v2/account":
+            row = super().__call__(method, url, body)
+            if self.multiplier is not None:
+                row["multiplier"] = self.multiplier
+            if self.level is not None:
+                row["options_trading_level"] = self.level
+            return row
+        if path == "/v2/account/activities/FILL":
+            return list(self.activities)
+        if path.startswith("/v2/account/activities"):
+            return []
+        return super().__call__(method, url, body)
+
+    @staticmethod
+    def collateral(legs):
+        """K of a credit structure: its widest wing (a vertical's width, a condor's wider side)."""
+        from ltcm.adapters.alpaca import instrument_for
+
+        wings = {}
+        for leg in legs:
+            inst = instrument_for({"symbol": leg["symbol"], "asset_class": "us_option"})
+            wings.setdefault(inst.right, []).append(inst.strike)
+        return max((max(s) - min(s) for s in wings.values() if len(s) > 1), default=D(0))
+
+    def place(self, body):
+        cash_before = self.cash
+        row = super().place(body)
+        legs = row.get("legs") or []
+        if row.get("status") == "filled":
+            for leg in legs:
+                self.activity(row, leg, D(leg["filled_qty"]), D(leg["filled_avg_price"]))
+            if self.sets_aside and body.get("order_class") == "mleg":
+                opening = legs[0]["position_intent"].endswith("_to_open")
+                credit = (self.cash - cash_before) > 0 if opening else (self.cash - cash_before) < 0
+                if credit:
+                    held = self.collateral(legs) * 100 * D(body["qty"])
+                    self.cash += -held if opening else held
+        return row
+
+    def activity(self, order, leg, qty, price):
+        self.n_activity += 1
+        self.activities.append({"id": f"20260910150000000::act-{self.n_activity}", "activity_type": "FILL", "type": "fill",
+                                "order_id": leg["id"], "symbol": leg["symbol"], "side": leg["side"], "qty": str(qty),
+                                "price": str(price), "cum_qty": leg["filled_qty"], "leaves_qty": str(D(leg["qty"]) - D(leg["filled_qty"])),
+                                "transaction_time": iso(self.clock), "order_status": leg["status"]})
+
+    def fill_legs(self, order_id, contracts):
+        """Fill `contracts[symbol]` more contracts of the named legs of a resting multi-leg order, each at its touch."""
+        order = self.orders[order_id]
+        for leg in order["legs"]:
+            more = D(contracts.get(leg["symbol"], 0))
+            if not more:
+                continue
+            bid, ask = self.quotes[leg["symbol"]]
+            price = ask if leg["side"] == "buy" else bid
+            done = D(leg["filled_qty"]) + more
+            leg.update(filled_qty=str(done), filled_avg_price=str(price), status="filled" if done >= D(leg["qty"]) else "partially_filled")
+            signed = more if leg["side"] == "buy" else -more
+            self.held[leg["symbol"]] = self.held.get(leg["symbol"], D(0)) + signed
+            self.cash += -signed * price * 100 - self.fee(more)
+            self.activity(order, leg, more, price)
+        whole = min(D(leg["filled_qty"]) / D(leg["ratio_qty"]) for leg in order["legs"])
+        order["filled_qty"] = str(int(whole))
+        order["status"] = "filled" if all(leg["status"] == "filled" for leg in order["legs"]) else "partially_filled"
+
+
+class PracticeCase(StructureHouseCase):
+    """A House whose `alpaca-paper` book is the real Alpaca adapter over `Venue` (the practice account, margin,
+    options level 3), beside the options shadow book, in the session on Thursday Sept 10, 2026, 11:00 New York."""
+
+    def new_house(self, **kw):
+        from league.economy import load_game
+        from league.house import House, Settings
+        from league.sandbox import LocalSandbox
+        from ltcm.adapters import AlpacaCredentials
+        from ltcm.adapters.alpaca import AlpacaBroker
+        from ltcm.tests.fakes import FakeTransport
+
+        game = load_game()
+        game["economy"]["min_population"] = 0
+        game["economy"]["newcomer_seconds"] = 10 ** 9
+        kw.setdefault("game", game)
+        if not hasattr(self, "venue"):
+            self.venue = Venue(self.clock)
+            for symbol, (bid, ask) in {**LEGS, **VERTICAL_LEGS}.items():
+                self.venue.quotes[symbol] = (D(bid), D(ask))
+        self.shadow = FakeBroker(SHADOW)
+        # As `league.venues.gateway_broker` builds it: placeholder credentials, `paper` False, the venue's name.
+        self.alpaca = AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), transport=FakeTransport(default=self.venue),
+                                   venue=PRACTICE)
+        house = House(
+            Path(self.dir.name) / "house", brokers={PRACTICE: self.alpaca, "alpaca": FakeBroker("alpaca", cash="500"), SHADOW: self.shadow},
+            sandbox=LocalSandbox(Path(self.dir.name) / "boxes"), alpaca_data=self.data, clock=self.clock,
+            settings=Settings(mark_every_seconds=0, research=False), **kw,
+        )
+        house.structure_book_name = SHADOW
+        return house
+
+    def setUp(self):
+        super().setUp()
+        self._rules = without_real_entry_rules()
+        self._rules.start()
+        self.addCleanup(self._rules.stop)
+        self.practice = self.house.books[PRACTICE]
+        self.assertTrue(self.practice.reconcile().ok)
+
+    # -- helpers
+    def switch(self, on=True):
+        self.house.structure_practice_account = on
+
+    def agent(self, kind="iron_condor", name="krasker"):
+        return self.house.spawn(name.replace("_", "-"), f"options-{str(kind).replace('_', '-')}-test", agent_code(kind), reason="test",
+                                specialty="alpaca-options")
+
+    def send(self, agent, rows, book=None):
+        """What a wake does with the agent's decision: the House's intents, submitted on the book it trades on."""
+        book = book or self.house.book_of(agent)
+        intents, dropped = self.house._intents(agent, book, rows)
+        self.assertEqual(dropped, [])
+        outcome = {"agent": agent.id, "_generation": self.house._generation(agent.id), "intents": intents}
+        return self.house._submit_wakes(book.name, [outcome])
+
+    def fills(self, agent, book=PRACTICE):
+        return [e.payload for e in self.house.ledger.iter(kinds="book.fill", agent=agent.id) if e.payload.get("book") == book]
+
+    def alerts(self):
+        return [e.payload for e in self.house.ledger.iter(kinds="ops.alert")]
+
+    def held(self, book, agent):
+        return {k: h.quantity for k, h in book.account(agent.id).holdings.items() if h.quantity}
+
+    def mleg_posts(self):
+        return [b for b in self.venue.posted if b.get("order_class") == "mleg"]
+
+
+class TheSwitch(PracticeCase):
+    """`options_structures.practice_account`: off unless it is a literal true; on, routing by the program's type."""
+
+    def test_the_switch_is_off_unless_the_config_says_true(self):
+        from league import house as house_module
+
+        for config, on in (({}, False), ({"options_structures": {"book": SHADOW}}, False),
+                           ({"options_structures": {"practice_account": "true"}}, False),
+                           ({"options_structures": {"practice_account": 1}}, False),
+                           ({"options_structures": {"practice_account": True}}, True)):
+            with self.subTest(config=config):
+                self.house.structure_practice_account = None
+                with mock.patch.object(house_module.json, "loads", return_value=config):
+                    self.assertIs(self.house._structure_practice_account(), on)
+        self.house.structure_practice_account = None
+        with mock.patch.object(house_module.Path, "read_text", side_effect=OSError("unreadable")):
+            self.assertFalse(self.house._structure_practice_account())
+
+    def test_the_repository_ships_it_off(self):
+        import json
+
+        config = json.loads((Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
+        self.assertIs(config["options_structures"]["practice_account"], False)
+        self.assertEqual(config["options_structures"]["book"], SHADOW)
+
+    def test_off_every_structure_agent_trades_on_the_shadow_book(self):
+        self.switch(False)
+        for kind in ("iron_condor", "debit_vertical", "calendar"):
+            self.assertIs(self.house.book_of(self.agent(kind, name=f"k-{kind}")), self.house.books[SHADOW])
+
+    def test_on_the_five_types_the_practice_account_closes_as_one_order_go_there_and_the_rest_stay(self):
+        self.switch(True)
+        where = {}
+        for kind in list(structures.TYPES) + [None]:
+            agent = self.agent(kind, name=f"k-{kind or 'none'}")
+            where[kind] = self.house.book_of(agent).name
+        self.assertEqual({k for k, v in where.items() if v == PRACTICE},
+                         {"debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"})
+        self.assertEqual({k for k, v in where.items() if v == SHADOW},
+                         {"calendar", "diagonal", "long_straddle", "long_strangle", None})
+
+    def test_a_practice_account_whose_venue_holds_no_legs_is_never_the_target(self):
+        """A canary's simulated account (`SimBroker`) holds no legs: the switch sends nobody there."""
+        self.switch(True)
+        agent = self.agent("iron_condor")
+        with mock.patch.object(self.practice, "_legs_at_venue", return_value=False):
+            self.assertIs(self.house.book_of(agent), self.house.books[SHADOW])
+
+    def test_an_account_that_reads_as_cash_keeps_credit_programs_on_the_shadow_book(self):
+        self.venue.multiplier = "1"
+        self.alpaca._account = None
+        self.practice.reconcile()
+        self.assertEqual(self.alpaca.account_type(), "cash")
+        self.switch(True)
+        self.assertIs(self.house.book_of(self.agent("iron_condor", name="k-condor")), self.house.books[SHADOW])
+        self.assertIs(self.house.book_of(self.agent("debit_vertical", name="k-vertical")), self.practice)
+
+    def test_an_account_under_options_level_3_opens_nothing_and_keeps_every_program_on_the_shadow_book(self):
+        self.venue.level = "2"
+        self.alpaca._account = None
+        self.practice.reconcile()
+        self.assertEqual(self.alpaca.structure_types, ())
+        self.switch(True)
+        self.assertIs(self.house.book_of(self.agent("debit_vertical")), self.house.books[SHADOW])
+
+    def test_the_wake_says_which_book(self):
+        self.switch(True)
+        agent = self.agent("iron_condor")
+        self.house.seat(agent)
+        ctx = self.house.snapshot(agent, self.house.book_of(agent))
+        self.assertEqual(ctx["structure_rules"]["book"], PRACTICE)
+        self.assertNotIn("moving_to", ctx["structure_rules"])
+
+
+class TheMigration(PracticeCase):
+    """An agent seated on the options shadow book when the switch turns on keeps trading there, closes only,
+    until it is flat; then it is re-seated, its stake moved, on the practice account. Never two books at once."""
+
+    def condor_on_the_shadow_book(self):
+        self.switch(False)
+        agent = self.agent("iron_condor")
+        shadow = self.house.books[SHADOW]
+        self.assertIs(self.house.book_of(agent), shadow)
+        self.house.seat(agent)
+        inst = structures.instrument(structures.parse(SHADOW, condor_row()).spec, SHADOW)
+        self.shadow.set_quote(inst, "0.55", "0.62")
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        return agent, shadow, inst
+
+    def assert_one_book(self, agent):
+        """Never positions or orders on two books at once."""
+        busy = [name for name, book in self.house.books.items() if self.house._structure_busy(book, agent.id)]
+        self.assertLessEqual(len(busy), 1, busy)
+
+    def test_it_closes_on_the_shadow_book_then_moves_when_flat(self):
+        agent, shadow, inst = self.condor_on_the_shadow_book()
+        self.switch(True)
+        # 1. Holding a condor on the shadow book: it stays there, and says where it is going.
+        self.assertIs(self.house.book_of(agent), shadow)
+        self.house.seat(agent)
+        self.assertNotIn(agent.id, self.practice.accounts)  # nothing staked on the practice account yet
+        ctx = self.house.snapshot(agent, shadow)
+        self.assertEqual(ctx["structure_rules"]["book"], SHADOW)
+        self.assertIn("alpaca-paper", ctx["structure_rules"]["moving_to"])
+        # 2. An open there is refused, with the reason; nothing reaches the practice account.
+        self.assertEqual(self.house._intents(agent, shadow, [condor_row(expiry="2026-09-14")])[0], [])
+        refused = [e.payload["reasons"][0] for e in self.house.ledger.iter(kinds="book.refused", agent=agent.id)]
+        self.assertIn("moving to the alpaca-paper book", refused[-1])
+        self.assertEqual(self.venue.posted, [])
+        self.assert_one_book(agent)
+        # 3. A close rests there (0.60 over the 0.55 bid): still not flat, still there.
+        rested = self.send(agent, [condor_row(action="close", limit=0.40)])
+        self.assertEqual([o.status for o in rested], ["resting"])
+        self.assertIs(self.house.book_of(agent), shadow)
+        self.assert_one_book(agent)
+        # 4. It fills: flat on the shadow book. The next seat (every wake seats) moves the stake.
+        self.shadow.fill_resting(rested[0].order_id, "1")
+        shadow.poll()
+        self.assertEqual(self.held(shadow, agent), {})
+        self.assertIs(self.house.book_of(agent), self.practice)
+        self.house.seat(agent)
+        self.assertTrue(shadow.account(agent.id).swept)
+        self.assertEqual(shadow.account(agent.id).cash, 0)
+        self.assertEqual(self.practice.account(agent.id).cash, D("200"))  # the rung's practice stake
+        stakes = [(e.payload["book"], e.payload.get("note")) for e in self.house.ledger.iter(kinds="book.stake", agent=agent.id)]
+        self.assertIn((SHADOW, "account closed"), stakes)
+        self.assertEqual(stakes[-1], (PRACTICE, "rung 1 stake"))
+        self.assertTrue(any("moved from options-shadow to alpaca-paper" in str(a) for a in self.alerts()))
+        # 5. Its next open goes to the practice account as ONE multi-leg order.
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.assertEqual(len(self.mleg_posts()), 1)
+        self.assert_one_book(agent)
+        self.assertEqual(shadow.account(agent.id).holdings, {})
+
+    def test_a_decision_made_for_the_old_book_is_dropped_once_it_has_moved(self):
+        agent, shadow, inst = self.condor_on_the_shadow_book()
+        self.switch(True)
+        closing, _ = self.house._intents(agent, shadow, [condor_row(action="close", limit=0.50)])  # decided on the shadow book
+        self.shadow.set_quote(inst, "0.61", "0.66")
+        own = shadow.submit(self.house._intents(agent, shadow, [condor_row(action="close", limit=0.39)])[0])  # flat meanwhile
+        self.assertEqual([o.status for o in own], ["filled"])
+        self.assertIs(self.house.book_of(agent), self.practice)
+        late = {"agent": agent.id, "_generation": self.house._generation(agent.id), "intents": closing}
+        self.assertEqual(self.house._submit_wakes(SHADOW, [late]), [])  # `_submit_wakes`: not its book any more
+
+    def test_a_structure_order_resting_on_the_old_book_is_not_flat(self):
+        self.switch(False)
+        agent = self.agent("iron_condor")
+        self.house.seat(agent)
+        inst = structures.instrument(structures.parse(SHADOW, condor_row()).spec, SHADOW)
+        self.shadow.set_quote(inst, "0.55", "0.66")
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["resting"])  # 0.62 under the 0.66 ask
+        self.switch(True)
+        self.assertIs(self.house.book_of(agent), self.house.books[SHADOW])
+        self.house.books[SHADOW].cancel(agent.id, self.house.books[SHADOW].open_orders(agent.id)[0].order_id)
+        self.assertIs(self.house.book_of(agent), self.practice)
+
+    def test_turned_off_it_moves_back_the_same_way(self):
+        self.switch(True)
+        agent = self.agent("iron_condor")
+        self.house.seat(agent)
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.switch(False)  # a rollback
+        self.assertIs(self.house.book_of(agent), self.practice)
+        self.assertEqual(self.house._intents(agent, self.practice, [condor_row(expiry="2026-09-14")])[0], [])
+        self.assertEqual([o.status for o in self.send(agent, [condor_row(action="close", limit=0.47)])], ["filled"])
+        self.assertIs(self.house.book_of(agent), self.house.books[SHADOW])
+        self.house.seat(agent)
+        self.assertTrue(self.practice.account(agent.id).swept)
+        self.assertEqual(self.house.books[SHADOW].account(agent.id).cash, D("200"))
+        self.assertTrue(self.practice.reconcile().ok)
+
+
+class EndToEnd(PracticeCase):
+    """House -> adapter -> book over the fake practice account (margin, level 3)."""
+
+    def seated(self, kind="iron_condor"):
+        self.switch(True)
+        agent = self.agent(kind)
+        self.assertIs(self.house.book_of(agent), self.practice)
+        self.house.seat(agent)
+        return agent
+
+    def test_a_condor_opens_and_closes_as_one_order_each_way_and_reconciles_to_the_cent_on_margin(self):
+        agent = self.seated()
+        opened = self.send(agent, [condor_row()])
+        self.assertEqual([o.status for o in opened], ["filled"], opened[0].detail)
+        body = self.venue.posted[-1]
+        self.assertEqual((body["order_class"], body["qty"], body["limit_price"], body["time_in_force"]), ("mleg", "1", "-0.38", "day"))
+        self.assertEqual(sorted((l["symbol"], l["side"], l["position_intent"]) for l in body["legs"]),
+                         sorted([(occ("2026-09-11", "put", 580), "buy", "buy_to_open"), (occ("2026-09-11", "put", 581), "sell", "sell_to_open"),
+                                 (occ("2026-09-11", "call", 590), "sell", "sell_to_open"), (occ("2026-09-11", "call", 591), "buy", "buy_to_open")]))
+        holding = self.practice.account(agent.id).holdings
+        (key, held), = holding.items()
+        self.assertEqual((held.quantity, held.cost), (D(1), D("61.12")))  # 0.61 x 100, four legs' $0.03 clearing fee
+        # A margin account ADDS the 0.39 credit to cash; the book debited 0.61: offset by $100 of collateral, exact.
+        self.assertEqual(self.alpaca.account_type(), "margin")
+        reading = self.practice.reconcile()
+        self.assertTrue(reading.ok, reading.detail)
+        self.assertEqual(reading.cash_diff, D(0))
+        # The owner's record: the account's type, the first order's answer, its fill as the order lists it, and the
+        # legs' FILL activities, with which order id they carry.
+        answers = {a["structure_answer"]["stage"]: a["structure_answer"] for a in self.alerts() if a.get("structure_answer")}
+        self.assertEqual(set(answers), {"account", "submit", "fill", "activity"})
+        self.assertEqual(answers["account"]["detail"]["multiplier"], "4")
+        self.assertEqual(answers["submit"]["detail"]["sent"]["legs"], body["legs"])
+        self.assertEqual(len(answers["fill"]["detail"]["legs"]), 4)
+        self.assertEqual(answers["activity"]["detail"]["order_id_is"], ["leg"])
+        self.assertEqual(len(answers["activity"]["detail"]["rows"]), 4)
+        # The close: one order, a debit (positive) at the buy-back's most.
+        closed = self.send(agent, [condor_row(action="close", limit=0.47)])
+        self.assertEqual([o.status for o in closed], ["filled"])
+        self.assertEqual((self.venue.posted[-1]["order_class"], self.venue.posted[-1]["limit_price"]), ("mleg", "0.47"))
+        sales = [f for f in self.fills(agent) if f["side"] == "sell"]
+        self.assertEqual(len(sales), 1)  # one closed trade
+        self.assertEqual((D(sales[0]["realized"]), sales[0]["flat"]), (D("-8.24"), True))  # (0.53 - 0.61) x 100 - $0.24
+        final = self.practice.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+        # The first answers are kept once a type: the second condor records nothing new but its refusal-free fill.
+        stages = [a["structure_answer"]["stage"] for a in self.alerts() if a.get("structure_answer")]
+        self.assertEqual(sorted(stages), ["account", "activity", "fill", "submit"])
+
+    def rested(self, agent, row, held):
+        orders = self.send(agent, [row])  # under the ask: it rests at the venue
+        self.assertEqual([o.status for o in orders], ["resting"], orders[0].detail)
+        (order_id,) = [o for o, r in self.venue.orders.items() if r.get("order_class") == "mleg" and r["status"] == "new"]
+        self.assertEqual(self.venue.orders[order_id]["limit_price"], held)
+        return order_id
+
+    def test_a_partial_fill_and_a_late_leg_book_only_whole_structures_and_never_adopt_a_leg(self):
+        agent = self.seated("debit_vertical")
+        long_call, short_call = occ("2026-09-11", "call", 590), occ("2026-09-11", "call", 591)
+        cheap = {"structure": "debit_vertical", "action": "open", "quantity": 2, "limit_price": 0.24, "reason": "two cheap verticals",
+                 "legs": [{"occ": long_call, "role": "long"}, {"occ": short_call, "role": "short"}]}
+        order_id = self.rested(agent, cheap, "0.24")  # 0.36 - 0.11 = 0.25 to open: $48 for two at the limit
+        # The long leg fills one structure's worth; the short is late. Nothing is booked, nothing broken, and a
+        # practice book never adopts the leg ahead however many readings it stands.
+        self.venue.fill_legs(order_id, {long_call: 1})
+        for _ in range(ADOPT_AFTER + 2):
+            self.practice.poll()
+            reading = self.practice.reconcile()
+            self.assertEqual(self.held(self.practice, agent), {})
+        self.assertFalse(reading.ok)  # frozen while the leg is late: the order's legs are in flight
+        self.assertIn("positions differ", reading.detail)
+        self.assertEqual(self.practice.baseline_positions, {})
+        self.assertFalse([a for a in self.alerts() if a.get("structure_break")])
+        # The late leg: one whole structure, booked once.
+        self.venue.fill_legs(order_id, {short_call: 1})
+        self.practice.poll()
+        self.assertEqual(list(self.held(self.practice, agent).values()), [D(1)])
+        reading = self.practice.reconcile()
+        self.assertTrue(reading.ok, reading.detail)
+        # The second structure's legs, both at once: two held, one order, reconciled to the cent.
+        self.venue.fill_legs(order_id, {long_call: 1, short_call: 1})
+        self.practice.poll()
+        self.assertEqual(list(self.held(self.practice, agent).values()), [D(2)])
+        final = self.practice.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+        buys = [f for f in self.fills(agent) if f["side"] == "buy"]
+        self.assertEqual([(D(f["quantity"]), D(f["price"])) for f in buys], [(D(1), D("0.25")), (D(1), D("0.25"))])
+        self.assertEqual(self.practice.open_orders(agent.id), [])
+
+    def test_an_order_that_ends_with_its_legs_uneven_is_an_error_and_the_leg_it_left_is_closed_not_adopted(self):
+        agent = self.seated("debit_vertical")
+        long_call, short_call = occ("2026-09-11", "call", 590), occ("2026-09-11", "call", 591)
+        one = {"structure": "debit_vertical", "action": "open", "quantity": 1, "limit_price": 0.24, "reason": "a cheap vertical",
+               "legs": [{"occ": long_call, "role": "long"}, {"occ": short_call, "role": "short"}]}
+        order_id = self.rested(agent, one, "0.24")
+        self.venue.fill_legs(order_id, {long_call: 1})
+        order = self.venue.orders[order_id]
+        order["status"] = "canceled"  # the day ends: the short leg never filled
+        for leg in order["legs"]:
+            if leg["status"] != "filled":
+                leg["status"] = "canceled"
+        self.practice.poll()
+        self.assertEqual(self.practice.open_orders(agent.id), [])
+        self.assertEqual(self.held(self.practice, agent), {})  # no structure: never booked
+        uneven = [a for a in self.alerts() if (a.get("structure_answer") or {}).get("stage") == "uneven"]
+        self.assertEqual([a["level"] for a in uneven], ["error"])
+        for _ in range(ADOPT_AFTER + 2):
+            self.practice.poll()
+            final = self.practice.reconcile()
+        breaks = [a for a in self.alerts() if a.get("structure_break")]
+        self.assertEqual([a["level"] for a in breaks], ["error"])
+        sold = [(b["symbol"], b["side"], b["position_intent"]) for b in self.venue.posted if "legs" not in b]
+        self.assertEqual(sold, [(long_call, "sell", "sell_to_close")])
+        self.assertEqual({s_: q for s_, q in self.venue.held.items() if q}, {})
+        self.assertEqual(self.practice.baseline_positions, {})  # the leg was never adopted
+        self.assertTrue(final.ok, final.detail)  # its cash, which no agent booked, is the House's, adopted on practice
+
+    def test_a_restart_while_the_order_rests_books_its_fill_from_the_legs(self):
+        agent = self.seated()
+        order_id = self.rested(agent, condor_row(limit=0.42), "-0.42")  # held 0.58, under the 0.61 ask
+        self.house.close(wait=None)
+        self.house = self.new_house()  # a new process: a new adapter that never saw the order, the book from the ledger
+        self.house.structure_practice_account = True
+        self.practice = self.house.books[PRACTICE]
+        self.assertEqual(len(self.practice.open_orders(agent.id)), 1)
+        self.venue.fill_legs(order_id, {symbol: 1 for symbol in LEGS})  # the venue fills it while the House is away
+        self.practice.poll()
+        self.assertEqual(list(self.held(self.practice, agent).values()), [D(1)])
+        final = self.practice.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+        self.assertIs(self.house.book_of(self.house.registry.get(agent.id)), self.practice)
+
+    def test_a_broken_structure_is_closed_at_once_shorts_first_with_an_error_alert(self):
+        agent = self.seated()
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.assertTrue(self.practice.reconcile().ok)
+        self.venue.held[occ("2026-09-11", "put", 580)] = D(0)  # the long put is gone at the venue (exercised)
+        self.practice.reconcile()
+        self.practice.reconcile()  # BREAK_AFTER readings in a row
+        breaks = [a for a in self.alerts() if a.get("structure_break")]
+        self.assertEqual([a["level"] for a in breaks], ["error"])
+        self.assertEqual(self.held(self.practice, agent), {})  # written off the agent at nothing
+        written = [e.payload for e in self.house.ledger.iter(kinds="book.settle", agent=agent.id)]
+        self.assertEqual([p["result"] for p in written], ["broken"])
+        singles = [b for b in self.venue.posted if "legs" not in b]
+        self.assertEqual(sorted((b["symbol"], b["side"], b["position_intent"]) for b in singles),
+                         [(occ("2026-09-11", "call", 590), "buy", "buy_to_close"), (occ("2026-09-11", "put", 581), "buy", "buy_to_close")])
+        for _ in range(2):  # then the long call left, sold once no short remains
+            self.practice.poll()
+            final = self.practice.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+        self.assertTrue(all(q >= 0 for q in self.practice.baseline_positions.values()))
+
+    def test_an_unmatched_short_leg_closes_the_whole_structure_at_once_with_an_error_alert(self):
+        """The owner's rule: a short the venue holds that no structure explains closes the WHOLE structure it sits in,
+        at once, with an error alert: every short bought back in the first pass, the longs sold once no short is left."""
+        agent = self.seated()
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        stray = occ("2026-09-11", "call", 590)
+        self.venue.held[stray] -= 1  # a second short call no structure explains, beside the condor's own
+        self.practice.reconcile()
+        self.assertFalse([a for a in self.alerts() if a.get("structure_break")])  # one reading can fall between a fill and its poll
+        self.practice.reconcile()
+        breaks = [a for a in self.alerts() if a.get("structure_break")]
+        self.assertEqual([a["level"] for a in breaks], ["error"])
+        self.assertEqual(self.held(self.practice, agent), {})
+        first = [(b["symbol"], b["side"], b["position_intent"], b["qty"]) for b in self.venue.posted if "legs" not in b]
+        self.assertEqual(sorted(first), [(stray, "buy", "buy_to_close", "2"), (occ("2026-09-11", "put", 581), "buy", "buy_to_close", "1")])
+        for _ in range(2):
+            self.practice.poll()
+            final = self.practice.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+        sold = [(b["symbol"], b["side"], b["position_intent"]) for b in self.venue.posted if "legs" not in b and b["side"] == "sell"]
+        self.assertEqual(sorted(sold), [(occ("2026-09-11", "call", 591), "sell", "sell_to_close"),
+                                        (occ("2026-09-11", "put", 580), "sell", "sell_to_close")])
+
+    def test_nothing_is_held_into_expiry_the_house_sells_it_whole_from_1530(self):
+        agent = self.seated()
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.house._state["next_wake"][agent.id] = self.clock() + 10 ** 9
+        self.at(THURSDAY_11_NY + 86400 + 4.6 * 3600)  # Friday 15:36 New York, the condor's expiry day
+        for symbol in LEGS:  # fresh quotes on the Friday
+            self.venue.quotes[symbol] = tuple(D(x) for x in LEGS[symbol])
+        self.house._enforce_horizon()
+        closes = [b for b in self.mleg_posts() if b["legs"][0]["position_intent"].endswith("_to_close")]
+        self.assertEqual([(b["qty"], b["limit_price"]) for b in closes], [("1", "0.47")])  # at its bid, 0.53: one order
+        self.assertEqual(self.held(self.practice, agent), {})
+        self.assertEqual({s: q for s, q in self.venue.held.items() if q}, {})
+
+
+class RealCashAccount(unittest.TestCase):
+    """The real account (multiplier 1: Alpaca's 1x limited margin, the owner's "cash" account) through the adapter and
+    a real-money book. Structures on real money are held by the House until O1 and by the gateway's
+    `OPTION_STRUCTURES_REAL`; this pins the adapter's and the book's part of it."""
+
+    def setUp(self):
+        import tempfile
+
+        from ltcm.adapters import AlpacaCredentials
+        from ltcm.adapters.alpaca import AlpacaBroker
+        from ltcm.tests.fakes import FakeTransport
+
+        self._rules = without_real_entry_rules()
+        self._rules.start()
+        self.addCleanup(self._rules.stop)
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.clock = Clock(THURSDAY_11_NY)
+        self.ledger = Ledger(Path(self.dir.name) / "ledger.sqlite", clock=self.clock)
+        self.addCleanup(self.ledger.close)
+        self.venue = Venue(self.clock, multiplier="1", level="3", sets_aside=True)
+        self.venue.cash = D("500")
+        for symbol, (bid, ask) in {**LEGS, **VERTICAL_LEGS}.items():
+            self.venue.quotes[symbol] = (D(bid), D(ask))
+        self.broker = AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), transport=FakeTransport(default=self.venue),
+                                   venue="alpaca")
+        self.book = Book("alpaca", self.broker, self.ledger, fees=Fees("alpaca", option_clearing=True), real_money=True, clock=self.clock)
+        self.assertTrue(self.book.reconcile().ok)
+        self.book.limits["a1"] = Limits(D("100"), D("75"), asset_classes=("option",))
+        self.book.stake("a1", "200")
+
+    def trade(self, row, side):
+        order = structures.parse("alpaca", {**row, "action": "open" if side == "buy" else "close"})
+        intent = Intent.new(agent="a1", instrument=structures.instrument(order.spec, "alpaca"), side=side, quantity="1",
+                            order_type="limit", limit_price=order.held_limit, time_in_force="day", reason="real",
+                            created_at=iso(self.clock), nonce=f"{side}{row['limit_price']}{len(self.venue.posted)}")
+        return self.book.submit([intent])[0]
+
+    def test_the_account_reads_as_cash_and_its_record_says_so(self):
+        self.assertEqual((self.broker.account_type(), self.broker.credit_in_cash()), ("cash", False))
+        self.assertFalse(self.broker.practice)
+        self.assertEqual(self.broker.structure_types, ("debit_vertical", "long_butterfly"))
+        rows = [e.payload for e in self.ledger.iter(kinds="ops.alert") if (e.payload.get("structure_answer") or {}).get("stage") == "account"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("reads as a cash account (multiplier 1", rows[0]["text"])
+
+    def test_a_debit_vertical_opens_closes_and_reconciles_with_no_offset(self):
+        opened = self.trade(vertical_row(limit=0.45), "buy")
+        self.assertEqual(opened.status, "filled", opened.detail)
+        self.assertEqual(self.venue.posted[-1]["limit_price"], "0.45")  # a debit: positive, at its limit
+        (held,) = self.book.account("a1").holdings.values()
+        self.assertEqual(held.cost, D("42.06"))  # filled at the touch, 0.62 - 0.20, and two legs' $0.03
+        reading = self.book.reconcile()
+        self.assertTrue(reading.ok, reading.detail)
+        self.assertEqual(reading.cash_diff, D(0))
+        self.assertEqual(self.book._collateral_not_offset, D(0))  # a debit structure has none to offset
+        closed = self.trade(vertical_row(limit=0.38), "sell")
+        self.assertEqual(closed.status, "filled", closed.detail)
+        final = self.book.reconcile()
+        self.assertTrue(final.ok, final.detail)
+        self.assertEqual(final.cash_diff, D(0))
+
+    def test_a_credit_structure_is_refused_before_anything_is_sent_unless_the_owner_admitted_it(self):
+        outcome = self.trade(condor_row(), "buy")
+        self.assertEqual(outcome.status, "refused")
+        self.assertIn("credit structures on the real account wait for the owner's confirmation", outcome.detail)
+        self.assertEqual(self.venue.posted, [])
+        from ltcm.broker import OrderIntent, RejectedOrder
+
+        spec = structures.parse("alpaca", condor_row()).spec
+        direct = OrderIntent.new(desk_id="book-alpaca", instrument=structures.instrument(spec, "alpaca"), side="buy", quantity="1",
+                                 order_type="limit", limit_price="0.62", time_in_force="day", rationale="t", created_at=iso(self.clock),
+                                 purpose="entry")
+        with self.assertRaises(RejectedOrder):
+            self.broker.submit(direct)  # the adapter refuses it itself, whatever the book asked
+        self.assertEqual(self.venue.posted, [])
+
+    def admit(self, types):
+        from league.constitution import CONSTITUTION
+
+        allocator = {**CONSTITUTION["allocator"], "option_spread_real_types": types}
+        return mock.patch.dict(CONSTITUTION, {"allocator": allocator})
+
+    def test_an_admitted_credit_type_on_a_cash_account_that_sets_its_loss_aside_reconciles_exactly(self):
+        with self.admit(["iron_condor"]):
+            self.assertIn("iron_condor", self.broker.structure_types)
+            self.assertNotIn("credit_vertical", self.broker.structure_types)
+            opened = self.trade(condor_row(), "buy")
+            self.assertEqual(opened.status, "filled", opened.detail)
+            reading = self.book.reconcile()
+            self.assertTrue(reading.ok, reading.detail)
+            self.assertEqual(reading.cash_diff, D(0))
+            closed = self.trade(condor_row(limit=0.47), "sell")
+            self.assertEqual(closed.status, "filled", closed.detail)
+            final = self.book.reconcile()
+            self.assertTrue(final.ok, final.detail)
+            self.assertEqual(final.cash_diff, D(0))
+
+    def test_a_cash_account_that_adds_the_credit_after_all_freezes_the_real_book_and_says_so(self):
+        """Alpaca says it has no cash accounts (https://alpaca.markets/support/alpaca-cash-accounts): if the 1x account
+        adds a credit to cash as a margin account does, the first admitted credit structure shows it, and the real book
+        freezes on exactly its collateral, named, never booked as the venue's fees."""
+        self.venue.sets_aside = False
+        with self.admit("iron_condor"):
+            self.assertEqual(self.trade(condor_row(), "buy").status, "filled")
+            reading = self.book.reconcile()
+        self.assertFalse(reading.ok)
+        self.assertIn("cash differs by 100.0000 (exactly the $100.00 collateral of the credit structures held", reading.detail)
+
+    def test_the_practice_account_offsets_the_same_condor(self):
+        """The same condor on a margin practice account: the credit is added to cash and the collateral offset."""
+        from ltcm.adapters import AlpacaCredentials
+        from ltcm.adapters.alpaca import AlpacaBroker
+        from ltcm.tests.fakes import FakeTransport
+
+        venue = Venue(self.clock, multiplier="4")
+        venue.quotes = dict(self.venue.quotes)
+        broker = AlpacaBroker(AlpacaCredentials("gateway", "gateway", paper=False), transport=FakeTransport(default=venue), venue=PRACTICE)
+        ledger = Ledger(Path(self.dir.name) / "practice.sqlite", clock=self.clock)
+        self.addCleanup(ledger.close)
+        book = Book(PRACTICE, broker, ledger, fees=Fees("alpaca", option_clearing=True), real_money=False, clock=self.clock)
+        self.assertTrue(book.reconcile().ok)
+        book.limits["a1"] = Limits(D("100"), D("75"), asset_classes=("option",))
+        book.stake("a1", "200")
+        self.assertEqual((broker.account_type(), broker.credit_in_cash()), ("margin", True))
+        order = structures.parse(PRACTICE, condor_row())
+        intent = Intent.new(agent="a1", instrument=structures.instrument(order.spec, PRACTICE), side="buy", quantity="1", order_type="limit",
+                            limit_price=order.held_limit, time_in_force="day", reason="practice", created_at=iso(self.clock), nonce="p")
+        self.assertEqual(book.submit([intent])[0].status, "filled")
+        reading = book.reconcile()
+        self.assertTrue(reading.ok, reading.detail)
+        self.assertEqual(venue.cash - D("98000"), D("38.88"))  # the venue added the 0.39 credit less $0.12 of fees
+        self.assertEqual(book._collateral_not_offset, D(0))
+
+
+if __name__ == "__main__":
+    unittest.main()
