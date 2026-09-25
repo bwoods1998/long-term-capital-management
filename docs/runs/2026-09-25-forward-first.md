@@ -73,7 +73,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | S | The search looks for capacity (foundry brief `foundry-2026-09-25.1`; alpaca-open 12 seats) | built, PR #331 (CI green; on #324); Deploy C |
 | Y | Compute follows yield (lane throttle, trigger skip, unit economics, the contract by section) | built, PR #330 (CI green; built on #311); Deploy C |
 | F3/C7 | Seat market by forward record; members on disjoint events | built, PR #329 (CI green); Deploy B; money review with C-money |
-| B | Deploy B integration (`b/integration`) | Deploy A + C8/C6 + F1 (+review) + F2/F4/X2 (+review) + F3/C7; money digest `555b7aac` before C-money; C-money and the Wave 1 money review to come |
+| B | Deploy B integration (`b/integration`, draft PR #334) | Deploy A + C8/C6 + M1-M6 + F1 + F2/F4/X2 + F3/C7, all reviewed; money digest `acff5c64` (constitution `32db7547`); Deploy B Saturday Sept 26 in a quiet window |
 | C8/C6 | Family = mechanism; capacity at the real size | built, PR #324 (CI green); money digest (on H4) `d7d910fe` -> `555b7aac`; Deploy B; three-lens review with C-money |
 | W | The site's flywheel strip | site #8 merged and DEPLOYED 12:35:10Z (version `2b780c2c`; the next checkpoint, 12:35:58Z, accepted); publisher #325 (CI green) merges in Deploy C |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
@@ -418,6 +418,33 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   foundry births until cards with more markets or larger edges come; the floor stays $5 and is watched. At T0 about 93%
   of capacity calls would go to kalshi-sports, weighted by the MLB-totals regime families; it fades with the 7-day
   window. At T0 the foundry refused every call ("no seat is open on any eligible desk"): F3 frees seats first.
+
+- **C-money (#326; digest after C8 + M1-M6: `acff5c64`).** M1: the family swing's looks at 10, 15, 20 real settlements,
+  each needing the real events on 5 distinct event dates (the date in the Kalshi ticker: a night slate settles across
+  two UTC dates); also the agent-level swing (else meriwether-h2d625d, E 2.07 on 2 slates, would be re-audited for a
+  $128.85 swing at its cooldown's end); `audit.pre_pack` 8. M2: probes may take; bunts and swings take only on a
+  family taker record proven from 5 events. M3: a proven family's practice member seated as a bunt on the family's
+  proof, best W first, under 4 real seats, the proof on 5+ dates, running the code that entered most of the family's
+  observations. M4: $50 for stock and ETF programs (also proven bunts). M5: re-admission by an 80% bound since the
+  demotion, one observation per block period, holds keyed by the family at the demotion. M6: new Alpaca fills record
+  `liquidity_role`. Replay on T0 with C8: the sports family's look at 10 reads -0.1187 on 2 dates (no entry), the look at
+  15 cannot pass (its first 15 events lie on at most 3 slates; the earliest possible is 20, needing the Sept 26 and 27
+  slates); M3's first case (`megacaps-megacap-short-horizon-re-8a220c`) spans 2 trading dates (not seated; 5 earliest
+  Sept 29).
+- **The Wave 1 money review (three lenses, verified, fixed on `b/review`; digest unchanged).** C7 (major): event
+  ownership was `sha256 % n` over the members, so a member joining or leaving moved most events (two real members could
+  hold one game); now an event a family agent holds or bids stays with it, the rest move by rendezvous hashing, the
+  60 s member cache is gone, and a member's held events stay in its markets. C8 (major): the two single-program
+  crypto-15m families proven on practice alone over 2 dates would have seated $30 bunts at once: a proven family whose
+  pooled proof spans fewer than 5 distinct dates AND whose real record has fewer than 10 settlements is now staked,
+  gated and allowed to take as a PROBE (`Allocator.thin_proof`; no new key: M3's date gate; the main session accepts it
+  as a guard on C8's consequence: it only lowers real exposure, and the sports family, real n 11, keeps its bunt). M2:
+  a probe's taking is one position at its cap in all, never while its family's record is unreadable or its account is
+  sized above a probe. M1/M5 rollback safety: pre-pack approvals are "prepared" until the look passes, mechanism-keyed
+  holds live beside Deploy A's (`probe_holds_mechanism`). C8: a closed trade counts for the family whose program
+  entered it. Disclosed, unchanged: M4's $50 is also the base of an equity bunt's growth and the agent-level swing.
+  Replay of one pass on T0 after the fixes: huang-h51fdd3-7 as a $10 Kalshi probe (not $30), huang-h427345-4 held by
+  its own demotion, meriwether-h2d625d sized to $37.50; every family record identical.
 
 ## Progress notes
 
