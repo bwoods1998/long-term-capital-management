@@ -528,6 +528,8 @@ class ContractBySection(unittest.TestCase):
         self.assertEqual(contract_topics({"asset_class": "option"}, "alpaca-options"), {"options"})
         self.assertEqual(contract_topics({"feeds": ["weather"]}, "kalshi-open"), {"feeds", "open"})
         self.assertEqual(contract_topics({"venue": "kalshi"}, "kalshi-sports"), set())
+        self.assertEqual(contract_topics({"venue": "alpaca", "options_features": True}, "alpaca-megacaps"), {"options"},
+                         "the options-derived features' section is an options section")
 
     def test_an_answer_that_asks_is_asked_again_once_with_the_sections(self):
         calls = []
