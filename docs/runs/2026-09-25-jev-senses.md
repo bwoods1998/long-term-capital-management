@@ -195,7 +195,7 @@ the post-ship evaluation can say whether Jev adds anything on data it has never 
 3 days of post-ship events, the shadow is cut to $0. Both are validated on post-ship events before any
 strategy reads them (the plan's 0.70 line applies to the served feature).
 
-### J2 on the research gate (10:35Z): Jev does not pick the sessions worth paying for; a free model does
+### J2 on the research gate (10:31Z): Jev does not pick the sessions worth paying for; a free model does
 
 The J2 analyst built 6,846 finished research sessions Sept 22 00:00Z to Sept 25 06:00Z from the ledger (read-only),
 each with its "new since the agent's previous session" evidence (its own fills, settlements, refusals, verdicts,
@@ -230,11 +230,11 @@ feeds). Kalshi desks cover 208 series, 53% of the volume, and 20.4M contracts of
 recorded feed pricing them. The largest near-term volume with no feed: WTA matches 10.03M, DP World Tour 3.06M
 (all within 48 h), ATP matches 2.85M (2.80M within 48 h), T20 cricket 1.07M, international friendlies 0.62M, UFC
 0.26M, F1 0.19M: ESPN's public scoreboards cover these sports, but the House's sports map does not. Sent to the
-Kalshi run at 10:37Z.
+Kalshi run at 10:31Z.
 
 ## Progress notes
 
-- **10:40Z (T0 + 4 h 23 m; the 10:17Z note was late: a usage limit stopped this session and its agents
+- **10:32Z (T0 + 4 h 16 m; the 10:17Z note was late: a usage limit stopped this session and its agents
   07:30-10:30Z, the other three runs too).** J0 done; J1's development analysis done (the free model is the
   feature, Jev a capped shadow), the recorder built and reviewed (no blockers; eight should-fix items and the
   model integration in progress); J2 research half measured (no Jev pre-filter; the free model goes to the gate's
