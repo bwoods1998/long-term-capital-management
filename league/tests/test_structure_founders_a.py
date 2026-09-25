@@ -277,6 +277,28 @@ class CondorVrp(FounderCase):
         ctx["now"] = utc(f"{FRI} 15:10")
         self.assertEqual(self.closes(self.run_seed(ctx)), [], "before its exit minute it holds")
 
+    def test_an_entry_that_never_filled_does_not_spend_the_day(self):
+        # Sept 25, 2026: entries were counted when sent, and on the structure replay one unfilled
+        # order used a founder's whole day. Only a fill (or a working order) counts now.
+        ctx = self.market(f"{FRI} 10:30")
+        ctx["params"] = {"max_entries_day": 1}
+        first = self.run_seed(ctx)
+        self.assertEqual(len(self.opens(first)), 1)
+        again = self.market(f"{FRI} 11:00")
+        again["params"], again["memory"] = {"max_entries_day": 1}, first["memory"]
+        self.assertEqual(len(self.opens(self.run_seed(again))), 1, "the first order died unfilled: the day is not spent")
+        intent = self.opens(first)[0]
+        filled = self.market(f"{FRI} 11:00")
+        filled["params"], filled["memory"] = {"max_entries_day": 1}, first["memory"]
+        filled["positions"] = [held(intent, float(structures.parse("alpaca-paper", intent).held_limit), opened_ny=f"{FRI} 10:45")]
+        filled["positions"][0]["legs"] = intent["legs"]
+        out = self.run_seed(filled)
+        self.assertEqual(self.opens(out), [])
+        filled["positions"] = []
+        filled["memory"] = out["memory"]
+        filled["now"] = utc(f"{FRI} 12:00")
+        self.assertEqual(self.opens(self.run_seed(filled)), [], "a condor that filled and closed still counts")
+
     def test_holds_between_its_exits_and_cancels_stale_orders(self):
         intent, order = self.opened()
         ctx = self.market(f"{FRI} 10:45")

@@ -592,11 +592,31 @@ def _params(ctx, defaults):
 
 
 def _day_memory(ctx, ny):
+    """Today's memory. `entries` counts, by underlying, the structures that FILLED today (a held
+    structure opened today is remembered by its legs) plus the opening orders still working, so an
+    entry that never filled is not spent (measured Sept 25, 2026 on the structure replay: counted when
+    sent, one unfilled order used a founder's whole day)."""
     memory = ctx.get("memory") if isinstance(ctx.get("memory"), dict) else {}
     today = ny.date().isoformat()
     if memory.get("day") != today:
-        memory = {"day": today, "entries": {}}
-    memory.setdefault("entries", {})
+        memory = {"day": today}
+    filled = memory.get("filled") if isinstance(memory.get("filled"), dict) else {}
+    for position in ctx.get("positions") or []:
+        opened = _when(position.get("opened_at")) if isinstance(position, dict) else None
+        legs = _structure_legs(position) if isinstance(position, dict) else []
+        parsed = _occ(legs[0][0]) if legs else None
+        if opened is not None and opened.date().isoformat() == today and parsed:
+            keys = filled.setdefault(parsed[0], [])
+            if _key(legs) not in keys:
+                keys.append(_key(legs))
+    entries = {under: len(keys) for under, keys in filled.items()}
+    for order in ctx.get("open_orders") or []:
+        legs = _structure_legs(order) if isinstance(order, dict) else []
+        parsed = _occ(legs[0][0]) if legs else None
+        if parsed and not (str(order.get("action") or "").lower() == "close" or str(order.get("side") or "").lower() == "sell"):
+            entries[parsed[0]] = entries.get(parsed[0], 0) + 1
+    memory["filled"] = filled
+    memory["entries"] = entries
     return memory
 
 NEEDS = {
@@ -621,7 +641,7 @@ NEEDS = {
 PARAMS = {"structure": "long_butterfly", "width": 1.0, "dte_min": 0, "dte_max": 0, "entry_delta": 0.5, "profit_target": 0.35,
           "stop_loss": 0.5, "exit_minutes_before_close": 35, "max_open": 2, "entry_start": 825, "entry_end": 860,
           "pin_minutes": 120, "pin_pct": 0.35, "min_share": 0.12, "vol_days": 5, "vol_cushion": 1.0, "min_edge": 0.0,
-          "risk_usd": 60.0, "requote_minutes": 10, "slip": 0.02, "max_entries_day": 1}
+          "risk_usd": 60.0, "requote_minutes": 20, "slip": 0.02, "max_entries_day": 1}
 
 
 def _volumes(tree, symbol, expiry, spot, pct):
