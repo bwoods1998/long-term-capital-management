@@ -241,6 +241,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
         # The Alpha Lab's own box (league/lab.py, league/labbox.py): its key, when config.json names one; none on a canary.
         lab_box=lab_box_key(config, canary=canary),
+        # K1 (Sept 25, 2026): flagged founder rows seated into a full league (league/kalshi_founders.py); never on a canary.
+        kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,

@@ -110,7 +110,10 @@ _BLOCK_KEY = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2})?$")
 
 
 def seat(house: Any) -> Any | None:
-    """One births pass's flagged founder: the Agent born, or None. Never raises (an error is a warning)."""
+    """One births pass's flagged founder: the Agent born, or None. Never raises (an error is a warning). Nothing at all
+    unless the House's `Settings.kalshi_founders` is on (the floor's House; never a test's or the canary's)."""
+    if not getattr(getattr(house, "settings", None), "kalshi_founders", False):
+        return None
     try:
         return _seat(house)
     except Exception as exc:  # noqa: BLE001 - the births pass goes on to the refill whatever happens here

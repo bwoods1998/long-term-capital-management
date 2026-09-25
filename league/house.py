@@ -451,6 +451,10 @@ class Settings:
     # an agent still running the code a repair corrects, gives it up), and agents running code a
     # BORN repair corrects are retired. Off: merged strategies wait for an empty seat, as before.
     enroll_displaces: bool = True
+    # K1 (the Kalshi-scale run, Sept 25, 2026): the founder rows flagged `seat_full_league` are seated into a full league
+    # (`league/kalshi_founders.py`). On in the floor's House (`service.build`), off in any House a test or the canary
+    # builds: each such birth reads its founder's NEEDS in a probe box, and no unrelated House is handed the weekend's founders.
+    kalshi_founders: bool = False
     # No new research from the moment a release is staged. It wants to be a little longer than a
     # research pass (one to three minutes, measured) so the ones in flight finish before the
     # restart, and a good deal SHORTER than a deploy: at fifteen minutes against a half-hourly

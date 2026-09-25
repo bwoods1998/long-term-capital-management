@@ -45,6 +45,11 @@ def alerts(house, level, *words):
 
 
 class FounderSeats(HouseCase):
+    def new_house(self, **kw):
+        house = super().new_house(**kw)
+        house.settings.kalshi_founders = True  # the floor's House has it on (service.build); a test's is off by default
+        return house
+
     def setUp(self):
         super().setUp()
         self.flag_rows(self.house)
@@ -232,6 +237,23 @@ class Room(FounderSeats):
         sports.founders = tuple({**f, "params": {**f["params"], "min_hours": 6.0}} if f["key"] == "k1-mlb-model" else f
                                 for f in sports.founders)
         self.assertEqual(kalshi_founders.seat(self.house).founder, "k1-mlb-model")
+
+
+class Switch(HouseCase):
+    def test_a_house_without_the_switch_seats_no_founder_and_says_nothing(self):
+        self.assertFalse(self.house.settings.kalshi_founders, "off unless the floor's House turns it on")
+        sports = self.house.niches["kalshi-sports"]
+        sports.founders = tuple(sports.founders) + (row("k1-mlb-model", ["KXMLBGAME", "KXMLBTOTAL"]),)
+        self.assertIsNone(kalshi_founders.seat(self.house))
+        self.assertNotIn("k1-mlb-model", {a.founder for a in self.house.registry.agents.values()})
+        self.assertEqual(alerts(self.house, "warning", "founder"), [])
+
+    def test_the_floor_turns_it_on_and_the_canary_never_does(self):
+        import inspect
+        from league import service
+
+        source = inspect.getsource(service.build)
+        self.assertIn('kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary', source)
 
 
 class FullLeague(FounderSeats):
