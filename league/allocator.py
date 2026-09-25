@@ -1023,8 +1023,35 @@ class Allocator:
 
     def tier(self, agent: Any) -> str:
         """"bunt" when the agent's family is proven or swinging (`family_proven`, `family_swing`), else "probe"
-        (P1, Sept 24, 2026). The proof's tier: a swinging family's member is a bunt that is staked more."""
-        return "bunt" if self.family_state(agent) in ("proven", "swing") else "probe"
+        (P1, Sept 24, 2026). The proof's tier: a swinging family's member is a bunt that is staked more.
+
+        A family proven on a THIN proof is staked as a probe (`thin_proof`, the Deploy B review, Sept 25, 2026)."""
+        state = self.family_state(agent)
+        if state == "swing":
+            return "bunt"
+        return "bunt" if state == "proven" and not self.thin_proof(agent.family, agent.venue) else "probe"
+
+    def thin_proof(self, family: str, venue: str) -> bool:
+        """Whether a PROVEN family's pooled proof spans fewer distinct settlement dates than M3's `proven_family_member.
+        min_distinct_dates` (5; `families.event_day`) while its REAL record alone is short of the proof's own count
+        (`family_proven.min_independent_settlements`, 10): its members are staked, gated and let take as PROBES, not bunts
+        (the Deploy B money review, Sept 25, 2026; the run's 5-date gate, no new key). The main session's decision of 07:11Z
+        seats a proven family's members on its proof only over 5 dates -- a count of events cannot tell a regime from an
+        edge -- and left the date line on `family_proven` itself to the owner; the E route to a bunt read the proof alone.
+        Measured on the T0 snapshot re-keyed by C8: crypto-15m-btc-15m-taker-momentum-7fd732 (n 20, bound +0.0927) and
+        crypto-15m-btc-5m-close-close-mom-c8e6aa (n 14, bound +0.0182) became proven on one program's practice record over 2
+        dates (18 of 20 events on Sept 24), and Deploy B's first pass seated both agents as $30 Kalshi bunts on 15-minute
+        BTC taker programs, the mechanism the constitution's `real_entry_liquidity` calls the loss engine; with this they are
+        probes ($10), under the probe gate. sports-central-run-under (3 dates, real n 11) keeps its bunt as decided at 07:11Z;
+        megacaps-chip-demand-relay's proof (2 dates, practice only) is thin until it spans 5. False without M3's rule."""
+        rule = member_rule()
+        need = int((rule or {}).get("min_distinct_dates") or 0)
+        if need <= 0:
+            return False
+        record = self.family(family, venue)
+        if int(record.get("dates") or 0) >= need:
+            return False
+        return int(record.get("real_n") or 0) < int(families.proof_rule()["min_independent_settlements"])
 
     def rung2_band(self, agent: Any) -> str:
         """What a rung-2 agent is called on the board, the tape and the book: "probe", "bunt", or "swing" for a

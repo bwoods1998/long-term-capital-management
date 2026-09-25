@@ -183,7 +183,7 @@ class TheAgentLevelSwingAsksTheDatesToo(KalshiHouse):
         room = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"})
         room.start()
         self.addCleanup(room.stop)
-        proof = {**canned("weather-favorites", proven=True, n=25, bound=0.03), "dates": 3}
+        proof = {**canned("weather-favorites", proven=True, n=25, bound=0.03), "dates": 3, "real_n": 11}  # the sports family at T0
         self.families["weather-favorites"] = {**proof, "real": {**families.empty_record("weather-favorites", "kalshi")["real"], "n": 11, "dates": 2}}
         a = self.agent("meriwether")
         with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)}):
@@ -448,6 +448,47 @@ class TakerProofFromFive(AtRiskCase):
         with patch.dict(CONSTITUTION["allocator"]):
             del CONSTITUTION["allocator"]["taker_proof_min"]
             self.assertFalse(self.record()["taker"]["positive"])  # without the key: the proof's own count
+
+
+class ThinProofsStakeProbes(KalshiHouse):
+    """The Deploy B review (Sept 25, 2026; `Allocator.thin_proof`): a family proven on fewer than M3's 5 distinct settlement
+    dates while its real record alone is short of the proof's count stakes its members as probes. C8's re-key of the T0
+    snapshot made two single-program 15-minute BTC taker families proven on 2 practice dates, and the first pass seated
+    both agents as $30 Kalshi bunts; sports-central-run-under (3 dates, real n 11) keeps its bunt as decided at 07:11Z."""
+
+    READY = dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)
+
+    def seat(self, **proof):
+        self.families["weather-favorites"] = {**canned("weather-favorites", proven=True, n=20, bound=0.0927, taker_positive=True),
+                                              **proof}
+        a = self.agent("huang")
+        with self.evidence_of({a.id: self.READY}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        return a, self.house.books["kalshi"].account(a.id).staked
+
+    def test_a_practice_proof_on_two_dates_seats_a_probe_not_a_bunt(self):
+        a, staked = self.seat(dates=2)  # crypto-15m-btc-15m-taker-momentum-7fd732 on the re-keyed T0 snapshot
+        self.assertEqual(staked, D("10"))
+        alloc = self.house.allocator
+        self.assertTrue(alloc.thin_proof("weather-favorites", "kalshi"))
+        self.assertEqual((alloc.tier(a), alloc.rung2_band(a), alloc.family_state(a)), ("probe", "probe", "proven"))
+        self.assertEqual(self.promote_row(a)["band_to"], "probe")
+
+    def test_a_real_record_of_the_proofs_count_keeps_the_bunt(self):
+        a, staked = self.seat(dates=3, real_n=11)  # sports-central-run-under at T0
+        self.assertEqual(staked, D("30"))
+        self.assertEqual(self.house.allocator.tier(a), "bunt")
+
+    def test_a_proof_on_five_dates_is_a_bunts(self):
+        a, staked = self.seat(dates=5)
+        self.assertEqual(staked, D("30"))
+
+    def test_without_the_members_rule_the_proof_alone_decides(self):
+        with patch.dict(CONSTITUTION["allocator"]):
+            del CONSTITUTION["allocator"]["proven_family_member"]
+            a, staked = self.seat(dates=2)
+        self.assertEqual(staked, D("30"))
 
 
 # ------------------------------------------------------------------------------------------ M3: members on the proof

@@ -432,6 +432,12 @@ CONSTITUTION: dict[str, Any] = {
         # +0.0010), all 13 entered by mcentee-hddb4ae's current code, at W_paper 1.0036 -- on 2 trading dates (Sept 23
         # and 24), so it waits for 3 more; sports-central-run-under's pooled proof spans 3 slate dates, and its members
         # -3, -5 and -6 (the proven code) have no closed practice trade. Nobody is seated by it at T0.
+        # The same `min_distinct_dates` holds the STAKE of a thin proof (the Deploy B money review, Sept 25, 2026; no new
+        # key, `Allocator.thin_proof`): a family proven on fewer dates while its REAL record alone is short of
+        # `family_proven.min_independent_settlements` stakes, gates and lets take its members as probes, not bunts. C8's
+        # re-key of the T0 snapshot made two single-program 15-minute BTC taker families proven on 2 practice dates (n 20,
+        # bound +0.0927; n 14, +0.0182), and Deploy B's first pass seated both agents as $30 Kalshi bunts; with it they are
+        # probes. sports-central-run-under (3 dates, real n 11) keeps its bunt, as decided at 07:11Z.
         "proven_family_member": {"min_practice_closed": 1, "min_w_paper": "1.0", "min_distinct_dates": 5, "same_code": True},
         # `family_swing` (row "allocator.family_swing", Deploy B, Sept 24, 2026; digest change 2 of 2): a
         # PROVEN family (`family_proven`, the pooled record: the table's one proof) whose REAL record has
