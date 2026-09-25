@@ -236,6 +236,19 @@ DEFAULTS: dict[str, Any] = {
     # A window this many blocks long with fewer than `forward_min_active_blocks` active ones is no longer waited
     # for: the program barely trades on data after its code was frozen, and graduation holds it ("forward").
     "forward_pending_blocks": 24,
+    # The review of #306 (Sept 25, 2026). A pending candidate holds its cell's ask (one a cell and kind) for this many hours
+    # of its window's data; then the next of its kind is asked too, at most `forward_asks_per_cell` at once. An hour desk's
+    # window is past `forward_pending_blocks` by then; a day desk's has one block of the three it needs (T0: 0.14 active
+    # blocks a block on kalshi-sports, 0.27 on weather), so its cells try a few programs at once.
+    "forward_ask_hours": 24,
+    "forward_asks_per_cell": 3,
+    # The share of each forward run's order kept for the living residents' programs (`forward_due`: one place in four,
+    # the first; never scored first, then least recently scored once a block of theirs closed since), which the House's
+    # seat market reads (`resident_forward`). The review of #306: at T0 the waiting graduates and the candidates
+    # graduation waits for were 126 rows, and a run scores 8-12 (Sept 25, 04:24Z: 12 of 48 in 266 s), so they came first
+    # every run: a new resident's first window waited behind them, and no resident was scored twice (nor before F1: the
+    # 247 windows to T0 are 247 candidates).
+    "forward_resident_share": 0.25,
     # S2 (the close-the-gaps run, Sept 24, 2026): every living resident's current program is scored too, in
     # the run's own budget, its window cut after its program was frozen on a grid of this many hours, so
     # the residents of one tape frozen within a few hours share one batch (a window a few hours shorter,
@@ -621,7 +634,13 @@ def forward_rank(fitness: Any, own: float | None, lineage: float | None, *, admi
 
     Replay still admits: a program that did not pass the gate is placed by its search fitness whatever its
     lineage's record. On the T0 snapshot a mutant that lost 0.177 a block on the search tape would otherwise
-    have become an elite of kalshi-crypto-15m on its lineage's +0.027."""
+    have become an elite of kalshi-crypto-15m on its lineage's +0.027. A losing record still counts against it
+    (the review of #306, Sept 25, 2026): such a program ranks after every program that passed the gate, its own
+    losing lineage's included, where before it escaped its lineage's record into the middle -- on the T0
+    re-placement 097632d172 (gate 0, fitness -0.0005) took alpaca-crypto-alts|hour|t4|c0 from its gate-passing
+    sibling ec93164b9d, both of the losing lineage haghani-39."""
+    if not admitted and lineage is not None and lineage <= 0:
+        return (3, -float(fitness or 0.0), 1, 0.0)
     if lineage is None or not admitted:
         return (1, -float(fitness or 0.0), 1, 0.0)
     return (0 if lineage > 0 else 2, -float(lineage), 1 if own is None else 0 if own > 0 else 2, -float(own or 0.0))
@@ -2360,17 +2379,30 @@ class Lab:
         # lineage's sealed-holdout ration (`_holdout_refusal`), never beyond it.
         decided: set[str] = set()
         wanted: dict[str, list[str]] = {"mechanism": [], "other": []}
-        asked: set[tuple[str, str]] = set()  # (cell, kind) already in `wanted`
+        # (cell, kind) -> [asked, of them still holding the ask]: a pending candidate holds its cell's ask for
+        # `forward_ask_hours` of its window's data; after that the next of its kind is asked too, at most
+        # `forward_asks_per_cell` at once (the review of #306, Sept 25, 2026: on a day desk three active blocks are
+        # three days with a trade at least, 11-21 days at T0's rates, and one candidate a cell held the ask for the
+        # `forward_pending_blocks` 24 days). On an hour desk its window is past `forward_pending_blocks` by then.
+        asked: dict[tuple[str, str], list[int]] = {}
+        latest = self._forward_state()["latest"]
+        ask_seconds, asks_max = float(settings["forward_ask_hours"]) * 3600.0, max(1, int(settings["forward_asks_per_cell"]))
         full = self.births_last_hour() >= int(settings["max_births_per_hour"])
         for row in self._graduation_order(scores):
             if row["cell"] in decided or row["code_sha256"] in running or self._desk(row["niche"]) is None:
                 continue
             reason = hold(row)
             if reason:
-                if reason.startswith("pending:"):
+                # A candidate tried already never graduates from the walk (the review of #306: 7 of the 48 asks on the T0
+                # snapshot went to candidates that had failed the House's replay, were rationed or were born); a waiting
+                # one is scored as waiting (`forward_due`).
+                if reason.startswith("pending:") and row["id"] not in tried:
                     kind = "mechanism" if row["origin"] in RESERVED_ORIGINS else "other"
-                    if (row["cell"], kind) not in asked:
-                        asked.add((row["cell"], kind))
+                    count = asked.setdefault((row["cell"], kind), [0, 0])
+                    if count[0] < asks_max and count[1] == 0:
+                        window = latest.get(str(row["id"]))
+                        count[0] += 1
+                        count[1] += int(window is None or float(window["window_end"]) - float(window["window_start"]) < ask_seconds)
                         wanted[kind].append(str(row["id"]))
                 continue
             decided.add(row["cell"])
@@ -2380,7 +2412,13 @@ class Lab:
             out.append(self._graduate_one(self._q("SELECT * FROM candidates WHERE id=?", (row["id"],))[0]))
             full = self.births_last_hour() >= int(settings["max_births_per_hour"])
         self._held = {"at": now_iso(self.house.clock), "counts": held}
-        self._set_meta("forward_wanted", json.dumps((wanted["mechanism"] + wanted["other"])[: max(0, int(settings["forward_wanted_max"]))]))
+        # Shared as a batch is (`reserved_quota`, the review of #306): the mechanism children first, up to all but the
+        # `reserved_share` kept for the parameter children, then those, then whatever room is left. Taken in turn, the 69
+        # cells with a mechanism child pending on the T0 snapshot filled all 48 asks, and no parameter child had one.
+        cap = max(0, int(settings["forward_wanted_max"]))
+        quota = reserved_quota(cap, settings.get("reserved_share"))
+        chosen = (wanted["mechanism"][:quota] + wanted["other"] + wanted["mechanism"][quota:])[:cap]
+        self._set_meta("forward_wanted", json.dumps(chosen))
         return out
 
     def forward_wanted(self) -> list[str]:
@@ -2430,7 +2468,9 @@ class Lab:
         forward-first run, Sept 25, 2026). Each reason starts with its kind and a colon (`held` counts them):
 
         - "lineage" (F1): its lineage's latest forward window loses over `lineage_block_active_blocks` active
-          blocks and no later window has won (`lineage_block`): the lineage is neither bred nor graduated.
+          blocks and no later window has won (`lineage_block`): the lineage is neither bred nor graduated. A
+          mechanism child written after that window's data began, with no ranked window yet, is "pending" instead
+          (the review of #306): its own winning window is the later one that releases the lineage.
         - "pending" (F1): it has no winning window of its own yet and the lab can build one: it graduates on its
           own forward record (`ranked_windows`: its latest window with `forward_min_active_blocks` active
           blocks, so a graduate waiting for a seat keeps the window that let it through while the window cut
@@ -2466,11 +2506,26 @@ class Lab:
             cache["forward_state"], cache["settings"] = self._forward_state(), self.settings
         state, settings = cache["forward_state"], cache["settings"]
         blocking = state["blocked"].get(str(row["lineage"]))
+        ranked, latest = state["ranked"].get(ident), state["latest"].get(ident)
         if blocking is not None:
-            return (f"lineage: the latest forward window of its lineage {row['lineage']} loses ({float(blocking['log_growth'] or 0.0):+.6f} "
-                    f"over {int(blocking['active_blocks'])} active blocks, {str(blocking['candidate'])[:12]}'s from "
-                    f"{_iso(float(blocking['window_start']))}); it is neither bred nor graduated until a later window wins")
-        ranked = state["ranked"].get(ident)
+            lineage = (f"lineage: the latest forward window of its lineage {row['lineage']} loses ({float(blocking['log_growth'] or 0.0):+.6f} "
+                       f"over {int(blocking['active_blocks'])} active blocks, {str(blocking['candidate'])[:12]}'s from "
+                       f"{_iso(float(blocking['window_start']))}); it is neither bred nor graduated until a later window wins")
+            # The review of #306 (Sept 25, 2026): a mechanism child written after the blocking window's data began is the
+            # later window that can release its lineage, so it is asked for as a pending one ("pending" below; graduation
+            # still waits for it to win, which clears the block). Held "lineage" too, nothing of the lineage was ever scored
+            # again: an agent's submissions share its running program's lineage (`submit`, agent:<id>) and ranked behind
+            # every cell, so at T0 huang-hd8ff7c-8's two gate-passing submissions waited on its seed's -0.00476 over 7 active
+            # blocks for good, and 8 of the 11 blocked lineages held no archive cell after re-placement.
+            cut = math.ceil(float(row["evaluated"] or row["created"] or 0.0) / 3600.0) * 3600.0
+            if (row["origin"] not in RESERVED_ORIGINS or ranked is not None or cut <= float(blocking["window_start"])
+                    or self._forward_unavailable(row, cache) is not None):
+                return lineage
+        if ranked is not None and latest is not ranked and not latest["ok"]:
+            # The review of #306: the window that ranked is older than one that failed (a passer's window cut after its pass,
+            # which raised or timed out on the new data); the program is not born on the older one.
+            return (f"forward: its latest forward window failed ({str(latest['error'] or 'no result')[:160]}); the older window "
+                    "that ranked does not stand for a program that fails on the data since")
         forward = float(ranked["mean_log_growth"]) if ranked is not None else None
         if forward is not None and forward <= 0:
             return (f"forward: its forward window loses ({forward:+.6f} a block on data after its code was frozen); "
@@ -2480,7 +2535,6 @@ class Lab:
             unavailable = self._forward_unavailable(row, cache)
             if unavailable is None:
                 # F1: where the lab can build a window, graduation waits for a winning one of its own.
-                latest = state["latest"].get(ident)
                 floor = int(settings["forward_min_active_blocks"])
                 if latest is not None and not latest["ok"]:
                     return f"forward: its forward window failed ({str(latest['error'] or 'no result')[:160]})"
@@ -2489,6 +2543,9 @@ class Lab:
                             f"was frozen, fewer than the {floor} a window needs to rank")
                 have = ("no forward window yet" if latest is None
                         else f"{int(latest['active_blocks'])} active of {int(latest['blocks'])} blocks so far")
+                if blocking is not None:
+                    have += (f"; its lineage {row['lineage']} is blocked by {str(blocking['candidate'])[:12]}'s losing window, "
+                             "which a winning window of its own, on later data, releases")
                 return f"pending: it graduates on a winning forward window of its own ({floor} active blocks at least); {have}"
             mechanism = self._mechanism_forward(row, scores, cache)
             if mechanism is not None and mechanism[0] <= 0:
@@ -3136,41 +3193,78 @@ class Lab:
         24, 2026: `_residents`, whatever its search status but blocked) and the candidates graduation waits for
         (F1, Sept 25, 2026: `forward_wanted`) whose forward window is next, at most `limit`, in this order:
         1. the graduates waiting for seats (or held before their birth) never scored;
+        then, one place in `forward_resident_share` (the first of each four at a quarter) kept for the residents --
+        those never scored, then the others least recently scored once a block of their horizon has closed since
+        (the review of #306, Sept 25, 2026) -- and the other places in this order:
         2. the candidates graduation waits for, never scored (mechanism children first, as `forward_wanted` lists);
-        3. the residents never scored;
-        4. the waiting graduates and the candidates graduation waits for whose latest window does not rank yet
-           (too few active blocks, or failed): scored again every run until it does, least recently scored first;
-        5. the other never-scored (the elites);
-        6. everyone else, least recently scored (the table decides, so a restart resumes).
+        3. the candidates graduation waits for, and the waiting graduates whose window is younger than
+           `forward_pending_blocks` blocks, whose latest window does not rank yet (too few active blocks, or failed):
+           scored again once a block of their horizon has closed since their last score, least recently scored first;
+        4. the other never-scored (the elites);
+        5. everyone else, least recently scored (the table decides, so a restart resumes).
+        Whatever is left of either list fills the other's places.
         D1, Sept 24, 2026: the runs of Sept 23 at 22:11Z and 23:14Z scored 4 and 5 of their 48 due candidates
         (the rest skipped when the run's time was spent), in evaluation order, so the graduates whose forward
         score the seat market reads waited behind the archive's never-scored elites. F1: a candidate is graduated
         only on a winning window of its own, which takes a few runs to reach three active blocks, and at T0 162
         of the 247 windows ever scored had no active block: a pending one scored once and then only after every
-        never-scored elite would wait for days."""
+        never-scored elite would wait for days. The review of #306: in that order the waiting and wanted rows (126
+        on the T0 snapshot, 73 of its 79 passed or held graduates young) came before every resident each run, and
+        a run scores 8-12 (04:24Z: 12 of 48 in 266 s, 10 batches), so a resident's first window waited behind them
+        and none was ever scored again (as before F1: the 247 windows to T0 are 247 candidates, none scored twice);
+        a waiting graduate that never trades was scored every run for good, and a day desk's window every hour for
+        one new block a day."""
         ids = list(residents if residents is not None else self._residents())[:400]
         wanted = self.forward_wanted()
         marks, want = ",".join("?" for _ in ids), ",".join("?" for _ in wanted)
         # A graduate held before its birth (E1, Sept 24, 2026: `held`) is scored as a waiting one is: a forward
         # window is what releases it.
-        rows = self._q("SELECT c.id, c.niche, c.evaluated, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations WHERE state IN"
-                       f" ('passed', 'held')) AS waiting, c.id IN ({marks}) AS resident FROM candidates c LEFT JOIN forward f ON f.candidate = c.id"
-                       " WHERE (c.status='evaluated' AND (c.id IN (SELECT candidate FROM archive UNION SELECT candidate FROM graduations"
-                       f" WHERE state IN ('passed', 'held')) OR c.id IN ({want}))) OR (c.status IN ('queued', 'evaluated', 'failed')"
-                       f" AND c.id IN ({marks})) GROUP BY c.id", (*ids, *wanted, *ids))
+        rows = self._q("SELECT c.id, c.niche, c.horizon, c.evaluated, MAX(f.at) AS scored, c.id IN (SELECT candidate FROM graduations"
+                       f" WHERE state IN ('passed', 'held')) AS waiting, c.id IN ({marks}) AS resident FROM candidates c LEFT JOIN forward f"
+                       " ON f.candidate = c.id WHERE (c.status='evaluated' AND (c.id IN (SELECT candidate FROM archive UNION SELECT candidate"
+                       f" FROM graduations WHERE state IN ('passed', 'held')) OR c.id IN ({want}))) OR (c.status IN ('queued', 'evaluated',"
+                       f" 'failed') AND c.id IN ({marks})) GROUP BY c.id", (*ids, *wanted, *ids))
         order = {ident: n for n, ident in enumerate(wanted)}
+        settings = self.settings
         latest = self._forward_state()["latest"]
-        floor = int(self.settings["forward_min_active_blocks"])
+        floor, pending = int(settings["forward_min_active_blocks"]), int(settings["forward_pending_blocks"])
+        now = self._now()
+
+        def block(row: sqlite3.Row) -> float:  # a block of its horizon (`evaluator.block_key`)
+            return 86400.0 if str(row["horizon"] or "") == "day" else 3600.0
+
+        def due(row: sqlite3.Row) -> bool:  # never scored, or a block of its horizon closed since its last score
+            return row["scored"] is None or now - float(row["scored"]) >= block(row)
 
         def tier(row: sqlite3.Row) -> tuple[Any, ...]:
             never, asked = row["scored"] is None, row["id"] in order
             window = latest.get(row["id"])
             young = window is not None and (not window["ok"] or int(window["active_blocks"]) < floor)
-            rank = (0 if never and row["waiting"] else 1 if never and asked else 2 if never and row["resident"]
-                    else 3 if young and (row["waiting"] or asked) else 4 if never else 5)
+            # A waiting graduate's window while it can still rank: under `forward_pending_blocks` blocks (as `_hold` counts
+            # them; a desk that keeps hours has fewer blocks than hours), or, failed, for as many blocks' time.
+            growing = asked or (bool(row["waiting"]) and window is not None
+                                and (int(window["blocks"]) < pending if window["ok"] else now - float(window["window_start"]) < pending * block(row)))
+            rank = (0 if never and row["waiting"] else 1 if never and asked else 2 if young and growing and due(row) else 3 if never else 4)
             return rank, order.get(row["id"], len(order)) if rank == 1 else 0, float(row["scored"] or 0.0), float(row["evaluated"] or 0.0)
 
-        picked = [r["id"] for r in sorted(rows, key=tier) if self._desk(r["niche"]) is not None][: max(0, int(limit))]
+        searched = [r for r in rows if self._desk(r["niche"]) is not None]
+        first = [r for r in searched if r["scored"] is None and r["waiting"]]
+        kept = sorted((r for r in searched if r["resident"] and not (r["scored"] is None and r["waiting"]) and due(r)),
+                      key=lambda r: (r["scored"] is not None, float(r["scored"] or 0.0), float(r["evaluated"] or 0.0)))
+        taken = {r["id"] for r in first} | {r["id"] for r in kept}
+        rest = sorted((r for r in searched if r["id"] not in taken), key=tier)
+        share = min(1.0, max(0.0, float(settings["forward_resident_share"])))
+        merged, k, n, turn = list(first), 0, 0, 0
+        while k < len(kept) or n < len(rest):
+            turn += 1
+            resident_turn = math.ceil(round(turn * share, 9)) > math.ceil(round((turn - 1) * share, 9))
+            if k < len(kept) and (resident_turn or n >= len(rest)):
+                merged.append(kept[k])
+                k += 1
+            else:
+                merged.append(rest[n])
+                n += 1
+        picked = [r["id"] for r in merged][: max(0, int(limit))]
         if not picked:
             return []
         full = {r["id"]: r for r in self._q(f"SELECT * FROM candidates WHERE id IN ({','.join('?' for _ in picked)})", picked)}
@@ -3439,7 +3533,7 @@ class Lab:
         - `scores`: `forward_score` of each candidate that has one (its latest window, ranked);
         - `growth`: each lineage's pooled forward growth per block over its candidates' latest windows (ok), only
           with `forward_min_active_blocks` active blocks pooled (`lineage_forward`'s pool): what places it
-          (`forward_rank`);
+          (`forward_rank`); a blocked lineage's at most zero, so it places as a losing one;
         - `blocked`: each lineage the forward rule blocks, with the window that does (`lineage_block`).
         Cached until the table changes (its rows, newest time and totals) or the dials do. The table grows by the
         forward runs' rows (226 on the 24 h to T0; a few thousand a day at most), so the pass is milliseconds."""
@@ -3472,6 +3566,10 @@ class Lab:
             stop = lineage_block(windows, min_active=floor, block_active=block)
             if stop is not None:
                 blocked[lineage] = stop
+                # The review of #306 (Sept 25, 2026): a blocked lineage places as a losing one whatever its pool. At T0
+                # agent:huang-h51fdd3-4 pooled +0.00346 a block on one active block of +0.149 while 0b15664168 lost -0.0317
+                # over 8, and re-placement gave it six kalshi-crypto-15m cells, where it weighs 0 and search stopped.
+                growth[lineage] = min(growth.get(lineage, 0.0), 0.0)
         state = {"latest": latest, "ranked": ranked, "scores": scores, "growth": growth, "blocked": blocked}
         self._fstate = (key, state)
         return state
