@@ -261,6 +261,14 @@ ORDER BY seq DESC LIMIT 20`.
   line); that day's Deploys 2-7 changed no money rule and needed no ratify.
 - **Roll back by hand (on the box):**
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
+- **Never roll back past Deploy G while `alpaca-paper` holds a structure** (the options desk's Wave 2, Sept 25,
+  2026). Deploy G ships `league/config.json` `options_structures.practice_account` false; it is turned on only by a
+  later release that changes nothing but that key, so a rollback of that release (the watch's included) lands on
+  G's code with the switch off, and G moves each structure agent back to the options shadow book once it is flat.
+  A release older than G cannot fold the account's legs into the structures (alpaca-paper then freezes for every
+  agent on it, for good), and its wind-down sells a held structure as its FIRST LEG alone, which for a debit
+  vertical leaves a naked short. To undo the switch, release the key false; before any rollback past G, check that
+  `alpaca-paper` holds no structure (no holding on the book whose position key contains `|`).
 - **The gateway.** Deploy with
   `cd gateway && node --test test/*.test.mjs && npx --yes wrangler@4 deploy --config wrangler.jsonc`;
   roll it back with `npx wrangler rollback`. After a deploy that touches the frontier month, read
