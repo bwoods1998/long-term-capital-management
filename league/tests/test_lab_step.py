@@ -320,6 +320,9 @@ class ARestart(StepCase):
         self.assertEqual(self.lab._tape_index, {})  # older than a search tape is kept: not ready, not kept
 
     def test_after_a_restart_rows_on_tapes_the_house_holds_are_ready_and_the_step_evaluates_first(self):
+        # E1's half (Sept 24, 2026): queue order and the largest group alternate with the written programs' turns. F1's
+        # game file keeps a third for the parameter children (two turns in three the written programs'; test_lab_forward_first).
+        self.house.game["lab"]["reserved_share"] = 0.5
         self.history(["BTC/USD"], "5Min", "2025-11-01", "2025-11-14")
         tape_id, tape = self.house.tape_for(self.needs)
         self.assertTrue(tape["steps"] and tape["source"]["window"])  # a development tape from the store

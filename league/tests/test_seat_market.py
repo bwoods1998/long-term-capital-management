@@ -57,6 +57,7 @@ class GraduatesFirst(LabCase):
         """As test_lab's graduation tests: queue Luna children and evaluate them into the archive."""
         ids = [self.queue(code, origin="luna") for code in codes]
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         return ids
 
     def test_no_house_mutation_is_staked_while_a_graduate_waits(self):

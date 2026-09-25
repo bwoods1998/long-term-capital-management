@@ -37,9 +37,12 @@ The work flows through these stages:
    off, the old ladder decides again: the screen, then the micro stake with the audit after it.
 5. **The Alpha Lab** (since Sept 23, 2026). Off the tick, the lab searches strategy programs in
    batches on its own box and sends the fittest of each cell through the House's replay and the
-   sealed holdout; survivors are born on paper. Since Sept 24, 2026 (E1) half of each batch and
-   half of its tape builds go to the programs someone wrote, and a graduate needs a code change
-   beyond its parameters or a forward score above its desk's living median (see the lab below).
+   sealed holdout; survivors are born on paper. Since Sept 24, 2026 (E1) a graduate needs a code
+   change beyond its parameters or a forward score above its desk's living median. Since Sept 25,
+   2026 (F1, forward first) the archive is placed by each lineage's forward record where it has one,
+   a candidate goes to the House's replay only on a winning forward window of its own, a lineage
+   whose latest window loses over six active blocks is neither bred nor graduated, and two thirds
+   of each batch and of its tape builds go to the programs someone wrote (see the lab below).
 6. **Feedback.** Results and repairs feed the next round.
 
 ## Pause, resume, stop
@@ -355,7 +358,15 @@ ORDER BY seq DESC LIMIT 20`.
     2026): `held`, what the last graduation pass held back (`at`, `counts` by reason: `forward`, a
     losing forward window, its own or, with none, its mechanism's on average; `idle`, a desk offered markets for 48 h with no intent and no feed it
     asked for since; `nudge`, the same program beyond PARAMS as a living one on its desk without a
-    forward score above the desk's median), or null.
+    forward score above the desk's median), or null. Since F1 (Sept 25, 2026) `held` also counts
+    `pending` (no winning forward window of its own yet: the usual state of most of the archive's
+    programs, and what the forward runs are asked to score first) and `lineage` (its lineage's latest
+    window loses over `lineage_block_active_blocks`, 6, active blocks); `forward` also counts a
+    window that failed, or one of `forward_pending_blocks` (24) blocks with fewer than three active.
+    `forward` gains `lineages` (`with_record`, `winning`, `blocked`), `wanted` (the candidates the
+    graduation pass asked the forward runs for), `unavailable` (tape keys no window can be built for,
+    for a day) and `placement` (the last re-placement of the archive: `cells`, `moved`,
+    `by_forward_record`).
   - `jev`: gate totals, the sensor's spend against its caps, triage groups and exposure groups.
   - `wakes_skipped` (Sept 24, 2026, the wake skip): the stock and option wakes not run while the
     regular session was shut (`count`, `by_desk`, `since`, `last_at`; kept in `house.json`). Such an
@@ -690,7 +701,10 @@ ORDER BY seq DESC LIMIT 20`.
     - `candidates`: every program the lab has seen, with its `origin` (`seed`, `param`, `luna`,
       `sol`, `agent`), `author`, `lineage`, `status` (`queued`, `evaluated`, `failed`, `invalid`,
       `blocked`), `fitness`, `trades`, `trades_per_day`, `corr` and `cell`;
-    - `archive`: one row per cell, the elite and its fitness;
+    - `archive`: one row per cell, the elite and its fitness (its own search fitness). Since F1
+      (Sept 25, 2026) a cell is placed by its lineage's forward record where the lineage has one
+      (`lab.forward_rank`), and every forward run that scores re-places the whole archive
+      (`replace_archive`), so an elite can change without a new program being evaluated;
     - `batches`: each batch's tape, candidates, how many ran, were eligible, cleared the gate and
       were archived, its seconds and its estimated Sail cost;
     - `calls`: each Luna and Sol call's cost, programs written and programs refused;
@@ -708,7 +722,10 @@ ORDER BY seq DESC LIMIT 20`.
       forward record; the archive's `fitness` is never rewritten by it. `SELECT candidate,
       active_blocks, mean_log_growth FROM forward f WHERE at = (SELECT MAX(at) FROM forward WHERE
       candidate = f.candidate) ORDER BY mean_log_growth DESC` is the forward leaderboard;
-    - `meta`: cursors and stamps (`forward_at`: the last completed forward run). Since D1 (Sept 24,
+    - `meta`: cursors and stamps (`forward_at`: the last completed forward run; since F1, Sept 25,
+      2026, `forward_wanted`, the JSON list of candidates graduation waits for a window of, and
+      `forward_unavailable`, tape key -> the refusal and when, for the NEEDS no window can be built
+      for; such a candidate graduates only with a code change beyond PARAMS). Since D1 (Sept 24,
       2026) also the step's failure record (`failures_in_a_row`, `failures_first_at`,
       `last_failure` with its phase and error, `failing_since` once escalated) and `tape_index`:
       a JSON object, tape key -> `at` (built), `ident` (the lab's tape id, as `batches.tape_id`
@@ -747,13 +764,18 @@ ORDER BY seq DESC LIMIT 20`.
     `health.json` `lab` (`refusal`, `closed_since`, `closed_minutes`, `llm`, `waiting_seat` with
     up to eight graduates, each with its `forward` score for the seat market, `queued`,
     `born_total`, `forward`) says why. Since E1 (Sept 24, 2026) the rows also carry `reserved`
-    (`share`: the share of each batch and of the tape builds kept for the programs someone wrote,
-    `game.json` `lab.reserved_share` held to `lab_bounds`; `evaluated`: how many of theirs the hour
-    evaluated) and `held` (as in `health.json`). The batch turns (`batch_turn`): with the half,
-    queue order, written programs, largest group, written programs, and again; a step builds at
-    most `max_tapes_per_step` (4) tapes, one a turn. What the lab is searching for, and why it
-    graduates less than before, is in `held`: a desk with no ranked resident needs a graduate's own
-    winning forward window for a parameter nudge, and nudges wait for one.
+    (`share`: `game.json` `lab.reserved_share` held to `lab_bounds`, since F1, Sept 25, 2026, the
+    share of each batch and of the tape builds KEPT for the parameter children; `mechanism_share`,
+    the rest, which the programs someone wrote take first; `evaluated`: how many of theirs the hour
+    evaluated) and `held` (as in `health.json`). The batch turns (`batch_turn`): at 0.33, written
+    programs, written programs, queue order, written programs, written programs, largest group, and
+    again; a step builds at most `max_tapes_per_step` (4) tapes, one a turn. What the lab is
+    searching for, and why it graduates less than before, is in `held`: since F1 every graduate
+    needs a winning forward window of its own (three active blocks on data after its code was
+    frozen: hours on an hourly desk, days on a daily one), so `pending` is most of the archive and
+    graduations follow the forward runs (`forward_box_seconds` 180 an hour, the pending candidates
+    first). To see what F1 is waiting for: `SELECT value FROM meta WHERE key='forward_wanted'`, then
+    those candidates' latest `forward` rows.
   - **The foundry's brief** (`foundry-2026-09-24.1`, E2): cards name the recorded feeds of their desk
     and state their `fee` and `edge_needed` (a card without them is refused before its replay, and
     says so in the call's `merton.pass` `refused`); `game.json` `hypotheses.fast_desks` is the

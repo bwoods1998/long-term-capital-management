@@ -176,6 +176,19 @@
     "max_births_per_hour": [
       1,
       12
+    ],
+    "_about_sept25": "Sept 25, 2026 (the forward-first run, F1): the forward windows' own dials, bounded like the rest. reserved_share keeps its bounds and is now the parameter children's share (the mechanism children take the rest first).",
+    "forward_box_seconds": [
+      60,
+      600
+    ],
+    "forward_candidates_per_run": [
+      16,
+      200
+    ],
+    "lineage_block_active_blocks": [
+      3,
+      24
     ]
   },
   "merton": {
@@ -292,7 +305,7 @@
     "budget_usd_per_hour": "0.75",
     "box_usd_per_hour": "0.20",
     "batch_size": 32,
-    "reserved_share": 0.5,
+    "reserved_share": 0.33,
     "param_children": 48,
     "llm_children": 6,
     "leap_every": 10,
@@ -313,6 +326,10 @@
       "alpaca-crypto-majors",
       "alpaca-open"
     ],
-    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E1: the lab as a search). Measured at T0: 2,137 of the lab's 3,641 candidates were parameter mutants and 16 of its 18 born graduates were nudges (an impulse floor 0.0006 -> 0.000686); after Deploy A the lab ran 63 batches of 84 candidates in an hour (1.3 a batch: 65 of the 69 Luna children queued at T4 asked for NEEDS of their own, a tape each, and a step builds four). reserved_share (0.5, lab_bounds 0.33-0.75; was a third): the share of each batch reserved for the programs someone wrote (agent submissions, Luna, Sol) where they wait, and the share of turns whose tape is theirs, the one with the most rows first; the other turns alternate between the queue's oldest row and the largest group of any origin, so a step's builds fill batches (league/lab.py batch_turn). A graduate needs a code change beyond PARAMS relative to every living program of its desk or a forward score above the desk's living median (zero while no resident has one), never graduates on a losing forward window, and is never born onto a desk that was offered markets for idle_desk_hours (48) with no intent unless a feed it asked for arrived since (Lab._hold). Breeding weighs a parent's own forward window and its family's record in the mechanism ledger; a lineage whose family is at its measured capacity is not searched; Sol's leaps go to deep_desks first."
+    "_about_sept24": "Sept 24, 2026 (the close-the-gaps run, E1: the lab as a search). Measured at T0: 2,137 of the lab's 3,641 candidates were parameter mutants and 16 of its 18 born graduates were nudges (an impulse floor 0.0006 -> 0.000686); after Deploy A the lab ran 63 batches of 84 candidates in an hour (1.3 a batch: 65 of the 69 Luna children queued at T4 asked for NEEDS of their own, a tape each, and a step builds four). reserved_share (0.5, lab_bounds 0.33-0.75; was a third): the share of each batch reserved for the programs someone wrote (agent submissions, Luna, Sol) where they wait, and the share of turns whose tape is theirs, the one with the most rows first; the other turns alternate between the queue's oldest row and the largest group of any origin, so a step's builds fill batches (league/lab.py batch_turn). A graduate needs a code change beyond PARAMS relative to every living program of its desk or a forward score above the desk's living median (zero while no resident has one), never graduates on a losing forward window, and is never born onto a desk that was offered markets for idle_desk_hours (48) with no intent unless a feed it asked for arrived since (Lab._hold). Breeding weighs a parent's own forward window and its family's record in the mechanism ledger; a lineage whose family is at its measured capacity is not searched; Sol's leaps go to deep_desks first.",
+    "forward_box_seconds": 180,
+    "forward_candidates_per_run": 96,
+    "lineage_block_active_blocks": 6,
+    "_about_sept25": "Sept 25, 2026 (the forward-first run, F1: forward growth is the fitness). Measured at T0 (04:21Z): the archive placed every cell by search fitness; 273 candidates went to the House's replay in 24 h (446 lab.graduate rows, 17% written by Luna, Sol or an agent), and only 2 of them had a winning forward window of their own when they went. Now a lineage whose candidates' latest windows pool forward_min_active_blocks (3) active blocks is placed and ordered by its forward growth per block (league/lab.py forward_rank; search fitness places only lineages without a record, and only a program that passed the gate is placed by its lineage's record); the archive is re-placed after every forward run (replace_archive: 44 of the 83 cells move on the T0 snapshot, and the elites of winning lineages go from 15 to 46). A lineage whose latest window loses over lineage_block_active_blocks (6, bounds 3-24) active blocks is neither bred nor graduated until a later window wins (11 lineages at T0). A candidate graduates only on a winning forward window of its own where the lab can build one (held \"pending\" until then, and the forward runs score the pending ones first, mechanism children first), or with a code change beyond PARAMS where it cannot. reserved_share (0.33, lab_bounds 0.33-0.75; E1 read it as the written programs' share, 0.5) is kept for the parameter children: the mechanism children take two thirds of the turns and of each batch first. The forward runs get forward_box_seconds 180 (was 90: at T0 most runs spent their 90 s after 5-20 of 48 due) and forward_candidates_per_run 96 (was 48; a due candidate with no forward data yet costs no box time)."
   }
 }
