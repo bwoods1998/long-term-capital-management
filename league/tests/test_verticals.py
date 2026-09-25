@@ -252,52 +252,6 @@ class TheOrderShape(unittest.TestCase):
         self.assertEqual(body["limit_price"], "-0.60")  # Alpaca's documented sign: a credit is negative (unverified)
 
 
-class OnePosition(unittest.TestCase):
-    """Sept 25, 2026: a spread is held as ONE long option-class instrument priced at its net."""
-
-    def vertical(self, long=C13, short=C14, **kw):
-        return parse_vertical(VENUE, spec(long, short, **kw))
-
-    def test_the_instrument_names_both_legs_and_keys_apart_from_the_long_leg(self):
-        inst = verticals.spread_instrument(self.vertical(), "options-shadow")
-        self.assertEqual((inst.asset_class, inst.symbol, inst.venue, inst.expiry, inst.right), ("option", "F", "options-shadow", "2026-10-16", "call"))
-        self.assertEqual((inst.strike, inst.multiplier, inst.market_id), (D("13"), D("100"), f"{C13}/{C14}"))
-        single = instrument_for("options-shadow", {"occ": C13})
-        self.assertNotEqual(inst.key, single.key)
-        self.assertTrue(verticals.is_spread(inst))
-        self.assertFalse(verticals.is_spread(single))
-        wider = verticals.spread_instrument(self.vertical(C13, C15), "options-shadow")
-        self.assertNotEqual(inst.key, wider.key)
-
-    def test_legs_and_vertical_round_trip(self):
-        inst = verticals.spread_instrument(self.vertical(P14, P13), "options-shadow")
-        long, short = verticals.legs_of(inst)
-        self.assertEqual((alpaca_symbol(long), alpaca_symbol(short)), (P14, P13))
-        self.assertEqual(long.venue, "options-shadow")
-        closing = verticals.vertical_of(inst, quantity=2, net="0.41", side="sell", reason="take profit")
-        self.assertEqual((closing.side, closing.quantity, closing.net_debit, closing.width), ("sell", D(2), D("0.41"), D(1)))
-
-    def test_a_reversed_name_can_never_be_traded(self):
-        inst = verticals.spread_instrument(self.vertical(), "options-shadow")
-        reversed_ = type(inst)("option", "F", "options-shadow", multiplier=100, expiry=inst.expiry, strike=D(14), right="call", market_id=f"{C14}/{C13}")
-        self.assertTrue(verticals.is_spread(reversed_))
-        with self.assertRaisesRegex(ValueError, "credit spread"):
-            verticals.vertical_of(reversed_, quantity=1, net="0.30", side="buy")
-        with self.assertRaises(ValueError):
-            verticals.legs_of(instrument_for("options-shadow", {"occ": C13}))
-
-    def test_the_touch_is_what_both_legs_trade_at_at_once(self):
-        self.assertEqual(verticals.spread_quote("0.80", "0.85", "0.40", "0.44"), (D("0.36"), D("0.45")))
-        self.assertEqual(verticals.spread_quote("0.10", "0.85", "0.40", "0.44"), (D(0), D("0.45")))  # never under zero
-        self.assertEqual(verticals.spread_quote(None, "0.85", "0.40", None), (None, D("0.45")))
-
-    def test_intrinsic_is_between_zero_and_the_width(self):
-        calls = verticals.spread_instrument(self.vertical(), "options-shadow")
-        self.assertEqual([verticals.intrinsic(calls, x) for x in ("12", "13.40", "20")], [D(0), D("0.40"), D(1)])
-        puts = verticals.spread_instrument(self.vertical(P14, P13), "options-shadow")
-        self.assertEqual([verticals.intrinsic(puts, x) for x in ("15", "13.75", "10")], [D(0), D("0.25"), D(1)])
-
-
 class Boundaries(unittest.TestCase):
     def test_the_module_imports_no_house_book_or_gateway_code(self):
         source = Path(verticals.__file__).read_text(encoding="utf-8")

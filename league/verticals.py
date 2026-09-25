@@ -17,19 +17,8 @@ a debit vertical can ever lose provided both legs are closed together and before
 loss: the ORDER cap bounds one opening order, the POSITION cap the spreads held plus this one.
 Neither is the gross of the two legs' premiums, and a close is never metered.
 
-**How the House holds one (Sept 25, 2026): one position, never two legs.** A spread is booked as
-ONE option-class `Instrument` (`spread_instrument`): the underlying, the long leg's expiry, right and
-strike, a multiplier of 100, and a `market_id` naming both legs' OCC codes, `LONG/SHORT`. Its price
-is the NET a share: the long leg's price less the short's. So every rule the book already keeps for
-a long option holds of the whole spread with nothing new: what it costs to open is its maximum loss
-(the order and position caps meter it exactly), it can only be bought to open and sold to close (no
-short position exists anywhere, so no negative leg can freeze a book), its mark is its bid, and a
-sale that leaves it flat is ONE closed trade for the evaluator, the allocator and the family record.
-`spread_quote` is its touch: bid = long bid - short ask, ask = long ask - short bid, the prices at
-which both legs could trade at once. `legs_of` recovers the two contracts; `vertical_of` the whole
-`DebitVertical` for an order on a held spread. On the practice side the House's own options shadow
-book (`league/options_shadow.py`) is the only venue that ever sees one; the shared practice account
-never does (a multi-leg order there would leave a sold leg that freezes every Alpaca practice agent).
+**How the House holds one:** as a structure (`league/structures.py`, Sept 25, 2026): ONE long
+instrument priced at its net, never two legs. This module keeps the design's vertical-only pieces.
 
 `mleg_body` is the multi-leg order Alpaca documents, for the real route (the plan's G1-G3), and
 `count_trades` folds per-leg venue fills into closed spreads: the reference the real book's leg
@@ -38,7 +27,6 @@ adoption is tested against. Alpaca's multi-leg shapes stay UNVERIFIED until the 
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
@@ -225,68 +213,6 @@ def fits_caps(vertical: DebitVertical, order_cap: Decimal, position_cap: Decimal
     return cap_refusal(vertical, order_cap, position_cap, held_max_loss=held_max_loss) is None
 
 
-# ------------------------------------------------------------------------- one position, one price
-#: `market_id` of a spread held as one position: the long leg's OCC code, a slash, the short leg's.
-SPREAD_ID = re.compile(r"^([A-Z]{1,6}[0-9]{6}[CP][0-9]{8})/([A-Z]{1,6}[0-9]{6}[CP][0-9]{8})$")
-
-
-def spread_id(vertical: DebitVertical) -> str:
-    """The `market_id` that names this spread's two contracts, `LONG/SHORT` in OCC codes."""
-    return f"{alpaca_symbol(vertical.long)}/{alpaca_symbol(vertical.short)}"
-
-
-def spread_instrument(vertical: DebitVertical, venue: str | None = None) -> Instrument:
-    """The ONE instrument a book holds for this spread (the module's docstring says why): an option
-    on the underlying at the long leg's expiry, strike and right, x100, named by both legs. Priced
-    at the net a share. `venue` is the book's venue (the options shadow book's, or later the real
-    account's); by default the legs' own."""
-    return Instrument("option", vertical.underlying, venue or vertical.venue, multiplier=vertical.multiplier,
-                      expiry=vertical.expiry, strike=vertical.long.strike, right=vertical.right, market_id=spread_id(vertical))
-
-
-def is_spread(instrument: Any) -> bool:
-    """Is this instrument a spread held as one position (`spread_instrument`)?"""
-    return (getattr(instrument, "asset_class", None) == "option"
-            and bool(SPREAD_ID.match(str(getattr(instrument, "market_id", None) or ""))))
-
-
-def legs_of(instrument: Instrument) -> tuple[Instrument, Instrument]:
-    """The (long, short) contracts of a spread instrument, on the instrument's venue."""
-    found = SPREAD_ID.match(str(instrument.market_id or ""))
-    if instrument.asset_class != "option" or not found:
-        raise ValueError(f"not a spread held as one position: {instrument.key}")
-    return instrument_for(instrument.venue, {"occ": found.group(1)}), instrument_for(instrument.venue, {"occ": found.group(2)})
-
-
-def vertical_of(instrument: Instrument, *, quantity: Any, net: Any, side: str, reason: str = "") -> DebitVertical:
-    """The `DebitVertical` for an order on a spread instrument: `side` buy opens more, sell closes;
-    `net` the limit a share. Its invariants hold again (the long leg the dearer), so a spread
-    instrument whose name was reversed can never be traded."""
-    long, short = legs_of(instrument)
-    return DebitVertical(long=long, short=short, quantity=money(quantity), net_debit=money(net), side=side, reason=reason)
-
-
-def spread_quote(long_bid: Any, long_ask: Any, short_bid: Any, short_ask: Any) -> tuple[Decimal | None, Decimal | None]:
-    """The spread's touch from its legs' touches, a share: (bid, ask). The bid is what closing it
-    gets when both legs trade at once (sell the long at its bid, buy the short back at its ask); the
-    ask is what opening it costs (buy the long at its ask, sell the short at its bid). A side with a
-    leg's price missing is None; a bid under zero is zero (the spread is never worth less)."""
-    def _d(value: Any) -> Decimal | None:
-        return None if value is None else money(value)
-    lb, la, sb, sa = _d(long_bid), _d(long_ask), _d(short_bid), _d(short_ask)
-    bid = None if lb is None or sa is None else max(ZERO, lb - sa)
-    ask = None if la is None or sb is None else la - sb
-    return bid, ask
-
-
-def intrinsic(instrument: Instrument, spot: Any) -> Decimal:
-    """A spread's value a share at expiry with the underlying at `spot`: between zero and the width."""
-    long, short = legs_of(instrument)
-    width = abs(long.strike - short.strike)
-    gain = (money(spot) - long.strike) if long.right == "call" else (long.strike - money(spot))
-    return min(width, max(ZERO, gain))
-
-
 # ------------------------------------------------------------------------------------- the order
 def mleg_body(vertical: DebitVertical, *, client_order_id: str) -> dict[str, Any]:
     """The multi-leg order Alpaca documents for `POST /v2/orders`, as the adapter would send it: no
@@ -354,5 +280,4 @@ def count_trades(fills: Iterable[Any]) -> int:
     return trades
 
 
-__all__ = ["DebitVertical", "SPREADS", "ROLES", "SPREAD_ID", "parse_vertical", "max_loss", "max_gain", "cap_refusal", "fits_caps",
-           "spread_id", "spread_instrument", "is_spread", "legs_of", "vertical_of", "spread_quote", "intrinsic", "mleg_body", "count_trades"]
+__all__ = ["DebitVertical", "SPREADS", "ROLES", "parse_vertical", "max_loss", "max_gain", "cap_refusal", "fits_caps", "mleg_body", "count_trades"]

@@ -173,7 +173,11 @@ def position_key(instrument: Instrument) -> str:
         return f"crypto:{symbol.replace('/', '').replace('-', '')}:{instrument.venue}"
     if instrument.asset_class == "option":
         strike = format(money(instrument.strike).normalize(), "f")
-        return f"option:{symbol}:{instrument.venue}:{instrument.expiry}:{strike}:{instrument.right}"
+        key = f"option:{symbol}:{instrument.venue}:{instrument.expiry}:{strike}:{instrument.right}"
+        # A structure held as one position (`league/structures.py`, Sept 25, 2026) is named by its
+        # type and legs: two structures sharing a first leg, or a structure and that leg's contract
+        # alone, are different positions. A single contract carries no `market_id`, so its key is as it was.
+        return f"{key}:{instrument.market_id}" if instrument.market_id else key
     if instrument.asset_class == "event":
         ticker = (instrument.market_id or symbol).upper()
         return f"event:{ticker}:{instrument.venue}:{instrument.right or 'yes'}"
