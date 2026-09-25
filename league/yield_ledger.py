@@ -315,7 +315,9 @@ def consult_outcomes(ledger: Any, *, now: float, settings: Mapping[str, Any]) ->
                     verdict = {"productive": False, "by": None, "sessions": done, "expired": True}
                 if verdict is not None:
                     out.append({"id": f"consult-outcome:{consult.seq}:sessions", "agent": agent,
-                                "payload": {**base, "stage": "sessions", **verdict, "doubles_next_price": not verdict["productive"]}})
+                                # An expired consult is not judged by `Merton.consult_price_multiple`: it doubles nothing.
+                                "payload": {**base, "stage": "sessions", **verdict,
+                                            "doubles_next_price": not verdict["productive"] and not verdict.get("expired")}})
             if (consult.seq, "blocks") not in judged:
                 before, after = consult_blocks(ledger, consult, n=n, rows=blocks)
                 partial = len(after) < n

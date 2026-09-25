@@ -99,6 +99,41 @@ class ConsultVerdicts(LedgerCase):
         self.session(agent="someone-else")
         self.assertEqual(merton.consult_price_multiple("haghani-63"), (1, 0), "another agent's consults are its own")
 
+    def test_the_multiple_decays_with_time_and_an_expired_consult_doubles_nothing(self):
+        """Review of #311: an agent whose balance fell under min x multiple could never buy the productive
+        consult that resets the price, and stayed at 8x until its consults left the newest 3,000
+        `merton.pass` rows (about two weeks). Only consults of the last `days` (7) count now. A consult
+        judged only because three days passed (`expired`) never moved the price, and its row says so."""
+        merton = self.merton(lift={"consult_max_multiple": 8})
+        for _ in range(3):
+            self.consult()
+            self.session()
+            self.session()
+        self.assertEqual(merton.consult_price_multiple("haghani-63"), (8, 3))
+        self.clock.advance(8 * 86400)
+        self.assertEqual(merton.consult_price_multiple("haghani-63"), (1, 0), "a week without a consult clears the multiple")
+        self.consult(agent="stale-desk")
+        self.session(agent="stale-desk")
+        self.clock.advance(3 * 86400 + 60)
+        from league.yield_ledger import consult_outcomes
+        rows = [r["payload"] for r in consult_outcomes(self.ledger, now=self.clock(), settings={**merton.lift})
+                if r["agent"] == "stale-desk" and r["payload"]["stage"] == "sessions"]
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["expired"])
+        self.assertFalse(rows[0]["doubles_next_price"], "consult_price_multiple does not judge an expired consult")
+        self.assertEqual(merton.consult_price_multiple("stale-desk"), (1, 0))
+
+    def test_a_restart_does_not_record_the_consultants_pause_again(self):
+        """Review of #311: the pause state was seeded from the ledger for the five scheduled roles only,
+        so every House restart (26 in the 24 hours to T0) wrote another 'merton pause' row for the
+        consultant while the floor's real P&L stayed at or under zero."""
+        self.ledger.append("ops.started", {"release": "test"})
+        self.ledger.append("book.settle", {"book": "kalshi", "pnl": "-1.00", "real_money": True}, agent="x")
+        for _ in range(3):  # three House processes in a row
+            self.assertTrue(self.merton(paused_until_profit=["consultant"]).consult_paused())
+        rows = [e.payload for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == "merton pause"]
+        self.assertEqual(len(rows), 1)
+
     def test_the_consultant_can_be_paused_until_profit(self):
         self.ledger.append("ops.started", {"release": "test"})
         self.ledger.append("book.settle", {"book": "kalshi", "pnl": "-1.00", "real_money": True}, agent="x")
