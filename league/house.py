@@ -43,6 +43,7 @@ from .agents import Agent, Registry, code_sha, niche_of
 from .admissions import Admissions
 from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, shards as shards_module
 from . import parameters
+from . import kalshi_founders
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
@@ -1159,19 +1160,23 @@ class House:
                             "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)})
         return out
 
-    def found(self, names: list[str] | None = None) -> list[Agent]:
+    def found(self, names: list[str] | None = None, *, described: Mapping[str, Any] | None = None) -> list[Agent]:
         """Seed the first population (idempotent: a founder already born is not born again).
 
         Founders of one desk share a name and number themselves: the six of the Meriwether desk are
         `meriwether`, `meriwether-2` ... `meriwether-6`. So what says a founder is already born is
-        its `key` (the role it plays on that desk), not the name it ends up with."""
+        its `key` (the role it plays on that desk), not the name it ends up with.
+
+        `described`: founder key -> its NEEDS probe's run, read by a caller that holds the lifecycle lock and must
+        not call Sail under it (`kalshi_founders.seat`, K1)."""
         born = []
         existing = {a.founder for a in self.registry.agents.values()}
         wanted = [f for f in self.founders() if (names is None or names_match(f, names)) and f["key"] not in existing]
         for index, seed in enumerate(wanted):
             # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
             agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"],
-                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1)
+                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1,
+                               described=(described or {}).get(seed["key"]))
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
@@ -7650,6 +7655,7 @@ class House:
         if len(self.registry.living()) < int(rules["min_population"]):
             self.found()
         self.enroll()
+        kalshi_founders.seat(self)  # K1: one flagged founder row (`seat_full_league`) a pass, into a full league too; never raises
         self._refill(rules)
 
     def _seal_applies(self, agent: Agent) -> bool:
