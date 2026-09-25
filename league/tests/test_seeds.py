@@ -174,7 +174,7 @@ class RegistryTests(unittest.TestCase):
             self.assertGreater(len(row["why"]), 40)
         # A file named by more than one row is one program pointed at several leagues, each its own family.
         shared = [row for row in SEEDS if sum(1 for other in SEEDS if other["file"] == row["file"]) > 1]
-        self.assertEqual({row["file"] for row in shared}, {"sports_consensus.py"})
+        self.assertEqual({row["file"] for row in shared}, {"sports_consensus.py", "weather_ensemble.py"})
         self.assertEqual(len({row["family"] for row in shared}), len(shared))
 
     def test_families_are_the_agreed_ones(self):
@@ -205,7 +205,7 @@ class RegistryTests(unittest.TestCase):
         for row in founding_seeds():
             with self.subTest(row["name"]):
                 lines = row["code"].splitlines()
-                if row["name"] in original:
+                if row["name"] in FOUNDING:
                     self.assertLessEqual(len(lines), 160)
                     self.assertTrue(lines[0].startswith(f"# {row['name']}:"), "the header names the seed")
                 else:  # a later program seated as several founders names the program its rows share

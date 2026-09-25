@@ -51,6 +51,11 @@ class FounderSeats(HouseCase):
         self.rules = self.house.game["economy"]
 
     def flag_rows(self, house):
+        # The real rows of niches.json carry the weekend's flagged founders (K1's sports and K3's weather founders, whose
+        # shape `test_niches` checks); these tests measure the hook on their own rows, so the real ones are unflagged here.
+        for niche in house.niches.values():
+            niche.founders = tuple({**f, "seat_full_league": False} if isinstance(f, dict) and f.get("seat_full_league") else f
+                                   for f in niche.founders)
         sports = house.niches["kalshi-sports"]
         sports.founders = tuple(sports.founders) + (row("k1-mlb-model", ["KXMLBGAME", "KXMLBTOTAL"]),
                                                     row("k1-nfl-model", ["KXNFLGAME", "KXNFLSPREAD"]),
