@@ -447,7 +447,7 @@ put debit vertical bought at 0.46 and sold at 0.52). Positive, but one close.
 | 5 | The target | - | 0 agents; desk structures +$5.80 on 1 close | 3 agents x 2 closes, desk positive |
 | 6 | Structure families meeting O4 | 0 | 0 (options-orb-vertical 1 closed structure) | >= 1 by Monday 13:00Z |
 | 7 | Real options activity | krasker-14 draining | krasker-14's two AAL calls sold (real, -$18.00 on the day, R5's drain); no real structure (O1 absent) | real structures by an O4 family |
-| 8 | Harness incidents | - | 4 House starts in the session: 14:38Z (killed for memory at 14:37:30Z, exit 137: a floor-wide defect this run's tapes likely aggravated), 16:23Z (V2), 16:39Z (V3, the tape-cache fix), 18:33Z (V4, the exit fix): three deploys in the session by the owner's lifted rule; no book frozen all day | 0 |
+| 8 | Harness incidents | - | the site's checkpoints refused from 15:50:21Z (structure codes over its 80 characters; fix #342); 4 House starts in the session: 14:38Z (killed for memory at 14:37:30Z, exit 137: a floor-wide defect this run's tapes likely aggravated), 16:23Z (V2), 16:39Z (V3, the tape-cache fix), 18:33Z (V4, the exit fix): three deploys in the session by the owner's lifted rule; no book frozen all day | 0 |
 
 **Open structures at the close:** krasker-22 CCL Oct 2 iron condor (marked at its $17.20 maximum loss: CCL's quotes are
 too wide to buy it back inside the wing; its rewritten program's stop asks $1.49 for a $0.50 wing, refused), krasker-32
@@ -466,7 +466,7 @@ AAL and RIVN Oct 2 put debit verticals (bought 0.27 and 0.24).
 4. **The replay's evidence:** of twelve founders only one passed; the calibration study showed they fail on edge and trade
    count, not on the fill model.
 
-**Bugs found today and their state:** the unbounded replay-tape cache (fixed, V3); structure exits refused through the
+**Bugs found today and their state:** the public site has refused every checkpoint since 15:50:21Z (found by the forward-first run at 20:05Z): krasker-22's CCL condor published its 95-character structure code as `market_id` and the site caps it at 80, a harness incident this run caused; fixed in `league/publish.py` by the forward-first run's PR #342 (ships with its Deploy B at 06:00Z, or Deploy A if it can), and a structure-aware label (`option_label` names a structure by its first leg) goes into Deploy G; the unbounded replay-tape cache (fixed, V3); structure exits refused through the
 touch (fixed, V4); CONTRACT.md's size pushing the engineer's worst case past its $5 line (trimmed); the House's memory growth
 beyond tapes (floor-wide; exit 137 on Sept 20, 24 and 25; to diagnose); the stuck-agent rewrite adopting a program that
 failed replay (Wave 2 gates it for structure agents); a structure strategy whose stop can ask more than its wing
