@@ -338,7 +338,7 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   + the gate's and triage's cents at the caps): the ~$24.25 left of funded money lasts about 30-40 days; at the
   $1.50 pool's ceiling, 16 days. K1 merged 20:22:34Z; forward-first merged its Deploy B (#334) to main at 22:18:39Z
   and asked that nobody owner-deploy main before its B at 06:00Z (it holds B's money rules unreleased); this run's
-  D-J2 stays at about 09:00Z. Done by 22:40Z: #322 rebased on main, #327 and #328 moved onto main and
+  D-J2 stays at about 09:00Z. Done by 22:23Z: #322 rebased on main, #327 and #328 moved onto main and
   retargeted, and the three integrated as **#349** (`dj2/integration`, one docstring conflict in
   `sensors.py` resolved; every touched test module passes locally; CI on the PR). One local test depended on
   the Mac's free /tmp (the recorder's own 2 GB disk guard tripped during the test's set-up); made independent.
