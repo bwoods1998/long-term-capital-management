@@ -223,8 +223,9 @@ class ChainBroker:
 
     option_feed = "opra"
 
-    def __init__(self, source: LegSource):
+    def __init__(self, source: LegSource, *, zero_dte_greeks: bool = False):
         self.source = source
+        self.zero_dte_greeks = zero_dte_greeks  # a WHAT-IF: greeks on today's expiries too (the live feed has none)
         self._greeks: dict[tuple[int, str], tuple[float | None, float | None]] = {}
 
     def option_chain(self, underlying: str, *, expiry_from: str, expiry_to: str, limit: int = 1000) -> list[dict[str, Any]]:
@@ -249,7 +250,7 @@ class ChainBroker:
             if key not in self._greeks:
                 # As the live feed: Alpaca's snapshot carries no greeks on a contract expiring today (the House's recorded
                 # chains of Sept 25: none on 12,882 of 12,882 0-DTE index rows and 7,986 of 7,986 0-DTE stock rows).
-                self._greeks[key] = (None, None) if str(row.get("expiry")) <= today else greeks(row, mid_spot, snap.t)
+                self._greeks[key] = (None, None) if str(row.get("expiry")) <= today and not self.zero_dte_greeks else greeks(row, mid_spot, snap.t)
                 if len(self._greeks) > 200_000:
                     self._greeks.clear()
             iv, delta = self._greeks[key]
@@ -544,16 +545,18 @@ def sane_limit(row: Mapping[str, Any], snap: Snapshot, tally: Tally | None = Non
 def run(snapshots: str | Path, *, house_bars: str | Path | None, local_store: str | Path | None, founders: Sequence[str] = FOUNDERS,
         work: str | Path | None = None, start: float | None = None, until: float | None = None, starts: Mapping[str, float] | None = None,
         mark_every: float = MARK_EVERY, keep_thoughts: int = 6, log: Callable[[str], None] | None = None,
-        decide_override: Mapping[str, Callable[[dict], dict]] | None = None, sane_limits: bool = False) -> dict[str, Any]:
+        decide_override: Mapping[str, Callable[[dict], dict]] | None = None, sane_limits: bool = False,
+        zero_dte_greeks: bool = False) -> dict[str, Any]:
     """The forward test. `start`/`until` bound the simulated session (epoch seconds); `starts` holds a founder back
     until its own first wake (the live birth, for the comparison); `decide_override` replaces a founder's decide (the
     tests). `sane_limits` is a WHAT-IF, not the House: a structure limit through the touch of the snapshot its decision
-    saw by more than the book's 10% limit-sanity rule allows is sent at the rule's line (`sane_limit`).
+    saw by more than the book's 10% limit-sanity rule allows is sent at the rule's line (`sane_limit`); `zero_dte_greeks`,
+    another, gives today's expiries Black-Scholes greeks the live feed does not carry.
     Returns the result document (`summarize`)."""
     say = log or (lambda text: None)
     clock = SimClock()
     source = LegSource(clock)
-    chain_broker = ChainBroker(source)
+    chain_broker = ChainBroker(source, zero_dte_greeks=zero_dte_greeks)
     data = Bars(clock, source)
     agents = [load_founder(name) for name in founders]
     if decide_override:
@@ -1257,6 +1260,9 @@ def calibrate(snapshots: str | Path, *, fit_from: str | Path | None, local_store
         for name, (start, end) in runs.items():
             table = fit.fit_spread_calibration(store, underlier, quantile=quantile, max_gap=max_gap, start=start, end=end)
             out[name] = table
+        # The same fit with quotes within a minute of the bar's close only: the replay fills AT the bar's close, so the
+        # drift of up to five more minutes the default pairing admits is not a cost the replay's fill meets.
+        out["day_only_gap60"] = fit.fit_spread_calibration(store, underlier, quantile=quantile, max_gap=60.0, start=before, end="9999")
         pairs = calibration_pairs(fit, store, underlier, start=before, end="9999", max_gap=max_gap)
         out["day_pairs"] = {"pairs": len(pairs), "fit_paired": out["day_only"]["fitted_on"]["quotes_paired"],
                             "zero_dte": sum(1 for p in pairs if p["expiry"] == day),
@@ -1279,6 +1285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("command", nargs="?", default="forward", choices=("forward", "calibrate", "bar-keys", "query-bars", "query-live", "query-chains"))
     parser.add_argument("--fit-from", default=None, help="calibrate: s3/calibration's league/options_history.py, when main has no fit")
     parser.add_argument("--live", default=None, help="the live founders' day (JSON of LIVE_QUERY's output): compared, and --from-birth reads it")
+    parser.add_argument("--what-if-0dte-greeks", action="store_true", help="also run the session with greeks on today's expiries (a what-if)")
     parser.add_argument("--house-chains", default=None, help="the House's recorded structure chains (CHAINS_QUERY's output): compared")
     parser.add_argument("--from-birth", action="store_true", help="also run each founder from its live first wake (the comparison run)")
     parser.add_argument("--what-if-sane-limits", action="store_true", help="also run the session with limits the book's 10%% rule refuses sent at its line (a what-if)")
@@ -1342,6 +1349,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             what_if["run"] = {"label": f"WHAT-IF, not the House ({name}): limits through the touch by more than the book's 10% sent at the 10% line",
                               "seconds": round(time.time() - began, 1)}
             result["what_if_sane_limits"][name] = what_if
+    if args.what_if_0dte_greeks:
+        result = {"session": result} if "session" not in result else result
+        began = time.time()
+        what_if = run(args.snapshots, starts=starts, zero_dte_greeks=True, **common)
+        what_if["run"] = {"label": "WHAT-IF, not the House (session): Black-Scholes greeks on today's expiries, which the live feed does not carry",
+                          "seconds": round(time.time() - began, 1)}
+        result["what_if_0dte_greeks"] = what_if
     if args.house_chains:
         result = {"session": result} if "session" not in result else result
         result["chains_against_the_house"] = compare_chains(args.snapshots, json.loads(Path(args.house_chains).read_text(encoding="utf-8")))
