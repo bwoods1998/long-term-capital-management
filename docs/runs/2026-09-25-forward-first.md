@@ -67,12 +67,12 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
 | H3 | The release train | merged 10:33:52Z (#296); ships in the options run's Deploy V (owner deploy) |
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
-| H4 | A real book never freezes on cents | built, PR #302 (CI green); money digest `535a7f15` -> `d7d910fe`; three-lens review running |
+| H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
-| A | Deploy A integration (`a/integration`) | H3, Z, H2 merged 07:17Z; H5 and H4 after their reviews |
+| A | Deploy A integration (`a/integration`) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; targeted tests running; Deploy A 20:10Z |
 
 ## Findings before Wave 0 reports
 
@@ -317,6 +317,20 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   inside a timeout handler was being marked). Tests: every box run refused with 429 rolls back; a wake timing out at
   the gateway rolls back and a canary refuses it. Open, low: HTTP 5xx from the venue and data clients carries no
   status (they err toward rollback, as before); a bare builtin `TimeoutError` still reads as a service's.
+
+- **H4 review (three lenses, verified, fixed; `h4/review` `b62b215`).** Confirmed and fixed: a regulators' fee (ORF,
+  CAT, TAF, REG) taken at the fill and booked as real dust stayed bookable when its listing came hours later, so it
+  could silently explain a later unrelated shortfall (the live CAT $0.01 of Sept 24's fills was booked again at
+  02:20:33Z Sept 25 against bid rounding): real dust now keeps a prepaid balance and a covered listing is written as a
+  zero-cash `venue-fee` row with `covered_usd`; the dust alert carries `began_at` (the newest option or stock fill no
+  clean reading has followed), so a fill before a promotion is inherited by the watch; room ages with its own fill,
+  oldest first; the first reading after the deploy expects the old rounding with its sign and books no listing against
+  it. The first reading after Deploy A raises no alert (replayed on all 1,461 snapshot reading pairs). Open: the
+  pre-existing `UnboundLocalError` on `inherited` in `watchdog.read_health` when health.json is missing (a follow-up).
+- **The options run's Deploy V (#317, merged 11:15Z; release `20260925T110706Z-c7adcaf627d5`)** carried H3 and Z and
+  its structure work (house.py +577 lines incl. the births-pass line, book.py structure hunks). Merging it into
+  `a/integration` conflicted in `_enforce_horizon`: rebuilt by hand as main's per-book `_horizon_exits` (with the
+  structure close) plus the H5 review's standing exits; `league/fees.py`'s docstring keeps both runs' paragraphs.
 
 ## Progress notes
 
