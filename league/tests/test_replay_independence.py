@@ -36,7 +36,8 @@ class LabGraduateReplayTest(LabCase):
         return tapes, patch.object(self.house.sandbox, "replay", side_effect=replay)
 
     def test_a_graduates_replay_ends_where_its_forward_window_begins(self):
-        self.clock.advance(35 * HOUR)  # frozen at 2026-09-11T11:26:40Z; the fake tape runs to 2026-09-12T11:55Z
+        # LabCase's clock stands `LAB_CLOCK_OFFSET` into the fake tape: frozen at 2026-09-11T11:26:40Z, the tape runs to
+        # 2026-09-12T11:55Z.
         ident = self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
         self.forward_wins(ident)
@@ -58,7 +59,6 @@ class LabGraduateReplayTest(LabCase):
         self.assertNotIn("replay_until", whole, "the cached tape is never mutated")
 
     def test_a_researchers_replay_and_code_the_lab_never_held_are_not_cut(self):
-        self.clock.advance(35 * HOUR)
         agent = self.seated("sawtooth", KNOB)
         tapes, replays = self.capture()
         with replays:
