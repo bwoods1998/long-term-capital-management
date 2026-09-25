@@ -40,7 +40,7 @@ import { json, fail, authorized, readBody } from './http.mjs';
 import { composeNotice, NOTICE_KINDS, FROM, TO } from './email.mjs';
 import {
   createsOrder, notional, REFERENCE_HEADER, PURPOSE_HEADER, allowedVenuePath, isOptionSymbol, alpacaShapeError,
-  admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError,
+  admittedStructures, isMultiLegOrder, structureNotional, practiceOrderError, closeLegsHeldError,
 } from './caps.mjs';
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
@@ -58,6 +58,10 @@ const rulesOf = venue => (venue === 'alpaca-paper' ? 'alpaca' : venue);
 //: A venue quote reused across orders for this long.
 const PRODUCT_CACHE_MS = 60_000;
 const productCache = new Map();
+//: The real Alpaca account's positions, read before a real structure close is admitted (Sept 25, 2026), reused this long:
+//: briefly, so a burst of closes reads them once and a leg sold a moment ago is not counted for long.
+const POSITIONS_CACHE_MS = 5_000;
+let positionsCache = null;
 const METHODS = ['GET', 'POST', 'DELETE'];
 const ALLOW = METHODS.join(', ');
 
@@ -270,15 +274,23 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     if (priced.error) return fail(priced.error, 400);
     let micro = priced.micro;
     if (priced.structure) {
-      // A structure's open or close is read from its legs' position_intent, which the venue holds it
-      // to (a close of what is not held is refused there, as a single contract's sell_to_close is:
-      // `caps.optionNotional`), never from the caller's header: an open
-      // is metered at its maximum loss against every cap, whatever the header says. A close takes
-      // risk off and is metered at zero; the gate refuses a zero reservation and counts every order,
-      // so a close holds the least amount it records, one micro-dollar, as an exit: the kill switch
-      // and the day's order count still stop it, the dollar caps do not.
+      // A structure's open or close is read from its legs' position_intent, never from the caller's
+      // header: an open is metered at its maximum loss against every cap, whatever the header says. A
+      // close takes risk off and is metered at zero; the gate refuses a zero reservation and counts every
+      // order, so a close holds the least amount it records, one micro-dollar, as an exit: the kill switch
+      // and the day's order count still stop it, the dollar caps do not. Since Sept 25, 2026 (the route's
+      // review, MINOR 1) a close is admitted only when the real account HOLDS every leg it closes, long
+      // legs long and short legs short (`caps.closeLegsHeldError`), read from the account's positions:
+      // no longer trusted to the venue alone. Positions that cannot be read admit no close (503): the
+      // House asks again at its next tick.
       exit = !priced.opening;
-      if (!priced.opening) micro = 1n;
+      if (!priced.opening) {
+        micro = 1n;
+        const held = await realPositions(env, { fetcher, now });
+        if (held.error) return fail(`Cannot check that the real account holds this structure's legs: ${held.error}.`, 503);
+        const refusal = closeLegsHeldError(parsed, held.positions);
+        if (refusal) return fail(refusal, 400);
+      }
     }
     const decision = await gate.reserve({ micro: String(micro), exit, venue: target.venue });
     if (!decision.ok) return json({ error: decision.error, ...(decision.cap ? { cap: decision.cap } : {}) }, decision.status);
@@ -315,6 +327,32 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
     // not proof of absence of an order. Only failures before dispatch may refund it.
     return fail(`The ${target.venue} API did not answer.`, 502);
   }
+}
+
+/**
+ * The real Alpaca account's positions (`GET v2/positions`, signed like every other call), reused for `POSITIONS_CACHE_MS`
+ * (`env.POSITIONS_CACHE_MS` overrides; 0 reads them every time): `{positions}` or `{error}`.
+ */
+async function realPositions(env, { fetcher, now }) {
+  const cacheMs = Number(env.POSITIONS_CACHE_MS ?? POSITIONS_CACHE_MS);
+  if (cacheMs > 0 && positionsCache && positionsCache.expires > Date.now()) return { positions: positionsCache.positions };
+  let answer;
+  try {
+    const signed = await sign({ venue: 'alpaca', path: 'v2/positions' }, new Request('https://x/v2/positions', { method: 'GET' }), env, { now: now() });
+    answer = await fetcher(signed.url, { method: 'GET', headers: signed.headers, signal: AbortSignal.timeout(8000), redirect: 'follow' });
+  } catch (error) {
+    return { error: error?.name || 'fetch failed' };
+  }
+  if (!answer.ok) return { error: `venue HTTP ${answer.status}` };
+  let positions;
+  try {
+    positions = await answer.json();
+  } catch {
+    return { error: 'an unreadable venue answer' };
+  }
+  if (!Array.isArray(positions)) return { error: 'the venue\'s positions were not a list' };
+  if (cacheMs > 0) positionsCache = { positions, expires: Date.now() + cacheMs };
+  return { positions };
 }
 
 /** Short-lived WebSocket credential material for the VM: the Kalshi handshake headers. */

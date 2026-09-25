@@ -532,6 +532,48 @@ export function structureNotional(body, admitted = []) {
   return { micro: read.maxLossMicro, structure: read.type, opening: read.opening };
 }
 
+// --- a real close holds its legs (Sept 25, 2026) --------------------------------------------------
+// The review of the multi-leg route (MINOR 1, needed before the real switch): a real structure CLOSE takes risk off, so it
+// is reserved as an exit at one micro-dollar, and it used to trust Alpaca to refuse closing legs the account does not hold.
+// A sell_to_close of a contract not held long, or a buy_to_close of one not held short, is a new position under another
+// name; the gateway is the boundary that must hold if the venue or the House does not. So before a real close is reserved,
+// the account's positions (a signed GET v2/positions, read at most every few seconds) must hold every leg: a long leg long
+// and a short leg short, at least the order's structures x the leg's ratio_qty contracts each. The practice account is
+// unchanged: nothing is metered there, and the venue's own margin rules judge it.
+
+/**
+ * Why a multi-leg CLOSE may not go to the real account given its `positions` (Alpaca's `GET v2/positions` rows:
+ * `{symbol, qty, side}`, a short option reported with side "short" and a negative qty), or null when every leg is held.
+ * `body` has already passed `structureOrder` as a close.
+ */
+export function closeLegsHeldError(body, positions) {
+  if (!Array.isArray(positions)) return 'The account\'s positions could not be read as a list: a real close is not admitted unread.';
+  const qty = parsePico(body.qty);
+  const held = new Map();
+  for (const row of positions) {
+    if (!row || typeof row !== 'object' || typeof row.symbol !== 'string') continue;
+    const amount = parsePico(row.qty);
+    if (amount === null || amount === 0n) continue;
+    const sign = row.side === 'short' ? -1n : row.side === 'long' ? 1n : (amount < 0n ? -1n : 1n);
+    if ((row.side === 'short' || row.side === 'long') && (amount < 0n) !== (sign < 0n)) continue;  // a row that contradicts itself holds nothing
+    const magnitude = amount < 0n ? -amount : amount;
+    held.set(row.symbol, (held.get(row.symbol) ?? 0n) + sign * magnitude);
+  }
+  const short = [];
+  for (const raw of body.legs) {
+    const intent = LEG_INTENTS[raw.position_intent];
+    const need = qty * (parsePico(raw.ratio_qty) / PICO);
+    const have = held.get(raw.symbol) ?? 0n;
+    const enough = intent.sign > 0 ? have >= need : -have >= need;
+    if (!enough) {
+      const count = value => (value < 0n ? -value : value) / PICO;
+      short.push(`${raw.symbol} ${intent.sign > 0 ? 'long' : 'short'} (${count(need)} needed, ${have === 0n ? 'none' : `${count(have)} ${have > 0n ? 'long' : 'short'}`} held)`);
+    }
+  }
+  if (short.length === 0) return null;
+  return `A structure close must close legs the real account holds: ${short.join('; ')}. A close of a leg not held would open a position: refused.`;
+}
+
 // --- the practice account ------------------------------------------------------------------------
 // `alpaca-paper` is never metered (no money is behind it), but since Sept 25, 2026 its OPTION orders
 // are held to the same defined-risk shapes: until then an order to the practice account was signed

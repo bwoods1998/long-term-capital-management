@@ -193,8 +193,18 @@ $0.70 debit vertical is $70 and passes the $75 cap, a $0.80 one is refused. The 
 from the legs' `position_intent`, never from `X-LTCM-Purpose`: an open labelled an exit is still
 metered. A close takes risk off and is metered at zero; the gate counts every order and refuses a
 zero reservation, so a close reserves one micro-dollar as an exit (health rounds it up to a cent):
-the kill switch and the order count stop it, the dollar caps do not. Admitting a type is a
-money-digest change the owner ratifies.
+the kill switch and the order count stop it, the dollar caps do not. Since Sept 25, 2026 (the route's
+review, MINOR 1) a real close is admitted only when the account **holds every leg it closes** -- a
+`sell_to_close` leg held long and a `buy_to_close` leg held short, at least `qty x ratio_qty` contracts
+each -- read from a signed `GET v2/positions` on the real account, reused for `POSITIONS_CACHE_MS`
+(5 s); a close of a leg not held is a `400` (it would open a position), and positions that cannot be
+read are a `503` that reserves nothing. The practice account is unchanged. Admitting a type is a
+money-digest change the owner ratifies: `OPTION_STRUCTURES_REAL` admits exactly the constitution's
+`allocator.option_spread_real_types` while `allocator.option_spreads_real` (O1) is true, and `off`
+while it is false, and `league.ci` (`check_structures`) refuses a tree where the two disagree, so the
+two change in one deploy. A gateway deployed back to `off` while a real structure is still held
+refuses that structure's close too: deploy the gateway's `off` only once the real book holds no
+structure (a House rollback that turns O1 off leaves the deployed gateway as it is, so closes go on).
 
 ## Jev shadow pilot
 
