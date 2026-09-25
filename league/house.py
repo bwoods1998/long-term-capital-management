@@ -793,8 +793,7 @@ class House:
                     try:
                         book.poll()
                     except Exception as exc:  # noqa: BLE001 - the reconcile below says what is unknown
-                        self.alert("warning", f"{name}: could not poll the venue before reconciling ({type(exc).__name__}: {str(exc)[:160]})",
-                                   **environment("gateway", exc))
+                        self.alert("warning", f"{name}: could not poll the venue before reconciling ({type(exc).__name__}: {str(exc)[:160]})")
                     book.reconcile()  # repair/check receipts before health, agent wakes or sizing
                 else:
                     book.open_baseline()
@@ -2152,7 +2151,7 @@ class House:
             self._defer("wakes", f"{agent.id}: {str(exc)[:200]}")
             return {"agent": agent.id, "skipped": "its box is in use by background work; woken on the next tick"}
         except SandboxError as exc:
-            self.alert("warning", f"{agent.id}: its box did not run ({str(exc)[:200]})", **environment("sail", exc))
+            self.alert("warning", f"{agent.id}: its box did not run ({str(exc)[:200]})")
             return {"agent": agent.id, "skipped": "sandbox"}
         self._charge_box(agent.id, run, note="a decision")
         result = run.result
@@ -2903,7 +2902,7 @@ class House:
             with self._box_patience():  # a pool thread of the tick: it never waits on background work
                 return self.wake(agent)
         except Exception as exc:  # noqa: BLE001 - one agent's wake must never take the tick down
-            self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})", **environment("gateway", exc))
+            self.alert("error", f"{agent.id}: its wake failed ({type(exc).__name__}: {str(exc)[:200]})")
             return {"agent": agent.id, "error": str(exc)}
 
     def _holds_real_money(self, agent: Agent) -> bool:
@@ -8341,7 +8340,7 @@ class House:
                             if stamp > str(self._state["settled"].get(name) or ""):
                                 self._state["settled"][name] = stamp
             except Exception as exc:  # noqa: BLE001 - one venue's outage must not stop the others
-                self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})", **environment("gateway", exc))
+                self.alert("warning", f"{name}: could not poll or settle ({type(exc).__name__}: {str(exc)[:200]})")
             lap(f"poll:{name}")
         try:
             self._cancel_stale_resting()
