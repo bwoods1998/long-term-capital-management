@@ -148,6 +148,23 @@ test of every founder on true touches.
   Watched through the session (a kill restarts the House with its state, as at 14:37Z); the growth is diagnosed after
   the close, not by another deploy today.
 
+**The owner, 18:05-18:15Z:** "im still seeing no production options trades on my account" (answered: structures trade on the
+House's simulated practice book by the amendment's fallback; Track P, the Alpaca practice account, was stopped by the
+outage and waits for H4; real money needs O4). Asked how to get them onto Alpaca, the owner answered: **"i want rapid
+recursivley learning loop that has paper trading and production trading as soon as possible based on actual progress
+made by the agents in the game."** Read as: structure agents on the owner's Alpaca practice account as soon as it is safe;
+real money following a structure family's own record automatically (O4 through the allocator's ladder); a faster loop.
+The earliest options session is Monday 13:30Z; tonight's windows are the forward-first run's Deploy A (20:10Z) and the Kalshi
+run's K1, then real Kalshi games in play until about 05:30Z. So: **Wave 2 built tonight as a workflow** (18:17Z,
+`wf_85793cba-1b5`): G-TRACKP (`g/trackp`: p/book merged with main and a/integration; routing a structure agent to
+alpaca-paper when its type is one of the five closeable ones, migration when flat; cash vs margin), G-MONEY (`g/money` on
+b/integration: the evidence mapping, O1-O5 + `option_spread_real_types`, the House's real route, the gateway's held-legs check
+on a real close; money-digest change 1 of 2), G-LOOP (`g/loop` on b/integration: edit replays at full caps for structures,
+the stuck-agent rewrite gated by the replay, the lab admitting structure programs, SPY/QQQ/IWM daily expiries with a memory
+bound), G-FORWARD (`g/forward`: today's forward test on the recorded OPRA snapshots and the calibration refit); each
+reviewed adversarially and fixed. Deploy G in Saturday's ~07:00Z slot. O1 ships false (the table); the owner's call on
+shipping O1 true with O4 gating each family automatically, and on credit types for real money, goes in the report.
+
 ## Coordination with the forward-first run
 
 Read before every merge and deploy: the forward-first record's "Coordination with the options-desk
