@@ -149,6 +149,10 @@ class Evidence:
     #: any band is read. Only a proven family's agent swings (Sept 24, 2026: every real-money agent is a
     #: probe or a proven family's member). None where no pass set it: no family gate.
     family_proven: bool | None = None
+    #: M1 of the forward-first run (Sept 25, 2026; `allocator.family_swing.min_distinct_dates`): (the settlement dates the
+    #: family's REAL record spans, the dates every swing look asks) while it spans fewer, else None: the agent-level swing
+    #: (`swing_at`) is a swing look too, so it neither enters nor stays on fewer dates. Set by the pass.
+    swing_dates: tuple[int, int] | None = None
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
@@ -530,11 +534,20 @@ def target_band(ev: Evidence, p: Mapping[str, Any]) -> tuple[str, str]:
                 # own E on a few real settlements says (the plan's gap 2).
                 return "bunt", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, but its family's pooled record is not "
                                 "proven: only a proven family's agent swings")
+            if ev.swing_dates:
+                # M1 (Sept 25, 2026): every swing look needs the family's real record on as many settlement dates. At T0
+                # meriwether-h2d625d stood at E 2.0725 on 11 real events of 2 slates (its swing audit vetoed at 01:20Z).
+                return "bunt", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, but its family's real record spans "
+                                f"{ev.swing_dates[0]} distinct settlement dates: every swing asks {ev.swing_dates[1]} "
+                                "(allocator.family_swing.min_distinct_dates)")
             return "swing", (f"E {ev.e:.4f} is at or above {p['swing_at']:g}, W_real {ev.w_real:.4f}, "
                              f"{ev.real_trades} real closed trades")
         return "bunt", "holds the bunt band"
     if ev.family_proven is False:
         return "bunt", "its family's pooled record is no longer proven: an unproven family's agent is a probe, not a swing"
+    if ev.swing_dates:
+        return "bunt", (f"its family's real record spans {ev.swing_dates[0]} distinct settlement dates: a swing holds on "
+                        f"{ev.swing_dates[1]} (allocator.family_swing.min_distinct_dates)")
     if ev.e < p["swing_at"] * p["hysteresis"] or ev.w_real < p["swing_exit_w_real"]:
         return "bunt", (f"E {ev.e:.4f} or W_real {ev.w_real:.4f} fell below the swing band's floor "
                         f"({p['swing_at'] * p['hysteresis']:.4f} / {p['swing_exit_w_real']:g})")
@@ -1018,6 +1031,17 @@ class Allocator:
         member of a swinging family (C2, Sept 24, 2026: its stake is the family swing's, and the book holds it
         to the swing's daily-loss rule, as every stake above the bunt)."""
         return "swing" if self.family_state(agent) == "swing" else self.tier(agent)
+
+    def swing_dates(self, agent: Any) -> tuple[int, int] | None:
+        """(the settlement dates the agent's family's REAL record spans, the dates every swing look asks) while it spans fewer
+        than `family_swing.min_distinct_dates`, else None (M1 of the forward-first run, Sept 25, 2026): what keeps the
+        agent-level swing (`swing_at`) to the rule the family swing keeps."""
+        rule = families.swing_rule()
+        need = int((rule or {}).get("min_distinct_dates") or 0)
+        if need <= 0:
+            return None
+        have = int((self.family(agent.family, agent.venue).get("real") or {}).get("dates") or 0)
+        return (have, need) if have < need else None
 
     def swing_allowed(self, agent: Any) -> bool:
         """Whether the agent may take the agent-level swing (`swing_at`): always, unless the constitution's
@@ -2073,6 +2097,7 @@ class Allocator:
                 # Only a proven (or swinging) family's agent takes the agent-level swing (Sept 24, 2026), while the
                 # constitution's `swing_requires_proven_family` says so; `family` never raises.
                 evid[agent.id].family_proven = self.swing_allowed(agent) if rules().get("swing_requires_proven_family") else None
+                evid[agent.id].swing_dates = self.swing_dates(agent) if evid[agent.id].rung >= 2 else None
             self._evidence = evid
             live_ok = {v: self._live_open(v) for v in REAL_BOOK}
             # 1. Deaths on paper wealth.

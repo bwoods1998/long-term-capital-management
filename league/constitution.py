@@ -468,7 +468,8 @@ CONSTITUTION: dict[str, Any] = {
         # `entry_every` 5, `entry_confidence` 0.9 and the loss-rate gate at every look unchanged: the looks are 10, 15,
         # 20, ...), so the one proven family meets its entry look in a day, not three; AND a stricter gate carried in the
         # same row, `min_distinct_dates` 5: every swing look -- the entry (on the first that many real events), the hold
-        # and so every doubling of the ramp (the whole real record) -- needs the real events to span at least 5 distinct
+        # and so every doubling of the ramp (the whole real record), and the agent-level swing (`swing_at`: its entry and its
+        # hold, `Allocator.swing_dates`) -- needs the family's real events to span at least 5 distinct
         # settlement dates, each event's OWN date (`families.event_day`: the date code of its Kalshi event ticker, the
         # slate the game was played on; the UTC date of its close where the ticker carries none, an Alpaca trade's).
         # Not the UTC date of the settlement: a night slate settles across two UTC dates (the real Sept 24 MLB slate

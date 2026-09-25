@@ -164,6 +164,44 @@ class EntryLooksWithDates(unittest.TestCase):
             self.assertTrue(families.swing_ready(real_record(n=10, dates=0), rule))
 
 
+class TheAgentLevelSwingAsksTheDatesToo(KalshiHouse):
+    """M1's "every swing look" holds for the agent-level swing (`swing_at`) as for the family's: at T0 meriwether-h2d625d
+    stood at E 2.0725 on 11 real events of 2 slates, its swing audit vetoed at 01:20Z, its cooldown ending about 23:20Z."""
+
+    def test_the_rule(self):
+        p = allocator._params()
+        ready = dict(rung=2, e=2.0725, w_paper=1.4261, w_real=1.7355, real_trades=11, family_proven=True)
+        self.assertEqual(allocator.target_band(ev(**ready), p)[0], "swing")
+        band, why = allocator.target_band(ev(**ready, swing_dates=(2, 5)), p)
+        self.assertEqual(band, "bunt")
+        self.assertIn("its family's real record spans 2 distinct settlement dates: every swing asks 5", why)
+        band, why = allocator.target_band(ev(**dict(ready, rung=3), swing_dates=(4, 5)), p)
+        self.assertEqual(band, "bunt")
+        self.assertIn("a swing holds on 5", why)
+
+    def test_no_swing_audit_until_the_real_record_spans_the_dates(self):
+        room = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "500"})
+        room.start()
+        self.addCleanup(room.stop)
+        proof = {**canned("weather-favorites", proven=True, n=25, bound=0.03), "dates": 3}
+        self.families["weather-favorites"] = {**proof, "real": {**families.empty_record("weather-favorites", "kalshi")["real"], "n": 11, "dates": 2}}
+        a = self.agent("meriwether")
+        with self.evidence_of({a.id: dict(e=1.10, w_paper=1.21, paper_trades=6, paper_settled=6)}):
+            self.tick()
+        self.assertEqual(self.house.evaluator.rung(a.id), 2)
+        swing_ready = {a.id: dict(e=2.0725, w_paper=1.4261, w_real=1.7355, real_trades=11, paper_trades=19, paper_settled=19)}
+        with self.evidence_of(swing_ready):
+            self.tick()
+        self.house.wait(5)
+        self.assertEqual((self.house.evaluator.rung(a.id), self.auditor.seen), (2, []))
+        self.families["weather-favorites"] = {**proof, "real": {**self.families["weather-favorites"]["real"], "n": 20, "dates": 5}}
+        self.house.allocator._families.clear()
+        with self.evidence_of(swing_ready):
+            self.tick()
+        self.house.wait(5)
+        self.assertEqual(self.auditor.seen, [a.id])  # on 5 dates the swing's audit is asked
+
+
 class DatesOnTheLedger(AtRiskCase):
     """`family_record` dates every observation: the pooled record's dates, the real record's, and the entry look's."""
 

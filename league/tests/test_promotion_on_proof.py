@@ -525,11 +525,14 @@ def decide(ctx):
 
 
 def canned(family, venue="kalshi", *, proven=False, n=4, bound=-0.01, taker_positive=False):
-    """A family record as `allocator.family_record` returns it, with the numbers a test sets."""
+    """A family record as `allocator.family_record` returns it, with the numbers a test sets. A proven one's real record
+    spans the settlement dates every swing look asks since the forward-first run's M1 (Sept 25, 2026), so a test of the
+    agent-level swing's mechanics tests those (the dates are league/tests/test_capital_follows_proof.py's)."""
     side = {"n": n, "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "positive": False, "members": 1}
     return {"family": family, "venue": venue, "through": 0, "members": 2, "members_counted": 1, "n": n,
             "n_eff": float(n), "mean_log": 0.01, "sd": 0.02, "bound": bound, "proven": proven,
             "state": "proven" if proven else "unproven", "real_n": 0,
+            "real": {"n": 0, "dates": 5 if proven else 0, "entry": None},
             "maker": dict(side), "taker": {**side, "positive": taker_positive, "bound": 0.004 if taker_positive else bound},
             "rule": allocator._family_rule()}
 
