@@ -297,7 +297,7 @@ class SeatCaps(unittest.TestCase):
         # R2 (Sept 24, 2026): the seats follow the waiters that remain once the search's closed desks are taken out
         # (niches.json `_about` has the 15:06Z count behind each), and fewer where the search is closed.
         for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 19, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
-                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 8, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
+                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 4, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
                           "kalshi-attention": 4}.items():
             self.assertEqual(niches[desk]["max_members"], cap, desk)
         turbo = json.loads((root / "turbo.json").read_text())

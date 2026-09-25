@@ -92,7 +92,11 @@
    "category": "Crypto",
    "desk": "huang",
    "desk_note": "Chi-fu Huang of MIT, on the fastest clock in the firm",
-   "max_members": 8
+   "max_members": 4,
+   "yields_seats": {
+    "floor": 4,
+    "reason": "K1 (the Kalshi-scale run, Sept 25, 2026): the fifteen-minute desk's pooled practice record is -$253.97 and every 15-minute family is negative on real money (-$40), and the foundry closes the desk (E2); it gives its seats, one a births pass down to 4 members, to the founder rows flagged seat_full_league (the weekend's model-versus-market sports founders), and its cap is 4, so no newcomer refills the seats it gives"
+   }
   },
   {
    "id": "kalshi-weather",
