@@ -1056,7 +1056,10 @@ class AgentSwingGate(KalshiHouse):
             alloc.rebalance()
         self.assertEqual(self.house.evaluator.rung(a.id), 2)
         self.assertFalse(alloc.swing_allowed(a))
-        with patch.dict(CONSTITUTION["allocator"], {"swing_requires_proven_family": False}):
+        # The key's rollback alone: M1's settlement dates (Sept 25, 2026), which every swing look asks, are
+        # league/tests/test_capital_follows_proof.py's (this canned family's real record spans none).
+        with patch.dict(CONSTITUTION["allocator"], {"swing_requires_proven_family": False}), \
+                patch.dict(CONSTITUTION["allocator"]["family_swing"], {"min_distinct_dates": 0}):
             self.assertTrue(alloc.swing_allowed(a))
             with patch.object(allocator, "audit_standing", return_value="approved"), self.evidence_of({a.id: self.SWING_READY}):
                 alloc.rebalance()
