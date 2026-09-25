@@ -151,6 +151,47 @@ agent's own venue outcomes). Triage reads 1,768 ledger rows behind the head (cur
 hypothesis links read 9,132 behind (cursor 664,895; 2,234 mechanisms indexed, the 60-call cap binds every
 day). Exposure's cap (40) was not reached on Sept 24 (25 calls, 1,931 cached answers).
 
+## Findings
+
+### J1 on the development data (07:28Z): the move lift is market type, and a free model beats Jev
+
+The J1 analyst re-ran the Sept 22 evaluation on the semantic lab's own store (read-only extract of
+`semantic.sqlite`, 128,246 labelled states Sept 20-22, all development data) and reproduced it exactly (lab
+numeric 0.609 / 0.616 / 0.661; + 8 Jev answers per state 0.765 / 0.757 / 0.750, AUC for "the mid moves at all"
+at 5 / 15 / 60 minutes, executable rows, test events never seen in training, 95% intervals from a 300-rep
+event-clustered bootstrap). Then the ablations, on identical rows:
+
+| Arm (15 min) | AUC [95%] |
+|---|---|
+| lab numeric (mid, spread, log OI, hours, drift) | 0.616 [0.570, 0.663] |
+| + 8 Jev answers per state (the lab) | 0.757 [0.716, 0.790] |
+| + a free 5-way category table from the series prefix (no Jev) | 0.735 [0.684, 0.772] |
+| + 6 static Jev answers asked once per market | 0.705 [0.651, 0.748] |
+| rich free numeric (19: time since the mid last moved, 60-minute range, abs drift, tight and pinned flags, volume, ...) | 0.829 [0.796, 0.851] |
+| rich free + series table | 0.837 [0.809, 0.859] |
+| rich free + series + 8 Jev per state | 0.838 [0.809, 0.859] (difference [−0.002, +0.003]) |
+
+- **Most of Jev's lift is the market's type:** a free category table recovers 98% / 84% / 89% of it at 5 / 15 /
+  60 minutes, and the series explains 97-98% of the variance of three of the static answers.
+- **Jev adds nothing over a better free model** at any horizon (intervals straddle zero), within weather and
+  within sports, on fresh rows, on series never seen in training and with the history thinned to 5-minute
+  spacing. Crypto alone shows +0.002 to +0.007 at 5 minutes. Direction stays unpredictable (0.52-0.57).
+- **The served model** (`move-v1-20260924`, 23 free features: the lab's 5, 13 more from the state and the
+  recorder's own minute quotes, 5 category flags; logistic, fitted on fresh development rows): held-out
+  0.859 / 0.829 / 0.806, against the lab's numeric + 8 Jev at 0.769 / 0.760 / 0.683 on the same basis. It costs
+  $0 of Jev. The lab states carried no rules text (all 129,025 had empty `rules_primary`), the same shape as the
+  live snapshots.
+- **Cost of the Jev designs at the live load** (4,509 markets a day, 95,734 market-states a day at a 5-minute
+  cadence, $0.000106 a state): per-state labels about $10 a day (7x the pool); static answers once per market
+  about $0.48 a day.
+
+**What J1 ships instead of the plan's Jev feature:** the free model as the served feature (`move_p5/15/60`),
+and Jev only as a recorded SHADOW (`jev_p*`: the free features + the 6 static answers once per market, and the
+two new "will it move within 15 / 60 minutes" questions on a paced sample of states), capped at $0.75 a day, so
+the post-ship evaluation can say whether Jev adds anything on data it has never seen. If it does not after
+3 days of post-ship events, the shadow is cut to $0. Both are validated on post-ship events before any
+strategy reads them (the plan's 0.70 line applies to the served feature).
+
 ## Progress notes
 
 ## Deploy log
