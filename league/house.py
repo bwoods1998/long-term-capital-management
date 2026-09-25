@@ -5039,7 +5039,10 @@ class House:
         now = self.clock()
         stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
         bound = float(self.settings.desk_displacement_seconds)  # not the tick: it runs every 30 s since H5
-        recently = {desk for desk, at in self._desk_displaced.items() if now - at < bound}
+        # Read from a copy (the review of #297): `kill` stamps a desk from whichever thread displaces -- the tick's births
+        # pass, the lab's thread -- while this scan runs on the tick, the lab's thread or, since H5, the House lane's
+        # foundry step (`Foundry.allocate`), and a desk's first stamp landing mid-read raised "dictionary changed size".
+        recently = {desk for desk, at in dict(self._desk_displaced).items() if now - at < bound}
         newcomer = newcomer or Newcomer()
 
         def kept(rule: str) -> None:

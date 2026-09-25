@@ -409,6 +409,23 @@ class TheReviewOfH5(HouseCase):
         self.assertEqual(len(warnings(self.house, "stopped buying work")), 1)  # told once
 
 
+    def test_a_desk_displaced_while_a_scan_reads_the_stamps_does_not_break_the_scan(self):
+        # The foundry's step asks the scan on the House lane (`Foundry.allocate` -> `_weakest`) while the tick's births
+        # pass kills; the scan read `_desk_displaced` live, and a desk's first displacement landing mid-read raised
+        # "dictionary changed size during iteration" (and the lab's thread does the same to the tick's own pass).
+        house = self.house
+
+        class Landing(float):
+            """A desk's stamp: reading it, another desk's first displacement lands."""
+
+            def __rsub__(self, other):
+                house._desk_displaced.setdefault("another-desk", other)
+                return float(other) - float(self)
+
+        house._desk_displaced["a-desk"] = Landing(self.clock() - 3600)
+        self.assertEqual(house._displaceable(house.game["economy"]), [])
+        self.assertIn("another-desk", house._desk_displaced)
+
 class TheScanMemoAndTheHouseLane(SeatCase):
     def test_research_queued_mid_pass_protects_a_replay_only_resident_as_a_fresh_scan_does(self):
         # An evidenced newcomer never displaces a replay-only resident whose research is queued or under way.
