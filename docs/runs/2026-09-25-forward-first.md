@@ -485,6 +485,14 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   of its tape (latent: oldest at T0 35 h against about 148 h); the experiment archive's growth (read disk on the box);
   spanning cards' extra replays (by spec); the capacity route's family weighting.
 
+- **An OOM kill inside the session (found and fixed by the options run).** At 14:37:30Z the House was killed by the
+  kernel (supervisor: exit 137; RSS 4.1 GB of 6.2 GB): `House.tape_for` cached every tape with no bound, and the options
+  run's structure tapes are large. Its hotfix V3 (#337, main `9d8b1d3`, release `20260925T163626Z-46eda79f4052`,
+  promoted 16:38:14Z, watch promoted 16:48:14Z) keeps no options tape and at most 24 tapes (`TAPES_KEPT`). The options
+  run also shipped V2 (#336, the owner's call at 16:09Z: 11 structure founders on practice; promoted 16:21:29Z). Both
+  were mid-session owner deploys on the owner's word in that run. Deploy A, B and C's branches merged main at
+  `9d8b1d3` (16:53Z; Deploy A 296 targeted tests OK, Deploy C's replay cut under the cache bound 148 OK).
+
 ## Progress notes
 
 ### T+10.2 h (14:36Z Sept 25, inside the US session; nothing of this run deployed yet)
