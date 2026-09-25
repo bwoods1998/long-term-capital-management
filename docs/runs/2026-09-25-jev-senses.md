@@ -261,6 +261,25 @@ recorded feed pricing them. The largest near-term volume with no feed: WTA match
 0.26M, F1 0.19M: ESPN's public scoreboards cover these sports, but the House's sports map does not. Sent to the
 Kalshi run at 10:31Z.
 
+### J1's ship rule, written before the post-ship data is read (12:24Z)
+
+The evaluation command ran once at 12:21Z as a smoke test of the pipeline on the first 30 minutes of rows (it
+works; those rows are too few to decide anything and the reading is not the decision). The rule, fixed now:
+
+- **Data:** rows recorded from the recorder's start (11:52:51Z), outcomes from its own minute quotes,
+  `python -m league.jev_features evaluate --cutoff 2026-09-25T11:52:51Z` on the box, read-only.
+- **When:** the first decision read at least 24 hours after the start (not before 11:53Z Sept 26), and only
+  if the "unseen events" population at 15 minutes (events never in the fit and never seen before the cutoff)
+  holds at least 200 events. Otherwise it waits and reads again every 12 hours.
+- **Serve the feature** (the `ctx["feeds"]["move"]` hook) only if, on that population at 15 minutes, the
+  served model's AUC has its 95% event-clustered lower bound at or above 0.70 (stricter than the plan's point
+  estimate), and on the lag <= 120 s population the point estimate is also at or above 0.70.
+- **Per desk:** a strategy of a category (crypto, weather, sports, finance, other) may read it only if that
+  category's own point AUC at 15 minutes is at or above 0.70 on at least 30 unseen events.
+- **Jev's shadow** earns a place in the served model only if the Jev increment (shadow minus served, paired)
+  has its 95% lower bound above zero on the same population; otherwise the shadow's spend goes to $0 after
+  3 days of post-ship rows (Monday Sept 28 11:53Z).
+
 ## Progress notes
 
 - **10:32Z (T0 + 4 h 16 m; the 10:17Z note was late: a usage limit stopped this session and its agents
