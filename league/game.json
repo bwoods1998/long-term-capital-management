@@ -194,7 +194,9 @@
       "practice_skip_triggers": [
         "book.fill",
         "book.settle"
-      ]
+      ],
+      "_about_sept25_jev_relevance": "Sept 25, 2026 (league/research_gate.py rule 4's switch; the Jev run's measurement, Sept 22 00Z-Sept 25 14:35Z): Jev's relevance answer woke 169 research sessions ($5.24) with o1 8.3% and o2 4.7%, the rate of the gate's random 10% sample of would-be skips (6.6% and 4.5% over 1,481) and a fifth of the free triggers' (about 23% o2): $0.66 a replay pass against $0.10-0.19. Off: the gate does not ask Jev and a note it would have rated relevant wakes nothing; notes in the agent's own desk still wake it as a free trigger.",
+      "jev_relevance": false
     }
   },
   "research_bounds": {
@@ -237,6 +239,10 @@
         "credit.grant",
         "window",
         "market"
+      ],
+      "jev_relevance": [
+        true,
+        false
       ]
     }
   },

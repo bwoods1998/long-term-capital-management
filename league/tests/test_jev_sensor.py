@@ -629,7 +629,7 @@ class ResearchGateTest(GateCase):
         self.assertEqual(report(self.house.ledger)["sampled_misses"], 0)
 
     def test_jev_relevance_runs_on_uncertain_and_falls_back_when_down(self):
-        agent = self.ready(p=0.5)
+        agent = self.ready(p=0.5, settings={"jev_relevance": True})  # game.json turns it off since Sept 25, 2026
         summary(self.house.ledger, agent.id)
         summary(self.house.ledger, agent.id)
         self.researched(agent)
@@ -697,7 +697,7 @@ class ResearchGateTest(GateCase):
         self.assertEqual(self.gates(), [])
 
     def test_relevance_is_cached_by_note_and_strategy_sha(self):
-        agent = self.ready(p=0.9)
+        agent = self.ready(p=0.9, settings={"jev_relevance": True})
         twin = self.seated(name="twin")  # the same file, so the same strategy sha
         self.house._state["last_research"][twin.id] = self.clock()
         for member in (agent, twin):

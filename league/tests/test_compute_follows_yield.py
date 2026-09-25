@@ -334,6 +334,37 @@ class PracticeTriggerSkip(F2Case):
         self.assertEqual(self.gates()[-1]["trigger"], "book.fill")
 
 
+class JevRelevanceSwitch(GateCase):
+    """Rule 4's switch (Sept 25, 2026): Jev's relevance answer woke 169 sessions at o2 4.7%, the random
+    sample's rate (4.5%) and a fifth of the free triggers'; game.json turns it off."""
+
+    def note(self):
+        self.house.ledger.append("library.note", {"title": "Spread lesson", "text": "x" * 80, "niche": "alpaca-crypto-alts"}, agent="peer")
+
+    def test_off_a_note_jev_rates_relevant_wakes_nothing_and_jev_is_not_asked(self):
+        agent = self.ready(p=0.9)
+        self.assertIs(self.house.game["research"]["gate"]["jev_relevance"], False, "game.json turns it off")
+        summary(self.house.ledger, agent.id)
+        summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.note()
+        self.clock.advance(self.interval)
+        self.assertFalse(self.house.research_due(agent))
+        self.assertEqual(self.gates()[-1]["decision"], "skip")
+        self.assertNotIn("jev_unavailable", self.gates()[-1]["reason"])
+        self.assertEqual(self.jev.calls, [], "nothing was asked")
+
+    def test_on_it_wakes_the_session_as_before(self):
+        agent = self.ready(p=0.9, settings={"jev_relevance": True})
+        summary(self.house.ledger, agent.id)
+        summary(self.house.ledger, agent.id)
+        self.researched(agent)
+        self.note()
+        self.clock.advance(self.interval)
+        self.assertTrue(self.house.research_due(agent))
+        self.assertEqual(self.gates()[-1]["reason"], "jev_relevant_note")
+
+
 class MertonLanes(LedgerCase):
     def merton(self):
         return Merton(SimpleNamespace(), None, self.ledger, evidence=lambda role: {}, clock=self.clock,

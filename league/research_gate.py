@@ -33,6 +33,12 @@ frequent than the clock already allows.
    outside your niche matter to your strategy?" Cached by (note id, strategy sha), 16 notes a
    request, and anything above `relevance_run_threshold` (uncertain included) runs. If Jev is
    down or capped the decision is the deterministic one.
+   Since Sept 25, 2026 the question is behind a switch, `jev_relevance`, which game.json turns off. Measured
+   by the Jev run over Sept 22 00Z-Sept 25 14:35Z: it woke 169 sessions ($5.24) whose o1 was 8.3% and o2 (a
+   candidate that passed replay within 2 h) 4.7% -- the rate of the gate's random 10% sample of would-be
+   skips (6.6% and 4.5% over 1,481) and a fifth of the free triggers' (about 23% o2): $0.66 a replay pass
+   against $0.10-0.19 for the deterministic triggers. J2's held-out AUC for o2: Jev's p 0.650, the trigger
+   kind alone 0.790. Since the Jev run's 11:52Z deploy lifted its call cap it wakes about 30 more a day.
 5. **Sampling.** `sample_percent` of would-be skips run anyway (`decision: sample`, `sampled: true`,
    chosen by a hash of agent, window and slot, so a restart does not re-roll it),
    so the gate's miss rate is measured, not assumed: a miss is a sampled session that retained a
@@ -238,6 +244,9 @@ DEFAULTS: dict[str, Any] = {
     # Sept 25, 2026 (Y, rule 13; under `real_positions` only): the trigger kinds that do not wake a
     # practice agent. game.json sets J2's ["book.fill", "book.settle"]; [] here keeps F2's rules alone.
     "practice_skip_triggers": [],
+    # Sept 25, 2026 (rule 4's switch; the Jev run's measurement): whether Jev's relevance answer may wake a
+    # session. game.json sets false; True here keeps the rule before it.
+    "jev_relevance": True,
 }
 #: The trigger kinds `practice_skip_triggers` may name (game.json `research_bounds.gate` lists them).
 SKIPPABLE_TRIGGERS = ("book.fill", "book.settle", "book.refused", "credit.grant", "window", "market")
@@ -974,7 +983,9 @@ class ResearchGate:
             interval = float(self.house.research_interval_hours(agent)) * 3600
             if clock and streak < after and not blocked:
                 return self._run(agent, st, "run", "clock", [], sampled=False, **tags)
-            hits, answered = ([], True) if (locked or paused) else self._relevant_notes(agent, st, receipt)
+            # Rule 4's switch (`jev_relevance`): off, Jev is not asked and wakes nothing.
+            ask_jev = not (locked or paused) and bool(settings.get("jev_relevance", True))
+            hits, answered = self._relevant_notes(agent, st, receipt) if ask_jev else ([], True)
             if hits:
                 return self._run(agent, st, "run", "jev_relevant_note", hits, sampled=False, receipt=receipt, **tags)
             heartbeat = float(settings["practice_max_skip_hours"] if f2 and not real else settings["max_skip_hours"])

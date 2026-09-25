@@ -102,8 +102,9 @@ def check_bounds(game: Mapping[str, Any]) -> None:
         if isinstance(gate[key], list):
             if any(item not in bound for item in gate[key]):
                 raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not a subset of {bound}")
-        elif all(isinstance(v, str) for v in bound):
-            if gate[key] not in bound:
+        elif all(isinstance(v, (str, bool)) for v in bound):
+            # A switch (`jev_relevance`, Sept 25, 2026) lists true and false: it must be one of them, a bool.
+            if gate[key] not in bound or isinstance(gate[key], bool) != isinstance(bound[0], bool):
                 raise ValueError(f"game.json: research.gate.{key} = {gate[key]!r} is not one of {bound}")
         elif not float(bound[0]) <= float(gate[key]) <= float(bound[1]):
             raise ValueError(f"game.json: research.gate.{key} = {gate[key]} is outside [{bound[0]}, {bound[1]}]")
