@@ -455,6 +455,11 @@ NEVER_THROTTLED = frozenset(("audits",))
 REFERENCE_MIN_BLOCKS = 10
 #: A lane is throttled only once it spent this much in the day: halving $0.47 of toolsmith saves nothing.
 THROTTLE_MIN_USD = Decimal("1.00")
+#: The newest `ops.budget` rows read for the day's yield rows (filtered to `WHAT` and the last 24 hours). The review of
+#: Deploy C (Sept 25, 2026): 200 covered 18.1 hours at T0 (246 ops.budget rows a day: Sail 107, holds absorbed 67,
+#: yield 24; 210 on Sept 23, 241 on Sept 24), so the day's price was taken over 18-20 yield rows. 2,000 is eight
+#: days of today's volume, read once an hour.
+DAY_ROWS = 2000
 
 
 def lane_prices(rows: Iterable[Mapping[str, Any]], lift: Mapping[str, Any] | None = None) -> dict[str, dict[str, Any]]:
@@ -707,7 +712,7 @@ class YieldLedger:
                    lab_usd=self._lab_usd(now - self.every_seconds, now))
         with self.house._state_lock:
             self._state()["last"] = now
-        recent = [e.payload for e in self.house.ledger.read(kinds="ops.budget", limit=200, newest=True)
+        recent = [e.payload for e in self.house.ledger.read(kinds="ops.budget", limit=DAY_ROWS, newest=True)
                   if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
         lift = self._lift(now, row, recent)
         throttle = self._throttle(recent, lift)
@@ -717,6 +722,8 @@ class YieldLedger:
                                                 **({"unit_economics": unit} if unit else {})})
         if throttle:
             self._apply(throttle)
+        elif self._throttle_off():
+            self._release()
         return row
 
     def _lab_usd(self, start: float, end: float) -> Decimal | None:
@@ -745,7 +752,7 @@ class YieldLedger:
                 for item in consult_outcomes(ledger, now=now, settings=settings):
                     ledger.append("consult.outcome", item["payload"], agent=item["agent"], id=item["id"])
             if recent is None:
-                recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=200, newest=True)
+                recent = [e.payload for e in ledger.read(kinds="ops.budget", limit=DAY_ROWS, newest=True)
                           if e.payload.get("what") == WHAT and e.at >= now_iso(lambda: now - 86400 + 60)] + [row]
             state = getattr(getattr(getattr(self.house, "jev_floor", None), "state", None), "data", None) or {}
             return lifts(ledger, now=now, settings=settings, lesson_since=state.get("lesson_arm_since"), recent=recent, cache=self._teacher)
@@ -770,6 +777,31 @@ class YieldLedger:
             except Exception:  # noqa: BLE001
                 pass
             return None
+
+    def _throttle_off(self) -> bool:
+        """Whether Y1 is switched off: `economy.lane_throttle` removed (the operator's off switch) or 0."""
+        return ((getattr(self.house, "game", None) or {}).get("economy") or {}).get("lane_throttle") in (None, "", 0)
+
+    def _release(self) -> list[dict[str, Any]]:
+        """Y1 switched off: one "lane throttle" row putting back every lane the rows still hold halved. The review of
+        Deploy C (Sept 25, 2026): `throttled()` reads each lane's newest row, and with the dial removed no plan was made,
+        so nothing ever wrote the rows that lift a throttle -- research, the engineer, the consultant and the architect
+        (all four halved on the T0 replay) stayed halved until a deploy or a ledger write."""
+        written = []
+        try:
+            for lane, row in sorted(throttle_state(self.house.ledger).items()):
+                if not row.get("throttled"):
+                    continue
+                payload = {"what": THROTTLE_WHAT, "lane": lane, "throttled": False, "multiple": None, "best": None,
+                           "why": "economy.lane_throttle is off", "how": "back to its usual cadence and price"}
+                self.house.ledger.append("ops.budget", payload)
+                written.append(payload)
+        except Exception as exc:  # noqa: BLE001 - tried again at the next hourly row
+            try:
+                self.house.alert("warning", f"yield ledger: the lane throttles could not be lifted ({type(exc).__name__}: {str(exc)[:160]})")
+            except Exception:  # noqa: BLE001
+                pass
+        return written
 
     def _apply(self, plan: Mapping[str, Any]) -> list[dict[str, Any]]:
         """One `ops.budget` "lane throttle" row for each lane whose state changes, naming its price, the best

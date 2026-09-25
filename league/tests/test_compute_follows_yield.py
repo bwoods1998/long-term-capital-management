@@ -170,6 +170,43 @@ class TheHourlyRow(LedgerCase):
         self.assertNotIn("throttle", row)
 
 
+    def test_removing_the_dial_puts_every_halved_lane_back(self):
+        """The review of Deploy C (Sept 25, 2026): `economy.lane_throttle` removed is the documented off switch, but with no
+        plan made nothing wrote the rows that lift a throttle, and `throttled()` reads each lane's newest row: every lane
+        halved stayed halved."""
+        self.alerts, self.lab_usd = [], "0"
+        self.throttle("research")
+        self.throttle("engineer")
+        self.throttle("toolsmith", on=False)
+        house = self.house()
+        house.game["economy"].pop("lane_throttle")
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertFalse(throttled(self.ledger, "research"))
+        self.assertFalse(throttled(self.ledger, "engineer"))
+        lifted = [e.payload for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == THROTTLE_WHAT][3:]
+        self.assertEqual([(r["lane"], r["throttled"], r["why"]) for r in lifted],
+                         [("engineer", False, "economy.lane_throttle is off"), ("research", False, "economy.lane_throttle is off")])
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertEqual(len([e for e in self.ledger.iter(kinds="ops.budget") if e.payload.get("what") == THROTTLE_WHAT]), 5,
+                         "a lane already back writes nothing more")
+
+    def test_the_day_is_the_day_s_yield_rows_however_many_budget_rows_came_between(self):
+        """The review of Deploy C (Sept 25, 2026): the day was the newest 200 `ops.budget` rows, 18.1 hours at T0 (246 a
+        day, most of them Sail meter readings and absorbed holds)."""
+        self.alerts, self.lab_usd = [], "0"
+        self.ledger.append("ops.budget", {"what": "yield", "spend_usd": {"architect": "5.00", "research": "0.10"},
+                                          "evidence": {"research": {"positive_blocks": 20}}})
+        for _ in range(250):
+            self.clock.advance(60)
+            self.ledger.append("ops.budget", {"what": "holds absorbed", "usd": "0.01"})
+        house = self.house()
+        self.clock.advance(3600)
+        YieldLedger(house).tick()
+        self.assertEqual(self.alerts, [])
+        self.assertTrue(throttled(self.ledger, "architect"), "$5.00 five hours ago, for no positive block, is in the day")
+
 class UnitEconomicsOnTheRow(LedgerCase):
     def test_compute_and_profit_a_day_are_counted_as_the_scoreboard_counts_them(self):
         """T0 by this fold: $118.88 of compute and $21.35 of profit a day, to the cent the scoreboard's."""
