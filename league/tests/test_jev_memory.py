@@ -21,7 +21,9 @@ from league.jev import CHOICE_BATCH, MODEL, PARTIAL_HEADER, Sensor
 from league.jev_memory import (ARMS, CONTROL, FREE, HEADER, JEV, MAX_BLOCK, MAX_LINE, QUESTIONS, TAXONOMY_VERSION,
                                MemoryIndex, arm_of, main, report)
 from league.ledger import Ledger, now_iso
+from league.sensors import JevFloor
 from league.tests.fakes import Clock
+from league.tests.test_house import HouseCase
 
 KINDS = {"a": "the first kind", "b": "the second kind", "c": "the third kind"}
 
@@ -696,6 +698,77 @@ class ReportTest(Floor):
         self.assertEqual(self.ledger.head(), head)
         self.assertEqual((self.root / "jev-memory.sqlite").read_bytes(), store)
 
+
+
+class WiringTest(HouseCase):
+    """JevFloor builds the memory only when switched on, runs it as a paced background job while
+    the floor is open, and hands the researcher its `prior_results`."""
+
+    def floor(self, settings):
+        self.jev = TypedJev(0.2)
+        self.house.researcher = SimpleNamespace()
+        floor = JevFloor(self.house, Sensor(self.house.root / "jev.sqlite", self.jev, clock=self.clock), settings)
+        self.house.jev_floor = floor
+        return floor
+
+    def jobs(self):
+        return {e.payload["key"] for e in self.house.ledger.iter(kinds="ops.job")}
+
+    def test_the_memory_is_off_unless_switched_on(self):
+        for settings in ({}, {"memory": {"enabled": False}}):
+            floor = self.floor(settings)
+            self.assertIsNone(floor.shared_memory)
+            self.assertFalse(hasattr(self.house.researcher, "prior_results"))
+            self.assertEqual(floor.prior_results("anyone"), (None, "", []))
+            self.assertIsNone(floor.health()["memory"])
+            self.assertFalse(floor.sensor.partial, "partial answers are opt-in too")
+        self.assertFalse((self.house.root / "jev-memory.sqlite").exists())
+
+    def test_switched_on_it_indexes_in_the_background_and_serves_the_researcher(self):
+        # The test sensor's day is 400 calls, so no reserve: the default holds 1,500 for retrieval.
+        floor = self.floor({"memory": {"enabled": True, "interval_seconds": 600, "reserve_calls": 0}, "partial_answers": True})
+        self.assertIsInstance(floor.shared_memory, MemoryIndex)
+        self.assertEqual(self.house.researcher.prior_results, floor.shared_memory.prior_results)
+        self.assertTrue(floor.sensor.partial)
+        agent = self.seated("scout")
+        self.assertEqual(arm_of(agent.id), FREE)
+        other = self.house.spawn("peer", "test-family", agent.code, reason="a second test agent")
+        self.house.ledger.append("agent.research", {"tool": "summary", "session": "s-1", "turns": 3, "profile": "flash_flex",
+                                                    "cost_usd": "0.01", "trials": 0, "summary": WEATHER, "reason": "finished",
+                                                    "candidate": False}, agent=other.id)
+        for _ in range(6):  # one Jev job starts a tick
+            self.house.tick()
+            self.house.wait(10)
+            self.clock.advance(60)
+        self.assertIn("jev:memory", self.jobs())
+        health = json.loads((self.house.root / "health.json").read_text())
+        lessons = self.house.ledger.count(kinds="playbook.entry")  # the teacher's lessons, loaded at start
+        self.assertEqual(health["jev"]["memory"]["docs"], lessons + 1)
+        self.assertEqual(health["jev"]["memory"]["taxonomy"], TAXONOMY_VERSION)
+        self.assertIn("memory", health["jev"]["sensor"]["today"], "the label was bought under its own purpose")
+        arm, block, refs = self.house.researcher.prior_results(agent, self.clock(), session="s-2")
+        self.assertEqual(arm, FREE)
+        self.assertEqual(refs[:1], [self.house.ledger.last("agent.research", agent=other.id).seq], "the same desk first")
+        self.assertIn(HEADER, block)
+        self.assertEqual(floor.prior_results(agent, self.clock())[0], FREE)
+        self.assertGreaterEqual(floor.health()["memory"]["retrievals_today"].get("free", 0), 1)
+
+    def test_a_pause_stops_the_memory_job(self):
+        floor = self.floor({"memory": {"enabled": True}})
+        (self.house.root / "PAUSE").write_text("rebuild")
+        self.house.tick()
+        self.house.wait(10)
+        self.assertNotIn("jev:memory", self.jobs())
+        self.assertEqual(floor.shared_memory.stats()["docs"], 0)
+        self.assertEqual(self.jev.calls, [])
+
+    def test_a_memory_that_cannot_start_is_an_alert(self):
+        (self.house.root / "jev-memory.sqlite").mkdir()
+        floor = self.floor({"memory": {"enabled": True}})
+        self.assertIsNone(floor.shared_memory)
+        self.assertFalse(hasattr(self.house.researcher, "prior_results"))
+        alerts = [e.payload.get("text", "") for e in self.house.ledger.iter(kinds="ops.alert")]
+        self.assertTrue(any("shared memory is off" in text for text in alerts), alerts)
 
 
 if __name__ == "__main__":

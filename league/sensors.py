@@ -7,14 +7,19 @@
   skip the session. A gate that raises never stops research: the clock decides.
 - `tick(open_for_business)` from `House.tick`: explicit inactivity reasons every
   `inactivity_seconds`, and -- only while the floor is open for business, since a maintenance
-  pause stops paid work -- triage, hypothesis links and exposure groups as background jobs, and
-  the move sensor (`league/jev_features.py`, Sept 25, 2026) as its own `jev:move` job.
+  pause stops paid work -- triage, hypothesis links, exposure groups and the shared memory's
+  indexing (`jev:memory`) as background jobs, and the move sensor (`league/jev_features.py`,
+  Sept 25, 2026) as its own `jev:move` job.
 - `health()` for health.json: Jev spend and caps, gate totals, inactivity counts, triage groups,
-  exposure groups, the move sensor's rows and last cycle.
+  exposure groups, the move sensor's rows and last cycle, the shared memory's index and retrievals.
+- `prior_results(agent, now, session=)`: J3's shared memory (`league/jev_memory.py`, Sept 25,
+  2026), also set as `house.researcher.prior_results` for the research state's hook, which is the
+  researcher's owner's to add.
 
 Every switch defaults on and can be turned off in config without a code change; with "jev"
-"enabled": false the House behaves exactly as before this module existed. The move sensor is the
-exception: it is off unless `"move": {"enabled": true}`, so a config without the key runs as before.
+"enabled": false the House behaves exactly as before this module existed. The move sensor and the
+shared memory are the exceptions: each is off unless `"move"` / `"memory"` says `"enabled": true`, so
+a config without the key runs as before.
 """
 
 from __future__ import annotations
@@ -33,6 +38,9 @@ class JevFloor:
     def __init__(self, house: Any, sensor: Any, settings: Mapping[str, Any] | None = None, *, rng: Any = None):
         self.house, self.sensor = house, sensor
         self.settings = dict(settings or {})
+        if self.settings.get("partial_answers", False) and sensor is not None:
+            # The gateway's opt-in (J5): a batch with one rejected answer keeps the others.
+            sensor.request_partial_answers()
         root = Path(house.root)
         self.state = GateState(root / "research-gate.json")
         gate_settings = dict(self.settings.get("research_gate") or {})
@@ -65,6 +73,25 @@ class JevFloor:
                                        closing=(lambda: bool(closing.is_set())) if closing is not None else None)
             except Exception as exc:  # noqa: BLE001
                 house.alert("warning", f"the Jev move sensor is off ({type(exc).__name__}: {str(exc)[:160]})")
+        memory = dict(self.settings.get("memory") or {})
+        #: J3, the swarm's shared memory (`self.memory` is the hypothesis index's, older than it).
+        self.shared_memory = None
+        if memory.get("enabled", False):
+            try:
+                from .jev_memory import MemoryIndex
+
+                closing = getattr(house, "_closing", None)
+                self.shared_memory = MemoryIndex(
+                    house.ledger, sensor, path=root / "jev-memory.sqlite", clock=house.clock, settings=memory,
+                    agent_of=house.registry.get, lineage=house.registry.lineage,
+                    closing=(lambda: bool(closing.is_set())) if closing is not None else None)
+                researcher = getattr(house, "researcher", None)
+                if researcher is not None:
+                    # Read by the research state's hook (researcher.py, its owner's change): never raises.
+                    researcher.prior_results = self.shared_memory.prior_results
+            except Exception as exc:  # noqa: BLE001 - a memory that cannot start is an alert, never a House that cannot
+                self.shared_memory = None
+                house.alert("warning", f"the Jev shared memory is off ({type(exc).__name__}: {str(exc)[:160]})")
 
     def research_due(self, agent: Any, *, last: float, due: bool, forced: str = "") -> bool:
         if not due and not forced:
@@ -97,10 +124,17 @@ class JevFloor:
             return
         # One job a tick at most: they share the House's three-slot ops lane with the backup, the
         # updater and Merton, and none of them is urgent.
-        for key, job in (("jev:triage", self.triage), ("jev:links", self.memory), ("jev:exposure", self.exposure)):
+        for key, job in (("jev:triage", self.triage), ("jev:links", self.memory), ("jev:exposure", self.exposure),
+                         ("jev:memory", self.shared_memory)):
             if job is not None and job.due():
                 if self.house._background(key, job.run):
                     break
+
+    def prior_results(self, agent: Any, now: float | None = None, *, session: str | None = None) -> tuple[Any, str, list[int]]:
+        """J3's prior results for a research session: (arm, block, ledger refs); (None, "", []) when off."""
+        if self.shared_memory is None:
+            return None, "", []
+        return self.shared_memory.prior_results(agent, now, session=session)
 
     def failure_history(self, ref: str, niche: str | None = None) -> dict[str, Any] | None:
         """A mechanism's failures and its linked mechanisms' failures, kept apart (hypothesis_memory)."""
@@ -121,4 +155,5 @@ class JevFloor:
                 "triage": safe(self.triage.stats) if self.triage is not None else None,
                 "hypothesis_memory": safe(self.memory.stats) if self.memory is not None else None,
                 "exposure": self.exposure.latest if self.exposure is not None else None,
-                "move": safe(self.move.stats) if self.move is not None else None}
+                "move": safe(self.move.stats) if self.move is not None else None,
+                "memory": safe(self.shared_memory.stats) if self.shared_memory is not None else None}
