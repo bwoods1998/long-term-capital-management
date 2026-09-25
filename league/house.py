@@ -796,11 +796,14 @@ class House:
                 out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
         return out
 
-    def _markets(self, series: list[str], hours: float, max_age: float) -> list[dict[str, Any]]:
+    def _markets(self, series: list[str], hours: float, max_age: float, min_hours: float = 0.0, limit: int | None = None) -> list[dict[str, Any]]:
+        # The listing window a strategy may opt into (`min_hours_to_close`, `max_markets`; Sept 25, 2026):
+        # passed only when declared, so every other listing is asked exactly as before.
+        window = {"min_hours_to_close": min_hours, "limit": limit} if min_hours or limit is not None else {}
         try:
-            return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age)
+            return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age, **window)
         except TypeError:  # a data source that does not share listings
-            return self.kalshi_data.markets(series, max_hours_to_close=hours)
+            return self.kalshi_data.markets(series, max_hours_to_close=hours, **window)
 
     def _resolves_at(self, instrument: Any) -> float | None:
         if self.kalshi_data is None:
@@ -1885,13 +1888,19 @@ class House:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
             age = 300.0 if agent.horizon == "day" else 60.0  # how old a shared listing may be: a daily strategy is not racing anyone
-            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}", 50, lambda: self._markets(series, hours, age))
+            from .tapes import DEFAULT_MAX_MARKETS, listing_window
+
+            floor, cap = listing_window(needs)  # opt-in NEEDS (Sept 25, 2026); (0, 200) and the old key when not declared
+            window = "" if (floor, cap) == (0.0, DEFAULT_MAX_MARKETS) else f":{floor}:{cap}"
+            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}{window}", 50,
+                                          lambda: self._markets(series, hours, age, floor, cap if window else None))
             niche = self.niche_of(agent)
             if not ctx["markets"] and niche is not None and niche.live:
                 # Its own series are dark (a season ended, a quiet night): the busiest live series of its specialty.
                 busiest = [x for x in niche.live if x not in series][: niches_module.MAX_UNIVERSE]
                 if busiest:
-                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self._markets(busiest, hours, age))
+                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}{window}", 120,
+                                                  lambda: self._markets(busiest, hours, age, floor, cap if window else None))
                     ctx["note"] = "None of the series your strategy names has a market open inside your window, so these are the busiest live series of your specialty."
         if agent.venue == 'kalshi':
             ctx['event_risk'] = book.event_risk(agent.id, (row['market'] for row in ctx['markets']))

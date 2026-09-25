@@ -43,6 +43,18 @@ SEEDS: list[dict] = [
      "why": "Leverage with the loss capped at the premium: one near-the-money call on a 20-day high above a rising 50-day mean, one put on the mirror image. Unmeasured; option buyers pay the spread and the variance premium."},
     {"name": "options-pullback", "family": "options-pullback", "file": "options_pullback.py",
      "why": "Connors' RSI(2) pullback expressed with a call: in an uptrend, two hard down days tend to be bought back within the week. Unmeasured by this firm."},
+    # Model versus market on sports (K1 of the Kalshi-scale run, Sept 25, 2026): ONE program,
+    # `sports_consensus.py`, a row per league, so each league's founder is its own family.
+    {"name": "consensus-nfl", "family": "sports-consensus-nfl", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. NFL winners, spreads and totals priced from the de-vigged DraftKings line the odds feed records, bid post-only where Kalshi is off it by more than the fee and a margin; on winners Kalshi measured within about a cent of the book (Sept 24-25), so the edge asked there is small and the bid is withdrawn when the line moves."},
+    {"name": "consensus-ncaaf", "family": "sports-consensus-ncaaf", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. College-football winners, spreads and totals (the whole FBS and FCS slate) priced from the de-vigged DraftKings line, bid post-only where Kalshi's thinner, wider ladders are off it by more than the fee and a margin."},
+    {"name": "consensus-mlb", "family": "sports-consensus-mlb", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. MLB winners, run lines (at the book's own run line only) and totals near the line priced from the de-vigged DraftKings prices; Kalshi's winners measured within 1.4 cents of the book on 90% of 112 readings (Sept 24-25), so this measures whether the small edges that remain pay."},
+    {"name": "consensus-mls", "family": "sports-consensus-mls", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. MLS home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
+    {"name": "consensus-ligamx", "family": "sports-consensus-ligamx", "file": "sports_consensus.py",
+     "why": "Unmeasured: the sportsbook line as a second price. Liga MX home, away and tie contracts priced from DraftKings' three-way prices with the draw, de-vigged, bid post-only where Kalshi is off them by more than the fee and a margin."},
 ]
 
 _HERE = Path(__file__).resolve().parent

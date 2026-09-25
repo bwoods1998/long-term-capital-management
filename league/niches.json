@@ -181,7 +181,7 @@
    ],
    "title": "Sports results on Kalshi: winners, spreads and totals in every league",
    "category": "Sports",
-   "max_members": 19,
+   "max_members": 24,
    "patterns": [
     "^KX[A-Z0-9]+(GAME|MATCH|FIGHT|SPREAD|TOTAL|TEAMTOTAL|BTTS|MAP|TOTALMAPS|1H|1HSPREAD|1HTOTAL|1Q|1QSPREAD|1QTOTAL|F5|F5TOTAL|RFI|ADVANCE)$"
    ],
@@ -297,7 +297,7 @@
     "KXATPMATCH",
     "KXWTAMATCH"
    ],
-   "brief": "Who wins, by how much, and how many points: every league Kalshi lists. This is most of the venue: about $50M of the $63M a day that resolves within 48 hours (surveyed on a football Saturday: college football $23M, the Premier League $13M, the NFL, La Liga, MLB, Serie A, cricket, esports). THE CALENDAR DECIDES WHAT IS LIVE: football from September to February, baseball to October, basketball and hockey from October to June, soccer August to May, esports, cricket, fights and tennis all year and at hours when US sport is dark. The House re-surveys the venue daily, so the universe below follows the season; if the series your strategy names go dark, you are shown the busiest live ones instead. You specialise INSIDE this niche by the series you name: be the NFL agent, or the soccer-totals agent, and spend your research there. Games list a close two days after kickoff; the House shows you when each is expected to END. The published bias is the favourite-longshot bias: longshots are overpriced and heavy favourites slightly underpriced, strongest in moneylines with a big underdog and in extreme totals (over 5.5 goals is a 95-cent NO almost every match). Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Nothing in sports is measured by this firm yet. A specialist should learn: whether the bias survives the maker fee where one is charged, how prices move on team news before the start, how reliable heavy favourites are by league and format (a best-of-one esports map upsets far more than a best-of-three series; a 70% baseball team is rare), and which books are deep enough to rest in. MEASURED Sept 19, 2026, on a week of real soccer totals: a resting bid left in the book DURING a match is picked off the moment a goal is scored (38 wins and 7 losses at 93 cents, -20% in a week). The founders therefore only enter before the start (`min_hours` is measured to the expected END of the game, so it includes the game's length) and re-quote every 30 minutes. Trading in-game needs a strategy that knows the score; the House does not show it yet, so ask for it.",
+   "brief": "Who wins, by how much, and how many points: every league Kalshi lists. This is most of the venue: about $50M of the $63M a day that resolves within 48 hours (surveyed on a football Saturday: college football $23M, the Premier League $13M, the NFL, La Liga, MLB, Serie A, cricket, esports). THE CALENDAR DECIDES WHAT IS LIVE: football from September to February, baseball to October, basketball and hockey from October to June, soccer August to May, esports, cricket, fights and tennis all year and at hours when US sport is dark. The House re-surveys the venue daily, so the universe below follows the season; if the series your strategy names go dark, you are shown the busiest live ones instead. You specialise INSIDE this niche by the series you name: be the NFL agent, or the soccer-totals agent, and spend your research there. Games list a close two days after kickoff; the House shows you when each is expected to END. The published bias is the favourite-longshot bias: longshots are overpriced and heavy favourites slightly underpriced, strongest in moneylines with a big underdog and in extreme totals (over 5.5 goals is a 95-cent NO almost every match). Resting (maker, post-only) bids on favourites above 90 cents earned +2.15 cents a contract in the first run, out of sample; buying at 10 cents or less lost 0.9 to 6.7 cents. Takers lose about 1.1% on Kalshi and makers earn it. Nothing in sports is measured by this firm yet. A specialist should learn: whether the bias survives the maker fee where one is charged, how prices move on team news before the start, how reliable heavy favourites are by league and format (a best-of-one esports map upsets far more than a best-of-three series; a 70% baseball team is rare), and which books are deep enough to rest in. MEASURED Sept 19, 2026, on a week of real soccer totals: a resting bid left in the book DURING a match is picked off the moment a goal is scored (38 wins and 7 losses at 93 cents, -20% in a week). The founders therefore only enter before the start (`min_hours` is measured to the expected END of the game, so it includes the game's length) and re-quote every 30 minutes. Trading in-game needs a strategy that knows the score; the House does not show it yet, so ask for it. Sept 25, 2026 (the Kalshi-scale run, K1): five MODEL-VERSUS-MARKET founders, `consensus-nfl`, `-ncaaf`, `-mlb`, `-mls` and `-ligamx`, each its own family, price winners, spreads and totals from the sportsbook line the House records (NEEDS['feeds'] = {'odds': [league], 'sports': [league]}: DraftKings, de-vigged, the only book ESPN answered) and rest post-only bids where Kalshi is off it by more than the fee and a margin. Measured the day before: on WINNERS Kalshi sits on the book's line (MLB, 112 readings: median gap 0.7 cents, 90th percentile 1.4, none of 3), so the edge there is thin and adverse selection is the risk; the ladders are thinner and wider.",
    "founders": [
     {
      "seed": "favorites-daily",
@@ -441,6 +441,140 @@
       ]
      },
      "key": "matches-favorites"
+    },
+    {
+     "seed": "consensus-nfl",
+     "key": "consensus-nfl",
+     "seat_full_league": true,
+     "seat_priority": 30,
+     "params": {
+      "sigma_margin": 13.5,
+      "sigma_total": 13.5
+     },
+     "needs": {
+      "series": [
+       "KXNFLGAME",
+       "KXNFLSPREAD",
+       "KXNFLTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "nfl"
+       ],
+       "sports": [
+        "nfl"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-ncaaf",
+     "key": "consensus-ncaaf",
+     "seat_full_league": true,
+     "seat_priority": 10,
+     "params": {
+      "sigma_margin": 15.5,
+      "sigma_total": 16.0
+     },
+     "needs": {
+      "series": [
+       "KXNCAAFGAME",
+       "KXNCAAFSPREAD",
+       "KXNCAAFTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "ncaaf"
+       ],
+       "sports": [
+        "ncaaf"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 500,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-mlb",
+     "key": "consensus-mlb",
+     "seat_full_league": true,
+     "seat_priority": 20,
+     "params": {
+      "sigma_margin": 4.2,
+      "sigma_total": 4.4,
+      "max_strike_z": 0.25
+     },
+     "needs": {
+      "series": [
+       "KXMLBGAME",
+       "KXMLBSPREAD",
+       "KXMLBTOTAL"
+      ],
+      "feeds": {
+       "odds": [
+        "mlb"
+       ],
+       "sports": [
+        "mlb"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 3.0,
+      "max_markets": 300,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-mls",
+     "key": "consensus-mls",
+     "seat_full_league": true,
+     "seat_priority": 60,
+     "needs": {
+      "series": [
+       "KXMLSGAME"
+      ],
+      "feeds": {
+       "odds": [
+        "mls"
+       ],
+       "sports": [
+        "mls"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
+      "wake_minutes": 10
+     }
+    },
+    {
+     "seed": "consensus-ligamx",
+     "key": "consensus-ligamx",
+     "seat_full_league": true,
+     "seat_priority": 70,
+     "needs": {
+      "series": [
+       "KXLIGAMXGAME"
+      ],
+      "feeds": {
+       "odds": [
+        "ligamx"
+       ],
+       "sports": [
+        "ligamx"
+       ]
+      },
+      "max_hours_to_close": 30,
+      "min_hours_to_close": 0.5,
+      "max_markets": 200,
+      "wake_minutes": 10
+     }
     }
    ],
    "desk": "meriwether",

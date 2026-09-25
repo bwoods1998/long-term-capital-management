@@ -15,6 +15,8 @@ NEEDS = {
     "bars": {"timeframe": "5Min", "limit": 120},   # alpaca: 1Min 5Min 15Min 1Hour 1Day, limit <= 500
     "series": ["KXBTCD"],         # kalshi: the series whose open markets to be shown
     "max_hours_to_close": 24,     # kalshi: only markets closing within this many hours
+    "min_hours_to_close": 3.5,    # kalshi, optional: only markets closing at least this many hours out (0 when absent)
+    "max_markets": 500,           # kalshi, optional: how many markets a wake is shown, 1 to 500 (200 when absent)
     "wake_minutes": 15,           # how often to be woken: 5 to 1440 (a stock or options desk is also
                                   # woken a few seconds after the regular open when its next wake would land later,
                                   # and is not woken at all while the regular session is shut)
@@ -25,6 +27,17 @@ def decide(ctx):
     ...
     return {"intents": [...], "cancels": [...], "thought": "one or two plain sentences", "memory": {...}}
 ```
+
+A Kalshi wake is shown at most `max_markets` markets (200 unless declared), the soonest to close
+first, and a game market's `hours_to_close` runs to the game's expected END. So while games are on,
+their markets come first: measured on the slate of Sept 26-27, 2026, a strategy naming the three
+college-football series was shown no game it could still enter from the noon kickoffs on Saturday.
+`min_hours_to_close` (optional, since Sept 25, 2026) hides markets closing sooner than that many hours --
+a game in progress, for a strategy that enters only before the start -- and `max_markets` (optional,
+1 to 500) sets how many are shown. Both are opt-in: a strategy that declares neither is shown exactly
+what it was. `min_hours_to_close` must be at least 0 and under `max_hours_to_close`, and `max_markets`
+a whole number from 1 to 500; the House refuses a birth whose NEEDS break either. A replay applies the
+same window at every step (and caps the markets at `max_markets` only where it is declared).
 
 Only these imports are allowed: `bisect collections datetime decimal fractions functools heapq
 itertools json math random re statistics time typing zoneinfo`. No files, no network, no
@@ -368,7 +381,12 @@ ctx["feeds"] = {
   live or starts within 90 minutes, every 15 minutes otherwise. `status` is `pre`, `in` or `post`;
   the spread is signed from the home side and moneylines are American odds. Esports, cricket,
   tennis, UFC and the smaller football leagues have no scoreboard here. Line-ups, injuries and
-  player props are not supplied.
+  player props are not supplied. Since Sept 25, 2026 a board is the whole slate Kalshi trades:
+  college football is ESPN's FBS and FCS week boards together (its default board is 18 featured
+  games; Kalshi listed 113 spread events that weekend), and a daily league (baseball, soccer, hockey,
+  basketball) is joined by the boards of the New York days the next 36 hours reach, so today's and
+  tomorrow's games are on it before ESPN's own board turns to them. Each team also carries `short`
+  (ESPN's short name: "Red Sox", "Tigres").
 - **perps**: for the coins the crypto desks trade, every 5 minutes: OKX's 8-hour funding rate and
   open interest in dollars, Hyperliquid's and Kraken's 1-hour funding and open interest (Kraken's
   rate is its absolute rate over the mark), Deribit's DVOL (BTC and ETH only) and the z-score of
@@ -469,9 +487,18 @@ NEEDS["feeds"] = {"weather": ["KXHIGHNY"], "nws": ["KNYC"], "forecast": ["KXHIGH
   `4M`, `6M`, `1Y`, `2Y`, `3Y`, `5Y`, `7Y`, `10Y`, `20Y`, `30Y` -- `date`, `yield` %.
 - **odds** (live; ESPN's core API; league keys as for `sports`): each game on the league's
   recorded board that has not started and starts within 36 hours: `id`, `name`, `start`, `home`,
-  `away`, `lines` (every provider: `details`, `spread` signed from the home side, `over_under`,
-  `home_ml`, `away_ml`, `implied_home` with the book's margin taken out, `open` prices) and
-  `win_probability` (ESPN's predictor, football and basketball only, else None).
+  `away`, `fetched`, `lines` (every provider: `details`, `spread` signed from the home side,
+  `over_under`, `home_ml`, `away_ml`, `draw_ml` (soccer's draw), `implied_home`, `implied_away`,
+  `implied_draw` with the book's margin taken out -- three-way where there is a draw price, so a
+  soccer row's three sum to 1 --, `over_odds`, `under_odds`, `implied_over` (the chance the game goes
+  over `over_under`), `home_spread_odds`, `away_spread_odds`, `implied_home_cover` (the chance the
+  home side covers `spread`; baseball's run line included), `open` prices) and `win_probability`
+  (ESPN's predictor, football and basketball only, else None). Since Sept 25, 2026 each game's lines
+  are refreshed on their own clock -- every 30 minutes inside 6 hours of its start, every 2 hours
+  before -- by a pass every 5 minutes, so a row lists every coming game (a college-football Saturday
+  has over a hundred) and each game says when its lines were `fetched` (never after the row's `t`;
+  None, with `lines` [], before the first fetch). Judge a line's age by `fetched`, not by `t`. Measured
+  Sept 25: ESPN answered ONE provider (DraftKings) for every NFL, NCAAF, MLB and MLS game probed.
 - **tsa** (live; the TSA's table): key `checkpoint`: `latest` `{date, travelers}` and the 14
   newest `days`. **polls** (live; RealClearPolling): key `trump_approval` -- the site refuses the
   House (a bot check) since Sept 24, 2026, so it has no row.

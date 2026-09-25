@@ -110,7 +110,8 @@ class ScoreboardTests(SportsCase):
         self.assertEqual(final["short_name"], "DET @ BUF")
         self.assertEqual(final["start"], "2026-09-18T00:15:00Z")
         self.assertEqual((final["status"], final["completed"], final["period"], final["clock"], final["detail"]), ("post", True, 4, "0:00", "Final"))
-        self.assertEqual(final["home"], {"team": "Buffalo Bills", "abbrev": "BUF", "location": "Buffalo", "nickname": "Bills", "id": "2", "score": 41, "winner": True, "record": "2-0"})
+        self.assertEqual(final["home"], {"team": "Buffalo Bills", "short": "Bills", "abbrev": "BUF", "location": "Buffalo", "nickname": "Bills", "id": "2",
+                                         "score": 41, "winner": True, "record": "2-0"})
         self.assertEqual(final["away"]["score"], 31)
         self.assertIsNone(final["odds"])
         self.assertEqual(pre["status"], "pre")
@@ -186,7 +187,7 @@ if __name__ == "__main__":
 import json  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from ltcm.data.sports import CORE_HOST, implied_home, parse_core_odds, parse_predictor  # noqa: E402
+from ltcm.data.sports import CORE_HOST, implied, implied_home, parse_core_odds, parse_predictor  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures" / "feeds"
 CORE_ODDS = CORE_HOST + "/v2/sports/football/leagues/nfl/events/401872948/competitions/401872948/odds"
@@ -202,7 +203,9 @@ class CoreApi(unittest.TestCase):
     def test_the_recorded_lines_and_predictor(self):
         lines = parse_core_odds(core("espn_core_odds_401872948.json"))
         self.assertEqual(lines, [{"provider": "Draft Kings", "priority": 1, "details": "GB -5.5", "spread": -5.5, "over_under": 42.5,
-                                  "home_ml": -245, "away_ml": 200, "implied_home": 0.6806,
+                                  "home_ml": -245, "away_ml": 200, "draw_ml": None, "implied_home": 0.6806, "implied_away": 0.3194,
+                                  "implied_draw": None, "over_odds": -118, "under_odds": -102, "implied_over": 0.5174,
+                                  "home_spread_odds": -105, "away_spread_odds": -115, "implied_home_cover": 0.4892,
                                   "open": {"spread": -7.5, "home_ml": -360, "away_ml": 285}}])
         self.assertEqual(parse_predictor(core("espn_core_predictor_401872948.json")),
                          {"home": 0.74465, "away": 0.25332, "tie": 0.00203, "modified": "2026-09-23T23:27Z"})
@@ -220,3 +223,35 @@ class CoreApi(unittest.TestCase):
         self.assertEqual(transport.calls[0]["headers"]["User-Agent"], USER_AGENT)
         with self.assertRaises(DataError):
             client.core_odds("nfl", "../401872948")
+
+    def test_a_draw_price_makes_the_three_way_de_vig_and_a_run_line_its_own_price(self):
+        # Recorded Sept 25, 2026 ~06:30Z: NYC at Atlanta United (MLS) and Baltimore at the Yankees (MLB).
+        soccer = parse_core_odds(core("espn_core_odds_761830.json"))[0]
+        self.assertEqual((soccer["home_ml"], soccer["away_ml"], soccer["draw_ml"]), (120, 190, 250))
+        self.assertEqual((soccer["implied_home"], soccer["implied_away"], soccer["implied_draw"]), (0.4189, 0.3178, 0.2633))
+        self.assertAlmostEqual(soccer["implied_home"] + soccer["implied_away"] + soccer["implied_draw"], 1.0, places=3)
+        self.assertEqual((soccer["over_under"], soccer["implied_over"]), (2.5, 0.5506))
+        baseball = parse_core_odds(core("espn_core_odds_401817088.json"))[0]
+        # The run line's prices are under `current.spread`, not `spreadOdds`: home -1.5 at +169, away +1.5 at -206.
+        self.assertEqual((baseball["spread"], baseball["home_spread_odds"], baseball["away_spread_odds"]), (-1.5, 169, -206))
+        self.assertEqual((baseball["implied_home_cover"], baseball["implied_home"], baseball["draw_ml"], baseball["implied_draw"]),
+                         (0.3558, 0.5631, None, None))
+        self.assertEqual(implied(120, 190, 250), [0.4189, 0.3178, 0.2633])
+        self.assertIsNone(implied(120, None, 250))
+
+
+class Boards(unittest.TestCase):
+    def test_a_board_reads_its_query_and_says_which_day_a_daily_board_shows(self):
+        mlb = HOST + "/apis/site/v2/sports/baseball/mlb/scoreboard"
+        stale = json.loads((FIXTURES / "espn_scoreboard_mlb_default_20260924.json").read_text(encoding="utf-8"))
+        today = json.loads((FIXTURES / "espn_scoreboard_mlb_20260925.json").read_text(encoding="utf-8"))
+        transport = FakeTransport({mlb: lambda method, url, body: today if "dates=20260925" in url else stale})
+        client = Sports(transport)
+        # At 06:18Z Sept 25 the default MLB board was still Sept 24's, every game final.
+        board = client.board("mlb")
+        self.assertEqual((board["day"], {e["status"] for e in board["events"]}), ("2026-09-24", {"post"}))
+        dated = client.board("mlb", "dates=20260925")
+        # A dated board does not say its day (the live answer carries no `day`): the query does.
+        self.assertEqual((dated["day"], [e["short_name"] for e in dated["events"]][:2]), (None, ["CHC @ BOS", "BAL @ NYY"]))
+        self.assertEqual(transport.calls[-1]["url"], mlb + "?dates=20260925")
+        self.assertEqual(client.scoreboard("mlb"), board["events"])
