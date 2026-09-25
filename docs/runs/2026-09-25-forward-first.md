@@ -424,8 +424,11 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   capacity, never a family by name), three tenths model-versus-market (weather ensemble, EDGAR earnings, DVOL and
   funding, the sportsbook line on leagues no founder prices), two tenths exploration. `alpaca-open` 8 -> 12 (the Kalshi
   run owns `kalshi-open`); a card spanning two desks is replayed on both. **On the T0 snapshot none of the last day's 55
-  replayed cards measures $5 a day** (best $4.15 on the closed crypto-15m desk; weather's best $0.47): expect few
-  foundry births until cards with more markets or larger edges come; the floor stays $5 and is watched. At T0 about 93%
+  replayed cards measures $5 a day** (best $4.15 on the closed crypto-15m desk; weather's best $0.47) -- CORRECTED by
+  the Wave 2 review: that figure left out the sample factor (listed / kept markets on a Kalshi tape); the best weather
+  pass measures $13.16 a day, so Kalshi cards can clear the floor. Alpaca cannot (its best pass, 5.89% over 505 hour
+  blocks, is $0.07 a day): the floor now applies to Kalshi cards only (`capacity_floor_venues` ["kalshi"]; Alpaca
+  cards state and measure capacity and are judged by their replay) until Alpaca's size before fills halve is measured. At T0 about 93%
   of capacity calls would go to kalshi-sports, weighted by the MLB-totals regime families; it fades with the 7-day
   window. At T0 the foundry refused every call ("no seat is open on any eligible desk"): F3 frees seats first.
 
@@ -470,6 +473,17 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   skip and Jev off (as shipped) 673 / 253 / 89 / $33.20 (the T0 day as run: 2,566 / 547 / 108 / $87.65). A paused
   practice agent's fill no longer spends its once-a-day trade wake; it wakes on news of its own program, its own active
   block once a day, and the sample.
+
+- **Wave 2 review (`c/review`, two lenses then a skeptic-fixer; 9 of 14 findings fixed, digest unchanged).** The replay
+  cut left a Kalshi position that closed by the cut but settled after it unresolved, failing good graduates as counted
+  trials (reproduced: full tape 0 unresolved, cut tape 1): such markets now stay off the cut tape. X3's note changed
+  the engineer's worklist key of short refusal reasons (fresh real-money repair jobs for refusals already worked): the
+  key reads only the text before " -- to fit". X3's room for the position and gross caps is priced at the ask, as the
+  rule values it. S's floor by venue (above). The lane throttle releases every halved lane when its dial is removed; the
+  yield row reads a full day of rows (200 covered 18.1 h); a section the engineer asked for is carried to its next
+  attempt; `options_features` counts as the options topic. Open, recorded: an old graduate whose freeze predates most
+  of its tape (latent: oldest at T0 35 h against about 148 h); the experiment archive's growth (read disk on the box);
+  spanning cards' extra replays (by spec); the capacity route's family weighting.
 
 ## Progress notes
 
