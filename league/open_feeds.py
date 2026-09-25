@@ -539,11 +539,52 @@ REFUSALS: tuple[Refusal, ...] = (
             "needs a key: api.census.gov now answers every request without a key with 'A valid key must be included' -- the "
             "owner's step (a free Census API key)", "owner"),
     Refusal("inflation_nowcast", (frozenset(("nowcast", "nowcasting", "cleveland", "clevelandfed")),
-                                  frozenset(("inflation", "cpi", "pce", "nowcast", "nowcasting"))),
+                                  frozenset(("inflation", "cpi", "pce", "cleveland", "clevelandfed"))),
             "the site's terms forbid it: the Cleveland Fed allows reuse only 'for noncommercial, personal, or educational purposes'",
             "no-source"),
     Refusal("predictit", (frozenset(("predictit",)),),
             "the site's terms forbid it: PredictIt licenses its API data 'for non-commercial use'", "no-source"),
+    Refusal("openrouter", (frozenset(("openrouter", "kxtokenuse", "kxanthshare", "kxopenshare", "kxdeepshare", "kxgoogshare",
+                                      "kxzaishare")),),
+            "needs a key: OpenRouter's rankings (what KXTOKENUSE and the AI share markets settle on) are served key-free only "
+            "inside its web page, and its terms bar scraping the site with 'scripts, robots ... or any other automated technology' "
+            "(openrouter.ai/terms, section 7); its rankings dataset API needs an OpenRouter key -- the owner's step (a free key; the "
+            "data is CC BY 4.0)", "owner"),
+    Refusal("ai_share", (frozenset(("ai", "llm", "llms", "model", "models", "token", "tokens")),
+                         frozenset(("share", "shares", "rankings", "ranking", "usage"))),
+            "needs a key: the AI model usage and share rankings Kalshi's markets settle on are OpenRouter's, served to programs "
+            "only through its keyed dataset API (openrouter.ai/terms bars scraping the site) -- the owner's step", "owner"),
+    Refusal("econ_consensus", (frozenset(("consensus", "surprise", "surprises", "estimate", "estimates", "expectation", "expectations",
+                                          "expected")),
+                               frozenset(("cpi", "payrolls", "nfp", "gdp", "unemployment", "jobs", "inflation", "pce", "ppi", "claims",
+                                          "jobless", "retail"))),
+            "no key-free source publishes it: economists' consensus forecasts are sold by data vendors or shown on sites whose "
+            "terms forbid automated use; the bls feed records the published values themselves", "no-source"),
+    Refusal("bea_data", (frozenset(("bea", "gdp", "pce")),
+                         frozenset(("data", "value", "values", "actual", "actuals", "series", "print", "prints", "history",
+                                    "historical", "estimate", "advance"))),
+            "needs a key: BEA's data API (GDP, PCE) needs a registration key (apps.bea.gov/API/signup) -- the owner's step",
+            "owner"),
+    Refusal("gdpnow", (frozenset(("gdpnow", "atlantafed", "atlanta")),),
+            "the site's terms forbid it: the Atlanta Fed permits GDPNow's data 'for personal and educational use only', not for "
+            "commercial gain (atlantafed.org/terms-of-use)", "no-source"),
+    Refusal("truth_social_count", (frozenset(("truth", "truthsocial", "factbase", "kxtruthsocial")),
+                                   frozenset(("post", "posts", "count", "counts", "truths", "number", "factbase", "kxtruthsocial"))),
+            "no source that passes the rule publishes it: Truth Social offers no key-free API whose terms allow automated "
+            "reading, and Roll Call's Factbase (what KXTRUTHSOCIAL settles on) publishes no terms that grant automated access "
+            "and serves its listing only through an internal endpoint", "no-source"),
+    Refusal("prediction_venues", (frozenset(("manifold", "metaculus", "smarkets", "betfair")),),
+            "the sites' terms forbid it for a trading firm: Manifold licenses its content 'solely for your personal, "
+            "non-commercial use' (docs.manifold.markets/terms), Metaculus's API now needs a token (the owner's step) and "
+            "Betfair's and Smarkets' need an account", "no-source"),
+    Refusal("crypto_aggregators", (frozenset(("coingecko", "gecko", "coinmarketcap", "cmc", "blockchaininfo", "coincap",
+                                              "cryptocompare")),),
+            "needs a paid plan or forbids it: CoinGecko's robots.txt disallows /api/v3 and its commercial licence is a paid plan, "
+            "CoinMarketCap, CoinCap and CryptoCompare need keys, and Blockchain.com's API terms are personal and non-commercial; "
+            "mempool.space (mempool) and alternative.me (fear_greed) are recorded", "owner"),
+    Refusal("f1", (frozenset(("f1", "formula", "jolpica", "ergast")),),
+            "the source's terms forbid it: Jolpica F1 (the Ergast successor) is 'freely available for non-commercial use' under "
+            "CC BY-NC-SA", "no-source"),
     Refusal("league_stats", (frozenset(("statsapi", "statcast", "mlb", "nfl", "ncaaf", "nba", "nhl", "wnba", "ncaa", "ncaab", "boxscore", "boxscores")),
                              frozenset(("stats", "statistics", "statcast", "boxscore", "boxscores", "splits", "pbp", "play", "plays",
                                         "player", "players", "advanced"))),

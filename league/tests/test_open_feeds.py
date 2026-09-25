@@ -327,6 +327,23 @@ class Refusals(RecorderCase):
         self.assertIsNone(open_feeds.refusal_for(""))
         self.assertEqual(open_feeds.refusal_for("vix_term_structure").name, "cboe")
         self.assertEqual(open_feeds.refusal_for("fred_dgs10_daily").owner, "owner")
+        named = {name: (open_feeds.refusal_for(name).name, open_feeds.refusal_for(name).owner) for name in (
+            "openrouter_rankings", "ai_model_token_share", "cpi_consensus_forecast", "gdpnow_nowcast", "cleveland_fed_inflation_nowcast",
+            "truth_social_post_count", "manifold_prices", "coingecko_prices", "f1_race_results", "nba_player_stats")}
+        self.assertEqual(named, {"openrouter_rankings": ("openrouter", "owner"), "ai_model_token_share": ("ai_share", "owner"),
+                                 "cpi_consensus_forecast": ("econ_consensus", "no-source"), "gdpnow_nowcast": ("gdpnow", "no-source"),
+                                 "cleveland_fed_inflation_nowcast": ("inflation_nowcast", "no-source"),
+                                 "truth_social_post_count": ("truth_social_count", "no-source"),
+                                 "manifold_prices": ("prediction_venues", "no-source"), "coingecko_prices": ("crypto_aggregators", "owner"),
+                                 "f1_race_results": ("f1", "no-source"), "nba_player_stats": ("league_stats", "no-source")})
+
+    def test_a_request_a_recorder_answers_is_never_refused(self):
+        commons = Commons(self.ledger, clock=self.clock)
+        asked = commons.request_tool("leahy-3", "openrouter_pageviews", "attention on OpenRouter while KXTOKENUSE trades")["queued"]
+        self.assertIsNotNone(open_feeds.refusal_for("openrouter_pageviews"))  # a rule names it ...
+        self.assertEqual(request_feed("openrouter_pageviews"), "pageviews")  # ... but a recorder answers it
+        self.assertEqual(open_feeds.refuse_requests(commons), [])
+        self.assertEqual([row["id"] for row in commons.open_requests(stale_days=0)], [asked])
 
 
 class ImportOrder(unittest.TestCase):
