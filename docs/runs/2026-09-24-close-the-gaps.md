@@ -1154,3 +1154,27 @@ from Deploy C′ (`--since 2026-09-24T16:32:40`) for the rows the morning's chur
 - **Docs, memory and this record are current;** the final PR merges them.
 - **The repo and `~/Work` are clean** except what is not ours to delete (section 7).
 - **This report is delivered.**
+
+### After the report (Sept 25, 00:00-00:10Z)
+
+- **#289 merged** (main `d058d5f`, CI green on both Pythons at 00:00:00Z) and owner-deployed at 00:02:51Z, nine seconds
+  after a failed backup row, so that the old House's next try would come after the promotion. The release
+  `20260925T000252Z-224ede104225` was promoted at 00:04:42Z and **rolled back at 00:06:24Z**: "reading 3: 1 error
+  alert(s) ... The daily backup of the House box failed (SailboxError: sailbox api 503 ...)", written at 00:05:55Z by
+  the OLD House. Its graceful shutdown waited 73 s for the backup already in flight, and the new House had not started.
+- **Why a timed retry was not made.** A new try starts at the tick after each failure and takes about three minutes
+  to fail. The failures came 163-443 s apart (23:01-00:05Z), so the only safe moment (after a failure, before the next
+  tick starts another try) is 20-60 s wide. A deploy's canary takes 90-105 s. Each miss costs the floor two restarts.
+- **The state:**
+  - The floor runs `main-8d48771e009d` (Deploy F plus Merton's #287). Grant active on `535a7f15`, no frozen book,
+    trading.
+  - The daily backup has failed 46 times since 21:31:55Z Sept 24, the same 503 from six Sail hosts, after daily
+    successes Sept 20-23. The Sept 23 backup had failed for 12 minutes and then succeeded.
+  - Until one succeeds, every release's watch (the updater's and the owner's) meets the running House's error and is
+    rolled back. The fix inside the release cannot help its own first watch, because the watch reads the House being
+    replaced.
+  - The fix (#289: backoff, and `began_at` that the watchdog inherits) lands with the first release whose watch meets
+    no backup error, once Sail's checkpoint service answers again. The in-box updater will then ship main's head
+    (#289 with Merton's #288, #290, #291 and whatever follows).
+- **Owner step:** check Sail's status for checkpoints ("prepare checkpoint warm snapshot ... DeadlineExceeded"). If it
+  lasts, a deploy lands only right after a backup succeeds, or once Sail's checkpoints work again.
