@@ -595,10 +595,14 @@ class InputsTest(ScoreboardCase):
         self.assertEqual(idle["desks"], ["alpaca-open"])
 
     def test_the_allowed_hosts_are_the_block_the_owner_allowed_on_sept_24(self):
-        self.assertEqual(gs.allowed_data_hosts(), (
+        hosts = gs.allowed_data_hosts()
+        self.assertEqual(hosts[:12], (
             "api.open-meteo.com", "ensemble-api.open-meteo.com", "historical-forecast-api.open-meteo.com",
             "api.weather.gov", "www.sec.gov", "efts.sec.gov", "api.nasdaq.com", "markets.newyorkfed.org",
             "home.treasury.gov", "sports.core.api.espn.com", "www.tsa.gov", "www.realclearpolling.com"))
+        # And every data host allowed after them (the Kalshi-scale run's I2 block of Sept 25-26, 2026, 21 hosts).
+        self.assertEqual(len(hosts), 12 + 21)
+        self.assertIn("mesonet.agron.iastate.edu", hosts[12:])
 
 
 # ------------------------------------------------------------------------------ the extras
