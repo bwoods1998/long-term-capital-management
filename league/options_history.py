@@ -98,6 +98,10 @@ SPREAD_MODEL = {
     # EXECUTION stress: multiplies the half-spread a fill at the touch pays, never the quote a
     # strategy is shown -- so a stressed run changes costs and not the strategy's decisions.
     "stress": 1.0,
+    # The fill half-spread CALIBRATED on recorded OPRA quotes (`CALIBRATED_SPREADS`, `calibrated_half`):
+    # None (the default) keeps the estimate above; a calibration table replaces it wherever the table
+    # has a bucket measured on enough quotes. `stress` still multiplies whatever a fill pays.
+    "calibration": None,
 }
 #: A structure tape keeps a contract's bar only within this fraction of the underlying's price then:
 #: the chain's own moneyness line (`House._chain`), so nothing a structure agent could be shown is lost.
@@ -246,7 +250,38 @@ def display_quote(last: float, model: Mapping[str, Any] | None = None) -> tuple[
     return (bid if bid > 0 else None), round(float(last) + half, 4)
 
 
-def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model: Mapping[str, Any] | None = None) -> tuple[float | None, float, float]:
+def spread_bucket(calibration: Mapping[str, Any], underlying: str, last: float, strike: float | None, spot: float | None) -> dict[str, Any] | None:
+    """The calibration bucket of a contract: its class (the table's `etf` underlyings, or a single stock),
+    its last print's premium, and at a premium of $3 or more its moneyness |strike / spot - 1| (deep in
+    the money index options are quoted dollars wide: Sept 22-24, 2026). None where no bucket fits."""
+    kind = "etf" if str(underlying or "").upper() in set(calibration.get("etf") or ()) else "stock"
+    away = abs(float(strike) / float(spot) - 1.0) if strike and spot else None
+    for row in calibration.get("buckets") or ():
+        low, high = row["premium"]
+        if row["class"] != kind or not (low <= last and (high is None or last < high)):
+            continue
+        band = row.get("moneyness")
+        if band is not None:
+            if away is None or not (band[0] <= away and (band[1] is None or away < band[1])):
+                continue
+        return dict(row)
+    return None
+
+
+def calibrated_half(calibration: Mapping[str, Any] | None, underlying: str, last: float, strike: float | None = None,
+                    spot: float | None = None) -> float | None:
+    """The calibrated fill half-spread of a leg printed last at `last`, or None (the estimate then) when
+    the calibration is off, has no bucket for it, or measured its bucket on fewer than `min_quotes`."""
+    if not calibration:
+        return None
+    row = spread_bucket(calibration, underlying, float(last), strike, spot)
+    if row is None or int(row.get("quotes") or 0) < int(calibration.get("min_quotes") or 0):
+        return None
+    return float(row["half"])
+
+
+def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model: Mapping[str, Any] | None = None, *,
+                   contract: Mapping[str, Any] | None = None, spot: float | None = None) -> tuple[float | None, float, float]:
     """`(bid, ask, half)` a FILL at the touch pays, estimated around a bar's last print: the
     conservative estimate. There are no historical quotes, so the half-spread is the largest of
     one tick, `floor_pct` of the premium, `range_weight` of the median high-low range of the
@@ -259,6 +294,14 @@ def estimate_quote(bar: Mapping[str, Any], recent_ranges: Sequence[float], model
     with a median about twice the quoted median."""
     m = {**SPREAD_MODEL, **dict(model or {})}
     last = float(bar["c"])
+    if m.get("calibration") and contract is not None:
+        # The calibrated half-spread (`CALIBRATED_SPREADS`), never under a tick; the estimate below
+        # where the table has no measured bucket for this contract.
+        measured = calibrated_half(m["calibration"], str(contract.get("underlying") or ""), last, _float(contract.get("strike")), spot)
+        if measured is not None:
+            half = round(max(m["min_half_ticks"] * tick(last), measured), 4)
+            bid = round(last - half, 4)
+            return (bid if bid > 0 else None), round(last + half, 4), half
     ranges = sorted(float(r) for r in recent_ranges if r is not None and r >= 0)
     median = ranges[len(ranges) // 2] if ranges else 0.0
     floor = next((float(f) for cap, f in (m.get("measured_floors") or []) if last < float(cap)), 0.0)
@@ -996,6 +1039,150 @@ def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[s
     return underlier_bars
 
 
+#: The calibration's buckets (`fit_spread_calibration`): premium bands of the last print, and at $3 and
+#: over a moneyness band too; the index ETFs' $0.5-3 legs are one band (one day of their quotes, Sept 23).
+SPREAD_BUCKETS = (
+    {"class": "etf", "premium": [0.0, 0.5], "moneyness": None},
+    {"class": "etf", "premium": [0.5, 3.0], "moneyness": None},
+    {"class": "etf", "premium": [3.0, None], "moneyness": [0.0, 0.03]},
+    {"class": "etf", "premium": [3.0, None], "moneyness": [0.03, None]},
+    {"class": "stock", "premium": [0.0, 0.5], "moneyness": None},
+    {"class": "stock", "premium": [0.5, 1.0], "moneyness": None},
+    {"class": "stock", "premium": [1.0, 3.0], "moneyness": None},
+    {"class": "stock", "premium": [3.0, None], "moneyness": [0.0, 0.03]},
+    {"class": "stock", "premium": [3.0, None], "moneyness": [0.03, None]},
+)
+
+
+#: The fill half-spread table fitted on the House's recorded OPRA quotes (`fit_spread_calibration` over
+#: the local copy, Sept 25, 2026, builder S3): 316,141 quotes of Sept 22 14:55Z - Sept 24 20:00Z, 11,111
+#: of them within 300 s of a qualifying bar of their contract (the index ETFs' only on Sept 23: their
+#: 15-minute bars of Sept 24 were not yet stored, and their Mon-Thu expiries have none), the 97.5th
+#: percentile of the one-sided distance from the last print to the real touch, a cent at least.
+#: On those quotes it is tighter than the real ask 5.6% / bid 7.6% of the time for the ETFs (the current
+#: estimate: 6.6% / 9.3%) and 2.3% / 1.3% for single stocks (the current estimate: 27.2% / 25.4%);
+#: held out (the same fit on Sept 22-23 only, judged on Sept 24's 4,557 single-stock quotes) 9.7% / 6.6%,
+#: a median $0.09 short (current: 30.6% / 28.2%, $0.024). OFF unless a tape's `spread_model["calibration"]` names it (`scripts/replay_structures.py
+#: --calibrated`); refit it (`python -m league.options_history calibrate`) as the House records more.
+CALIBRATED_SPREADS = {
+    "version": "opra-quotes-2026-09-22..24-q0.975-gap300s", "quantile": 0.975, "max_gap_seconds": 300.0, "min_quotes": 60,
+    "etf": ["IWM", "QQQ", "SPY"],
+    "buckets": [
+        {"class": "etf", "premium": [0.0, 0.5], "moneyness": None, "half": 0.02, "quotes": 108},
+        {"class": "etf", "premium": [0.5, 3.0], "moneyness": None, "half": 0.07, "quotes": 99},
+        {"class": "etf", "premium": [3.0, None], "moneyness": [0.0, 0.03], "half": 0.25, "quotes": 66},
+        {"class": "etf", "premium": [3.0, None], "moneyness": [0.03, None], "half": 2.79, "quotes": 29},
+        {"class": "stock", "premium": [0.0, 0.5], "moneyness": None, "half": 0.06, "quotes": 6437},
+        {"class": "stock", "premium": [0.5, 1.0], "moneyness": None, "half": 0.14, "quotes": 1612},
+        {"class": "stock", "premium": [1.0, 3.0], "moneyness": None, "half": 0.46, "quotes": 1499},
+        {"class": "stock", "premium": [3.0, None], "moneyness": [0.0, 0.03], "half": 1.02, "quotes": 622},
+        {"class": "stock", "premium": [3.0, None], "moneyness": [0.03, None], "half": 1.86, "quotes": 639},
+    ],
+}
+
+
+def _quantile(values: Sequence[float], p: float) -> float | None:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, max(0, int(round(p * (len(ordered) - 1)))))] if ordered else None
+
+
+def fit_spread_calibration(store: OptionsHistory, underlier_bars: Callable[..., list[dict[str, Any]]], *, quantile: float = 0.975,
+                           max_gap: float = 300.0, min_quotes: int = 60, etf: Sequence[str] = ("SPY", "QQQ", "IWM"),
+                           start: str = "", end: str = "9999", liquidity: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """A fill half-spread table fitted on the recorded OPRA quotes (`SPREAD_MODEL["calibration"]`).
+
+    The replay prices a fill around a leg's LAST PRINT c in a 15-minute bar; it cannot know the mid. So
+    what a fill half-spread h must cover is not the quoted half-spread but the distance from c to the
+    real touch the fill trades at: a buy is flattered when c + h < the ask, a sell when c - h > the bid.
+    Each recorded quote is paired with its contract's last qualifying bar (the tape's `min_volume` and
+    `min_trades`) closed at most `max_gap` seconds before it -- a fill-time pairing: the replay fills at
+    that bar's close -- and each bucket's h is the `quantile` of the larger one-sided need (ask - c,
+    c - bid), never under a cent. Buckets measured on fewer than `min_quotes` keep the estimate.
+
+    `check` says, on the same quotes, how often the table and the current estimate are tighter than
+    the real touch (buy and sell), and by how much. The table is only as good as the days it saw: refit
+    it as the House records more (a Friday's 0-DTE legs, the daily expiries)."""
+    live = {**LIQUIDITY, **dict(liquidity or {})}
+    etf_set = {str(x).upper() for x in etf}
+    quotes: dict[str, list[tuple[str, float, float]]] = {}
+    for occ, t, bid, ask in store.db.execute("SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? ORDER BY occ, t", (start, end)):
+        quotes.setdefault(occ, []).append((t, float(bid), float(ask)))
+    total = sum(len(rows) for rows in quotes.values())
+    if not quotes:
+        raise HistoryError("no recorded quotes to calibrate on")
+    first = min(rows[0][0] for rows in quotes.values())
+    last_t = max(rows[-1][0] for rows in quotes.values())
+    bars_from = iso(_ts(first) - 7 * 86400)
+    spots: dict[str, tuple[list[float], list[float]]] = {}
+    for root in sorted({occ[:-15] for occ in quotes}):
+        rows = underlier_bars(root, "15Min", bars_from, last_t) or []
+        spots[root] = ([_ts(r["t"]) for r in rows], [float(r["c"]) for r in rows])
+    pairs = []
+    names = list(quotes)
+    for i in range(0, len(names), 400):
+        group = names[i:i + 400]
+        marks = ",".join("?" * len(group))
+        printed: dict[str, list[tuple]] = {}
+        for occ, t, h, l, c in store.db.execute(
+                f"SELECT occ, t, h, l, c FROM bars WHERE timeframe = '15Min' AND t >= ? AND t <= ? AND v >= ? AND n >= ? AND occ IN ({marks}) ORDER BY occ, t",
+                (bars_from, last_t, float(live["min_volume"]), int(live["min_trades"]), *group)):
+            printed.setdefault(occ, []).append((_ts(t), float(h), float(l), float(c)))
+        for occ in group:
+            mine = printed.get(occ)
+            if not mine:
+                continue
+            stamps = [b[0] for b in mine]
+            parsed = parse_occ(occ)
+            root = parsed["underlying"]
+            for t, bid, ask in quotes[occ]:
+                at = _ts(t)
+                k = bisect.bisect_right(stamps, at) - 1
+                if k < 0 or at - stamps[k] > max_gap:
+                    continue
+                times, closes = spots.get(root, ([], []))
+                j = bisect.bisect_right(times, at) - 1
+                ranges = [max(0.0, b[1] - b[2]) for b in mine[max(0, k - int(SPREAD_MODEL["range_bars"])):k]]
+                current = estimate_quote({"c": mine[k][3]}, ranges)[2]
+                pairs.append({"root": root, "c": mine[k][3], "strike": parsed["strike"], "spot": closes[j] if j >= 0 else None,
+                              "bid": bid, "ask": ask, "day": t[:10], "current": current})
+    calibration = {"version": f"opra-quotes-q{quantile}-gap{int(max_gap)}s", "quantile": quantile, "max_gap_seconds": max_gap,
+                   "min_quotes": min_quotes, "etf": sorted(etf_set), "buckets": []}
+    members: dict[int, list[dict[str, Any]]] = {}
+    for pair in pairs:
+        row = spread_bucket({"etf": sorted(etf_set), "buckets": [dict(b, index=n) for n, b in enumerate(SPREAD_BUCKETS)]},
+                            pair["root"], pair["c"], pair["strike"], pair["spot"])
+        if row is not None:
+            members.setdefault(row["index"], []).append(pair)
+    for n, bucket in enumerate(SPREAD_BUCKETS):
+        group = members.get(n) or []
+        need = max(_quantile([p["ask"] - p["c"] for p in group], quantile) or 0.0, _quantile([p["c"] - p["bid"] for p in group], quantile) or 0.0)
+        calibration["buckets"].append({**bucket, "half": round(max(0.01, need), 4), "quotes": len(group),
+                                       "quoted_half_median": _quantile([(p["ask"] - p["bid"]) / 2 for p in group], 0.5)})
+
+    def tighter(half_of: Callable[[dict[str, Any]], float]) -> dict[str, Any]:
+        out = {}
+        for kind in ("etf", "stock"):
+            group = [p for p in pairs if (p["root"] in etf_set) == (kind == "etf")]
+            if not group:
+                continue
+            halves = [half_of(p) for p in group]
+            short = [x for p, h in zip(group, halves) for x in (p["ask"] - (p["c"] + h), (p["c"] - h) - p["bid"]) if x > 1e-9]
+            out[kind] = {"quotes": len(group), "median_half": _quantile(halves, 0.5),
+                         "buy_tighter": round(sum(1 for p, h in zip(group, halves) if p["c"] + h < p["ask"] - 1e-9) / len(group), 4),
+                         "sell_tighter": round(sum(1 for p, h in zip(group, halves) if p["c"] - h > p["bid"] + 1e-9) / len(group), 4),
+                         "median_shortfall": _quantile(short, 0.5) or 0.0}
+        return out
+
+    def table_half(pair: dict[str, Any]) -> float:
+        measured = calibrated_half(calibration, pair["root"], pair["c"], pair["strike"], pair["spot"])
+        return pair["current"] if measured is None else max(tick(pair["c"]), measured)
+
+    calibration["fitted_on"] = {"from": first, "to": last_t, "days": sorted({p["day"] for p in pairs}), "quotes_recorded": total,
+                                "quotes_paired": len(pairs)}
+    calibration["check"] = {"calibrated": tighter(table_half), "current": tighter(lambda p: p["current"])}
+    return calibration
+
+
 def stored_underlier(store: OptionsHistory) -> Callable[[str, str, str, str], list[dict[str, Any]]]:
     """`underlier_bars(symbol, timeframe, start, end)` read from the store's `underlier_bars` table
     instead of the gateway: the same close-stamped, UNADJUSTED bars `adapter_from` returns, as
@@ -1032,7 +1219,9 @@ def refresh(store: OptionsHistory, symbols: Sequence[str], underlier_bars: Calla
 def main(argv: list[str] | None = None) -> int:
     """`python -m league.options_history ingest --symbols SPY,QQQ --start 2026-05-01 --end 2026-09-18`."""
     parser = argparse.ArgumentParser(description="Ingest listed-option history through the gateway (market-data GETs only).")
-    parser.add_argument("command", choices=("ingest", "coverage", "features"))
+    parser.add_argument("command", choices=("ingest", "coverage", "features", "calibrate"))
+    parser.add_argument("--quantile", type=float, default=0.975)
+    parser.add_argument("--max-gap", type=float, default=300.0)
     parser.add_argument("--store", default="/workspace/state/options_history.sqlite")
     parser.add_argument("--symbols", default="SPY,QQQ")
     parser.add_argument("--start", default="")
@@ -1048,6 +1237,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "coverage":
         print(json.dumps(OptionsHistory(args.store).coverage(), indent=1))
         return 0
+    if args.command == "calibrate":
+        store = OptionsHistory(args.store)
+        try:
+            underlier = stored_underlier(store)  # a local copy carries its underlying bars
+        except HistoryError:
+            underlier = None
+        if underlier is not None:
+            print(json.dumps(fit_spread_calibration(store, underlier, quantile=args.quantile, max_gap=args.max_gap), indent=1))
+            return 0
     from .service import load_config, load_env, secret
     from .tapes import AlpacaData
     from .venues import gateway_broker
@@ -1059,6 +1257,9 @@ def main(argv: list[str] | None = None) -> int:
     data = AlpacaData(broker.client, feed=config.get("alpaca_feed", "iex"))
     underlier = adapter_from(data)
     store = OptionsHistory(args.store, gateway_get(broker))
+    if args.command == "calibrate":  # the House's store: its underlying bars through the gateway (market-data GETs)
+        print(json.dumps(fit_spread_calibration(store, underlier, quantile=args.quantile, max_gap=args.max_gap), indent=1))
+        return 0
     if args.command == "ingest":
         rows = store.ingest(symbols, args.start, args.end or ny_date(time.time()), underlier_bars=underlier,
                             timeframes=[t for t in args.timeframes.split(",") if t], band=args.band, max_days=args.max_days,

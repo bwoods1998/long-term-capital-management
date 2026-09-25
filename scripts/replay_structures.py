@@ -105,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--history", default=str(DEFAULT_HISTORY), help="the local options history copy")
     parser.add_argument("--params", default="", help="JSON PARAMS overriding the file's (an edit replay)")
     parser.add_argument("--stress", type=float, default=1.0, help="execution stress: multiplies what fills pay")
+    parser.add_argument("--calibrated", action="store_true",
+                        help="price fills with the calibrated half-spreads (options_history.CALIBRATED_SPREADS) instead of the estimate")
+    parser.add_argument("--calibration", default="", help="a calibration table (JSON, `python -m league.options_history calibrate`) to price fills with")
     parser.add_argument("--scale", type=float, default=1.0, help="the book's size against practice rung 1 (0.5: an edit replay)")
     parser.add_argument("--niche", default="alpaca-options")
     parser.add_argument("--json", action="store_true", help="print the whole summary as JSON")
@@ -141,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     tape = store.tape(needs, start_iso, end_iso, horizon=horizon, warmup=warmup, execution="15Min", underlier_bars=underlier,
                       max_order_usd=float(rung["max_order_usd"]))
     tape["spread_model"]["stress"] = args.stress
+    if args.calibration:
+        tape["spread_model"]["calibration"] = json.loads(Path(args.calibration).read_text(encoding="utf-8"))
+    elif args.calibrated:
+        tape["spread_model"]["calibration"] = oh.CALIBRATED_SPREADS
     built = time.time() - t0
     # The tape's size as the box would receive it, counted as it is encoded (never one big string).
     size_mb = (sum(len(chunk) for chunk in json.JSONEncoder(separators=(",", ":")).iterencode(tape)) / 1e6) if args.measure else None
@@ -156,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "strategy": args.strategy, "window": [start_iso, end_iso], "horizon": horizon, "symbols": needs.get("symbols"),
         "structures": bool(needs.get("structures")), "params": params, "mutable_params": mutable,
+        "fill_model": (tape["spread_model"].get("calibration") or {}).get("version") or "estimate (options_history.estimate_quote)",
         "tape": {"steps": len(tape["steps"]), "contracts": len(tape["contracts"]), "json_mb": None if size_mb is None else round(size_mb, 1),
                  "option_bars": sum(len(step.get("options") or {}) for step in tape["steps"]), "bounded": tape.get("bounded"),
                  "recorded_quotes": tape.get("recorded_quotes"), "build_seconds": round(built, 1)},
@@ -179,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(summary, indent=1, default=str))
         return 0 if passed else 1
-    print(f"{args.strategy}: {'PASS' if passed else 'FAIL'}  ({horizon}, {', '.join(needs.get('symbols') or [])}, {start_iso} .. {end_iso})")
+    print(f"{args.strategy}: {'PASS' if passed else 'FAIL'}  ({horizon}, {', '.join(needs.get('symbols') or [])}, {start_iso} .. {end_iso}; fills: {summary['fill_model']})")
     for reason in reasons:
         print(f"  - {reason}")
     print(f"  trades (closed structures) {summary['trades']}  opened {summary['structures_opened']}  settled at expiry "

@@ -1123,3 +1123,76 @@ class StructureKit(unittest.TestCase):
         self.assertEqual((result["fills"], result["options"]["structures"]["opened"]), (1, 1))
         self.assertEqual(structure_core.TYPES, ("debit_vertical", "long_butterfly", "calendar", "diagonal", "long_straddle",
                                                 "long_strangle", "credit_vertical", "iron_condor", "iron_butterfly"))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The calibrated fill half-spread (Sept 25, 2026, builder S3): a table fitted on the recorded OPRA quotes
+# (`options_history.fit_spread_calibration`), OFF unless the tape's spread model names it.
+
+class SpreadCalibration(unittest.TestCase):
+    TABLE = {"version": "test", "quantile": 0.975, "max_gap_seconds": 300.0, "min_quotes": 60, "etf": ["SPY"],
+             "buckets": [{"class": "etf", "premium": [0.0, 3.0], "moneyness": None, "half": 0.03, "quotes": 500},
+                         {"class": "etf", "premium": [3.0, None], "moneyness": [0.0, 0.03], "half": 0.30, "quotes": 80},
+                         {"class": "etf", "premium": [3.0, None], "moneyness": [0.03, None], "half": 2.50, "quotes": 10},
+                         {"class": "stock", "premium": [0.0, None], "moneyness": None, "half": 0.10, "quotes": 900}]}
+
+    def test_off_by_default_the_estimate_is_unchanged(self):
+        self.assertIsNone(oh.SPREAD_MODEL["calibration"])
+        row = bar(1.20, 1.25, 1.10, 1.20)
+        plain = oh.estimate_quote(row, [0.3, 0.3], oh.SPREAD_MODEL)
+        self.assertEqual(oh.estimate_quote(row, [0.3, 0.3], oh.SPREAD_MODEL, contract={"underlying": "SPY", "strike": 585.0}, spot=585.4), plain)
+        self.assertEqual(plain[2], 0.15)  # half the median range: the estimate
+
+    def test_the_table_prices_a_measured_bucket_and_the_estimate_keeps_the_rest(self):
+        model = {**oh.SPREAD_MODEL, "calibration": self.TABLE}
+        row = bar(1.20, 1.25, 1.10, 1.20)
+        self.assertEqual(oh.estimate_quote(row, [0.3, 0.3], model, contract={"underlying": "SPY", "strike": 585.0}, spot=585.4), (1.17, 1.23, 0.03))
+        self.assertEqual(oh.estimate_quote(row, [0.3, 0.3], model, contract={"underlying": "F", "strike": 12.0}, spot=12.2)[2], 0.10)
+        dear = bar(5.0, 5.0, 5.0, 5.0)
+        self.assertEqual(oh.estimate_quote(dear, [], model, contract={"underlying": "SPY", "strike": 580.0}, spot=585.4)[2], 0.30)  # 0.9% away
+        # a bucket measured on too few quotes (10 < 60), or no spot to place it: the estimate (4% of $5)
+        self.assertEqual(oh.estimate_quote(dear, [], model, contract={"underlying": "SPY", "strike": 540.0}, spot=585.4)[2], 0.20)
+        self.assertEqual(oh.estimate_quote(dear, [], model, contract={"underlying": "SPY", "strike": 580.0}, spot=None)[2], 0.20)
+        # never under a tick ($0.05 at $3 and over)
+        tight = {**self.TABLE, "buckets": [dict(self.TABLE["buckets"][1], half=0.01)]}
+        self.assertEqual(oh.estimate_quote(dear, [], {**oh.SPREAD_MODEL, "calibration": tight}, contract={"underlying": "SPY", "strike": 580.0}, spot=585.4)[2], 0.05)
+        self.assertTrue(all(b["half"] >= 0.01 for b in oh.CALIBRATED_SPREADS["buckets"]))
+
+    def test_a_structure_replay_fills_at_the_calibrated_touch_and_stress_still_widens_it(self):
+        steps = [sstep("2026-09-22T13:45:00Z", VPRICES), sstep("2026-09-22T14:00:00Z", VPRICES)]
+        params = {"legs": VLEGS, "open_at": "2026-09-22T13:45:00Z", "limit": 0.60}
+        base = run_replay(STRUCTURE_STRATEGY, params, stape(steps, VERTICAL), stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual(base["fill_log"][0]["price"], 0.576)  # the estimate: 4% of each premium
+        tape = stape(steps, VERTICAL)
+        tape["spread_model"]["calibration"] = self.TABLE
+        calibrated = run_replay(STRUCTURE_STRATEGY, params, tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual(calibrated["fill_log"][0]["price"], 0.56)  # 1.20 + 0.03 - (0.70 - 0.03)
+        tape["spread_model"]["stress"] = 2.0
+        stressed = run_replay(STRUCTURE_STRATEGY, params, tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual(stressed["fills"], 0)  # 1.20 + 0.06 - (0.70 - 0.06) = 0.62: over the 0.60 limit
+        stressed = run_replay(STRUCTURE_STRATEGY, dict(params, limit=0.65), tape, stake=1000.0, limits=SLIMITS, audit=True)
+        self.assertEqual(stressed["fill_log"][0]["price"], 0.62)
+
+    def test_the_fit_is_the_quantile_of_the_distance_from_the_last_print_to_the_real_touch(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = oh.OptionsHistory(Path(root) / "h.sqlite")
+            code = socc(585)
+            store.db.execute("INSERT INTO contracts VALUES (?, 'SPY', '2026-09-25', 585.0, 'call', 100, 'active', '')", (code,))
+            store.db.execute("INSERT INTO bars VALUES (?, '15Min', '2026-09-22T14:00:00Z', 1.2, 1.2, 1.2, 1.20, 50, 10, 1.2)", (code,))
+            # 100 quotes a minute apart within 300 s of the bar: the ask 0.01..0.10 over the last print
+            for k in range(100):
+                t = f"2026-09-22T14:0{k // 20}:{(k % 20) * 3:02d}Z"
+                store.db.execute("INSERT INTO quotes VALUES (?, ?, ?, ?, 'opra')", (code, t, 1.19, round(1.20 + 0.001 * (k + 1), 4)))
+            store.db.execute("INSERT INTO quotes VALUES (?, '2026-09-22T14:30:00Z', 1.0, 2.0, 'opra')", (code,))  # 30 min stale: unpaired
+            store.db.commit()
+
+            def underlier(symbol, timeframe, start, end):
+                return [{"t": "2026-09-22T14:00:00Z", "o": 585.4, "h": 585.4, "l": 585.4, "c": 585.4, "v": 1000.0}]
+            fitted = oh.fit_spread_calibration(store, underlier, quantile=0.95, max_gap=300.0, min_quotes=50, etf=("SPY",))
+            store.close()
+        spy = [b for b in fitted["buckets"] if b["class"] == "etf" and b["quotes"]]
+        self.assertEqual(len(spy), 1)
+        self.assertEqual((spy[0]["premium"], spy[0]["quotes"], spy[0]["half"]), ([0.5, 3.0], 100, 0.095))
+        self.assertEqual(fitted["fitted_on"]["quotes_recorded"], 101)
+        check = fitted["check"]["calibrated"]["etf"]
+        self.assertEqual((check["quotes"], check["buy_tighter"]), (100, 0.05))  # 5 of 100 asks are over c + 0.095

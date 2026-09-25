@@ -323,7 +323,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             return  # nothing works against this bar (the estimates below are the replay's costliest arithmetic)
         volume, trades = float(bar.get("v") or 0), int(bar.get("n") or 0)
         stress = max(1.0, float(model.get("stress") or 1.0))  # the execution stress: costs, not the quote shown
-        half = estimate_quote(bar, ranges.get(occ, []), model)[2] * stress
+        half = estimate_quote(bar, ranges.get(occ, []), model, contract=contracts[occ], spot=spot_of(occ))[2] * stress
         shown = (display_quote(float(bar["o"]), model)[1] - float(bar["o"])) * stress  # the shown half-spread at the open
         bar_start = now_ts - step_seconds
         for order_id in [k for k, o in book.orders.items() if o["occ"] == occ]:
@@ -407,6 +407,12 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         book.orders[order_id] = {"order_id": order_id, "occ": occ, "ident": {"symbol": parsed["underlying"], "expiry": parsed["expiry"],
                                  "strike": parsed["strike"], "right": parsed["right"]}, "side": side, "quantity": qty, "limit_price": round(limit, 4),
                                  "submitted_at": now, "placed_ts": now_ts, "expires_ts": _session_end(now_ts), "reason": intent["reason"].strip()[:500]}
+
+    def spot_of(occ: str) -> float | None:
+        """The underlying's last price on the tape: a calibrated spread's moneyness band reads it
+        (`options_history.spread_bucket`; the estimate without a calibration never does)."""
+        seen = spot.get(contracts[occ].get("underlying"))
+        return None if seen is None else seen[0]
 
     def iv_of(occ: str) -> float | None:
         """The contract's implied volatility at its last print, against the underlying then: solved
@@ -652,7 +658,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             if occ in watched and float(bar.get("v") or 0) >= liq["min_volume"] and int(bar.get("n") or 0) >= liq["min_trades"]:
                 # A structure leg's CONSERVATIVE touch at this bar: what a fill at the touch pays
                 # (`estimate_quote` from the bars before it, as `work` reads it, times the stress).
-                wide = estimate_quote(bar, ranges.get(occ, []), model)[2] * stress
+                wide = estimate_quote(bar, ranges.get(occ, []), model, contract=contracts[occ], spot=spot_of(occ))[2] * stress
                 close = float(bar["c"])
                 exec_touch[occ] = last_exec[occ] = {"bid": max(0.0, round(close - wide, 4)), "ask": round(close + wide, 4),
                                                     "volume": float(bar.get("v") or 0), "ts": now_ts, "source": "estimate"}
@@ -661,7 +667,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             day, volume, trades = day_totals.get(occ, ("", 0.0, 0))
             day_totals[occ] = (today, (volume if day == today else 0.0) + float(bar.get("v") or 0), (trades if day == today else 0) + int(bar.get("n") or 0))
             if float(bar.get("v") or 0) >= liq["min_volume"] and int(bar.get("n") or 0) >= liq["min_trades"]:
-                _, _, half = estimate_quote(bar, ranges[occ], model)  # what a fill at the touch would pay
+                _, _, half = estimate_quote(bar, ranges[occ], model, contract=contracts[occ], spot=spot_of(occ))  # what a fill at the touch would pay
                 bid, ask = display_quote(float(bar["c"]), model)  # what the strategy is shown and marked at
                 info, under = contracts[occ], spot.get(contracts[occ].get("underlying"))
                 args = None  # the implied volatility's inputs at this print (`iv_of` solves it when shown)
