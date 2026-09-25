@@ -135,9 +135,11 @@ run's `config.json` change is its own new `options_structures` key).
 | 1 (V, the practice deploy; Track S and, if ready, Track P) | building | Track S, new: `league/structures.py` (every defined-risk structure, held as one position), `league/options_shadow.py`, `league/options_desk.py` (seating the structure founders), structure founders in `league/seeds/` (new files and their `SEEDS` rows), their tests; `league/verticals.py`; `league/options_replay.py`; `league/service.py` (the options-shadow book beside kalshi-shadow); `league/config.json` (a new `options_structures` key only); `league/house.py` `_chain` and new options hooks outside the forward-first run's listed regions (the structure intent at wake, a structure agent's book, the structures in a wake's context, the expiry-day close); the `alpaca-options` row of `league/niches.json`; `league/CONTRACT.md` "Options". Track P: `gateway/lib/caps.mjs`, `gateway/lib/router.mjs`, `gateway/test/` (the multi-leg route, practice only), `ltcm/adapters/alpaca.py` (multi-leg orders and per-leg fills), `league/book.py` (structure-aware; only after the forward-first run's H4 has merged) |
 | 2 (G, real structures, switch off) | after 20:05Z | `league/allocator.py` and `league/constitution.py` (O1-O5), only after the forward-first run's Wave 1 has merged; the gateway's real-venue metering |
 
-- **Announced deploys:** Deploy V (practice; no money-digest change expected) between 10:00Z and
-  12:25Z Sept 25, never within 30 minutes of the forward-first run's Deploy A; its exact start is
-  written here first. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
+- **Announced deploys:** Deploy V (practice; no money-digest change expected; the House release and
+  the gateway's practice multi-leg route, the gateway first) between 10:00Z and 12:25Z Sept 25, never
+  within 30 minutes of the forward-first run's Deploy A; its exact start and end are written here.
+  **D-J1 slot (the Jev run, asked 06:28Z):** open for 12:15-12:55Z only if V's watch ends by 11:45Z;
+  otherwise Saturday after Deploy B and Deploy G. State: pending V. Deploy G (the gateway's multi-leg route and the book's spreads, switch off;
   money-digest change 1 of 2) after the forward-first run's Deploy B, not before 20:05Z Sept 25.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
