@@ -1,4 +1,4 @@
-# options-reversal: buy the day after a two-sigma drop with a 2-7 day call debit vertical, against the move.
+# options-reversal: buy a sharp drop with a 1-7 day call debit vertical against the move, out the next day.
 #
 # THE IDEA. A day that drops a stock or an index ETF more than `z_entry` standard deviations of its last 20 daily
 # moves is mostly liquidity demand (forced sellers), and part of it comes back within days. Late that day (or the
@@ -6,12 +6,13 @@
 # THE EVIDENCE. Published: short-term reversal after extreme days (Nagel 2012, "Evaporating liquidity"). Measured
 # on this firm's history (underlying closes, May 22 to Aug 11, 2026): 2 days after a 1.8-sigma drop BAC +1.90%
 # (2), SOFI +1.93% (3), AAL +10.3% (1), CCL +6.0% (2), RIVN +1.02% (3), IWM +1.05% (2); after spikes the fade was
-# no better than a coin (SPY +0.09% on 9), so spikes are not faded by default. Few events: `z_entry` is 1.5.
+# no better than a coin (SPY +0.09% on 9), so spikes are not faded by default. After a 1.5-sigma drop, pooled over
+# the six, the NEXT day made +1.88% (21, 71% up).
 # WHAT IT NEEDS. Daily bars (40) and quotes of six names, the chain within 7 days, `structures: True`.
 # WHEN IT TRADES. Today's drop from `entry_start` (14:30 New York) to `entry_end` (15:30), or yesterday's from
 # 10:00 to 11:00, once an event, at most `max_open` at once; never on an expiry day after 14:00.
 # HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), when the drop has
-# been made back (the price over the close before it), after `max_hold_days`, and on its expiry day
+# been made back (the price over the close before it), from 10:00 `max_hold_days` after entry, on its expiry day
 # `exit_minutes_before_close` before the close. PARAMS: `z_entry`, `lookback`, `fade_up`, `structure`, `width`.
 
 import json, math, re
@@ -139,9 +140,9 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-reversal", "asse
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "z_entry": [1.0, 3.5], "lookback": [10, 30], "fade_up": [0, 1], "max_hold_days": [1, 7]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 2, "dte_max": 7, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 7, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.5, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.5, "lookback": 20, "fade_up": 0, "max_hold_days": 3, "entry_start": 870, "entry_end": 930}
+          "min_credit": 0.3, "requote_minutes": 30, "z_entry": 1.5, "lookback": 20, "fade_up": 0, "max_hold_days": 1, "entry_start": 870, "entry_end": 930}
 
 def _event(ctx, under, p, ny, late):
     # (z of the move, the close before it, the event's day): today's move so far late in the day, else yesterday's.
@@ -168,7 +169,7 @@ def decide(ctx):
         before, price = _num(events.get(under), 0.0), _price(ctx, under)
         if before > 0 and price > 0 and (price >= before if bull else price <= before):
             return f"the move has reversed: {price:.2f} is back {'over' if bull else 'under'} the close before it, {before:.2f}"
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] else None
+        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     def signal(under):
         found = _event(ctx, under, p, ny, late)

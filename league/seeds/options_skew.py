@@ -7,9 +7,9 @@
 # THE EVIDENCE. Published: the skew and variance risk premia (Bakshi, Kapadia and Madan 2003). Measured on this
 # firm's options history (the House's daily features, May 14 to Aug 11, 2026): 3 days after a skew one sd under
 # its 20-day mean SPY rose 0.62% (11, 82% of the time), QQQ 1.28% (11), IWM 0.35% (12); after a rich skew over a
-# rising index the next 3 days fell (SPY, QQQ, IWM: 5 cases). Readings are taken from the chain the House shows
-# (its IVs and deltas); until `min_obs` days of its own exist it measures against `skew_norm` +- `skew_sd`.
-# WHAT IT NEEDS. Daily bars (30) and quotes of the three ETFs, the chain within 9 days, `structures: True`.
+# rising index the next 3 days fell (SPY, QQQ, IWM: 5 cases). It reads the House's daily `skew_25d`
+# (`options_features`), else the chain's; until `min_obs` days of its own exist it measures against `skew_norm` +- `skew_sd`.
+# WHAT IT NEEDS. Daily bars (30), quotes and options features of the three ETFs, the chain within 9 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:30 New York) to `entry_end` (15:00), once an underlying a day.
 # HOW IT EXITS. At `profit_target` of what it can make (a credit: of the credit), at `stop_loss` of the debit
 # (or of the credit), after `max_hold_days`, and on its expiry day `exit_minutes_before_close` before the close.
@@ -133,7 +133,7 @@ def _enter(ctx, p, ny, notes, cancels, memory, signal, build):
     return intents, {"sent": {k: v for k, v in sent.items() if k in keep}, "done": {k: v for k, v in done.items() if k in keep}}
 
 NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-skew", "asset_class": "option", "structures": True,
-         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 30}, "max_days_to_expiry": 9, "wake_minutes": 10,
+         "symbols": ["SPY", "QQQ", "IWM"], "bars": {"timeframe": "1Day", "limit": 30}, "max_days_to_expiry": 9, "wake_minutes": 10, "options_features": True,
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 9], "dte_max": [1, 9], "wing_delta": [0.02, 0.3], "entry_delta": [0.15, 0.5], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.3, 2.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
@@ -164,13 +164,17 @@ def decide(ctx):
 
     def aged(row, held_kind, occs, dte):
         opened = _ny(row.get("opened_at"))
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] else None
+        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     readings = {}
     for under in NEEDS["symbols"] if p["entry_start"] <= ny.hour * 60 + ny.minute < p["entry_end"] else []:
-        skew, past = _skew(ctx, under, p, ny), [x[1] for x in seen.get(under, []) if x[0] != day]
-        if skew is not None:  # one reading a day (the day's last), judged against the days before it
-            seen[under] = [x for x in seen.get(under, []) if x[0] != day] + [[day, round(skew, 5)]]
+        row = ((ctx.get("options_features") or {}).get(under) or {}) if isinstance(ctx.get("options_features"), dict) else {}
+        # The House's daily 25-delta skew (its OPRA closing prints) keyed by its session, else today's chain's.
+        when = (_ny(row.get("t")).date().toordinal() - 1) if _num(row.get("skew_25d"), None) is not None and _ny(row.get("t")) else day
+        skew = _num(row.get("skew_25d")) if when != day else _skew(ctx, under, p, ny)
+        past = [x[1] for x in seen.get(under, []) if x[0] != when]
+        if skew is not None:  # one reading a day, judged against the days before it
+            seen[under] = [x for x in seen.get(under, []) if x[0] != when] + [[when, round(skew, 5)]]
             mean = sum(past) / len(past) if len(past) >= p["min_obs"] else p["skew_norm"]
             sd = math.sqrt(sum((x - mean) ** 2 for x in past) / len(past)) if len(past) >= p["min_obs"] else p["skew_sd"]
             readings[under] = (skew, (skew - mean) / max(sd, 0.002), mean)

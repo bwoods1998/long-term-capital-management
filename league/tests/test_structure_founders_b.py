@@ -93,12 +93,12 @@ def intraday_bars(day, closes, first_open=None, start_minute=585, step=15):
     return out
 
 
-def ctx_for(now, chain_rows, bars, positions=(), orders=(), memory=None, params=None, cash=200.0, quotes=None, limits=None):
+def ctx_for(now, chain_rows, bars, positions=(), orders=(), memory=None, params=None, cash=200.0, quotes=None, limits=None, options_features=None):
     q = {s: {"bid": rows[-1]["c"] - 0.01, "ask": rows[-1]["c"] + 0.01, "t": now} for s, rows in bars.items() if rows}
     q.update(quotes or {})
     return {"now": now, "venue": "alpaca", "rung": 1, "params": dict(params or {}), "memory": dict(memory or {}), "cash": cash, "equity": cash,
             "limits": dict(limits or LIMITS), "fees": {"option_per_contract": 0.05}, "positions": list(positions), "open_orders": list(orders),
-            "bars": bars, "quotes": q, "chain": list(chain_rows), "structures": []}
+            "bars": bars, "quotes": q, "chain": list(chain_rows), "structures": [], **({"options_features": options_features} if options_features else {})}
 
 
 def width(intent):
@@ -330,9 +330,12 @@ class TrendVerticalTests(FounderCase):
         intent = self.opens(self.run_seed(self.ctx(self.UP, 55.8)))[0]
         top = round(0.3 + 0.7 * (width(intent) - 0.3), 2)
         self.assertIn("target", self.closes(self.run_seed(self.ctx(self.UP, 56.5, positions=[held(intent, 0.3, top)])))[0]["reason"])
-        self.assertIn("crossed", self.closes(self.run_seed(self.ctx(self.UP, 50.0, positions=[held(intent, 0.3, 0.1)])))[0]["reason"])
-        old = held(intent, 0.3, 0.3, opened_at="2026-09-20T14:00:00Z")
-        self.assertIn("held 4 days", self.closes(self.run_seed(self.ctx(self.UP, 55.8, positions=[old])))[0]["reason"])
+        self.assertEqual(self.closes(self.run_seed(self.ctx(self.UP, 50.0, positions=[held(intent, 0.3, 0.1)]))), [], "trend_exit 0: no exit on the mean")
+        self.assertIn("crossed", self.closes(self.run_seed(self.ctx(self.UP, 50.0, positions=[held(intent, 0.3, 0.1)], params={"trend_exit": 1})))[0]["reason"])
+        yesterday = held(intent, 0.3, 0.3, opened_at="2026-09-23T15:00:00Z")
+        self.assertIn("held 1 days", self.closes(self.run_seed(self.ctx(self.UP, 55.8, positions=[yesterday])))[0]["reason"])
+        self.assertEqual(self.closes(self.run_seed(self.ctx(self.UP, 55.8, now="2026-09-24T13:45:00Z", positions=[yesterday]))), [],
+                         "the next day's exit waits for 10:00 New York")
         self.assertEqual(self.closes(self.run_seed(self.ctx(self.UP, 55.8, positions=[held(intent, 0.3, 0.3)]))), [])
         monday = self.ctx(self.UP, 55.8, now="2026-09-28T19:00:00Z", positions=[held(intent, 0.3, 0.3, opened_at="2026-09-28T14:00:00Z")])
         [flat] = self.closes(self.run_seed(monday))
@@ -445,6 +448,13 @@ class SkewTests(FounderCase):
         self.assertEqual((order.spec.type, order.spec.legs[0].right), ("credit_vertical", "put"))
         self.assertEqual(self.opens(self.run_seed(self.ctx(0.09, closes=[800.0 - i for i in range(30)], params={"rich_side": 1}))), [],
                          "rich, but the index is under its mean")
+
+    def test_the_houses_daily_skew_feature_comes_first(self):
+        feature = {"SPY": {"day": "2026-09-23", "t": "2026-09-24T04:00:00Z", "skew_25d": 0.02, "atm_iv": 0.13}}
+        out = self.run_seed(self.ctx(0.09, options_features=feature))  # the chain reads rich; the House's feature reads cheap
+        [intent] = self.opens(out)
+        self.assertEqual(structures.parse("alpaca", intent).spec.legs[0].right, "call")
+        self.assertEqual(out["memory"]["skew"]["SPY"], [[date(2026, 9, 23).toordinal(), 0.02]], "kept under the feature's own session")
 
     def test_its_own_history_replaces_the_norm(self):
         reading = self.run_seed(self.ctx(0.0))["memory"]["skew"]["SPY"][0][1]

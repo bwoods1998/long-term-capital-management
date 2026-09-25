@@ -1,4 +1,4 @@
-# options-trend-vertical: buy the pullback in a stock's 20-day uptrend with a 4-10 day call debit vertical.
+# options-trend-vertical: buy the pullback in a stock's 20-day uptrend with a 1-10 day call debit vertical, out next day.
 #
 # THE IDEA. A stock above a rising 20-day mean that closed yesterday under its 5-day mean has pulled back inside
 # its trend, and such pullbacks were bought within days. A near-the-money call debit vertical (long the strike
@@ -6,13 +6,14 @@
 # THE EVIDENCE. Published: time-series momentum (Moskowitz, Ooi and Pedersen 2012) and short pullbacks in uptrends
 # (Connors). Measured on this firm's history (underlying closes, May 22 to Aug 11, 2026, the replay window's first
 # two thirds): 3-day returns after such a pullback were +2.43% BAC (7), +0.88% PFE (4), +0.83% T (6), +1.27% SOFI
-# (12), negative on SPY, QQQ, F, AAL and RIVN; after Aug 11: PFE +1.25%, T +1.31%, SOFI +6.58%, BAC -2.82%.
+# (12), negative on SPY, QQQ, F, AAL and RIVN; pooled over the four, the NEXT day +0.40% (29, 62% up), and after
+# Aug 11 (out of sample) +0.59% (14). The owner wants structures closed within the session or the next day.
 # Names whose near legs cost over a dollar (HOOD, INTC) are left out: the replay's estimated spreads eat them.
 # WHAT IT NEEDS. Daily bars (60) and quotes of four stocks, the chain within 10 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:00 New York) to `entry_end` (15:00), once a pullback, at most `max_open`.
-# HOW IT EXITS. At `profit_target` of the width less the debit, at `stop_loss` of the debit (1.0: none), when the
-# price crosses the 20-day mean, after `max_hold_days`, on its expiry day `exit_minutes_before_close` before the
-# close. PARAMS: `structure` (credit_vertical sells puts instead), `both_sides` (1 buys puts in downtrends too).
+# HOW IT EXITS. At `profit_target` of the width less the debit, at `stop_loss` of the debit (1.0: none), from 10:00
+# `max_hold_days` after the entry, below the 20-day mean if `trend_exit` (off: SOFI whipsawed on it in the fit
+# window), and on its expiry day `exit_minutes_before_close` before the close. PARAMS: `structure` (credit_vertical sells puts instead), `both_sides` (1 buys puts in downtrends too).
 
 import json, math, re
 from datetime import datetime, timezone
@@ -137,11 +138,11 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-trend-vertical",
          "parameter_rules": {"bounds": {"width": [1, 20], "dte_min": [1, 10], "dte_max": [1, 10], "wing_delta": [0.02, 0.3], "entry_delta": [0.2, 0.6], "profit_target": [0.2, 0.95],
                                         "stop_loss": [0.2, 1.0], "exit_minutes_before_close": [30, 240], "exit_dte": [0, 5], "max_open": [1, 3],
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
-                                        "trend_days": [10, 50], "slope_days": [1, 10], "fast": [2, 10], "max_hold_days": [1, 10], "both_sides": [0, 1]},
+                                        "trend_days": [10, 50], "slope_days": [1, 10], "fast": [2, 10], "max_hold_days": [1, 10], "both_sides": [0, 1], "trend_exit": [0, 1]},
                              "ordered": [["dte_min", "dte_max"], ["fast", "trend_days"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 4, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 4, "both_sides": 0,
+          "min_credit": 0.3, "requote_minutes": 30, "trend_days": 20, "slope_days": 5, "fast": 5, "max_hold_days": 1, "both_sides": 0, "trend_exit": 0,
           "entry_start": 600, "entry_end": 900}
 
 def _trend(ctx, under, p):  # (price now, the 20-day mean, its slope, yesterday's close against the 5-day mean) or None
@@ -159,9 +160,9 @@ def decide(ctx):
 
     def broken(row, held_kind, occs, dte):  # the trend turned against it, or it has been held long enough
         found, bull, opened = _trend(ctx, _parts(occs[0])[0], p), (_parts(occs[0])[2] == "call") != (held_kind in CREDIT), _ny(row.get("opened_at"))
-        if found and (found[0] < found[1] if bull else found[0] > found[1]):
+        if p["trend_exit"] >= 1 and found and (found[0] < found[1] if bull else found[0] > found[1]):
             return f"the price {found[0]:.2f} crossed the {int(p['trend_days'])}-day mean {found[1]:.2f} against it"
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] else None
+        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     def signal(under):
         found = _trend(ctx, under, p)

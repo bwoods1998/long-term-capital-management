@@ -1,4 +1,4 @@
-# options-gap-drift: ride a stock's news move for days with a 3-10 day vertical in the move's direction.
+# options-gap-drift: ride a stock's news move into the next day with a 1-10 day vertical in the move's direction.
 #
 # THE IDEA. When a stock moves two standard deviations of its daily moves on news (an earnings release, most
 # often), the market under-reacts and the price keeps drifting the same way for days. Buy a near-the-money debit
@@ -6,12 +6,12 @@
 # THE EVIDENCE. Published: post-earnings-announcement drift (Ball and Brown 1968; Bernard and Thomas 1989).
 # Measured on this firm's history (underlying closes): 3-day drift after a 2-sigma, 3% day, May 22 to Aug 11,
 # 2026: BAC +0.46% (1), T +2.04% (5), F +11.5% (1), AAL +2.07% (6), RIVN +5.15% (4), CCL +0.56% (4); HOOD, SOFI
-# and SNAP went the other way and are left out. EDGAR's 8-K Item 2.02 feed would name the earnings days, but the
+# and SNAP went the other way and are left out; pooled, the NEXT day +0.95% (21, 76%). EDGAR's 8-K Item 2.02 feed would name the earnings days, but the
 # options replay tape carries no feeds (a founder declaring one cannot be replayed): the event is read from price.
 # WHAT IT NEEDS. Daily bars (40) and quotes of six stocks, the chain within 10 days, `structures: True`.
 # WHEN IT TRADES. From `entry_start` (10:15 New York) to `entry_end` (12:00), once an event, at most `max_open`.
 # HOW IT EXITS. At `profit_target` of what it can make, at `stop_loss` of the debit (1.0: none), when the gap
-# fills (the price back through the close before it), after `max_hold_days`, and on its expiry day
+# fills (the price back through the close before it), from 10:00 `max_hold_days` after entry, on its expiry day
 # `exit_minutes_before_close` before the close. PARAMS: `gap_z`, `min_gap_pct`, `lookback`, `structure`, `width`.
 
 import json, math, re
@@ -140,9 +140,9 @@ NEEDS = {"venue": "alpaca", "horizon": "day", "style": "options-gap-drift", "ass
                                         "max_qty": [1, 3], "notional_usd": [20, 75], "slip": [0, 0.05], "max_debit": [0.3, 0.8], "min_credit": [0.1, 0.5],
                                         "gap_z": [1.0, 4.0], "min_gap_pct": [0, 10], "lookback": [10, 30], "max_hold_days": [1, 10]},
                              "ordered": [["dte_min", "dte_max"]]}}
-PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 3, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
+PARAMS = {"structure": "debit_vertical", "width": 1.0, "dte_min": 1, "dte_max": 10, "wing_delta": 0.25, "entry_delta": 0.5, "profit_target": 0.6, "stop_loss": 1.0,
           "exit_minutes_before_close": 60, "exit_dte": 0, "max_open": 2, "max_qty": 1, "notional_usd": 70.0, "slip": 0.02, "max_debit": 0.65,
-          "min_credit": 0.3, "requote_minutes": 30, "gap_z": 2.0, "min_gap_pct": 3.0, "lookback": 20, "max_hold_days": 4, "entry_start": 615, "entry_end": 720}
+          "min_credit": 0.3, "requote_minutes": 30, "gap_z": 2.0, "min_gap_pct": 3.0, "lookback": 20, "max_hold_days": 1, "entry_start": 615, "entry_end": 720}
 
 def _event(ctx, under, p, ny):
     # (bullish, z, the close before the move, the move's session) for today's move, else yesterday's if today has not undone it.
@@ -171,7 +171,7 @@ def decide(ctx):
         before, price = _num(events.get(under), 0.0), _price(ctx, under)
         if before > 0 and price > 0 and (price <= before if bull else price >= before):
             return f"the gap filled: {price:.2f} is back through the close before it, {before:.2f}"
-        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] else None
+        return f"held {(ny.date() - opened.date()).days} days, the most is {int(p['max_hold_days'])}" if opened and (ny.date() - opened.date()).days >= p["max_hold_days"] and ny.hour * 60 + ny.minute >= 600 else None
 
     def signal(under):
         found = _event(ctx, under, p, ny)
