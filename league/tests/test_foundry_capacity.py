@@ -335,7 +335,8 @@ class Routes(CapacityCase):
     def test_model_calls_rotate_over_the_recorded_feeds_and_leave_founded_leagues_to_their_founders(self):
         self.settings(capacity_share=0, model_share=1.0, exploration_share=0)
         sports = self.house.niches["kalshi-sports"]
-        sports.founders = tuple(sports.founders) + (
+        # Exactly these two founders: the repo's own kalshi-sports founders grow with the Kalshi run's leagues (K1).
+        sports.founders = (
             {"seed": "sports-consensus", "key": "consensus-nfl", "needs": {"series": ["KXNFLGAME"], "feeds": {"odds": ["nfl"], "sports": ["nfl"]}}},
             {"seed": "sports-consensus", "key": "consensus-mlb", "needs": {"series": ["KXMLBGAME"], "feeds": {"odds": ["mlb"], "sports": ["mlb"]}}})
         picks = []
