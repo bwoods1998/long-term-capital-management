@@ -160,7 +160,9 @@ IN_PLAY_HOURS = 5.0
 #: 2.0-26.4 h before first pitch (median 17.2 h), so a position in a game that began less than five
 #: hours ago was opened within about 31 hours. The 48 hours to 04:23Z Sept 25 held 18,966 fill, order
 #: and settlement rows of every book (922 of them the real Kalshi book's) of the ledger's 653,550,
-#: found by bisecting `seq` on `at`, never a scan: 0.25 s on the T0 snapshot, the bisection 0.06 s.
+#: found by bisecting `seq` on `at`, never a scan: 0.25 s on the T0 snapshot, the bisection 0.06 s;
+#: on the House box at 21:27Z Sept 25 (829,542 rows, one vCPU, a cold cache) 0.82 s, 0.60 s of it
+#: the bisection, for 1,141 real Kalshi rows -- six MLB totals held for that night, 22:40Z-02:15Z starts.
 #: Replayed every ten minutes over the 44 hours to then, it held for 14 real MLB-total events: 22:13Z
 #: to 05:13Z on Sept 23-24, 16:13Z to 20:43Z for Sept 24's three day games, and 22:23Z Sept 24 to past
 #: 04:23Z Sept 25, each night one unbroken hold.
