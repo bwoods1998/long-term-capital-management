@@ -444,11 +444,12 @@ def consult_verdicts(ledger: Any, agent_id: str, *, sessions: int = 2) -> list[t
     return [(c, consult_verdict(c, rows, sessions=sessions)) for c in consults]
 
 
-def consult_blocks(ledger: Any, consult: Any, *, n: int = 6) -> tuple[list[float], list[float]]:
+def consult_blocks(ledger: Any, consult: Any, *, n: int = 6, rows: list[Any] | None = None) -> tuple[list[float], list[float]]:
     """(its previous `n` active forward blocks' log growth, its next `n`) around a consult: the
-    consultant's forward lift (F4) is the mean of the second less the mean of the first."""
+    consultant's forward lift (F4) is the mean of the second less the mean of the first. `rows`: the
+    agent's `eval.block` rows when the caller has read them already."""
     agent = consult.payload["agent"]
-    rows = [e for e in ledger.iter(kinds="eval.block", agent=agent) if e.payload.get("active")]
+    rows = [e for e in (rows if rows is not None else ledger.iter(kinds="eval.block", agent=agent)) if e.payload.get("active")]
     before = [float(e.payload.get("log_growth") or 0) for e in rows if e.seq < consult.seq][-n:]
     after = [float(e.payload.get("log_growth") or 0) for e in rows if e.seq > consult.seq][:n]
     return before, after
@@ -533,8 +534,10 @@ class Merton:
 
     def consult_price_multiple(self, agent_id: str) -> tuple[int, int]:
         """(the multiple of its usual price the agent's next consult costs, the unproductive consults
-        in a row behind it). F4, Sept 25, 2026: in the 24 hours to T0 the consultant cost $28.72 for 51
-        answers with no measured lift, and 56 of the 64 answers of the day wrote the agent a file. A
+        in a row behind it). F4, Sept 25, 2026: in the 24 hours to T0 (04:23Z) the consultant cost $35.44
+        for 62 answers; of the 110 consults of the snapshot that had two sessions behind them, 50 were
+        followed by no candidate and no strategy change, and the 31 with six forward blocks after them
+        lost 0.0091 a block against the six before (12 of 31 better). A
         consult after which the agent retained no candidate and changed no strategy within
         `consult_sessions` (2) sessions doubles its next consult's price, again for each in a row, up to
         `consult_max_multiple` (8); a productive one resets it. A consult whose sessions have not yet

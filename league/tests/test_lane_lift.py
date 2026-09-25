@@ -1,8 +1,9 @@
 """Every lane is measured (F4, Sept 25, 2026, the forward-first run).
 
-In the 24 hours to T0 the consultant cost $28.72 for 51 answers and nothing said whether one made an
-agent trade better; the teacher's "137 lessons" were 111 post-mortems and 6 lessons; the engineer had
-verified 22 repairs for $26.59 in its life. These tests pin the `consult.outcome` rows, the doubling
+In the 24 hours to T0 the consultant cost $35.44 for 62 answers and nothing said whether one made an
+agent trade better (replayed: 50 of 110 consults bought nothing within two sessions, and the 31 with six
+blocks after lost 0.0091 a block against the six before); the yield row's lessons were 111 post-mortems
+and 6 lessons; the engineer had verified 22 repairs for $27.54 in its life. These tests pin the `consult.outcome` rows, the doubling
 of an unproductive consult's price, the consultant's pause, and the `lift` section of the hourly
 yield row (league/yield_ledger.py), plus `scripts/gate_replay.py`'s arithmetic on a small ledger.
 """

@@ -66,9 +66,9 @@ frequent than the clock already allows.
    real_positions`). Replayed on the T0 snapshot (the 24 hours to 04:23Z Sept 25; `scripts/gate_replay.py`):
    2,566 sessions, $87.65, 547 candidates, and the clock was the costliest trigger -- 387 `clock` runs
    ($27.72), 350 of them idle agents re-running every 12 minutes at the winners' pace (mcentee-hfadaea
-   33 sessions in the day), whose 207 retained candidates had 5 adoptions or forks; 122 `heartbeat` runs,
-   121 of them a newborn's first session at age 0 (an unresearched agent's `last` is 0); 275 samples of
-   locked winners retained 4 candidates. So the clock (and the backoff it carries) runs only an agent ON
+   33 sessions in the day), and the clock's 201 retained candidates had 9 adoptions or forks; 122
+   `heartbeat` runs, 121 of them a newborn's first session at age 0 (an unresearched agent's `last` is
+   0); 275 samples of locked winners retained 4 candidates. So the clock (and the backoff it carries) runs only an agent ON
    REAL MONEY that holds a position or a working order there, or met a refusal since its last session
    (`House._holds_real_money`'s test). Everyone else waits for evidence: a fill, a settlement, a refusal
    (once, rule 11), an active forward block, a teacher's lesson naming it (rule 12), a code or rung

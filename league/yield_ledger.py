@@ -24,8 +24,12 @@ A lesson is a `playbook.entry` the teacher wrote (`source: teacher`): until Sept
 post-mortem counted, 111 of the 117 "lessons" of the 24 hours to T0 (the teacher wrote 6).
 
 The forward lift (Sept 25, 2026, the forward-first run, F4; `lift` on the row, `lifts()`). Pricing a
-lane is not measuring it: in the 24 hours to T0 the consultant cost $28.72 for 51 answers and nothing
-said whether one made an agent trade better. Over the last `merton.lift.days` (7):
+lane is not measuring it: in the 24 hours to T0 (04:23Z) the consultant cost $35.44 for 62 answers and
+nothing said whether one made an agent trade better. Replayed on the T0 snapshot with the functions
+below: 50 of 110 judged consults were followed by no candidate and no strategy change; the 31 with six
+forward blocks after them grew 0.0091 a block LESS than in the six before (one-sided 80% lower bound
+-0.0129; 12 of 31 better), at $0.45 a positive block after against research's $0.29 over the same day.
+Over the last `merton.lift.days` (7):
 
 - the teacher: forward growth per active block over `teacher_days` (3) after each lesson, of the agents
   the lesson names (desk, specialty or family), split by `research_gate.lesson_arm`: under the gate's
@@ -37,7 +41,7 @@ said whether one made an agent trade better. Over the last `merton.lift.days` (7
   its next `consult_blocks` (6) active forward blocks against its previous ones (`merton.consult_blocks`)
   -- and their mean lift, dollars per positive block after, against research's over the last day.
 - the engineer: repairs verified (`repair.status` `verified`, one per key) per dollar of its passes,
-  over the window and lifetime (22 for $26.59 at T0).
+  over the window and lifetime (22 for $27.54 at T0, $1.25 a repair).
 
 Each lane's `verdict` is `lift` when the one-sided 80% lower bound of its lift is above zero (the
 engineer: a verified repair in the window), `no_lift` when it is not on at least `min_blocks` (30)
@@ -267,33 +271,39 @@ def consult_outcomes(ledger: Any, *, now: float, settings: Mapping[str, Any]) ->
     judged = {(int(e.payload.get("consult_seq") or 0), str(e.payload.get("stage")))
               for e in ledger.read(kinds="consult.outcome", limit=5000, newest=True)}
     out: list[dict[str, Any]] = []
+    by_agent: dict[str, list[Any]] = {}
     for consult in consults_of(ledger):
-        age = now - _epoch(consult.at)
-        if age > 2 * days * 86400:
-            continue
-        agent = str(consult.payload["agent"])
-        base = {"consult_seq": consult.seq, "agent": agent, "consulted_at": consult.at,
-                "cost_usd": str(consult.payload.get("cost_usd") or "0"), "wrote_code": bool(consult.payload.get("wrote_code"))}
-        if (consult.seq, "sessions") not in judged:
-            rows = list(ledger.iter(kinds=("agent.research", "agent.strategy"), agent=agent, after=consult.seq))
-            verdict = consult_verdict(consult, rows, sessions=sessions)
-            if verdict is None and age >= 3 * 86400:
-                done = sum(1 for e in rows if e.payload.get("tool") == "summary")
-                verdict = {"productive": False, "by": None, "sessions": done, "expired": True}
-            if verdict is not None:
-                out.append({"id": f"consult-outcome:{consult.seq}:sessions", "agent": agent,
-                            "payload": {**base, "stage": "sessions", **verdict, "doubles_next_price": not verdict["productive"]}})
-        if (consult.seq, "blocks") not in judged:
-            before, after = consult_blocks(ledger, consult, n=n)
-            partial = len(after) < n
-            if not partial or age >= 2 * days * 86400:
-                b, a = _mean(before), _mean(after)
-                out.append({"id": f"consult-outcome:{consult.seq}:blocks", "agent": agent,
-                            "payload": {**base, "stage": "blocks", "partial": partial,
-                                        "before": {"blocks": len(before), "mean_log_growth": round(b, 6) if b is not None else None},
-                                        "after": {"blocks": len(after), "mean_log_growth": round(a, 6) if a is not None else None,
-                                                  "positive": sum(1 for g in after if g > 0)},
-                                        "lift": round(a - b, 6) if a is not None and b is not None else None}})
+        if now - _epoch(consult.at) <= 2 * days * 86400:
+            by_agent.setdefault(str(consult.payload["agent"]), []).append(consult)
+    for agent, consults in by_agent.items():
+        # One read of the agent's rows for all its consults: at 64 consults a day, a fortnight of
+        # consults waiting for their blocks is hundreds of consults over far fewer agents.
+        waiting = [c for c in consults if (c.seq, "sessions") not in judged]
+        rows = list(ledger.iter(kinds=("agent.research", "agent.strategy"), agent=agent, after=waiting[0].seq)) if waiting else []
+        blocks = list(ledger.iter(kinds="eval.block", agent=agent)) if any((c.seq, "blocks") not in judged for c in consults) else []
+        for consult in consults:
+            age = now - _epoch(consult.at)
+            base = {"consult_seq": consult.seq, "agent": agent, "consulted_at": consult.at,
+                    "cost_usd": str(consult.payload.get("cost_usd") or "0"), "wrote_code": bool(consult.payload.get("wrote_code"))}
+            if (consult.seq, "sessions") not in judged:
+                verdict = consult_verdict(consult, rows, sessions=sessions)
+                if verdict is None and age >= 3 * 86400:
+                    done = sum(1 for e in rows if e.seq > consult.seq and e.payload.get("tool") == "summary")
+                    verdict = {"productive": False, "by": None, "sessions": done, "expired": True}
+                if verdict is not None:
+                    out.append({"id": f"consult-outcome:{consult.seq}:sessions", "agent": agent,
+                                "payload": {**base, "stage": "sessions", **verdict, "doubles_next_price": not verdict["productive"]}})
+            if (consult.seq, "blocks") not in judged:
+                before, after = consult_blocks(ledger, consult, n=n, rows=blocks)
+                partial = len(after) < n
+                if not partial or age >= 2 * days * 86400:
+                    b, a = _mean(before), _mean(after)
+                    out.append({"id": f"consult-outcome:{consult.seq}:blocks", "agent": agent,
+                                "payload": {**base, "stage": "blocks", "partial": partial,
+                                            "before": {"blocks": len(before), "mean_log_growth": round(b, 6) if b is not None else None},
+                                            "after": {"blocks": len(after), "mean_log_growth": round(a, 6) if a is not None else None,
+                                                      "positive": sum(1 for g in after if g > 0)},
+                                            "lift": round(a - b, 6) if a is not None and b is not None else None}})
     return out
 
 
