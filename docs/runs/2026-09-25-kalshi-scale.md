@@ -173,6 +173,8 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
 
 - **11:44Z: #320's first CI run was cancelled at its 20-minute limit** (main's suite takes 7-8). With the weekend's founder rows flagged in `niches.json`, every unrelated House test's births pass seated a real founder, each birth probing its NEEDS (`test_house` grew a `meriwether`). Fixed (`0773e13`): `Settings.kalshi_founders` (default off) gates `kalshi_founders.seat()`; `service.build` turns it on for the floor and never for the canary, whose ticks the watchdog times; the founder tests turn it on in their own Houses; a test that a House without it seats nobody. Founder + House tests 97 OK, 616 more House-heavy tests OK.
 
+- **12:02Z: #320's second CI run failed one test of 3,695** (`test_repairs` restart test: the job went `dormant` on the per-job spend limit). The engineer and every Merton pass read `CONTRACT.md` whole as their system prompt; K1 had grown it 69.0 → 81.7 KB, and with a $1.75 hold booked the default $5.00 ceiling had only a few hundred bytes of room even on main. Fixed (`d05e391`): the Sept 26 feeds' full texts move to `league/FEEDS.md` (the same texts reach agents through `runtime_status`), `CONTRACT.md` keeps the declaration and a line per feed (75.4 KB, +6.4 KB over main), and the restart test, which is about the restart's bookkeeping, raises its ceiling and says why. The margin itself is worth the forward-first run's attention (every run's CONTRACT growth is paid on every engineer and Merton call).
+
 ## Findings before the builders report
 
 - **No agent has ever declared `weather`, `nws`, `forecast` or `odds`** (every `agent.born` row to 06:30Z Sept 25:
