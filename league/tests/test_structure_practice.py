@@ -29,6 +29,7 @@ No test order was sent anywhere: every venue here is a fake.
 """
 
 import dataclasses
+import math
 import unittest
 import urllib.parse
 from decimal import ROUND_CEILING, Decimal
@@ -466,6 +467,144 @@ class TheMigration(PracticeCase):
         self.assertTrue(self.practice.account(agent.id).swept)
         self.assertEqual(self.house.books[SHADOW].account(agent.id).cash, D("200"))
         self.assertTrue(self.practice.reconcile().ok)
+
+
+class TheRecordAcrossTheMove(PracticeCase):
+    """The adversarial review of Deploy G (Sept 25, 2026): after the move an agent's practice record stays on the book it
+    left, and the House read only the book it moved to. An agent with closed structures there then had "no record to
+    protect" and rewrote itself in place (the allocator pools both books, so the new program carried the old one's
+    W_paper); its standing lost its blocks; and its death clock started again. Each now reads both books."""
+
+    def closed_condor_then_moved(self):
+        """A condor opened and closed (at a loss) on the options shadow book, then the switch: moved, flat, swept."""
+        self.switch(False)
+        agent = self.agent("iron_condor")
+        shadow = self.house.books[SHADOW]
+        self.house.seat(agent)
+        inst = structures.instrument(structures.parse(SHADOW, condor_row()).spec, SHADOW)
+        self.shadow.set_quote(inst, "0.55", "0.62")
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.shadow.set_quote(inst, "0.61", "0.66")
+        self.assertEqual([o.status for o in self.send(agent, [condor_row(action="close", limit=0.39)])], ["filled"])
+        self.assertEqual(self.held(shadow, agent), {})
+        self.assertFalse(self.house.record_is_empty(agent))
+        self.switch(True)
+        self.assertIs(self.house.book_of(agent), self.practice)
+        self.house.seat(agent)
+        self.assertTrue(shadow.account(agent.id).swept)
+        self.assertEqual(self.practice.account(agent.id).cash, D("200"))
+        return agent
+
+    def blocks(self, agent, book, growth, n):
+        """`n` finished active day blocks of `growth` each on `book`, begun after the agent entered its rung."""
+        entered = self.house.evaluator._rung_entered(agent.id)
+        for _ in range(n):
+            self.n_blocks = getattr(self, "n_blocks", 0) + 1
+            seq = entered + self.n_blocks
+            self.house.ledger.append("eval.block", {"book": book, "key": f"day-{self.n_blocks}", "horizon": "day", "start_equity": 200.0,
+                                                    "end_equity": 200.0 * math.exp(growth), "flow": 0.0, "log_growth": growth, "active": True,
+                                                    "exposure": 0.5, "first_mark_seq": seq, "last_mark_seq": seq},
+                                     agent=agent.id, id=f"block:{agent.id}:{book}:day-{self.n_blocks}")
+
+    def moved(self, name="krasker"):
+        """A structure agent seated on the shadow book, then moved flat to the practice account."""
+        self.switch(False)
+        agent = self.agent("iron_condor", name=name)
+        self.house.seat(agent)
+        return agent
+
+    def move(self, agent):
+        self.switch(True)
+        self.house.seat(agent)
+        self.assertIs(self.house.book_of(agent), self.practice)
+        self.assertTrue(self.house.books[SHADOW].account(agent.id).swept)
+
+    def test_a_moved_agent_with_closed_structures_on_the_book_it_left_does_not_rewrite_in_place(self):
+        agent = self.closed_condor_then_moved()
+        # Before the review this was True: alpaca-paper, the book of its rung now, is empty.
+        self.assertEqual(self.house.evaluator.trade_returns(agent.id, PRACTICE)[0], [])
+        self.assertFalse(self.house.record_is_empty(agent))
+        self.assertEqual([b.name for b in self.house._record_books(agent)], [PRACTICE, SHADOW])
+
+    def test_a_moved_agent_with_no_record_still_rewrites_in_place(self):
+        agent = self.moved()
+        self.assertTrue(self.house.record_is_empty(agent))
+        self.move(agent)
+        self.assertTrue(self.house.record_is_empty(agent))
+
+    def test_its_standing_reads_its_blocks_on_both_books(self):
+        agent = self.moved()
+        self.blocks(agent, SHADOW, 0.01, 4)
+        self.move(agent)
+        self.blocks(agent, PRACTICE, 0.02, 1)
+        row = self.house.standing_of(agent.id)
+        self.assertEqual(row["active_blocks"], 5)  # 1 on alpaca-paper alone, before the review
+        self.assertAlmostEqual(row["mean_growth"], 0.012)
+
+    def test_its_death_clock_does_not_start_again_on_the_new_book(self):
+        agent = self.moved()
+        self.blocks(agent, SHADOW, -0.02, 5)  # down 9.5% after 5 active blocks: paper death is 10% from 6
+        self.move(agent)
+        self.blocks(agent, PRACTICE, -0.02, 1)  # 6 active blocks in all, down 11.3%
+        self.assertEqual(self.house.evaluator.judge(agent.id, PRACTICE).decision, "hold")  # its new book alone
+        verdict = self.house.judge(agent)
+        self.assertEqual(verdict.decision, "die")
+        self.assertIn("down 11.3% on paper after 6 active blocks", verdict.reason)
+        self.assertIn("over alpaca-paper and options-shadow", verdict.reason)
+        self.assertEqual(verdict.numbers["books"], [PRACTICE, SHADOW])
+        self.assertFalse(self.house.registry.get(agent.id).alive)
+
+    def test_a_winner_that_moved_is_not_judged_on_what_it_left(self):
+        agent = self.moved()
+        self.blocks(agent, SHADOW, 0.01, 5)
+        self.move(agent)
+        self.blocks(agent, PRACTICE, -0.02, 1)
+        self.assertIsNone(self.house._moved_record_death(agent, self.practice, 1))
+        self.assertNotEqual(self.house.judge(agent).decision, "die")
+        self.assertTrue(self.house.registry.get(agent.id).alive)
+
+    def test_an_agent_that_never_moved_is_judged_by_the_evaluator_alone(self):
+        agent = self.moved()
+        self.blocks(agent, SHADOW, -0.02, 5)
+        self.assertEqual([b.name for b in self.house._record_books(agent)], [SHADOW])
+        self.assertIsNone(self.house._moved_record_death(agent, self.house.books[SHADOW], 1))
+
+
+class TheBooksAStructureMayTradeOn(PracticeCase):
+    """The review of Deploy G (Sept 25, 2026): a misnamed `options_structures.book` could put a rung-1 structure agent's
+    structures on the owner's real account; and a `structure_moving` stamp outlived a promotion or a death."""
+
+    def test_the_config_may_name_only_a_practice_book(self):
+        from league import house as house_module
+
+        for named, book in (("alpaca", SHADOW), ("kalshi-shadow", SHADOW), ("nonsense", SHADOW), (PRACTICE, PRACTICE), (SHADOW, SHADOW)):
+            with self.subTest(named=named):
+                self.house.structure_book_name = None
+                with mock.patch.object(house_module.json, "loads", return_value={"options_structures": {"book": named}}):
+                    self.assertEqual(self.house._structure_book_name(), book)
+        self.assertTrue(any("options_structures.book names alpaca, which is not a practice book" in a.get("text", "")
+                            for a in self.alerts()))
+
+    def test_a_real_book_named_directly_is_the_shadow_book_too(self):
+        """The review's demonstration (`structure_book_name` set to the real book's name): no rung-1 agent is staked there."""
+        self.house.structure_book_name = "alpaca"
+        agent = self.agent("debit_vertical")
+        self.assertEqual(self.house._structure_book_name(), SHADOW)
+        self.assertIs(self.house.book_of(agent), self.house.books[SHADOW])
+
+    def test_a_moving_stamp_goes_when_it_dies(self):
+        """(Its promotion: `test_real_structures.TheReviewOfDeployG`, on a House with a real book.)"""
+        self.switch(False)
+        agent = self.agent("iron_condor")
+        self.house.seat(agent)
+        inst = structures.instrument(structures.parse(SHADOW, condor_row()).spec, SHADOW)
+        self.shadow.set_quote(inst, "0.55", "0.62")
+        self.assertEqual([o.status for o in self.send(agent, [condor_row()])], ["filled"])
+        self.switch(True)
+        self.house.seat(agent)  # holding on the shadow book: moving
+        self.assertIn(agent.id, self.house._state["structure_moving"])
+        self.house.kill(agent, "evidence", "a test: killed while moving")
+        self.assertNotIn(agent.id, self.house._state["structure_moving"])
 
 
 class EndToEnd(PracticeCase):

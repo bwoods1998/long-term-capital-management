@@ -464,14 +464,75 @@ class TheDailyExpiries(unittest.TestCase):
         self.assertEqual([b[0] for b in self.venue.bars], ["2026-03-13"])
         self.assertTrue(row["weekly_only"])
 
+    def test_the_features_read_the_weekly_expiries_alone_before_and_after_every_expiry_is_ingested(self):
+        """The adversarial review of Deploy G (Sept 25, 2026): once the weekdays are ingested, a new day's features would
+        sum three expiries where every stored day summed one (`compute_features` never remakes a day): a step in
+        `option_volume`, `contracts_printed` and `put_call_volume_ratio` between replay and live."""
+        self.ingest()
+        weekly = self.store.features_for_day("SPY", "2026-03-05", 100.0)
+        self.assertEqual((weekly["contracts_printed"], weekly["option_volume"]), (6, 60))  # the Friday's six contracts
+        self.ingest(all_expiries=self.oh.DAILY_EXPIRIES, daily_max_days=10)
+        printed = self.store.db.execute("SELECT COUNT(DISTINCT b.occ) FROM bars b JOIN contracts c ON c.occ = b.occ WHERE b.timeframe = '1Day' "
+                                        "AND b.t = ?", (self.oh.close_stamp("2026-03-05T12:00:00Z", "1Day"),)).fetchone()[0]
+        self.assertEqual(printed, 18)  # the Monday's, the Wednesday's and the Friday's contracts all printed that day
+        every = self.store.features_for_day("SPY", "2026-03-05", 100.0)
+        self.assertEqual(every, weekly)
+        # Another underlying is read on every expiry it holds, as before.
+        self.store.db.execute("UPDATE contracts SET underlying = 'F' WHERE underlying = 'SPY'")
+        self.assertEqual(self.store.features_for_day("F", "2026-03-05", 100.0)["contracts_printed"], 18)
+
 
 class TheHousesDailyRefresh(StructureHouseCase):
     """`House._refresh_options_history` ingests every expiry of SPY, QQQ and IWM for the options desk's replay, and
-    backfills a symbol the store holds only weekly across the window once."""
+    backfills a symbol the store holds only weekly across the window once -- while `league/config.json`
+    `options_history_daily_expiries` is on (the review of Deploy G, Sept 25, 2026: Deploy G ships it off)."""
+
+    def refreshed(self, every=()):
+        """What `_refresh_options_history` asks `refresh` for, the store covering every symbol weekly and `every` with
+        every expiry: (symbols, days, all_expiries, daily_max_days) a call."""
+        asked, calls = [], []
+
+        class Store(OptionsStore):
+            def covers(self, symbols, timeframe, start, end, every_expiry=False, **kw):
+                asked.append((sorted(symbols), timeframe, every_expiry))
+                return [str(s).upper() for s in symbols if not every_expiry or str(s).upper() in every]
+
+        self.house.options_history = Store()
+
+        def refresh(store_, symbols, underlier, **kw):
+            calls.append((sorted(symbols), kw["days"], kw.get("all_expiries"), kw.get("daily_max_days")))
+            return {"features": {}, "coverage": []}
+
+        with mock.patch("league.options_history.refresh", refresh):
+            self.house._refresh_options_history()
+        return calls, asked
+
+    def test_off_every_symbol_is_refreshed_weekly_as_before_and_nothing_is_backfilled(self):
+        self.structure_agent()  # trades SPY
+        self.assertIs(self.house._options_history_daily_expiries(), False)  # the repository's config.json
+        calls, asked = self.refreshed()
+        self.assertEqual(calls, [(["SPY"], 10, None, None), (["IWM", "QQQ"], 10, None, None)])
+        self.assertNotIn(True, [every for _, _, every in asked])
+
+    def test_the_switch_is_on_only_when_the_config_says_true_and_the_repository_ships_it_off(self):
+        from league import house as house_module
+
+        for config, on in (({}, False), ({"options_history_daily_expiries": "true"}, False), ({"options_history_daily_expiries": 1}, False),
+                           ({"options_history_daily_expiries": True}, True)):
+            with self.subTest(config=config):
+                self.house.options_history_daily_expiries = None
+                with mock.patch.object(house_module.json, "loads", return_value=config):
+                    self.assertIs(self.house._options_history_daily_expiries(), on)
+        self.house.options_history_daily_expiries = None
+        with mock.patch.object(house_module.Path, "read_text", side_effect=OSError("unreadable")):
+            self.assertIs(self.house._options_history_daily_expiries(), False)
+        config = json.loads((Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
+        self.assertIs(config["options_history_daily_expiries"], False)
 
     def test_spy_is_backfilled_with_every_expiry_once_and_the_rest_are_kept_current(self):
         from league import options_history as oh
 
+        self.house.options_history_daily_expiries = True  # a later release turns it on
         agent = self.structure_agent()  # trades SPY
         single = self.house.spawn("krasker", "options-single", STRUCTURE_AGENT.replace('"structures": True, "symbols": ["SPY"]', '"symbols": ["F"]'),
                                   reason="test", specialty="alpaca-options")

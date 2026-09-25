@@ -990,7 +990,14 @@ class House:
     def _structure_book_name(self) -> str:
         """The practice book a structure agent's structures go to: `league/config.json`
         `options_structures.book` (`options-shadow` or `alpaca-paper`), read once, the options shadow book
-        when the key is absent or unreadable. The switch is the deploy's: a rollback undoes it."""
+        when the key is absent or unreadable. The switch is the deploy's: a rollback undoes it.
+
+        Only a PRACTICE book of Alpaca (`families.PRACTICE_BOOKS["alpaca"]`) is taken; any other name is the
+        options shadow book, said once (the adversarial review of Deploy G, Sept 25, 2026: with the key naming
+        `alpaca`, a rung-1 structure agent was staked $150 on the REAL book, and with O1 on its open filled there
+        with no O4 line, no allocator and no audit)."""
+        from .families import PRACTICE_BOOKS
+
         if self.structure_book_name is None:
             try:
                 config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
@@ -998,6 +1005,13 @@ class House:
             except Exception:  # noqa: BLE001 - an unreadable config is the default book, never alpaca-paper by accident
                 named = None
             self.structure_book_name = str(named or STRUCTURE_BOOK_DEFAULT)
+        if self.structure_book_name not in PRACTICE_BOOKS["alpaca"]:
+            named, self.structure_book_name = self.structure_book_name, STRUCTURE_BOOK_DEFAULT
+            try:
+                self.alert("warning", f"league/config.json options_structures.book names {named}, which is not a practice book "
+                                      f"({', '.join(PRACTICE_BOOKS['alpaca'])}): structures trade on {STRUCTURE_BOOK_DEFAULT}")
+            except Exception:  # noqa: BLE001 - the default stands whether or not the alert is written
+                pass
         return self.structure_book_name
 
     def _structure_practice_account(self) -> bool:
@@ -1083,8 +1097,15 @@ class House:
            book at the rung's practice stake, as `_move_books` does for any change of book. Its old record
            stays on the old book, finished by the mark pass (`_observe_wind_down`).
         So an agent is never holding, or ordering, structures on two books at once; for a moment it may have
-        cash on both (the sweep and the stake are separate rows), never a position or an order."""
+        cash on both (the sweep and the stake are separate rows), never a position or an order.
+
+        On any other book (its real book once promoted) it is not moving between practice books: its stamp goes
+        (and at its death, `kill`). Kept, a later demotion to a practice book it is again busy on would reuse the
+        old stamp and refuse its opens there at once, with no full session (the review of Deploy G, Sept 25, 2026)."""
         if not self.is_structure_agent(agent) or book not in self._structure_books():
+            if agent.id in (self._state.get("structure_moving") or {}):
+                with self._state_lock:
+                    self._state["structure_moving"].pop(agent.id, None)
             return
         moving = book is not self._structure_target(agent)
         with self._state_lock:
@@ -1307,6 +1328,13 @@ class House:
         if book.real_money:
             if book.name != REAL_BOOK.get(agent.venue):
                 return f"a structure agent's real book is {REAL_BOOK.get(agent.venue)}, not {book.name}: nothing is sent"
+            rung = self.evaluator.rung(agent.id)
+            if rung < 2:
+                # Only an agent the allocator seated on real money trades there (the review of Deploy G, Sept 25, 2026:
+                # beside `_structure_book_name`, which takes a practice book only, so a misnamed book cannot put a rung-1
+                # agent's structures on the owner's real account). What it may still hold there the House winds down.
+                return (f"a structure agent on rung {rung} trades on practice, never on the real {book.name} book: nothing is "
+                        "sent (real money follows its family's O4 line, through the allocator)")
             if order.action == "open":
                 admitted = allocator_module.spread_types_real()
                 if not admitted:
@@ -4053,6 +4081,31 @@ class House:
         from datetime import date, timedelta
         return (date.fromisoformat(str(self.holdout_window[1])[:10]) + timedelta(days=1)).isoformat() + "T00:00:00Z"
 
+    #: Set once from `league/config.json` `options_history_daily_expiries` (`_options_history_daily_expiries`, the review
+    #: of Deploy G, Sept 25, 2026); a test sets it directly.
+    options_history_daily_expiries: bool | None = None
+
+    def _options_history_daily_expiries(self) -> bool:
+        """Whether the daily refresh ingests EVERY expiry of SPY, QQQ and IWM (`options_history.DAILY_EXPIRIES`):
+        `league/config.json` `options_history_daily_expiries`, read once; only a literal `true` turns it on.
+
+        The adversarial review of Deploy G (Sept 25, 2026): the first refresh after the deploy (17:00 New York) would
+        backfill every weekday expiry across the window unwatched -- 4.55 M more bars on the review's synthetic copy,
+        estimated at one ops slot for 25-45 minutes and 4-5k gateway GETs -- and once the store holds them, a rollback
+        to a release before G cannot be undone there: that code's `tape` has no weekly filter and caps only after
+        building, so its SPY/QQQ/IWM structure tapes grow about fourfold (a 930 MB peak against G's 217 MB, measured
+        on the copy). So Deploy G ships it false and keeps today's weekly refresh; a later release that changes nothing
+        but this key turns it on, in an announced, watched quiet slot. Once the store holds every expiry, never roll
+        back past Deploy G without first deleting the non-weekly SPY/QQQ/IWM bars."""
+        if self.options_history_daily_expiries is None:
+            try:
+                config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
+                on = config.get("options_history_daily_expiries") is True
+            except Exception:  # noqa: BLE001 - an unreadable config is the weekly refresh, never the backfill by accident
+                on = False
+            self.options_history_daily_expiries = on
+        return bool(self.options_history_daily_expiries)
+
     def _refresh_options_history(self) -> dict[str, Any]:
         """The daily options-history job (ops lane, market-data GETs only): the underlyings living
         options strategies trade, at 1Day and 15Min; the feature symbols of living equity
@@ -4064,7 +4117,9 @@ class House:
         SPY, QQQ and IWM are traded by the options desk with EVERY expiry (G-LOOP, Sept 25, 2026:
         `options_history.DAILY_EXPIRIES`, a weekday expiry read from `DAILY_MAX_DAYS` days before it): one
         the store holds only weekly is backfilled across the window once, its Fridays' chunks already done
-        (never fetched again), and its weekly coverage stays its replay's until then."""
+        (never fetched again), and its weekly coverage stays its replay's until then. Only while
+        `options_history_daily_expiries` is on (`_options_history_daily_expiries`); off, every symbol is
+        refreshed weekly, as before G."""
         from .options_history import DAILY_EXPIRIES, DAILY_MAX_DAYS, adapter_from, refresh
         options = {n.id for n in self.niches.values() if n.asset_class == "option"}
         replay = sorted({str(s).upper() for a in self.registry.living() if a.specialty in options for s in (a.needs.get("symbols") or [])[:8]})
@@ -4077,7 +4132,8 @@ class House:
         done: dict[str, Any] = {"features": {}, "coverage": []}
         for group, timeframes, band in ((replay, ("1Day", "15Min"), 0.2), (wanted, ("1Day",), 0.10)):
             covered = set(self.options_history.covers(group, timeframes[-1], start, end))
-            daily = {"all_expiries": DAILY_EXPIRIES, "daily_max_days": DAILY_MAX_DAYS} if group is replay else {}
+            daily = ({"all_expiries": DAILY_EXPIRIES, "daily_max_days": DAILY_MAX_DAYS}
+                     if group is replay and self._options_history_daily_expiries() else {})
             every = [s for s in group if s in DAILY_EXPIRIES] if daily else []
             if every:
                 covered -= set(every) - set(self.options_history.covers(every, timeframes[-1], start, end, every_expiry=True))
@@ -4803,6 +4859,8 @@ class House:
             self.evaluator.observe(agent.id, book.name, agent.horizon)
             peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
+            if verdict.decision != "die":
+                verdict = self._moved_record_death(agent, book, rung) or verdict  # a structure agent's record on the books it left (G)
             if verdict.decision != 'eligible' and not allocator_module.enabled():
                 # Under the allocator its own statuses are the only ones (two writers alternated a
                 # `progress` row every pass for every waiting agent, Sept 23, 2026 review).
@@ -5968,6 +6026,8 @@ class House:
                 self._desk_displaced[agent.specialty] = self.clock()
             for key in ("next_wake", "memory", "last_research", "tried", "idle"):
                 self._state[key].pop(agent.id, None)
+            with self._state_lock:
+                (self._state.get("structure_moving") or {}).pop(agent.id, None)  # a living agent's move (`_structure_move`)
             try:
                 self._hand_off_retained(agent, cause)  # S3: its latest replay-passed candidate waits for a seat
             except Exception as exc:  # noqa: BLE001 - a hand-off that fails never keeps an agent alive
@@ -9420,19 +9480,106 @@ class House:
 
     def record_is_empty(self, agent: Agent) -> bool:
         """True when nothing this agent has done could be evidence and nothing is in its hands: no
-        holding, no working order, no active block and no closed trade on the book of its rung.
+        holding, no working order, no active block and no closed trade on the book of its rung --
+        on every book of its rung's record (`_record_books`: a structure agent's practice spans the
+        books it moved between).
         On paper this permits an in-place rewrite: no record or position is inherited. A real
-        agent still has its earlier paper qualification to protect and must fork new code."""
-        book = self.book_of(agent)
-        if book is None:
+        agent still has its earlier paper qualification to protect and must fork new code.
+
+        The adversarial review of Deploy G (Sept 25, 2026): read on the book of its rung alone, a structure
+        agent that had closed three winning verticals on options-shadow and then moved to alpaca-paper had
+        "no record to protect" and rewrote itself in place; the allocator's evidence pools every practice
+        book it was staked on, so the NEW program carried the old one's 3 trades at W_paper 1.2105 into the
+        O4 member pick, the O4 check and the paper-death rule. A book it has left is swept, so its trades
+        are counted there (`independent_closed`), not measured against a stake that is gone."""
+        books = self._record_books(agent)
+        if not books:
             return True
-        if book.account(agent.id).holdings or book.open_orders(agent.id):
-            return False  # new code must not inherit a position it does not know how to leave
         entered = self.evaluator._rung_entered(agent.id)
-        if any(row.get("active") for row in self.evaluator.blocks(agent.id, since_seq=entered, book=book.name)):
-            return False
-        returns, _ = self.evaluator.trade_returns(agent.id, book.name, since_seq=entered)
-        return not returns
+        for index, book in enumerate(books):
+            if book.account(agent.id).holdings or book.open_orders(agent.id):
+                return False  # new code must not inherit a position it does not know how to leave
+            if any(row.get("active") for row in self.evaluator.blocks(agent.id, since_seq=entered, book=book.name)):
+                return False
+            if index == 0:
+                returns, _ = self.evaluator.trade_returns(agent.id, book.name, since_seq=entered)
+                if returns:
+                    return False
+            elif self.evaluator.independent_closed(agent.id, book.name, since_seq=entered):
+                return False
+        return True
+
+    def _record_books(self, agent: Agent, book: Book | None = None) -> list[Book]:
+        """The books this agent's record on its current rung is on, the book of its rung (`book_of`, or `book`) first:
+        that one alone, except for a structure agent on practice, whose record also stays on every other structure book
+        it has an account on (`_structure_books`: it moves between the options shadow book and the Alpaca practice
+        account, `_structure_move`, and its old record is finished there, never moved). The allocator pools the same
+        books (`allocator.evidence`); `record_is_empty`, `_standing` and `judge` read them all (the review of Deploy G,
+        Sept 25, 2026)."""
+        book = self.book_of(agent) if book is None else book
+        if book is None:
+            return []
+        if book.real_money or not self.is_structure_agent(agent):
+            return [book]
+        return [book, *(other for other in self._structure_books() if other is not book and agent.id in other.accounts)]
+
+    def _record_blocks(self, agent: Agent, books: Sequence[Book], since_seq: int) -> list[dict[str, Any]]:
+        """The finished blocks since `since_seq` on `books` (`_record_books`), in the order they began: on one book exactly
+        `Evaluator.blocks` of it."""
+        if len(books) == 1:
+            return self.evaluator.blocks(agent.id, since_seq=since_seq, book=books[0].name)
+        names = {b.name for b in books}
+        rows = [row for row in self.evaluator.blocks(agent.id, since_seq=since_seq) if row.get("book") in names]
+        return sorted(rows, key=lambda row: int(row.get("first_mark_seq") or 0))
+
+    def _moved_record_death(self, agent: Agent, book: Book, rung: int) -> Verdict | None:
+        """Death on a structure agent's practice record across the books it moved between (`_record_books`), or None.
+
+        The evaluator judges one book, and a move (`_structure_move`) does not change the rung, so on the new book its
+        death clock started again (the review of Deploy G, Sept 25, 2026, by inspection; `test_structure_practice` has
+        an agent down 9.5% after five active blocks on options-shadow, one block short of paper death, that began again
+        at nothing on alpaca-paper). This applies the evaluator's own FREE death rules, the same
+        constitution keys, to the blocks of every book since it entered the rung, in the order they began: the drawdown
+        of `ladder.death` and the paper death of `ladder.paper_death`. Not the statistical death test (an upper bound
+        below zero): each of its looks spends alpha, rationed by the looks of the stay, and running it twice a pass would
+        spend it twice; the allocator's paper death reads the pooled record (`allocator.evidence`) already. Nor promotion:
+        read on the new book alone, a move can delay one, never make one. None when there is nothing on another book
+        since it entered (then the evaluator's judgement is the whole of it)."""
+        if rung != 1:
+            return None
+        books = self._record_books(agent, book)
+        if len(books) < 2:
+            return None
+        from . import stats
+
+        rows = self._record_blocks(agent, books, self.evaluator._rung_entered(agent.id))
+        if not any(row.get("book") != book.name for row in rows):
+            return None
+        growth = [float(row["log_growth"]) for row in rows]
+        active = sum(1 for row in rows if row.get("active"))
+        wealth, level = [1.0], 0.0
+        for value in growth:
+            level += value
+            wealth.append(math.exp(max(level, -700.0)))
+        drawdown = stats.max_drawdown(wealth)
+        ladder = self.evaluator.ladder
+        death, paper_death = ladder["death"], ladder.get("paper_death")
+        numbers = {"book": book.name, "books": [b.name for b in books], "blocks": len(rows), "active_blocks": active,
+                   "drawdown": drawdown, "via": "its practice record across the books it moved between"}
+        why = ""
+        if drawdown >= float(death["max_drawdown"]):
+            why = f"drawdown of {drawdown:.0%} is past the {float(death['max_drawdown']):.0%} limit"
+        elif paper_death and active >= int(paper_death["min_active_blocks"]):
+            change = math.exp(max(sum(growth), -700.0)) - 1.0
+            if change <= -float(paper_death["max_loss"]):
+                why = (f"down {-change:.1%} on paper after {active} active blocks; paper keeps no agent down "
+                       f"{float(paper_death['max_loss']):.0%}")
+            elif active >= int(paper_death["unprofitable_blocks"]) and change <= 0:
+                why = (f"not profitable on paper after {active} active blocks ({change:+.1%}); "
+                       f"{int(paper_death['unprofitable_blocks'])} is the chance a paper seat gives")
+        if not why:
+            return None
+        return self.evaluator._decide(agent.id, rung, "die", f"{why}, over {' and '.join(numbers['books'])}", numbers)
 
     def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Its own last closed trades, forward-tested or real: what research should learn from first."""
@@ -9544,10 +9691,13 @@ class House:
         rung = self.evaluator.rung(agent.id)
         entered = self.evaluator._rung_entered(agent.id)
         book = self.book_of(agent)
-        if book is not None and not book.evidence_integrity(agent.id)['ok']:
+        # A structure agent's practice record spans the books it moved between (`_record_books`, the review of Deploy G,
+        # Sept 25, 2026): read on its new book alone, a winner lost its record, and with it a winner's standing.
+        books = self._record_books(agent, book)
+        if any(not b.evidence_integrity(agent.id)['ok'] for b in books):
             return Standing(agent.id, agent.niche, rung, 0.0, 0, working=False,
                             reward_growth=0.0, reward_observations=0, reward_rung=rung)
-        rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
+        rows = self._record_blocks(agent, books, entered) if rung >= 1 and book else []
         growth = [float(r["log_growth"]) for r in rows]
         active = sum(1 for r in rows if r.get("active"))
         reward_rows, reward_rung = list(rows), rung
