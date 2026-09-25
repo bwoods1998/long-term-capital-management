@@ -708,6 +708,43 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertEqual((D(sold[0]["quantity"]), D(sold[0]["price"])), (D("1"), D("0.57")))
         self.assertEqual(book.account(agent.id).holdings, {})
 
+    def test_every_ledger_id_of_a_structures_life_fits_the_ledgers_200_characters(self):
+        """A condor's instrument key is about 140 characters; an id built from it and a 34-character agent name
+        would pass the ledger's 200 and the row would be refused. Every id on the House's structure paths is a
+        hash (the intent's) or short: refusals, the open, the close, the expiry-day close and the wind-down."""
+        from league import structures
+
+        agent = self.house.spawn("k" + "x" * 33, "options-structures-test", STRUCTURE_AGENT, reason="test", specialty="alpaca-options")
+        self.assertEqual(len(agent.id), 34)
+        book = self.house.book_of(agent)
+        self.house.seat(agent)
+        inst = structures.instrument(structures.parse("options-shadow", condor_row()).spec, "options-shadow")
+        self.assertGreater(len(inst.key), 140)
+        self.shadow.set_quote(inst, "0.55", "0.62")
+        single = {"occ": occ("2026-09-11", "call", 590), "side": "buy", "quantity": 1, "type": "limit", "limit_price": 0.40, "reason": "one leg"}
+        intents, _ = self.house._intents(agent, book, [condor_row(), single])
+        self.assertEqual(book.submit(intents)[0].status, "filled")
+        book.submit(self.house._intents(agent, book, [condor_row(action="close", limit=0.40)])[0])  # rests at 0.60
+        self.at(THURSDAY_11_NY + 86400 + 3.75 * 3600)
+        self.house._intents(agent, book, [condor_row()])  # refused: past the entry cut
+        self.at(THURSDAY_11_NY + 86400 + 4.6 * 3600)
+        self.shadow.set_quote(inst, "0.50", "0.66")
+        self.house._state["next_wake"][agent.id] = self.clock() + 10 ** 9
+        self.house._enforce_horizon()  # its own 0.60 is cancelled and the House's sale at 0.50 fills
+        self.assertEqual(book.account(agent.id).holdings, {})
+        other = self.house.spawn("k" + "y" * 33, "options-structures-test", STRUCTURE_AGENT, reason="test", specialty="alpaca-options")
+        self.house.seat(other)
+        self.at(THURSDAY_11_NY + 3600)
+        later = structures.instrument(structures.parse("options-shadow", condor_row(expiry="2026-09-14")).spec, "options-shadow")
+        self.shadow.set_quote(later, "0.55", "0.62")
+        book.submit(self.house._intents(other, book, [condor_row(expiry="2026-09-14")])[0])
+        self.house.kill(self.house.registry.get(other.id), "test")  # the wind-down sells it whole at the bid
+        self.assertEqual(book.account(other.id).holdings, {})
+        ids = [e.id for e in self.house.ledger.iter()]
+        self.assertTrue(ids)
+        self.assertLessEqual(max(len(i) for i in ids), 200)
+        self.assertTrue(self.refusals(agent))
+
     def test_a_dead_agents_structure_waits_for_the_open(self):
         agent = self.structure_agent()
         book, inst = self.held_condor(agent)
