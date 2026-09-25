@@ -50,7 +50,7 @@ Execution record for the owner's goal of Sept 25, 2026: execute
    store, `jev-features.sqlite`, starting at the newest snapshot: no back-fill). No strategy sees the
    feature until its held-out AUC on post-ship events meets the plan's 0.70 line; then the serving hook
    goes through `league/feeds.py` with the Kalshi run's agreement, after its K1 merges.
-5. **Builders (06:32Z):** the J1 analyst (read-only, the Sept 20-22 lab data: which of the eight features
+5. **Builders (06:21Z):** the J1 analyst (read-only, the Sept 20-22 lab data: which of the eight features
    carry the move lift, whether a free market-type table explains it, the frozen model) and the J1 builder
    (worktree `~/Work/ltcm-j1-move`, branch `j1/move-recorder`: `Sensor.ask_state`, `league/jev_features.py`,
    the `JevFloor` hook, the `jev` block, tests).
@@ -89,7 +89,7 @@ its session.
 |---|---|---|
 | 0.1 | T0 recorded and committed | done |
 | 0.2 | Plan merged to main | done 06:25Z (#303, `19c3771`) |
-| 0.3 | J0 baseline | done 06:30Z (below) |
+| 0.3 | J0 baseline | done 06:25Z (below) |
 | J0 | Caps into one $1.50 daily pool | built with J1 (config), ships in D-J1 |
 | J1 | Move recorder | building; model analysis running |
 | J2 | Filters in front of research, Merton, replays | offline evaluation first; hooks after F2 |
@@ -99,7 +99,7 @@ its session.
 
 ## The scoreboard at T0 (J0 baseline)
 
-Read-only on the box at 06:17-06:30Z Sept 25: `jev.sqlite`, `health.json` `jev`, the ledger's
+Read-only on the box at 06:17-06:25Z Sept 25: `jev.sqlite`, `health.json` `jev`, the ledger's
 `research.gate` rows (24 h to 06:20Z), the gateway's `typesafe` block (`scripts/gateway_admin.py status`).
 
 | # | Metric | Reading at T0 | Target |
