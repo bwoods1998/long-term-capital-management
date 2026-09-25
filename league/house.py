@@ -2043,23 +2043,25 @@ class House:
                 marker, check = None, index.cursor
             try:
                 rows = index.refresh(self.ledger, check_after=check)
-                for row in rows:
-                    if self.ledger.get(row["id"]) is None:
-                        self.ledger.append("agent.family", row["payload"], agent=row["agent"], id=row["id"])
+                group = [{"kind": "agent.family", "payload": row["payload"], "agent": row["agent"], "id": row["id"]}
+                         for row in rows if self.ledger.get(row["id"]) is None]
+                if first and check == 0 and rows and marker is None:
+                    moved: dict[str, dict[str, list[str]]] = {}
+                    for row in rows:
+                        p = row["payload"]
+                        moved.setdefault(f"{p['was']}@{p['venue']}", {}).setdefault("out", []).append(row["agent"])
+                        moved.setdefault(f"{p['family']}@{p['venue']}", {}).setdefault("in", []).append(row["agent"])
+                    group.append({"kind": "agent.family", "id": families_module.REKEY_ID,
+                                  "payload": {"rekey": True, "through": index.cursor, "rows": len(rows),
+                                              "agents": len({r["agent"] for r in rows}), "families": moved,
+                                              "rule": "allocator.family_key"}})
+                if group:
+                    self.ledger.append_many(group)  # one indivisible group: the re-key is on the ledger whole or not at all
             except BaseException:
                 # A look that fails part of the way may have filed programs in the index that no row records yet: the next
                 # look builds the index again and checks from where the last complete look stopped.
                 self._family_index = None
                 raise
-            if first and check == 0 and rows and marker is None:
-                moved: dict[str, dict[str, list[str]]] = {}
-                for row in rows:
-                    p = row["payload"]
-                    moved.setdefault(f"{p['was']}@{p['venue']}", {}).setdefault("out", []).append(row["agent"])
-                    moved.setdefault(f"{p['family']}@{p['venue']}", {}).setdefault("in", []).append(row["agent"])
-                self.ledger.append("agent.family", {"rekey": True, "through": index.cursor, "rows": len(rows),
-                                                    "agents": len({r["agent"] for r in rows}), "families": moved,
-                                                    "rule": "allocator.family_key"}, id=families_module.REKEY_ID)
             self._family_index = index
             with self._state_lock:
                 self._state["family_key_through"] = index.cursor
