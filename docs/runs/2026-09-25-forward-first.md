@@ -70,6 +70,7 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
+| H3b | The train holds while a real Kalshi game is in play; the watchdog's `inherited` crash | built, PR #345; merged into `c/integration` 21:41Z; Deploy C |
 | X | Execution (fill rate in the snapshot, refusals say what fits, the graduate's replay cut at its freeze, the scoreboard's families) | built, PR #332 (CI green); Deploy C (`book.py` text) |
 | C | Deploy C integration (`c/integration`, draft PR #335) | Deploy B + X, S, Y (+ `jev_relevance` off), the W publisher; digest `acff5c64` (no change of its own); Wave 2 review running; about 08:00Z Saturday after the options run's G |
 | S | The search looks for capacity (foundry brief `foundry-2026-09-25.1`; alpaca-open 12 seats) | built, PR #331 (CI green; on #324); Deploy C |
@@ -523,6 +524,15 @@ today meriwether-h2d625d stays a proven-family bunt at $16.62 on a proof of 3 da
   could ship during a game: **H3b** (a builder, for Deploy C) holds the train while the real Kalshi book has a position
   whose event has started and not settled, and fixes the watchdog's pre-existing `UnboundLocalError` on `inherited`.
   Wave 0 cleanup: nine merged worktrees and their branches (h2, h3, h4, h5, z, their reviews, `a/integration`) removed.
+
+- **H3b (#345, into Deploy C).** A fourth train hold, `in_play`: no updater release while the real `kalshi` book holds a
+  position or working order in an event whose ticker carries a start time (New York time, EDT/EST), from 30 minutes
+  before it to its settlement or 5 hours after its start; weather, daily and 15-minute crypto, and date-only games never
+  hold; the last 48 hours of real rows, read without a scan (0.82 s over 829,542 rows on the box at 21:27Z; it found
+  tonight's six MLB totals, 22:40Z to 02:15Z). Replayed every 10 minutes over the 44 h to T0 it covered 14 real games
+  in three spans. The watchdog's `inherited` is set before health.json is read (3 tests). CI was red only on S's
+  model-route test, which pinned the sports founders to two where K1 (merged via main) added four more: fixed on
+  `c/integration` (the test sets exactly its own founders).
 
 ## Progress notes
 
