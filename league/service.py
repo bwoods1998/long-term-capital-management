@@ -168,7 +168,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     from .auditor import Auditor
     from .budget import Budget
     from .campaigns import CampaignBudget
-    from .commons import Commons
+    from .commons import Commons, gateway_fetch
     from .funded import FundedTransport
     from .frontier import Frontier
     from .paper import KalshiShadowBroker
@@ -241,6 +241,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
         # The Alpha Lab's own box (league/lab.py, league/labbox.py): its key, when config.json names one; none on a canary.
         lab_box=lab_box_key(config, canary=canary),
+        # K1 (Sept 25, 2026): flagged founder rows seated into a full league (league/kalshi_founders.py); never on a canary.
+        kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary,
     )
     house = House(
         root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
@@ -249,8 +251,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     )
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
+    # `fetch`: research's `web_fetch` reads one public page through the gateway (I1, Sept 25, 2026).
     house.commons = Commons(house.ledger, news=News(cache_dir=root / "cache"),
-                            clock=house.clock)
+                            clock=house.clock, fetch=gateway_fetch(gateway_url, token))
     if house.researcher is not None:
         house.researcher.commons = house.commons
     frontier = Frontier(gateway_url, token, spend_guard=campaigns)

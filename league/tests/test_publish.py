@@ -328,6 +328,57 @@ class PublisherTest(HouseCase):
         self.assertEqual(publisher.checkpoint(self.house)["run"]["models_used"], ["DeepSeek V4 Flash", "gpt-6-astra"])
 
 
+# Sept 25, 2026: krasker-22's CCL iron condor on options-shadow (filled 15:48:59Z), the held instrument whose 95-character
+# id made the site refuse every checkpoint from 15:50:21Z (HTTP 400 "Invalid checkpoint.": capital/schema.js
+# `validInstrument` allows 80).
+IRON_CONDOR = "iron_condor|-1CCL261002C00022500|+1CCL261002C00023000|+1CCL261002P00021500|-1CCL261002P00022000"
+
+
+def hold_structure(house, agent, code=IRON_CONDOR):
+    """Put one held structure in `agent`'s account, as the structure book holds it: one option instrument whose
+    `market_id` is the structure's code, its symbol, expiry, strike and right the first leg's."""
+    from ltcm.broker import Instrument
+
+    from league.book import Holding
+
+    book = house.book_of(agent)
+    inst = Instrument("option", "CCL", "options-shadow", multiplier=D(100), expiry="2026-10-02", strike=D("22.5"), right="call", market_id=code)
+    book.account(agent.id).holdings[inst.key] = Holding(inst, quantity=D(1), cost=D("17.20"), opened_at=now_iso(house.clock), reason="an iron condor")
+    return inst
+
+
+class StructurePositionTest(HouseCase):
+    """A four-leg structure's id is longer than the site allows an instrument's strings (80): the checkpoint
+    sends it shortened (`site_market_id`) and every other id as it is."""
+
+    def test_a_four_leg_structure_id_is_sent_inside_the_sites_80_characters(self):
+        self.assertEqual(len(IRON_CONDOR), 95)
+        shown = publish.site_market_id({"market_id": IRON_CONDOR, "symbol": "CCL", "expiry": "2026-10-02"})
+        self.assertEqual(shown, "iron_condor|-1C22.5|+1C23|+1P21.5|-1P22")
+        # A leg on another underlying or expiry keeps them; a two-leg code and a ticker fit, and are sent as they are.
+        far = "iron_butterfly|-1SOFIXX261002C00280000|+1SOFIXX261016C00285000|+1SOFIXX261002P00275000|-1SOFIXX261002P00280000"
+        self.assertEqual(publish.site_market_id({"market_id": far, "symbol": "SOFIXX", "expiry": "2026-10-02"}),
+                         "iron_butterfly|-1C280|+1C285@SOFIXX261016|+1P275|-1P280")
+        vertical = "debit_vertical|-1AAL261002P00013500|+1AAL261002P00014000"
+        self.assertEqual(publish.site_market_id({"market_id": vertical, "symbol": "AAL", "expiry": "2026-10-02"}), vertical)
+        self.assertEqual(publish.site_market_id({"market_id": "KXHIGHDEN-26SEP25-T72"}), "KXHIGHDEN-26SEP25-T72")
+        # Anything else too long is cut to the bound, never sent whole.
+        self.assertEqual(publish.site_market_id({"market_id": "x" * 100}), "x" * 80)
+
+    def test_the_checkpoint_never_sends_an_instrument_string_over_80(self):
+        agent = self.seated()
+        hold_structure(self.house, agent)
+        body = Publisher("https://blakewoods.us", lambda: "t" * 40, Path(self.dir.name) / "publish.json", tape="test", opener=FakeSite(),
+                         clock=self.clock).checkpoint(self.house)
+        position = next(p for d in body["desks"] if d["id"] == agent.id for p in d["positions"] if p["instrument"]["asset_class"] == "option")
+        self.assertEqual(position["instrument"]["market_id"], "iron_condor|-1C22.5|+1C23|+1P21.5|-1P22")
+        self.assertEqual(position["instrument"]["symbol"], "CCL 10-02 22.5C")
+        for desk in body["desks"]:
+            for p in desk["positions"]:
+                for field, value in p["instrument"].items():
+                    self.assertLessEqual(publish.js_length(str(value)), publish.MAX_INSTRUMENT_TEXT, f"{desk['id']} instrument.{field}")
+
+
 class CheckpointFoldsTest(HouseCase):
     """Sept 24, 2026 (R6-perf): the checkpoint summed the whole ledger on every tick (every charge twice,
     every model request, each agent's every verdict, the newest 10,000 wakes: about 250,000 rows a tick on
@@ -875,6 +926,13 @@ class SiteAcceptsTheBoardTest(FamiliesCase):
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
         self.house.allocator = FakeAllocator(self.board(agent))
+        self.clock.advance(5)
+        self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
+
+    def test_the_site_accepts_a_checkpoint_holding_a_four_leg_structure(self):
+        # Sept 25, 2026: the site refused every checkpoint from 15:50:21Z while krasker-22 held a CCL iron condor whose
+        # 95-character id went out as the position's market_id; the same body, shortened, is accepted.
+        hold_structure(self.house, self.seated())
         self.clock.advance(5)
         self.assertEqual(self.valid(self.publisher().checkpoint(self.house)), "true")
 

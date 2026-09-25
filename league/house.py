@@ -44,6 +44,7 @@ from .admissions import Admissions
 from . import allocator as allocator_module, capital, feeds as feeds_module, niches as niches_module, research_gate, shards as shards_module
 from . import parameters
 from . import options_desk
+from . import kalshi_founders
 from .parameters import mutate  # retained as a public import for callers of league.house.mutate
 from .book import Book, BookError, Intent, Limits, step_of
 from .commons import Commons
@@ -490,6 +491,10 @@ class Settings:
     # an agent still running the code a repair corrects, gives it up), and agents running code a
     # BORN repair corrects are retired. Off: merged strategies wait for an empty seat, as before.
     enroll_displaces: bool = True
+    # K1 (the Kalshi-scale run, Sept 25, 2026): the founder rows flagged `seat_full_league` are seated into a full league
+    # (`league/kalshi_founders.py`). On in the floor's House (`service.build`), off in any House a test or the canary
+    # builds: each such birth reads its founder's NEEDS in a probe box, and no unrelated House is handed the weekend's founders.
+    kalshi_founders: bool = False
     # No new research from the moment a release is staged. It wants to be a little longer than a
     # research pass (one to three minutes, measured) so the ones in flight finish before the
     # restart, and a good deal SHORTER than a deploy: at fifteen minutes against a half-hourly
@@ -1302,11 +1307,14 @@ class House:
                 out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
         return out
 
-    def _markets(self, series: list[str], hours: float, max_age: float) -> list[dict[str, Any]]:
+    def _markets(self, series: list[str], hours: float, max_age: float, min_hours: float = 0.0, limit: int | None = None) -> list[dict[str, Any]]:
+        # The listing window a strategy may opt into (`min_hours_to_close`, `max_markets`; Sept 25, 2026):
+        # passed only when declared, so every other listing is asked exactly as before.
+        window = {"min_hours_to_close": min_hours, "limit": limit} if min_hours or limit is not None else {}
         try:
-            return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age)
+            return self.kalshi_data.markets(series, max_hours_to_close=hours, max_age=max_age, **window)
         except TypeError:  # a data source that does not share listings
-            return self.kalshi_data.markets(series, max_hours_to_close=hours)
+            return self.kalshi_data.markets(series, max_hours_to_close=hours, **window)
 
     def _resolves_at(self, instrument: Any) -> float | None:
         if self.kalshi_data is None:
@@ -1671,19 +1679,23 @@ class House:
                             "code": niches_module.founder_code(seeds_module.load(founder["seed"]), niche, founder)})
         return out
 
-    def found(self, names: list[str] | None = None) -> list[Agent]:
+    def found(self, names: list[str] | None = None, *, described: Mapping[str, Any] | None = None) -> list[Agent]:
         """Seed the first population (idempotent: a founder already born is not born again).
 
         Founders of one desk share a name and number themselves: the six of the Meriwether desk are
         `meriwether`, `meriwether-2` ... `meriwether-6`. So what says a founder is already born is
-        its `key` (the role it plays on that desk), not the name it ends up with."""
+        its `key` (the role it plays on that desk), not the name it ends up with.
+
+        `described`: founder key -> its NEEDS probe's run, read by a caller that holds the lifecycle lock and must
+        not call Sail under it (`kalshi_founders.seat`, K1)."""
         born = []
         existing = {a.founder for a in self.registry.agents.values()}
         wanted = [f for f in self.founders() if (names is None or names_match(f, names)) and f["key"] not in existing]
         for index, seed in enumerate(wanted):
             # The probe box stays awake between seeds: most of reading a strategy's NEEDS is the box waking.
             agent = self.spawn(seed["name"], seed["family"], seed["code"], reason=seed["why"], specialty=seed["niche"],
-                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1)
+                               founder=seed["key"], keep_probe_awake=index < len(wanted) - 1,
+                               described=(described or {}).get(seed["key"]))
             # The founders are the owner's priors (what the first run measured, and published
             # research): they start their forward test at once, because paper costs nothing and
             # forward evidence is the evidence that counts. Their replay is still run and still
@@ -2530,13 +2542,19 @@ class House:
             series = [str(s) for s in (needs.get("series") or [])][:12]
             hours = float(needs.get("max_hours_to_close") or 24)
             age = 300.0 if agent.horizon == "day" else 60.0  # how old a shared listing may be: a daily strategy is not racing anyone
-            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}", 50, lambda: self._markets(series, hours, age))
+            from .tapes import DEFAULT_MAX_MARKETS, listing_window
+
+            floor, cap = listing_window(needs)  # opt-in NEEDS (Sept 25, 2026); (0, 200) and the old key when not declared
+            window = "" if (floor, cap) == (0.0, DEFAULT_MAX_MARKETS) else f":{floor}:{cap}"
+            ctx["markets"] = self._cached(f"markets:{','.join(series)}:{hours}{window}", 50,
+                                          lambda: self._markets(series, hours, age, floor, cap if window else None))
             niche = self.niche_of(agent)
             if not ctx["markets"] and niche is not None and niche.live:
                 # Its own series are dark (a season ended, a quiet night): the busiest live series of its specialty.
                 busiest = [x for x in niche.live if x not in series][: niches_module.MAX_UNIVERSE]
                 if busiest:
-                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}", 120, lambda: self._markets(busiest, hours, age))
+                    ctx["markets"] = self._cached(f"markets:{','.join(busiest)}:{hours}{window}", 120,
+                                                  lambda: self._markets(busiest, hours, age, floor, cap if window else None))
                     ctx["note"] = "None of the series your strategy names has a market open inside your window, so these are the busiest live series of your specialty."
         if agent.venue == 'kalshi':
             ctx['event_risk'] = book.event_risk(agent.id, (row['market'] for row in ctx['markets']))
@@ -9281,6 +9299,7 @@ class House:
             self.found()
         self.enroll()
         options_desk.seat_founders(self)  # the options desk's structure founders, one a tick (league/options_desk.py)
+        kalshi_founders.seat(self)  # K1: one flagged founder row (`seat_full_league`) a pass, into a full league too; never raises
         self._refill(rules)
 
     def _seal_applies(self, agent: Agent) -> bool:

@@ -976,6 +976,13 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
     if venue == 'kalshi' and watched_symbols and any(not observed_bars.get(s) for s in watched_symbols):
         return failed('unsupported input: required observed bars are missing')
     max_hours = _num(needs.get("max_hours_to_close"))
+    # The listing window a strategy may opt into (Sept 25, 2026; `league.tapes.listing_window`, what
+    # a live wake is shown): markets closing sooner than `min_hours_to_close` are not shown, and at
+    # most `max_markets`, the soonest to close. Neither applies unless declared.
+    min_hours = _num(needs.get("min_hours_to_close"))
+    # A floor at or over the horizon is read as absent, as the live wake reads it (`listing_window`).
+    min_hours = min_hours if min_hours is not None and 0 < min_hours < (max_hours or 24.0) else None
+    max_markets = needs.get("max_markets") if type(needs.get("max_markets")) is int and 1 <= needs["max_markets"] <= 500 else None
     # Recorded live feeds (`league/feeds.py`), shown only to a strategy that declares them.
     feeds = prepared.feed_index() if needs.get("feeds") and isinstance(tape.get("feeds"), dict) else None
 
@@ -1083,12 +1090,18 @@ def _replay(code: str, sha: str, params: dict | None, tape: dict, stake: float, 
                         mine = False  # past its horizon to trade, but still something it may watch
                         if not watched:
                             continue
+                    if mine and min_hours is not None and (hours is None or hours < min_hours):
+                        mine = False  # too soon to close for its window (a game in progress), still watchable
+                        if not watched:
+                            continue
                     row = {k: v if isinstance(v, _SCALARS) else copy.deepcopy(v) for k, v in market.items() if k != "close_ts"}
                     row["hours_to_close"] = hours
                     if mine:
                         shown_markets.append(row)
                     if watched:
                         watched_markets.append(row if mine else dict(row))
+                if max_markets is not None:
+                    shown_markets = sorted(shown_markets, key=lambda row: (row["hours_to_close"] is None, row["hours_to_close"] or 0.0, str(row.get("market"))))[:max_markets]
                 ctx["markets"] = shown_markets
                 # A market it WATCHES is not one it trades, so it is not cut to its own series or
                 # its own horizon. Underlier bars ride on the tape (see `House.tape_for`): six of
