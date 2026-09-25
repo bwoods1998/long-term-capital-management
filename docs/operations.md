@@ -291,6 +291,16 @@ watch.
     timeout loses no filing). `failing` shows a stock at its first failure. A warning quotes each URL
     without its query, so the reason (a read timeout, an HTTP status) is on the line.
   - `background_jobs`, `durable_research` and `promotion_status`.
+  - `restarts_24h`, `restarts_24h_in_session` and `last_start` (H6, Sept 25, 2026): the `ops.started`
+    rows of the last 24 hours, those that fell inside a regular US session, and the newest (`at`,
+    `release`, ledger `seq`). The plan's line is six a day and none in a session (26 in the day to
+    04:25Z Sept 25, seven inside the Sept 24 session).
+  - `restart_research` (H6): the research sessions in flight when this House started (`at_start`),
+    how many have since ended as sessions do (`resumed`), were closed because their agent died or
+    changed (`retired`), or were lost (`lost_count`; the last 20 in `lost`: session, agent, reason,
+    `began_before_start`, `candidate_recovered`), and those still `waiting` to resume. In the day to
+    04:39Z Sept 25, 110 sessions spanned a restart: 84 resumed, 25 were lost (23
+    `provider: campaign_post_unconfirmed`, 2 `tool outcome unconfirmed`).
   - `tick_steps` (Sept 24, 2026): where the tick's time went, on the monotonic clock. `last`: the
     last tick's `at`, `total_seconds` (from its start to its health block written) and `steps`, the
     seconds of each: `replay_rules`, `feeds` (scheduling the recorders), `poll:<book>` (fills and
@@ -300,9 +310,18 @@ watch.
     sweeps), `allocator`, `floor_invariants`, `research`, `schedule` (the background jobs it starts),
     `jev`, `history_coverage`, `merton`, `hypotheses`, `lab`, `shards`, `payout`, `notices`,
     `horizon`, `tuition`, `population` (culls and births), `save_state`, `publish` and `health` (this
-    file's own block). `slowest_hour`: each step's slowest over the ticks of the last hour, the eight
+    file's own block). Since Sept 25, 2026 (H5 of the forward-first run) the tick runs every 30 s
+    (`config.json` `tick_seconds`) and `research` and `hypotheses` only schedule their jobs on the
+    House lane (`background.house`, keys `house:research` and `house:hypotheses`, once a minute);
+    `population` is the births pass only every five minutes or on the tick after a birth or death
+    (otherwise culls, a few milliseconds); `poll:kalshi-shadow` and `publish` run once a minute and
+    are near zero on the ticks between. To judge the tick, read `last.total_seconds` over several ticks
+    and the interval between the log's tick lines (`{"at": ..., "woke": [...]}` in
+    `/workspace/league.log`): the line to hold is a p50 of 40 s or less over an hour with 128 living
+    (before: tick p50 60.8 s over 26 ticks, 04:31-05:00Z Sept 25, the births pass 22.0 s of it; tick lines 60-68 s apart at p50 in quiet hours, 97-121 s
+    in the Sept 24 US session). `slowest_hour`: each step's slowest over the ticks of the last hour, the eight
     slowest first, with that tick's `at`; `ticks_in_hour`; and `background`: each lane's
-    (`research`, `replay`, `ops`, `audit`, `feeds`, `shards`) last job with its `key`, `state`,
+    (`research`, `replay`, `ops`, `audit`, `feeds`, `shards`, `house`) last job with its `key`, `state`,
     `seconds` and `at`, which ran beside the tick and are not in its time. `tick_duration_seconds`
     is unchanged: the tick up to its health block. Measured Sept 24, 2026 08:40-08:50Z: ticks of
     51-64 s landing 70-80 s apart, the House at about 74% of the box's one vCPU, and nothing that said
@@ -783,7 +802,12 @@ watch.
 - **Research ends with `provider: campaign_post_unconfirmed`.** A Sail request was in flight when
   the House restarted. The House cannot prove whether the vendor accepted it, so it will not buy it
   again inside the idempotency window, and the agent researches on its next due session. Many at
-  once means many restarts.
+  once means many restarts. Since Sept 25, 2026 (H6) such a session, and one that ends
+  `tool outcome unconfirmed: <tool>` or whose candidate commit a restart interrupted, is named in one
+  warning a tick ("N research sessions lost to the restart at <start>: <session> (<reason>); ...",
+  with `sessions` and `agents`), counted in `health.json` `restart_research`, and -- when it
+  recovered no retained candidate -- closed as cancelled so its agent may research again in 15
+  minutes, as a provider failure's is.
 - **Research ends with `provider: provider_http_502` (or 500, 503, 504, 529).** The vendor failed
   the session (L2, Sept 24, 2026: 13 sessions ended in a 502 and 13 in a 504 in the day before T0).
   What its model turns were charged comes back in one `credit.grant` (id
@@ -1018,7 +1042,9 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `options_history` | on | Options history, options replay, and IV/skew/activity features |
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
-| `league/house.py` | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
+| `league/house.py` | `Settings.tick_seconds` (and `config.json` `tick_seconds`, 30-600) | 30 s | H5 (Sept 25, 2026): the run loop's tick, for the wakes (60 before; the tick lines landed 60-68 s apart at p50 with 60 the floor) |
+| | `Settings.population_pass_seconds`, `house_job_seconds`, `simulated_poll_seconds`, `publish_seconds`, `desk_displacement_seconds` | 300 s, 60 s, 60 s, 60 s, 60 s | H5: the births pass (or the tick after a birth or death); research scheduling and the foundry's step on the House lane; a simulated venue's fill and settlement pass (its fill model's cadence); the site's checkpoint; one displacement a desk. Each keeps what it did at sixty-second ticks |
+| | `Settings.box_wait_seconds`, `probe_wait_seconds` | 2 s, 15 s | The tick never waits on background work (Sept 23, 2026): a wake whose box another caller holds waits this long, then is skipped and due again on the next tick; births wait this long for the probe box, then defer to the next tick (`health.json` `deferred`). Measured Sept 22: a probe takes about 20 s and a box's sleep up to about 17 s. The research thread's admission may wait up to 600 s for the probe box, since it never holds the tick's lock while it waits |
 | | `EVIDENCE_CLOCK_DAYS`, `EVIDENCE_CLOCK_REFRESH_SECONDS`, `FORWARD_RULE_FILLS`, `House.RETAINED_TTL_SECONDS`, `WIND_DOWN_REFUSALS`, `WIND_DOWN_RETRY_SECONDS` | 7 d, 1 d, 3, 72 h, 3, 1 d | The seat market by evidence (S1-S4, Sept 24, 2026): the evidence clock's window and refresh (a paper seat's grace is the larger of 12 h and its desk's clock); the fills after which a trader goes only to a newcomer with a better forward record; how long a dead author's retained candidate waits for a seat (and how far back the first pickup reaches); the identical refusals of a House-sent sale before its retries stop, and how long until it is tried again. Constants in `league/house.py`: an update or owner deploy changes them |
 | | `SEAT_WAIT_WARN_SECONDS`, `SEARCH_CLOSED_TTL_SECONDS`, `SEAT_EXPIRED_KEEP_SECONDS`, `SAIL_BURN_WINDOW_SECONDS`, `SAIL_BURN_MIN_SPAN_SECONDS` | 2 h, 10 min, 7 d, 1 d, 6 h | The seat market's capacity (R2, Sept 24, 2026): how long a newcomer waits before one warning a desk an hour names its desk, count and rule; how often the search's closed desks are read (the foundry's rule reads every block of every agent that lived on them); how long an expired waiter is remembered; and Sail's burn for the population rule (the falls of the Sail meter's readings over the trailing day, scaled to a day, none measured under six hours of readings). Constants in `league/house.py` |
 | | `POPULATION_RUNWAY_BAND_DAYS`, `PROVEN_UNBRED_RETRY_SECONDS` | 0.25 d, 1 h | The review of #276 (Sept 24, 2026): once the population rule holds the league it grows again only over the runway floor by this band (the runway moves 2.6% a reading at the 90th percentile and rose with no top-up in half the 15:06Z snapshot's readings, so at the floor it flipped and the league crept up); and a proven family's program with no distinct valid PARAMS mutation left is held, its desk not kept from other families, this long before it is asked again. Constants in `league/house.py` |

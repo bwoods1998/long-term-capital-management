@@ -9,7 +9,7 @@
   "alpaca_option_feed": "opra",
   "real_money": true,
   "auto_update": true,
-  "tick_seconds": 60,
+  "tick_seconds": 30,
   "mark_every_seconds": 300,
   "replay_days": 21,
   "inference_daily_cap_usd": "20.00",

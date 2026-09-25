@@ -154,6 +154,18 @@ REPEAT_WARNINGS = 10
 REPEAT_WINDOW_SECONDS = 1800.0
 #: A session the provider broke gives the agent its turn back this soon (`House.research`).
 PROVIDER_RETRY_SECONDS = 900.0
+#: H6 (Sept 25, 2026): how a research session in flight at a restart ends when it cannot be resumed safely
+#: (`House._session_lost`). `provider: campaign_post_unconfirmed`: the restart killed the model call's POST
+#: after its campaign hold was written and before Sail's answer was linked, and a second POST could be a
+#: second bill (`funded.FundedTransport`); `tool outcome unconfirmed`: it killed a tool between its intent
+#: and its receipt, and no side effect is repeated (`Researcher.research`). Read from research.sqlite on
+#: the box for the day to 04:39Z Sept 25 (26 restarts): 110 sessions began before a restart and ended
+#: after it; 84 resumed and ended as usual, 23 ended campaign_post_unconfirmed and 2 tool outcome
+#: unconfirmed (every such ending that day spanned a restart), 1 ended in a provider 502 -- and nothing
+#: said so: each was closed as a finished pass, which restarts the agent's research clock.
+SESSION_LOSSES = ("provider: campaign_post_unconfirmed", "tool outcome unconfirmed")
+#: The sessions lost to restarts that health.json names (`restart_research.lost`), newest last.
+SESSION_LOSSES_SHOWN = 20
 #: The lab evaluated nothing for this long while its queue was not empty: a health failure (L3).
 LAB_IDLE_SECONDS = 3600.0
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -423,7 +435,9 @@ def measure_evidence_clocks(ledger: Any, agents: Sequence[Any], now: float, *, d
 class Settings:
     """The House's own dials (not the game's, not the constitution's)."""
 
-    tick_seconds: int = 60
+    # The run loop's tick (league/config.json `tick_seconds`): 30 since H5 (Sept 25, 2026), for the wakes, which
+    # saw the tick lines 60-68 s apart at p50 while it was 60; the steps beside them keep their own cadences below.
+    tick_seconds: int = 30
     mark_every_seconds: int = 300
     real_money: bool = False  # the owner's switch: False keeps every agent on practice books
     replay_days: int = 21
@@ -474,6 +488,27 @@ class Settings:
     # hung Sail call, and the House's first tick waited about twelve minutes for it.
     box_wait_seconds: float = 2.0
     probe_wait_seconds: float = 15.0
+    # H5 (Sept 25, 2026, the forward-first run): the tick serves the wakes, every `tick_seconds` (30), and
+    # what it did beside them keeps the cadence it had while ticks were sixty seconds or more apart.
+    # Measured on the box 04:31-05:00Z Sept 25 (26 ticks, 128 living): ticks of 19-100 s, p50 60.8 s --
+    # population 22.0 s at p50, 75.3 s at its slowest (the refill asked the displacement scan once for
+    # each of 395 deferred research candidates, every tick: 399 scans, 17.1 of the 18.4 s the same tick
+    # took on the T0 snapshot here), research 6.3, wakes 6.2, poll:kalshi-shadow 5.5, hypotheses 2.2,
+    # publish 1.2. The log's tick lines landed 60-68 s apart at p50 in quiet hours (tick_seconds 60 was
+    # the floor) and 97-121 s in the US session of Sept 24.
+    #: The births pass (proven families, forks, merged strategies, the refill: the seat caps, the waiters
+    #: and the displacement scan) at most this often, and on the first tick after any birth or death.
+    population_pass_seconds: float = 300.0
+    #: Research scheduling and the foundry's bookkeeping, on the House's own lane beside the tick.
+    house_job_seconds: float = 60.0
+    #: A simulated venue's pass (kalshi-shadow: resting orders re-quoted, held markets asked for a
+    #: result). Its maker fills are decided on the quotes it samples, so sampling it twice as often
+    #: would fill more practice orders than the record was earned under: the fill model's cadence stays.
+    simulated_poll_seconds: float = 60.0
+    #: The site's checkpoint: the site's load does not double with the tick.
+    publish_seconds: float = 60.0
+    #: At most one displacement a desk in this long (`_displaceable`): the "one a tick" of sixty-second ticks.
+    desk_displacement_seconds: float = 60.0
 
 
 
@@ -657,7 +692,11 @@ class House:
                        "feeds": threading.Semaphore(1),
                        # And the Kalshi shard funder (`league/shards.py`): a pass a refusal asked for
                        # must not wait behind Merton, the backup or a repair; one at a time.
-                       "shards": threading.Semaphore(1)}
+                       "shards": threading.Semaphore(1),
+                       # H5 (Sept 25, 2026): the tick's own bookkeeping, moved beside it (`_house_job`):
+                       # research scheduling and the foundry's step. Behind Merton's three ops slots they
+                       # would wait out a pass of minutes; one at a time, never two of the same.
+                       "house": threading.Semaphore(1)}
         self._jobs: dict[str, threading.Thread] = {}
         self._job_status: dict[str, dict[str, Any]] = {}
         #: The tick's own clock (health.json `tick_steps`, Sept 24, 2026): the laps of the tick in hand,
@@ -668,6 +707,15 @@ class House:
         self._tick_hour: deque[tuple[float, str, dict[str, float]]] = deque(maxlen=self.TICK_STEPS_KEPT)
         self._lane_last: dict[str, dict[str, Any]] = {}
         self._standings_memo: dict[str, Any] | None = None  # one standings table a tick (`standings`)
+        #: H5 (Sept 25, 2026): the displacement scan's answers inside one births pass (`_displaceable`), and
+        #: when the last pass ran and on which roster (`_births_due`).
+        self._scan_memo: dict[str, Any] | None = None
+        self._lane_memos: dict[int, dict[str, Any]] = {}  # a House-lane job's standings table (`_house_job`)
+        self._births_pass: tuple[float, tuple[int, int]] | None = None
+        self._foundry_turn = threading.Lock()  # a births pass and the foundry's step never run side by side
+        #: H5: when the tick last ran each step it keeps at its own cadence ("publish", "house:research",
+        #: "poll:<simulated book>" ...), on the House's clock.
+        self._cadence: dict[str, float] = {}
         # What the tick put off because a box was busy (`_defer`): shown in health.json, told hourly.
         self._deferred: dict[str, dict[str, Any]] = {}
         self._deferred_told: dict[str, float] = {}
@@ -702,6 +750,13 @@ class House:
             self.researcher.trades = lambda agent_id: self._recent_trades(agent_id, limit=200)
             self.researcher.edit_replay = self._edit_replay  # `edit_params` (X1, Sept 24, 2026)
         self._born_at = self.clock()
+        #: H6 (Sept 25, 2026): the research sessions in flight when this House started (a saved session that
+        #: had begun), and what became of them (`_session_resumed`, `_session_lost`; health.json `restart_research`).
+        self._restart_research: dict[str, Any] = {
+            "started_at": now_iso(self.clock),
+            "in_flight": {job["session"]: job["agent"] for job in self.research_jobs.pending() if job["status"] != "queued"},
+            "resumed": 0, "retired": 0, "lost": [], "untold": []}
+        self._restart_research["at_start"] = len(self._restart_research["in_flight"])
         self._inference_ceiling: Decimal | None = None  # the config's hard cap, read once (`_pace_inference`)
         # Written once, on the first ever start, and persisted: `_refill` paces newcomers from it
         # when none has been born yet (see there for why this must outlive a restart).
@@ -3220,8 +3275,12 @@ class House:
 
         lane_name = ("research" if key.startswith("research:") else "replay" if key.startswith("replay")
                      else "audit" if key.startswith("audit:") else "feeds" if key.startswith("feeds:")
-                     else "shards" if key.startswith("shards:") else "ops")
+                     else "shards" if key.startswith("shards:") else "house" if key.startswith("house:") else "ops")
         lane = self._lanes[lane_name]
+        # The House's own bookkeeping runs every minute (`_house_job`): a started and a finished `ops.job`
+        # row for each would be 5,760 ledger rows a day that say nothing. Its last run is in health.json
+        # (`tick_steps.background.house`) and a failure is still a warning.
+        rows = lane_name != "house"
         with self._state_lock:
             self._job_status[key] = {"queued_at": self.clock(), "started_at": None}
 
@@ -3239,8 +3298,9 @@ class House:
                 job_id = f"{key}:{queued_at:.6f}"
                 state = "finished"
                 try:
-                    self.ledger.append("ops.job", {"job": job_id, "key": key, "state": "started",
-                        "queued_seconds": max(0, started_at - queued_at)})
+                    if rows:
+                        self.ledger.append("ops.job", {"job": job_id, "key": key, "state": "started",
+                            "queued_seconds": max(0, started_at - queued_at)})
                     work(*args)
                 except Exception as exc:  # noqa: BLE001
                     state = "failed"
@@ -3250,10 +3310,11 @@ class House:
                         pass
                 finally:
                     try:
-                        self.ledger.append("ops.job", {"job": job_id, "key": key, "state": state,
-                            "queued_seconds": max(0, started_at - queued_at),
-                            "running_seconds": max(0, self.clock() - started_at),
-                            "elapsed_seconds": max(0, self.clock() - queued_at)})
+                        if rows:
+                            self.ledger.append("ops.job", {"job": job_id, "key": key, "state": state,
+                                "queued_seconds": max(0, started_at - queued_at),
+                                "running_seconds": max(0, self.clock() - started_at),
+                                "elapsed_seconds": max(0, self.clock() - queued_at)})
                     except Exception:
                         pass  # a missing finish remains visible as interrupted work after restart
                     with self._state_lock:
@@ -3267,10 +3328,19 @@ class House:
         return True
 
     def wait(self, timeout: float | None = None) -> None:
-        """Block until the slow work in hand is done (tests use it; the run loop does not)."""
+        """Block until the slow work in hand is done (tests use it; the run loop does not), including
+        work that work in hand starts: since H5 (Sept 25, 2026) the House's research scheduling runs on
+        its own lane and queues the research jobs from there, so one pass over the threads could end
+        before the jobs it started had begun."""
         deadline = None if timeout is None else time.monotonic() + timeout
-        for thread in list(self._jobs.values()):
-            thread.join(None if deadline is None else max(0, deadline - time.monotonic()))
+        while True:
+            alive = [thread for thread in list(self._jobs.values()) if thread.is_alive()]
+            if not alive:
+                return
+            for thread in alive:
+                thread.join(None if deadline is None else max(0, deadline - time.monotonic()))
+            if deadline is not None and time.monotonic() >= deadline:
+                return
 
     @staticmethod
     def _crashed(result: Mapping[str, Any]) -> str:
@@ -4955,7 +5025,7 @@ class House:
         clocks = self._desk_clocks()
         now = self.clock()
         stamp = None  # now, as a market-hours check reads it: made once, and only if a desk keeps hours
-        bound = float(self.settings.tick_seconds)
+        bound = float(self.settings.desk_displacement_seconds)  # not the tick: it runs every 30 s since H5
         recently = {desk for desk, at in self._desk_displaced.items() if now - at < bound}
         newcomer = newcomer or Newcomer()
 
@@ -4976,12 +5046,27 @@ class House:
         newcomer_proven = self._family_proven(newcomer.family, newcomer.venue)
         # S3 (R2): a newcomer with a winning forward window may take a stale seat (`_stale_seat`).
         scored = newcomer.forward is not None and newcomer.forward > 0
+        # H5 (Sept 25, 2026): inside one births pass the scan below is asked the same question over and over
+        # -- once for each deferred research candidate of a full desk, 399 scans for 10 distinct questions on
+        # the T0 snapshot -- so the pass keeps each answer (`_scan_memo`) while no one is born or dies. The
+        # question is the desk, whether the newcomer is evidenced, whether its family is proven and its
+        # forward score; `exclude` only drops residents from the answer, so it is applied to the kept one.
+        memo, question = self._scan_memo, None
+        if why is None and memo is not None and memo["thread"] == threading.get_ident():
+            roster = self._roster()
+            if memo["roster"] != roster:
+                memo["roster"], memo["scans"] = roster, {}
+            question = (specialty, bool(evidenced), bool(newcomer_proven), newcomer.forward, id(rules))
+            kept_answer = memo["scans"].get(question)
+            if kept_answer is not None:
+                return [row for row in kept_answer if row[-1].id not in exclude]
+        skip = () if question is not None else exclude
         losing_blocks = int(rules.get("losing_family_min_blocks", 6))
         pooled = self.family_forward()
         rank = []
         for standing in self.standings():
             agent = self.registry.get(standing.agent)
-            if agent.id in exclude or (specialty is not None and agent.specialty != specialty):
+            if agent.id in skip or (specialty is not None and agent.specialty != specialty):
                 continue
             if standing.rung >= 2:
                 kept("real money")
@@ -5124,6 +5209,9 @@ class House:
                          float(self.economy.balance(agent.id)), agent))
         # Has it traded at all, a losing family first, replay-only first, then growth, how much, and its purse.
         rank.sort(key=lambda row: row[:6])
+        if question is not None:
+            memo["scans"][question] = rank
+            return [row for row in rank if row[-1].id not in exclude]
         return rank
 
     def _paused_past(self, agent: Agent, grace: float, now: float) -> bool:
@@ -6745,6 +6833,7 @@ class House:
                     id=f'research-commit-unconfirmed:{session}')
                 self._apply_controls(agent.id, session)  # its ids make a second application a no-op (X1)
                 self.research_jobs.finish(session, 'candidate commit unconfirmed; evidence retained')
+                self._session_lost(agent.id, session, 'candidate commit unconfirmed; evidence retained', recovered=False)
                 return None
             with self._lifecycle_lock:
                 current = self._generation(agent.id)
@@ -6755,6 +6844,7 @@ class House:
                         # between an edit and a pause of one pass moved the generation (X1).
                         self._apply_controls(agent.id, session)
                     self.research_jobs.finish(session, 'retired or changed before resume', cancelled=True)
+                    self._session_resumed(session, retired=True)
                     return None
                 generation = tuple(job['generation'])
                 if job['snapshot'] is None:
@@ -6797,6 +6887,14 @@ class House:
             from .research_gate import provider_fault
 
             broken = provider_fault(getattr(outcome, 'reason', ''))
+            # H6 (Sept 25, 2026): a session a restart (or a tool's exception) left unconfirmed was no pass either:
+            # it is named in a warning, and its agent's turn comes back as a broken session's does. One that
+            # recovered a retained candidate is a pass (its candidate is applied above).
+            reason = str(getattr(outcome, 'reason', '') or '')
+            if reason.startswith(SESSION_LOSSES):
+                broken = self._session_lost(agent.id, session, reason, recovered=bool(outcome.candidate)) or broken
+            else:
+                self._session_resumed(session)
             retry = self.research_interval_hours(agent) * 3600 - PROVIDER_RETRY_SECONDS if broken else 0.0
             self.research_jobs.finish(session, getattr(outcome, 'reason', 'finished'), cancelled=broken)
             self._note_research_result(agent.id, outcome)
@@ -6826,6 +6924,48 @@ class House:
             with self.research_jobs.claim(job['session']) as claimed:
                 if claimed:
                     self.research_jobs.finish(job['session'], 'retired before resume', cancelled=True)
+                    self._session_resumed(job['session'], retired=True)
+
+    def _session_resumed(self, session: str, *, retired: bool = False) -> None:
+        """H6: a session in flight at this House's start has ended as sessions do (`resumed`), or was closed
+        because its agent died or changed meanwhile (`retired`: not the restart's doing)."""
+        with self._state_lock:
+            book = self._restart_research
+            if book["in_flight"].pop(session, None) is not None:
+                book["retired" if retired else "resumed"] += 1
+
+    def _session_lost(self, agent_id: str, session: str, reason: str, *, recovered: bool) -> bool:
+        """H6 (Sept 25, 2026): a research session that ended unconfirmed (`SESSION_LOSSES`, or a candidate
+        commit a restart interrupted) is kept for the next tick's warning (`_tell_lost_sessions`) and for
+        health.json `restart_research.lost`, whether it began before this House's start or not (a tool that
+        raised leaves the same state). Returns True when it produced nothing -- no retained candidate was
+        recovered -- so its agent gets its turn back (`research`)."""
+        with self._state_lock:
+            book = self._restart_research
+            spanned = book["in_flight"].pop(session, None) is not None
+            row = {"session": session, "agent": agent_id, "reason": str(reason)[:160], "at": now_iso(self.clock),
+                   "began_before_start": spanned, "candidate_recovered": bool(recovered)}
+            book["lost"] = (book["lost"] + [row])[-SESSION_LOSSES_SHOWN:]
+            book["lost_count"] = int(book.get("lost_count") or 0) + 1
+            book["untold"].append(row)
+        return not recovered
+
+    def _tell_lost_sessions(self) -> None:
+        """One warning a tick names every research session lost since the last (`_session_lost`). One a tick,
+        not one a session: after a restart several end within minutes of each other, and ten warnings of one
+        text in half an hour escalate to an error (`REPEAT_WARNINGS`) that a deploy's watch would read as the
+        new release's failure (Sept 25, 2026: up to four sessions a restart, two restarts five minutes apart)."""
+        with self._state_lock:
+            rows, self._restart_research["untold"] = list(self._restart_research["untold"]), []
+        if not rows:
+            return
+        spanned = [row for row in rows if row["began_before_start"]]
+        where = (f"lost to the restart at {self._restart_research['started_at']}" if len(spanned) == len(rows)
+                 else "ended unconfirmed")
+        names = "; ".join(f"{row['session']} ({row['reason']}{', its retained candidate recovered' if row['candidate_recovered'] else ''})"
+                          for row in rows)
+        self.alert("warning", f"{len(rows)} research session{'' if len(rows) == 1 else 's'} {where}: {names}"[:1000],
+                   sessions=[row["session"] for row in rows], agents=sorted({row["agent"] for row in rows}))
 
     def _admission_gate(self, row, *, displace=False):
         """An admission's checks, under the lifecycle lock and with no Sail call: `(parent, candidate,
@@ -7481,13 +7621,15 @@ class House:
         return out
 
     def standings(self) -> list[Standing]:
-        """Every living agent's standing. Inside a tick, on the tick's own thread, the table is built
-        once and reused while the living roster is unchanged (a birth or a death rebuilds it); anywhere
-        else it is built fresh."""
+        """Every living agent's standing. Inside a tick, on the tick's own thread, and inside a House-lane
+        job on its thread (`_house_job`, H5), the table is built once and reused while the living roster
+        is unchanged (a birth or a death rebuilds it); anywhere else it is built fresh."""
         epoch = float(self.game['economy']['epoch_seconds'])
         living = list(self.registry.living())
         memo = getattr(self, "_standings_memo", None)
         if memo is None or memo["thread"] != threading.get_ident():
+            memo = getattr(self, "_lane_memos", {}).get(threading.get_ident())  # a House-lane job's own (H5)
+        if memo is None:
             return [self._standing(agent, epoch) for agent in living]
         roster = tuple(a.id for a in living)
         if memo["living"] != roster or memo["rows"] is None:
@@ -7607,15 +7749,56 @@ class House:
             self.alert("warning", f"the population rule could not be applied ({type(exc).__name__}: {str(exc)[:160]})")
         if not refill or self._closing.is_set():
             return  # births buy sandbox work; culling above remains available after spending stops
-        # Every birth reads its strategy's NEEDS in the probe box. The tick holds that box for the
-        # whole phase (each probe reenters it), or, when background work has it, births wait for
-        # the next tick with the reason recorded. A Sail call that fails is deferred the same way.
-        with self._probe_turn("births") as free:
-            if free:
-                try:
-                    self._births(rules)
-                except SandboxError as exc:
-                    self._defer("births", f"infrastructure: {type(exc).__name__}: {str(exc)[:200]}")
+        roster = self._roster()
+        if not self._births_due(roster):
+            return  # H5: nothing was born and nothing died since a pass that is under five minutes old
+        # H5: the foundry's step runs beside the tick now, and it labels births (`annotate_births`) and moves its
+        # cards; a pass of births beside it could write a birth's route under the id it is labelling. So the two
+        # take turns (`_foundry_turn`): the tick waits for it at most `box_wait_seconds`, then leaves the pass due.
+        if not self._foundry_turn.acquire(timeout=float(self.settings.box_wait_seconds)):
+            return
+        try:
+            # Every birth reads its strategy's NEEDS in the probe box. The tick holds that box for the
+            # whole phase (each probe reenters it), or, when background work has it, births wait for
+            # the next tick with the reason recorded. A Sail call that fails is deferred the same way.
+            with self._probe_turn("births") as free:
+                if free:
+                    # The roster the pass began on: a birth or death it makes itself asks for the next tick's pass,
+                    # as a pass that seats someone is often followed by another (three merged strategies a tick).
+                    # A pass deferred for the probe box or Sail is not a pass: the next tick tries again.
+                    self._scan_memo = {"thread": threading.get_ident(), "roster": None, "scans": {}}
+                    try:
+                        self._births(rules)
+                        self._births_pass = (self.clock(), roster)
+                    except SandboxError as exc:
+                        self._defer("births", f"infrastructure: {type(exc).__name__}: {str(exc)[:200]}")
+                    finally:
+                        self._scan_memo = None
+        finally:
+            self._foundry_turn.release()
+
+    def _roster(self) -> tuple[int, int]:
+        """(agents ever born, agents that died): it moves at every birth and every death, whichever thread made it."""
+        with self.registry._lock:
+            agents = list(self.registry.agents.values())
+        return len(agents), sum(1 for agent in agents if not agent.alive)
+
+    def _births_due(self, roster: tuple[int, int]) -> bool:
+        """H5 (Sept 25, 2026): is the births pass due -- none yet in this process, the last one
+        `population_pass_seconds` (300) old, or a birth or a death since it began (the House's own, the
+        lab's, a research admission's, a displacement's)?
+
+        The pass is the seat market: the proven families' births, forks, merged strategies and the refill,
+        which reads the waiters and asks the displacement scan for every candidate. With the league at its
+        ceiling and no resident displaceable it seats nobody, and it cost the tick 22.0 s at p50 (15.4-17.6 s
+        on the T0 snapshot here, 17.1 s of it the scan asked once for each of 395 deferred research
+        candidates) on every tick. Nothing it reads changes between passes but the clock -- a grace that runs
+        out, a waiter that arrives, a card that passes replay -- and those now wait at most five minutes,
+        inside the refill's own ten-minute newcomer cadence. A freed seat is looked at on the next tick."""
+        last = self._births_pass
+        if last is None or last[1] != roster:
+            return True
+        return self.clock() - last[0] >= float(self.settings.population_pass_seconds)
 
     def _births(self, rules: Mapping[str, Any]) -> None:
         """A proven family's program first (R3, `_proven_births`), then forks of rich agents, the founders below the
@@ -7919,6 +8102,44 @@ class House:
             self.alert("warning", f"stale {'Sail' if kind == 'sail' else 'OpenAI'} holds have not been released for {minutes:.0f} minutes: "
                                   f"{row['why']}", check=dict(out.get("check") or {}), key=key)
 
+    def _cadence_due(self, step: str, seconds: float) -> bool:
+        """H5 (Sept 25, 2026): is a step the tick keeps at its own cadence due (`_cadence`, stamped by the caller
+        when it runs)? The tick runs every `tick_seconds` (30) for the wakes; these keep the cadence they had."""
+        return self.clock() - self._cadence.get(step, float("-inf")) >= float(seconds)
+
+    def _house_job(self, work: Callable[..., Any], *args: Any) -> Any:
+        """One of the tick's own steps on the House lane (`_background`, "house:"), with a standings table of
+        its own for the run (`standings`), as the tick has: the foundry asks the displacement scan of every desk."""
+        ident = threading.get_ident()
+        self._lane_memos[ident] = {"thread": ident, "living": None, "rows": None}
+        try:
+            return work(*args)
+        finally:
+            self._lane_memos.pop(ident, None)
+
+    def _schedule_research(self, open_for_business: bool) -> int:
+        """Queue a research job for every agent whose pass is due (`research_due`), stuck and longest-waiting first
+        (`research_order`); a dead agent's saved session is closed first. Runs on the House lane once a minute
+        (H5, Sept 25, 2026), as it ran once a tick while ticks were a minute apart: `research_due` and
+        `queue_research` were already asked from the research workers' threads (`_research_if_due`), and a
+        worker asks `research_due` again before it spends anything. Returns the jobs queued."""
+        self._cancel_retired_research()
+        queued = 0
+        for agent in self.research_order() if open_for_business else []:
+            if self._closing.is_set():
+                break
+            if self.research_due(agent):
+                # Persist before dispatch, so queued work also survives process exit.
+                queued += bool(self.queue_research(agent))
+        return queued
+
+    def _foundry_step(self, open_for_business: bool) -> None:
+        """The hypothesis foundry's step (`Foundry.tick`: its bookkeeping, and a paid call when its own gates allow),
+        never beside a births pass (`_foundry_turn`, `keep_population`)."""
+        if self.hypotheses is not None:
+            with self._foundry_turn:
+                self.hypotheses.tick(open_for_business=open_for_business)
+
     def tick(self) -> dict[str, Any]:
         """One pass of the floor. It never waits on a box background work holds: a wake whose box
         is busy is retried on the next tick, and births wait for the probe box at most
@@ -8008,9 +8229,17 @@ class House:
         living_before = {a.id for a in self.registry.living()}
         lap("feeds")
         for name, book in self.books.items():
+            advance = getattr(book.broker, "advance", None)
+            if advance is not None:
+                # H5 (Sept 25, 2026): a simulated venue (kalshi-shadow, a canary's) is passed at its fill model's
+                # cadence, never every tick (`Settings.simulated_poll_seconds`); its step was 5.5 s at p50 on the
+                # box (45 held instruments asked for a result, 13 resting orders re-quoted, one venue call each).
+                if not self._cadence_due(f"poll:{name}", self.settings.simulated_poll_seconds):
+                    lap(f"poll:{name}")
+                    continue
+                self._cadence[f"poll:{name}"] = self.clock()
             try:
-                advance = getattr(book.broker, "advance", None)
-                if advance:
+                if advance and book.open_orders():  # nothing working: nothing to re-quote (H5)
                     advance()
                 book.poll()
                 settlements = getattr(book.broker, "settlements", None)
@@ -8159,11 +8388,12 @@ class House:
         except Exception as exc:  # noqa: BLE001 - a check that fails this tick runs again on the next
             self.alert("warning", f"the floor's invariants could not be checked ({type(exc).__name__}: {str(exc)[:160]})")
         lap("floor_invariants")
-        self._cancel_retired_research()
-        for agent in self.research_order() if open_for_business else []:
-            if self.research_due(agent):
-                # Persist before dispatch, so queued work also survives process exit.
-                self.queue_research(agent)
+        # H5 (Sept 25, 2026): research is scheduled on the House's own lane, once a minute, never inside the tick
+        # (`_schedule_research`): 6.3 s of the tick at p50 on the box, 24.0 s at its slowest, for work whose
+        # answer (a job queued for a research worker) nobody on the tick waits for.
+        if self._cadence_due("house:research", self.settings.house_job_seconds) \
+                and self._background("house:research", self._house_job, self._schedule_research, open_for_business):
+            self._cadence["house:research"] = self.clock()
         lap("research")
         if open_for_business and self.survey_due():
             self._background("niche-survey", self.survey_niches)  # stamped when it ends; one in hand is not started twice
@@ -8211,8 +8441,11 @@ class House:
             self._follow_the_search()
         except Exception:  # noqa: BLE001 - the caps stand as they are; the population step tries again and says so
             pass  # (once a tick: two warnings of one text a tick would reach the repeat escalation twice as fast)
-        if self.hypotheses is not None:
-            self.hypotheses.tick(open_for_business=open_for_business)  # its own tier, budget and cadence gates
+        if self.hypotheses is not None and self._cadence_due("house:hypotheses", self.settings.house_job_seconds) \
+                and self._background("house:hypotheses", self._house_job, self._foundry_step, open_for_business):
+            # H5: the foundry's step beside the tick, once a minute (its own tier, budget and cadence gates
+            # inside): 2.2 s of the tick at p50 on the box, 9.4 s at its slowest (23.0 s in the hour to 04:25Z).
+            self._cadence["house:hypotheses"] = self.clock()
         lap("hypotheses")
         if self.lab is not None:
             self.lab.tick(open_for_business=open_for_business)  # schedules one bounded step off the tick (league/lab.py)
@@ -8242,6 +8475,7 @@ class House:
         # to sit inside the payout that a spent budget closes -- it could only be delivered while
         # the condition it announces was false. It tells the owner once per kind; a tick is cheap.
         self._expedition_notices()
+        self._tell_lost_sessions()
         lap("notices")
         try:
             self._enforce_horizon()
@@ -8259,7 +8493,8 @@ class House:
         lap("population")
         self._save_state()
         lap("save_state")
-        if self.publisher is not None:
+        if self.publisher is not None and self._cadence_due("publish", self.settings.publish_seconds):
+            self._cadence["publish"] = self.clock()  # H5: once a minute, as at sixty-second ticks
             try:
                 self.publisher.publish(self)
             except Exception as exc:  # noqa: BLE001 - the site is downstream of the floor, never upstream
@@ -8335,11 +8570,53 @@ class House:
             "repeating_warnings": repeating,
             "failures": failures,
             "research_economy": economy,
+            # H6 (Sept 25, 2026): the restarts of the last day and what became of the research in flight at this one.
+            **self._restarts_health(),
+            "restart_research": self._restart_research_health(),
         }
         health["tick_steps"] = self._tick_steps(str(summary["at"]))  # last: its `health` step is this block
         tmp = self.root / "health.tmp"
         tmp.write_text(json.dumps(health, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.root / "health.json")
+
+    def _restarts_health(self) -> dict[str, Any]:
+        """health.json `restarts_24h` (the `ops.started` rows of the last 24 hours on the House's clock),
+        `restarts_24h_in_session` (those that fell inside a regular US equity session, which the release train
+        must never restart the House in) and `last_start` (the newest: at, release, ledger seq). Read at most
+        once a minute. H6 (Sept 25, 2026): 26 starts in the day to 04:25Z, 24-37 a day Sept 20-24, seven inside
+        the Sept 24 session; the plan's line is six a day and none in a session, and health said nothing."""
+        now = self.clock()
+        hit = self._data_cache.get("restarts")
+        if hit is not None and now - hit[0] < 60:
+            return hit[1]
+        try:
+            rows = self.ledger.read(kinds="ops.started", limit=500, newest=True)
+            since = now_iso(lambda: now - 86400)
+            recent = [row for row in rows if row.at >= since]
+            in_session = 0
+            for row in recent:
+                try:
+                    in_session += bool(market_open_at(row.at))
+                except Exception:  # noqa: BLE001 - a moment outside the computed calendar is not a session
+                    pass
+            last = rows[-1] if rows else None
+            value = {"restarts_24h": len(recent), "restarts_24h_in_session": in_session,
+                     "last_start": None if last is None else {"at": last.at, "release": last.payload.get("release"), "seq": last.seq}}
+        except Exception as exc:  # noqa: BLE001 - health is written whatever the ledger says
+            value = {"restarts_24h": None, "restarts_24h_in_session": None, "last_start": {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}}
+        self._data_cache["restarts"] = (now, value)
+        return value
+
+    def _restart_research_health(self) -> dict[str, Any]:
+        """health.json `restart_research` (H6): the research sessions in flight when this House started
+        (`at_start`), how many have since ended as usual (`resumed`), were closed because their agent died or
+        changed (`retired`), or were lost (`lost_count`, and the last `SESSION_LOSSES_SHOWN` in `lost`: session,
+        agent, reason, whether it began before this start), and the ones still `waiting` to resume."""
+        with self._state_lock:
+            book = self._restart_research
+            return {"started_at": book["started_at"], "at_start": book["at_start"], "resumed": book["resumed"],
+                    "retired": book["retired"], "lost_count": int(book.get("lost_count") or 0),
+                    "lost": [dict(row) for row in book["lost"]], "waiting": sorted(book["in_flight"])}
 
     def _health_failures(self, lab: Mapping[str, Any] | None) -> list[dict[str, Any]]:
         """health.json `failures`: what the in-box watchdog (league/watchdog.py) reads as a failure of
