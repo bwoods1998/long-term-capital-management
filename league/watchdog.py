@@ -21,7 +21,9 @@ a staged thing with a way back that needs nobody:
 3. PROMOTE swap `current` atomically and restart the House (`<base>/restart.sh`);
 4. WATCH   read the real House's health every `watch_every` seconds for `watch_seconds`. After a
            grace of two readings, the first bad one ROLLS BACK: `current` goes back to the
-           release before, the House is restarted again, and the verdict says why.
+           release before, the House is restarted again, and the verdict says why. A vendor's
+           outage is never a bad reading: an error alert the House marked as a service's
+           (`ENVIRONMENT`, `service_failed`) is counted in the reading's detail, never a reason.
 
 There are two watchdogs and they do not fight. The EXTERNAL one (`gateway/lib/watchdog.mjs`)
 keeps the box alive: it resumes a paused Sailbox and runs `/workspace/restart.sh` when the
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import json
@@ -96,6 +99,95 @@ def epoch(value: Any) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.timestamp()
+
+
+# -------------------------------------------------------------------------------- environment
+#: The payload key that marks an alert as the ENVIRONMENT's: a call to a service outside the House's
+#: process failed, and the service, not this code, is why (H2, the forward-first run, Sept 25, 2026).
+#: Its value names the service (`sail`, `site`, `github`, `gateway`, `data`, or a background job's
+#: name). `read_health` counts an error alert that carries it in `detail.environment_alerts` and never
+#: makes it a reason. Sept 24-25, 2026: Sail's checkpoint API answered 503 from 21:31:55Z to 01:55Z
+#: (73 failed backups, each an error alert), and the watch rolled back all six releases promoted in
+#: those hours on them -- the updater's at 22:21, 23:00, 23:39, 00:38 and 01:14Z and the owner's at
+#: 00:02Z, that one on the OLD House's backup, in flight at the promotion and failed 73 s later.
+ENVIRONMENT = "environment"
+
+#: HTTP statuses that are the service's failure, not the request's: every 5xx, and 408, 425 and 429
+#: (timed out, too early, too many requests). Any other status says something about the House's
+#: own request -- a 400 for a payload this code built, a 401/403 for its credential, a 404 for a box
+#: it named -- and stays the House's.
+_SERVICE_STATUSES = frozenset({408, 425, 429})
+#: The errno of a network that failed under a socket call, on the plain OSError that carries it.
+_NETWORK_ERRNOS = frozenset(getattr(errno, name) for name in ("ENETUNREACH", "EHOSTUNREACH", "ENETDOWN", "EHOSTDOWN", "ETIMEDOUT",
+                                                              "ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "EPIPE") if hasattr(errno, name))
+#: This code's own mistakes wherever they are raised: a TypeError, a KeyError, a bad value it built or
+#: could not parse (ValueError, and with it json's decode error and a certificate that does not verify),
+#: its own database. An exception of one of these kinds is the House's even when it was raised while
+#: a service's failure was being handled.
+_CODE_ERRORS = (TypeError, LookupError, AttributeError, NameError, ValueError, AssertionError, ArithmeticError, ImportError,
+                SyntaxError, RecursionError, MemoryError, NotImplementedError, sqlite3.Error)
+
+
+def _http_status(exc: BaseException) -> int | None:
+    """The HTTP status an exception carries (`status`, urllib's `code`, a response's `status_code`), or None."""
+    for value in (getattr(exc, "status", None), getattr(exc, "code", None), getattr(getattr(exc, "response", None), "status_code", None)):
+        if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+            return value
+    return None
+
+
+def service_failed(exc: BaseException | None) -> bool:
+    """Did a service outside the House's process fail -- rather than this code -- when `exc` was raised?
+
+    Yes for an HTTP status of 5xx, 408, 425 or 429 (Sail's `SailboxError`, the site's `PublishError`,
+    urllib's `HTTPError`: anything with an integer `status` or `code`), a timeout, a refused, reset or
+    aborted connection, a network that is unreachable, a name that did not resolve, a response that
+    broke off, and a TLS channel that dropped. No for any other status and for this code's own
+    mistakes (`_CODE_ERRORS`, a URL it built that urllib cannot use, a local OSError such as a missing
+    file). A wrapper that is neither -- `SailboxError("sailbox transport failed: ...")`, `SandboxError`,
+    `TransportError`, urllib's `URLError` -- is judged by what it wraps (`reason`, `__cause__`, else
+    `__context__`: raised `from` the failure or `from None` inside its handler), so a Sail 503 inside a
+    `SandboxError` is the environment's and a TypeError inside one is the House's."""
+    import http.client
+    import socket
+    import urllib.error
+
+    try:
+        import ssl
+
+        dropped: tuple[type[BaseException], ...] = (ssl.SSLError,)
+    except ImportError:  # pragma: no cover - an interpreter without TLS reaches no service anyway
+        dropped = ()
+    # The server's side of an HTTP exchange only: `InvalidURL`, `NotConnected` and the connection-state
+    # errors are this code's misuse of the client.
+    broke_off = (http.client.IncompleteRead, http.client.BadStatusLine, http.client.LineTooLong)
+    network = (TimeoutError, ConnectionError, socket.gaierror, socket.herror, *broke_off, *dropped)
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen and len(seen) < 8:
+        seen.add(id(exc))
+        if isinstance(exc, _CODE_ERRORS):
+            return False
+        status = _http_status(exc)
+        if status is not None:
+            return status >= 500 or status in _SERVICE_STATUSES
+        if isinstance(exc, urllib.error.URLError):
+            # A socket's failure rides as its `reason`; a string reason ("unknown url type") is a URL this code built.
+            if isinstance(exc.reason, BaseException):
+                exc = exc.reason
+                continue
+            return False
+        if isinstance(exc, network):
+            return True
+        if isinstance(exc, OSError):
+            return exc.errno in _NETWORK_ERRNOS
+        exc = exc.__cause__ if exc.__cause__ is not None else exc.__context__
+    return False
+
+
+def environment(service: str, exc: BaseException | None) -> dict[str, str]:
+    """The payload an alert about `exc` carries: `{"environment": service}` when the service failed
+    (`service_failed`), else nothing. For `House.alert(level, text, **environment("sail", exc))`."""
+    return {ENVIRONMENT: str(service)} if service and service_failed(exc) else {}
 
 
 # ------------------------------------------------------------------------------------- health
@@ -192,6 +284,11 @@ def read_health(  # noqa: PLR0913 - one reading, one place
     applied to conditions that last. So an hour of lab idleness can never roll a release back (it
     cannot begin inside a ten-minute watch), a canary (which inherits nothing, and runs no lab)
     still refuses on any of them, and `status` shows them all.
+
+    An error alert marked as the environment's (`ENVIRONMENT`: a call to a service outside the
+    House's process failed on the service's side, H2, Sept 25, 2026) is never a reason, in the watch
+    or in a canary: it is counted in `detail.environment_alerts`, and the first one is shown in
+    `detail.environment_first` (`{seq, service, text}`).
 
     A House stopped on purpose (`<root>/STOP`) is not stale and not stalled: it is stopped.
     """
@@ -290,7 +387,7 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                     first_start = db.execute("SELECT at FROM ledger WHERE kind = 'ops.started' AND seq > ? ORDER BY seq ASC LIMIT 1",
                                              (int(since_seq),)).fetchone()
                     restarted_at = epoch(first_start[0]) if first_start else None
-                    errors, inherited_alerts = [], 0
+                    errors, inherited_alerts, environment_alerts = [], 0, []
                     for row_seq, payload in db.execute("SELECT seq, payload FROM ledger WHERE kind = 'ops.alert' AND seq > ? ORDER BY seq ASC", (int(since_seq),)):
                         try:
                             alert = json.loads(payload)
@@ -298,6 +395,17 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                             alert = {"level": "error", "text": "an alert that is not JSON"}
                         if str(alert.get("level") or "").lower() in ("error", "critical", "fatal"):
                             text = str(alert.get("text") or "")[:300]
+                            # A vendor's outage is never the floor's failure (H2, Sept 25, 2026): an
+                            # error the House marked as a service's (`ENVIRONMENT`, set only where a
+                            # call outside its process failed on the service's side -- `service_failed`)
+                            # is counted and shown, in the watch and in the canary alike, and never a
+                            # reason. Six releases were rolled back on Sail's checkpoint 503s on Sept
+                            # 24-25; the tick's own exceptions, a frozen book, a health failure and
+                            # every unmarked error still roll back.
+                            service = alert.get(ENVIRONMENT)
+                            if isinstance(service, str) and service.strip():
+                                environment_alerts.append({"seq": row_seq, "service": service.strip()[:40], "text": text})
+                                continue
                             # A book that was already failing to reconcile before this release goes
                             # on saying so every few minutes, and those alerts are not the new
                             # release's doing any more than the freeze itself is. Sept 20, 2026:
@@ -316,6 +424,9 @@ def read_health(  # noqa: PLR0913 - one reading, one place
                                 continue
                             errors.append((row_seq, text))
                     detail["error_alerts"] = len(errors)
+                    detail["environment_alerts"] = len(environment_alerts)
+                    if environment_alerts:
+                        detail["environment_first"] = environment_alerts[0]
                     if inherited_alerts:
                         detail["inherited_alerts"] = inherited_alerts
                     if errors:
