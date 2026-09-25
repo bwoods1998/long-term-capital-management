@@ -95,7 +95,12 @@ its session.
   checked unchanged (forward-first's request). Its exact start is written here first.
   **10:31Z: today's slot is closed** (the options run: the usage-limit outage delayed Deploy V past 11:45Z).
   D-J1 goes in Saturday Sept 26's quiet window after forward-first's Deploy B and the options run's Deploy G,
-  before the Kalshi run's K2. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
+  before the Kalshi run's K2.
+  **11:10Z: reopened.** The options run's Deploy V promoted at 11:08:45Z and its watch ended "promoted" at
+  11:18:45Z, so by the agreed terms the slot is open from 11:48:45Z, finished before 12:55Z. **D-J1 planned
+  start: 11:50Z** (PR #319 only: J0 + J1; J3 is not ready), on three conditions: CI green on the rebased head
+  `18d4b3f`, a pre-deploy blocker check clean, and no game a real Kalshi family holds in play (none before the
+  evening MLB slate). If any fails, or the canary and watch could run past 12:55Z, it moves to Saturday. **Gateway (J5 + the cap to $41):** after the other runs' gateway deploys.
 
 ## Checklist
 
