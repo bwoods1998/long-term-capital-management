@@ -475,6 +475,17 @@ CONSTITUTION: dict[str, Any] = {
         # positive (`Allocator.family_taker`). Evidence: the taker mechanisms were the loss engine of
         # the nine promotions (15-minute crypto momentum at 182 bps, MLB-total takers at 7%).
         "real_entry_liquidity": "maker_unless_family_taker_positive",
+        # `real_book_dust_usd` (row "H4 allocator.real_book_dust_usd" of the forward-first run, Sept 25, 2026:
+        # $0.25-1.00; `league/book.py` reads it, and treats a value outside `book.REAL_BOOK_DUST_BOUNDS` as no
+        # key): a REAL book's cash shortfall under this, with every position agreeing, no order in doubt and no
+        # settlement awaited, that the regulators' fees Alpaca takes at option and stock fills and lists only
+        # later can explain (`Book._explain_real_cents`), is booked to the House row as dust with an error alert
+        # naming it -- never a freeze and never an agent's record. Over it, or unexplained, the freeze stays for
+        # the owner. Evidence: the real Alpaca book froze on -0.0308 at 18:23Z Sept 24 (an option buy's OCC,
+        # ORF and CAT cents, all taken at the fill and listed hours later) and on +0.0108 from 02:49Z to 04:11Z
+        # Sept 25 (the book's own rounding of resting bids, fixed in the book), each freeze refusing every
+        # Alpaca real entry. Absent: a real book freezes on any difference over its per-fill tolerance.
+        "real_book_dust_usd": "0.50",
         # `family_probe` (row "allocator.family_probe"; R5 of the close-the-gaps run, Sept 24, 2026: the run's third and
         # last money-digest change, which the owner granted at the resume): NO PROBE ON A LOSING FAMILY. The line is the
         # House's own for breeding (`House._losing_family`, `families.losing`): a family's pooled forward record -- its
@@ -547,4 +558,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '38a57fe98b837c60007a86459090de14bee177c74cd83e58d718002de8986158'
+PINNED_DIGEST = 'd0aa4c2a38c933a6d2acba7acb816f48b1c3d2d7d67d86e06b27e2166e61fa49'
