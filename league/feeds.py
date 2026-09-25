@@ -751,8 +751,8 @@ class FeedRecorder:
             if self.keys(feed):
                 plan.append((feed, "*"))
         for feed, source in RECORDERS.items():  # the recorders of Sept 24, 2026 that are live
-            if source.history:
-                continue  # in HISTORY_FEEDS above
+            if source.history or getattr(source, "internal", False):
+                continue  # in HISTORY_FEEDS above; or recorded by the House itself (`move`), never polled
             keys = self.keys(feed)
             if keys:
                 plan.extend([(feed, "*")] if source.batch else [(feed, key) for key in keys])
@@ -3258,6 +3258,42 @@ RECORDERS: dict[str, Source] = _register(WeatherEnsemble(), NwsForecast(), Forec
 from . import open_feeds as _open_feeds  # noqa: E402
 
 RECORDERS.update(_register(*_open_feeds.SOURCES))
+
+
+class MoveFeature(Source):
+    """J1's move feature (the Jev-senses run, Sept 25, 2026: docs/goals/LTCM_JEV_SENSES.md), agreed with the
+    Kalshi-scale run as one Source-style entry. No host: the House's own move sensor (`league/jev_features.py`
+    `MoveSensor`) calls `record` once per Kalshi series a cycle, and only once the served model's file says
+    "serve": true (after the Jev run's ship rule passes). The feeds lane never polls it (`internal`,
+    `FeedRecorder._plan`). The rules above hold: `t` is when the feature was computed, nothing is back-filled,
+    a series never recorded is absent, unchanged content is stored once, and replay needs recorded blocks."""
+
+    name = "move"
+    internal = True  # recorded by the House itself, never polled; `keys` is what it has recorded
+    what = ("not served until the Jev run's ship rule passes (then \"serve\": true in league/jev_move_model.json): every key "
+            "is absent before. Per Kalshi series, whether each market's midpoint is about to move: markets[ticker] = "
+            "{move_p5, move_p15, move_p60} (the probability the mid changes at all within 5, 15 and 60 minutes; not its "
+            "direction) and model (the served version), from a free model of the market's own quotes (no Jev in it)")
+    source = "the House's own move sensor (league/jev_features.py MoveSensor, league/jev_move_model.json); no host"
+    cadence = "every 5 minutes, per series the move sensor was shown that cycle, once serving is on"
+    point_in_time = ("each row is stamped when the move sensor computed it and shown only from then on, live and in replay; "
+                     "nothing is back-filled, and a series the sensor was not shown is absent")
+    gap = 900.0  # three of the sensor's 5-minute cycles
+    max_keys = 500
+    example = "KXHIGHNY"
+    note = "Features only: Jev and the sensor have no order, promotion, spending or merge authority."
+
+    def keys(self, recorder: "FeedRecorder") -> list[str]:
+        with recorder._lock:
+            return sorted(key for (feed, key), row in recorder._load_stats().items() if feed == self.name and row["first_ok"])
+
+    def key_of(self, raw: Any) -> str | None:
+        """A Kalshi series (`KXHIGHNY`); a market or event ticker names its series (`KXHIGHNY-26SEP25-B72.5`)."""
+        series = str(raw or "").strip().upper().split("-", 1)[0]
+        return series if re.fullmatch(r"[A-Z][A-Z0-9]{1,39}", series) else None
+
+
+RECORDERS.update(_register(MoveFeature()))
 FEEDS = FEEDS + tuple(RECORDERS)
 HISTORY_FEEDS = HISTORY_FEEDS + tuple(name for name, source in RECORDERS.items() if source.history)
 for _feed_name, _recorder in RECORDERS.items():

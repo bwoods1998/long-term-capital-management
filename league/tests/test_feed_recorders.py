@@ -1014,6 +1014,9 @@ class Keyed(RecorderCase):
         self.assertNotIn("api.eia.gov", hosts)
         self.assertNotIn("api.the-odds-api.com", hosts)
         for name, source in feeds.RECORDERS.items():
+            if getattr(source, "internal", False):  # J1's move feature: recorded by the House itself, no host to allow
+                self.assertEqual((name, source.host), ("move", ""))
+                continue
             self.assertIn(source.host, hosts + ("api.eia.gov", "api.the-odds-api.com"), name)  # every recorder reads a host on record
         store = FeedRecorder(path=Path(self.dir.name) / "defaults.sqlite", clock=self.clock, environ={"ODDS_API_KEY": "x" * 32})
         self.addCleanup(store.close)

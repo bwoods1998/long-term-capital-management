@@ -102,6 +102,12 @@ NEEDS["feeds"] = {"cli": ["KXHIGHNY"], "metar": ["KNYC"], "ghcnd": ["KNYC"],    
   `all`: `next` `{at (UTC), date, time_et}` and the next 60 days' `upcoming`. A moved date is a new row.
 - **halts** (live; Nasdaq Trader's trade halts): per stock the equity desks trade, and `all`:
   `count` and `halts` (`reason` code, `halted`, `resumed_trading`); an empty list is a stock not halted.
+- **move** (live; the House's own move sensor, `league/jev_features.py`, no host; not served, so absent, until
+  the Jev run's ship rule passes and `league/jev_move_model.json` says `"serve": true`; Jev has no authority over
+  it): per Kalshi series (`KXHIGHNY`; a ticker names its series), `markets[ticker]` = `{move_p5, move_p15,
+  move_p60}`, the probability the midpoint changes at all within 5, 15 and 60 minutes (not its direction), and
+  `model`; `t` is when the sensor computed it, a replay sees it only from then, and nothing before serving began
+  exists.
 
 A request for data no key-free source may give the House -- Polymarket's prices (its terms bar trading
 firms), MLB/NHL/NBA line-ups and stats (their terms bar automated and commercial use), sportsbook

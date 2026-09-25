@@ -589,6 +589,7 @@ NEEDS["feeds"] = {"cli": ["KXHIGHNY"], "metar": ["KNYC"], "ghcnd": ["KNYC"],    
 - **fuel** (live; EIA's public tables, no key)
 - **bls_releases**, **bea_releases** (live; the agencies' release calendars)
 - **halts** (live; Nasdaq Trader's trade halts)
+- **move** (live; the House's own move sensor, key a Kalshi series; not served, so absent, until the Jev run's ship rule passes)
 
 Each feed's fields, stamps and caveats: `runtime_status` (`observations.feeds`) and `league/FEEDS.md`.
 
