@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +45,10 @@ class Rules(unittest.TestCase):
         # (T0: a mutant losing 0.177 a block on the search tape, on a lineage at +0.027).
         self.assertEqual(forward_rank(-0.177, None, 0.027, admitted=0), forward_rank(-0.177, None, None))
         self.assertLess(forward_rank(0.01, None, None), forward_rank(-0.177, None, 0.027, admitted=False))
+        # ... but a losing record counts against it (the review of #306): after every program that passed the gate, its own
+        # losing lineage's included (T0: 097632d172, gate 0, took its cell from ec93164b9d, both haghani-39).
+        self.assertLess(forward_rank(0.001, None, -0.001), forward_rank(-0.0005, None, -0.001, admitted=0))
+        self.assertLess(forward_rank(0.9, -0.01, -0.5), forward_rank(0.9, None, -0.001, admitted=0))
 
     def test_a_lineage_is_blocked_by_a_window_losing_over_six_active_blocks_until_a_later_one_wins(self):
         def window(start, at, growth, active):
@@ -269,7 +274,7 @@ class Graduation(FirstCase):
         self.lab._set_meta("forward_wanted", json.dumps([wanted, young]))
         self.window(young, 0.001, active=1)
         self.window(scored, 0.001, active=4)
-        self.clock.advance(60)
+        self.clock.advance(3600)  # a block has closed since `young` was scored (the review of #306: not before)
         self.assertEqual([r["id"] for r in self.lab.forward_due(10)], [waiting, wanted, young, elite, scored])
 
     def test_a_passer_keeps_the_window_that_let_it_through_and_one_without_is_held_before_its_birth(self):
@@ -339,6 +344,128 @@ class Batches(FirstCase):
         self.assertEqual(self.lab._forward_unavailable(self.candidate(child)), "a refusal")
         self.lab._note_unavailable(tape_key(needs), None)
         self.assertIsNone(self.lab._forward_unavailable(self.candidate(child)))
+
+
+class ReviewOf306(FirstCase):
+    """The review of #306 (Sept 25, 2026), on the T0 snapshot: the waiting and wanted rows (126) came before every resident
+    in each forward run, which scores 8-12; a waiting graduate that never trades was scored every run for good; asks went
+    to candidates already tried and never to a parameter child; a day desk's cell held one ask for 24 days; an agent's
+    submissions waited for good on its own running program's losing window; a blocked lineage placed as a winning one; a
+    program the gate refused escaped its losing lineage's record; and a passer was born on an older window after its
+    latest one failed."""
+
+    def test_a_resident_keeps_a_place_in_every_forward_run_whatever_waits_before_it(self):
+        resident = self.seated("resident", KNOB)
+        self.lab.seed(force=True)
+        ident = self.lab.resident_candidate(resident)
+        self.window(ident, 0.0, active=0, blocks=1)  # its first window, the hour after its birth: no active block
+        wanted = [self.elite(with_params(SPARSE, {"notional": 30.0 + n}), origin="luna", lineage=f"founder:{n}") for n in range(6)]
+        self.lab._set_meta("forward_wanted", json.dumps(wanted))
+        for child in wanted:
+            self.window(child, 0.001, active=1)  # young: scored again until they rank
+        self.clock.advance(3600)
+        due = [r["id"] for r in self.lab.forward_due(4)]
+        self.assertEqual(due[0], ident)  # before: behind every young wanted row, so never scored again
+        self.assertEqual(len(due), 4)
+        self.assertLessEqual(set(due[1:]), set(wanted))
+
+    def test_a_young_window_is_scored_again_once_a_block_closed_and_only_while_it_can_still_rank(self):
+        stale = self.elite(with_params(KNOB, {"notional": 31.0}), origin="param", lineage="founder:b")
+        young = self.elite(with_params(KNOB, {"notional": 32.0}), origin="param", lineage="founder:c")
+        other = self.elite(SPARSE, origin="luna", lineage="founder:d")
+        other = self.elite_of(self.cell_of(other))
+        self.assertNotIn(other, (stale, young))
+        for ident, line in ((stale, "rosenfeld-lstale"), (young, "rosenfeld-lyoung")):
+            self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, at, detail) VALUES(?,?,?,?,?,?,?,?)",
+                        (ident, DESK, "founder:x", line, "f", "held", self.clock(), "held: pending"))
+        self.window(stale, 0.0, active=1, blocks=30, start=self.clock() - 30 * 3600)  # past `forward_pending_blocks`
+        self.window(young, 0.0, active=1, blocks=2)
+        # The never-scored elite first: `young` was scored a minute ago, `stale` can no longer rank (before: both, every run).
+        self.assertEqual([r["id"] for r in self.lab.forward_due(1)], [other])
+        self.clock.advance(3600)
+        self.assertEqual([r["id"] for r in self.lab.forward_due(1)], [young])
+        # A day desk's window: once a day.
+        self.lab._x("UPDATE candidates SET horizon='day' WHERE id=?", (young,))
+        self.assertEqual([r["id"] for r in self.lab.forward_due(1)], [other])
+
+    def test_a_candidate_tried_already_is_not_asked_for(self):
+        child = self.elite(SPARSE, origin="luna", lineage="founder:new")
+        self.lab._x("INSERT INTO graduations(candidate, niche, lineage, line, family, state, at, detail) VALUES(?,?,?,?,?,?,?,?)",
+                    (child, DESK, "founder:new", "rosenfeld-ltried", "f", "replay_failed", self.clock(), "the House's replay did not pass"))
+        self.lab.graduate()
+        self.assertEqual(self.lab._held["counts"], {"pending": 1})
+        self.assertEqual(self.lab.forward_wanted(), [])
+
+    def test_the_parameter_children_keep_their_share_of_the_asks(self):
+        self.house.game["lab"].update({"forward_wanted_max": 2, "reserved_share": 0.75})  # one ask each at the upper bound
+        mechanisms = [self.elite(REWRITTEN, origin="luna", lineage="founder:a"), self.elite(SPARSE, origin="luna", lineage="founder:b")]
+        param = self.elite(with_params(KNOB, {"notional": 30.0}), origin="param", lineage="founder:c")
+        self.assertEqual(len({self.cell_of(i) for i in mechanisms}), 2)
+        self.lab.graduate()
+        wanted = self.lab.forward_wanted()
+        self.assertEqual(len(wanted), 2)
+        self.assertIn(wanted[0], mechanisms)
+        self.assertEqual(wanted[1], param)  # before: the two mechanism children, and never a parameter child
+
+    def test_a_day_desks_cell_asks_the_next_program_once_the_first_has_a_day_of_data(self):
+        params = [self.elite(with_params(KNOB, {"notional": 30.0 + n}), origin="param", lineage="founder:a") for n in range(4)]
+        self.assertEqual(len({self.cell_of(i) for i in params}), 1)
+        self.lab._x(f"UPDATE candidates SET horizon='day' WHERE id IN ({','.join('?' for _ in params)})", params)
+        self.lab.graduate()
+        self.assertEqual(len(self.lab.forward_wanted()), 1)  # one ask a cell and kind
+        first = self.lab.forward_wanted()[0]
+        self.window(first, 0.001, active=1, blocks=1, start=self.clock() - 86400)  # a day's block, one of the three it needs
+        self.lab.graduate()
+        wanted = self.lab.forward_wanted()
+        self.assertEqual((len(wanted), wanted[0]), (2, first))  # before: `first` alone, for 24 days
+        for ident in wanted[1:]:
+            self.window(ident, 0.001, active=1, blocks=1, start=self.clock() - 86400)
+        self.house.game["lab"]["forward_asks_per_cell"] = 3
+        self.lab.graduate()
+        self.assertEqual(len(self.lab.forward_wanted()), 3)
+        for ident in self.lab.forward_wanted()[2:]:
+            self.window(ident, 0.001, active=1, blocks=1, start=self.clock() - 86400)
+        self.lab.graduate()
+        self.assertEqual(len(self.lab.forward_wanted()), 3)  # at most `forward_asks_per_cell` at once
+
+    def test_an_agents_submission_after_its_program_lost_is_asked_for_and_its_win_releases_the_lineage(self):
+        resident = self.seated("resident", KNOB)
+        self.lab.seed(force=True)
+        seed, lineage = self.lab.resident_candidate(resident), f"agent:{resident.id}"
+        self.window(seed, -0.002, active=7, blocks=8, start=self.clock() - 8 * 3600)
+        self.clock.advance(3600)
+        submission = self.elite(SPARSE, origin="agent", lineage=lineage)
+        self.assertIn(lineage, self.lab._forward_state()["blocked"])
+        self.assertEqual(self.lab.graduate(), [])
+        self.assertIn("releases", self.lab._hold(self.candidate(submission)))
+        self.assertEqual(self.lab.forward_wanted(), [submission])  # before: held "lineage", never scored, for good
+        self.assertEqual(self.lab.lineage_weights()[lineage], 0.0)  # still not bred
+        row = self.candidate(submission)
+        self.window(submission, 0.003, active=3, start=math.ceil(float(row["evaluated"]) / 3600.0) * 3600.0)
+        self.assertNotIn(lineage, self.lab._forward_state()["blocked"])
+        out = self.lab.graduate()
+        self.assertEqual((out[0]["candidate"], out[0]["state"]), (submission, "born"))
+
+    def test_a_blocked_lineage_places_as_a_losing_one_whatever_its_pool(self):
+        loser = self.elite(KNOB, lineage="founder:a")
+        lucky = self.elite(with_params(KNOB, {"notional": 60.0}), origin="param", lineage="founder:a")
+        other = self.elite(with_params(KNOB, {"notional": 40.0}), origin="param", lineage="founder:b")
+        cell = self.cell_of(loser)
+        self.assertEqual({self.cell_of(lucky), self.cell_of(other)}, {cell})
+        start = self.clock() - 8 * 3600
+        self.window(loser, -0.03, active=8, blocks=8, start=start)
+        self.window(lucky, 0.3, active=1, blocks=1, start=start)  # one outlier block pools the lineage above zero
+        self.assertIn("founder:a", self.lab._forward_state()["blocked"])
+        self.lab.replace_archive()
+        self.assertEqual(self.elite_of(cell), other)  # before: founder:a, placed first on +0.0067 a block
+        self.assertEqual(self.lab.stats()["forward"]["lineages"], {"with_record": 1, "winning": 0, "blocked": 1})
+
+    def test_a_passer_is_not_born_on_an_older_window_after_its_latest_one_failed(self):
+        child = self.elite(SPARSE, origin="luna", lineage="founder:new")
+        self.window(child, 0.002, active=3)
+        self.assertIsNone(self.lab._hold(self.candidate(child)))
+        self.window(child, 0.0, active=0, blocks=0, ok=0)  # the window cut after its pass raised on the new data
+        self.assertIn("forward: its latest forward window failed", self.lab._hold(self.candidate(child)) or "")
 
 
 if __name__ == "__main__":
