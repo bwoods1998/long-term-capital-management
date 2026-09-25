@@ -406,6 +406,8 @@ class TheTradingPathStillRollsBack(unittest.TestCase):
         world = AHouseCase(self)
         timeout = raised_from(lambda: TransportError("GET https://ltcm-gateway/v1/alpaca-paper/v2/orders failed: timed out"),
                               TimeoutError("timed out"))
+        # A real venue is polled at most once a minute (`venue_poll_seconds`, the review of #297): make this tick's due.
+        world.house._cadence.pop("poll:alpaca-paper", None)
         with mock.patch.object(world.house.books["alpaca-paper"], "poll", side_effect=timeout):
             world.house.tick()
         polled = [e.payload for e in world.house.ledger.read(kinds="ops.alert", limit=500) if "could not poll or settle" in str(e.payload.get("text"))]

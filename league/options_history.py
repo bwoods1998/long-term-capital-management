@@ -99,6 +99,15 @@ SPREAD_MODEL = {
     # strategy is shown -- so a stressed run changes costs and not the strategy's decisions.
     "stress": 1.0,
 }
+#: A structure tape keeps a contract's bar only within this fraction of the underlying's price then:
+#: the chain's own moneyness line (`House._chain`), so nothing a structure agent could be shown is lost.
+STRUCTURE_BAND = 0.20
+#: The most option bars a structure tape carries. Measured Sept 25, 2026 on the local copy: SPY, QQQ and
+#: IWM at 0-7 days over the House's whole options window (May 16 to Sept 24, 2,340 steps) are 797,000
+#: bars, 43 MB of JSON, 323 MB resident and 125 s of CPU on a laptop at load 40, whose CPU ran the same
+#: Black-Scholes loop 6-8x slower than the House box's; so this cap is about 110 MB and a minute of a
+#: box's CPU, well inside its 2 GB and 300 s.
+STRUCTURE_TAPE_MAX_BARS = 2_000_000
 LIQUIDITY = {"min_volume": 5.0, "min_trades": 2, "max_participation": 0.10, "quote_age_seconds": 1500}
 #: Alpaca charges no options commission (`league/fees.py`); the regulatory and clearing
 #: pass-through (ORF, OCC, TAF) is not yet measured on this account. Assumed, per contract per fill.
@@ -195,11 +204,24 @@ def implied_vol(price: float, spot: float, strike: float, years: float, right: s
     discounted intrinsic value, or a stale print -- rather than a number made up to fit."""
     if not (price > 0 and spot > 0 and strike > 0 and years > 0):
         return None
-    if not bs_price(spot, strike, years, low, right, rate=rate, q=q) < price < bs_price(spot, strike, years, high, right, rate=rate, q=q):
+    # `bs_price` with what does not depend on the volatility worked out once: the same operations in
+    # the same order, so the same bits, at half the cost (the options replay solves one a shown print;
+    # this was two thirds of a structure replay's time, Sept 25, 2026).
+    root, moneyness, carry, grow, discount = math.sqrt(years), math.log(spot / strike), (rate - q), math.exp(-q * years), math.exp(-rate * years)
+
+    def value(vol: float) -> float:
+        sq = vol * root
+        d1 = (moneyness + (carry + 0.5 * vol * vol) * years) / sq
+        d2 = d1 - sq
+        if right == "call":
+            return spot * grow * _cdf(d1) - strike * discount * _cdf(d2)
+        return strike * discount * _cdf(-d2) - spot * grow * _cdf(-d1)
+
+    if not value(low) < price < value(high):
         return None
     for _ in range(80):
         mid = 0.5 * (low + high)
-        if bs_price(spot, strike, years, mid, right, rate=rate, q=q) < price:
+        if value(mid) < price:
             low = mid
         else:
             high = mid
@@ -746,17 +768,31 @@ class OptionsHistory:
     # -- the options desk's replay tape ------------------------------------------------------------
     def tape(self, needs: Mapping[str, Any], start: str, end: str, *, horizon: str, underlier_bars: Callable[..., list[dict[str, Any]]],
              warmup: int = 70, execution: str = "15Min", max_order_usd: float = 75.0, spread: Mapping[str, Any] | None = None,
-             liquidity: Mapping[str, Any] | None = None, fee_per_contract: float = FEE_PER_CONTRACT_USD) -> dict[str, Any]:
+             liquidity: Mapping[str, Any] | None = None, fee_per_contract: float = FEE_PER_CONTRACT_USD,
+             max_option_bars: int | None = None) -> dict[str, Any]:
         """A replay tape for an options strategy (`league/options_replay.py` walks it).
 
         Steps are the regular-session closes of the underlyings' `execution` bars. A step carries
         the underlyings' bars (`execution_bars`), the signal bars that became available by then
         (`history_bars`), and the option bars that closed at it (`options`). `contracts` says
-        when each contract first printed, which is when the replay may show it."""
+        when each contract first printed, which is when the replay may show it.
+
+        A STRUCTURE agent's tape (NEEDS `"structures": true`, Sept 25, 2026) carries what its live chain
+        can show (`House._chain(structures=True)`): no single-contract affordability line (a leg is not
+        bought alone), 0 to `max_days_to_expiry` days (7 when unstated), and only bars whose strike is
+        within the chain's 20% of the underlying's last close then (`STRUCTURE_BAND`), which bounds a
+        month of SPY, QQQ and IWM 0-7 day contracts to about 80,000, 75,000 and 25,000 bars (measured on
+        the local copy, Sept 25, 2026). A structure tape is also held to `STRUCTURE_TAPE_MAX_BARS` option
+        bars (`max_option_bars`): over it, the OLDEST steps are dropped (their signal bars joining the
+        warmup) and the tape says so under `bounded`."""
         symbols = [str(s).upper() for s in (needs.get("symbols") or [])][:8]
-        days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
+        structural = bool(needs.get("structures"))
+        asked = needs.get("max_days_to_expiry")
+        # A structure agent's 0 is a 0-DTE strategy's own answer, not "unsaid" (`House._structure_context`).
+        days = (max(0, min(int(7 if asked is None else asked), 45)) if structural
+                else max(2, min(int(asked or 21), 45)))
         timeframe = str((needs.get("bars") or {}).get("timeframe") or "1Day")
-        afford = float(max_order_usd) / MULTIPLIER
+        afford = float("inf") if structural else float(max_order_usd) / MULTIPLIER
         start_ts, end_ts = _ts(start), _ts(end)
         warm_reach = warmup * (1.6 if timeframe == "1Day" else 1.0) * TIMEFRAMES.get(timeframe, 86400) + 7 * 86400
         signals, warmup_bars, execution_rows = {}, {}, {}
@@ -772,8 +808,18 @@ class OptionsHistory:
             for bar in rows:
                 by_time.setdefault(bar["t"], {"execution_bars": {}, "options": {}})["execution_bars"][symbol] = {k: bar[k] for k in ("o", "h", "l", "c", "v")}
         first_day, last_day = ny_date(start_ts), (_day(ny_date(end_ts)) + timedelta(days=days)).isoformat()
+        closes: dict[str, list[tuple[str, float]]] = {s: sorted((t, float(v["execution_bars"][s]["c"])) for t, v in by_time.items()
+                                                              if s in v["execution_bars"]) for s in symbols}
         for symbol in symbols:
             listed = {r["occ"]: r for r in self.contracts(symbol, first_day, last_day)}
+            stamps = [t for t, _ in closes.get(symbol, [])]
+            prices = [c for _, c in closes.get(symbol, [])]
+
+            def near(t: str, strike: float) -> bool:
+                """A structure tape keeps a bar only where the chain could show its contract: within
+                STRUCTURE_BAND of the underlying's last close at or before it (kept when none is known)."""
+                index = bisect.bisect_right(stamps, t) - 1
+                return index < 0 or abs(strike / prices[index] - 1.0) <= STRUCTURE_BAND
             names = list(listed)
             for i in range(0, len(names), 500):
                 group = names[i:i + 500]
@@ -809,18 +855,25 @@ class OptionsHistory:
                         flush(current, kept)
                         current, kept = occ, []
                         shown_from = iso(datetime.combine(_day(listed[occ]["expiry"]) - timedelta(days=days + 4), datetime.min.time(), NY).timestamp())
-                    if t >= shown_from:
+                    if t >= shown_from and (not structural or near(t, float(listed[occ]["strike"]))):
                         kept.append((t, o, h, l, c, v, int(n or 0)))
                 flush(current, kept)
         # Recorded OPRA quotes (from Sept 22, 2026, when the House began keeping them): the last
         # one of each contract in (previous step, step] rides on the step; nothing is carried.
-        recorded = self.quotes(list(contracts), iso(start_ts), end)
+        # Streamed from the store onto the steps (never held as one list: a structure tape's
+        # contracts have up to hundreds of thousands of them, and the local copy is read on a laptop).
         times = sorted(by_time)
-        for occ, rows in recorded.items():
-            for q in rows:
-                index = bisect.bisect_left(times, q["t"])  # the first step at or after the quote
+        recorded = 0
+        names = list(contracts)
+        for i in range(0, len(names), 500):
+            group = names[i:i + 500]
+            marks = ",".join("?" * len(group))
+            for occ, t, bid, ask in self.db.execute(f"SELECT occ, t, bid, ask FROM quotes WHERE t >= ? AND t <= ? AND occ IN ({marks}) ORDER BY occ, t",
+                                                    (iso(start_ts), end, *group)):
+                recorded += 1
+                index = bisect.bisect_left(times, t)  # the first step at or after the quote
                 if index < len(times):
-                    by_time[times[index]].setdefault("quotes", {})[occ] = q
+                    by_time[times[index]].setdefault("quotes", {})[occ] = {"t": t, "bid": bid, "ask": ask}
         steps = []
         cursors = {s: 0 for s in symbols}
         for t in sorted(by_time):
@@ -832,20 +885,70 @@ class OptionsHistory:
                     index += 1
                 cursors[symbol] = index
             steps.append(entry)
+        bounded = None
+        cap = STRUCTURE_TAPE_MAX_BARS if max_option_bars is None else int(max_option_bars)
+        total = sum(len(entry["options"]) for entry in steps)
+        if structural and total > cap:
+            first, kept = 0, total
+            while first < len(steps) and kept > cap:
+                kept -= len(steps[first]["options"])
+                first += 1
+            for entry in steps[:first]:  # the dropped steps' signal bars are the kept steps' warmup
+                for symbol, rows in (entry.get("history_bars") or {}).items():
+                    warmup_bars.setdefault(symbol, []).extend(rows)
+            warmup_bars = {symbol: rows[-warmup:] for symbol, rows in warmup_bars.items()}
+            steps = steps[first:]
+            printed = {occ for entry in steps for occ in entry["options"]} | {occ for entry in steps for occ in entry.get("quotes") or {}}
+            contracts = {occ: row for occ, row in contracts.items() if occ in printed}
+            bounded = {"option_bars": total, "kept": kept, "max_option_bars": cap, "from": steps[0]["t"] if steps else None,
+                       "why": "a structure tape is held to what a box replays well inside its time and memory"}
         coverage = {s: [r for r in self.coverage(s) if r.get("timeframe") == execution] for s in symbols}
         return {
             "venue": "alpaca", "asset_class": "option", "horizon": horizon, "timeframe": timeframe, "execution_timeframe": execution,
             "step_seconds": TIMEFRAMES[execution], "symbols": symbols, "warmup_bars": warmup_bars, "warmup_requested": warmup,
             "half_spread_bps": 1.0, "steps": steps, "contracts": contracts,
-            "chain_rules": {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford},
+            "chain_rules": ({"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 80, "afford_per_share": None, "structures": True}
+                            if structural else {"max_days_to_expiry": days, "moneyness": 0.20, "per_underlying": 40, "afford_per_share": afford}),
             "spread_model": {**SPREAD_MODEL, **dict(spread or {})}, "liquidity": live,
             "fee_per_contract_usd": float(fee_per_contract), "multiplier": MULTIPLIER,
-            "recorded_quotes": sum(len(r) for r in recorded.values()),
+            "recorded_quotes": recorded,
             "provenance": {"options": SOURCE_BARS, "listing": SOURCE_CONTRACTS, "quotes": SPREAD_MODEL["kind"],
                            "recorded_quotes": "OPRA quotes the House read for live chains, where they exist (Sept 22, 2026 on)",
                            "underlying": "the House's underlier bars adapter", "history_starts": HISTORY_STARTS},
             "coverage": {s: [{k: r.get(k) for k in ("status", "start", "end", "contracts", "with_bars", "bars")} for r in rows] for s, rows in coverage.items()},
+            # What a live wake of these NEEDS is handed besides (`House.snapshot`), stamped with when each
+            # row became available: the options-derived features it declares (Sept 25, 2026).
+            **({"options_features": self.feature_series(symbols)} if needs.get("options_features") else {}),
+            **({"bounded": bounded} if bounded else {}),
+            **({"structure_hours": structure_hours(first_day, last_day)} if structural else {}),
         }
+
+
+def structure_hours(first: str, last: str) -> dict[str, list[int]]:
+    """{day: [entry cut, House close]} in New York minutes for the days in [first, last] whose structure
+    hours are not the regular 14:30 and 15:30: an early close (13:00 the day after Thanksgiving and on
+    Christmas Eve) holds them 90 and 30 minutes before the bell, as `House._structure_hours` does. Read
+    from the House's session calendar (`ltcm.data`) where the tape is built; the replay in the box
+    reads them off the tape. Empty where the calendar cannot be read (the regular hours then)."""
+    try:
+        from ltcm.data import to_datetime, us_equity_session
+    except ImportError:
+        return {}
+    out: dict[str, list[int]] = {}
+    day, end = _day(first), _day(last)
+    while day <= end:
+        try:
+            session = us_equity_session(day.isoformat())
+        except Exception:  # noqa: BLE001 - a day outside the calendar keeps the regular hours
+            session = None
+        if session is not None:
+            bell = to_datetime(session.close_at).astimezone(NY)
+            minutes = bell.hour * 60 + bell.minute
+            hours = [min(14 * 60 + 30, minutes - 90), min(15 * 60 + 30, minutes - 30)]
+            if hours != [14 * 60 + 30, 15 * 60 + 30]:
+                out[day.isoformat()] = hours
+        day += timedelta(days=1)
+    return out
 
 
 def _in_session(ts: float) -> bool:
@@ -890,6 +993,24 @@ def adapter_from(alpaca_data: Any) -> Callable[[str, str, str, str], list[dict[s
             if not token:
                 break
         return [found[key] for key in sorted(found)]
+    return underlier_bars
+
+
+def stored_underlier(store: OptionsHistory) -> Callable[[str, str, str, str], list[dict[str, Any]]]:
+    """`underlier_bars(symbol, timeframe, start, end)` read from the store's `underlier_bars` table
+    instead of the gateway: the same close-stamped, UNADJUSTED bars `adapter_from` returns, as
+    `adapter_from` fetched them when the copy was made (a bar whose close is in [start, end]).
+
+    The table is not part of `SCHEMA`: only a LOCAL copy of the store carries it (Sept 25, 2026, the
+    options-desk run: `~/Work/.options-history/`, made on the House box with the House's own data
+    client, so a structure replay on a laptop needs no gateway and never touches the box)."""
+    if not store.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'underlier_bars'").fetchone():
+        raise HistoryError(f"{store.path} holds no underlier bars: only a local copy of the store does")
+
+    def underlier_bars(symbol: str, timeframe: str, start: str, end: str) -> list[dict[str, Any]]:
+        rows = store.db.execute("SELECT payload FROM underlier_bars WHERE symbol = ? AND timeframe = ? AND ts >= ? AND ts <= ? ORDER BY ts",
+                                (symbol.upper(), timeframe, _ts(start), _ts(end)))
+        return [json.loads(payload) for (payload,) in rows]
     return underlier_bars
 
 

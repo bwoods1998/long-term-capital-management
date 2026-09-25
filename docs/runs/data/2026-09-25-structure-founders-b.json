@@ -1,0 +1,995 @@
+{
+ "what": "The S4b structure founders (direction and events) judged by the House's own options replay on the local copy of the options history",
+ "run": "options-desk run, Sept 25, 2026 (docs/runs/2026-09-25-options-desk.md), builder S4b, branch s4b/founders at c48e29b",
+ "judge": "scripts/replay_structures.py (builder S3): House._live_window (126 days, after the sealed holdout), OptionsHistory.tape with the local underlier bars, replay.run_replay at practice rung 1 ($200 stake, $100 position, $75 order), Evaluator.replay_gate against a throwaway ledger (a first look: no earlier trials in the family). Fills: every leg must print in one later 15-minute bar; long legs at the conservative estimated ask, short at the conservative bid, $0.05 a contract a leg; marks at the shown bid.",
+ "gate": {
+  "min_trades": 10,
+  "min_blocks": 20,
+  "min_oos_blocks": 8,
+  "min_oos_growth_a_block": -0.0005,
+  "min_deflated_sharpe": 0.0
+ },
+ "out_of_sample": "the replay's own split: the last 34% of day blocks (from about Aug 12, 2026); every universe, direction and default was chosen on the first two thirds (May 22 to Aug 11, 2026) of underlying closes and bars, before the full-window replay was read",
+ "founders": [
+  {
+   "name": "options-orb",
+   "family": "options-orb-vertical",
+   "file": "options_orb.py",
+   "mechanism": "opening-range breakout on IWM, BAC, SOFI, SNAP, AAL, faded by default (fade 1) with a 0-4 day near-the-money debit vertical, flat by the close",
+   "symbols": [
+    "IWM",
+    "BAC",
+    "SOFI",
+    "SNAP",
+    "AAL"
+   ],
+   "params": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 4,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "profit_target": 0.5,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 25,
+    "exit_dte": 99,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 60.0,
+    "slip": 0.02,
+    "max_debit": 0.65,
+    "min_credit": 0.3,
+    "requote_minutes": 20,
+    "range_bars": 2,
+    "breakout_pct": 0.001,
+    "fade": 1,
+    "entry_start": 600,
+    "entry_end": 780
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": false,
+    "reasons": [
+     "it did not trade out of sample: no out-of-sample block was active"
+    ],
+    "trades": 20,
+    "structures_opened": 20,
+    "structures_closed": 20,
+    "settled_at_expiry": 2,
+    "not_evaluated": 0,
+    "fills": 38,
+    "fees_usd": 3.8,
+    "refused": 7,
+    "stake": 200.0,
+    "final_equity": 6.04,
+    "return_pct": -96.98,
+    "max_drawdown": 0.975935202959,
+    "blocks": 86,
+    "growth_log": -3.499913,
+    "growth_pct": -96.98,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.061401988677
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "by_underlying": {
+     "SOFI": {
+      "trades": 8,
+      "wins": 2,
+      "losses": 6,
+      "pnl_usd": -61.32,
+      "mean_entry": 0.2144
+     },
+     "AAL": {
+      "trades": 6,
+      "wins": 1,
+      "losses": 5,
+      "pnl_usd": -64.6,
+      "mean_entry": 0.2475
+     },
+     "SNAP": {
+      "trades": 3,
+      "wins": 1,
+      "losses": 2,
+      "pnl_usd": -1.1,
+      "mean_entry": 0.11
+     },
+     "IWM": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "pnl_usd": -54.24,
+      "mean_entry": 0.5175
+     },
+     "BAC": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "pnl_usd": -12.7,
+      "mean_entry": 0.36
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 3998,
+     "json_mb": null,
+     "option_bars": 193264,
+     "bounded": null,
+     "recorded_quotes": 10086,
+     "build_seconds": 3.3
+    },
+    "replay_seconds": 16.1
+   },
+   "rank_by_out_of_sample_growth": 6
+  },
+  {
+   "name": "options-trend-vertical",
+   "family": "options-trend-vertical",
+   "file": "options_trend_vertical.py",
+   "mechanism": "a close 1% under the 5-day mean inside a rising 20-day trend on BAC, PFE, T, SOFI: a 3-10 day call debit vertical held up to 3 days",
+   "symbols": [
+    "BAC",
+    "PFE",
+    "T",
+    "SOFI"
+   ],
+   "params": {
+    "structure": "debit_vertical",
+    "width": 2.0,
+    "dte_min": 3,
+    "dte_max": 10,
+    "wing_delta": 0.15,
+    "entry_delta": 0.5,
+    "profit_target": 0.6,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 60,
+    "exit_dte": 0,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 70.0,
+    "slip": 0.02,
+    "max_debit": 0.65,
+    "min_credit": 0.3,
+    "requote_minutes": 30,
+    "trend_days": 20,
+    "slope_days": 5,
+    "fast": 5,
+    "max_hold_days": 3,
+    "both_sides": 0,
+    "trend_exit": 0,
+    "pull_pct": 0.01,
+    "entry_start": 600,
+    "entry_end": 900
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": false,
+    "reasons": [
+     "out-of-sample growth is not above -0.050% a block"
+    ],
+    "trades": 17,
+    "structures_opened": 17,
+    "structures_closed": 17,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "fills": 34,
+    "fees_usd": 3.4,
+    "refused": 0,
+    "stake": 200.0,
+    "final_equity": 123.68,
+    "return_pct": -38.16,
+    "max_drawdown": 0.5806,
+    "blocks": 86,
+    "growth_log": -0.48062,
+    "growth_pct": -38.16,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.006530241655
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 11,
+     "mean_log_growth": -0.003737793358
+    },
+    "by_underlying": {
+     "SOFI": {
+      "trades": 6,
+      "wins": 2,
+      "losses": 4,
+      "pnl_usd": -55.04,
+      "mean_entry": 0.4285
+     },
+     "BAC": {
+      "trades": 5,
+      "wins": 2,
+      "losses": 3,
+      "pnl_usd": -2.9,
+      "mean_entry": 0.4714
+     },
+     "PFE": {
+      "trades": 3,
+      "wins": 0,
+      "losses": 3,
+      "pnl_usd": -32.6,
+      "mean_entry": 0.2767
+     },
+     "T": {
+      "trades": 3,
+      "wins": 2,
+      "losses": 1,
+      "pnl_usd": 14.22,
+      "mean_entry": 0.2267
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 2301,
+     "json_mb": null,
+     "option_bars": 159857,
+     "bounded": null,
+     "recorded_quotes": 23380,
+     "build_seconds": 1.5
+    },
+    "replay_seconds": 17.5
+   },
+   "rank_by_out_of_sample_growth": 2
+  },
+  {
+   "name": "options-reversal",
+   "family": "options-reversal-vertical",
+   "file": "options_reversal.py",
+   "mechanism": "a 1.5-sigma daily drop on BAC, SOFI, AAL, CCL, RIVN, IWM bought with a 3-7 day call debit vertical held up to 4 days",
+   "symbols": [
+    "BAC",
+    "SOFI",
+    "AAL",
+    "CCL",
+    "RIVN",
+    "IWM"
+   ],
+   "params": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "dte_max": 7,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "profit_target": 0.5,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 60,
+    "exit_dte": 0,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 70.0,
+    "slip": 0.02,
+    "max_debit": 0.65,
+    "min_credit": 0.3,
+    "requote_minutes": 30,
+    "z_entry": 1.5,
+    "lookback": 20,
+    "fade_up": 0,
+    "max_hold_days": 4,
+    "entry_start": 870,
+    "entry_end": 930
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": false,
+    "reasons": [
+     "out-of-sample growth is not above -0.050% a block"
+    ],
+    "trades": 14,
+    "structures_opened": 15,
+    "structures_closed": 14,
+    "settled_at_expiry": 4,
+    "not_evaluated": 0,
+    "fills": 25,
+    "fees_usd": 2.5,
+    "refused": 0,
+    "stake": 200.0,
+    "final_equity": 18.56,
+    "return_pct": -90.72,
+    "max_drawdown": 0.9122,
+    "blocks": 86,
+    "growth_log": -2.377309,
+    "growth_pct": -90.72,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.004363470218
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 14,
+     "mean_log_growth": -0.073399684026
+    },
+    "by_underlying": {
+     "RIVN": {
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "pnl_usd": -18.3,
+      "mean_entry": 0.2725
+     },
+     "CCL": {
+      "trades": 3,
+      "wins": 1,
+      "losses": 2,
+      "pnl_usd": 5.58,
+      "mean_entry": 0.2853
+     },
+     "AAL": {
+      "trades": 3,
+      "wins": 2,
+      "losses": 1,
+      "pnl_usd": -10.82,
+      "mean_entry": 0.1683
+     },
+     "SOFI": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "pnl_usd": -70.0,
+      "mean_entry": 0.3835
+     },
+     "BAC": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "pnl_usd": -54.8,
+      "mean_entry": 0.4725
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 5017,
+     "json_mb": null,
+     "option_bars": 288792,
+     "bounded": null,
+     "recorded_quotes": 17192,
+     "build_seconds": 1.6
+    },
+    "replay_seconds": 21.8
+   },
+   "rank_by_out_of_sample_growth": 5
+  },
+  {
+   "name": "options-gap-drift",
+   "family": "options-gap-drift",
+   "file": "options_gap_drift.py",
+   "mechanism": "a 2-sigma, 3% news move on BAC, T, F, AAL, RIVN, CCL ridden with a 3-10 day debit vertical in its direction, held up to 4 days",
+   "symbols": [
+    "BAC",
+    "T",
+    "F",
+    "AAL",
+    "RIVN",
+    "CCL"
+   ],
+   "params": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "dte_max": 10,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "profit_target": 0.6,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 60,
+    "exit_dte": 0,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 70.0,
+    "slip": 0.02,
+    "max_debit": 0.65,
+    "min_credit": 0.3,
+    "requote_minutes": 30,
+    "gap_z": 2.0,
+    "min_gap_pct": 3.0,
+    "lookback": 20,
+    "max_hold_days": 4,
+    "entry_start": 615,
+    "entry_end": 720
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": true,
+    "reasons": [],
+    "trades": 17,
+    "structures_opened": 18,
+    "structures_closed": 17,
+    "settled_at_expiry": 3,
+    "not_evaluated": 0,
+    "fills": 32,
+    "fees_usd": 3.2,
+    "refused": 0,
+    "stake": 200.0,
+    "final_equity": 281.99,
+    "return_pct": 40.995,
+    "max_drawdown": 0.333018894892,
+    "blocks": 86,
+    "growth_log": 0.343554,
+    "growth_pct": 40.995,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": 0.006146932312
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 9,
+     "mean_log_growth": -0.000235203415
+    },
+    "by_underlying": {
+     "AAL": {
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "pnl_usd": -41.2,
+      "mean_entry": 0.2225
+     },
+     "F": {
+      "trades": 3,
+      "wins": 1,
+      "losses": 2,
+      "pnl_usd": 8.34,
+      "mean_entry": 0.2233
+     },
+     "RIVN": {
+      "trades": 3,
+      "wins": 1,
+      "losses": 2,
+      "pnl_usd": -18.92,
+      "mean_entry": 0.4
+     },
+     "T": {
+      "trades": 3,
+      "wins": 3,
+      "losses": 0,
+      "pnl_usd": 56.12,
+      "mean_entry": 0.2017
+     },
+     "BAC": {
+      "trades": 2,
+      "wins": 1,
+      "losses": 1,
+      "pnl_usd": 47.92,
+      "mean_entry": 0.4125
+     },
+     "CCL": {
+      "trades": 2,
+      "wins": 2,
+      "losses": 0,
+      "pnl_usd": 40.68,
+      "mean_entry": 0.4352
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 3149,
+     "json_mb": null,
+     "option_bars": 185554,
+     "bounded": null,
+     "recorded_quotes": 40333,
+     "build_seconds": 1.1
+    },
+    "replay_seconds": 12.3
+   },
+   "rank_by_out_of_sample_growth": 1
+  },
+  {
+   "name": "options-skew",
+   "family": "options-skew",
+   "file": "options_skew.py",
+   "mechanism": "F, AAL, CCL, RIVN 25-delta skew against its own level: rich skew over the 20-day mean rides the trend with a call vertical, cheap skew buys a put vertical",
+   "symbols": [
+    "F",
+    "AAL",
+    "CCL",
+    "RIVN"
+   ],
+   "params": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "dte_max": 9,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "profit_target": 0.5,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 60,
+    "exit_dte": 0,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 72.0,
+    "slip": 0.02,
+    "max_debit": 0.65,
+    "min_credit": 0.28,
+    "requote_minutes": 30,
+    "z_rich": 1.0,
+    "z_cheap": 1.0,
+    "cheap_side": -1,
+    "rich_side": 1,
+    "skew_norm": 0.02,
+    "skew_sd": 0.045,
+    "min_obs": 8,
+    "lookback": 20,
+    "trend_days": 20,
+    "max_hold_days": 3,
+    "entry_start": 630,
+    "entry_end": 900
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": false,
+    "reasons": [
+     "out-of-sample growth is not above -0.050% a block"
+    ],
+    "trades": 48,
+    "structures_opened": 50,
+    "structures_closed": 48,
+    "settled_at_expiry": 3,
+    "not_evaluated": 0,
+    "fills": 95,
+    "fees_usd": 9.5,
+    "refused": 0,
+    "stake": 200.0,
+    "final_equity": 38.1,
+    "return_pct": -80.95,
+    "max_drawdown": 0.901957796907,
+    "blocks": 86,
+    "growth_log": -1.658103,
+    "growth_pct": -80.95,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.010669523801
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 26,
+     "mean_log_growth": -0.03620483544
+    },
+    "by_underlying": {
+     "F": {
+      "trades": 16,
+      "wins": 6,
+      "losses": 10,
+      "pnl_usd": -47.94,
+      "mean_entry": 0.2486
+     },
+     "RIVN": {
+      "trades": 12,
+      "wins": 4,
+      "losses": 8,
+      "pnl_usd": -95.82,
+      "mean_entry": 0.2917
+     },
+     "CCL": {
+      "trades": 10,
+      "wins": 4,
+      "losses": 6,
+      "pnl_usd": -49.3,
+      "mean_entry": 0.4003
+     },
+     "AAL": {
+      "trades": 10,
+      "wins": 4,
+      "losses": 6,
+      "pnl_usd": 41.14,
+      "mean_entry": 0.2682
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 1881,
+     "json_mb": null,
+     "option_bars": 117273,
+     "bounded": null,
+     "recorded_quotes": 29295,
+     "build_seconds": 0.8
+    },
+    "replay_seconds": 17.5
+   },
+   "rank_by_out_of_sample_growth": 4
+  },
+  {
+   "name": "options-diagonal",
+   "family": "options-trend-diagonal",
+   "file": "options_diagonal.py",
+   "mechanism": "a call diagonal (short 1-4 day, long 5-10 day at least $0.50 lower) in the 20-day uptrend of BAC, PFE, T, F, AAL, SNAP",
+   "symbols": [
+    "BAC",
+    "PFE",
+    "T",
+    "F",
+    "AAL",
+    "SNAP"
+   ],
+   "params": {
+    "structure": "diagonal",
+    "width": 0.5,
+    "dte_min": 5,
+    "dte_max": 10,
+    "near_dte_min": 1,
+    "near_dte_max": 4,
+    "entry_delta": 0.35,
+    "profit_target": 0.5,
+    "stop_loss": 1.0,
+    "exit_minutes_before_close": 120,
+    "exit_dte": 0,
+    "max_open": 2,
+    "max_qty": 1,
+    "notional_usd": 75.0,
+    "slip": 0.01,
+    "requote_minutes": 30,
+    "trend_days": 20,
+    "slope_days": 5,
+    "both_sides": 0,
+    "trend_exit": 0,
+    "entry_start": 600,
+    "entry_end": 840
+   },
+   "window": [
+    "2026-05-22T00:00:00Z",
+    "2026-09-25T00:00:00Z"
+   ],
+   "replay": {
+    "passed": false,
+    "reasons": [
+     "out-of-sample growth is not above -0.050% a block"
+    ],
+    "trades": 20,
+    "structures_opened": 20,
+    "structures_closed": 20,
+    "settled_at_expiry": 6,
+    "not_evaluated": 0,
+    "fills": 34,
+    "fees_usd": 3.4,
+    "refused": 7,
+    "stake": 200.0,
+    "final_equity": 20.38,
+    "return_pct": -89.81,
+    "max_drawdown": 0.943325398279,
+    "blocks": 86,
+    "growth_log": -2.283763,
+    "growth_pct": -89.81,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.022922094616
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 13,
+     "mean_log_growth": -0.033696687781
+    },
+    "by_underlying": {
+     "PFE": {
+      "trades": 8,
+      "wins": 3,
+      "losses": 5,
+      "pnl_usd": -43.9,
+      "mean_entry": 0.402
+     },
+     "AAL": {
+      "trades": 6,
+      "wins": 3,
+      "losses": 3,
+      "pnl_usd": -51.56,
+      "mean_entry": 0.4808
+     },
+     "F": {
+      "trades": 4,
+      "wins": 1,
+      "losses": 3,
+      "pnl_usd": -34.08,
+      "mean_entry": 0.3574
+     },
+     "BAC": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "pnl_usd": -20.88,
+      "mean_entry": 0.59
+     },
+     "SNAP": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "pnl_usd": -29.2,
+      "mean_entry": 0.34
+     }
+    },
+    "tape": {
+     "steps": 2236,
+     "contracts": 2767,
+     "json_mb": null,
+     "option_bars": 166767,
+     "bounded": null,
+     "recorded_quotes": 29511,
+     "build_seconds": 1.2
+    },
+    "replay_seconds": 15.0
+   },
+   "rank_by_out_of_sample_growth": 3
+  }
+ ],
+ "earlier_looks": [
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_diagonal",
+   "passed": false,
+   "trades": 14,
+   "growth_log": -1.944212,
+   "fit_mean_log_growth": -0.034108975306,
+   "oos_mean_log_growth": 0.0,
+   "params_changed": {
+    "structure": "diagonal",
+    "width": 0.5,
+    "dte_min": 5,
+    "entry_delta": 0.35,
+    "stop_loss": 0.5
+   }
+  },
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_gap_drift",
+   "passed": true,
+   "trades": 17,
+   "growth_log": 0.343554,
+   "fit_mean_log_growth": 0.006146932312,
+   "oos_mean_log_growth": -0.000235203415,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3,
+    "max_hold_days": 4
+   }
+  },
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_orb",
+   "passed": false,
+   "trades": 20,
+   "growth_log": -3.499913,
+   "fit_mean_log_growth": -0.061401988677,
+   "oos_mean_log_growth": 0.0,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 0,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3
+   }
+  },
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_reversal",
+   "passed": false,
+   "trades": 25,
+   "growth_log": -2.425883,
+   "fit_mean_log_growth": -0.015883347225,
+   "oos_mean_log_growth": -0.052432155776,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 1,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3,
+    "max_hold_days": 1
+   }
+  },
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_skew",
+   "passed": false,
+   "trades": 4,
+   "growth_log": -3.221379,
+   "fit_mean_log_growth": -0.056515420265,
+   "oos_mean_log_growth": 0.0,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 10.0,
+    "dte_min": 1,
+    "wing_delta": 0.12,
+    "entry_delta": 0.3,
+    "stop_loss": 1.0,
+    "min_credit": 0.28,
+    "max_hold_days": 4
+   }
+  },
+  {
+   "look": "round 1, 07:07-07:24Z, next-day exits (gap: 4-day holds)",
+   "file": "options_trend_vertical",
+   "passed": false,
+   "trades": 31,
+   "growth_log": -3.162968,
+   "fit_mean_log_growth": -0.033033129871,
+   "oos_mean_log_growth": -0.044140682424,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 1,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3,
+    "max_hold_days": 1
+   }
+  },
+  {
+   "look": "round 2, 07:24-07:28Z",
+   "file": "options_reversal",
+   "passed": false,
+   "trades": 14,
+   "growth_log": -2.377309,
+   "fit_mean_log_growth": -0.004363470218,
+   "oos_mean_log_growth": -0.073399684026,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3,
+    "max_hold_days": 4
+   }
+  },
+  {
+   "look": "round 2, 07:24-07:28Z",
+   "file": "options_skew",
+   "passed": false,
+   "trades": 48,
+   "growth_log": -1.658103,
+   "fit_mean_log_growth": -0.010669523801,
+   "oos_mean_log_growth": -0.03620483544,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 1.0,
+    "dte_min": 3,
+    "wing_delta": 0.25,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.28,
+    "max_hold_days": 3
+   }
+  },
+  {
+   "look": "round 2, 07:24-07:28Z",
+   "file": "options_trend_vertical",
+   "passed": false,
+   "trades": 17,
+   "growth_log": -0.48062,
+   "fit_mean_log_growth": -0.006530241655,
+   "oos_mean_log_growth": -0.003737793358,
+   "params_changed": {
+    "structure": "debit_vertical",
+    "width": 2.0,
+    "dte_min": 3,
+    "wing_delta": 0.15,
+    "entry_delta": 0.5,
+    "stop_loss": 1.0,
+    "min_credit": 0.3,
+    "max_hold_days": 3
+   }
+  },
+  {
+   "look": "variants, 07:29-10:32Z",
+   "file": "diagonal_v2",
+   "passed": false,
+   "trades": 20,
+   "growth_log": -2.283763,
+   "fit_mean_log_growth": -0.022922094616,
+   "oos_mean_log_growth": -0.033696687781,
+   "params_changed": {
+    "structure": "diagonal",
+    "width": 0.5,
+    "dte_min": 5,
+    "entry_delta": 0.35,
+    "stop_loss": 1.0
+   }
+  },
+  {
+   "look": "variants, 07:29-10:32Z",
+   "file": "reversal_credit",
+   "passed": false,
+   "trades": 8,
+   "growth_log": -2.682382,
+   "fit_mean_log_growth": -0.031997710932,
+   "oos_mean_log_growth": -0.02960389418,
+   "params_changed": {
+    "structure": "credit_vertical",
+    "width": 1.0,
+    "dte_min": 2,
+    "wing_delta": 0.2,
+    "entry_delta": 0.45,
+    "stop_loss": 1.0,
+    "min_credit": 0.25,
+    "max_hold_days": 7
+   }
+  },
+  {
+   "look": "variants, 07:29-10:32Z",
+   "file": "trend_credit",
+   "passed": false,
+   "trades": 9,
+   "growth_log": -0.436646,
+   "fit_mean_log_growth": -0.005387171689,
+   "oos_mean_log_growth": -0.004468187563,
+   "params_changed": {
+    "structure": "credit_vertical",
+    "width": 1.0,
+    "dte_min": 2,
+    "wing_delta": 0.2,
+    "entry_delta": 0.45,
+    "stop_loss": 1.0,
+    "min_credit": 0.25,
+    "max_hold_days": 7
+   }
+  }
+ ],
+ "ranking_by_out_of_sample_growth": [
+  {
+   "rank": 1,
+   "name": "options-gap-drift",
+   "oos_mean_log_growth": -0.000235203415,
+   "passed": true
+  },
+  {
+   "rank": 2,
+   "name": "options-trend-vertical",
+   "oos_mean_log_growth": -0.003737793358,
+   "passed": false
+  },
+  {
+   "rank": 3,
+   "name": "options-diagonal",
+   "oos_mean_log_growth": -0.033696687781,
+   "passed": false
+  },
+  {
+   "rank": 4,
+   "name": "options-skew",
+   "oos_mean_log_growth": -0.03620483544,
+   "passed": false
+  },
+  {
+   "rank": 5,
+   "name": "options-reversal",
+   "oos_mean_log_growth": -0.073399684026,
+   "passed": false
+  },
+  {
+   "rank": 6,
+   "name": "options-orb",
+   "oos_mean_log_growth": 0.0,
+   "passed": false
+  }
+ ]
+}

@@ -34,7 +34,7 @@ is `401`, including a deployment whose token is missing or shorter than 32 chara
 | `POST` | `/v1/unkill` | Releases it. **Owner token only**; the runtime token is a `401` here. |
 | `GET`/`POST`/`DELETE` | `/v1/kalshi/<path>` | Signs `timestamp + METHOD + /trade-api/v2/<path>` with RSA-PSS SHA-256 (salt 32) and forwards to `https://api.elections.kalshi.com/trade-api/v2/<path>` with the query string. Status and body come back verbatim. |
 | `GET`/`POST`/`DELETE` | `/v1/alpaca/<path>` | Adds `APCA-API-KEY-ID` and `APCA-API-SECRET-KEY` and forwards to `https://api.alpaca.markets/<path>`, or to `https://data.alpaca.markets/<path>` when the path is a market-data one (`v2/stocks/`, `v1beta3/`). The real account. |
-| `GET`/`POST`/`DELETE` | `/v1/alpaca-paper/<path>` | The same paths with the paper key pair, forwarded to `https://paper-api.alpaca.markets/<path>` (market data still goes to the data host). Never metered, and not stopped by the kill switch: see below. |
+| `GET`/`POST`/`DELETE` | `/v1/alpaca-paper/<path>` | The same paths with the paper key pair, forwarded to `https://paper-api.alpaca.markets/<path>` (market data still goes to the data host). Never metered, and not stopped by the kill switch: see below. Its option orders are held to the defined-risk shapes ([Multi-leg structures](#multi-leg-structures-sept-25-2026)). |
 | `GET` | `/v1/kalshi/ws-auth` | The three handshake headers for Kalshi's WebSocket (`/trade-api/ws/v2`), good for 30 seconds. The only route that hands the VM credential material, and what it hands over is short-lived and read-only: Kalshi takes no order over its WebSocket. The first run used it; the league does not. |
 | `POST` | `/v1/frontier/responses` | One metered call to the frontier model (OpenAI Responses API). See [The frontier month](#the-frontier-month). |
 | `POST` | `/v1/typesafe/systemone` | Bounded Jev shadow pilot; requires `X-LTCM-Request`, pinned `jev-1.13.0`, inline state and choice/noul questions. Uses `TYPE_SAFE_TOKEN` only in this Worker. |
@@ -88,6 +88,7 @@ redeploying, which is a change the owner makes, not one the VM can.
 | `MAX_DAY_USD` | `4000` | `400` | Notional for the whole trading day, both real venues together. |
 | `MAX_DAY_ORDERS` | `2000` | `60` | Order count for the whole trading day, both real venues together. |
 | `CAP_TIMEZONE` | `America/New_York` | the same | The calendar the day rolls on: the floor's own. |
+| `OPTION_STRUCTURES_REAL` | `off` | `off` | The multi-leg structure types the real Alpaca account admits, comma-separated (`debit_vertical`, ...). `off`, or any name that is not a type, admits none. See [Multi-leg structures](#multi-leg-structures-sept-25-2026). |
 
 Sized for two accounts of about $800 each: one order is never more than a tenth of an account,
 and a day's submitted notional is a few times the floor's capital because resting quotes are
@@ -103,7 +104,8 @@ rounds **against** the order.
 An Alpaca order is priced only as one instrument named by a top-level `symbol`, spelled as a stock
 ticker (`AAPL`, `BRK.B`), a crypto pair (`BTC/USD`) or a standard OCC option symbol (a root of one
 to six capital letters). Each of these is a `400` before any quote is read:
-- an `order_class` other than `simple`, or any `legs` field (multi-leg, bracket, OCO, OTO);
+- an `order_class` other than `simple`, or any `legs` field (multi-leg, bracket, OCO, OTO), except a
+  multi-leg order of a type `OPTION_STRUCTURES_REAL` admits (none as deployed; below);
 - a `type` other than `market` or `limit`. A stop, stop-limit or trailing stop fills at market once
   it triggers, so nothing in its body bounds what it spends. `stop_price`, `trail_price` and
   `trail_percent` are not accepted;
@@ -129,6 +131,70 @@ sets it on a sell, so an exit passes the dollar caps while an entry is still met
 A reservation is returned only when the forward never reached the venue. A venue that answered at
 all keeps its reservation, however it answered, and so does a timeout after dispatch: an
 unconfirmed write is an order until reconciliation says otherwise.
+
+### Multi-leg structures (Sept 25, 2026)
+
+The options-desk run (`docs/goals/LTCM_OPTIONS_DESK.md`, amended by the owner on Sept 25, 2026)
+lets options agents trade level-3 **defined-risk** structures. `lib/caps.mjs` reads a multi-leg
+order (`order_class: "mleg"`, the shape in Alpaca's
+[level-3 guide](https://docs.alpaca.markets/docs/options-level-3-trading)) as ONE structure from its
+legs alone, by the rules of the structure spec that `league/structures.py` implements:
+
+| Type | Legs (one root, whole contracts, no contract twice) |
+| --- | --- |
+| `debit_vertical` | one long, one short, one expiry and right; the long leg the dearer strike (lower call, higher put) |
+| `credit_vertical` | the same, the short leg the dearer strike |
+| `iron_condor` | long put < short put < short call < long call, one expiry |
+| `iron_butterfly` | the same with the short put and short call at one strike |
+| `long_butterfly` | one right and expiry: long 1 low, short 2 middle (`ratio_qty` 2), long 1 high, equal wings |
+| `calendar` | one right and strike: short the near expiry, long the far |
+| `diagonal` | one right: short near, long far, the long strike at least as favourable (a call's lower, a put's higher) |
+| `long_straddle`, `long_strangle` | a long call and a long put of one expiry, one strike or two |
+
+The order around the legs is `qty` (whole structures), `type: "limit"`, `time_in_force: "day"`,
+`limit_price`, 2-4 `legs` of exactly `{symbol, ratio_qty, side, position_intent}` (a standard OCC
+symbol, `ratio_qty` 1 or a butterfly body's 2, a side that agrees with the intent), an optional
+`client_order_id`, and nothing else: no top-level `symbol` or `side`. A structure opens whole (every
+leg `buy_to_open` or `sell_to_open`) and closes whole (every leg `sell_to_close` or `buy_to_close`,
+named by what each leg was). Each of these is a `400` naming the reason, on both accounts:
+- a short leg whose right has no long leg: *"A short leg with no long leg of its right covering it
+  is a naked short: refused."*;
+- a ratio other than a butterfly's body: *"A ratio_qty other than a long butterfly's body of 2 leaves
+  a leg uncovered: refused."*; a broken-wing butterfly; a calendar or diagonal whose short leg
+  expires last; a diagonal whose long strike is less favourable; any leg set that is not a type;
+- legs that open and close at once (legging in or out, or a roll), mixed roots, a contract twice;
+- a `limit_price` of the wrong sign (below), zero on an open, a credit at or over the collateral, or
+  a debit at or over a bounded structure's maximum value (the checks `structures.held_limit` makes).
+  A close at zero passes: it can only give a worthless structure away, or buy one back for nothing,
+  which the expiry-day close of a structure bid at zero must be able to send.
+
+**The sign of `limit_price`.** Alpaca's
+[orders reference](https://docs.alpaca.markets/reference/postorder) (read Sept 25, 2026): for `mleg`,
+"a positive value indicates a debit ... a negative value signifies a credit". alpaca-py's reference
+says the same; the level-3 guide's own iron-condor example (a positive `1.80` for a short condor)
+contradicts it and is not followed. Opening a debit type and buying back a credit type are debits
+(positive); opening a credit type and selling a debit type to close are credits (negative). A limit
+of the other sign is refused, never re-read: a short condor opened at a positive limit would PAY to
+sell premium.
+
+**The practice account** (`alpaca-paper`) forwards every type, opened and closed, unmetered and past
+the kill switch as before. Its other option orders pass only as a single-leg `buy_to_open`,
+`sell_to_close` or `buy_to_close` (the last can only buy back a short the account holds: the book's
+repair of an unmatched short leg); a single-leg `sell_to_open` is a naked short and refused, and so is
+a single-leg option with no `position_intent`, an option named by an asset id, or a field the check
+decides on (`symbol`, `legs`, `order_class`, `position_intent`, `side`) spelled any other way. A body
+that is not JSON is a `400`. Stock and crypto orders pass exactly as before.
+
+**The real account** refuses every multi-leg order while `OPTION_STRUCTURES_REAL` is `off` (as
+deployed). A type it names is metered at its **maximum loss**: a debit type at
+`limit_price x 100 x qty`, a credit type at `(collateral - credit) x 100 x qty` (the collateral is the
+width, or a condor's wider wing), against `MAX_ORDER_USD_ALPACA` and the day's caps like any order; a
+$0.70 debit vertical is $70 and passes the $75 cap, a $0.80 one is refused. The open or close is read
+from the legs' `position_intent`, never from `X-LTCM-Purpose`: an open labelled an exit is still
+metered. A close takes risk off and is metered at zero; the gate counts every order and refuses a
+zero reservation, so a close reserves one micro-dollar as an exit (health rounds it up to a cent):
+the kill switch and the order count stop it, the dollar caps do not. Admitting a type is a
+money-digest change the owner ratifies.
 
 ## Jev shadow pilot
 

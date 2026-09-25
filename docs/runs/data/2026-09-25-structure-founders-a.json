@@ -1,0 +1,752 @@
+{
+ "what": "S4a structure founders (volatility and premium), options-desk run, Sept 25, 2026: each replayed ONCE as the House would (scripts/replay_structures.py from s3/replay over ~/Work/.options-history, practice rung 1: $200 stake, $75 order, $100 position; window 2026-05-22..2026-09-25, 86 daily blocks, the last 29 out of sample).",
+ "verdict": "NONE PASSES; none is delivered. Ranked by out-of-sample growth a block below.",
+ "founders": [
+  {
+   "name": "options-condor-vrp",
+   "family": "options-condor-vrp",
+   "file": "options_condor_vrp.py",
+   "why": "The variance risk premium (published): index options price more movement than follows. A $1-winged 0-2 day iron condor on SPY/QQQ/IWM when the implied move is rich against the realized one and the condor's expected value clears every leg's touch.",
+   "wake_minutes": 5,
+   "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM"
+   ],
+   "max_days_to_expiry": 2,
+   "bars": {
+    "timeframe": "15Min",
+    "limit": 500
+   },
+   "params": {
+    "structure": "iron_condor",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 2,
+    "entry_delta": 0.15,
+    "profit_target": 0.5,
+    "stop_loss": 2.0,
+    "exit_minutes_before_close": 30,
+    "max_open": 2,
+    "entry_start": 600,
+    "entry_end": 840,
+    "vrp_min": 1.1,
+    "vol_days": 5,
+    "vol_cushion": 1.1,
+    "min_edge": 0.01,
+    "risk_usd": 75.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_entries_day": 2
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "5 closed trades, 10 needed",
+      "out-of-sample growth is not above -0.050% a block"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 5,
+    "structures_opened": 5,
+    "structures_closed": 5,
+    "settled_at_expiry": 1,
+    "not_evaluated": 0,
+    "house_close_offers": 2,
+    "fills": 9,
+    "fees_usd": 1.8,
+    "refused": 5,
+    "refusal_reasons": {
+     "no leverage: not enough free cash for the structure's maximum loss and its fee": 3,
+     "no shorts: a close is limited to the structures held and not already offered": 2
+    },
+    "final_equity": 88.72,
+    "stake": 200.0,
+    "return_pct": -55.64,
+    "max_drawdown": 0.7337,
+    "blocks": 86,
+    "growth": -0.812832,
+    "growth_pct": -55.64,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.005211565513
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 5,
+     "mean_log_growth": -0.017785268595
+    },
+    "by_underlying": {
+     "IWM": {
+      "trades": 5,
+      "wins": 1,
+      "losses": 4,
+      "pnl_usd": -111.28,
+      "mean_entry": 0.6755
+     }
+    },
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 26.6
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "1 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 1,
+    "growth_pct": -25.7,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "refusal_reasons": {}
+   },
+   "rank_by_oos_growth": 1
+  },
+  {
+   "name": "options-strangle-cheap",
+   "family": "options-strangle-cheap",
+   "file": "options_strangle_cheap.py",
+   "why": "The one time buying options pays (published): when implied volatility lags a burst of realized. A 2-5 day long strangle on IWM/QQQ/SPY only when the implied move is cheap against the realized one, out on a move or after a day.",
+   "wake_minutes": 10,
+   "symbols": [
+    "IWM",
+    "QQQ",
+    "SPY"
+   ],
+   "max_days_to_expiry": 2,
+   "bars": {
+    "timeframe": "15Min",
+    "limit": 500
+   },
+   "params": {
+    "structure": "long_strangle",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 2,
+    "entry_delta": 0.12,
+    "profit_target": 0.3,
+    "stop_loss": 0.5,
+    "exit_minutes_before_close": 35,
+    "max_open": 3,
+    "entry_start": 600,
+    "entry_end": 660,
+    "cheap_max": 0.9,
+    "vol_days": 5,
+    "vol_cushion": 1.0,
+    "min_edge": 0.0,
+    "risk_usd": 75.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_hold_days": 1,
+    "max_entries_day": 1
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "out-of-sample growth is not above -0.050% a block"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 11,
+    "structures_opened": 11,
+    "structures_closed": 11,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "house_close_offers": 0,
+    "fills": 22,
+    "fees_usd": 2.6,
+    "refused": 20,
+    "refusal_reasons": {
+     "no leverage: not enough free cash for the structure's maximum loss and its fee": 20
+    },
+    "final_equity": 8.08,
+    "stake": 200.0,
+    "return_pct": -95.96,
+    "max_drawdown": 0.9616,
+    "blocks": 86,
+    "growth": -3.208925,
+    "growth_pct": -95.96,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.044553930722
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 1,
+     "mean_log_growth": -0.023081084237
+    },
+    "by_underlying": {
+     "IWM": {
+      "trades": 9,
+      "wins": 1,
+      "losses": 8,
+      "pnl_usd": -211.2,
+      "mean_entry": 0.4094
+     },
+     "SPY": {
+      "trades": 2,
+      "wins": 1,
+      "losses": 1,
+      "pnl_usd": 19.28,
+      "mean_entry": 0.5465
+     }
+    },
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 21.9
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "8 closed trades, 10 needed",
+      "out-of-sample growth is not above -0.050% a block"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 8,
+    "growth_pct": -47.3,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 2,
+     "mean_log_growth": -0.017444131969
+    },
+    "refusal_reasons": {
+     "no leverage: not enough free cash for the structure's maximum loss and its fee": 8
+    }
+   },
+   "rank_by_oos_growth": 2
+  },
+  {
+   "name": "options-calendar-term",
+   "family": "options-calendar-term",
+   "file": "options_calendar_term.py",
+   "why": "Term-structure mean reversion (published): when the near expiry's implied volatility is kinked above the far one's, sell the near and buy the far at one strike, closed before the near expiry.",
+   "wake_minutes": 10,
+   "symbols": [
+    "IWM",
+    "F",
+    "SOFI",
+    "INTC",
+    "PFE",
+    "T"
+   ],
+   "max_days_to_expiry": 10,
+   "bars": {
+    "timeframe": "15Min",
+    "limit": 500
+   },
+   "params": {
+    "structure": "calendar",
+    "width": 0,
+    "dte_min": 1,
+    "dte_max": 3,
+    "back_min": 5,
+    "back_max": 10,
+    "entry_delta": 0.45,
+    "profit_target": 0.3,
+    "stop_loss": 0.35,
+    "exit_minutes_before_close": 45,
+    "max_open": 2,
+    "entry_start": 630,
+    "entry_end": 900,
+    "kink_min": 1.1,
+    "vol_days": 5,
+    "vol_cushion": 1.0,
+    "min_edge": 0.0,
+    "risk_usd": 75.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_hold_days": 1,
+    "max_entries_day": 1
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "out-of-sample growth is not above -0.050% a block"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 10,
+    "structures_opened": 10,
+    "structures_closed": 10,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "house_close_offers": 0,
+    "fills": 20,
+    "fees_usd": 4.4,
+    "refused": 3,
+    "refusal_reasons": {
+     "no leverage: not enough free cash for the structure's maximum loss and its fee": 3
+    },
+    "final_equity": 13.3,
+    "stake": 200.0,
+    "return_pct": -93.35,
+    "max_drawdown": 0.934278796264,
+    "blocks": 86,
+    "growth": -2.710553,
+    "growth_pct": -93.35,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": -0.028915416504
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 3,
+     "mean_log_growth": -0.036633606571
+    },
+    "by_underlying": {
+     "T": {
+      "trades": 4,
+      "wins": 0,
+      "losses": 4,
+      "pnl_usd": -73.76,
+      "mean_entry": 0.1817
+     },
+     "F": {
+      "trades": 3,
+      "wins": 0,
+      "losses": 3,
+      "pnl_usd": -29.02,
+      "mean_entry": 0.1519
+     },
+     "PFE": {
+      "trades": 2,
+      "wins": 0,
+      "losses": 2,
+      "pnl_usd": -44.8,
+      "mean_entry": 0.1601
+     },
+     "SOFI": {
+      "trades": 1,
+      "wins": 0,
+      "losses": 1,
+      "pnl_usd": -39.12,
+      "mean_entry": 0.2244
+     }
+    },
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 42.3
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "2 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 2,
+    "growth_pct": -32.4,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "refusal_reasons": {}
+   },
+   "rank_by_oos_growth": 3
+  },
+  {
+   "name": "options-putspread-dip",
+   "family": "options-putspread-dip",
+   "file": "options_putspread_dip.py",
+   "why": "Sell the put skew after an intraday dip in an uptrend (published: rich index put premium, short-term reversal): a $1-wide put credit vertical, 0-4 days, bought back within a day.",
+   "wake_minutes": 10,
+   "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM"
+   ],
+   "max_days_to_expiry": 4,
+   "bars": {
+    "timeframe": "1Hour",
+    "limit": 400
+   },
+   "params": {
+    "structure": "credit_vertical",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 4,
+    "entry_delta": 0.3,
+    "profit_target": 0.5,
+    "stop_loss": 2.0,
+    "exit_minutes_before_close": 30,
+    "max_open": 2,
+    "entry_start": 630,
+    "entry_end": 900,
+    "trend_days": 10,
+    "dip_pct": 0.4,
+    "vol_days": 10,
+    "vol_cushion": 1.1,
+    "min_edge": 0.0,
+    "risk_usd": 75.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_hold_days": 1,
+    "max_entries_day": 1
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "structures_opened": 0,
+    "structures_closed": 0,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "house_close_offers": 0,
+    "fills": 0,
+    "fees_usd": 0.0,
+    "refused": 0,
+    "refusal_reasons": {},
+    "final_equity": 200.0,
+    "stake": 200.0,
+    "return_pct": 0.0,
+    "max_drawdown": 0.0,
+    "blocks": 86,
+    "growth": 0.0,
+    "growth_pct": 0.0,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": 0.0
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "by_underlying": {},
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 35.8
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "growth_pct": 0.0,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "refusal_reasons": {}
+   },
+   "rank_by_oos_growth": 4
+  },
+  {
+   "name": "options-ironfly-quiet",
+   "family": "options-ironfly-quiet",
+   "file": "options_ironfly_quiet.py",
+   "why": "Volatility clusters (published): a quiet midday tends to stay quiet while at-the-money premium decays fastest. A 0-1 day at-the-money iron butterfly with $1 wings, flat by 15:15 New York.",
+   "wake_minutes": 5,
+   "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM"
+   ],
+   "max_days_to_expiry": 2,
+   "bars": {
+    "timeframe": "15Min",
+    "limit": 500
+   },
+   "params": {
+    "structure": "iron_butterfly",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 1,
+    "entry_delta": 0.5,
+    "profit_target": 0.25,
+    "stop_loss": 1.2,
+    "exit_minutes_before_close": 45,
+    "max_open": 2,
+    "entry_start": 690,
+    "entry_end": 810,
+    "flat_at": 915,
+    "quiet_bars": 6,
+    "quiet_ratio": 0.7,
+    "range_pct": 0.8,
+    "vol_days": 5,
+    "vol_cushion": 1.1,
+    "min_edge": 0.0,
+    "risk_usd": 75.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_entries_day": 1
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "structures_opened": 0,
+    "structures_closed": 0,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "house_close_offers": 0,
+    "fills": 0,
+    "fees_usd": 0.0,
+    "refused": 0,
+    "refusal_reasons": {},
+    "final_equity": 200.0,
+    "stake": 200.0,
+    "return_pct": 0.0,
+    "max_drawdown": 0.0,
+    "blocks": 86,
+    "growth": 0.0,
+    "growth_pct": 0.0,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": 0.0
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "by_underlying": {},
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 22.0
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "growth_pct": 0.0,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "refusal_reasons": {}
+   },
+   "rank_by_oos_growth": 5
+  },
+  {
+   "name": "options-butterfly-pin",
+   "family": "options-butterfly-pin",
+   "file": "options_butterfly_pin.py",
+   "why": "Pinning at heavily traded strikes on expiry days (published: Ni, Pearson and Poteshman 2005): a $1-winged long butterfly expiring today, centred on the strike that traded most in the last two hours, sold before the close.",
+   "wake_minutes": 5,
+   "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM"
+   ],
+   "max_days_to_expiry": 2,
+   "bars": {
+    "timeframe": "15Min",
+    "limit": 500
+   },
+   "params": {
+    "structure": "long_butterfly",
+    "width": 1.0,
+    "dte_min": 0,
+    "dte_max": 0,
+    "entry_delta": 0.5,
+    "profit_target": 0.35,
+    "stop_loss": 0.5,
+    "exit_minutes_before_close": 35,
+    "max_open": 2,
+    "entry_start": 825,
+    "entry_end": 860,
+    "pin_minutes": 120,
+    "pin_pct": 0.35,
+    "min_share": 0.12,
+    "vol_days": 5,
+    "vol_cushion": 1.0,
+    "min_edge": 0.0,
+    "risk_usd": 60.0,
+    "requote_minutes": 20,
+    "slip": 0.02,
+    "max_entries_day": 1
+   },
+   "replay": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "structures_opened": 0,
+    "structures_closed": 0,
+    "settled_at_expiry": 0,
+    "not_evaluated": 0,
+    "house_close_offers": 0,
+    "fills": 0,
+    "fees_usd": 0.0,
+    "refused": 0,
+    "refusal_reasons": {},
+    "final_equity": 200.0,
+    "stake": 200.0,
+    "return_pct": 0.0,
+    "max_drawdown": 0.0,
+    "blocks": 86,
+    "growth": 0.0,
+    "growth_pct": 0.0,
+    "fit_window": {
+     "blocks": 57,
+     "mean_log_growth": 0.0
+    },
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "by_underlying": {},
+    "window": [
+     "2026-05-22T00:00:00Z",
+     "2026-09-25T00:00:00Z"
+    ],
+    "replay_seconds": 21.1
+   },
+   "replay_before_the_entry_count_fix": {
+    "gate": {
+     "passed": false,
+     "reasons": [
+      "0 closed trades, 10 needed",
+      "it did not trade out of sample: no out-of-sample block was active",
+      "deflated Sharpe undefined against 1 trials, 0.0 needed"
+     ],
+     "floor": {
+      "min_trades": 10,
+      "min_blocks": 20,
+      "min_deflated_sharpe": 0.0,
+      "min_oos_blocks": 8,
+      "min_oos_growth": -0.0005
+     }
+    },
+    "trades": 0,
+    "growth_pct": 0.0,
+    "out_of_sample": {
+     "blocks": 29,
+     "active_blocks": 0,
+     "mean_log_growth": 0.0
+    },
+    "refusal_reasons": {}
+   },
+   "rank_by_oos_growth": 6
+  }
+ ],
+ "research_before_the_replay_landed": "A scratch sweep over the same tape's SHOWN quotes (fills at the next step's shown touch, more generous than the replay's conservative touch): near-the-money iron condors lost on average (k=0.4 sd shorts, 0-4 DTE: -$32 a structure over 79), iron butterflies and long butterflies lost on nearly every rule, long strangles were negative outside a few 11-trade subsets, and the positive rules (call credit verticals 0.4 sd out, morning entries) had 12-13 trades each: too thin to trust. Over 0-2 days the estimated-quote implied move was at or below the move the recent 15-minute bars imply most days (ratios 0.6-1.2), although 30-day ATM IV (features) sat above monthly realized. The replay's estimated half-spread (max of a tick, 4% of the premium and half the recent bar range, a leg) costs a near-the-money 4-leg structure $0.15-0.30 a share a round trip."
+}

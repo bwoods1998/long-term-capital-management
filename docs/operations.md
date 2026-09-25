@@ -230,7 +230,9 @@ ORDER BY seq DESC LIMIT 20`.
 - **Is it a money rule?** Compare
   `python3 -c "from league.constitution import digest, money_digest; print(digest(), money_digest())"`
   on the tree you deploy with the grant's digest (`floor_watch.py` prints it). Only a changed money
-  digest needs the ratify. The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
+  digest needs the ratify. The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
+  2, `allocator.real_book_dust_usd`) moves them to constitution `d0aa4c2a…`, money `d7d910fe…`: its
+  deploy needs the ratify (the grant's seats unchanged). The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
   `allocator.family_probe`, no probe on a losing family) moves them to constitution `38a57fe9…`, money
   `535a7f15…`: its deploy needs the ratify (the grant's 101 seats unchanged). Its Deploy B (the mechanism
   ledger's unit, the family swing with its entry looks, `swing_requires_proven_family`,
@@ -1128,7 +1130,57 @@ ORDER BY seq DESC LIMIT 20`.
   per-fill tolerance or three readings adopted the venue, and a freeze at 15:37:27Z rolled Deploy C
   back inside its watch. A "does not reconcile" warning on a practice book now means a dollar or
   more, or cents beside an order whose outcome is unknown; an error means real money, or positions
-  that disagree. Read the `book.reconciled` rows. A real book is unchanged: its cents still freeze it.
+  that disagree. Read the `book.reconciled` rows. A real book's cents follow the next item.
+- **A real book never freezes on cents its venue's fees explain** (H4 of the forward-first run, Sept
+  25, 2026; `allocator.real_book_dust_usd`, $0.50). Three changes in `league/book.py`, and the
+  House's wiring of the OCC fee:
+  - *The fees an option or stock fill takes.* Every Alpaca option fill pays the OCC clearing fee
+    ($0.03 a contract) at the fill, as the practice book has since Sept 24. The regulators' cents the
+    real account also takes at the fill (ORF, CAT; TAF and SEC on sales) are listed only that evening
+    or the next night, so the book's next reading is a few cents short. A shortfall under the key,
+    with every position agreeing, no order in doubt, nothing awaiting settlement, and no larger than
+    the room the book's option and stock fills of the last 6 hours leave for those fees (less the dust
+    already booked on it), is booked to the House row: a `book.fill` row with `source: dust`, a
+    `detail` beginning "real book:" and `unlisted_fees_usd`, and an ERROR `ops.alert` whose text begins
+    "`<book>`: -0.0300 of cash booked as dust on the House row, not a freeze". Nothing freezes. The
+    dust has PAID those fees: when Alpaca lists them (ORF, CAT, TAF, REG, SEC), the next shortfall's
+    fee check marks each listing the dust covers as paid, a `venue-fee` row at no cash with
+    `covered_usd`, so a listing can never explain a second, unrelated shortfall (the review of H4 found
+    such listings taking a later real shortfall to zero with no alert, over the key when a day's fees
+    come as one row). A listing larger than what the dust paid is booked as before, against its own
+    shortfall. A stale listing (its cash absorbed before H4, like the live ledger's Sept 24 ORF $0.03)
+    booked against the cents of an option or stock fill that no clean reading has followed yet pays
+    that fill's own listings ahead the same way (`unlisted_fees_usd` on its `venue-fee` row), so the
+    stale ones do not pile up. The alert carries `began_at` (the fill's time) when no clean reading
+    had followed the fill, so the fees of a fill in the minutes before a promotion are inherited by
+    the deploy's watch; cents that appear after a clean reading, or a fill inside the watch, still
+    count as the new release's error alert and roll it back, one more reason no deploy runs in the
+    US session.
+  - *Resting crypto bids.* Alpaca holds each at its notional rounded half-up to the cent, and the
+    book now adds each back that way. Added back unrounded (to eighteen places) they moved the
+    reading by tenths of a cent at every change of the resting bids, each booked as dust, until four
+    of the eight bids resting at 02:26Z Sept 25 were cancelled or replaced over the next passes and
+    the real book froze on "cash differs by 0.0149", then "0.0108", from 02:38:59Z to a restart at
+    04:11:50Z, with no fill and no fee behind it. New `book.reconciled` rows carry
+    `holds: "cent"`. The first clean reading after the deploy that ships this expects exactly the
+    sub-cent error the last reading of the release before left on the bids resting then, with its sign
+    (read from the ledger's orders; at most half a cent a bid, 1.3 cents at worst over the 101 clean
+    readings of Sept 24 18:30Z-Sept 25 04:26Z), and books it back as ordinary dust, so the deploy's
+    watch does not meet a freeze; no fee listing is booked against it. Replayed over the snapshot's
+    1,461 pairs of real readings, every one lands inside the per-fill cent around that error except
+    the readings just after the two real option fills of Sept 24, which are the at-fill fees above.
+  - *A restart.* The first reading after a restart now allows a cent only for each venue fill since
+    the last clean reading (the fold reads the `book.reconciled` rows). It had allowed a cent for every
+    fill the book ever had, which is what "un-froze" the real Alpaca book at 04:11:50Z Sept 25 ($0.12
+    for 12 fills took the 0.0108) and at 18:45:22Z Sept 24 (the option's -0.0324); on the real Kalshi
+    book it allowed $1.39.
+
+  What still freezes a real book, for you to read: a difference at or over the key; any surplus over
+  the tolerance and the maker's fee slack (a dividend, interest, a refund, a fill the book never saw);
+  a shortfall with no option or stock fill in the last 6 hours, or larger than their fees can be; any
+  position difference or order in doubt. To verify after a deploy: `book.reconciled` rows with
+  `ok: true`, a `book.fill` `source: dust` row with `unlisted_fees_usd` beside the next real option or
+  stock fill, its error alert, and `health.json` `books.alpaca` not frozen.
 - **File a repair.** Drop a JSON file into `/workspace/state/repairs-inbox/`:
   `{"key", "kind", "summary", "agents", "severity"}`. It is admitted whatever its priority.
   `{"drill": "<stamp>"}` plants the labelled synthetic drill; `scripts/repair_drill.py --plant`
@@ -1191,9 +1243,11 @@ deploy and a re-ratified grant (see "A money rule" above).
 | File | Key | Default | What it does |
 |---|---|---|---|
 | `league/config.json` | `semantic_lab` | `false` | The continuous Jev midpoint labeller. It stays off: a capped evaluation found no tradable value |
-| | `jev.enabled`, `jev.daily_usd`, `jev.daily_calls` | on, $0.25, 400 | The Jev floor: gate relevance, triage, hypothesis links, exposure |
+| | `jev.enabled`, `jev.daily_usd`, `jev.daily_calls`, `jev.purpose_calls` | on, $1.50, 25,000; gate 3,000, triage 1,500, links 1,000, exposure 500, move 7,500 | The Jev floor: gate relevance, triage, hypothesis links, exposure, and the move sensor's shadow labels. One daily pool aligned to the funded Jev balance (Sept 25, 2026; $0.25 and 400 before). A breaker per purpose |
+| | `jev.move` (`enabled`, `interval_seconds`, `max_markets_per_cycle`, `daily_usd`, `retention_days`) | on, 300 s, 800, $0.75, 14 days | The move sensor (`league/jev_features.py`, J1): every market the Kalshi strategies are shown gets point-in-time `move_p5/15/60` from the free model every 5 minutes, and Jev's static answers once per market as a recorded shadow. Not served to strategies until its held-out AUC on post-ship events is at least 0.70 |
 | | `deep_replay`, `holdout_gate` | on | Deep Alpaca history for replay, and the sealed holdout before paper |
 | | `options_history` | on | Options history, options replay, and IV/skew/activity features |
+| | `options_structures.book`, `options_structures.shadow.starting_cash` | `options-shadow`, $100,000 | Level-3 structures (Sept 25, 2026, the options-desk run; `league/structures.py`): the book a STRUCTURE AGENT (the `alpaca-options` desk, NEEDS `"structures": true`) trades on at rung 1. `options-shadow` is the House's own practice account (`league/options_shadow.py`: fills only on a strictly newer OPRA quote, at the structure's touch from every leg, at most 10% of any leg's shown size, session only, $0.05 a contract a leg, marks at the bid, a structure still held after its expiry's close settled at intrinsic, never written off at zero; nothing leaves the House). `alpaca-paper` sends each structure to the shared practice account as ONE multi-leg order (Track P, not before Sept 28; only the five types it can close as one covered order). A structure is held as ONE long instrument priced at net value plus collateral: its cost is its maximum loss, a flat sale is one closed trade, no book holds a negative leg. The House refuses structure intents on real money until O1 (`allocator.option_spreads_real`), closes structures from 15:30 New York on their earliest expiry day (30 minutes before an early close), cancels resting opens at the 14:30 entry cut (90 minutes before an early close), and seats structure founders one a tick (`league/options_desk.py`, cause `options_seat`, at most 12 retirements, never real money, a winner, a proven family's member, a working order or a position while its market is shut, never a Kalshi desk). An unknown book name: every structure intent is refused with the reason |
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.tick_seconds` (and `config.json` `tick_seconds`, 30-600) | 30 s | H5 (Sept 25, 2026): the run loop's tick, for the wakes (60 before; the tick lines landed 60-68 s apart at p50 with 60 the floor) |
@@ -1253,6 +1307,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `allocator.longshot_floor_real` (read by `book.py`) | `"0.30"` | X0, Sept 24, 2026: a REAL Kalshi entry priced under it is refused by the risk engine's longshot rule; the floor is the larger of it and the book's `min_event_price` (0.15, which practice books keep). 20-cent ETH strikes lost twice on real money on Sept 23. Without the key: 0.15 everywhere |
 | | `allocator.real_entry_liquidity` (read by `book.py`) | `maker_unless_family_taker_positive` | X0: a REAL Kalshi entry must be a post-only limit unless the agent's family's pooled taker record is positive (`Allocator.family_taker`, wired to each real book as `family_taker`); an unmeasured record refuses it, and the refusal names the family, its taker settlements and bound. The taker mechanisms were the loss engine of the nine promotions of Sept 23. Without the key: any order type |
 | | `allocator.max_event_share` (read by `book.py`) | `"0.25"` | X0: on a REAL Kalshi book an agent's holdings at cost, working buys and the new order on one event (a ticker's first two `-` segments, Kalshi's own event: every strike of one game or one city's day, every player prop of one game; a two-segment ticker is its own event) are at most this share of its equity on the book; the refusal says "one event may hold at most 25% of the stake". Without the key: no cap. `Book.risk_lines(agent)["entry_rules"]` lists the three a real book enforces |
+| | `allocator.real_book_dust_usd` (read by `book.py`) | `"0.50"` (bounds $0.25-1.00) | H4 of the forward-first run, Sept 25, 2026: a REAL book's cash SHORTFALL under it, with every position agreeing, no order in doubt and no settlement awaited, that the regulators' fees Alpaca takes at option and stock fills and lists as FEE activities only later can explain (ORF, CAT, TAF, SEC: room for $0.04 a fill plus $0.02 a contract or $0.0002 a share, from the book's option and stock fills of the last 6 hours, less the dust already booked on it; `Book._explain_real_cents`) is booked to the House row as dust with an error alert naming the amount and the explanation, never a freeze and never an agent's record. Over the key, a surplus, or a shortfall no such fill explains, the freeze stays for you. A value outside the bounds, or none, is no key: the book freezes as before. The real account's first option buy (18:19:57Z Sept 24) froze the book on -0.0308: its OCC fee (now paid at the fill, `Fees.option_clearing` on every Alpaca book) and $0.03 of ORF and CAT taken at the fill and listed at 20:35Z and 00:31Z |
 | | `allocator` `swing_at`, `swing_min_real_trades`, `swing_min_w_real`, `swing_exit_w_real` | 1.25, 8, 1.0, 0.9 | Bunt → swing (audited the first time), for a PROVEN family's agent only since Sept 24, 2026 (`swing_requires_proven_family`; an unproven family's agent stays a probe, and a swing whose family stops being proven drops to a probe; a swing audit that finishes after that does not commit); a swing leaves under 1.25 × hysteresis or W_real 0.9. 1.5 → 1.25 on Sept 23, 2026 ~17:00 UTC: the only two earners needed 2.8 and 5.6 days at their rates to reach 1.5 |
 | | `allocator` `kappa`, `e_cap`, `max_share_of_venue`, `position_share` | 2, 20, 0.6, 0.5 | A swing's stake is the bunt × min(E, e_cap)^kappa, up to 60% of the venue's capital (kappa 1 → 2 on Sept 23, 2026 ~17:00 UTC: winners compound in the square of their evidence); a position is up to half the stake at Alpaca (`position_share_event` on Kalshi), never under the venue minimum × 1.2 |
 | | `allocator` `stars`, `star_min_w_real` | 3, 1.25 | The site's top lane: the best swings by real P&L |

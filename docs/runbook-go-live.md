@@ -36,7 +36,10 @@ to paste a secret into a chat or a file.
   Sept 24, 11 s after Deploy D of the close-the-gaps run promoted (`allocator.family_probe`: no probe
   on a losing family). The digests before it: `c02ed852…` (Sept 24 Deploy B, 08:31Z), `521c4586…`
   (Deploy A, 05:37Z), `c2b0e09c…` (Sept 23 Deploy C), `1d63a56e…` (Sept 23 Deploy A). The allocator's
-  envelope at each venue is that capital plus the realized profit there.
+  envelope at each venue is that capital plus the realized profit there. The forward-first run's
+  Deploy A adds `allocator.real_book_dust_usd` ($0.50: a real book's cents that its option and stock
+  fills' unlisted regulatory fees explain are dust with an error alert, never a freeze), which moves
+  the money digest to `d7d910fe…` (constitution `d0aa4c2a…`) and needs the ratify at its promotion.
 - **After a money-rule change**, from a clean worktree at `origin/main`:
 
   ```sh
