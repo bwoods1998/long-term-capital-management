@@ -35,7 +35,7 @@ ENSEMBLE = ("Price every Kalshi weather series (daily highs, lows, rain) from th
 
 class Brief(FoundryCase):
     def test_cards_are_model_versus_market_and_state_their_fee_and_the_edge_that_clears_it(self):
-        self.assertEqual(PROMPT_VERSION, "foundry-2026-09-24.1")
+        self.assertEqual(PROMPT_VERSION, "foundry-2026-09-25.1")  # S1 of Sept 25, 2026 keeps E2's rules (test_foundry_capacity)
         for words in ("MODEL VERSUS MARKET", "recorded_feeds", "edge_needed", "at_capacity"):
             self.assertIn(words, FOUNDRY_BRIEF)
         silent = {k: v for k, v in candidate("silent", "a sawtooth that names no fee", PASSER).items() if k not in ("fee", "edge_needed")}

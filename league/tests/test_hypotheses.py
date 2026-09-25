@@ -113,6 +113,10 @@ class FoundryCase(HouseCase):
             candidate("idle", "a mechanism that never finds a trade worth its fee", IDLE),
             candidate("unsafe", "a mechanism whose file reaches for the operating system", UNSAFE),
         ])
+        # The capacity and model routes and the capacity floor (S1 of the forward-first run, Sept 25, 2026) are off for
+        # the tests of what came before them, which state no capacity; league/tests/test_foundry_capacity.py has theirs.
+        self.house.game["hypotheses"] = {**self.house.game.get("hypotheses", {}), "capacity_share": 0, "model_share": 0,
+                                         "min_capacity_usd": 0}
         self.foundry = Foundry(self.house, self.frontier)
         self.house.hypotheses = self.foundry
         self.rules = self.house.game["economy"]
@@ -637,10 +641,12 @@ class Transfer(FoundryCase):
 
     def test_shares_adding_up_to_more_than_the_window_are_scaled_down(self):
         self.settings(transfer_share=0.6, fast_share=0.6, exploration_share=0.3)
-        self.assertEqual({k: round(v, 9) for k, v in self.foundry.shares().items()}, {"transfer": 0.4, "fast": 0.4, "exploration": 0.2})
-        self.assertEqual(load_game()["hypotheses"]["transfer_share"], 0.3)
+        self.assertEqual({k: round(v, 9) for k, v in self.foundry.shares().items()},
+                         {"capacity": 0.0, "model": 0.0, "transfer": 0.4, "fast": 0.4, "exploration": 0.2})
+        # Sept 25, 2026 (S1): the game file's calls go to capacity, model and exploration (test_foundry_capacity).
+        self.assertEqual(load_game()["hypotheses"]["transfer_share"], 0)
         self.settings(transfer_share=0.3, fast_share=0.5, exploration_share=0.2)
-        self.assertEqual(self.foundry.shares(), {"transfer": 0.3, "fast": 0.5, "exploration": 0.2})
+        self.assertEqual(self.foundry.shares(), {"capacity": 0.0, "model": 0.0, "transfer": 0.3, "fast": 0.5, "exploration": 0.2})
 
     def test_with_no_transfer_share_nothing_is_ported_and_the_routes_are_as_before(self):
         self.assertEqual(DEFAULTS["transfer_share"], 0)
@@ -648,7 +654,7 @@ class Transfer(FoundryCase):
         self.earn_on(etf, "alpaca-paper")
         # An older game file, without the dial.
         older = {k: v for k, v in self.house.game["hypotheses"].items() if k not in ("transfer_share", "_about_sept23b")}
-        self.house.game["hypotheses"] = {**older, "fast_desks": [self.DESK, "alpaca-crypto-alts"]}
+        self.house.game["hypotheses"] = {**older, "fast_desks": [self.DESK, "alpaca-crypto-alts"], "fast_share": 0.5}
         self.foundry = Foundry(self.house, self.frontier)
         self.house.hypotheses = self.foundry
         self.assertEqual(self.foundry.shares()["transfer"], 0)
