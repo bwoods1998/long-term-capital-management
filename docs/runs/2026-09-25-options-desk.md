@@ -120,6 +120,14 @@ seats in `league/niches.json` (with forward-first's F3), `league/feeds.py`, `ltc
 run's founders live in `league/seeds/` (options only) and its seats in the `alpaca-options` row, so no
 file of the Kalshi run's is touched.
 
+**Four runs (the owner's message, about 06:18Z):** a fourth run executes `docs/goals/LTCM_JEV_SENSES.md`. It
+owns only the Jev files (`league/jev.py`, `sensors.py`, `triage.py`, `hypothesis_memory.py`, `exposure.py`,
+`semantic_lab.py`, `jev_features.py`, `scripts/jev_lab_eval/`, `gateway/lib/typesafe.mjs`, `config.json`'s
+`jev` block), lands small hooks into `research_gate.py`, `feeds.py` and `lab.py` only after the waves that
+own them merge, and changes no money rule. One deploy at a time across the four runs; any gateway deploy
+rebases on the others' gateway changes and re-runs every gateway test. No file of this run's overlaps (this
+run's `config.json` change is its own new `options_structures` key).
+
 **This run's current wave, file owners and deploys (kept current):**
 
 | Wave | State | Files owned |
