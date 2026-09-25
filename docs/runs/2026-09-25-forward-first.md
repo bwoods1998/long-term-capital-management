@@ -65,14 +65,14 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
 | 0.4 | The scoreboard at T0 | done (below; Z, PR #298) |
 | H1 | Ship the stuck head | promoted 04:09:55Z (not by this session); Sail's checkpoints recovered at 01:55:04Z, so the backup alert is quiet until the next failure; the updater's next CODE release is the last check |
 | B | `kalshi-open` offered markets with no intent | not a defect (05:00Z, below) |
-| H3 | The release train | merged 10:33:52Z (#296); ships in the options run's Deploy V (owner deploy) |
+| H3 | The release train | merged 10:33:52Z (#296); LIVE in the options run's Deploy V (promoted 11:08:45Z, watched to 11:18:45Z); the updater held main's head to 20:05Z (the session hold) |
 | H5/H6 | The tick; sessions across restarts; restarts in health | built, PR #297 (CI green); adversarial review running |
 | H4 | A real book never freezes on cents | built, PR #302; three-lens review fixes on `h4/review` (`b62b215`); money digest `535a7f15` -> `d7d910fe`; integrated |
 | Z | The scoreboard | merged 10:33:56Z (#298) |
 | H2 | A vendor's outage never rolls back a release | built, PR #307; reviewed, fixes on `h2/review` (`49acc6c`), integrated |
 | F1 | The lab places, breeds and graduates on forward growth | built, PR #306 (CI green); Deploy B (`lab.py` protected) |
 | F2/F4/X2 | Research on outcomes; lanes measured; refusal dedupe | built, PR #311 (CI green); Deploy B (touches `ledger.py`: the `consult.outcome` kind) |
-| A | Deploy A integration (`a/integration`) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; targeted tests running; Deploy A 20:10Z |
+| A | Deploy A integration (`a/integration`, draft PR #323) | main (incl. the options run's Deploy V, #317) + H2, H4, H5 reviewed; 630 targeted tests OK after re-pointing the structure-invariance test to H4's book.py; CI running; Deploy A 20:10Z |
 
 ## Findings before Wave 0 reports
 
