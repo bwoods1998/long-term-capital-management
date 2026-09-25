@@ -1,0 +1,8 @@
+{
+  "family": "options-orb-vertical",
+  "name": "krasker_29_touch_priced_exits",
+  "repair": {
+    "key": "order_refusal:options-shadow:limit price deviates #% from reference"
+  },
+  "why": "Corrected child of krasker-29. Its signal exits halved the structure mark, consistent with four IWM price-distance refusals of 48.15\u201350%. Use the marked liquidation value for every exit rather than half-mark, penny or slip-discounted limits, retaining the existing credit-close conversion. Preserve the parent's venue, horizon, symbols, entry logic, exit triggers and parameters. Born at rung 0 with no inherited record; CI and subsequent floor outcomes judge the repair."
+}
