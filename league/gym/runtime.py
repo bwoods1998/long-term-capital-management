@@ -142,13 +142,27 @@ def canonical(value: Any) -> str:
 
 
 # --------------------------------------------------------------------------- the sandboxed namespace
+#: Standard-library modules numpy's own C code may import lazily while a program's frame is current
+#: (C-level imports look `__import__` up in the CALLING frame's builtins: the program's).
+_NUMPY_NEEDS = frozenset({"warnings", "operator", "functools", "contextlib", "collections", "copyreg", "itertools", "numbers",
+                          "types", "re", "math"})
+
+
 def _importer(name: str, globals: Any = None, locals: Any = None, fromlist: Any = (), level: int = 0) -> Any:
-    if level != 0 or name not in ("math", "numpy"):
-        raise ImportError(f"a program imports only math and numpy, not {name}")
+    """The `__import__` a program's builtins carry. A program's own import statements were checked by
+    `safety.check_program` (math and numpy, nothing else, no submodule); this hands out math, numpy,
+    and whatever numpy's internals ask for on its behalf (numpy.* and a few standard modules)."""
+    import importlib
+
+    if level != 0:
+        raise ImportError("a program imports only math and numpy")
+    root = name.split(".")[0]
     if name == "math":
         return math
-    import numpy
-    return numpy
+    if root == "numpy" or name in _NUMPY_NEEDS:
+        module = importlib.import_module(name)
+        return module if fromlist else importlib.import_module(root)
+    raise ImportError(f"a program imports only math and numpy, not {name}")
 
 
 _SAFE_BUILTIN_NAMES = (

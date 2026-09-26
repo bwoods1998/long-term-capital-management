@@ -265,8 +265,29 @@ class TheRuntime(unittest.TestCase):
 
     def test_imports_at_run_time_reach_only_math_and_numpy(self):
         self.assertIs(R._importer("math"), math)
-        with self.assertRaises(ImportError):
-            R._importer("os")
+        self.assertIs(R._importer("numpy"), np)
+        for name in ("os", "sys", "subprocess", "pickle", "socket", "importlib"):
+            with self.assertRaises(ImportError):
+                R._importer(name)
+
+    def test_numpy_works_inside_a_program_in_a_fresh_interpreter(self):
+        # numpy's C code imports its own submodules lazily through the CALLING frame's builtins (the
+        # program's); a warm process hides that, so this runs where nothing is imported yet.
+        import subprocess
+        import sys
+        code = ("import numpy as np\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n"
+                "    x = np.arange(50.0)\n    return [{'cancel': int(np.std(x) + np.percentile(x, 90) + np.median(x) + np.var(x)"
+                " + np.linalg.norm(x) + np.nanmean(x) + np.corrcoef(x, x)[0, 1] + np.polyfit(x, x, 1)[0] + np.cumsum(x)[-1]"
+                " + np.quantile(x, 0.5) + np.argsort(x)[0] + np.round(np.mean(x), 2) + np.searchsorted(x, 3.0)"
+                " + x.any() + x.all() + x.mean() + x.std() + x.var() + x.max() + x.min() + x.sum() + x.prod()"
+                " + x.clip(0, 1).sum() + x.round(2).sum() + x.cumsum()[-1] + x.argmax() + x.dot(x))}]\n")
+        script = ("import sys\nfrom league.gym.runtime import load_program\nr = load_program(sys.stdin.read()).start()\n"
+                  "print(r.decide(None), r.messages)\n")
+        done = subprocess.run([sys.executable, "-c", script], input=code, capture_output=True, text=True,
+                              cwd=str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("[{'cancel':", done.stdout)
+        self.assertIn("[]", done.stdout.split("]", 1)[1] + "]")
 
 
 if __name__ == "__main__":

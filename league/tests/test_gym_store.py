@@ -14,9 +14,10 @@ try:
 except ImportError:  # pragma: no cover
     HAVE = False
 
+from league.gym import events as EV  # standard library only: these tests run everywhere
+
 if HAVE:
     from league.gym import ctx as C
-    from league.gym import events as EV
     from league.gym import greeks as G
     from league.gym import store as S
     from league.gym import synth
