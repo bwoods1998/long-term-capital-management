@@ -114,8 +114,9 @@ def implied_vol(price, spot, strike, years, rate, is_call, *, guess=None, iterat
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             newton = v - diff / vega
         bad = ~np.isfinite(newton) | (newton <= lo[live]) | (newton >= hi[live])
-        vol[live] = np.where(bad, 0.5 * (lo[live] + hi[live]), newton)
         done = np.abs(diff) <= tol * np.maximum(tv[live], 1e-4)
+        # A converged element keeps its vol: a last step from it could leave the bracket and bisect.
+        vol[live] = np.where(done, v, np.where(bad, 0.5 * (lo[live] + hi[live]), newton))
         live = live[~done]
         if live.size == 0:
             break
