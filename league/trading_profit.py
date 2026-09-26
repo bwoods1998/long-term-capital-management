@@ -53,12 +53,15 @@ def marked_value(row: Mapping[str, Any], day: Any) -> tuple[Decimal, str] | None
     if chain is None:
         return None
     legs = json.loads(row['legs'])
+    revision = getattr(chain, 'quote_revision', None)
+    if not isinstance(revision, int) or revision % 2:
+        return None  # record() is updating this chain, or this reader predates coherent snapshots
     generation = chain.generation
     indices = [chain.column(leg['symbol']) for leg in legs]
     if not indices or min(indices) < 0:
         return None
     bids, asks = chain.bid[:, indices].copy(), chain.ask[:, indices].copy()
-    if generation != chain.generation:
+    if generation != chain.generation or revision != chain.quote_revision:
         return None
     good = np.flatnonzero((np.isfinite(bids) & np.isfinite(asks) & (bids >= 0) & (asks >= bids)).all(axis=1))
     if not len(good):

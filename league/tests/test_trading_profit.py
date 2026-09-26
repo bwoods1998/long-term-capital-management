@@ -91,7 +91,7 @@ class TradingProfitTest(unittest.TestCase):
 
     @unittest.skipIf(np is None, 'the live quote grid requires numpy')
     def test_mark_uses_copied_columns_and_database_quantity_with_real_quote_time(self):
-        chain = SimpleNamespace(day=dt.date(2026, 9, 28), open_min=570, generation=1,
+        chain = SimpleNamespace(day=dt.date(2026, 9, 28), open_min=570, generation=1, quote_revision=2,
                                 bid=np.array([[1., .4], [1.2, .5]]), ask=np.array([[1.2, .6], [1.4, .7]]),
                                 column=lambda symbol: {'long': 0, 'short': 1}.get(symbol, -1))
         row = position(1, '-202', 2, 'open', root='SPY',
@@ -103,6 +103,26 @@ class TradingProfitTest(unittest.TestCase):
         value, stamp = marked_value(row, SimpleNamespace(chains={'SPY':chain}))
         self.assertEqual(value, 120)
         self.assertEqual(stamp, '2026-09-28T13:30:00.000Z')
+
+    @unittest.skipIf(np is None, 'the live quote grid requires numpy')
+    def test_quote_update_cannot_mix_old_bids_with_new_asks(self):
+        chain = SimpleNamespace(day=dt.date(2026, 9, 28), open_min=570, generation=1, quote_revision=2,
+                                bid=np.array([[1.0]]), ask=np.array([[1.2]]), column=lambda symbol: 0)
+        row = position(1, '-102', 1, 'open', root='SPY',
+                       legs=json.dumps([{'symbol':'long','side':1,'ratio':1}]))
+        day = SimpleNamespace(chains={'SPY': chain})
+        old_bids = chain.bid
+        class UpdatingQuotes:
+            def __getitem__(self, index):
+                old = old_bids[index].copy()
+                chain.ask[0, 0] = 2.2
+                chain.quote_revision += 2  # ordinary quote write: the column generation is unchanged
+                return old
+        chain.bid = UpdatingQuotes()
+        self.assertIsNone(marked_value(row, day))
+        chain.bid = old_bids
+        chain.quote_revision = 5  # the writer has begun, but has not finished this row
+        self.assertIsNone(marked_value(row, day))
 
     def test_existing_corrupt_state_is_unknown(self):
         with tempfile.TemporaryDirectory() as directory:
