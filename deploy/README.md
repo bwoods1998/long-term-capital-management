@@ -79,8 +79,8 @@ The box can reach only its allowlist; Sail resolves the names itself. The option
 gateway's exact `*.workers.dev` name (every account and OpenAI call), `api.sailresearch.com` (models),
 `sailbox-api.sailresearch.com` (Gym and gate boxes), `blakewoods.us` (the site), and `pypi.org` with
 `files.pythonhosted.org` for the venv's packages (the box's Python 3.11 has no numpy, which the Gym's
-live-path pieces need). `LEAGUE_HOSTS` in
-`scripts/floor_box.py` still lists the old league's data hosts until the prune (Wave 2b) trims it.
+live-path pieces need). `LEAGUE_HOSTS` in `scripts/floor_box.py` still lists the old league's data
+hosts until the prune (Wave 2b) trims it.
 `floor_box.py hosts` prints the list and what is missing; `hosts --add` widens it and records it.
 
 ## Real money
