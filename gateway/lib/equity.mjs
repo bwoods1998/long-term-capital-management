@@ -58,7 +58,7 @@ export function stale(reading, at) {
  * `{ capMicro, parts }`, where `parts` is what `/v1/health` reports.
  */
 export function effectiveCap(env = {}, reading = null, at = Date.now()) {
-  const base = monthCapMicro(env);
+  const base = monthCapMicro(env, at);
   const share = shareMillionths(env);
   const baseline = parseUsdMicro(env.EQUITY_BASELINE_USD, null);
   const ceiling = parseUsdMicro(env.FRONTIER_MONTH_MAX_USD, null);

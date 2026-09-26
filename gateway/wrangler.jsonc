@@ -83,7 +83,11 @@
     // Sept 24 01:34 UTC (the close-the-gaps run's T0): $394.46 metered this month and the owner
     // states $213 of OpenAI credit funded (he added $200), so the month is aligned to metered +
     // funded, rounded down -> $607.
-    "FRONTIER_MONTH_USD": "607",
+    // Sept 26: owner confirms $124 remaining after adding $100. Raise the existing aggregate
+    // ceiling by exactly that addition: $607 -> $707 (metered $596.29 at confirmation).
+    // This credit funds September only; October requires a freshly reconciled allowance.
+    "FRONTIER_MONTH_USD": "707",
+    "FRONTIER_FUNDED_MONTH": "2026-09",
     // Sept 23: compute follows profit (lib/equity.mjs). The month's cap is FRONTIER_MONTH_USD plus
     // COMPUTE_PROFIT_SHARE of the real accounts' equity above EQUITY_BASELINE_USD (the live grant's
     // capital, Kalshi $517.75 + Alpaca $500), read here with the venue keys, and exactly
@@ -93,7 +97,7 @@
     // `frontier.profit_index.earned_usd`). Raise it with each OpenAI top-up bought from profit.
     "COMPUTE_PROFIT_SHARE": "0.3",
     "EQUITY_BASELINE_USD": "1017.75",
-    "FRONTIER_MONTH_MAX_USD": "607",
+    "FRONTIER_MONTH_MAX_USD": "707",
     // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
     // by month or restart. No production trading/release decision consumes these answers.
     // Sept 23 06:40 UTC: $16.14 metered and the owner reports $26 funded at Jev -> metered +

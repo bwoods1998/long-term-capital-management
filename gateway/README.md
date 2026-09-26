@@ -85,10 +85,13 @@ path, Wave 5):
 ## The OpenAI month
 
 `/v1/frontier/responses` forwards one call to OpenAI's Responses API within `FRONTIER_MONTH_USD`
-($607 for September 2026, `FRONTIER_MONTH_MAX_USD` the same): the call's worst case is reserved
+($707 for September 2026, `FRONTIER_MONTH_MAX_USD` the same): the call's worst case is reserved
 before it leaves, settled at the usage OpenAI reports, and a call that does not fit is a `402`. The
 reply carries `X-LTCM-Cost-USD` to the microdollar. The cap never goes above funded money; raising it
-is a gateway deploy.
+is a gateway deploy. The owner confirmed a $100 addition on September 26, increasing the aggregate
+ceiling from $607 to $707. `FRONTIER_FUNDED_MONTH=2026-09` expires that allowance at October 1
+00:00 UTC; the next month requires reconciling remaining credit and deploying its funded month
+and ceiling.
 
 - **Flex** (Sept 26, 2026): a request may carry `service_tier: "flex"` for a model whose
   `FRONTIER_MODELS` row has a `flex` rate (half the standard one for GPT-6 Astra, Sol and Luna). It is
