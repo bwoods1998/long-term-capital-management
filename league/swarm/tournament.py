@@ -103,7 +103,10 @@ class Tournament:
                 fields.update(best_validation=float(mean), since_val_revisions=0, since_val_trials=0)
             self.store.update_family(fid, **fields)
             self.store.bump(fid, validations=1)
+            losses = sorted(float(t["max_loss"]) / max(1, int(t.get("qty") or 1)) for t in (result.get("trades") or [])
+                            if isinstance(t.get("max_loss"), (int, float)))
             self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
+                                 typical_max_loss_usd=round(losses[len(losses) // 2], 2) if losses else None,
                                  validation_numbers={"mean": mean, "t": summary.get("t_stat"),
                                                      "sharpe_daily": summary.get("sharpe_daily"),
                                                      "quarters": summary.get("quarters_positive")},

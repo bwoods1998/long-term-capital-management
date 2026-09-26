@@ -3,6 +3,7 @@
     agents  [{id, family, mechanism, structure, band, born_at, retired_at,
               record: {trials, revisions, forward: {trades, wins, pnl_usd} | None, real: {...} | None}}]
     gym     {as_of, trials, market_years, families_alive, families_retired}
+    compute {as_of, sail_usd, openai_usd}: the swarm's own spend (the House adds its own)
 
 An agent is a family (its id); `family` is its lineage (the founder a fork descends from). Never a program,
 a parameter, a quote, a spread, an implied vol or a result of the Gym beyond counts: the publisher's own
@@ -39,6 +40,7 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
             fams = [dict(r) for r in db.execute("SELECT id, lineage, mechanism, structure, band, born_at, retired_at, trials,"
                                                 " inherited_trials, revisions FROM families")]
             totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
+            spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
             forward: dict[str, dict[str, dict[str, Any]]] = {}
             for r in db.execute("SELECT family, source, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins"
                                 " FROM forward GROUP BY family, source"):
@@ -63,7 +65,11 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                                   "forward": fwd, "real": rec.get("real")}})
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}
-    return {"gym": gym, "agents": agents}
+    # The swarm's OWN spend since it began (its model calls and its Gym boxes; OpenAI through the gateway): the House's
+    # `site_inputs()` adds the House's own before the page shows compute.
+    compute = {"as_of": gym["as_of"], "sail_usd": round(spend.get("sail_model", 0.0) + spend.get("gym_box", 0.0), 2),
+               "openai_usd": round(spend.get("openai", 0.0), 2)}
+    return {"gym": gym, "agents": agents, "compute": compute}
 
 
 __all__ = ["site_inputs"]

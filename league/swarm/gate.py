@@ -9,16 +9,15 @@ THE GATE (when a family's validated best meets the validation line):
 3. ONE HOLDOUT LOOK on a gate box (a fork of the gate image; the Gym image has no holdout days), judged by
    the plan's holdout line (`evidence.holdout_line`, with Holm-Bonferroni across every look the swarm has
    made). The researcher is told PASS or FAIL, never a number.
-4. A pass makes the family a Candidate (live shadow); a Candidate that trades one of the five one-order-
-   closeable types is a Probe (real money from its next session: the live path sizes it by the Money
-   table, or keeps it in shadow when its maximum loss does not fit the account).
+4. A pass makes the family a Candidate (live shadow). Candidate <-> Probe <-> Sized is the LIVE PATH's
+   (the Money table), written through `SwarmStore.set_band`; the swarm never makes a Probe or a Sized.
 
 THE NIGHTLY FORWARD: once a day (after `forward.after_hour_utc`), every Candidate, Probe and Sized family's
 banded version runs over the forward days the gate image holds; the trades are the family's `nightly`
-forward record (the House adds `shadow` and `real` through `bands.record_forward`). Forward records move
-bands and never select among Gym programs: a banded family whose forward record is negative over 20 trades
-loses its band (back to the Gym); a Probe whose record has >= 20 trades, a positive mean and an 80% lower
-bound above zero is Sized.
+forward record (the live path adds `shadow` and `real` through `SwarmStore.add_forward`). Forward records
+move bands and never select among Gym programs: a CANDIDATE whose forward record (nightly + shadow + real)
+is negative over 20 trades goes back to the Gym; a Probe or Sized family's record is kept in its state
+(`forward`, flagged `negative`) for the live path, which alone moves those bands.
 
 Every step is a `swarm.gate` event; band moves are `swarm.band` events (the site's news).
 Standard library only.
@@ -34,7 +33,7 @@ from typing import Any, Callable, Mapping
 
 from . import evidence
 from .pool import GymJob, PoolError
-from .store import CLOSEABLE, SwarmStore, dumps
+from .store import SwarmStore, dumps
 
 REVIEW = """You review option-trading programs before they meet sealed data. A program is one Python file (NEEDS, PARAMS,
 decide(ctx)) that runs in a replay of recorded one-minute option quotes and then, unchanged, on live quotes and real
@@ -173,8 +172,6 @@ class Gate:
             self.store.update_family(fam["id"], best_version=n)
             self.store.set_state(fam["id"], banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
             self.store.set_band(fam["id"], "candidate", reason="passed its holdout look")
-            if fam["structure"] in CLOSEABLE:
-                self.store.set_band(fam["id"], "probe", reason="a Candidate on a type that closes in one order")
         return bool(line["passed"])
 
     # ------------------------------------------------------------------ the nightly forward
@@ -224,12 +221,9 @@ class Gate:
             return None
         record = evidence.forward_record(self.store.forward(fid))
         self.store.set_state(fid, forward=record)
-        if record["negative"]:
+        if record["negative"] and fam["band"] == "candidate":
             self.store.set_band(fid, "gym", reason=f"its forward record turned negative over {record['trades']} trades")
             return {"family": fid, "to": "gym"}
-        if fam["band"] == "probe" and record["sized"]:
-            self.store.set_band(fid, "sized", reason=f"a forward record of {record['trades']} trades with a positive lower bound")
-            return {"family": fid, "to": "sized"}
         return None
 
 

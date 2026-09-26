@@ -15,7 +15,8 @@ Each tick, cheaply and never waiting on the swarm:
    most `mirror_limit` a tick, idempotent by id (`swarm:<seq>`): the public ones (`swarm.born`,
    `swarm.retired`, `swarm.band`, `swarm.note`) feed the site's tape; the rest are private. The House's own
    `agent.*` and `eval.*` kinds are never written here (its roster and evaluator read those).
-3. READ. `bands()` (what the live path trades) and `site_inputs()` (the site's agents and the Gym's pace).
+3. READ. `bands()` (what the live path may run: `bands.read`) and `site_inputs()` (the site's agents, the
+   Gym's pace and the swarm's compute), which the House's own `site_inputs()` merges with the live path's.
 
 Standard library only.
 """
@@ -195,7 +196,7 @@ class SwarmStep:
         return len(rows)
 
     # ------------------------------------------------------------------ read
-    def bands(self) -> dict[str, Any]:
+    def bands(self) -> list[dict[str, Any]]:
         return bands_mod.read(self.root)
 
     def site_inputs(self) -> dict[str, Any]:
@@ -203,13 +204,11 @@ class SwarmStep:
 
 
 def attach(house: Any, root: str | Path, config: Mapping[str, Any]) -> SwarmStep | None:
-    """Set `house.swarm` (and `house.site_inputs` when the House has none of its own) when the swarm is enabled."""
+    """Set `house.swarm` when the swarm is enabled (the House's `site_inputs()` reads `house.swarm.site_inputs()`)."""
     if not (config.get("swarm") or {}).get("enabled"):
         return None
     step = SwarmStep(root, config=config)
     house.swarm = step
-    if getattr(house, "site_inputs", None) is None:
-        house.site_inputs = step.site_inputs
     return step
 
 

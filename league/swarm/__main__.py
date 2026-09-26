@@ -37,8 +37,8 @@ def main(argv: list[str] | None = None) -> int:
         if (root / "swarm.sqlite").exists():
             store = SwarmStore(root, readonly=True)
             out["totals"] = store.totals()
-            out["bands"] = {b: sum(1 for f in bands.read(root)["families"] if f["band"] == b)
-                            for b in ("gym", "candidate", "probe", "sized", "retired")}
+            out["bands"] = {b: sum(1 for f in store.families() if f["band"] == b) for b in ("gym", "candidate", "probe", "sized", "retired")}
+            out["live_rows"] = [{k: r[k] for k in ("family", "band", "validation_passed", "holdout_passed", "version")} for r in bands.read(root)]
             store.close()
         print(json.dumps(out, indent=1, default=str))
         return 0

@@ -1,17 +1,33 @@
-"""What the House reads of the swarm: each family's band and the program that holds it.
+"""What the live path reads of the swarm: the families it may run, with their programs.
 
     from league.swarm import bands
-    view = bands.read(root)            # never raises, never waits more than a second
-    for fam in view["families"]:       # every living family, and the retired ones with a band history
-        fam["band"]                    # gym | candidate | probe | sized | retired
-        fam["program"]                 # {version, sha, params, path} of the version that holds the band (None in the Gym)
-    code = bands.program_code(root, fam["id"])    # that program's source (for the live path's runner)
-    bands.record_forward(root, fam["id"], "shadow", [{"id", "day", "pnl", "max_loss"}, ...])   # the House's records
+    rows = bands.read(root)        # never raises, never waits more than a second ([] when it cannot read)
 
-The swarm writes bands (the gate: Candidate and Probe; the forward record: Sized, or back to the Gym); the
-MONEY rules for Probe and Sized (sizes, caps, stops) are the live path's. The House never blocks on the
-swarm: `read` opens the store read-only with a one-second timeout and returns {"families": [], "error": ...}
-when it cannot.
+One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
+family in the Gym band whose validated version met the validation line (execution tuition: 1-lot real
+orders that measure multi-leg fills and are never evidence). Each row:
+
+    family                the family's id
+    band                  gym | candidate | probe | sized
+    structure, roots      its structure type and roots
+    holdout_passed        it passed its holdout look (Candidate or better)
+    validation_passed     its validated version met the validation line
+    version, code, params, run_sha
+                          the program the row stands for: the version that holds the band (holdout passed),
+                          else the version that met the validation line
+    typical_max_loss_usd  the median maximum loss of ONE structure in that version's validation run (None when
+                          it opened none)
+    seed_era              the program was written by a model that knows 2024-2026 (every program in this swarm
+                          is): it needs a forward record before it is Sized
+    forward               its forward record (nightly + shadow + real): trades, wins, pnl_usd, mean_rom, lcb80,
+                          negative (>= 20 trades and P&L below zero)
+
+OWNERSHIP OF THE BANDS. The swarm moves gym <-> candidate (the gate's holdout pass; a Candidate whose forward
+record turns negative over 20 trades goes back to the Gym) and retires families. The LIVE PATH alone moves
+candidate <-> probe <-> sized by the Money table, writing through `SwarmStore(root).set_band(fid, band,
+reason=...)`, and records its trades with `SwarmStore(root).add_forward(fid, "shadow" | "real", trades)` (ids
+unique per family). A Probe or Sized family whose forward record turns negative is flagged here
+(`forward.negative`) for the live path to demote.
 
 Standard library only.
 """
@@ -19,75 +35,64 @@ Standard library only.
 from __future__ import annotations
 
 import sqlite3
-import time
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from . import DB_NAME
-from .store import CLOSEABLE, SwarmStore, loads
+from .store import loads
+
+LIVE_BANDS = ("candidate", "probe", "sized")
 
 
-def read(root: str | Path) -> dict[str, Any]:
-    """Every living family's band, the program holding it and its evidence summaries (see the module doc)."""
+def read(root: str | Path) -> list[dict[str, Any]]:
+    """The rows (the module docstring). [] when there is no store or it cannot be read within a second."""
     path = Path(root) / DB_NAME
-    out: dict[str, Any] = {"as_of": time.time(), "families": []}
     if not path.exists():
-        out["error"] = "no swarm store yet"
-        return out
+        return []
     try:
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         db.row_factory = sqlite3.Row
         try:
-            rows = [dict(r) for r in db.execute("SELECT * FROM families WHERE retired_at IS NULL OR band != 'retired' ORDER BY id")]
+            fams = [dict(r) for r in db.execute("SELECT id, band, structure, roots, state FROM families WHERE retired_at IS NULL ORDER BY id")]
+            wanted: dict[str, int] = {}
+            for fam in fams:
+                state = loads(fam["state"], {}) or {}
+                fam["state"] = state
+                if fam["band"] in LIVE_BANDS and state.get("banded_version"):
+                    wanted[fam["id"]] = int(state["banded_version"])
+                elif fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
+                    wanted[fam["id"]] = int(state["validation_version"])
             versions = {}
-            for r in db.execute("SELECT family, n, sha, params, path FROM versions"):
-                versions[(r["family"], r["n"])] = dict(r)
-            forward = {}
-            for r in db.execute("SELECT family, source, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins"
-                                " FROM forward GROUP BY family, source"):
-                forward.setdefault(r["family"], {})[r["source"]] = {"trades": r["n"], "wins": r["wins"], "pnl_usd": round(r["pnl"] or 0.0, 2)}
+            for fid, n in wanted.items():
+                row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fid, n)).fetchone()
+                if row is not None:
+                    versions[fid] = dict(row)
         finally:
             db.close()
-    except sqlite3.Error as exc:
-        out["error"] = f"{type(exc).__name__}: {exc}"
-        return out
-    for r in rows:
-        state = loads(r.get("state"), {}) or {}
-        n = state.get("banded_version") if r["band"] in ("candidate", "probe", "sized") else None
-        v = versions.get((r["id"], n)) if n else None
-        out["families"].append({
-            "id": r["id"], "lineage": r["lineage"], "band": r["band"], "band_since": r.get("band_since"),
-            "structure": r["structure"], "closeable": r["structure"] in CLOSEABLE, "roots": loads(r["roots"], []),
-            "mechanism": r["mechanism"], "born_at": r["born_at"], "retired_at": r.get("retired_at"),
-            "program": ({"version": v["n"], "sha": v["sha"], "params": loads(v["params"], {}), "path": str(Path(root) / v["path"])}
-                        if v else None),
-            "validation": state.get("validation_view"), "holdout": "pass" if r["band"] in ("candidate", "probe", "sized") else None,
-            "forward": forward.get(r["id"], {}), "forward_record": state.get("forward"),
-            "trials": int(r["trials"]) + int(r["inherited_trials"]), "revisions": r["revisions"],
+    except sqlite3.Error:
+        return []
+    out = []
+    for fam in fams:
+        v = versions.get(fam["id"])
+        if v is None:
+            continue
+        try:
+            code = (Path(root) / v["path"]).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        state = fam["state"]
+        params = loads(v["params"], {}) or {}
+        from .gate import run_sha
+
+        validated = state.get("validation_version") == v["n"] and bool((state.get("validation_line") or {}).get("passed"))
+        out.append({
+            "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": loads(fam["roots"], []),
+            "holdout_passed": fam["band"] in LIVE_BANDS, "validation_passed": validated or fam["band"] in LIVE_BANDS,
+            "version": int(v["n"]), "code": code, "params": params, "run_sha": run_sha({"sha": v["sha"], "params": params}),
+            "typical_max_loss_usd": state.get("typical_max_loss_usd") if state.get("validation_version") == v["n"] else None,
+            "seed_era": True, "forward": state.get("forward"),
         })
     return out
 
 
-def program_code(root: str | Path, family: str) -> str | None:
-    """The source of the version holding a family's band (None in the Gym band or when unreadable)."""
-    for fam in read(root)["families"]:
-        if fam["id"] == family and fam.get("program"):
-            try:
-                return Path(fam["program"]["path"]).read_text(encoding="utf-8")
-            except OSError:
-                return None
-    return None
-
-
-def record_forward(root: str | Path, family: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
-    """The House's forward trades for a family (`shadow` or `real`), each once by id. Returns how many were new."""
-    if source not in ("shadow", "real"):
-        raise ValueError("the House records shadow or real trades; the swarm records its nightly replays")
-    store = SwarmStore(root)
-    try:
-        return store.add_forward(family, source, trades)
-    finally:
-        store.close()
-
-
-__all__ = ["read", "program_code", "record_forward"]
+__all__ = ["read", "LIVE_BANDS"]
