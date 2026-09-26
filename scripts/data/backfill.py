@@ -349,12 +349,13 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
                                               source=f"thetadata option_history_quote 1m exp=* max_dte={sl.MAX_DTE} strike_range={rng}"))
         under = None
         for expiry in [e for e in expiries if e >= task.day][:3]:
+            # Calls only: the same underlying series at half the request time (measured Sept 26).
             greeks = theta.call("option_history_greeks_first_order", task.root, expiry, interval="1m",
-                                date=task.day, strike_range=1, **window)
+                                date=task.day, strike_range=1, right="call", **window)
             if greeks is not None:
                 under = fr.underlying(greeks, open_min=open_min, close_min=close_min)
                 if under.height:
-                    put("underlying", under, f"thetadata option_history_greeks_first_order underlying_price exp={expiry.isoformat()}")
+                    put("underlying", under, f"thetadata option_history_greeks_first_order underlying_price exp={expiry.isoformat()} strike_range=1 calls")
                     break
         oi = theta.call("option_history_open_interest", task.root, "*", date=task.day, max_dte=sl.MAX_DTE, strike_range=rng)
         if oi is not None:
