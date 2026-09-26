@@ -182,6 +182,31 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    """One line of progress every N seconds (for a monitor): stages, rate, ETAs, the last error."""
+    api = bl.client()
+    box = bl.data_box_id()
+    last_error = None
+    while True:
+        try:
+            p = json.loads(api.download(box, "/data/work/progress.json"))
+            alive = api.exec(box, ["bash", "-c", "p=$(cat /data/work/backfill.pid 2>/dev/null); "
+                                                 "[ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo yes || echo no"], timeout=60).stdout.strip()
+            stages = " ".join(f"s{k}:{v['done']}/{v['planned']}" for k, v in p["stages"].items())
+            etas = " ".join(f"eta{k}={v.get('hours_to_finish')}h" for k, v in list(p["eta"].items())[:3])
+            error = p.get("last_error")
+            line = f"{bl.now()} alive={alive} rate={p['underlying_days_per_hour']}/h {stages} {etas}"
+            if error and error != last_error:
+                line += f" ERR={error[:160]}"
+            last_error = error
+            say(line if alive == "yes" else line + " BACKFILL NOT RUNNING")
+        except Exception as error:  # noqa: BLE001 - a watch keeps watching
+            say(f"{bl.now()} watch error {type(error).__name__}: {str(error)[:160]}")
+        if args.once:
+            return 0
+        time.sleep(args.every)
+
+
 def cmd_slots(args: argparse.Namespace) -> int:
     api = bl.client()
     box = bl.data_box_id()
@@ -263,6 +288,10 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(func=cmd_start)
     sub.add_parser("stop").set_defaults(func=cmd_stop)
     sub.add_parser("status").set_defaults(func=cmd_status)
+    w = sub.add_parser("watch")
+    w.add_argument("--every", type=int, default=900)
+    w.add_argument("--once", action="store_true")
+    w.set_defaults(func=cmd_watch)
     sl_ = sub.add_parser("slots")
     sl_.add_argument("n", type=int)
     sl_.set_defaults(func=cmd_slots)

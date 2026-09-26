@@ -194,10 +194,44 @@ def checkpoint_with_retry(api: Any, box: str, *, name: str, ttl_seconds: int, at
     raise AssertionError("unreachable")
 
 
+def wait_until_complete(kind: str, *, poll: float = 120.0, api: Any = None, sleep: Callable[[float], None] = time.sleep,
+                        log: Callable[[str], None] = say) -> dict[str, Any]:
+    """Block until the data box's progress shows every stage this image needs as complete."""
+    api = api or bl.client()
+    box = bl.data_box_id()
+    last = None
+    while True:
+        try:
+            progress = json.loads(api.download(box, "/data/work/progress.json"))
+            rows = {str(s): (progress.get("stages") or {}).get(str(s)) or {} for s in KINDS[kind]["needs_stages"]}
+            if all(r.get("planned") and r.get("done", 0) >= r["planned"] for r in rows.values()):
+                log(f"{kind}: stages {sorted(rows)} complete at {bl.now()}")
+                return rows
+            summary = {s: f"{r.get('done')}/{r.get('planned')}" for s, r in rows.items()}
+            if summary != last:
+                log(f"{kind}: waiting, stages {summary} at {bl.now()}")
+                last = summary
+        except (bl.SailboxError, ValueError, KeyError) as error:
+            log(f"{kind}: progress unreadable ({type(error).__name__}); retrying")
+        sleep(poll)
+
+
 def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Callable[[float], None] = time.sleep,
           ttl_days: int = 365, rehearsal: bool = False, keep: bool = False) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
-    terminates the fork and records the result under `rehearsals` (never as the current image)."""
+    terminates the fork and records the result under `rehearsals` (never as the current image).
+    One build at a time: each stops and restarts the data box's backfill around its checkpoint."""
+    import fcntl
+
+    bl.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(bl.STATE_DIR / "images.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
+                      rehearsal=rehearsal, keep=keep)
+
+
+def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
+           ttl_days: int, rehearsal: bool, keep: bool) -> dict[str, Any]:
     api = api or bl.client()
     spec = KINDS[kind]
     errors: list[dict[str, Any]] = []
@@ -315,12 +349,15 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--ttl-days", type=int, default=365)
     b.add_argument("--rehearsal", action="store_true", help="every step on the store as it is; the fork is terminated")
     b.add_argument("--keep", action="store_true", help="with --rehearsal: leave the fork asleep (for a nightly rehearsal)")
+    b.add_argument("--when-complete", action="store_true", help="wait until the data box holds what the image needs")
     v = sub.add_parser("verify")
     v.add_argument("kind", choices=sorted(KINDS))
     v.add_argument("--checkpoint", default=None)
     sub.add_parser("status")
     args = parser.parse_args(argv)
     if args.cmd == "build":
+        if args.when_complete:
+            wait_until_complete(args.kind)
         print(json.dumps(build(args.kind, version=args.version, force=args.force or args.rehearsal,
                                ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep), indent=1))
     elif args.cmd == "verify":
