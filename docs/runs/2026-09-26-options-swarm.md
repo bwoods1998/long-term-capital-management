@@ -874,6 +874,30 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
 - **21:45Z B3 PR #388 opened:** the Claude gateway route, Claude-first architect and audit, and the
   diagnostician.
 
+- **22:00-22:25Z Reviews.**
+  - **#388 (B3, Claude):** merge after fixes. Two billing-safety fixes:
+    - a truncated upstream answer settled at $0;
+    - holds never swept.
+    
+    Also: a diagnostician retry loop on billed failures, a retire race, phantom holds, empty answers
+    counted as success, and masking. Sent to B3.
+  - **#389 (B1, search and D2):** merge after fixes. The high finding: a version demoted by its 1.5x
+    Train robustness run kept `gate_ready` and its tuition eligibility. Also:
+    - submitted versions skipped robustness;
+    - a migration restart-loop risk;
+    - batch-dependent per-year eligibility;
+    - top-10 profile cost against the $1.5/h pace, so `top_profile` will be set null in `swarm.json`;
+    - a retire-reason D2a leak;
+    - a retire race;
+    - unbounded robustness queueing.
+    
+    Sent to B1. R1 waits for these fixes.
+- **22:16Z Site.** personal-site #13 merged (`e4a96f6`) and deployed (version `5ce5265c`). Agent progress
+  checklists accept the D2 line (50 trades on 25 days) beside 100 on 60, so the site stays valid across
+  R1. Page 200; the checkpoint loads.
+- **22:07Z Population.** 26 alive, up from 16 at the sprint's start. The deployed architect still asks
+  for "3 to N"; main's #383 asks for the whole gap and ships in R1.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
