@@ -98,6 +98,11 @@ RUNG_OF = {"replay": 0, "paper": 1, "probe": 2, "bunt": 2, "swing": 3, "star": 3
 PAPER_BOOK = {"alpaca": "alpaca-paper", "kalshi": "kalshi-shadow"}
 REAL_BOOK = {"alpaca": "alpaca", "kalshi": "kalshi"}
 EVENT_BOOKS = ("kalshi-shadow", "kalshi")
+#: Every practice book of a venue, and the practice books whose fills pay the execution haircut (`families`, G of the
+#: options-desk run, Sept 25, 2026): a STRUCTURE agent practises on the book `league/config.json` `options_structures.book`
+#: names (`practice_book`), the House's `options-shadow` today.
+PRACTICE_BOOKS = families.PRACTICE_BOOKS
+HAIRCUT_BOOKS = families.HAIRCUT_BOOKS
 MAX_MOVES = 50
 #: The mechanism ledger's states in the order of their proof (C2, Sept 24, 2026): a newcomer never displaces a
 #: member of a family whose state ranks above its own family's.
@@ -106,6 +111,151 @@ STATE_RANK = {"unproven": 0, "proven": 1, "swing": 2}
 #: (PR #164, Sept 23, 2026) it does, so a position follows its stake past one order's size; before,
 #: no position could exceed four fifths of the cap, exactly as `capital.scaled_limits` held rung 3.
 EXITS_SLICED = True
+
+# ------------------------------------------------------------ real structures (O1-O5)
+#: The bounds of the options-desk run's money rows (docs/goals/LTCM_OPTIONS_DESK.md, the table O1-O5; Deploy G, Sept 25,
+#: 2026). `league.ci` refuses a constitution outside them (`spread_problems`), and a House that reads one anyway treats
+#: real structures as switched off (`spread_rule`): it fails closed. The line (O4) may be made stricter, never looser.
+SPREAD_BOUNDS: dict[str, tuple[Decimal, Decimal]] = {
+    "spread_probe_usd": (Decimal("80"), Decimal("150")),  # O2
+    "spread_position_share": (Decimal("0.5"), Decimal("1.0")),  # O3
+    "option_spread_haircut_bps": (Decimal("24"), Decimal("60")),  # O5, `evidence.alpaca_paper_haircut_bps.option_spread`
+}
+#: O4's floors: {key: the loosest value the row allows}. `replay_min_oos_growth` is "positive": growth ABOVE it.
+SPREAD_LINE_FLOORS: dict[str, Decimal] = {"min_practice_closed": Decimal(3), "min_w_paper": Decimal("1.01"),
+                                          "replay_min_practice_closed": Decimal(1), "replay_min_structures": Decimal(20),
+                                          "replay_min_oos_growth": Decimal(0)}
+#: The structure types real money may be (`allocator.option_spread_real_types`) without a further owner confirmation: the
+#: debit vertical, the one type the plan authorizes on the cash account. A credit type (or any other) joins this tuple only
+#: with the owner's explicit confirmation, written here with its date (the amendment's credit grant arrived cut and is held).
+SPREAD_REAL_TYPES_AUTHORIZED = ("debit_vertical",)
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        out = Decimal(str(value))
+    except Exception:  # noqa: BLE001 - not a number is out of bounds
+        return None
+    return out if out.is_finite() else None
+
+
+def spread_problems(constitution: Mapping[str, Any] | None = None) -> list[str]:
+    """Why the constitution's real-structure rows (O1-O5) are outside their bounds, or [] when they are inside them, or
+    absent (no real structures at all: the rows before Deploy G). `league.ci` refuses a tree with any problem."""
+    r = rules(constitution)
+    keys = ("option_spreads_real", "option_spread_real_types", "spread_probe_usd", "spread_position_share", "spread_probe_line")
+    haircut = (r.get("evidence") or {}).get("alpaca_paper_haircut_bps")
+    if not any(k in r for k in keys) and not (isinstance(haircut, Mapping) and "option_spread" in haircut):
+        return []
+    problems = []
+    missing = [k for k in keys if k not in r]
+    if missing:
+        problems.append(f"allocator: the real-structure rows come together; missing {', '.join(missing)}")
+    if "option_spreads_real" in r and not isinstance(r["option_spreads_real"], bool):
+        problems.append("allocator.option_spreads_real (O1) is true or false")
+    types = r.get("option_spread_real_types")
+    if "option_spread_real_types" in r:
+        if not isinstance(types, (list, tuple)) or not types or len(set(types)) != len(types) \
+                or any(t not in SPREAD_REAL_TYPES_AUTHORIZED for t in types):
+            problems.append(f"allocator.option_spread_real_types must list distinct types among {list(SPREAD_REAL_TYPES_AUTHORIZED)} "
+                            f"(a credit type, or any other, needs the owner's explicit confirmation): {types!r}")
+    for key in ("spread_probe_usd", "spread_position_share"):
+        if key in r:
+            low, high = SPREAD_BOUNDS[key]
+            value = _decimal(r[key])
+            if value is None or not low <= value <= high:
+                problems.append(f"allocator.{key} = {r[key]!r} is outside [{low}, {high}]")
+    line = r.get("spread_probe_line")
+    if "spread_probe_line" in r:
+        if not isinstance(line, Mapping) or set(line) != set(SPREAD_LINE_FLOORS):
+            problems.append(f"allocator.spread_probe_line (O4) has exactly the keys {sorted(SPREAD_LINE_FLOORS)}")
+        else:
+            for key, floor in SPREAD_LINE_FLOORS.items():
+                value = _decimal(line[key])
+                if value is None or value < floor or (key != "min_w_paper" and key != "replay_min_oos_growth" and value != value.to_integral_value()):
+                    problems.append(f"allocator.spread_probe_line.{key} = {line[key]!r} is looser than the row's {floor} (or not a count)")
+    low, high = SPREAD_BOUNDS["option_spread_haircut_bps"]
+    rate = _decimal(haircut.get("option_spread")) if isinstance(haircut, Mapping) else None
+    if rate is None or not low <= rate <= high:
+        problems.append(f"allocator.evidence.alpaca_paper_haircut_bps.option_spread (O5) must be in [{low}, {high}] a side")
+    return problems
+
+
+def spread_rule(constitution: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """The real-structure rows as the allocator and the House read them, or None -- NO real structures -- where the
+    constitution has none, or has them outside their bounds (`spread_problems`: fail closed). {"on": O1, "types": the
+    admitted types, "probe_usd": O2, "position_share": O3, "line": O4's numbers}."""
+    r = rules(constitution)
+    if "option_spreads_real" not in r or spread_problems(constitution):
+        return None
+    line = r["spread_probe_line"]
+    return {"on": r["option_spreads_real"] is True, "types": tuple(r["option_spread_real_types"]),
+            "probe_usd": _d(r["spread_probe_usd"]), "position_share": _d(r["spread_position_share"]),
+            "line": {"min_practice_closed": int(line["min_practice_closed"]), "min_w_paper": float(line["min_w_paper"]),
+                     "replay_min_practice_closed": int(line["replay_min_practice_closed"]),
+                     "replay_min_structures": int(line["replay_min_structures"]),
+                     "replay_min_oos_growth": float(line["replay_min_oos_growth"])}}
+
+
+def spreads_real(constitution: Mapping[str, Any] | None = None) -> bool:
+    """O1: whether real structures are switched on (and every row inside its bounds)."""
+    rule = spread_rule(constitution)
+    return bool(rule and rule["on"])
+
+
+def spread_types_real(constitution: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    """The structure types a real OPEN may be now: `option_spread_real_types` while O1 is on, else none. What the gateway's
+    `OPTION_STRUCTURES_REAL` must admit, exactly (`league.ci`)."""
+    rule = spread_rule(constitution)
+    return rule["types"] if rule and rule["on"] else ()
+
+
+def is_structure_agent(house: Any, agent: Any) -> bool:
+    """Whether `agent` trades level-3 structures (`House.is_structure_agent`: the options desk, NEEDS "structures": true).
+    A House without the hook (a test's stand-in) has none."""
+    judge = getattr(house, "is_structure_agent", None)
+    if agent is None or judge is None:
+        return False
+    try:
+        return bool(judge(agent))
+    except Exception:  # noqa: BLE001 - an agent that cannot be read is not seated as a structure agent
+        return False
+
+
+def structure_type_of(agent: Any) -> str | None:
+    """The structure type a structure agent's program opens, as its PARAMS name it (`PARAMS["structure"]`, as every options
+    desk founder carries it), or None when they name none. O4 seats only a member whose type real money may open (the review
+    of g/money, Sept 25, 2026): its real opens of any other type would be refused, and the seat would be idle money."""
+    kind = (getattr(agent, "params", None) or {}).get("structure")
+    return str(kind) if isinstance(kind, str) and kind else None
+
+
+def _params_key(params: Any) -> str:
+    """One PARAMS as a comparable key: as JSON would write it, keys sorted (a trial's `params` are the replay's effective
+    PARAMS, JSON-normalized; an agent's are its birth's or its rewrite's)."""
+    try:
+        return json.dumps(json.loads(json.dumps(dict(params or {}), default=str)), sort_keys=True)
+    except (TypeError, ValueError):
+        return ""
+
+
+def practice_book(house: Any, agent: Any) -> str:
+    """The name of the practice book an agent's practice record is on: a STRUCTURE agent's is the book its structures
+    go to (`House._structure_book`: `league/config.json` `options_structures.book`, `options-shadow` today, `alpaca-paper`
+    once the routing moves it), everyone else's its venue's (`PAPER_BOOK`). Its evidence, its verdicts and its family's
+    record read it (G of the options-desk run, Sept 25, 2026: until then the allocator read a structure agent's empty
+    `alpaca-paper` record, so no structure could ever count)."""
+    find = getattr(house, "_structure_book", None)
+    if find is not None and agent is not None:
+        try:
+            book = find(agent)
+        except Exception:  # noqa: BLE001 - unreadable: its venue's practice book, where it holds nothing
+            book = None
+        if book is not None and getattr(book, "name", None):
+            return str(book.name)
+    return PAPER_BOOK[agent.venue]
 
 
 def rules(constitution: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -153,6 +303,9 @@ class Evidence:
     #: family's REAL record spans, the dates every swing look asks) while it spans fewer, else None: the agent-level swing
     #: (`swing_at`) is a swing look too, so it neither enters nor stays on fewer dates. Set by the pass.
     swing_dates: tuple[int, int] | None = None
+    #: The practice book the paper record was read on (`practice_book`): a structure agent's structure book; "" where the
+    #: evidence was built by hand (its venue's `PAPER_BOOK`).
+    paper_book: str = ""
 
     def row(self) -> dict[str, Any]:
         return {"W_paper": round(self.w_paper, 6), "W_real": round(self.w_real, 6), "E": round(self.e, 6),
@@ -161,15 +314,26 @@ class Evidence:
                 "real_drawdown": round(self.real_drawdown, 4), "stay_closed": int(self.real_stay_closed)}
 
 
-def _haircut_rate(bps: Any, asset_class: Any) -> float:
+def _haircut_rate(bps: Any, asset_class: Any, *, structure: bool = False) -> float:
     """The haircut in bps a side for one fill: a plain number charges every class (the form before A8,
     kept for rollback); a table charges the fill's asset class, and a class the table does not name
     pays the table's largest rate, never nothing (evidence honesty: an unmeasured class is not
-    assumed to fill at the quote)."""
+    assumed to fill at the quote). A level-3 STRUCTURE's fill (`structure`: its instrument's `market_id`
+    names a structure, `structure_core.is_code`) is its own class, `option_spread` (O5, Sept 25, 2026),
+    never the single contract's `option`; a table without it charges the table's largest."""
     if isinstance(bps, Mapping):
         rates = [float(v) for v in bps.values()]
-        return float(bps[asset_class]) if asset_class in bps else max(rates, default=0.0)
+        cls = "option_spread" if structure else asset_class
+        return float(bps[cls]) if cls in bps else max(rates, default=0.0)
     return float(bps or 0)
+
+
+def _structure_fill(instrument: Mapping[str, Any] | None) -> bool:
+    """Whether a fill row's instrument is a level-3 structure held as one position (its `market_id` is a structure code)."""
+    from .structure_core import is_code
+
+    inst = instrument or {}
+    return inst.get("asset_class") == "option" and bool(is_code(inst.get("market_id")))
 
 
 def _paper_haircut(house: Any, agent: str, book_name: str, bps: Any) -> float:
@@ -204,7 +368,7 @@ def _paper_haircut(house: Any, agent: str, book_name: str, bps: Any) -> float:
             notional = abs(float(p["quantity"]) * float(p["price"]) * multiplier)
         except (KeyError, TypeError, ValueError):
             continue
-        total += notional * _haircut_rate(bps, instrument.get("asset_class")) / 10_000.0 / max(base, 1.0)
+        total += notional * _haircut_rate(bps, instrument.get("asset_class"), structure=_structure_fill(instrument)) / 10_000.0 / max(base, 1.0)
     return min(total, 5.0)
 
 
@@ -394,20 +558,34 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     weights = r.get("evidence") or {}
     ev = house.evaluator
     rung = ev.rung(agent.id) if rung is None else rung
-    paper_name, real_name = PAPER_BOOK[agent.venue], REAL_BOOK[agent.venue]
+    # A structure agent's practice record is on its structure book (`practice_book`: G, Sept 25, 2026).
+    paper_name, real_name = practice_book(house, agent), REAL_BOOK[agent.venue]
     # Evidence does not depend on the rung the agent stands on: both records are read in full,
     # blocks in progress included (Sept 23, 2026 review: reading the real record only while on real
     # money let a demoted bunt's unfinished loss vanish, and it was re-bunted every other pass).
     # The drawdown that demotes is the current real stay's, from where that stay began.
     stay = real_stay_start(house, agent.id) if rung >= 2 else None
-    paper = ev.wealth(agent.id, paper_name, agent.horizon, current=True)
+    # A structure agent's practice may span more than one practice book (the review of g/money, Sept 25, 2026: its structure
+    # book moves from `options-shadow` to `alpaca-paper` with Track P's routing, and an agent keeps its old book for a day):
+    # every practice book of its venue it was ever staked on is read and pooled, as its family's record reads them, so a
+    # move never drops a record. Everyone else's is its one practice book, as before.
+    paper_books = [paper_name]
+    if is_structure_agent(house, agent):
+        staked_on = {str(e.payload.get("book")) for e in house.ledger.iter(kinds="book.stake", agent=agent.id)}
+        paper_books += [name for name in PRACTICE_BOOKS.get(agent.venue, ()) if name != paper_name and name in staked_on]
+    paper_log = haircut = 0.0
+    paper_closed = settled = 0
+    for name in paper_books:
+        paper_log += ev.wealth(agent.id, name, agent.horizon, current=True)["log"]
+        if name in HAIRCUT_BOOKS:
+            haircut += _paper_haircut(house, agent.id, name, weights.get("alpaca_paper_haircut_bps", 0))
+        closed_here, settled_here = closed_trades(house, agent.id, name)
+        paper_closed += closed_here
+        settled += settled_here
     real = ev.wealth(agent.id, real_name, agent.horizon, current=True, drawdown_since=stay if stay is not None else None)
-    haircut = _paper_haircut(house, agent.id, paper_name, weights.get("alpaca_paper_haircut_bps", 0)) \
-        if paper_name == "alpaca-paper" else 0.0
-    w_paper = math.exp(max(min(paper["log"] - haircut, 50.0), -50.0))
+    w_paper = math.exp(max(min(paper_log - haircut, 50.0), -50.0))
     w_real = math.exp(max(min(real["log"], 50.0), -50.0))
     e = (w_paper ** float(weights.get("paper_weight", 0.5))) * w_real
-    paper_closed, settled = closed_trades(house, agent.id, paper_name)
     real_closed, _ = closed_trades(house, agent.id, real_name)
     stay_closed = closed_trades(house, agent.id, real_name, since_seq=stay)[0] if stay is not None else 0
     left = left_real_at(house, agent.id)
@@ -422,7 +600,7 @@ def evidence(house: Any, agent: Any, rung: int | None = None) -> Evidence:
     return Evidence(agent=agent.id, venue=agent.venue, rung=rung, w_paper=w_paper, w_real=w_real, e=e,
                     paper_trades=paper_closed, paper_settled=settled if paper_name in EVENT_BOOKS else 0, real_trades=real_closed,
                     real_pnl=real_pnl, real_drawdown=real["drawdown"] if stay is not None else 0.0, haircut_log=haircut,
-                    real_seen=seen, cooling=cooling, real_stay_closed=stay_closed)
+                    real_seen=seen, cooling=cooling, real_stay_closed=stay_closed, paper_book=paper_name)
 
 
 # --------------------------------------------------------------------- bands
@@ -582,15 +760,22 @@ def _position_share(venue: str, p: Mapping[str, Any]) -> float:
     return float(p["position_share_event"] if REAL_BOOK.get(venue) in EVENT_BOOKS else p["position_share"])
 
 
-def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None) -> tuple[Decimal, Decimal]:
+def limits_for(stake: Decimal, venue: str, *, order_cap: Decimal | None = None, structure: bool = False) -> tuple[Decimal, Decimal]:
     """(max position, max order) for a real account staked `stake`: `position_share` of the stake
     (`position_share_event` on Kalshi since Sept 24, 2026: $6 of a $30 bunt, $2 of a $10 probe), never
     under the venue's minimum order x 1.2 (Alpaca crypto takes nothing under $10), and every order
-    within the gateway's per-order cap."""
+    within the gateway's per-order cap.
+
+    A STRUCTURE agent's (`structure`, O3 of the options-desk run, Sept 25, 2026): `spread_position_share` of the stake in
+    maximum loss ($150 of a $150 probe at 1.0), every order within the gateway's own $75, which meters a multi-leg order at
+    its limit (its maximum loss), never at a market order's touch plus ten per cent."""
     p = _params()
     share = _position_share(venue, p)
     cap = order_cap if order_cap is not None else _d(CONSTITUTION["order_caps"]["max_order_usd"])
-    if order_cap is None and venue == "alpaca":
+    rule = spread_rule() if structure else None
+    if rule is not None:
+        share = float(rule["position_share"])
+    if order_cap is None and venue == "alpaca" and rule is None:
         # The gateway counts an Alpaca market order at the touch plus ten per cent
         # (`book.GATEWAY_MARKET_MARKUP`): an entry over $68.18 at the ask is over its $75 cap.
         from .book import GATEWAY_MARKET_MARKUP
@@ -638,6 +823,7 @@ class Allocator:
         self._waiting_flat: set[str] = set()  # probes on a losing family told once that they go back once flat
         self._first_real: dict[tuple[str, str], float] = {}  # a family's first real dollar, once found (R3's clock)
         self._codes: dict[tuple[str, str], dict[str, Any]] = {}  # each family's proven code, once a pass (M3, `proven_code`)
+        self._spread_lines: dict[tuple[str, str], dict[str, Any]] = {}  # each structure family's O4 line, once a pass (G)
         if self.state.get("families") is None:
             # A first start under the mechanism ledger: the states the ledger's last `family.record` rows say.
             self.state["families"] = families.restore_states(getattr(house, "ledger", None))
@@ -799,6 +985,7 @@ class Allocator:
             tape_fault = f"the family records' tape ({type(exc).__name__})"
         self._families = {}
         self._codes = {}
+        self._spread_lines = {}
         self._released = None
         self._released = self._swing_released()  # the grant's rung-3 release, read once a pass
         try:
@@ -1076,7 +1263,11 @@ class Allocator:
     def swing_allowed(self, agent: Any) -> bool:
         """Whether the agent may take the agent-level swing (`swing_at`): always, unless the constitution's
         `swing_requires_proven_family` holds it to a proven (or swinging) family's agent (Sept 24, 2026). The
-        House's `_commit_promotion` reads it when a swing audit finishes."""
+        House's `_commit_promotion` reads it when a swing audit finishes.
+
+        A structure agent takes no swing while real structures are switched off (O1, Sept 25, 2026)."""
+        if self.is_structure(agent) and not self.structure_real_ok(agent):
+            return False
         if not rules().get("swing_requires_proven_family"):
             return True
         return self.family_state(agent) in ("proven", "swing")
@@ -1140,7 +1331,7 @@ class Allocator:
         account = (getattr(book, "accounts", None) or {}).get(agent.id) if book is not None else None
         staked = account.staked if account is not None else _d("0")
         position, _ = self.limits(agent, staked)
-        cap, _ = limits_for(self.target_stake(agent, "probe", self._evidence.get(agent.id)), agent.venue)
+        cap, _ = limits_for(self.target_stake(agent, "probe", self._evidence.get(agent.id)), agent.venue, structure=self.is_structure(agent))
         return position <= cap, cap
 
     def _family_note(self, agent: Any) -> str:
@@ -1626,7 +1817,7 @@ class Allocator:
             cutoffs = tape.cutoffs.get(agent.id) or {}
             history = [(e.seq, str(e.payload["code_sha256"])) for e in self.house.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=agent.id)
                        if e.payload.get("code_sha256")]
-            for book in (PAPER_BOOK[venue], REAL_BOOK[venue]):
+            for book in (*PRACTICE_BOOKS[venue], REAL_BOOK[venue]):  # a structure family's practice is on its structure book (G)
                 stakes = [(r.seq, float(r.payload.get("usd") or 0)) for r in rows if r.kind == "book.stake" and r.payload.get("book") == book]
                 if staked_base(stakes, through) <= 0:
                     continue
@@ -1714,6 +1905,235 @@ class Allocator:
                                      f"its family {agent.family} already holds {seated} of its {cap} seats on real money "
                                      "(allocator.proven_family_member; game.json economy.proven_family_members)")
         return False
+
+    # ------------------------------------------------ real structures (O1-O5 of the options-desk run, Sept 25, 2026)
+    # The owner, 18:15Z Sept 25: "i want rapid recursively learning loop that has paper trading and production trading as
+    # soon as possible based on actual progress made by the agents in the game". A STRUCTURE agent (the options desk,
+    # NEEDS "structures": true) reaches real money by one route only: while O1 (`option_spreads_real`) is on, the best
+    # practice member of a structure FAMILY whose pooled record meets O4's line (`spread_line`) is seated as a probe at O2
+    # (`spread_probe_usd`) at the pass that finds it, through `_bunt` (R5's probe gate, the audit of a known defect, the
+    # envelope and the venue's cash, as every probe). The E route and the proven members' route (M3) never seat one.
+    # While O1 is off none is seated, one on real money is lent nothing more and goes back to practice once flat, and none
+    # takes a swing. After the probe the ladder is every family's: demotions, holds, the family's proof, the swing.
+    def is_structure(self, agent: Any) -> bool:
+        """Whether `agent` trades level-3 structures (`is_structure_agent`)."""
+        return is_structure_agent(self.house, agent)
+
+    def _spread_base(self, agent: Any) -> Decimal | None:
+        """O2 (`spread_probe_usd`) for a structure agent while the rows are in force, else None."""
+        if not self.is_structure(agent):
+            return None
+        rule = spread_rule()
+        return rule["probe_usd"] if rule is not None else None
+
+    def spread_line(self, family: str, venue: str) -> dict[str, Any]:
+        """Whether a structure FAMILY meets O4 (`allocator.spread_probe_line`) now, with the numbers, once a pass:
+        {"family", "meets", "route" ("practice", "replay" or None), "practice_closed", "w_paper", "replay", "why"}.
+
+        The POOLED practice record is the family record's (`families.family_record` `structures`): every member ever born,
+        each for its stretch in the family, its closed structures on its practice books since its evidence cutoff -- one
+        flat sale of a held structure is one -- and W_paper, the account-unit growth of those closes pooled, after the O5
+        haircut. "practice": at least `min_practice_closed` of them with W_paper at or above `min_w_paper`. "replay": at
+        least `replay_min_practice_closed` of them and a passed House replay of a program the family ran with at least
+        `replay_min_structures` structures and out-of-sample growth above `replay_min_oos_growth` (`_spread_replay`). A record
+        that cannot be read meets nothing (fail closed)."""
+        key = (family, venue)
+        cached = self._spread_lines.get(key)
+        if cached is not None:
+            return cached
+        rule = spread_rule()
+        record = self.family(family, venue)
+        mine = record.get("structures") or {}
+        # Only the closes of the types real money may open count (the review of g/money, Sept 25, 2026): O4 is "a debit-
+        # vertical family"'s line, and a condor's record says nothing of a vertical's.
+        types = tuple(rule["types"]) if rule is not None else ()
+        kinds = mine.get("by_type") or {}
+        closed = sum(int((kinds.get(t) or {}).get("practice_closed") or 0) for t in types)
+        log = math.fsum(float((kinds.get(t) or {}).get("practice_log") or 0.0) for t in types)
+        w = math.exp(max(min(log, 50.0), -50.0))
+        marked = self._spread_marked(family, venue)
+        out: dict[str, Any] = {"family": family, "meets": False, "route": None, "types": list(types), "practice_closed": closed,
+                               "w_paper": round(w, 6), "all_types_closed": int(mine.get("practice_closed") or 0),
+                               "marked": None if marked is None else {"members": marked[0], "log_w_paper": round(marked[1], 6)},
+                               "replay": None}
+        if rule is None:
+            out["why"] = "the constitution has no real-structure rows in force (allocator.spread_probe_line)"
+        elif record.get("error"):
+            out["why"] = f"its family's record could not be read this pass ({record['error']}): no line is met"
+        else:
+            line = rule["line"]
+            if closed >= line["min_practice_closed"] and w >= line["min_w_paper"]:
+                out.update(meets=True, route="practice")
+            elif closed >= line["replay_min_practice_closed"]:
+                replay = self._spread_replay(family, venue, line, types)
+                if replay is not None:
+                    out.update(meets=True, route="replay", replay=replay)
+            if out["meets"] and (marked is None or marked[1] < 0.0):
+                # The closes alone could hide losers still held (the review of g/money, Sept 25, 2026): at seating the
+                # members' practice records MARKED to market, pooled, must not be losing.
+                out.update(meets=False, route=None, held_back=out["route"])
+                out["why"] = (f"its family {family} has {closed} closed practice {'/'.join(types)} structure(s) at W_paper {w:.4f}, "
+                              + ("but no member's marked practice record was read this pass" if marked is None else
+                                 f"but its members' practice records marked to market are losing (pooled log W_paper "
+                                 f"{marked[1]:+.4f} over {marked[0]})")
+                              + ": no seat until they are not (allocator.spread_probe_line)")
+            elif out["route"] == "practice":
+                out["why"] = (f"its family {family} has {closed} closed practice {'/'.join(types)} structures at W_paper {w:.4f}, "
+                              f"at or above {line['min_practice_closed']} and {line['min_w_paper']:g} (allocator.spread_probe_line)")
+            elif out["route"] == "replay":
+                r = out["replay"]
+                out["why"] = (f"its family {family} has {closed} closed practice {'/'.join(types)} structure(s) and a passed replay "
+                              f"on the options history ({r['agent']}, {r['trades']} structures, out of sample {r['oos']:+.6f} a "
+                              "block; allocator.spread_probe_line)")
+            else:
+                out["why"] = (f"its family {family} has {closed} closed practice {'/'.join(types)} structures at W_paper {w:.4f} "
+                              f"({out['all_types_closed']} of every type): the line asks {line['min_practice_closed']} of the "
+                              f"types real money may open at W_paper {line['min_w_paper']:g} or more, or "
+                              f"{line['replay_min_practice_closed']} and a passed replay of a program a member ran with "
+                              f"{line['replay_min_structures']} structures and positive out-of-sample growth (allocator.spread_probe_line)")
+        self._spread_lines[key] = out
+        return out
+
+    def _spread_marked(self, family: str, venue: str) -> tuple[int, float] | None:
+        """(members read, their summed log W_paper): the living structure members' practice records as this pass's evidence
+        read them -- MARKED to market, open structures included, after the O5 haircut (`evidence`) -- or None when no
+        member's was read. O4 counts closed structures; this is what they still hold (the review of g/money, Sept 25, 2026)."""
+        registry = self.house.registry
+        with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
+            members = [a for a in list(registry.living()) if a.family == family and a.venue == venue]
+        logs = [math.log(ev.w_paper) for a in members if self.is_structure(a)
+                for ev in (self._evidence.get(a.id),) if ev is not None and ev.w_paper > 0]
+        return (len(logs), math.fsum(logs)) if logs else None
+
+    def _spread_replay(self, family: str, venue: str, line: Mapping[str, Any], types: Sequence[str] = ()) -> dict[str, Any] | None:
+        """The best PASSED House replay (`eval.trial`) of a program the structure family ran -- a member's trial written while
+        it was in the family (C8's stretches), whose `code_sha256` AND `params` are a program a member ran in the family
+        (`agent.born`, `agent.strategy`: a research candidate of another mechanism is not the family's, and neither is a
+        variant of its code with PARAMS no member ever ran, the review of g/money, Sept 25, 2026), of a structure type real
+        money may open (`types`, its PARAMS' `structure`) -- with at least `replay_min_structures` structures (a structure
+        agent's replay counts a structure as one trade) and out-of-sample growth above `replay_min_oos_growth`: {"agent",
+        "seq", "at", "trades", "oos", "code", "structure"}, or None. A structure agent's House replay is on the options
+        history (`House.tape_for`); a House without one never replays it at all."""
+        tape, through = self._tape, self._through
+        registry = self.house.registry
+        with (getattr(registry, "_lock", None) or contextlib.nullcontext()):
+            everyone = [a for a in list(registry.agents.values()) if a.venue == venue]
+        spans_of = getattr(tape, "spans", None)
+        best = None
+        for agent in everyone:
+            where = spans_of(agent.id, family, through=through) if spans_of is not None else None
+            if (where is None and agent.family != family) or where == [] or not self.is_structure(agent):
+                continue
+            ran = {(str(e.payload["code_sha256"]), _params_key(e.payload.get("params")))
+                   for e in self.house.ledger.iter(kinds=("agent.born", "agent.strategy"), agent=agent.id)
+                   if e.payload.get("code_sha256") and families.within(where, e.seq)}
+            # Every trial on the ledger as it stands (the pass's tape position counts only the tape's kinds, not trials).
+            for entry in self.house.ledger.iter(kinds="eval.trial", agent=agent.id):
+                p = entry.payload
+                if not p.get("passed") or not families.within(where, entry.seq) or not isinstance(p.get("params"), Mapping):
+                    continue
+                if (str(p.get("code_sha256") or ""), _params_key(p["params"])) not in ran or p["params"].get("structure") not in types:
+                    continue
+                try:
+                    trades, oos = int(p.get("trades") or 0), float(p["oos_mean_log_growth"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if trades < line["replay_min_structures"] or not math.isfinite(oos) or oos <= line["replay_min_oos_growth"]:
+                    continue
+                if best is None or oos > best["oos"]:
+                    best = {"agent": agent.id, "seq": entry.seq, "at": entry.at, "trades": trades, "oos": oos, "code": str(p["code_sha256"]),
+                            "structure": str(p["params"]["structure"])}
+        return best
+
+    def _spread_refusal(self, agent: Any) -> str | None:
+        """Why no structure agent of this family may be seated on real money now, or None: O1 off (or the rows out of their
+        bounds), the family short of O4's line, or a member of it already on real money (one probe a family at a time)."""
+        if not spreads_real():
+            return ("real structures wait for the owner's switch (allocator.option_spreads_real, O1, is off): no structure "
+                    "agent is seated on real money")
+        rule = spread_rule()
+        kind = structure_type_of(agent)
+        if rule is None or kind not in rule["types"]:
+            # Its real opens would all be refused (`House._structure_refusal`): a seat would be idle money in the envelope
+            # (the review of g/money, Sept 25, 2026).
+            return (f"its program opens {kind or 'no named structure type'} (PARAMS \"structure\"), not a type real money may "
+                    f"open ({', '.join(rule['types']) if rule else 'none'}: allocator.option_spread_real_types): no structure seat")
+        line = self.spread_line(agent.family, agent.venue)
+        if not line["meets"]:
+            return line["why"]
+        seated = self._members_real_ids(agent.family, agent.venue)
+        if seated and agent.id not in seated:
+            return (f"its family {agent.family} already has {', '.join(seated)} on real money: O4 seats one structure probe a "
+                    "family at a time; the ladder takes it from there")
+        return None
+
+    def _spread_ups(self, living: Sequence[Any], evid: Mapping[str, Evidence]) -> list[tuple[Any, Evidence, str, dict[str, Any]]]:
+        """O4's route (G of the options-desk run, Sept 25, 2026): while O1 is on, for each structure family that meets the
+        line (`spread_line`) with no member on real money, its best practice member -- the highest W_paper, then the most
+        closed trades -- to be seated as a probe this pass: [(agent, evidence, why, line)]. Every other structure agent at
+        rung 1 is told why it waits (a `progress` row only when the reason changes)."""
+        rule = spread_rule()
+        if rule is None:
+            return []
+        house = self.house
+        groups: dict[tuple[str, str], list[tuple[Any, Evidence]]] = {}
+        for agent in living:
+            ev = evid.get(agent.id)
+            if ev is None or ev.rung != 1 or ev.cooling or not self.is_structure(agent) or house.evaluator.rung(agent.id) != 1:
+                continue  # (one back from real money within the re-entry cooldown waits for it, as any agent does)
+            groups.setdefault((agent.family, agent.venue), []).append((agent, ev))
+        for key, members in list(groups.items()):
+            # Only a member whose program opens a type real money may open is a candidate (the review of g/money, Sept 25,
+            # 2026); a family with none is told why by `_spread_refusal` on its first member.
+            admitted = [row for row in members if structure_type_of(row[0]) in rule["types"]]
+            groups[key] = admitted or members
+        out = []
+        for (family, venue), members in sorted(groups.items()):
+            members.sort(key=lambda row: (-row[1].w_paper, -row[1].paper_trades, row[0].id))
+            refusal = self._spread_refusal(members[0][0])
+            if refusal is not None:
+                for agent, ev in members:
+                    house._promotion_status(agent, _verdict(agent.id, 1, "a structure family's probe", ev), "spread_line", refusal)
+                continue
+            agent, ev = members[0]
+            line = self.spread_line(family, venue)
+            out.append((agent, ev, f"the best practice member of a structure family that meets the spread probe line: {line['why']}",
+                        line))
+        return out
+
+    def structure_real_ok(self, agent: Any) -> bool:
+        """Whether a structure agent may hold, or be given, real money now: O1 on and its program's type (`structure_type_of`)
+        one real money may open (`spread_types_real`). A seated agent that rewrote itself to another type could open nothing
+        real (the review of g/money, Sept 25, 2026: an idle seat is money held from the envelope)."""
+        return spreads_real() and structure_type_of(agent) in spread_types_real()
+
+    def _drain_structure(self, agent: Any, ev: Evidence, summary: dict[str, Any]) -> None:
+        """O1 off (or the rows out of their bounds), or its program's type no longer one real money may open, while a
+        structure agent is on real money: it goes back to practice by the demotion path once that path sells nothing
+        (`_back_when_flat`), and is lent nothing more meanwhile (`_size`). The House sends none of its structure OPENS that
+        real money does not admit meanwhile; its closes go."""
+        if not spreads_real():
+            why = ("real structures are switched off (allocator.option_spreads_real, O1): a structure agent goes back to practice "
+                   "once the demotion would sell nothing")
+            self._back_when_flat(agent, ev, summary, why, {"rule": "allocator.option_spreads_real"})
+            return
+        why = (f"its program opens {structure_type_of(agent) or 'no named structure type'}, not a type real money may open "
+               f"({', '.join(spread_types_real())}): it goes back to practice once the demotion would sell nothing")
+        self._back_when_flat(agent, ev, summary, why, {"rule": "allocator.option_spread_real_types"})
+
+    def _spread_board(self) -> dict[str, Any]:
+        """The board's `spread`: the switch, the admitted types and every living structure family's O4 line, for the watch
+        (the families' records every 30 minutes, the options-desk run's owner direction)."""
+        rule = spread_rule()
+        lines = {}
+        for agent in list(self.house.registry.living()):
+            if agent.family and agent.family not in lines and self.is_structure(agent):
+                try:
+                    lines[agent.family] = {k: v for k, v in self.spread_line(agent.family, agent.venue).items() if k != "family"}
+                except Exception as exc:  # noqa: BLE001 - a display row never costs the pass its board
+                    lines[agent.family] = {"meets": False, "why": f"unreadable ({type(exc).__name__})"}
+        return {"on": bool(rule and rule["on"]), "types": list(rule["types"]) if rule else [],
+                "probe_usd": str(rule["probe_usd"]) if rule else None, "families": lines}
 
     # ------------------------------------------------------------ the probe gate
     def forward(self, family: str) -> tuple[int, float]:
@@ -1921,6 +2341,14 @@ class Allocator:
         True, with the promotion status written, when the seat is refused."""
         if not enabled() or agent is None:
             return False
+        if self.is_structure(agent):
+            # O1 and O4 again (G, Sept 25, 2026): a structure agent's seat is committed only while real structures are on,
+            # its family still meets the spread probe line, and no member of it is on real money.
+            self._spread_lines.pop((agent.family, agent.venue), None)
+            refusal = self._spread_refusal(agent)
+            if refusal is not None:
+                self.house._promotion_status(agent, verdict, "spread_line", refusal)
+                return True
         try:  # the ledger as it stands now, not as the last pass read it: blocks closed while the audit ran
             self._tape.refresh(self.house.ledger)
             self._forward = self.family_forward()
@@ -1981,6 +2409,14 @@ class Allocator:
             return
         why = (f"its family {agent.family}'s pooled forward record is {gate['growth']:+.4f} over {gate['blocks']} active blocks: "
                f"a probe is not kept on a family at or below zero after {gate['minimum']} (allocator.family_probe)")
+        self._back_when_flat(agent, ev, summary, why,
+                             {"rule": "allocator.family_probe", "family_forward": {"blocks": gate["blocks"], "growth": round(gate["growth"], 6)}})
+
+    def _back_when_flat(self, agent: Any, ev: Evidence, summary: dict[str, Any], why: str, extra: Mapping[str, Any]) -> None:
+        """Send an agent on real money back to practice by the demotion path once that path sells nothing (`_unflat`): its
+        working buys cancelled first, the path's own first step; one that holds a position keeps its seat until it is flat,
+        is lent nothing more (`_size`), and is told once. R5's losing family (`_drain_probe`) and O1 switched off
+        (`_drain_structure`, Sept 25, 2026) take this path."""
         obstacle = self._unflat(agent)
         if obstacle == "working":
             book = self.house.books.get(REAL_BOOK[agent.venue])
@@ -2002,12 +2438,11 @@ class Allocator:
             if agent.id not in self._waiting_flat:
                 self._waiting_flat.add(agent.id)
                 with contextlib.suppress(Exception):  # a courtesy: the board's `probe_gate` says it too
-                    self.house.alert("info", f"allocator: {agent.id} is a probe on a losing family ({why}); it goes back to "
-                                             f"practice once the demotion would sell nothing (now: {obstacle}): no sale is forced")
+                    self.house.alert("info", f"allocator: {agent.id} goes back to practice ({why}) once the demotion would sell "
+                                             f"nothing (now: {obstacle}): no sale is forced")
             return
         self._waiting_flat.discard(agent.id)
-        self._move_down(agent, ev, "paper", why, summary,
-                        extra={"rule": "allocator.family_probe", "family_forward": {"blocks": gate["blocks"], "growth": round(gate["growth"], 6)}})
+        self._move_down(agent, ev, "paper", why, summary, extra=extra)
 
     # ------------------------------------------------------------- stakes
     def target_stake(self, agent: Any, band: str, ev: Evidence | None = None) -> Decimal:
@@ -2021,7 +2456,14 @@ class Allocator:
             # mechanism. `bunt_growth` then keeps what it makes on the probe's own base.
             base = p["probe_bunt_usd"].get(agent.venue, base)
         niche = self.house.niche_of(agent)
-        if niche is not None and niche.asset_class == "option":
+        spread = self._spread_base(agent)
+        if spread is not None:
+            # A STRUCTURE agent (O2 of the options-desk run, Sept 25, 2026): its probe is `spread_probe_usd` ($150), and a
+            # proven family's structure bunt is never staked less (as `option_bunt_usd` holds a single contract's), so its
+            # bunt growth and its swing are sized on it too. Its positions are `spread_position_share` of it (`limits`).
+            base = max(base, spread)
+            p = {**p, "bunt_usd": {**p["bunt_usd"], agent.venue: base}}
+        elif niche is not None and niche.asset_class == "option":
             # One option contract cannot be cut smaller: an options bunt is one contract's premium,
             # and since Sept 23, 2026 (A2a) `option_bunt_usd`, $80: the book holds a position and an
             # order to half the account's equity, so at $40 the $40 contract the bunt was staked for
@@ -2046,10 +2488,17 @@ class Allocator:
             stake = max(_d(swing["stake_usd"]), base)
         else:
             stake = bunt_stake(ev, base, p)
+        if spread is not None and band in ("bunt", "probe") and (band == "probe" or self.tier(agent) == "probe"):
+            # A structure PROBE is staked O2 at most (the review of g/money, Sept 25, 2026): `bunt_stake` grows the base by
+            # W_real, which reads the agent's whole real record, so a probe re-seated after a winning stay was staked up to
+            # $187.50. Its growth past O2 is the ladder's: the family's proof makes it a bunt.
+            stake = min(stake, spread)
         if self.paused_long(agent.id):
             # Paused a day or more (review of #249, P2): an idle stake is held to the probe, by free cash only.
             probe = p["probe_bunt_usd"].get(agent.venue, p["bunt_usd"].get(agent.venue, _d("10")))
-            if niche is not None and niche.asset_class == "option":
+            if spread is not None:
+                probe = max(probe, spread)  # O2: a structure agent's probe
+            elif niche is not None and niche.asset_class == "option":
                 probe = max(probe, p["option_bunt_usd"])
             elif "alpaca_equity" in p["probe_bunt_usd"] and equity_program(agent, niche):
                 probe = max(probe, p["probe_bunt_usd"]["alpaca_equity"])  # M4: a stock program's probe
@@ -2096,11 +2545,12 @@ class Allocator:
         whose family was proven while the envelope had no room for the $20 raise was given the $30
         bunt's $6 position at its next wake, and a $3.00 position, 30% of its stake, filled.)"""
         target = self.seat_stake(agent)
+        structure = self.is_structure(agent)  # O3 (Sept 25, 2026): a structure's cap is a share of the stake in maximum loss
         if staked <= 0:
-            return limits_for(target, agent.venue)
+            return limits_for(target, agent.venue, structure=structure)
         book = self.house.book_of(agent)
         held = book.equity(agent.id) if book is not None and agent.id in book.accounts else staked
-        return limits_for(min(max(staked, target), max(staked, held)), agent.venue)
+        return limits_for(min(max(staked, target), max(staked, held)), agent.venue, structure=structure)
 
     # ---------------------------------------------------- facts for the books
     def band_of(self, agent_id: str) -> str | None:
@@ -2138,7 +2588,7 @@ class Allocator:
         the venue's envelope now, and the grant behind it. Replaces the legacy tuition in the packet."""
         agent = self.house.registry.get(ev.agent)
         stake = self.target_stake(agent, band, ev) if agent is not None else _params()["bunt_usd"].get(ev.venue, _d("10"))
-        position, order = limits_for(stake, ev.venue)
+        position, order = limits_for(stake, ev.venue, structure=self.is_structure(agent))
         grant = self.grant()
         policy = (grant or {}).get("policy") or {}
         seated = sum(1 for a in self.house.registry.living() if a.venue == ev.venue and self.house.evaluator.rung(a.id) >= 2)
@@ -2210,6 +2660,9 @@ class Allocator:
                 band, why = target_band(ev, p)
                 if RUNG_OF[band] < ev.rung:
                     self._move_down(agent, ev, band, why, summary)
+                elif self.is_structure(agent) and not self.structure_real_ok(agent):
+                    # O1 off (Sept 25, 2026): a structure agent on real money goes back to practice once flat.
+                    self._drain_structure(agent, ev, summary)
                 elif ev.rung == 2:
                     # R5 (Sept 24, 2026): a probe on a losing family goes back to practice, never by a forced sale.
                     self._drain_probe(agent, ev, summary)
@@ -2222,6 +2675,8 @@ class Allocator:
                     continue
                 if house.evaluator.rung(agent.id) != ev.rung:
                     continue  # moved this pass
+                if self.is_structure(agent) and (ev.rung == 1 or not self.structure_real_ok(agent)):
+                    continue  # G (Sept 25, 2026): O4's route alone seats a structure agent, and nothing moves one up while O1 is off
                 band, why = target_band(ev, p)
                 if RUNG_OF[band] > ev.rung:
                     ups.append((ev.e, agent, ev, band, why))
@@ -2229,12 +2684,20 @@ class Allocator:
             displaced_at: set[str] = set()
             # M3 (Sept 25, 2026; `allocator.proven_family_member`): after the moves up on their own E, a proven family's
             # practice members seated on the family's proof, best W_paper first, while the family has seats left.
-            moves = [(agent, ev, band, why, False) for _, agent, ev, band, why in ups]
+            moves = [(agent, ev, band, why, False, None) for _, agent, ev, band, why in ups]
+            structures = {a.id for a in living if self.is_structure(a)}
             try:
-                moves += [(agent, ev, "bunt", why, True) for agent, ev, why in self._member_ups(living, evid, {row[1].id for row in ups}, p)]
+                moves += [(agent, ev, "bunt", why, True, None)
+                          for agent, ev, why in self._member_ups(living, evid, {row[1].id for row in ups} | structures, p)]
             except Exception as exc:  # noqa: BLE001 - the members' route is a second door; a fault in it never stops the pass
                 self._family_error("the proven families' members", "", exc, then="no member is seated on its family's proof this pass")
-            for agent, ev, band, why, on_proof in moves:
+            # O4 (G of the options-desk run, Sept 25, 2026): while O1 is on, a structure family that meets the spread probe
+            # line has its best practice member seated as a probe at `spread_probe_usd`, this pass.
+            try:
+                moves += [(agent, ev, "bunt", why, "spread", line) for agent, ev, why, line in self._spread_ups(living, evid)]
+            except Exception as exc:  # noqa: BLE001 - a fault in the structures' route seats no structure agent and stops nothing
+                self._family_error("the structure families' spread line", "", exc, then="no structure agent is seated this pass")
+            for agent, ev, band, why, on_proof, line in moves:
                 if not live_ok.get(agent.venue):
                     continue
                 since = self.paused_since(agent.id)
@@ -2245,7 +2708,11 @@ class Allocator:
                                             f"its entries are paused (since {now_iso(lambda: since)}): a paused agent is promoted to "
                                             "no real band; resume_entries lets the allocator weigh it again")
                     continue
-                if on_proof:
+                if on_proof == "spread":
+                    if house.evaluator.rung(agent.id) == 1 and self._spread_refusal(agent) is None:
+                        self._bunt(agent, ev, why, p, summary, displaced_at,
+                                   extra={"rule": "allocator.spread_probe_line", "spread_line": {k: v for k, v in line.items() if k != "why"}})
+                elif on_proof:
                     if house.evaluator.rung(agent.id) == 1 and self._member_seat_free(agent, ev):
                         self._bunt(agent, ev, why, p, summary, displaced_at, extra={"rule": "allocator.proven_family_member"})
                 elif band == "bunt":
@@ -2502,6 +2969,8 @@ class Allocator:
         if abs(delta) < max(equity, Decimal(1)) * _d(p["min_stake_change"]):
             return None
         if delta > 0:
+            if self.is_structure(agent) and not self.structure_real_ok(agent):
+                return None  # O1 off, or its type not admitted (Sept 25, 2026): lent nothing more; free cash still comes back
             gate = self.probe_gate(agent) if band == "bunt" else None
             if gate is not None and gate["gate"] in ("losing", "unreadable"):
                 # R5 (Sept 24, 2026; the R5 review, Sept 24, 2026): a probe on a losing family waiting to go back to practice (on Alpaca,
@@ -2652,7 +3121,11 @@ class Allocator:
             slot["count"] += 1
             slot["capital_usd"] += row["stake_usd"] or ZERO
         envelope = sum((self.grant_capital(v) for v in REAL_BOOK), ZERO)
-        board = {"enabled": True, "agents": agents, "moves": moves, "bands": bands, "families": self.families_board(),
+        try:
+            spread = self._spread_board()  # G (Sept 25, 2026): O1, the admitted types and each structure family's O4 line
+        except Exception as exc:  # noqa: BLE001 - a display block never costs the pass its board
+            spread = {"error": f"{type(exc).__name__}"}
+        board = {"enabled": True, "agents": agents, "moves": moves, "bands": bands, "families": self.families_board(), "spread": spread,
                  "throttle": {"active": bool(throttle), "floor_pnl_usd": self.floor_pnl(), "envelope_usd": envelope},
                  "at": now_iso(house.clock),
                  "envelope": {v: {"capital_usd": str(self.capital(v)), "committed_usd": str(self.committed(v))} for v in REAL_BOOK
@@ -2708,7 +3181,7 @@ def _verdict(agent_id: str, rung: int, why: str, ev: Evidence, allocator: "Alloc
     Sept 23 for capacity it could not see (09:32 and 10:06Z)."""
     from .evaluator import Verdict
 
-    book = PAPER_BOOK[ev.venue] if rung <= 1 else REAL_BOOK[ev.venue]
+    book = (ev.paper_book or PAPER_BOOK[ev.venue]) if rung <= 1 else REAL_BOOK[ev.venue]
     band = "bunt" if rung <= 1 else "swing"
     if band == "bunt" and allocator is not None:
         agent = allocator.house.registry.get(agent_id)

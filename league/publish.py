@@ -450,7 +450,24 @@ def league_real_pnl(house: Any) -> Decimal:
     return total
 
 def option_label(instrument: Mapping[str, Any]) -> str:
-    """`F 10-09 13C`: the underlying, the expiry's month and day, the strike and C or P."""
+    """`F 10-09 13C`: the underlying, the expiry's month and day, the strike and C or P. A level-3 structure held as one
+    instrument (its `market_id` the type and every leg, `league/structure_core.py`) is named as one, not by its first leg
+    (Sept 25, 2026: krasker-22's CCL iron condor read "CCL 10-02 22.5C", a single call): `CCL 10-02 iron condor
+    +21P -21.5P -22.5C +23C` (each leg's strike, right and side; a leg of another expiry keeps its month and day)."""
+    code = str(instrument.get("market_id") or "")
+    kind, _, rest = code.partition("|")
+    parts = rest.split("|") if rest else []
+    found = [_STRUCTURE_LEG.match(part) for part in parts]
+    if kind and parts and all(found):
+        expiry = str(instrument.get("expiry") or "")
+        home = expiry.replace("-", "")[2:]
+        legs = []
+        for match in found:
+            sign, ratio, _root, day, right, strike = match.groups()
+            shown = format((Decimal(int(strike)) / 1000).normalize(), "f")
+            other = "" if day == home else f"@{day[2:4]}-{day[4:6]}"
+            legs.append(f"{sign}{ratio + 'x' if ratio != '1' else ''}{shown}{right}{other}")
+        return js_cut(f"{instrument.get('symbol')} {expiry[5:]} {kind.replace('_', ' ')} {' '.join(legs)}", MAX_INSTRUMENT_TEXT)
     try:
         strike = f"{float(instrument.get('strike')):g}"
     except (TypeError, ValueError):

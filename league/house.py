@@ -101,6 +101,12 @@ SETTLE_LAGS_FILE = "settle_lags.json"
 #: practice book's stake and caps ("at half notional"), and an agent gets one such replay a day,
 #: passed or not, so it cannot search its parameters in place for a lucky look that is no trial.
 EDIT_REPLAY_NOTIONAL = 0.5
+#: A STRUCTURE agent's edit is replayed at the full practice caps instead (G-LOOP, Sept 25, 2026): the program as it
+#: would trade. At half notional its order cap is $37.50, and a structure's cost is its maximum loss: a $1-wide iron
+#: condor or credit vertical at the founders' 0.15-0.30 short deltas takes $0.25-0.45 of credit, so it costs $55-75 to
+#: hold and cannot be opened at all; its edit's replay traded nothing and failed on trade count, whatever the edit was
+#: (builder S3's finding, the options-desk run record, row S3).
+EDIT_REPLAY_STRUCTURE_NOTIONAL = 1.0
 EDIT_REPLAY_EVERY_SECONDS = 24 * 3600.0
 #: A reconcile that fails is read once more after this many seconds and a fresh poll, before it is
 #: called a mismatch (`reconcile_with_second_look`).
@@ -152,6 +158,16 @@ STRUCTURE_CHAIN_PER_UNDERLYING = 80
 #: into one request an expiry only when it returns this many rows or more (near the adapter's 1,000-snapshot page).
 STRUCTURE_CHAIN_WINDOW_DAYS = 7
 STRUCTURE_CHAIN_SPLIT_ROWS = 600
+#: A structure agent moving between the options shadow book and the Alpaca practice account (`House._structure_move`,
+#: Wave 2, Sept 25, 2026) keeps trading on its old book, opens included, until it is flat -- through the close of the
+#: first FULL regular session after the first wake that found it moving (`_structure_move_opens_until`); after that it
+#: only closes there, so the move always ends (a structure it cannot close itself is sold by the House's expiry-day
+#: close). A founder of 0-7 day structures is usually flat within a session, and one that never is must not trade on
+#: the old book for ever. Counted in sessions, not hours (the review of Wave 2): a deploy on Saturday stamped the
+#: agents moving at once, 15-minute wakes seat them all weekend, and a day of wall clock ran out on Sunday, so on
+#: Monday krasker-22 (a CCL condor to Oct 2) could open on neither book. This is the fallback when the calendar
+#: cannot say: a day.
+STRUCTURE_MOVE_OPENS_SECONDS = 24 * 3600
 PROBE_BOX = "house-probe"
 #: The order path's own invariants (`House._order_path_invariants`, workstream B, Sept 23, 2026):
 #: how often they run, how many ledger rows the first pass reads back (never the whole ledger),
@@ -859,7 +875,7 @@ class House:
         self._health({"at": now_iso(self.clock)})
 
     def _chain(self, symbols: list[str], days: int, afford: float | None, quotes: Mapping[str, Any], *,
-               structures: bool = False) -> list[dict[str, Any]]:
+               structures: bool = False, per_underlying: int | None = None) -> list[dict[str, Any]]:
         """The option contracts an agent may consider: its underlyings, expiring after today and
         within `days`, within a fifth of the underlying's price, two-sided, and affordable in one
         order. At most 40 an underlying, nearest the money first. Empty where the venue cannot list.
@@ -870,7 +886,8 @@ class House:
         from tomorrow after it) to `days` ahead, and at most `STRUCTURE_CHAIN_PER_UNDERLYING` an
         underlying. The venue's chain is read by `_expiry_chain`, shared by every structure agent for two
         minutes: one ranged request an underlying, split by expiry only where the adapter's one call would
-        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain)."""
+        stop at its first thousand contracts and cut an expiry in half (a 0-7 day SPY chain). `per_underlying`: another
+        count than 80 or 40 nearest, the same ranking (`_note_structure_reach`'s 160, G-LOOP's review, Sept 25, 2026)."""
         broker = next((b.broker for name, b in self.books.items() if family_of(name) == "alpaca" and hasattr(b.broker, "option_chain")), None)
         if broker is None:
             return []
@@ -880,7 +897,8 @@ class House:
             new_york, hour = _new_york(self.clock)
             first = new_york if hour < self._structure_hours(new_york)[0] else _plus_days(new_york, 1)
             last = _plus_days(new_york, days)
-        per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
+        if per_underlying is None:
+            per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structures else 40
         rows: list[dict[str, Any]] = []
         for symbol in symbols:
             touch = quotes.get(symbol) or {}
@@ -965,11 +983,21 @@ class House:
 
     #: Set once from `league/config.json` (`_structure_book_name`); a test sets it directly.
     structure_book_name: str | None = None
+    #: Set once from `league/config.json` `options_structures.practice_account` (`_structure_practice_account`,
+    #: Wave 2, Sept 25, 2026); a test sets it directly.
+    structure_practice_account: bool | None = None
 
     def _structure_book_name(self) -> str:
         """The practice book a structure agent's structures go to: `league/config.json`
         `options_structures.book` (`options-shadow` or `alpaca-paper`), read once, the options shadow book
-        when the key is absent or unreadable. The switch is the deploy's: a rollback undoes it."""
+        when the key is absent or unreadable. The switch is the deploy's: a rollback undoes it.
+
+        Only a PRACTICE book of Alpaca (`families.PRACTICE_BOOKS["alpaca"]`) is taken; any other name is the
+        options shadow book, said once (the adversarial review of Deploy G, Sept 25, 2026: with the key naming
+        `alpaca`, a rung-1 structure agent was staked $150 on the REAL book, and with O1 on its open filled there
+        with no O4 line, no allocator and no audit)."""
+        from .families import PRACTICE_BOOKS
+
         if self.structure_book_name is None:
             try:
                 config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
@@ -977,7 +1005,141 @@ class House:
             except Exception:  # noqa: BLE001 - an unreadable config is the default book, never alpaca-paper by accident
                 named = None
             self.structure_book_name = str(named or STRUCTURE_BOOK_DEFAULT)
+        if self.structure_book_name not in PRACTICE_BOOKS["alpaca"]:
+            named, self.structure_book_name = self.structure_book_name, STRUCTURE_BOOK_DEFAULT
+            try:
+                self.alert("warning", f"league/config.json options_structures.book names {named}, which is not a practice book "
+                                      f"({', '.join(PRACTICE_BOOKS['alpaca'])}): structures trade on {STRUCTURE_BOOK_DEFAULT}")
+            except Exception:  # noqa: BLE001 - the default stands whether or not the alert is written
+                pass
         return self.structure_book_name
+
+    def _structure_practice_account(self) -> bool:
+        """The switch (Wave 2 of the options desk, Sept 25, 2026): `league/config.json`
+        `options_structures.practice_account`, read once. Only a literal `true` turns it on; absent, false
+        or unreadable, every structure agent trades on `options_structures.book` as before. On, a structure
+        agent whose program trades a type the Alpaca practice account can close as ONE covered order trades
+        there (`_structure_target`).
+
+        THE ROLLBACK RULE (the review of Wave 2, Sept 25, 2026). The release that brings this code (Deploy G)
+        ships it OFF; it is flipped only by a later release that changes nothing but this key, so that
+        undoing the flip lands on this code with the switch off, which moves agents back to the shadow book
+        once they are flat (`_structure_move`). NEVER roll back past the release that brought this code
+        while `alpaca-paper` holds a structure: the older code cannot fold the venue's legs into the
+        structures (the practice book freezes for every agent on it, for good), and its wind-down would sell
+        a held structure as its FIRST LEG alone (`alpaca_symbol` on the held instrument's first leg), which
+        for a debit vertical leaves a naked short -- legging out and a naked short, both not authorized. To
+        undo, release this key false."""
+        if self.structure_practice_account is None:
+            try:
+                config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
+                on = (config.get("options_structures") or {}).get("practice_account") is True
+            except Exception:  # noqa: BLE001 - an unreadable config is the switch off, never the practice account by accident
+                on = False
+            self.structure_practice_account = on
+        return bool(self.structure_practice_account)
+
+    def _structure_target(self, agent: Agent) -> Book | None:
+        """The book a structure agent's structures should trade on now (Wave 2, Sept 25, 2026): the Alpaca
+        practice account (`PRACTICE_BOOK["alpaca"]`) when the switch is on (`_structure_practice_account`),
+        that book is open and its venue holds legs (`structure_legs`: the real adapter, never a canary's
+        simulated account), and the program's own structure type, `PARAMS["structure"]`, is one this account
+        opens (`AlpacaBroker.structure_types`: the five types Alpaca closes as ONE covered order, a debit or
+        credit vertical, an iron condor or butterfly, a long butterfly, less what the account's type and
+        options level refuse). Anything else -- a calendar, a diagonal, a straddle or strangle (their one-order
+        close is uncovered, so Alpaca refuses it and they could only be held into expiry), a program that
+        names no type or trades several -- stays on `options_structures.book` (the options shadow book).
+        None when that book is not open here."""
+        default = self.books.get(self._structure_book_name())
+        practice = self.books.get(PRACTICE_BOOK["alpaca"])
+        if not self._structure_practice_account() or practice is None or practice is default or not practice._legs_at_venue():
+            return default
+        kind = (agent.params or {}).get("structure")
+        try:
+            opens = tuple(getattr(practice.broker, "structure_types", None) or ())
+        except Exception:  # noqa: BLE001 - an account that cannot say opens nothing: the shadow book it is
+            opens = ()
+        return practice if isinstance(kind, str) and kind in opens else default
+
+    def _structure_books(self) -> list[Book]:
+        """The books a structure agent can hold structures on: `options_structures.book` and the Alpaca
+        practice account, those open here (the practice account's whether or not the switch is on, so an
+        agent holding there after the switch is turned off still closes there)."""
+        names = dict.fromkeys([self._structure_book_name(), PRACTICE_BOOK["alpaca"]])
+        return [self.books[name] for name in names if name in self.books]
+
+    @staticmethod
+    def _structure_busy(book: Book, agent_id: str) -> bool:
+        """Whether the agent is not flat in structures on `book` (`Book.structures_busy`: it holds one, an order
+        of one is open, or a never-arrived buy of one still binds cash there). Cannot tell: not flat."""
+        account = book.accounts.get(agent_id)
+        if account is None or (account.swept and not account.holdings):
+            return False  # never seated there, or left: `book_of` asks this often, so the orders are not scanned
+        try:
+            return bool(book.structures_busy(agent_id))
+        except Exception:  # noqa: BLE001 - cannot tell: not flat, so it is not moved
+            return True
+
+    def _structure_move(self, agent: Agent, book: Book) -> None:
+        """Leave a structure book the agent is flat on for the one `book_of` now names (Wave 2, Sept 25, 2026).
+
+        THE MIGRATION, when the switch moves a structure agent between the options shadow book and the Alpaca
+        practice account (either way: the switch turned on, off by a config-only release -- never by rolling
+        back past this code, `_structure_practice_account` -- or its program's type changed):
+        1. While the agent holds a structure, has an order of one open or a never-arrived buy of one binding
+           cash on its OLD book, `_structure_book` keeps it there: its wakes see that book and it keeps trading
+           there, opens included, through the close of the first full regular session after the first wake
+           that found it moving (kept in house.json, `structure_moving`; `_structure_move_opens_until`); after
+           that the House refuses its opens there (`_structure_refusal`) and it only gets flatter: the House's
+           expiry-day close and a strategy's own exits bound the rest by its structures' earliest expiry.
+        2. At the first `seat` once it is flat there (every wake seats), this sweeps the old account's free
+           cash back to the House (`_sweep`, "account closed"), says so once, and `seat` stakes it on the new
+           book at the rung's practice stake, as `_move_books` does for any change of book. Its old record
+           stays on the old book, finished by the mark pass (`_observe_wind_down`).
+        So an agent is never holding, or ordering, structures on two books at once; for a moment it may have
+        cash on both (the sweep and the stake are separate rows), never a position or an order.
+
+        On any other book (its real book once promoted) it is not moving between practice books: its stamp goes
+        (and at its death, `kill`). Kept, a later demotion to a practice book it is again busy on would reuse the
+        old stamp and refuse its opens there at once, with no full session (the review of Deploy G, Sept 25, 2026)."""
+        if not self.is_structure_agent(agent) or book not in self._structure_books():
+            if agent.id in (self._state.get("structure_moving") or {}):
+                with self._state_lock:
+                    self._state["structure_moving"].pop(agent.id, None)
+            return
+        moving = book is not self._structure_target(agent)
+        with self._state_lock:
+            since = self._state.setdefault("structure_moving", {})
+            if moving:
+                since.setdefault(agent.id, self.clock())  # when this wake first found it moving (`_structure_move_opens_until`)
+            else:
+                since.pop(agent.id, None)
+        if moving:
+            return
+        for old in self._structure_books():
+            if old is book or agent.id not in old.accounts or self._structure_busy(old, agent.id):
+                continue
+            account = old.account(agent.id)
+            if account.swept or not account.funded or account.holdings:
+                continue
+            self._sweep(agent.id, old)
+            if old.account(agent.id).swept:
+                self.alert("info", f"{agent.id}: moved from {old.name} to {book.name} for its structures ({(agent.params or {}).get('structure')}), "
+                                   f"flat on {old.name}: its practice account there closed and swept, staked on {book.name}")
+
+    @staticmethod
+    def _structure_move_opens_until(since: float) -> float:
+        """Until when a moving structure agent may still OPEN on its old book (`_structure_move`, the review of
+        Wave 2, Sept 25, 2026): the close of the first regular session that opens after `since` (the first wake
+        that found it moving), so it always has one full session of trading there, whenever the switch was
+        flipped -- a Saturday deploy's wakes all weekend spend none of it. A calendar that cannot say: a day."""
+        try:
+            session = next_session(to_datetime(since))
+            if session is not None:
+                return to_datetime(session.close_at).timestamp()
+        except Exception:  # noqa: BLE001 - a date past the calendar's years: the day of wall clock
+            pass
+        return float(since) + STRUCTURE_MOVE_OPENS_SECONDS
 
     def is_structure_agent(self, agent: Agent | None) -> bool:
         """Whether `agent` trades structures: on the options desk, with `"structures": True` in its NEEDS."""
@@ -985,6 +1147,55 @@ class House:
             return False
         niche = self.niche_of(agent)
         return niche is not None and niche.asset_class == "option"
+
+    def _structure_program(self, agent: Agent | None, needs: Any = None) -> bool:
+        """Whether `agent` trades structures now, or would with a program of these `needs` (a rewrite into one)."""
+        if self.is_structure_agent(agent):
+            return True
+        niche = self.niche_of(agent)
+        return (isinstance(needs, Mapping) and needs.get("structures") is True and niche is not None
+                and niche.asset_class == "option")
+
+    def _note_structure_reach(self, agent: Agent, symbols: list[str], days: int, key: str, quotes: Mapping[str, Any]) -> None:
+        """Keep, for this wake's intents, the contracts a structure agent may open legs on (`_structure_reach_refusal`): the
+        `options_history.STRUCTURE_REACH` (160) of each underlying nearest the money in the chain this wake read, ranked as
+        its 80 are (`_chain`, the venue's chain cached two minutes, so no request more). Called by `_structure_context`,
+        which every wake of a structure agent runs before its decision."""
+        from .options_history import STRUCTURE_REACH
+
+        seen = self.__dict__.setdefault("_structure_reach_seen", {})
+        if not any(family_of(name) == "alpaca" and hasattr(b.broker, "option_chain") for name, b in self.books.items()):
+            seen.pop(agent.id, None)  # no venue here lists a chain (a test's House): there is no reach to hold it to
+            return
+        reach = self._cached(f"structure-reach:{key}", 120,
+                             lambda: frozenset(str(r.get("occ") or r.get("symbol") or "").upper()
+                                               for r in self._chain(symbols[:8], days, None, quotes, structures=True, per_underlying=STRUCTURE_REACH)),
+                             record=False)  # the chain itself is recorded (`_structure_context`); this is only its ranking
+        if len(seen) > 512:
+            seen.clear()
+        seen[agent.id] = reach
+
+    def _structure_reach_refusal(self, agent: Agent, order: Any) -> str:
+        """Why a structure OPEN is refused for its legs (empty when it is not; G-LOOP's review, Sept 25, 2026): a leg outside
+        the `options_history.STRUCTURE_REACH` (160) contracts of its underlying nearest the money in the chain the agent's
+        wake read (`_note_structure_reach`; it is shown the 80 nearest). The options replay refuses such an open alike, at
+        its step (`options_replay`), so live and replay agree -- and a replay tape that keeps only what the chain could
+        reach can never price a leg because the market LATER came near it (the review's look-ahead). A close is never
+        refused for it: it only takes risk off. An intent with no wake behind it in this process (a test's) is not
+        judged by it: every wake of a structure agent reads its chain before its decision."""
+        if order.action != "open":
+            return ""
+        reach = (self.__dict__.get("_structure_reach_seen") or {}).get(agent.id)
+        if reach is None:
+            return ""
+        from .options_history import STRUCTURE_REACH
+
+        outside = sorted({leg.occ for leg in order.spec.legs if str(leg.occ).upper() not in reach})
+        if not outside:
+            return ""
+        return (f"outside the chain's reach: every leg of a structure you open must be among the {STRUCTURE_REACH} contracts of its "
+                f"underlying nearest the money in the chain the House read this wake (you are shown the {STRUCTURE_CHAIN_PER_UNDERLYING} "
+                f"nearest); {', '.join(outside[:4])} {'is' if len(outside) == 1 else 'are'} not. The replay refuses it alike")
 
     def _structure_hours(self, day: str) -> tuple[float, float]:
         """(entry cut, House close) for structures whose earliest expiry is `day`, as New York hours: 14:30 and
@@ -1010,12 +1221,18 @@ class House:
         return hours[day]
 
     def _structure_book(self, agent: Agent) -> Book | None:
-        """A structure agent's practice book (`book_of`, rung 1): the one the config names, None when
-        that book is not open here -- `book_of` then falls back to the desk's practice book, where
-        `_structure_intent` refuses every one of its intents, saying so."""
+        """A structure agent's practice book (`book_of`, rung 1): the book it is not flat on, if it is moving
+        (`_structure_move`: it trades there, closes only, until it is flat), else `_structure_target` (the
+        book the config names, or the Alpaca practice account by the switch). None when that book is not
+        open here -- `book_of` then falls back to the desk's practice book, where `_structure_intent`
+        refuses every one of its intents, saying so."""
         if not self.is_structure_agent(agent):
             return None
-        return self.books.get(self._structure_book_name())
+        target = self._structure_target(agent)
+        for book in self._structure_books():
+            if book is not target and self._structure_busy(book, agent.id):
+                return book
+        return target
 
     def _structure_intent(self, agent: Agent, book: Book, row: Mapping[str, Any], now: str, index: int) -> Intent | bool | None:
         """A decision row as a structure intent (`_intents`): None when the row is none of a structure's
@@ -1047,7 +1264,7 @@ class House:
                             limit_price=order.held_limit, reason=order.reason, created_at=now, nonce=f"{now}:{index}")
         if order.action == "open" and self.registry.entries_paused(agent.id):
             return False  # held like any paused buy (X1): not sent, and not a refusal
-        refusal = self._structure_refusal(agent, book, order, instrument, now)
+        refusal = self._structure_refusal(agent, book, order, instrument, now) or self._structure_reach_refusal(agent, order)
         if refusal:
             self._refuse_intent(agent, book, intent, refusal)
             return False
@@ -1088,18 +1305,56 @@ class House:
                                  f"{band:.0%} band from the {touch} {getattr(quote, touch)}; it fills at the {touch}]")
 
     def _structure_refusal(self, agent: Agent, book: Book, order: Any, instrument: Instrument, now: str) -> str:
-        """Why the House does not send this structure order (empty when it does): not a structure agent; on real
-        money (O1: the owner's switch); not on the structure book; an open outside the specialty, outside the
-        session, or on its earliest expiry day from `STRUCTURE_ENTRY_CUT_HOUR` New York (or after that expiry)."""
+        """Why the House does not send this structure order (empty when it does): not a structure agent; not on the
+        structure book (practice) or its venue's real book; on real money, an OPEN while the owner's switch is off (O1,
+        `allocator.option_spreads_real`) or of a type `allocator.option_spread_real_types` does not admit; an open outside
+        the specialty, outside the session, or on its earliest expiry day from `STRUCTURE_ENTRY_CUT_HOUR` New York (or
+        after that expiry).
+
+        On real money (G of the options-desk run, Sept 25, 2026) an admitted open goes to the real Alpaca book as the ONE
+        held instrument, by the same `Book` and broker path as practice: the venue's adapter sends it as one multi-leg
+        order, and the gateway admits exactly the constitution's types (`league.ci` holds `OPTION_STRUCTURES_REAL` to them).
+        A CLOSE is never refused for the switch or the type: it only takes risk off, and a structure held when the switch
+        went off must still be sold (the gateway checks that the account holds its legs, and admits a close of any type).
+
+        Since the review of g/money (Sept 25, 2026): NO real structure order, open or close, goes through an adapter that
+        cannot send it as one multi-leg order (`_structure_unsendable`: a close sent leg by leg would leave a naked short
+        leg), and a real open whose leg would net at the venue against a contract the real book holds or bids on the other
+        side is refused (`_real_netting_refusal`: the venue nets contracts across the account, and a netted leg can no
+        longer be closed as the structure's)."""
         if not self.is_structure_agent(agent):
             return ("a structure intent comes only from a structure agent: an agent of the options desk whose NEEDS "
                     "carry \"structures\": true")
         if book.real_money:
-            return "structures on real money wait for the owner's switch (O1): nothing is sent to a real account"
-        wanted = self._structure_book_name()
-        if book.name != wanted:
-            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
-                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+            if book.name != REAL_BOOK.get(agent.venue):
+                return f"a structure agent's real book is {REAL_BOOK.get(agent.venue)}, not {book.name}: nothing is sent"
+            rung = self.evaluator.rung(agent.id)
+            if rung < 2:
+                # Only an agent the allocator seated on real money trades there (the review of Deploy G, Sept 25, 2026:
+                # beside `_structure_book_name`, which takes a practice book only, so a misnamed book cannot put a rung-1
+                # agent's structures on the owner's real account). What it may still hold there the House winds down.
+                return (f"a structure agent on rung {rung} trades on practice, never on the real {book.name} book: nothing is "
+                        "sent (real money follows its family's O4 line, through the allocator)")
+            if order.action == "open":
+                admitted = allocator_module.spread_types_real()
+                if not admitted:
+                    return ("structures on real money wait for the owner's switch (O1: allocator.option_spreads_real is off): "
+                            "no structure is opened on a real account")
+                if order.spec.type not in admitted:
+                    article = "an" if order.spec.type[:1] in "aeiou" else "a"
+                    return (f"{article} {order.spec.type} is not admitted on real money: allocator.option_spread_real_types "
+                            f"admits {', '.join(admitted)} (a credit type waits for the owner's explicit confirmation)")
+            unsendable = self._structure_unsendable(book, agent.id, instrument, order.action)
+            if unsendable:
+                return unsendable
+            if order.action == "open":
+                netting = self._real_netting_refusal(book, [(leg.occ, leg.sign) for leg in order.spec.legs])
+                if netting:
+                    return netting
+        else:
+            refusal = self._structure_practice_refusal(agent, book, order)
+            if refusal:
+                return refusal
         if order.action != "open":
             return ""
         niche = self.niche_of(agent)
@@ -1126,22 +1381,111 @@ class House:
         except LedgerConflict:
             pass  # this very intent was refused already
 
+    def _structure_unsendable(self, book: Book, agent_id: str, inst: Instrument, action: str) -> str:
+        """Why a structure order may not go to this REAL book's venue adapter, open or close (empty when it may, and on every
+        practice book): the adapter must say it sends a structure as ONE multi-leg order (`mleg`, Track P's adapter). One
+        without it would spell the held instrument as its first leg's OCC code and send that leg alone: legging in on an
+        open, and on a close legging OUT, which leaves the structure's short leg naked (the review of g/money, Sept 25, 2026;
+        until then only opens were held back). A close held back here is an error on the record, said once a structure a
+        day: a held real structure the House cannot close needs the owner (restore the adapter; never a leg by hand)."""
+        if not book.real_money:
+            return ""
+        try:
+            whole = "mleg" in set(book.broker.capabilities() or ())
+        except Exception:  # noqa: BLE001 - an adapter that cannot say is one that cannot
+            whole = False
+        if whole:
+            return ""
+        why = (f"the {book.name} book's venue adapter cannot send a structure as one multi-leg order (no `mleg` capability): no "
+               "structure order, open or close, is sent to it, never leg by leg")
+        if action != "open":
+            told = self.__dict__.setdefault("_structure_unsendable_told", set())
+            key = (agent_id, inst.key, _new_york(self.clock)[0])
+            if key not in told:
+                told.add(key)
+                try:
+                    self.alert("error", f"{agent_id}: the real structure {inst.market_id} on {book.name} cannot be closed: {why}. "
+                                        "Restore an adapter that sends one multi-leg order; never close it leg by leg")
+                except Exception:  # noqa: BLE001 - the refusal stands whether or not the alert is written
+                    pass
+        return why
+
+    def _real_netting_refusal(self, book: Book, legs: Sequence[tuple[str, int]]) -> str:
+        """Why an option OPEN on a REAL book would net against a contract the book already holds or bids on the other side
+        (empty when it would not, and on every practice book). `legs` are (OCC code, +1 long | -1 short); a single contract
+        is one long leg. The venue nets contracts across the account: two structures sharing a strike on opposite sides, or a
+        single contract bought on a structure's short leg, leave the account without one of the legs, and each structure's
+        close is then refused at the gateway as closing a leg not held -- into expiry (the review of g/money, Sept 25, 2026).
+        Every account's holdings and working buys on the book are read (the House knows them before the venue does)."""
+        if not book.real_money:
+            return ""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        wanted = {str(occ): int(sign) for occ, sign in legs}
+        sides: dict[str, set[int]] = {}
+
+        def add(inst: Instrument) -> None:
+            if is_structure(inst):
+                for leg in structures.spec_of(inst).legs:
+                    sides.setdefault(leg.occ, set()).add(leg.sign)
+            elif inst.asset_class == "option":
+                sides.setdefault(alpaca_symbol(inst), set()).add(1)  # a book never holds a single contract short
+
+        try:
+            for agent_id in book.agents():
+                for holding in list(book.account(agent_id).holdings.values()):
+                    if holding.quantity > 0:
+                        add(holding.instrument)
+            for working in book.open_orders():
+                if working.side == "buy":
+                    add(working.instrument)
+        except Exception as exc:  # noqa: BLE001 - a book that cannot be read opens nothing
+            return f"the {book.name} book's holdings could not be read to rule out netting ({type(exc).__name__}): no option is opened"
+        clash = sorted(occ for occ, sign in wanted.items() if -sign in sides.get(occ, ()))
+        if not clash:
+            return ""
+        return (f"{', '.join(clash)} is held or bid on the other side on {book.name}: the venue nets one account's contracts, "
+                "and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
+
+    def _structure_practice_refusal(self, agent: Agent, book: Book, order: Any) -> str:
+        """Why a structure order is not sent on this PRACTICE book (empty when it is; `_structure_refusal`): not the book
+        the agent's structures trade on (`_structure_target`), unless it is moving off this one (`_structure_move`, Wave
+        2, Sept 25, 2026: it trades on here until it is flat, and opens here only until `_structure_move_opens_until`)."""
+        target = self._structure_target(agent)
+        wanted = target.name if target is not None else self._structure_book_name()
+        if book.name == wanted:
+            return ""
+        if self._structure_book(agent) is not book:
+            return (f"structures trade on the {wanted} book, which is not open on this House: nothing is sent to {book.name}"
+                    if wanted not in self.books else f"structures trade on the {wanted} book, not on {book.name}")
+        if order.action == "open":
+            since = (self._state.get("structure_moving") or {}).get(agent.id)
+            if since is not None and self.clock() >= self._structure_move_opens_until(float(since)):
+                return (f"this agent's structures are moving to the {wanted} book: after a full session of trading on here it closes "
+                        f"what it holds on {book.name} and opens nothing more here; once it is flat its next open goes to {wanted}")
+        return ""
+
     def _structure_context(self, agent: Agent, ctx: dict[str, Any], symbols: list[str], max_order: Decimal,
-                           max_position: Decimal) -> None:
+                           max_position: Decimal, *, book: Book | None = None) -> None:
         """A structure agent's options block (`snapshot`): `ctx["chain"]`, not filtered by a single contract's
         affordability, 0 to `max_days_to_expiry` days (today until 14:30 New York), at most 80 contracts an
         underlying; `ctx["structures"]`, the ready-made candidates within its caps (`structures.candidates`,
-        the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee."""
+        the same function the options replay shows); and `ctx["structure_rules"]`, the time rules and fee.
+        On real money (`book`, G of Sept 25, 2026) only the types real money admits now are offered, and the rules
+        say which (none while the owner's switch, O1, is off)."""
         from . import structures
 
         asked = agent.needs.get("max_days_to_expiry")
-        days = max(0, min(int(7 if asked is None else asked), 45))  # 0 is a 0-DTE strategy's own answer, not "unsaid"
+        from .options_history import structure_days
+        days = structure_days(asked, symbols)  # 0 is a 0-DTE strategy's own answer, not "unsaid"; 10 at most on SPY, QQQ, IWM
         today, hour = _new_york(self.clock)
         cut, close = self._structure_hours(today)
         opening = hour < cut
         chain = self._cached(f"structure-chain:{','.join(symbols)}:{days}:{today}:{int(opening)}", 120,
                              lambda: self._chain(symbols[:8], days, None, ctx["quotes"], structures=True))
         ctx["chain"] = chain
+        self._note_structure_reach(agent, symbols, days, f"{','.join(symbols)}:{days}:{today}:{int(opening)}", ctx["quotes"])
         try:
             ctx["structures"] = structures.candidates(chain, max_loss_usd=min(max_order, max_position), today=today)
         except Exception as exc:  # noqa: BLE001 - a candidate that cannot be built costs the list, not the wake
@@ -1151,8 +1495,27 @@ class House:
             "entry_cut_new_york": f"{_clock_text(cut)} on the structure's earliest expiry day (today's hours)",
             "house_close_new_york": f"{_clock_text(close)} on the structure's earliest expiry day, at its bid, re-priced each tick",
             "fee_per_contract_leg_usd": float(structures.FEE_PER_CONTRACT),
-            "book": self._structure_book_name(),
+            "book": book.name if book is not None else self._structure_book_name(),
         }
+        if book is not None and book.real_money:
+            admitted = allocator_module.spread_types_real()
+            ctx["structures"] = [row for row in ctx["structures"] if row.get("structure") in admitted]
+            ctx["structure_rules"]["real_money_opens"] = (list(admitted) if admitted else
+                                                          "none: the owner's switch (O1, allocator.option_spreads_real) is off")
+        self._structure_moving_context(agent, ctx, book)
+
+    def _structure_moving_context(self, agent: Agent, ctx: dict[str, Any], book: Book | None) -> None:
+        """The practice book a structure agent's wake trades on, and where it is moving (`_structure_move`, Wave 2,
+        Sept 25, 2026), in `ctx["structure_rules"]`. Never on a real-money wake: there the book is the real one."""
+        if book is not None and book.real_money:
+            return
+        here, target = self._structure_book(agent), self._structure_target(agent)
+        if here is not None:
+            ctx["structure_rules"]["book"] = here.name
+            if target is not None and target is not here:
+                ctx["structure_rules"]["moving_to"] = (f"{target.name}: you trade on {here.name} until you are flat there (opens "
+                                                       f"until the close of a full session there, then closes only); once flat, "
+                                                       f"your next open goes to {target.name}")
 
     def _structure_row(self, inst: Instrument, *, average_cost: Decimal | None = None, mark: Decimal | None = None,
                        quantity: Decimal | None = None, limit: Decimal | None = None, side: str | None = None) -> dict[str, Any]:
@@ -1265,6 +1628,8 @@ class House:
         if holding.quantity <= 0 or str(inst.expiry or "9999") != today or hour < self._structure_hours(today)[1] \
                 or market_hours(inst, now) is False:
             return None
+        if self._structure_unsendable(book, agent_id, inst, "close"):
+            return None  # never leg by leg (the review of g/money, Sept 25, 2026): an error on the record, once a day
         limit = self._structure_bid(book, inst)
         if limit is None:
             return None
@@ -2270,7 +2635,11 @@ class House:
         rung = self.evaluator.rung(agent.id)
         if rung >= 2 and REAL_BOOK[agent.venue] in self.books:
             return self.books[REAL_BOOK[agent.venue]]
-        # A structure agent practises on the structure book (`_structure_book`, Sept 25, 2026).
+        return self.practice_book(agent)
+
+    def practice_book(self, agent: Agent) -> Book | None:
+        """The book an agent practises on (rung 1): a structure agent's structure book (`_structure_book`, Sept 25,
+        2026), else its venue's practice book. The allocator reads the same (`allocator.practice_book`)."""
         return self._structure_book(agent) or self.books.get(PRACTICE_BOOK[agent.venue])
 
     def _limits(self, rung: int, agent: Agent | None = None, staked: Decimal | None = None) -> Limits:
@@ -2293,8 +2662,10 @@ class House:
             classes = ("option",)
             if rung == 2 and not allocated:  # one contract cannot be cut smaller: the micro rung's option cap
                 position = order = Decimal(row["option_max_position_usd"])
-            elif allocated:
+            elif allocated and not self.is_structure_agent(agent):
                 position = order = max(position, Decimal(row["option_max_position_usd"]))
+            # A structure agent's real caps are the allocator's as they are (O3, Sept 25, 2026): a position of
+            # `spread_position_share` of its stake in maximum loss, every order within the gateway's $75.
         return Limits(position, order, asset_classes=classes, max_hours_to_resolve=self.horizon_hours(agent))
 
     def _real_limits(self, agent: Agent, book: Book, limits: Limits) -> tuple[Decimal, Decimal]:
@@ -2378,6 +2749,7 @@ class House:
         book = self.book_of(agent)
         if rung < 1 or book is None:
             return
+        self._structure_move(agent, book)  # a structure agent flat on the book it is leaving (Wave 2, Sept 25, 2026)
         account = book.account(agent.id)
         book.limits[agent.id] = self._limits(rung if book.real_money else 1, agent, account.staked)
         # A new seat, or a return to a book the House had closed the agent's account on (a
@@ -2528,7 +2900,7 @@ class House:
                                                        lambda: self.options_history.features_at(symbols, self.clock()))
             niche = self.niche_of(agent)
             if niche is not None and niche.asset_class == "option" and self.is_structure_agent(agent):
-                self._structure_context(agent, ctx, symbols, max_order, max_position)  # its chain and ctx["structures"]
+                self._structure_context(agent, ctx, symbols, max_order, max_position, book=book)  # its chain and ctx["structures"]
             elif niche is not None and niche.asset_class == "option":
                 days = max(2, min(int(needs.get("max_days_to_expiry") or 21), 45))
                 # A contract is 100 shares: what one contract may cost a share, by the same number the
@@ -3282,6 +3654,14 @@ class House:
                 if (book.real_money and side == "buy" and self.campaigns
                         and not self.campaigns.allows_live(self.evaluator.rung(agent.id))):
                     raise ValueError("this phase permits exits but no new real-money entries")
+                if book.real_money and side == "buy" and instrument.asset_class == "option":
+                    # A single contract bought on a real structure's short leg would net it away at the venue (the review
+                    # of g/money, Sept 25, 2026): `_real_netting_refusal`.
+                    from ltcm.adapters.alpaca import alpaca_symbol
+
+                    netting = self._real_netting_refusal(book, [(alpaca_symbol(instrument), 1)])
+                    if netting:
+                        raise ValueError(netting)
                 niche = self.niche_of(agent)
                 if niche is not None and side == "buy" and not niche.holds(instrument):
                     raise ValueError(f"{instrument.market_id or instrument.symbol} is outside the {niche.id} specialty")
@@ -3369,7 +3749,42 @@ class House:
                     adjusted.extend(f"{shown} {side}: {note}" for note in notes)
             except Exception as exc:  # noqa: BLE001 - one malformed intent is dropped, the rest stand
                 dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+        if book.real_money and intents:
+            intents = self._net_within_decision(agent, book, intents, dropped)
         return intents, dropped
+
+    def _net_within_decision(self, agent: Agent, book: Book, intents: list[Intent], dropped: list[str]) -> list[Intent]:
+        """`_real_netting_refusal` within one decision on a REAL book (the review of g/money, Sept 25, 2026): its option
+        buys in order, a later one whose leg meets an earlier one's opposite leg is refused (a structure's as the book's own
+        refusal row, a single contract's as a dropped row), since neither is on the book yet when the other is checked."""
+        from . import structures
+        from ltcm.adapters.alpaca import alpaca_symbol
+
+        kept: list[Intent] = []
+        sides: dict[str, set[int]] = {}
+        for intent in intents:
+            inst = intent.instrument
+            if intent.side != "buy" or inst.asset_class != "option":
+                kept.append(intent)
+                continue
+            try:
+                legs = [(leg.occ, leg.sign) for leg in structures.spec_of(inst).legs] if is_structure(inst) else [(alpaca_symbol(inst), 1)]
+            except Exception as exc:  # noqa: BLE001 - an open whose legs cannot be read is not sent
+                dropped.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+                continue
+            clash = sorted(occ for occ, sign in legs if -sign in sides.get(occ, ()))
+            if clash:
+                why = (f"{', '.join(clash)} is opened on the other side by this same decision on {book.name}: the venue nets one "
+                       "account's contracts, and a netted leg could no longer be closed as its structure's. Nothing is opened on it")
+                if is_structure(inst):
+                    self._refuse_intent(agent, book, intent, why)
+                else:
+                    dropped.append(f"ValueError: {why[:160]}")
+                continue
+            for occ, sign in legs:
+                sides.setdefault(occ, set()).add(sign)
+            kept.append(intent)
+        return kept
 
     def _fit_order_type(self, book: Book, instrument: Instrument, side: str, order_type: str, limit: Decimal | None,
                         post_only: bool) -> tuple[str, Decimal | None, str] | None:
@@ -3666,14 +4081,46 @@ class House:
         from datetime import date, timedelta
         return (date.fromisoformat(str(self.holdout_window[1])[:10]) + timedelta(days=1)).isoformat() + "T00:00:00Z"
 
+    #: Set once from `league/config.json` `options_history_daily_expiries` (`_options_history_daily_expiries`, the review
+    #: of Deploy G, Sept 25, 2026); a test sets it directly.
+    options_history_daily_expiries: bool | None = None
+
+    def _options_history_daily_expiries(self) -> bool:
+        """Whether the daily refresh ingests EVERY expiry of SPY, QQQ and IWM (`options_history.DAILY_EXPIRIES`):
+        `league/config.json` `options_history_daily_expiries`, read once; only a literal `true` turns it on.
+
+        The adversarial review of Deploy G (Sept 25, 2026): the first refresh after the deploy (17:00 New York) would
+        backfill every weekday expiry across the window unwatched -- 4.55 M more bars on the review's synthetic copy,
+        estimated at one ops slot for 25-45 minutes and 4-5k gateway GETs -- and once the store holds them, a rollback
+        to a release before G cannot be undone there: that code's `tape` has no weekly filter and caps only after
+        building, so its SPY/QQQ/IWM structure tapes grow about fourfold (a 930 MB peak against G's 217 MB, measured
+        on the copy). So Deploy G ships it false and keeps today's weekly refresh; a later release that changes nothing
+        but this key turns it on, in an announced, watched quiet slot. Once the store holds every expiry, never roll
+        back past Deploy G without first deleting the non-weekly SPY/QQQ/IWM bars."""
+        if self.options_history_daily_expiries is None:
+            try:
+                config = json.loads(Path(__file__).with_name("config.json").read_text(encoding="utf-8"))
+                on = config.get("options_history_daily_expiries") is True
+            except Exception:  # noqa: BLE001 - an unreadable config is the weekly refresh, never the backfill by accident
+                on = False
+            self.options_history_daily_expiries = on
+        return bool(self.options_history_daily_expiries)
+
     def _refresh_options_history(self) -> dict[str, Any]:
         """The daily options-history job (ops lane, market-data GETs only): the underlyings living
         options strategies trade, at 1Day and 15Min; the feature symbols of living equity
         strategies (and SPY, QQQ, IWM) at 1Day; then their feature rows. A symbol the store does
         not yet cover over the replay window is backfilled across it first; the chunk journal
         makes that a one-off (six underlyings over three and a half months took about ten
-        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay."""
-        from .options_history import adapter_from, refresh
+        minutes and 70 MB, Sept 22, 2026). Until a symbol is covered, paper stays its replay.
+
+        SPY, QQQ and IWM are traded by the options desk with EVERY expiry (G-LOOP, Sept 25, 2026:
+        `options_history.DAILY_EXPIRIES`, a weekday expiry read from `DAILY_MAX_DAYS` days before it): one
+        the store holds only weekly is backfilled across the window once, its Fridays' chunks already done
+        (never fetched again), and its weekly coverage stays its replay's until then. Only while
+        `options_history_daily_expiries` is on (`_options_history_daily_expiries`); off, every symbol is
+        refreshed weekly, as before G."""
+        from .options_history import DAILY_EXPIRIES, DAILY_MAX_DAYS, adapter_from, refresh
         options = {n.id for n in self.niches.values() if n.asset_class == "option"}
         replay = sorted({str(s).upper() for a in self.registry.living() if a.specialty in options for s in (a.needs.get("symbols") or [])[:8]})
         wanted = sorted({str(s).upper() for a in self.registry.living() if a.needs.get("options_features") for s in (a.needs.get("symbols") or [])}
@@ -3685,9 +4132,14 @@ class House:
         done: dict[str, Any] = {"features": {}, "coverage": []}
         for group, timeframes, band in ((replay, ("1Day", "15Min"), 0.2), (wanted, ("1Day",), 0.10)):
             covered = set(self.options_history.covers(group, timeframes[-1], start, end))
+            daily = ({"all_expiries": DAILY_EXPIRIES, "daily_max_days": DAILY_MAX_DAYS}
+                     if group is replay and self._options_history_daily_expiries() else {})
+            every = [s for s in group if s in DAILY_EXPIRIES] if daily else []
+            if every:
+                covered -= set(every) - set(self.options_history.covers(every, timeframes[-1], start, end, every_expiry=True))
             for days, symbols in ((10, [s for s in group if s in covered]), (span, [s for s in group if s not in covered])):
                 if symbols:
-                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45)
+                    ran = refresh(self.options_history, symbols, underlier, days=days, timeframes=timeframes, band=band, max_days=45, **daily)
                     done["features"].update(ran["features"])
                     done["coverage"] += ran["coverage"]
         self.ledger.append("ops.budget", {"what": "options history refresh", "replay_symbols": len(replay), "feature_symbols": len(wanted),
@@ -3706,11 +4158,17 @@ class House:
             oldest = min(self._tapes, key=lambda k: self._tapes[k][0])
             self._tapes.pop(oldest, None)
 
-    def tape_for(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-        """The recorded history a strategy with these NEEDS is replayed over (cached for a day)."""
+    def tape_for(self, needs: Mapping[str, Any], *, window: tuple[float, float] | None = None) -> tuple[str, dict[str, Any]]:
+        """The recorded history a strategy with these NEEDS is replayed over (cached for a day).
+
+        `window` (start, end epochs; OPTIONS tapes only, G-LOOP, Sept 25, 2026): the tape of that stretch instead
+        of the replay window, which the lab's forward window of a structure program asks for (its last
+        `forward_days`: a tenth of the whole tape's bars, built on the House's one CPU and never kept)."""
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
         structural = option and needs.get("structures") is True  # a structure agent's options tape (Sept 25, 2026)
+        if window is not None and not (option and self.options_history is not None):
+            raise ValueError("unsupported input: only an options tape is built for a window of its own")
         wanted = self._feeds_wanted(needs)
         # The history store holds no option chains, and no feed reaches back into its development
         # window (the backfilled history feeds cover the live window): a strategy that reads either is
@@ -3719,7 +4177,7 @@ class House:
             deep = self._deep_tape(needs)
             if deep is not None:
                 return deep
-        start, end = self._live_window(needs)
+        start, end = window if window is not None else self._live_window(needs)
         start_iso, end_iso = now_iso(lambda: start), now_iso(lambda: end)
         watched = needs.get("observe") if isinstance(needs.get("observe"), dict) else {}
         if option and self.options_history is not None:
@@ -4004,7 +4462,8 @@ class House:
     def _run_replay(self, agent: Agent, code: str, needs: Mapping[str, Any], params: Mapping[str, Any], *,
                     scale: float = 1.0) -> tuple[dict[str, Any], str]:
         """`scale` sizes the replay's book: the practice rung's stake and caps times it (an in-place edit
-        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`; everything else at the practice book's)."""
+        is replayed at half notional, `EDIT_REPLAY_NOTIONAL`, a structure agent's at the full caps,
+        `EDIT_REPLAY_STRUCTURE_NOTIONAL`; everything else at the practice book's)."""
         parameters.require_valid(params, needs)
         if self.campaigns and not self.pacer.may_spend("sail"):
             raise ValueError("campaign allowance is closed")
@@ -4298,7 +4757,9 @@ class House:
 
         The agent keeps its seat, its record and its code; only numeric PARAMS that `parameters.inspect`
         lists as mutable change, each inside its bounds. The House replays the code with the edited
-        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`), on the
+        PARAMS first, on a book of half the practice stake and caps (`EDIT_REPLAY_NOTIONAL`; a structure
+        agent's at the full practice stake and caps, `EDIT_REPLAY_STRUCTURE_NOTIONAL`: at half, most of its
+        structures cost more than the order cap and its replay could not open one), on the
         tape its replays use -- the development window, never the sealed holdout -- and judges it by
         the replay gate against the line's trials with this look, and every earlier edit look of the
         line, counted in the deflation (`evaluator.replay_gate`, counted=False, `looks`). It records no
@@ -4351,8 +4812,9 @@ class House:
         niche = self.niche_of(current)
         if niche is not None and not self._replayable(niche, current.needs):
             return {"error": "this specialty has no replay to judge an edit by: an edit here waits for one"}
+        scale = EDIT_REPLAY_STRUCTURE_NOTIONAL if self.is_structure_agent(current) else EDIT_REPLAY_NOTIONAL
         try:
-            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=EDIT_REPLAY_NOTIONAL)
+            result, tape_id = self._run_replay(current, current.code, current.needs, edited, scale=scale)
         except Exception as exc:  # noqa: BLE001 - a replay that cannot run is no look, and changes nothing
             return {"error": f"the edit's replay could not run (not a look; nothing changed): {type(exc).__name__}: {str(exc)[:200]}"}
         crash = self._crashed(result)
@@ -4366,7 +4828,8 @@ class House:
                    "deflated_sharpe": None if deflated is None else deflated["dsr"], "return_pct": result.get("return_pct"),
                    "max_drawdown": result.get("max_drawdown"), "oos_mean_log_growth": oos.get("mean_log_growth"),
                    "fees_usd": result.get("fees_usd"), "tape": tape_id, "tape_source": result.get("tape_source"),
-                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * EDIT_REPLAY_NOTIONAL}
+                   "stake_usd": float(CONSTITUTION["rungs"]["1"]["stake_usd"]) * scale,
+                   "max_order_usd": float(CONSTITUTION["rungs"]["1"]["max_order_usd"]) * scale}
         self.ledger.append("agent.research", {"tool": "edit_replay", "session": session, "passed": passed, "reasons": reasons,
                                               "params": edited, "was": dict(current.params), **numbers}, agent=current.id)
         return {"passed": passed, "reasons": reasons, "params": edited, "was": dict(current.params),
@@ -4396,6 +4859,8 @@ class House:
             self.evaluator.observe(agent.id, book.name, agent.horizon)
             peers = [a.id for a in self.registry.agents.values() if a.family == agent.family and a.venue == agent.venue and a.id != agent.id]
             verdict = self.evaluator.judge(agent.id, book.name, peers=peers if rung == 2 else (), family=agent.family, horizon=agent.horizon)
+            if verdict.decision != "die":
+                verdict = self._moved_record_death(agent, book, rung) or verdict  # a structure agent's record on the books it left (G)
             if verdict.decision != 'eligible' and not allocator_module.enabled():
                 # Under the allocator its own statuses are the only ones (two writers alternated a
                 # `progress` row every pass for every waiting agent, Sept 23, 2026 review).
@@ -5316,7 +5781,10 @@ class House:
                 # A structure is sold whole, at its bid (at least a cent), in the session (Sept 25, 2026): its
                 # bid can be zero while its legs still trade, and a debit structure worth nothing is sold for a cent.
                 # A sale of it resting at or under the bid is kept across passes (it fills there, and `quantity` is
-                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`).
+                # net of it); one over the bid was cancelled to be re-priced (`_structure_wind_down_bids`). Never
+                # through an adapter that would send it leg by leg (`_structure_unsendable`, the review of g/money).
+                if self._structure_unsendable(book, agent.id, holding.instrument, "close"):
+                    continue
                 sale = self._structure_sale(agent.id, holding.instrument, quantity, structure_bids.get(holding.instrument.key), now,
                                             nonce=f"wind-down:{now}", reason="the House is closing this account: the whole structure at its bid")
                 if sale is not None:
@@ -5558,6 +6026,8 @@ class House:
                 self._desk_displaced[agent.specialty] = self.clock()
             for key in ("next_wake", "memory", "last_research", "tried", "idle"):
                 self._state[key].pop(agent.id, None)
+            with self._state_lock:
+                (self._state.get("structure_moving") or {}).pop(agent.id, None)  # a living agent's move (`_structure_move`)
             try:
                 self._hand_off_retained(agent, cause)  # S3: its latest replay-passed candidate waits for a seat
             except Exception as exc:  # noqa: BLE001 - a hand-off that fails never keeps an agent alive
@@ -5860,7 +6330,8 @@ class House:
           displaced only by a newcomer whose forward score beats the resident's own forward record
           (`Lab.resident_forward`: the lab scores every resident's program, S2); with no record of its
           own YET there is nothing to compare, and it keeps its seat -- but a trader the lab can never
-          score (`Lab.can_score`: an options or unreplayed desk, a blocked program) is judged as before,
+          score (`Lab.can_score`: an unreplayed desk, a single-contract program of the options desk -- whose
+          STRUCTURE programs the lab scores since G-LOOP, Sept 25, 2026 -- a blocked program) is judged as before,
           or its desk's waiters would starve for good (the review of #245);
         - a resident whose family is proven (the allocator's family record, `Allocator.family`) is never
           displaced by an unproven newcomer -- except one that has never traded and whose grace has run;
@@ -8812,7 +9283,20 @@ class House:
             # to protect and no position in hand, a file that at least TRADES is worth more than
             # one that provably does nothing, and the paper screen is what stands above it.
             traded = float(candidate.get("numbers", {}).get("trades") or 0) > 0
-            if not repair and not (traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))):
+            stuck = traded and rung == 1 and self.record_is_empty(agent) and barren >= int((self.game.get("research") or {}).get("idle", {}).get("barren_wakes", 10))
+            if stuck and not repair and self._structure_program(agent, candidate.get("needs")):
+                # Never a STRUCTURE program (G-LOOP, Sept 25, 2026): its replay is the only judge of arithmetic that
+                # can cost a structure's whole maximum loss. At 15:34:48Z krasker-22 (options-gap-drift) took this
+                # rule's way out of eleven barren wakes into a credit-spread program whose replay had FAILED at
+                # 15:34:26Z (17 trades), opened a CCL Oct 2 condor on $0.50 wings at 15:42:56Z, and from 15:54Z its
+                # stop tried to buy it back at 1.46, three times the wings: refused as no defined-risk order, the
+                # condor marked at its whole $17.20 maximum loss. A structure agent's new program must pass the
+                # replay gate before it trades; until then its own rules stand, and research goes on.
+                self.ledger.append("agent.research", {"tool": "candidate", "status": "not_adopted",
+                    "reason": (f"its own rules had not fired in {barren} wakes, but a structure program trades only once its "
+                               "replay passes: this one's did not"), "_candidate": candidate}, agent=agent.id)
+                candidate = None
+            elif not repair and not stuck:
                 candidate = None
         if candidate and outcome.consulted and candidate["code"].strip() == outcome.consulted.strip():
             candidate = {**candidate, "purpose": "A specialist wrote this file for it: " + candidate["purpose"]}
@@ -8981,7 +9465,8 @@ class House:
         paused = self.registry.entries_paused(agent.id)
         out: dict[str, Any] = {"state": "paused" if paused else "open",
                                "tools": "pause_entries / resume_entries hold and release your buys (your sells always go on); edit_params "
-                                        "changes your PARAMS in place once its replay at half notional passes"}
+                                        "changes your PARAMS in place once its replay at "
+                                        + ("the full practice caps" if self.is_structure_agent(agent) else "half notional") + " passes"}
         if paused:
             since = str(paused.get("since") or "")
             held = sum(int(e.payload.get("held") or 0) for e in self.ledger.read(kinds="agent.woke", agent=agent.id, limit=2000, newest=True)
@@ -8995,19 +9480,106 @@ class House:
 
     def record_is_empty(self, agent: Agent) -> bool:
         """True when nothing this agent has done could be evidence and nothing is in its hands: no
-        holding, no working order, no active block and no closed trade on the book of its rung.
+        holding, no working order, no active block and no closed trade on the book of its rung --
+        on every book of its rung's record (`_record_books`: a structure agent's practice spans the
+        books it moved between).
         On paper this permits an in-place rewrite: no record or position is inherited. A real
-        agent still has its earlier paper qualification to protect and must fork new code."""
-        book = self.book_of(agent)
-        if book is None:
+        agent still has its earlier paper qualification to protect and must fork new code.
+
+        The adversarial review of Deploy G (Sept 25, 2026): read on the book of its rung alone, a structure
+        agent that had closed three winning verticals on options-shadow and then moved to alpaca-paper had
+        "no record to protect" and rewrote itself in place; the allocator's evidence pools every practice
+        book it was staked on, so the NEW program carried the old one's 3 trades at W_paper 1.2105 into the
+        O4 member pick, the O4 check and the paper-death rule. A book it has left is swept, so its trades
+        are counted there (`independent_closed`), not measured against a stake that is gone."""
+        books = self._record_books(agent)
+        if not books:
             return True
-        if book.account(agent.id).holdings or book.open_orders(agent.id):
-            return False  # new code must not inherit a position it does not know how to leave
         entered = self.evaluator._rung_entered(agent.id)
-        if any(row.get("active") for row in self.evaluator.blocks(agent.id, since_seq=entered, book=book.name)):
-            return False
-        returns, _ = self.evaluator.trade_returns(agent.id, book.name, since_seq=entered)
-        return not returns
+        for index, book in enumerate(books):
+            if book.account(agent.id).holdings or book.open_orders(agent.id):
+                return False  # new code must not inherit a position it does not know how to leave
+            if any(row.get("active") for row in self.evaluator.blocks(agent.id, since_seq=entered, book=book.name)):
+                return False
+            if index == 0:
+                returns, _ = self.evaluator.trade_returns(agent.id, book.name, since_seq=entered)
+                if returns:
+                    return False
+            elif self.evaluator.independent_closed(agent.id, book.name, since_seq=entered):
+                return False
+        return True
+
+    def _record_books(self, agent: Agent, book: Book | None = None) -> list[Book]:
+        """The books this agent's record on its current rung is on, the book of its rung (`book_of`, or `book`) first:
+        that one alone, except for a structure agent on practice, whose record also stays on every other structure book
+        it has an account on (`_structure_books`: it moves between the options shadow book and the Alpaca practice
+        account, `_structure_move`, and its old record is finished there, never moved). The allocator pools the same
+        books (`allocator.evidence`); `record_is_empty`, `_standing` and `judge` read them all (the review of Deploy G,
+        Sept 25, 2026)."""
+        book = self.book_of(agent) if book is None else book
+        if book is None:
+            return []
+        if book.real_money or not self.is_structure_agent(agent):
+            return [book]
+        return [book, *(other for other in self._structure_books() if other is not book and agent.id in other.accounts)]
+
+    def _record_blocks(self, agent: Agent, books: Sequence[Book], since_seq: int) -> list[dict[str, Any]]:
+        """The finished blocks since `since_seq` on `books` (`_record_books`), in the order they began: on one book exactly
+        `Evaluator.blocks` of it."""
+        if len(books) == 1:
+            return self.evaluator.blocks(agent.id, since_seq=since_seq, book=books[0].name)
+        names = {b.name for b in books}
+        rows = [row for row in self.evaluator.blocks(agent.id, since_seq=since_seq) if row.get("book") in names]
+        return sorted(rows, key=lambda row: int(row.get("first_mark_seq") or 0))
+
+    def _moved_record_death(self, agent: Agent, book: Book, rung: int) -> Verdict | None:
+        """Death on a structure agent's practice record across the books it moved between (`_record_books`), or None.
+
+        The evaluator judges one book, and a move (`_structure_move`) does not change the rung, so on the new book its
+        death clock started again (the review of Deploy G, Sept 25, 2026, by inspection; `test_structure_practice` has
+        an agent down 9.5% after five active blocks on options-shadow, one block short of paper death, that began again
+        at nothing on alpaca-paper). This applies the evaluator's own FREE death rules, the same
+        constitution keys, to the blocks of every book since it entered the rung, in the order they began: the drawdown
+        of `ladder.death` and the paper death of `ladder.paper_death`. Not the statistical death test (an upper bound
+        below zero): each of its looks spends alpha, rationed by the looks of the stay, and running it twice a pass would
+        spend it twice; the allocator's paper death reads the pooled record (`allocator.evidence`) already. Nor promotion:
+        read on the new book alone, a move can delay one, never make one. None when there is nothing on another book
+        since it entered (then the evaluator's judgement is the whole of it)."""
+        if rung != 1:
+            return None
+        books = self._record_books(agent, book)
+        if len(books) < 2:
+            return None
+        from . import stats
+
+        rows = self._record_blocks(agent, books, self.evaluator._rung_entered(agent.id))
+        if not any(row.get("book") != book.name for row in rows):
+            return None
+        growth = [float(row["log_growth"]) for row in rows]
+        active = sum(1 for row in rows if row.get("active"))
+        wealth, level = [1.0], 0.0
+        for value in growth:
+            level += value
+            wealth.append(math.exp(max(level, -700.0)))
+        drawdown = stats.max_drawdown(wealth)
+        ladder = self.evaluator.ladder
+        death, paper_death = ladder["death"], ladder.get("paper_death")
+        numbers = {"book": book.name, "books": [b.name for b in books], "blocks": len(rows), "active_blocks": active,
+                   "drawdown": drawdown, "via": "its practice record across the books it moved between"}
+        why = ""
+        if drawdown >= float(death["max_drawdown"]):
+            why = f"drawdown of {drawdown:.0%} is past the {float(death['max_drawdown']):.0%} limit"
+        elif paper_death and active >= int(paper_death["min_active_blocks"]):
+            change = math.exp(max(sum(growth), -700.0)) - 1.0
+            if change <= -float(paper_death["max_loss"]):
+                why = (f"down {-change:.1%} on paper after {active} active blocks; paper keeps no agent down "
+                       f"{float(paper_death['max_loss']):.0%}")
+            elif active >= int(paper_death["unprofitable_blocks"]) and change <= 0:
+                why = (f"not profitable on paper after {active} active blocks ({change:+.1%}); "
+                       f"{int(paper_death['unprofitable_blocks'])} is the chance a paper seat gives")
+        if not why:
+            return None
+        return self.evaluator._decide(agent.id, rung, "die", f"{why}, over {' and '.join(numbers['books'])}", numbers)
 
     def _recent_trades(self, agent_id: str, limit: int = 12) -> list[dict[str, Any]]:
         """Its own last closed trades, forward-tested or real: what research should learn from first."""
@@ -9048,6 +9620,17 @@ class House:
         if not allocator_module.enabled():
             return None
         r = allocator_module.rules()
+        if self.is_structure_agent(agent) and "spread_probe_line" in r:
+            # G of the options-desk run (Sept 25, 2026): a structure agent reaches real money by its FAMILY's spread probe
+            # line (O4), while the owner's switch (O1) is on, never by E: its family's numbers against the line.
+            board = self.allocator.board()
+            spread = board.get("spread") or {}
+            return {"band": ((board.get("agents") or {}).get(agent.id) or {}).get("band"), "route": "allocator.spread_probe_line",
+                    "option_spreads_real": bool(spread.get("on")), "line": dict(r["spread_probe_line"]),
+                    "family": (spread.get("families") or {}).get(agent.family),
+                    "note": ("Real money follows your FAMILY's closed practice structures (or one of them and a passed replay "
+                             "with positive growth out of sample), judged by the allocator at every pass while the owner's "
+                             "switch is on; the numbers are its last pass's, and nothing here moves a band.")}
         at, trades_needed = float(r["bunt_at"]), int(r["bunt_min_trades"])
         settled_needed = int(r.get("bunt_min_settled") or 0)
         weight = float((r.get("evidence") or {}).get("paper_weight", 0.5))
@@ -9067,7 +9650,7 @@ class House:
         # E = W_paper ** weight x W_real, so with the real record as it stands the line is this W_paper.
         needed = (at / w_real) ** (1.0 / weight) if weight > 0 and w_real > 0 else math.inf
         gain = max(0.0, needed / w_paper - 1.0) if w_paper > 0 else math.inf
-        paper = self.books.get(PRACTICE_BOOK[agent.venue])
+        paper = self.practice_book(agent)  # a structure agent's is its structure book (G, Sept 25, 2026)
         equity = float(paper.equity(agent.id)) if paper is not None and agent.id in paper.accounts else None
         out.update(measured=True, measured_at=board.get("at"), E=e, W_paper=w_paper, W_real=w_real,
                    closed_trades=trades, **({"settled": settled} if agent.venue == "kalshi" else {}),
@@ -9108,10 +9691,13 @@ class House:
         rung = self.evaluator.rung(agent.id)
         entered = self.evaluator._rung_entered(agent.id)
         book = self.book_of(agent)
-        if book is not None and not book.evidence_integrity(agent.id)['ok']:
+        # A structure agent's practice record spans the books it moved between (`_record_books`, the review of Deploy G,
+        # Sept 25, 2026): read on its new book alone, a winner lost its record, and with it a winner's standing.
+        books = self._record_books(agent, book)
+        if any(not b.evidence_integrity(agent.id)['ok'] for b in books):
             return Standing(agent.id, agent.niche, rung, 0.0, 0, working=False,
                             reward_growth=0.0, reward_observations=0, reward_rung=rung)
-        rows = self.evaluator.blocks(agent.id, since_seq=entered, book=book.name) if rung >= 1 and book else []
+        rows = self._record_blocks(agent, books, entered) if rung >= 1 and book else []
         growth = [float(r["log_growth"]) for r in rows]
         active = sum(1 for r in rows if r.get("active"))
         reward_rows, reward_rung = list(rows), rung
@@ -9133,7 +9719,7 @@ class House:
             changes = [e for e in self.ledger.iter(kinds='eval.verdict', agent=agent.id)
                        if e.seq < entered and e.payload.get('decision') in ('seat', 'promote', 'demote')
                        and e.payload.get('to_rung') == 1]
-            paper = self.books.get(PRACTICE_BOOK[agent.venue])
+            paper = self.practice_book(agent)  # a structure agent's practice record is on its structure book (G)
             old = self._reward_evidence(agent, paper, prior, changes[-1].seq if changes else 0,
                                         until=entered) if paper else (0.0, 0)
             if old[0] > 0 and old[1] >= minimum:

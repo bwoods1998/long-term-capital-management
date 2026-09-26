@@ -239,7 +239,19 @@ ORDER BY seq DESC LIMIT 20`.
   `probe_bunt_usd.alpaca_equity` $50, `family_probe.reseat` `bound_since_demotion`) moves them to
   constitution `32db7547…`, money `acff5c64…` on the c/money branch (recompute on the tree deployed if
   another money key merges first): its deploy needs the ratify (the grant's seats unchanged: the smallest
-  real stake is still the $10 Kalshi probe). The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
+  real stake is still the $10 Kalshi probe). The options-desk run's Deploy G (Sept 26, 2026: its digest change 1 of 2, rows
+  O1-O5 -- `option_spreads_real` false, `option_spread_real_types` ["debit_vertical"], `spread_probe_usd` $150,
+  `spread_position_share` 1.0, `spread_probe_line`, `evidence.alpaca_paper_haircut_bps.option_spread` 60) moves them to
+  constitution `63b65b34…`, money `be1e3ce9…` on g/money over b/integration (recompute on the tree deployed): its deploy
+  needs the ratify (the grant's seats unchanged). **O5 = 60 bps is provisional** (the review of Deploy G, Sept 25,
+  2026): it is the top of its row (24-60, the most conservative), set before any shadow spread had closed, where the
+  row asks for the rate measured from the first 30 shadow spread fills. Measure it (as A8 measured the other classes)
+  once 30 have filled, and move it inside the row; that is a money rule and needs the ratify. Flipping O1 to true is
+  its digest change 2 of 2 and must set the gateway's `OPTION_STRUCTURES_REAL` to exactly `option_spread_real_types`
+  in the same deploy (`league.ci` `check_structures` refuses a tree where they disagree). The gateway's list gates real OPENS only: a close of any
+  defined-risk type goes at `off` too once the account holds its legs, so the gateway can go back to `off` at any time
+  (the review of g/money). Never roll the House back past Deploy G or past Track P's Alpaca adapter while the real book
+  holds a structure: an older House refuses its real closes (or holds them back, without one multi-leg order). The forward-first run's H4 (Sept 25, 2026, its Deploy A: digest change 1 of
   2, `allocator.real_book_dust_usd`) moves them to constitution `d0aa4c2a…`, money `d7d910fe…`: its
   deploy needs the ratify (the grant's seats unchanged). The close-the-gaps run's R5 (Sept 24, 2026, its third and last digest change:
   `allocator.family_probe`, no probe on a losing family) moves them to constitution `38a57fe9…`, money
@@ -250,8 +262,47 @@ ORDER BY seq DESC LIMIT 20`.
   learn-and-unblock run (17:34Z, Sept 23, 2026) had set `52c6c7e5…` / `1d63a56e…`, the grant
   re-ratified at 17:34:36Z. Before it: `9fa83727…` / `44e8d48d…`, ratified at 08:28:13Z (101 agents, a $10
   line); that day's Deploys 2-7 changed no money rule and needed no ratify.
-- **Roll back by hand (on the box):**
+- **Roll back by hand:** `python3 scripts/floor_box.py rollback --reason "why"` from the owner's machine. It
+  asks the in-box watchdog (`league.watchdog rollback`, run from `/workspace/previous`) after the structures guard
+  below, and prints the re-ratify step. Only when floor_box cannot reach the box, on the box and with no guard:
   `cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollback --base /workspace --reason "why"`
+  (check by hand first that `alpaca-paper` holds no structure: no holding on the book whose position key
+  contains `|`).
+- **After any manual rollback of Deploy G, re-ratify at once on the restored release:**
+  `python3 scripts/live_trading.py --ratify earned-live-20260921`. G's ratify pins the grant to money `be1e3ce9…`;
+  the release before G (Deploy B) is `acff5c64…`, so after the rollback the grant reads inactive (real entries
+  refused, nobody promoted to real money) until it is re-ratified. `deploy_ratify.sh` re-ratifies only on a
+  rollback it saw in its own deploy's log, never on one made by hand. The same holds for any manual rollback past a
+  release that changed the money digest.
+- **Never roll back past Deploy G while `alpaca-paper` holds a structure** (the options desk's Wave 2, Sept 25,
+  2026). A release older than G cannot fold the account's legs into the structures (alpaca-paper then freezes for
+  every agent on it, for good), and its wind-down sells a held structure as its FIRST LEG alone, which for a debit
+  vertical leaves a naked short. **The guard** (the review of Deploy G): `floor_box.py rollback` and
+  `floor_box.py deploy` read the target release (the box's `previous`, or the tree being sent) for
+  `House._structure_practice_account` and `Book._fold_structure_legs`; when it lacks either, they read the box's
+  ledger read-only and refuse while it shows a structure held, or a structure order open, on `alpaca-paper`, or
+  cannot be read. `--force-structures-risk` overrides it with a loud warning: use it only when the venue itself
+  shows `alpaca-paper` flat of option legs and the ledger is what is wrong. The in-box watchdog's automatic
+  rollback during a deploy's watch is not guarded: it returns to the release that was current before that deploy,
+  which already ran with whatever the book holds.
+- **The practice-account flip** (`options_structures.practice_account`). Deploy G ships it false. It is turned on
+  only by **an owner deploy (`floor_box.py deploy`) of a release that changes nothing but that key**, never through
+  the updater's train (`league/config.json` is not protected, so a flip merged to `main` would otherwise ship at a
+  time the train picks): so a rollback of that release (the watch's included) lands on G's code with the switch
+  off, and G moves each structure agent back to the options shadow book once it is flat. **To undo it, deploy a
+  forward release setting it false**, never a rollback past G; then wait until `alpaca-paper` is flat of
+  structures: opens go on through the first full session after each agent is found moving
+  (`_structure_move_opens_until`), then closes only, bounded by each structure's earliest expiry (up to 10 days on
+  SPY/QQQ/IWM). Until then G cannot be rolled back (the guard above refuses it).
+- **The daily-expiry backfill** (`options_history_daily_expiries`, the review of Deploy G). Deploy G ships it false:
+  the options-history refresh keeps the weekly expiries. Flip it the same way, **an owner deploy of a release that
+  changes nothing but that key**, in an announced, watched quiet slot: outside the US session, with no real Kalshi
+  game in play (the first every-expiry backfill holds one of the 3 ops slots for 25-45+ minutes and makes about
+  4-5k unpaced gateway GETs; each SPY/QQQ/IWM structure tape then costs about 3x the CPU under `_tape_lock`).
+  Record House RSS and tick time during the backfill and at the first every-expiry structure tape. Undo it with a
+  forward release setting it false. Once the store holds every expiry, **never roll back past Deploy G without
+  first deleting the non-weekly SPY/QQQ/IWM bars**: the older code's tape has no weekly filter and caps only after
+  building (measured on a synthetic every-expiry copy: 930 MB peak against G's 217 MB).
 - **The gateway.** Deploy with
   `cd gateway && node --test test/*.test.mjs && npx --yes wrangler@4 deploy --config wrangler.jsonc`;
   roll it back with `npx wrangler rollback`. After a deploy that touches the frontier month, read
@@ -1336,7 +1387,7 @@ deploy and a re-ratified grant (see "A money rule" above).
 | | `jev.move` (`enabled`, `interval_seconds`, `max_markets_per_cycle`, `daily_usd`, `retention_days`) | on, 300 s, 800, $0.75, 14 days | The move sensor (`league/jev_features.py`, J1): every market the Kalshi strategies are shown gets point-in-time `move_p5/15/60` from the free model every 5 minutes, and Jev's static answers once per market as a recorded shadow. Not served to strategies until its held-out AUC on post-ship events is at least 0.70 |
 | | `deep_replay`, `holdout_gate` | on | Deep Alpaca history for replay, and the sealed holdout before paper |
 | | `options_history` | on | Options history, options replay, and IV/skew/activity features |
-| | `options_structures.book`, `options_structures.shadow.starting_cash` | `options-shadow`, $100,000 | Level-3 structures (Sept 25, 2026, the options-desk run; `league/structures.py`): the book a STRUCTURE AGENT (the `alpaca-options` desk, NEEDS `"structures": true`) trades on at rung 1. `options-shadow` is the House's own practice account (`league/options_shadow.py`: fills only on a strictly newer OPRA quote, at the structure's touch from every leg, at most 10% of any leg's shown size, session only, $0.05 a contract a leg, marks at the bid, a structure still held after its expiry's close settled at intrinsic, never written off at zero; nothing leaves the House). `alpaca-paper` sends each structure to the shared practice account as ONE multi-leg order (Track P, not before Sept 28; only the five types it can close as one covered order). A structure is held as ONE long instrument priced at net value plus collateral: its cost is its maximum loss, a flat sale is one closed trade, no book holds a negative leg. The House refuses structure intents on real money until O1 (`allocator.option_spreads_real`), closes structures from 15:30 New York on their earliest expiry day (30 minutes before an early close), cancels resting opens at the 14:30 entry cut (90 minutes before an early close), and seats structure founders one a tick (`league/options_desk.py`, cause `options_seat`, at most 12 retirements, never real money, a winner, a proven family's member, a working order or a position while its market is shut, never a Kalshi desk). An unknown book name: every structure intent is refused with the reason |
+| | `options_structures.book`, `options_structures.shadow.starting_cash` | `options-shadow`, $100,000 | Level-3 structures (Sept 25, 2026, the options-desk run; `league/structures.py`): the book a STRUCTURE AGENT (the `alpaca-options` desk, NEEDS `"structures": true`) trades on at rung 1. `options-shadow` is the House's own practice account (`league/options_shadow.py`: fills only on a strictly newer OPRA quote, at the structure's touch from every leg, at most 10% of any leg's shown size, session only, $0.05 a contract a leg, marks at the bid, a structure still held after its expiry's close settled at intrinsic, never written off at zero; nothing leaves the House). `alpaca-paper` sends each structure to the shared practice account as ONE multi-leg order (Track P, not before Sept 28; only the five types it can close as one covered order). A structure is held as ONE long instrument priced at net value plus collateral: its cost is its maximum loss, a flat sale is one closed trade, no book holds a negative leg. On real money the House refuses a structure OPEN until O1 (`allocator.option_spreads_real`) is true and its type is in `allocator.option_spread_real_types` (the debit vertical; a close always goes) and only through a venue adapter that sends it as one multi-leg order (`mleg`, Track P's), and the allocator seats a structure agent there only as O4's probe (`allocator.spread_probe_line`, Deploy G of Sept 26, 2026); it closes structures from 15:30 New York on their earliest expiry day (30 minutes before an early close), cancels resting opens at the 14:30 entry cut (90 minutes before an early close), and seats structure founders one a tick (`league/options_desk.py`, cause `options_seat`, at most 12 retirements, never real money, a winner, a proven family's member, a working order or a position while its market is shut, never a Kalshi desk). An unknown book name: every structure intent is refused with the reason |
 | | `research_traces` | on | Private research transcripts with their cost and outcome (for eventual fine-tuning) |
 | | `lab.box_id`, `lab.box_key` | `sb_742fe765-…`, `lab` | The Alpha Lab's own Sailbox (`scripts/lab_box.py create`, size l, sealed). The service binds it under `box_key` and hands the lab that evaluator; without a `box_id` there is no lab (a name alone binds nothing). A terminated lab box is never replaced from the agents' image: the lab stops with the error alert "the Alpha Lab is stopped: its box is gone" and asks again hourly. Make a new box and set its id |
 | `league/house.py` | `Settings.tick_seconds` (and `config.json` `tick_seconds`, 30-600) | 30 s | H5 (Sept 25, 2026): the run loop's tick, for the wakes (60 before; the tick lines landed 60-68 s apart at p50 with 60 the floor) |

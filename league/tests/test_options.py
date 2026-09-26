@@ -721,22 +721,34 @@ class StructuresInTheHouse(StructureHouseCase):
         self.assertIn("outside the regular session", self.refusals(agent)[0])
 
     def test_structures_on_real_money_wait_for_the_owners_switch(self):
+        """An OPEN on real money waits for O1 (`allocator.option_spreads_real`, off); a close only takes risk off and goes
+        (G of Sept 25, 2026: `league/tests/test_real_structures.py` has the switch on)."""
         from types import SimpleNamespace
 
         agent = self.structure_agent()
-        real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca"))
+        # On rung 2, where only the allocator seats it: a rung-1 agent sends nothing to a real book (the review of Deploy G).
+        self.house.evaluator.seat(agent.id, 2, "a test: seated on real money")
+        # An adapter that sends a structure as one multi-leg order (`mleg`): without it no real structure order, open or
+        # close, is sent (the review of g/money, Sept 25, 2026; test_real_structures).
+        real = SimpleNamespace(name="alpaca", real_money=True, broker=SimpleNamespace(venue="alpaca", capabilities=lambda: {"mleg"}))
         intents, dropped = self.house._intents(agent, real, [condor_row(), condor_row(action="close", limit=0.10)])
-        self.assertEqual((intents, dropped), ([], []))
-        self.assertTrue(all("owner's switch (O1)" in r for r in self.refusals(agent)))
+        self.assertEqual(dropped, [])
+        self.assertEqual([(i.side, i.instrument.venue) for i in intents], [("sell", "alpaca")])
+        refusals = self.refusals(agent)
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("owner's switch (O1: allocator.option_spreads_real is off)", refusals[0])
 
     def test_a_missing_structure_book_refuses_and_never_sends_to_alpaca_paper(self):
         agent = self.structure_agent()
+        # A name that is no practice book is the options shadow book (the review of Deploy G, Sept 25, 2026: test_structure_
+        # practice), which is not open on this House here.
         self.house.structure_book_name = "no-such-book"
+        self.house.books.pop("options-shadow")
         book = self.house.book_of(agent)
         self.assertIs(book, self.house.books["alpaca-paper"])  # seated on the desk's practice book...
         intents, _ = self.house._intents(agent, book, [condor_row()])
         self.assertEqual(intents, [])  # ...where nothing it sends goes
-        self.assertIn("no-such-book book, which is not open on this House", self.refusals(agent)[0])
+        self.assertIn("options-shadow book, which is not open on this House", self.refusals(agent)[0])
 
     def test_a_paused_agents_open_is_held_and_its_close_goes(self):
         agent = self.structure_agent()

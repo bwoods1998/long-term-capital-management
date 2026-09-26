@@ -60,8 +60,10 @@ class Rules(unittest.TestCase):
         self.assertTrue(r["enabled"])
         self.assertTrue(0.25 <= r["evidence"]["paper_weight"] <= 1)
         # A8 (Sept 23, 2026): per asset class, each within the table's floor of 2 bps a side.
-        self.assertEqual(set(r["evidence"]["alpaca_paper_haircut_bps"]), {"crypto", "equity", "option"})
-        self.assertTrue(all(2 <= bps <= 50 for bps in r["evidence"]["alpaca_paper_haircut_bps"].values()))
+        # O5 of the options-desk run (Sept 25, 2026): a structure's fills are their own class, 24-60 bps a side.
+        self.assertEqual(set(r["evidence"]["alpaca_paper_haircut_bps"]), {"crypto", "equity", "option", "option_spread"})
+        self.assertTrue(all(2 <= bps <= 50 for cls, bps in r["evidence"]["alpaca_paper_haircut_bps"].items() if cls != "option_spread"))
+        self.assertTrue(24 <= r["evidence"]["alpaca_paper_haircut_bps"]["option_spread"] <= 60)
         self.assertTrue(1.0 <= r["bunt_at"] <= 1.25 and 3 <= r["bunt_min_trades"] <= 20)
         self.assertTrue(1.2 <= r["swing_at"] <= 3 and 5 <= r["swing_min_real_trades"] <= 30)
         self.assertTrue(0.5 <= r["kappa"] <= 2 and 5 <= r["e_cap"] <= 50)
@@ -814,8 +816,9 @@ class HaircutByAssetClass(ReviewRegressions):
         self.assertEqual(self.cut({"crypto": 0, "equity": 0, "option": 0}), 0.0)
 
     def test_the_constitution_carries_the_measured_table(self):
-        # docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills.
-        self.assertEqual(self.TABLE, {"crypto": 4, "equity": 2, "option": 24})
+        # docs/research/queries/2026-09-23/A8-haircut.out: 368 crypto, 136 equity and 46 option fills; and O5 of the
+        # options-desk run (Sept 25, 2026): a structure's fills at the top of its row until measured.
+        self.assertEqual(self.TABLE, {"crypto": 4, "equity": 2, "option": 24, "option_spread": 60})
 
 
 class BuntGrowth(HouseCaseReal):

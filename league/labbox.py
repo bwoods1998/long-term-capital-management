@@ -102,9 +102,11 @@ class LabBox:
 
     # ---------------------------------------------------------------- evaluate
     def evaluate(self, candidates: Sequence[Mapping[str, Any]], tape_id: str, tape: Mapping[str, Any], *, stake: float,
-                 limits: Mapping[str, Any], timeout: float = 600) -> list[dict[str, Any]]:
+                 limits: Mapping[str, Any], timeout: float = 600, candidate_seconds: float | None = None) -> list[dict[str, Any]]:
         """One result per candidate (`{"id", "code", "params"}`), in order: what a single replay of it
-        returns, plus its `id`. Batches of at most `max_batch`; each is answered within its budget."""
+        returns, plus its `id`. Batches of at most `max_batch`; each is answered within its budget.
+        `candidate_seconds`: each candidate's own wall-clock limit for this call (the lab gives a structure
+        replay its own, G-LOOP, Sept 25, 2026), else the box's."""
         candidates = [dict(c) for c in candidates]
         if not candidates:
             return []
@@ -112,14 +114,22 @@ class LabBox:
         out: list[dict[str, Any]] = []
         for start in range(0, len(candidates), self.max_batch):
             out.extend(self._batch(candidates[start:start + self.max_batch], digest, tape, stake=stake, limits=limits,
-                                   timeout=timeout))
+                                   timeout=timeout, candidate_seconds=candidate_seconds))
         return out
 
+    def forget(self, tape_id: str) -> None:
+        """Let the memo of this tape's digest go, and with it the memo's hold on the tape (G-LOOP, Sept 25, 2026: an
+        options tape is some hundreds of MB, and the House was killed for memory that day). The box keeps its copy:
+        a later batch over the same tape object digests it again, and one the box still holds is not sent again."""
+        with self._lock:
+            self._digests.pop(tape_id, None)
+
     def _batch(self, candidates: list[dict[str, Any]], digest: str, tape: Mapping[str, Any], *, stake: float,
-               limits: Mapping[str, Any], timeout: float) -> list[dict[str, Any]]:
+               limits: Mapping[str, Any], timeout: float, candidate_seconds: float | None = None) -> list[dict[str, Any]]:
         options = {"tape_digest": digest, "stake": stake, "limits": dict(limits), "timeout": timeout,
                    "keep_awake": self.keep_awake, "holdout": self.holdout, "budget_seconds": self.budget_seconds,
-                   "workers": self.workers, "candidate_seconds": self.candidate_seconds}
+                   "workers": self.workers,
+                   "candidate_seconds": self.candidate_seconds if candidate_seconds is None else candidate_seconds}
         try:
             run = self.sandbox.replay_batch(self.box_key, candidates, None, **options)
         except TapeMissing:
