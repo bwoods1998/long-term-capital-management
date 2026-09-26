@@ -116,11 +116,12 @@ class Nightly:
 
         # 1. the pull, on the data box, with the backfill paused (one ThetaData session per account)
         self.data.wake()
-        was_running = self.data.backfill_running()
+        need_pull = not state.get("pulled") and not self.rehearsal
+        was_running = need_pull and self.data.backfill_running()
         if was_running:
             self.data.stop_backfill()
         try:
-            if not state.get("pulled") and not self.rehearsal:
+            if need_pull:
                 for stage in (7, 8):  # the day's chains, then (needing them) the back months
                     ok, out = self.data.run(f"backfill.py run --stages {stage} --forward-days {day.isoformat()} "
                                             "--threads 8 --passes 3 --pause 120", timeout=5400)
