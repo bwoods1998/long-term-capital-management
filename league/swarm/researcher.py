@@ -322,9 +322,9 @@ class Researcher:
         deadline = self.clock() + float(self.cfg.get("cycle_seconds", 170))
         gym_done = False
         author = "model"
-        if pending:  # the run asked for at the end of the last cycle
+        if pending:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
             result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
-            current.append({"type": "function_call_output", "call_id": pending["call_id"], "output": json.dumps(result, default=str)[:12000]})
+            current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
             out["tool_calls"] += 1
             gym_done = True
             pending = None
@@ -362,9 +362,19 @@ class Researcher:
                 break
             stop = False
             for call in calls:
-                if call.name == "gym_run" and (gym_done or self.clock() > deadline - 30 or out["tool_calls"] >= max_tools):
+                if call.name == "gym_run" and (gym_done or self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
+                        and pending is None and not call.error:
+                    # One run a cycle: this one opens the next cycle. Its call is answered now (every call keeps its output
+                    # beside it in the history); its result arrives as a message when it has run.
                     pending = {"call_id": call.call_id, "arguments": call.arguments, "author": profile}
                     stop = True
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps({"status": "queued", "note": "this run opens your next cycle; its result "
+                                                          "comes then"})})
+                    continue
+                if call.name == "gym_run" and pending is not None:
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps({"error": "one run is already queued for your next cycle"})})
                     continue
                 if out["tool_calls"] >= max_tools:
                     result: Any = {"error": "this cycle's tool budget is spent; continue next cycle"}

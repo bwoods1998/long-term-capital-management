@@ -138,8 +138,14 @@ class Process(LoopCase):
         self.assertIn("usd_per_hour", beat["status"])
         for t in list(sw.rounds.values()):
             t.join(30)
+        self.assertNotIn("tournament", sw.rounds, "the first tournament is an hour after the founding")
+        self.assertIn("gate", sw.rounds)
+        self.store.put("tournament_at", 0.0)
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
         self.assertIn("tournament", sw.rounds)
-        self.assertIsNotNone(self.store.get("tournament_at"))
+        self.assertGreater(self.store.get("tournament_at"), 0.0)
 
     def test_the_brake_scales_the_gym_to_zero_and_idles_researchers(self):
         sw = self.swarm()

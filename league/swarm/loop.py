@@ -153,6 +153,10 @@ class Swarm:
             self.store.event("swarm.born", fam["id"], {"parent": None, "mechanism": fam["mechanism"], "structure": fam["structure"],
                                                         "roots": fam["roots"], "origin": "seed", "founder": spec.get("founder")})
             born.append(fam["id"])
+        # The first tournament an hour after the founding (it validates what the first hour's cycles submitted), and the
+        # architect after it: a round over families that have not run yet would only spend.
+        self.store.put("tournament_at", self.clock())
+        self.store.put("architect_at", self.clock())
         return born
 
     # ------------------------------------------------------------------ status and heartbeat
