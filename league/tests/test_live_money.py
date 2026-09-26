@@ -103,6 +103,11 @@ class Bands(unittest.TestCase):
         self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(band="gym"), D("5000"), fwd([]))[0], "gym")
 
+    def test_a_candidate_becomes_a_probe_first_never_sized_at_once(self):
+        good = [0.2, 0.1, 0.3, -0.1, 0.25] * 5
+        self.assertEqual(M.band_for(self.t, row(band="candidate"), D("5000"), fwd(good))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good))[0], "sized")
+
     def test_sized_needs_twenty_trades_a_positive_mean_and_a_positive_lower_bound(self):
         good = [0.2, 0.1, 0.3, -0.1, 0.25] * 4
         self.assertEqual(M.band_for(self.t, row(band="probe"), D("5000"), fwd(good))[0], "sized")
@@ -113,14 +118,45 @@ class Bands(unittest.TestCase):
         self.assertLess(f.lcb, 0)
         self.assertEqual(M.band_for(self.t, row(band="sized"), D("5000"), f)[0], "probe")
 
-    def test_one_decision_counts_once_whatever_the_sources(self):
+    def test_one_decision_counts_once_preferring_real_then_shadow_then_nightly(self):
         shadow = [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 10.0, "max_loss": 100.0} for d in range(1, 13)]
         nightly = [{"day": f"2026-10-{d:02d}", "source": "nightly", "pnl": 12.0, "max_loss": 100.0} for d in range(1, 16)]
-        real = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 2.0, "max_loss": 20.0} for d in range(1, 13)]
+        real = [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": 2.0, "max_loss": 20.0} for d in range(1, 11)]
         f = M.forward_stats(shadow + nightly + real, 0.8)
-        self.assertEqual(f.n, 15)                          # 12 shadow days, then 3 nightly-only days; the real ones mirror
-        self.assertAlmostEqual(f.pnl, 12 * 10.0 + 3 * 12.0)
-        self.assertEqual(M.forward_stats(real, 0.8).n, 12)  # a day with only real trades counts them
+        # 10 real days, then 2 shadow-only days, then 3 nightly-only days: 15, each day once, the real fills first.
+        self.assertEqual(f.n, 15)
+        self.assertAlmostEqual(f.pnl, 10 * 2.0 + 2 * 10.0 + 3 * 12.0)
+        self.assertEqual(f.real_n, 10)
+
+    def test_real_losses_are_never_hidden_behind_winning_shadow_days(self):
+        rows = []
+        for d in range(1, 26):
+            rows.append({"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 100.0, "max_loss": 500.0})
+            rows.append({"day": f"2026-10-{d:02d}", "source": "nightly", "pnl": 100.0, "max_loss": 500.0})
+            rows.append({"day": f"2026-10-{d:02d}", "source": "real", "pnl": -30.0, "max_loss": 60.0})
+        f = M.forward_stats(rows, 0.8)
+        self.assertLess(f.mean, 0)
+        self.assertFalse(M.sized_ok(M.Table.from_constitution(), f))
+        self.assertTrue(f.negative)
+
+    def test_a_real_record_that_loses_holds_the_family_at_probe(self):
+        t = M.Table.from_constitution()
+        rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(1, 21)]
+        rows += [{"day": f"2026-10-{d:02d}", "source": "real", "pnl": -1.0, "max_loss": 50.0} for d in range(1, 11)]
+        rows += [{"day": f"2026-10-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0} for d in range(11, 31)]
+        f = M.forward_stats(rows, 0.8)
+        self.assertTrue(M.sized_ok(t, f))                   # the whole record would size it
+        self.assertTrue(f.real_bad)                         # but its 10 real trades lose
+        self.assertEqual(M.band_for(t, row(band="probe"), D("5000"), f)[0], "probe")
+        band, why = M.band_for(t, row(band="sized"), D("5000"), f)
+        self.assertEqual(band, "probe")
+        self.assertIn("real", why)
+
+    def test_a_new_program_version_starts_its_own_record(self):
+        rows = [{"day": f"2026-09-{d:02d}", "source": "shadow", "pnl": 30.0, "max_loss": 100.0, "version": 1} for d in range(1, 25)]
+        rows += [{"day": "2026-10-01", "source": "shadow", "pnl": 5.0, "max_loss": 100.0, "version": 2}]
+        self.assertEqual(M.forward_stats(rows, 0.8, version=2).n, 1)
+        self.assertEqual(M.forward_stats(rows, 0.8, version=1).n, 24)
 
     def test_a_negative_forward_record_loses_the_band(self):
         band, why = M.band_for(self.t, row(band="sized"), D("5000"), fwd([0.5] * 25, negative=True))
@@ -173,9 +209,17 @@ class Sizing(unittest.TestCase):
         import league.stats as S
         expect = min(0.10, 0.25 * f.lcb / f.variance) * 10000
         self.assertAlmostEqual(float(cap), max(300.0, expect), places=6)
-        weak = fwd([0.02, 0.01, 0.03, -0.01] * 5)
-        self.assertEqual(M.structure_cap(self.t, "sized", D("10000"), weak), max(D("300"), M.structure_cap(self.t, "sized", D("10000"), weak)))
         self.assertEqual(self.plan(100, band="sized", equity="10000", fwd_=f, family_loss="2950").qty, 0)  # 30% family
+
+    def test_a_sized_family_whose_kelly_is_under_the_probes_cap_keeps_the_probes_limits(self):
+        weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly under 3%
+        self.assertTrue(M.sized_ok(self.t, weak))
+        self.assertLess(M.kelly_cap(self.t, D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
+        self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak), "probe")
+        self.assertEqual(M.structure_cap(self.t, "sized", D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
+        # Sized at a Probe-sized stake never gets the Sized family limits: three open, 12%.
+        self.assertIn("the most a Probe family holds is 3", self.plan(10, band="sized", fwd_=weak, family_open=3).reason)
+        self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_loss="650").qty, 0)
 
     def test_the_book_and_the_gateways_caps(self):
         self.assertIn("the book's open maximum loss", self.plan(50, book_loss="3837.16").reason)   # 70% = 3837.155

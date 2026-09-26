@@ -450,7 +450,8 @@ class OptionsLive:
         forward_meta = row.get("forward") or {}
         try:
             fwd = M.forward_stats(self.families.forward_rows(fid), self.table.sized_confidence,
-                                  negative=forward_meta.get("negative") if isinstance(forward_meta, Mapping) else None)
+                                  negative=forward_meta.get("negative") if isinstance(forward_meta, Mapping) else None,
+                                  version=row.get("version"))
         except Exception:  # noqa: BLE001
             fwd = M.Forward(0, None, None, None, 0.0, False)
         grant = self._grant()
@@ -603,12 +604,11 @@ class OptionsLive:
         results = self._decide(day, jobs, out)
         for key, acc in shadow_due.items():
             answer = results.get(key) or {}
-            self._stats(key, answer)
-            acc.apply(day, mi - 1, answer.get("intents") or [])
+            self._isolated(key, lambda: (self._stats(key, answer), acc.apply(day, mi - 1, answer.get("intents") or [])))
         for key, inst in real_due.items():
             answer = results.get(key) or {}
-            self._stats(key, answer)
-            self._real_intents(inst, day, mi, answer.get("intents") or [], out)
+            self._isolated(key, lambda: (self._stats(key, answer),
+                                         self._real_intents(inst, day, mi, answer.get("intents") or [], out)))
         self._export_shadow()
         self._export_real()
         self._retire_finished()
@@ -636,7 +636,11 @@ class OptionsLive:
                 acc.last_mi = -1
             if smi <= acc.last_mi:
                 continue
-            acc.pre(day, smi)
+            try:
+                acc.pre(day, smi)
+            except Exception as exc:  # noqa: BLE001 - one account's trouble stays its own
+                self._isolated(key, lambda exc=exc: (_ for _ in ()).throw(exc))
+                continue
             if inst is None or inst.mode == "wind_down" or acc.winding_down:
                 if not acc.winding_down or any(not p.closing for p in acc.positions.values()):
                     acc.wind_down(day, smi)
@@ -675,10 +679,18 @@ class OptionsLive:
         results = self._decide(day, jobs, out)
         for key, acc in due.items():
             answer = results.get(key) or {}
-            self._stats(key, answer)
-            acc.apply(day, mi - 1, answer.get("intents") or [])
+            self._isolated(key, lambda: (self._stats(key, answer), acc.apply(day, mi - 1, answer.get("intents") or [])))
         self._export_shadow()
         self.shadow.save()
+
+    def _isolated(self, key: str, work: Callable[[], Any]) -> None:
+        """One instance's part of the minute: whatever it raises stays its own (the rest of the minute goes on)."""
+        try:
+            work()
+        except Exception as exc:  # noqa: BLE001
+            self.alert("warning", f"live: {key}'s minute failed ({type(exc).__name__}: {str(exc)[:160]})")
+            self.state.event("live.error", {"instance": key, "error": f"{type(exc).__name__}: {exc}",
+                                            "trace": traceback.format_exc()[-2000:]})
 
     def _stats(self, key: str, answer: Mapping[str, Any]) -> None:
         inst = self.instances.get(key)
@@ -1108,6 +1120,8 @@ class OptionsLive:
                 why = self._real_intent(inst, day, mi, dict(intent), out)
             except L.Refused as exc:
                 why = str(exc)
+            except Exception as exc:  # noqa: BLE001 - one malformed intent is refused alone, never the minute's end
+                why = f"a malformed intent: {type(exc).__name__}: {str(exc)[:160]}"
             if why:
                 book._reject(inst.key, why)
                 self.record("live.refusal", {"instance": inst.key, "family": inst.family, "why": why[:300],
@@ -1170,7 +1184,7 @@ class OptionsLive:
             return f"a debit of {order.limit:.2f} on a {order.type} worth at most {top:.2f} can never pay"
         unit = M.D(round(order.max_loss_share * V.MULTIPLIER + 2 * order.fees, 2))
         family_rows = self.families.forward_rows(inst.family) if inst.band == "sized" else []
-        fwd = M.forward_stats(family_rows, self.table.sized_confidence) if family_rows else None
+        fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if family_rows else None
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
         plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                            exposure=book.exposure(inst.family, day=today, week_start=week_start))
@@ -1204,7 +1218,9 @@ class OptionsLive:
         trades = acc.new_trades()
         if not trades:
             return
-        rows = [{"id": f"{acc.instance}:{t['id']}", "day": t["day"], "pnl": t["pnl"], "max_loss": t["max_loss"]} for t in trades]
+        version = _version_of(acc.instance)
+        rows = [{"id": f"{acc.instance}:{t['id']}", "day": t["day"], "pnl": t["pnl"], "max_loss": t["max_loss"], "version": version}
+                for t in trades]
         try:
             self.families.add_forward(acc.family, "shadow", rows)
         except Exception as exc:  # noqa: BLE001 - kept to be sent again
@@ -1223,7 +1239,7 @@ class OptionsLive:
         for row in rows:
             if not row["tuition"]:
                 try:
-                    self.families.add_forward(row["family"], "real", [row])
+                    self.families.add_forward(row["family"], "real", [{**row, "version": _version_of(row.get("instance") or "")}])
                 except Exception as exc:  # noqa: BLE001
                     self.alert("warning", f"live: a real trade could not reach the forward record ({type(exc).__name__})")
                     return
@@ -1316,6 +1332,14 @@ class OptionsLive:
                 "paper_proof": self.proof.status() if self.proof is not None else None,
                 "instances": {k: {"family": i.family, "kind": i.kind, "band": i.band, "mode": i.mode, "error": i.error or None,
                                   "tuition": i.tuition} for k, i in self.instances.items()}}
+
+
+def _version_of(instance: str) -> int | None:
+    """The program version an instance key names (`<family>@<version>:<kind>`)."""
+    try:
+        return int(str(instance).rsplit("@", 1)[1].split(":", 1)[0])
+    except (IndexError, ValueError):
+        return None
 
 
 def json_or(text: Any, default: Any) -> Any:

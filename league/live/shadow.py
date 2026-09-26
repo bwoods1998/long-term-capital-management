@@ -99,11 +99,16 @@ class ShadowAccount(E.Account):
         return job
 
     def apply(self, day: LiveDay, mi: int, intents: Sequence[Mapping[str, Any]]) -> None:
+        """The answer's intents as the engine's orders. Any intent that cannot become one is a refusal of that intent
+        alone (the engine raises `Refused`; a malformed value, a NaN the JSON reply made None, raises TypeError or
+        ValueError), never the minute's end: one program's bad intent costs no other program anything."""
         for intent in intents or []:
             try:
                 self._intent(day, mi, dict(intent))
             except L.Refused as exc:
                 self._reject(str(exc))
+            except Exception as exc:  # noqa: BLE001 - a malformed intent is refused, never raised
+                self._reject(f"a malformed intent: {type(exc).__name__}: {str(exc)[:160]}")
 
     def wind_down(self, day: LiveDay, mi: int) -> None:
         """Close everything at the natural, as orders arriving next minute (a superseded instance)."""

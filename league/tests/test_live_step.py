@@ -396,6 +396,27 @@ class ExpiryDayWithoutData(LiveCase):
         self.assertEqual(self.venue.sent[-1]["legs"][0]["position_intent"], "sell_to_close")
 
 
+BAD = """
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0}
+PARAMS = {}
+
+def decide(ctx):
+    return [{"open": "debit_vertical", "root": "SPY", "qty": 1, "limit": {"price": float("nan")},
+             "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0}, {"side": "short", "right": "C", "rel": 0, "offset": 1.0}]}]
+"""
+
+
+class Isolation(LiveCase):
+    def test_one_programs_malformed_intent_costs_its_own_intent_only(self):
+        live = self.make([family("bad", BAD, band="probe"), family("vert", VERTICAL, band="probe", params={"hold": 4})])
+        self.run_to(9, 40)
+        closes = [b for b in self.venue.sent if b["legs"][0]["position_intent"] == "sell_to_close"]
+        self.assertEqual(len(closes), 1, "the other family's exit still goes")
+        self.assertTrue(any("bad" == a for p, a in self.ledger.of("live.refusal")))
+        self.assertFalse([e for e in live.state.events(kinds=["live.error"])])
+        self.assertTrue(live.shadow.accounts["bad@1:s"].counts["rejected"] > 0)
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])

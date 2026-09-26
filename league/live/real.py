@@ -737,7 +737,7 @@ class RealBook:
         out = []
         for r in self.state.rows("SELECT * FROM positions WHERE status='closed' AND pid>? ORDER BY pid", (since_pid,)):
             pos = RPosition.of(r)
-            out.append({"pid": pos.pid, "family": pos.family, "tuition": pos.tuition, "id": f"real:{pos.pid}",
+            out.append({"pid": pos.pid, "family": pos.family, "instance": pos.instance, "tuition": pos.tuition, "id": f"real:{pos.pid}",
                         "day": pos.opened_day, "pnl": round(pos.cash, 2),
                         "max_loss": round(pos.max_loss_share * V.MULTIPLIER * pos.opened_qty, 2)})
         return out

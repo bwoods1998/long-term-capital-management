@@ -14,10 +14,13 @@ BANDS (the live path owns candidate <-> probe <-> sized; the swarm owns gym <-> 
   opens are allowed), and whose typical maximum loss (one structure, with its round-trip fees) fits the Probe's cap at
   `E`: `probe.max_loss_share x E`, or `probe.floor_usd` for one contract. Otherwise it stays a Candidate, shadow only,
   with the reason recorded.
-- SIZED: a Probe whose forward record (nightly + shadow + real) has at least `sized.min_trades` trades with a mean
-  return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero.
-- A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`: at least 20 trades and a
-  loss) loses its band: back to Candidate, its real instance on exits only.
+- SIZED: a PROBE (never a Candidate at once) whose forward record has at least `sized.min_trades` trades with a mean
+  return on maximum loss above zero and its one-sided `sized.confidence` lower bound above zero. The record
+  (`one_record`) is the program version's own, one source a market day (real, else shadow, else nightly).
+- A family whose REAL trades alone lose (`REAL_MIN_TRADES` or more, mean at or below zero) is held at Probe, and a
+  Sized one goes back to Probe.
+- A Probe or Sized family whose forward record turns negative (the swarm's `forward.negative`, or this record's own:
+  20 trades and a mean below zero) loses its band: back to Candidate, its real instance on exits only.
 
 SIZING a real open (`plan_open`), by maximum loss, never premium. `unit` is one structure's maximum loss at its limit
 plus its open and close fees:
@@ -26,8 +29,9 @@ plus its open and close fees:
   but whose unit is at most `probe.floor_usd` trades ONE (the floor). At most `probe.open_per_family` open structures,
   and the family's open maximum loss at most max(`probe.family_share x E`, `probe.floor_usd`).
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
-  per-trade return on maximum loss) of `E` a structure, never below the Probe's cap (a family never loses size for
-  proving more) and never above `sized.max_loss_share x E`; the family at most `sized.family_share x E`.
+  per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
+  `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
+  (3% a structure, 3 open, 12% the family): Sized limits never apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
@@ -156,6 +160,13 @@ class Table:
 
 
 # --------------------------------------------------------------------------------------------- the forward record
+#: The real subset of a forward record read on its own once it has this many trades: losing, it holds the family at
+#: Probe (never Sized) and takes a Sized family back to Probe.
+REAL_MIN_TRADES = 10
+#: Per market day, the one source counted: real fills first, then the live shadow book, then the nightly replay.
+SOURCE_ORDER = ("real", "shadow", "nightly")
+
+
 @dataclass(frozen=True)
 class Forward:
     """A family's forward record, as returns on maximum loss (r = pnl / max_loss, one per trade)."""
@@ -166,38 +177,45 @@ class Forward:
     lcb: float | None
     pnl: float
     negative: bool
+    real_n: int = 0
+    real_mean: float | None = None
 
     @property
     def variance(self) -> float | None:
         return None if self.sd is None else self.sd * self.sd
 
+    @property
+    def real_bad(self) -> bool:
+        """The real fills alone lose: at least `REAL_MIN_TRADES` real trades with a mean return at or below zero."""
+        return self.real_n >= REAL_MIN_TRADES and self.real_mean is not None and self.real_mean <= 0
 
-def one_record(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    """The forward record with each trading day counted ONCE: the live shadow book's trades that day where it has any,
-    else the nightly replay's, else the real book's. The three sources trade the SAME program's decisions on the same
-    day (the nightly replay re-runs the day the shadow book traded live; a real trade mirrors a shadow one), so counting
-    them all would count one decision two or three times and narrow the lower bound that sizes money. A tightening of
-    the plan's count (the plan: "nightly + shadow + real"), on the same evidence."""
+
+def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> list[Mapping[str, Any]]:
+    """The forward record the money table reads: the program version's own (a new version starts its own record;
+    rows written without a version count only while no row carries one), and each market day counted ONCE, from one
+    source, preferring REAL fills, then the live SHADOW book, then the NIGHTLY replay. The three trade the same
+    program's decisions on the same day, so counting them all counts one decision two or three times; real first, so
+    real losses are never hidden behind a winning shadow day. The swarm's `league/swarm/evidence.py` reads the same
+    record by the same rule (the review of #362, Sept 26, 2026: one rule for both sides). Returns are per dollar of
+    maximum loss, scale-free across the shadow's notional and the real stake."""
+    rows = list(rows)
+    if version is not None and any(r.get("version") is not None for r in rows):
+        rows = [r for r in rows if r.get("version") is not None and str(r.get("version")) == str(version)]
     by_day: dict[str, dict[str, list]] = {}
     for row in rows:
         by_day.setdefault(str(row.get("day") or ""), {}).setdefault(str(row.get("source") or ""), []).append(row)
     out: list[Mapping[str, Any]] = []
     for day in sorted(by_day):
         sources = by_day[day]
-        for source in ("shadow", "nightly", "real", ""):
+        for source in SOURCE_ORDER + ("",):
             if sources.get(source):
                 out.extend(sources[source])
                 break
     return out
 
 
-def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negative: bool | None = None) -> Forward:
-    """The forward record's statistics from its trades ({pnl, max_loss}, one record a day: `one_record`); a trade
-    without a positive maximum loss is not a return and is left out of the returns (it still counts in the P&L).
-    `negative`: the swarm's own verdict when it gives one (else: at least 20 trades and a loss in all)."""
-    rows = one_record(rows)
-    returns = []
-    pnl = 0.0
+def _returns(rows: Sequence[Mapping[str, Any]]) -> tuple[list[float], float]:
+    returns, pnl = [], 0.0
     for row in rows:
         try:
             p, m = float(row["pnl"]), float(row.get("max_loss") or 0.0)
@@ -208,11 +226,24 @@ def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negat
         pnl += p
         if math.isfinite(m) and m > 0:
             returns.append(p / m)
+    return returns, pnl
+
+
+def forward_stats(rows: Sequence[Mapping[str, Any]], confidence: float, *, negative: bool | None = None,
+                  version: Any = None) -> Forward:
+    """The forward record's statistics (`one_record`: the version's own, one source a day). A trade without a positive
+    maximum loss is not a return and is left out of the returns (it still counts in the P&L). Negative: the swarm's own
+    verdict OR this record's (at least 20 trades and a mean return below zero)."""
+    record = one_record(rows, version=version)
+    returns, pnl = _returns(record)
     n = len(returns)
     bounds = stats.mean_bounds(returns, 1.0 - confidence) if n >= 2 else None
     mean = bounds["mean"] if bounds else (returns[0] if n == 1 else None)
+    real, _ = _returns([r for r in record if str(r.get("source") or "") == "real"])
+    own_negative = n >= 20 and mean is not None and mean < 0
     return Forward(n=n, mean=mean, sd=bounds["sd"] if bounds else None, lcb=bounds["lcb"] if bounds else None, pnl=pnl,
-                   negative=bool(negative) if negative is not None else (len(rows) >= 20 and pnl < 0))
+                   negative=bool(negative) or own_negative, real_n=len(real),
+                   real_mean=(sum(real) / len(real)) if real else None)
 
 
 # --------------------------------------------------------------------------------------------------------- bands
@@ -254,9 +285,14 @@ def band_for(table: Table, row: Mapping[str, Any], equity: Decimal, fwd: Forward
             return "candidate", (f"its typical structure risks ${cents(unit)}, over the Probe's cap of "
                                  f"${cents(probe_cap(table, equity))} ({table.probe_share:%} of ${cents(equity)}) and the "
                                  f"one-contract floor of ${table.probe_floor}")
-    if sized_ok(table, fwd):
+    if band in ("probe", "sized") and fwd.real_bad:
+        return "probe", (f"its {fwd.real_n} real trades lose (mean {fwd.real_mean:.4f} a dollar of maximum loss): held at "
+                         "Probe")
+    if band in ("probe", "sized") and sized_ok(table, fwd):
         return "sized", (f"a forward record of {fwd.n} trades, mean {fwd.mean:.4f} a dollar of maximum loss, "
                          f"{table.sized_confidence:.0%} lower bound {fwd.lcb:.4f}")
+    if band == "candidate":
+        return "probe", "passed the holdout and trades a real type that fits the Probe's cap (Sized only from Probe)"
     return "probe", "passed the holdout and trades a real type that fits the Probe's cap"
 
 
@@ -280,10 +316,27 @@ class Plan:
     reason: str                      # why this size (or why none)
 
 
+def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
+    """`kelly_fraction` of Kelly on the forward record's LOWER bound, as dollars of maximum loss a structure, never
+    above `sized.max_loss_share` (0 when the record cannot size anything)."""
+    if fwd is None or fwd.lcb is None or not fwd.variance:
+        return ZERO
+    share = D(stats.quarter_kelly(fwd.lcb, fwd.variance, fraction=table.kelly_fraction, cap=float(table.sized_share)))
+    return min(share, table.sized_share) * max(ZERO, equity)
+
+
+def sizing_band(table: Table, band: str, equity: Decimal, fwd: Forward | None) -> str:
+    """The limits a real open is sized under: a Sized family whose Kelly stake is under the Probe's cap keeps the
+    Probe's limits (3% a structure, 3 open, 12% the family): the Sized family and count limits never apply at a
+    Probe-sized stake (the review of #362, C3)."""
+    if band == "sized" and kelly_cap(table, equity, fwd) < probe_cap(table, equity):
+        return "probe"
+    return band
+
+
 def structure_cap(table: Table, band: str, equity: Decimal, fwd: Forward | None) -> Decimal:
-    if band == "sized" and fwd is not None and fwd.lcb is not None and fwd.variance:
-        share = D(stats.quarter_kelly(fwd.lcb, fwd.variance, fraction=table.kelly_fraction, cap=float(table.sized_share)))
-        return max(probe_cap(table, equity), min(share, table.sized_share) * equity)
+    if sizing_band(table, band, equity, fwd) == "sized":
+        return kelly_cap(table, equity, fwd)
     return probe_cap(table, equity)
 
 
@@ -311,6 +364,7 @@ def plan_open(table: Table, *, band: str, tuition: bool, equity: Decimal, unit: 
                                 f"(${cents(exposure.tuition_week)} used)")
         qty, why = 1, "tuition: one structure, to measure the venue's fills"
     elif band in BANDS_REAL:
+        band = sizing_band(table, band, equity, fwd)
         cap = structure_cap(table, band, equity, fwd)
         qty = int((cap / unit).to_integral_value(rounding=ROUND_FLOOR))
         why = f"{band}: ${cents(cap)} of maximum loss a structure"
@@ -496,5 +550,5 @@ class FlowBook:
         return before[-1] if before else None
 
 
-__all__ = ["Table", "Forward", "forward_stats", "one_record", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
+__all__ = ["Table", "Forward", "forward_stats", "one_record", "kelly_cap", "sizing_band", "REAL_MIN_TRADES", "band_for", "fits_probe", "probe_cap", "structure_cap", "family_cap",
            "Exposure", "Plan", "plan_open", "Stops", "FlowBook", "D", "cents", "sized_ok"]

@@ -82,7 +82,7 @@ class MemoryFamilies:
                 key = (source, str(t["id"]))
                 if key not in book:
                     book[key] = {"id": str(t["id"]), "day": str(t.get("day") or ""), "pnl": float(t["pnl"]),
-                                 "max_loss": float(t.get("max_loss") or 0.0)}
+                                 "max_loss": float(t.get("max_loss") or 0.0), "version": t.get("version")}
                     n += 1
         return n
 
