@@ -243,11 +243,69 @@ python3 scripts/gateway_admin.py status
 A kill the run engaged may be released once its cause is fixed and verified; tell the owner at once
 either way.
 
-**Turning real money on:** (to be completed when the live path lands). The plan's order: the
-gateway's caps by maximum loss and `OPTION_STRUCTURES_REAL` deployed; a second owner deploy with
-`real_money` true; the grant ratified on the running digest within a minute; a 1-lot paper structure
-early in the session proves the multi-leg route before the first real order, which comes from an
-agent's intent, never from a test.
+**The live path** (`league/live/`, Sept 26, 2026, Wave 5) is `House.options_live`, on when `config.json`
+`live.enabled`. Once a minute in the session (a few seconds past the minute) it reads each needed root's
+chain through the gateway, steps every Candidate's shadow book (the Gym's own engine, one minute behind
+the wall clock), reads the Brokerage Account (equity, orders, positions, option events, funding) and
+sends Probe and Sized families' orders sized by the constitution's `options_money` table. It owns both
+Alpaca accounts: no old `Book` is built for them. Its state is `/workspace/state/live.sqlite` (the real
+book: every order written before it is sent, positions by family, fills, the stops, the counters) and
+`live-shadow.json`; programs run in a child process (`live-decider.log` beside them). The House box needs
+numpy in `/workspace/.venv`. `health.json` carries its block (`options_live`: the last minute, what shuts
+real entries now, the stops, reconciliation, the paper proof, every instance).
+
+```sh
+python3 -m league.live --root /workspace/state                        # the live state: stops, freeze, proof, positions, orders
+python3 -m league.live --root /workspace/state --release-drawdown     # owner: lift the drawdown stop's pause
+python3 -m league.live --root /workspace/state --clear-assignment     # owner: lift an assignment's freeze by hand
+```
+
+Real entries need all of: `real_money` true; the grant active on the running money digest; the kill
+switch off; no stop tripped (daily 25% of start-of-day equity, drawdown 50% from the peak since the
+reset, deposits netted); reconciliation clean (two readings in a row that disagree freeze entries, two
+clean ones lift it; the LTC dust is known); no unresolved assignment; the paper proof passed; the House
+not paused. Exits need only the kill switch off. Expiring equity structures with a leg in or within 1% of
+the money are closed from ten minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and
+QQQ); index structures settle in cash.
+
+**Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
+`OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the
+release carries the options money table: a new money digest); `python3 scripts/live_trading.py
+--ratify` within a minute of it (`--enable` the first time). Then the House promotes Candidates that
+qualify to Probe within five minutes (`live.band` rows), and the paper proof runs at the next session's
+09:35 ET before any real order.
+
+### Monday's pre-open (12:00-13:25Z Sept 28)
+
+1. **The box** (`python3 scripts/floor_box.py status`, then on the box): the loop and supervisor up;
+   `health.json` `options_live.summary.state` is "before the open", `options_live.instances` lists every
+   Candidate's shadow instance and every Probe's real one with no `error`; `/workspace/.venv/bin/python -c
+   "import numpy"` works; `live-decider.log` has no traceback; `release` is the M4b release.
+2. **The account** (through the gateway, reads only): equity, `last_equity`, `options_buying_power`,
+   options level 3, multiplier; no open order; positions only the LTC dust (0.000373062); whether the
+   deposit has landed (a `CSD` activity).
+3. **The grant**: `python3 scripts/live_trading.py` on the box: `active` true, `constitution_digest` equal
+   to the running release's money digest, capital = min(equity, `live_trading.ceiling_usd`). A deposit
+   that landed: `--ratify` now (capital follows it up to the ceiling; above the ceiling is the owner's call).
+4. **The gateway**: `python3 scripts/gateway_admin.py status`: `kill_switch` false; `max_loss` shows a
+   fresh equity reading (it reads the account on the first open if stale), the per-order cap = the lower of
+   $1,000 and 15% of equity, today's opening maximum loss 0 of 100% of equity, credit opens admitted only if
+   equity >= $2,000; `caps.max_day_orders` 300; the deployed `OPTION_STRUCTURES_REAL` is the five types.
+5. **The live state**: `python3 -m league.live --root /workspace/state`: `stops` not tripped (no
+   `drawdown_tripped`), `reconciliation.frozen` empty, no `assignment_latch`, `paper_proof` absent or
+   `passed`, no working orders, no open real positions but the ones expected.
+6. **The Probe list**: `live.band` rows since Sunday (who became Probe or Sized and why; who stayed a
+   Candidate and why: not through the holdout, a type real money does not open, a credit type under $2,000,
+   a typical structure over the Probe's cap). It must match M4's list in the run record.
+7. **The day**: Sept 28 is a full session (not a half day), no FOMC, CPI or jobs release; 0DTE expiries on
+   SPY, QQQ, IWM, XSP and SPXW. No deploy from 13:25Z to 20:05Z except a rollback.
+8. **At the open** (13:30-13:45Z): the paper proof (`live.paper_proof` "passed" in the ledger by about
+   13:40Z; if "failed", read `paper_proof` in the live state and the proof's events before anything else);
+   then the first real orders (`live.order`), the refusals (`live.refusal`: each says which rule), the day's
+   order count against 250, `reconciliation.frozen` staying empty. Watch every 30 minutes: fills against the
+   Gym's expectation, the stops, the index 0DTE cutoff actually enforced by the venue at 15:00 ET.
+9. **To stop real money at once**: `python3 scripts/gateway_admin.py kill` (exits stop too; release with
+   `unkill` from the owner's machine). `live_trading.py --disable` revokes the grant for good: not for a pause.
 
 ## Recover
 
