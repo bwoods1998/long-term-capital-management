@@ -140,7 +140,12 @@ class PaperProof:
         work["terminal"] = work["status"] in TERMINAL
         work["route_full"] = (work["action"] in ("open", "close") and
                               self._filled(answer, row, work["action"] == "close"))
-        self._put(row)
+        changed = work.get("answer") != answer
+        work["answer"] = dict(answer)
+        with self.state.transaction():
+            self._put(row)
+            if changed:
+                self._event("order_observed", {"cid": work["cid"], "action": work["action"], "answer": answer})
         if work["terminal"]:
             return
         values = [abs(Decimal(qty)) for qty in work["fills"].values()]

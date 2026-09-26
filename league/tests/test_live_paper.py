@@ -45,6 +45,12 @@ class DurableProof(LiveCase):
         self.run_to(9, 46)
         self.assert_passed_flat()
         self.assertEqual(len(self.paper.sent), 2)
+        recovered = self.live.proof.status()["orders"][0]
+        self.assertEqual(recovered["answer"]["status"], "filled")
+        self.assertTrue(all(leg["filled_avg_price"] is not None for leg in recovered["answer"]["legs"]))
+        observed = self.live.state.events(kinds=["paper_proof.order_observed"])
+        self.assertTrue(any(event["payload"]["cid"] == recovered["cid"]
+                            and event["payload"]["answer"]["status"] == "filled" for event in observed))
 
     def test_dispatch_crash_has_already_committed_the_client_id_and_baseline(self):
         self.make_proof()
