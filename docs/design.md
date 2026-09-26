@@ -57,6 +57,8 @@ Unknown orders retain stable client IDs and reservations until reconciliation re
 
 Schema-2 checkpoints expose allowlisted account, funding, cost, Gym, agent and structure summaries. Optional `trading: {as_of, pnl_usd}` aggregates the complete real-options book in a read-only transaction, independent of the public roster. Fees and partial closes are included. The mark uses copied quotes and database position quantities, with accounting and quote revision checks. Frozen, broken, unknown or unpriced state produces `null`. A missing book is zero only when the ledger proves no real option fill.
 
+An agent's optional promotion checklist exposes bounded counts, required counts and an allowlisted blocker. The publisher reads a consistent evidence snapshot and returns `null` when proof is unavailable or mismatched. Research metrics and fitted inputs stay private.
+
 Private prompts, quotes, source programs, tuned parameters, credentials and fitted fill tables never enter the site. `league/tests/fixtures/site_*.json` are synthetic contract fixtures, not performance results.
 
 Public repair proposals may touch only pure `league/tools/` helpers and their tests. Private strategy reports stay with the swarm. Money code, judges, runtime, data and operator tools require owner review. CI uses read-only tokens and never merges. The in-box updater defaults off; owner releases pass an isolated synthetic canary and a rollback watch.

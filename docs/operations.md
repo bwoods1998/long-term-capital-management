@@ -1,6 +1,6 @@
 # Operations
 
-Wave 2b is prepared as a draft. Merge and deployment wait until after Monday 2026-09-28 close. Production status comes from the running release and private records, not the branch's existence. Do not deploy from 13:25 to 20:05Z on a trading day except an emergency rollback.
+Wave 2b is prepared as a draft. Merge and deployment wait until Monday 2026-09-28 20:05Z, after the close. Production status comes from the running release and private records, not the branch's existence. Do not deploy from 13:25 to 20:05Z on a trading day except an emergency rollback.
 
 ## State and credentials
 
