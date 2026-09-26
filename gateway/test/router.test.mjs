@@ -682,7 +682,7 @@ test('a multi-leg order is refused before its symbol is quoted, priced or reserv
   for (const [body, headers] of [[writtenPut, {}], [writtenPut, { 'X-LTCM-Purpose': 'exit' }], [marketSpread, {}]]) {
     const refused = await call(ask('POST', '/v1/alpaca/v2/orders', { body, headers }), { reply: quote });
     assert.equal(refused.response.status, 400, JSON.stringify(body));
-    assert.match(refused.body.error, /Multi-leg/);
+    assert.match(refused.body.error, /multi-leg/i);  // the structure rules' refusal (Sept 25, 2026), before any quote
     assert.equal(refused.calls.length, 0, 'no quote read and nothing forwarded');
     assert.equal((await refused.gate.status()).today.orders, 0);
   }

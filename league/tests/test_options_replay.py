@@ -923,18 +923,22 @@ class Structures(unittest.TestCase):
         self.assertEqual([(f["side"], f["price"]) for f in r["fill_log"]], [("buy", 2.16), ("settle", 1.88)])
         self.assertEqual(r["trade_log"][0]["how"] if "trade_log" in r else r["digest"]["worst"][0]["how"],
                          "settled: the far leg's bid less the near leg's intrinsic")
-        # no price of the underlying on its expiry day (the tape jumps to Monday): refunded at cost, not a trade, not a loss
+        # no price of the underlying on its expiry day (the tape jumps to Monday): refunded at cost, not a trade, not a loss.
+        # (Its far leg is 8 days out on Sept 24: a strategy shown 10 days, as every leg of an open must be in the chain's
+        # reach -- G-LOOP's review, Sept 25, 2026.)
         gap = [sstep("2026-09-24T13:45:00Z", prices), sstep("2026-09-24T14:00:00Z", prices),
                {"t": "2026-09-28T13:45:00Z", "bars": {}, "execution_bars": {}, "options": {socc(590): [0.5, 0.5, 0.5, 0.5, 50.0, 10]}}]
-        r = srun(gap, [near, far, socc(590)], structure="calendar", legs=legs, open_at="2026-09-24T13:45:00Z", limit=2.20, limits=wide)
+        ten = STRUCTURE_STRATEGY.replace('"max_days_to_expiry": 7', '"max_days_to_expiry": 10')
+        r = srun(gap, [near, far, socc(590)], strategy=ten, structure="calendar", legs=legs, open_at="2026-09-24T13:45:00Z", limit=2.20, limits=wide)
         self.assertEqual(r["options"]["structures"]["not_evaluated"], 1)
         self.assertEqual(r["trades"], 0)
         self.assertAlmostEqual(r["final_equity"], 1000.0 - 0.1, places=6)  # the fee stays paid
-        # a far leg the history never saw at all: the calendar is not evaluated (refused), never a loss
+        # a far leg the history never saw at all: refused, never a loss -- since G-LOOP's review (Sept 25, 2026) as a leg
+        # outside the chain's reach (no chain holds a contract the history never priced), which the House refuses live alike
         later = [{"occ": near, "role": "short"}, {"occ": socc(585, expiry="261023"), "role": "long"}]
         r = srun(steps, [near, far], structure="calendar", legs=later, open_at="2026-09-25T13:45:00Z", limit=2.20, limits=wide)
-        self.assertEqual((r["fills"], r["trades"], r["options"]["structures"]["unseen_leg_refusals"]), (0, 0, 1))
-        self.assertIn("not evaluated: the history holds no prints of a leg", " ".join(r["refusal_reasons"]))
+        self.assertEqual((r["fills"], r["trades"], r["options"]["structures"]["outside_reach_refusals"]), (0, 0, 1))
+        self.assertIn("outside the chain's reach", " ".join(r["refusal_reasons"]))
 
     def test_the_context_is_the_houses_structure_context(self):
         cheap, dear, today_call = socc(585), socc(575), socc(586)

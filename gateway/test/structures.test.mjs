@@ -215,11 +215,17 @@ test('OPTION_STRUCTURES_REAL admits the types it names, and a typo admits none',
   }
 });
 
-test('the real account prices a multi-leg order only when its type is admitted: an open at maximum loss, a close at zero', () => {
+test('the real account prices a multi-leg OPEN only when its type is admitted, at maximum loss, and a close of any type at zero', () => {
   const vertical = OPENS[0][1];
-  // With no type admitted, the refusal is the one that always stood (#187).
+  // With no type admitted, every open is refused as not admitted; a close of a defined-risk structure is priced at zero
+  // whatever is admitted (Sept 25, 2026, the review of g/money: the router admits it only when the account holds its legs).
   for (const structures of [undefined, []]) {
-    assert.match(notional('alpaca', mleg(vertical, '0.70'), { structures }).error, /Multi-leg, bracket, OCO and OTO orders/);
+    assert.equal(notional('alpaca', mleg(vertical, '0.70'), { structures }).error,
+      'A debit_vertical is not admitted on the real account: OPTION_STRUCTURES_REAL admits none.');
+    for (const [type, legs] of OPENS) {
+      const close = notional('alpaca', mleg(closing(legs), '0'), { structures });
+      assert.deepEqual([close.error, close.micro, close.structure, close.opening], [undefined, 0n, type, false], type);
+    }
   }
   const admitted = ['debit_vertical'];
   const open = notional('alpaca', mleg(vertical, '0.70'), { structures: admitted });

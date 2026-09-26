@@ -56,6 +56,13 @@ rules (`league/options_shadow.py`), each HELD AS ONE POSITION at S = net value +
   legs' bid less the near legs' intrinsic (a calendar or diagonal) -- never written off at zero. A
   structure whose far leg the history never priced is "not evaluated": refunded at its cost (fees
   stay paid) and not counted as a trade.
+- An open is refused unless EVERY leg is among the `chain_rules.reach` (160) contracts of its
+  underlying nearest the money that the chain could show at that step (the House's rule live,
+  `House._structure_reach_refusal`; G-LOOP's review, Sept 25, 2026). On a tape that keeps only what
+  the chain could reach (`OptionsHistory._structure_reach`), a contract is listed and may be a leg
+  only from the step it was first among them (`contracts[occ]["reached"]`): its earlier bars are
+  kept for its spread estimate alone. So what a strategy is shown, and may open, at a step never
+  depends on where the underlying went after it.
 - A structure is ONE trade when it is flat (`trade_log` has one row a structure), so the replay's
   trade count is a count of structures.
 """
@@ -73,12 +80,12 @@ from zoneinfo import ZoneInfo
 try:
     from league.replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,
                                _clean_memory, _feed_index, _feeds_until, _mean, _num, _parse_ts, digest)
-    from league.options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to
+    from league.options_history import display_quote, estimate_quote, parse_occ, structure_days, tick, implied_vol, bs_delta, years_to
     from league import structure_core as core
 except ImportError:  # in the agent's box the files sit side by side
     from replay import (MAX_BARS, MAX_CANCELS, MAX_ERRORS, MAX_INTENTS, RUIN_EQUITY, RUIN_LOG_GROWTH, _block_key,  # type: ignore
                         _clean_memory, _feed_index, _feeds_until, _mean, _num, _parse_ts, digest)
-    from options_history import display_quote, estimate_quote, parse_occ, tick, implied_vol, bs_delta, years_to  # type: ignore
+    from options_history import display_quote, estimate_quote, parse_occ, structure_days, tick, implied_vol, bs_delta, years_to  # type: ignore
     import structure_core as core  # type: ignore
 
 NY = ZoneInfo("America/New_York")
@@ -90,6 +97,9 @@ STRUCTURE_ENTRY_CUT = 14 * 60 + 30
 STRUCTURE_CLOSE = 15 * 60 + 30
 #: A structure agent is shown at most this many contracts an underlying (`STRUCTURE_CHAIN_PER_UNDERLYING`).
 STRUCTURE_CHAIN_PER_UNDERLYING = 80
+#: ...and may open a structure only on legs among this many nearest the money at that step (`options_history.STRUCTURE_REACH`,
+#: the House's rule live): a tape says which under `chain_rules.reach`; this is the number when it does not.
+STRUCTURE_REACH = 160
 
 
 def _ny(ts: float) -> datetime:
@@ -111,6 +121,7 @@ class _Book:
         self.sorders: dict[str, dict[str, Any]] = {}  # structure orders, by order id
         self.seq = self.fills = self.refused = self.expired_orders = self.written_off = self.forced = 0
         self.settled = self.not_evaluated = self.structures_opened = self.structures_closed = self.unseen = self.cut_opens = 0
+        self.unreached = 0  # structure opens refused for a leg outside the chain's reach (G-LOOP's review, Sept 25, 2026)
         self.fees_usd = 0.0
         self.reasons: dict[str, int] = {}
         self.trade_returns: list[float] = []
@@ -244,11 +255,18 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
     chain_symbols = symbols[:8]
     max_days = int(needs.get("max_days_to_expiry") or rules.get("max_days_to_expiry") or 21)
     max_days = max(2, min(max_days, 45))
-    # A structure agent (NEEDS `"structures": true`): the House's structure context and book rules.
-    structural = bool(needs.get("structures"))
+    # A structure agent (NEEDS `"structures": true`, read as the House reads it: `True` alone): its structure context and
+    # book rules.
+    structural = needs.get("structures") is True
     if structural:
-        asked = needs.get("max_days_to_expiry")
-        max_days = max(0, min(int(7 if asked is None else asked), 45))  # as `House._structure_context`: 0 is 0-DTE
+        # As `House._structure_context` (`structure_days`): 0 is 0-DTE; 10 at most for SPY, QQQ or IWM.
+        max_days = structure_days(needs.get("max_days_to_expiry"), symbols)
+    # The reach (G-LOOP's review, Sept 25, 2026): an open's legs must be among the `reach` nearest at its step; on a tape
+    # that keeps only what the chain could reach, a contract is listed only from the step it first could.
+    reach_rule = max(1, int(rules.get("reach") or STRUCTURE_REACH)) if structural else 0
+    gated = structural and isinstance(tape.get("reached"), dict)
+    reached_at = {occ: (_parse_ts(info.get("reached")) if info.get("reached") else None) for occ, info in contracts.items()} if gated else {}
+    reachable: dict[str, Any] = {"ts": None, "occs": frozenset()}
     # The entry cut and the House's close by New York day (`House._structure_hours`): the regular
     # 14:30 and 15:30, earlier on an early close (the tape carries those days, from the House's calendar).
     early = {str(day): (int(pair[0]), int(pair[1])) for day, pair in (tape.get("structure_hours") or {}).items()
@@ -426,6 +444,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         first = today if structural and moment.hour * 60 + moment.minute < structure_hours(today)[0] else None
         per_underlying = STRUCTURE_CHAIN_PER_UNDERLYING if structural else int(rules.get("per_underlying", 40))
         rows_out = []
+        near: set[str] = set()  # the reach: the `reach_rule` nearest an underlying, which an open's legs must be among
         for symbol in chain_symbols:
             s = spot.get(symbol)
             listed = by_under.get(symbol, set())
@@ -436,6 +455,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             price = s[0]
             rows = []
             for occ in listed:
+                if gated and (reached_at.get(occ) is None or reached_at[occ] > now_ts + EPS):
+                    continue  # kept on the tape for a later reach: not listed before it (`reached`)
                 info, seen = contracts[occ], quote(occ, now_ts)
                 if seen is None or "bar" not in seen:
                     continue  # a recorded quote alone, with no print yet: not listed by the replay's rule
@@ -449,6 +470,8 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
             # Nearest the money first, then the nearer expiry; the contract's code breaks a tie (a call and
             # a put of one strike), so the cut and the order are the same in every process.
             rows.sort(key=lambda r: r[:3])
+            if structural:
+                near.update(r[2] for r in rows[:reach_rule])
             for _, expiry, occ, info, seen in rows[:per_underlying]:
                 years = years_to(expiry, now_ts)
                 vol = iv_of(occ)  # solved once, at the print, against the underlying then; only for rows shown
@@ -459,6 +482,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                                  "volume": seen["day_volume"], "trades": seen["day_trades"], "underlying_price": price,
                                  "quote_source": seen.get("source") or "estimated from trade prints (no historical quotes)",
                                  "greeks_source": "computed (Black-Scholes)"})
+        reachable.update(ts=now_ts, occs=frozenset(near))
         return rows_out
 
     def conservative(spec: Any, touches_by_leg: dict[str, dict[str, Any]]) -> tuple[float | None, float | None]:
@@ -565,6 +589,14 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
                 cut, close = structure_hours(today)
                 return book.refuse(f"no structure is opened on its earliest expiry day from {cut // 60:02d}:{cut % 60:02d} New York: "
                                    f"the House closes what is still held from {close // 60:02d}:{close % 60:02d} and nothing is held into an expiry")
+            if reachable["ts"] != now_ts:
+                chain(now)  # the chain as it stands at this step, which sets the reach
+            if any(leg.occ not in reachable["occs"] for leg in spec.legs):
+                # The House's rule live (`House._structure_reach_refusal`), and what keeps a reach-filtered tape honest:
+                # a leg's admission depends on the chain at this step alone, never on where the market went after it.
+                book.unreached += 1
+                return book.refuse(f"outside the chain's reach: every leg of an open must be among the {reach_rule} contracts of its "
+                                   "underlying nearest the money that the chain holds at this step (the House's rule live)")
             for leg in spec.legs:
                 info = contracts.get(leg.occ)
                 if info is None:
@@ -857,6 +889,7 @@ def replay_options(decide: Any, needs: dict, effective: dict, tape: dict, stake:
         result["options"]["structures"] = {
             "opened": book.structures_opened, "closed": book.structures_closed, "settled_at_expiry": book.settled,
             "not_evaluated": book.not_evaluated, "unseen_leg_refusals": book.unseen, "house_close_offers": house_offers,
+            "outside_reach_refusals": book.unreached, "reach": reach_rule,
             "opens_cancelled_at_the_cut": book.cut_opens,
             "candidates_shown": structures_shown,
             "execution": ("structures: later bars only; every leg printed in the bar or quoted after the decision; long legs at "
