@@ -1,386 +1,318 @@
 {
-  "schema_version": 1,
-  "published_at": "2026-09-19T06:30:00.000Z",
-  "floor": {
-    "equity": "1022.25",
-    "cash": "967.96",
-    "daily_pnl": "0.32",
-    "capital_usd": "1021.9251",
-    "since_inception_pct": "0.0318",
-    "benchmark": null,
-    "live_equity": "1022.25",
-    "live_daily_pnl": "0.32",
-    "live_desks": 2,
-    "shadow_desks": 1,
-    "account_equity": "1022.25",
-    "account_cash": "967.96",
-    "venues": [
-      {
-        "venue": "kalshi",
-        "equity": "512.21",
-        "cash": "493.41",
-        "as_of": "2026-09-19T06:29:40.000Z"
-      },
-      {
-        "venue": "alpaca",
-        "equity": "510.04",
-        "cash": "474.55",
-        "as_of": "2026-09-19T06:29:41.000Z"
-      }
-    ],
-    "performance": {
-      "start_at": "2026-09-19T04:56:53.000Z",
-      "start_equity": "1021.9251",
-      "net_flows": "0",
-      "verified_at": "2026-09-19T06:25:00.000Z"
-    }
+  "schema_version": 2,
+  "published_at": "2026-09-28T14:58:00.000Z",
+  "run": {
+    "started_at": "2026-09-26T07:02:18.000Z"
   },
-  "desks": [
+  "account": {
+    "equity": "5694.37",
+    "cash": "5210.12",
+    "as_of": "2026-09-28T14:57:58.000Z",
+    "stale": false
+  },
+  "performance": {
+    "start_at": "2026-09-26T06:25:30.000Z",
+    "start_equity": "481.65",
+    "net_flows": "5000.00",
+    "verified_at": "2026-09-28T14:55:02.000Z"
+  },
+  "compute": {
+    "as_of": "2026-09-28T14:57:00.000Z",
+    "sail_usd": "212.40",
+    "openai_usd": "64.10",
+    "thetadata_usd": "5.43",
+    "market_data_usd": "5.66",
+    "other_usd": "0.00"
+  },
+  "gym": {
+    "as_of": "2026-09-28T14:50:00.000Z",
+    "trials": 48213,
+    "market_years": "51240.5",
+    "families_alive": 11,
+    "families_retired": 37
+  },
+  "agents": [
     {
-      "id": "favorites-maker",
-      "name": "favorites-maker",
-      "family": "kalshi-hour-favorites",
-      "generation": 1,
-      "parent_id": null,
-      "mode": "live",
-      "venues": [
-        "kalshi"
-      ],
-      "capital_usd": "100.00",
-      "equity": "100.30",
-      "cash": "81.50",
-      "daily_pnl": "0.30",
-      "return_pct": "0.3",
-      "max_drawdown_pct": "0.05",
-      "days_live": 0,
-      "orders": 6,
-      "cost_usd": "0.02",
-      "status": "active",
-      "gate": {
-        "name": "Rung 2: micro-real",
-        "passed": true,
-        "evidence": {
-          "rung": 2,
-          "decisions": 6
+      "id": "condor-vrp-3",
+      "family": "condor-vrp",
+      "name": "Condor Vrp 3",
+      "mechanism": "Sells short-dated index premium when realized volatility runs under the level the options price in.",
+      "structure": "iron_condor",
+      "band": "sized",
+      "born_at": "2026-09-26T09:14:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 5812,
+        "revisions": 41,
+        "forward": {
+          "trades": 64,
+          "wins": 45,
+          "pnl_usd": "1284.20"
+        },
+        "real": {
+          "trades": 22,
+          "wins": 16,
+          "pnl_usd": "212.40"
         }
-      },
-      "updated_at": "2026-09-19T06:29:50.000Z",
-      "pnl_usd": "0.30",
-      "next_session_at": "2026-09-19T06:35:00.000Z",
-      "positions": [
-        {
-          "instrument": {
-            "symbol": "KXBTCD-26SEP1903-T80999.99",
-            "asset_class": "event",
-            "venue": "kalshi",
-            "market_id": "KXBTCD-26SEP1903-T80999.99",
-            "right": "yes"
-          },
-          "side": "yes",
-          "quantity": "20",
-          "entry_price": "0.93",
-          "mark_price": "0.94",
-          "market_value": "18.80",
-          "unrealized_pnl": "0.20",
-          "opened_at": "2026-09-19T06:05:00.000Z",
-          "thesis": "BTC is $420 above the 80,999.99 strike with 55 minutes left. YES at 93 cents pays 7% if it holds; resting maker bid, no taker fee.",
-          "target_price": null,
-          "stop_price": null,
-          "time_stop_at": null,
-          "exit_orders": []
-        }
-      ],
-      "band": "bunt",
-      "stake_usd": "10.00",
-      "evidence": {
-        "W_paper": "1.061200",
-        "W_real": "1.030000",
-        "E": "1.061070",
-        "trades": 9,
-        "real_trades": 3
-      },
-      "last_move": {
-        "at": "2026-09-19T05:40:12.000Z",
-        "from_band": "paper",
-        "to_band": "bunt",
-        "reason": "E 1.030 after 9 settled trades"
-      },
-      "family_state": "proven",
-      "family_n": 12
+      }
     },
     {
-      "id": "crypto-reversion",
-      "name": "crypto-reversion",
-      "family": "alpaca-hour-reversion",
-      "generation": 1,
-      "parent_id": null,
-      "mode": "live",
-      "venues": [
-        "alpaca"
-      ],
-      "capital_usd": "100.00",
-      "equity": "100.02",
-      "cash": "64.53",
-      "daily_pnl": "0.02",
-      "return_pct": "0.02",
-      "max_drawdown_pct": "0.09",
-      "days_live": 0,
-      "orders": 1,
-      "cost_usd": "0.03",
-      "status": "active",
-      "gate": {
-        "name": "Rung 2: micro-real",
-        "passed": true,
-        "evidence": {
-          "rung": 2,
-          "decisions": 5
+      "id": "orb-4",
+      "family": "orb",
+      "name": "Orb 4",
+      "mechanism": "Trades the break of the opening range in the direction of the break, with a vertical sized by its maximum loss.",
+      "structure": "debit_vertical",
+      "band": "probe",
+      "born_at": "2026-09-26T10:02:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 2877,
+        "revisions": 22,
+        "forward": {
+          "trades": 40,
+          "wins": 23,
+          "pnl_usd": "310.10"
+        },
+        "real": {
+          "trades": 3,
+          "wins": 2,
+          "pnl_usd": "21.80"
         }
-      },
-      "updated_at": "2026-09-19T06:29:50.000Z",
-      "pnl_usd": "0.02",
-      "next_session_at": "2026-09-19T06:40:00.000Z",
-      "live_session": {
-        "session_id": "crypto-reversion:20260919-0625",
-        "trigger": "cadence:06:25",
-        "started_at": "2026-09-19T06:25:00.000Z"
-      },
-      "positions": [
-        {
-          "instrument": {
-            "symbol": "BTC/USD",
-            "asset_class": "crypto",
-            "venue": "alpaca"
-          },
-          "side": "long",
-          "quantity": "0.000437",
-          "entry_price": "80950.00",
-          "mark_price": "81210.50",
-          "market_value": "35.49",
-          "unrealized_pnl": "0.11",
-          "opened_at": "2026-09-19T06:11:02.000Z",
-          "thesis": "BTC closed 2.1 standard deviations under its 24-bar mean on 5-minute bars. Buying the reversion; out at the mean or after two hours.",
-          "target_price": "81400.00",
-          "stop_price": null,
-          "time_stop_at": "2026-09-19T08:11:02.000Z",
-          "exit_orders": []
-        }
-      ],
-      "band": "bunt",
-      "stake_usd": "15.00",
-      "evidence": {
-        "W_paper": "1.044100",
-        "W_real": "1.001300",
-        "E": "1.023128",
-        "trades": 7,
-        "real_trades": 1
-      },
-      "last_move": {
-        "at": "2026-09-19T06:10:03.000Z",
-        "from_band": "paper",
-        "to_band": "bunt",
-        "reason": "E 1.031 after 7 closed trades"
-      },
-      "family_state": "unproven",
-      "family_n": 9
+      }
     },
     {
-      "id": "crypto-reversion-2",
-      "name": "crypto-reversion-2",
-      "family": "alpaca-hour-reversion",
-      "generation": 2,
-      "parent_id": "crypto-reversion",
-      "mode": "shadow",
-      "venues": [
-        "alpaca"
-      ],
-      "capital_usd": "100.00",
-      "equity": "99.96",
-      "cash": "75.00",
-      "daily_pnl": "-0.04",
-      "return_pct": "-0.04",
-      "max_drawdown_pct": "0.04",
-      "days_live": 0,
-      "orders": 2,
-      "cost_usd": "0.01",
-      "status": "active",
-      "gate": {
-        "name": "Rung 1: forward paper",
-        "passed": false,
-        "evidence": {
-          "rung": 1,
-          "decisions": 3
+      "id": "putspread-dip-2",
+      "family": "putspread-dip",
+      "name": "Putspread Dip 2",
+      "mechanism": "Buys a put debit vertical after a gap down that the first hour does not recover, and exits before the close.",
+      "structure": "debit_vertical",
+      "band": "probe",
+      "born_at": "2026-09-26T09:20:00.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 3390,
+        "revisions": 28,
+        "forward": {
+          "trades": 31,
+          "wins": 18,
+          "pnl_usd": "402.75"
+        },
+        "real": {
+          "trades": 4,
+          "wins": 2,
+          "pnl_usd": "-18.30"
         }
-      },
-      "updated_at": "2026-09-19T06:29:50.000Z",
-      "pnl_usd": "-0.04",
-      "next_session_at": "2026-09-19T06:45:00.000Z",
-      "positions": [
-        {
-          "instrument": {
-            "symbol": "ETH/USD",
-            "asset_class": "crypto",
-            "venue": "alpaca"
-          },
-          "side": "long",
-          "quantity": "0.0078",
-          "entry_price": "3205.00",
-          "mark_price": "3200.00",
-          "market_value": "24.96",
-          "unrealized_pnl": "-0.04",
-          "opened_at": "2026-09-19T06:18:00.000Z",
-          "thesis": "ETH closed 2.4 standard deviations under its 24-bar mean, past the wider entry this variant waits for. Practice book until the forward test passes.",
-          "target_price": "3231.00",
-          "stop_price": null,
-          "time_stop_at": "2026-09-19T08:18:00.000Z",
-          "exit_orders": []
-        }
-      ],
-      "band": "paper",
-      "stake_usd": null,
-      "evidence": {
-        "W_paper": "0.998000",
-        "W_real": "1.000000",
-        "E": "0.998999",
-        "trades": 3,
-        "real_trades": 0
-      },
-      "last_move": null,
-      "family_state": "unproven",
-      "family_n": 9
+      }
+    },
+    {
+      "id": "butterfly-pin",
+      "family": "butterfly-pin",
+      "name": "Butterfly Pin",
+      "mechanism": "Buys a long butterfly around the strike with the largest open interest on expiry afternoons, where prices tend to pin.",
+      "structure": "long_butterfly",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1988,
+        "revisions": 15,
+        "forward": {
+          "trades": 9,
+          "wins": 4,
+          "pnl_usd": "-22.00"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "ironfly-quiet",
+      "family": "ironfly-quiet",
+      "name": "Ironfly Quiet",
+      "mechanism": "Sells an at-the-money iron butterfly on quiet mornings when the overnight range was narrow.",
+      "structure": "iron_butterfly",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 2410,
+        "revisions": 19,
+        "forward": {
+          "trades": 18,
+          "wins": 11,
+          "pnl_usd": "96.40"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "trend-vertical",
+      "family": "trend-vertical",
+      "name": "Trend Vertical",
+      "mechanism": "Rides trend days: once the first two hours close far from the open, it buys a vertical in that direction.",
+      "structure": "debit_vertical",
+      "band": "candidate",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1760,
+        "revisions": 13,
+        "forward": {
+          "trades": 12,
+          "wins": 7,
+          "pnl_usd": "58.90"
+        },
+        "real": null
+      }
+    },
+    {
+      "id": "calendar-term",
+      "family": "calendar-term",
+      "name": "Calendar Term",
+      "mechanism": "Buys a calendar when near-dated options are rich against the month behind them.",
+      "structure": "calendar",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 611,
+        "revisions": 7,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "eod-drift",
+      "family": "eod-drift",
+      "name": "Eod Drift",
+      "mechanism": "Buys the last hour's drift into the close on days the index is up from the open.",
+      "structure": "long_call",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 88,
+        "revisions": 1,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "gap-drift",
+      "family": "gap-drift",
+      "name": "Gap Drift",
+      "mechanism": "Fades opening gaps that the premarket did not confirm, with a single long option.",
+      "structure": "long_call",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 1204,
+        "revisions": 17,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "skew-revert",
+      "family": "skew-revert",
+      "name": "Skew Revert",
+      "mechanism": "Sells the side of the smile that has steepened most against its own recent history.",
+      "structure": "credit_vertical",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 940,
+        "revisions": 9,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "strangle-cheap",
+      "family": "strangle-cheap",
+      "name": "Strangle Cheap",
+      "mechanism": "Buys a strangle into scheduled news when the move the options expect is small beside past moves.",
+      "structure": "long_strangle",
+      "band": "gym",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": null,
+      "record": {
+        "trials": 402,
+        "revisions": 4,
+        "forward": null,
+        "real": null
+      }
+    },
+    {
+      "id": "reversal-1",
+      "family": "reversal",
+      "name": "Reversal 1",
+      "mechanism": "Bought reversals after three down days; it never beat the fill cost on validation.",
+      "structure": "debit_vertical",
+      "band": "retired",
+      "born_at": "2026-09-26T16:02:11.000Z",
+      "retired_at": "2026-09-27T21:40:00.000Z",
+      "record": {
+        "trials": 2000,
+        "revisions": 30,
+        "forward": null,
+        "real": null
+      }
     }
   ],
-  "committee": {
-    "last_memo_at": null,
-    "allocations": {
-      "favorites-maker": "100.00",
-      "crypto-reversion": "100.00",
-      "crypto-reversion-2": "100.00"
-    }
-  },
-  "budget": {
-    "spent_today_usd": "0.06",
-    "cap_usd": "2.00",
-    "mode": "open"
-  },
-  "infra": {
-    "host": "sailbox",
-    "box_id": "sb_fixture01",
-    "checkpoint_count": 19,
-    "uptime_seconds": 5400
-  },
-  "run": {
-    "started_at": "2026-09-19T05:00:00.000Z",
-    "uptime_seconds": 5400,
-    "availability_7d_pct": null,
-    "sessions_total": 19,
-    "sessions_today": 19,
-    "decisions_total": 14,
-    "sail_model_spend_today_usd": "0.06",
-    "sail_model_spend_total_usd": "0.06",
-    "sail_infra_spend_total_usd": "0.06",
-    "sail_spend_total_usd": "0.12",
-    "pnl_total_usd": "0.32",
-    "pnl_per_sail_dollar": "2.67",
-    "models_used": [
-      "DeepSeek V4 Flash"
-    ]
-  },
-  "lab": {
-    "experiments": [],
-    "curve": [
-      {
-        "generation": 1,
-        "desks": 2,
-        "decisions": 11,
-        "cost_usd": "0.05",
-        "pnl_usd": "0.32",
-        "cost_adjusted_excess_pct": "0.135",
-        "brier": null,
-        "pnl_per_inference_usd": "6.4"
-      },
-      {
-        "generation": 2,
-        "desks": 1,
-        "decisions": 3,
-        "cost_usd": "0.01",
-        "pnl_usd": "-0.04",
-        "cost_adjusted_excess_pct": "-0.06",
-        "brier": null,
-        "pnl_per_inference_usd": "-4"
-      }
-    ],
-    "calibration": {
-      "n": 0,
-      "brier": null
-    }
-  },
-  "board": {
-    "enabled": true,
-    "bands": {
-      "kalshi": {
-        "bunt": {
-          "count": 1,
-          "capital_usd": "10.00"
-        }
-      },
-      "alpaca": {
-        "bunt": {
-          "count": 1,
-          "capital_usd": "15.00"
-        },
-        "paper": {
-          "count": 1,
-          "capital_usd": "0.00"
-        }
-      }
+  "structures": [
+    {
+      "id": "st-condor-vrp-3-0928a",
+      "agent": "condor-vrp-3",
+      "underlying": "XSP",
+      "structure": "iron_condor",
+      "legs": 4,
+      "expiry": "2026-09-28",
+      "quantity": 1,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "184.00",
+      "pnl_usd": "12.50"
     },
-    "moves": [
-      {
-        "id": "le-fixture-move-1",
-        "at": "2026-09-19T05:40:12.000Z",
-        "agent": "favorites-maker",
-        "venue": "kalshi",
-        "from_band": "paper",
-        "to_band": "bunt",
-        "stake_usd": "10.00",
-        "reason": "E 1.030 after 9 settled trades"
-      },
-      {
-        "id": "le-fixture-move-2",
-        "at": "2026-09-19T06:10:03.000Z",
-        "agent": "crypto-reversion",
-        "venue": "alpaca",
-        "from_band": "paper",
-        "to_band": "bunt",
-        "stake_usd": "15.00",
-        "reason": "E 1.031 after 7 closed trades"
-      }
-    ],
-    "throttle": {
-      "active": false,
-      "floor_pnl_usd": "0.32",
-      "envelope_usd": "1017.75"
+    {
+      "id": "st-orb-4-0928a",
+      "agent": "orb-4",
+      "underlying": "SPY",
+      "structure": "debit_vertical",
+      "legs": 2,
+      "expiry": "2026-09-28",
+      "quantity": 2,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "96.00",
+      "pnl_usd": "-8.00"
     },
-    "families": {
-      "unproven": 1,
-      "rows": [
-        {
-          "family": "kalshi-hour-favorites",
-          "venue": "kalshi",
-          "state": "proven",
-          "n": 12,
-          "real_n": 3,
-          "bound": "0.021500",
-          "stake_usd": "10.00",
-          "members_real": 1,
-          "capacity_usd_per_day": "4.10"
-        }
-      ]
+    {
+      "id": "st-putspread-dip-2-0928a",
+      "agent": "putspread-dip-2",
+      "underlying": "QQQ",
+      "structure": "debit_vertical",
+      "legs": 2,
+      "expiry": "2026-09-30",
+      "quantity": 1,
+      "real": true,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "61.00",
+      "pnl_usd": null
     },
-    "lab": {
-      "at": "2026-09-19T06:25:00.000Z",
-      "tested_last_hour": 84,
-      "graduates_waiting": 2
+    {
+      "id": "st-ironfly-quiet-0928a",
+      "agent": "ironfly-quiet",
+      "underlying": "SPY",
+      "structure": "iron_butterfly",
+      "legs": 4,
+      "expiry": "2026-09-28",
+      "quantity": 1,
+      "real": false,
+      "opened_at": "2026-09-28T14:02:40.000Z",
+      "max_loss_usd": "312.00",
+      "pnl_usd": "41.00"
     }
-  }
+  ]
 }

@@ -1,141 +1,126 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "events": [
     {
-      "id": "ops:floor.mark:2026-09-19T04:56:53.000Z",
-      "stream": "ops",
-      "kind": "floor.mark",
-      "at": "2026-09-19T04:56:53.000Z",
+      "id": "le-0001-floor.mark",
+      "stream": "account",
+      "kind": "account.mark",
+      "at": "2026-09-26T06:30:00.000Z",
       "payload": {
-        "account_equity": "1021.9251",
-        "account_cash": "1021.9251",
-        "as_of": "2026-09-19T04:56:53.000Z",
-        "venues": [
-          {
-            "venue": "kalshi",
-            "equity": "512.0051",
-            "cash": "512.0051",
-            "as_of": "2026-09-19T04:56:53.000Z"
-          },
-          {
-            "venue": "alpaca",
-            "equity": "509.92",
-            "cash": "509.92",
-            "as_of": "2026-09-19T04:56:53.000Z"
-          }
-        ]
+        "equity": "481.65",
+        "cash": "481.62",
+        "as_of": "2026-09-26T06:30:00.000Z"
       },
-      "digest": "abacbd45752c7ef320963c21b23026c09c937f5af86f7997bb7f5dde6ec29ecf"
+      "digest": "766c662cb262288ede4eccd3dd8a8fab85603275f8eff7fe8bd71b43253c1ab8"
     },
     {
-      "id": "desk:favorites-maker:outcome:KXBTCD-26SEP1902-T80499.99",
-      "stream": "desk:favorites-maker",
-      "kind": "desk.outcome",
-      "at": "2026-09-19T06:00:05.000Z",
+      "id": "le-0002-agent.born",
+      "stream": "swarm",
+      "kind": "swarm.news",
+      "at": "2026-09-26T09:14:00.000Z",
       "payload": {
-        "market_id": "KXBTCD-26SEP1902-T80499.99",
-        "result": "yes",
-        "pnl": "0.14",
-        "real_money": true,
-        "held_for_hours": 0.8,
-        "rationale_excerpt": "BTC sat $600 above the 80,499.99 strike with 48 minutes left. YES at 97 cents was a favorite priced under its odds.",
-        "entry_price": "0.97",
-        "exit_price": "1",
-        "quantity": "5",
-        "instrument": {
-          "symbol": "KXBTCD-26SEP1902-T80499.99",
-          "asset_class": "event",
-          "venue": "kalshi",
-          "market_id": "KXBTCD-26SEP1902-T80499.99",
-          "right": "yes"
-        }
+        "text": "Condor Vrp 3 is born, a new family: Sells short-dated index premium when realized volatility is low."
       },
-      "digest": "d4d32326b7f10466bc44f4fa9c16bdc0a465d296cece9b92d205170bcf48510d"
+      "digest": "f1e866015dba8b3130ccbd1abe248bc481f91360f1fd526e589f76d2dfba036b"
     },
     {
-      "id": "desk:crypto-reversion:20260919-0610:tool:0001",
-      "stream": "desk:crypto-reversion",
-      "kind": "desk.tool_call",
-      "at": "2026-09-19T06:10:12.000Z",
+      "id": "le-0003-eval.verdict",
+      "stream": "swarm",
+      "kind": "swarm.news",
+      "at": "2026-09-28T12:05:00.000Z",
       "payload": {
-        "session_id": "crypto-reversion:20260919-0610",
-        "tool": "web_search",
-        "arguments": {
-          "query": "bitcoin price drop September 19"
-        }
+        "text": "Condor Vrp 3 moves from Probe to Sized: its forward record held over 64 trades."
       },
-      "digest": "12a884cdb0e3ef2916594a063f24d08c03f95c0e0e48831a70689f86ab12f321"
+      "digest": "389e8c9d6696e71828bdda33b3ce1e33caf7a7a1e2a4f30c1bcf2838f72d9336"
     },
     {
-      "id": "desk:crypto-reversion:20260919-0610:thought:0002",
-      "stream": "desk:crypto-reversion",
-      "kind": "desk.thought",
-      "at": "2026-09-19T06:10:40.000Z",
+      "id": "le-0004-book.fill",
+      "stream": "agent:condor-vrp-3",
+      "kind": "agent.trade",
+      "at": "2026-09-28T14:02:40.000Z",
       "payload": {
-        "session_id": "crypto-reversion:20260919-0610",
-        "text": "BTC is 2.1 standard deviations under its 24-bar mean on 5-minute bars, the spread is one tick and no news explains the drop. Buying $35 for the reversion; out at the mean or in two hours."
+        "action": "open",
+        "real": true,
+        "underlying": "XSP",
+        "structure": "iron_condor",
+        "legs": 4,
+        "expiry": "2026-09-28",
+        "quantity": 1,
+        "max_loss_usd": "184.00",
+        "pnl_usd": null,
+        "why": "the condor fits the quiet tape"
       },
-      "digest": "09df65a77feab5d77c4eb93e471eb0480d2e126eda4ca2c6beee5e9a15f6fb6d"
+      "digest": "a810bc7f8bf232eebdc32245b6f2d179a294db88d8bdf67889d75646c3735295"
     },
     {
-      "id": "broker:alpaca:fill:9f1c2ab4-0001",
-      "stream": "broker:alpaca",
-      "kind": "broker.fill",
-      "at": "2026-09-19T06:11:02.000Z",
+      "id": "le-0005-book.fill",
+      "stream": "agent:orb-4",
+      "kind": "agent.trade",
+      "at": "2026-09-28T14:10:00.000Z",
       "payload": {
-        "desk_id": "crypto-reversion",
-        "instrument": {
-          "symbol": "BTC/USD",
-          "asset_class": "crypto",
-          "venue": "alpaca"
-        },
-        "side": "buy",
-        "quantity": "0.000437",
-        "price": "80950.00",
-        "fee": "0.09",
-        "real_money": true,
-        "order_id": "ord-9f1c2ab4",
-        "reason": "Two deviations under the 24-bar mean; buying the reversion."
+        "action": "open",
+        "real": true,
+        "underlying": "SPY",
+        "structure": "debit_vertical",
+        "legs": 2,
+        "expiry": "2026-09-28",
+        "quantity": 2,
+        "max_loss_usd": "96.00",
+        "pnl_usd": null,
+        "why": "The open broke higher on heavy volume."
       },
-      "digest": "62c73827dbfdab8b914f47c95c86f557ff4df6ad485b1e140bb84201143a2afd"
+      "digest": "4f710add454968e61df255d90e6a589d36b420c601e5f29b501a16ee81040839"
     },
     {
-      "id": "lab:progress:20260919-0615",
-      "stream": "lab",
-      "kind": "lab.progress",
-      "at": "2026-09-19T06:15:00.000Z",
+      "id": "le-0006-book.fill",
+      "stream": "agent:orb-4",
+      "kind": "agent.trade",
+      "at": "2026-09-28T14:30:00.000Z",
       "payload": {
-        "component": "league",
-        "stage": "test",
-        "message": "Replayed 3 variants of crypto-reversion against 30 days of 5-minute bars; 1 passed rung 0 and starts on paper."
+        "action": "close",
+        "real": true,
+        "underlying": "SPY",
+        "structure": "debit_vertical",
+        "legs": 2,
+        "expiry": "2026-09-28",
+        "quantity": 2,
+        "max_loss_usd": null,
+        "pnl_usd": "31.00",
+        "why": "the condor fits the quiet tape"
       },
-      "digest": "4df358dc934b64cb145ab329fa90d21cc94b77d64145ed522f58576e6ce94177"
+      "digest": "7b74f2eab5333f7a5f3923ca5cc9cab2b965dd1db62949d8f20709c57db1cade"
     },
     {
-      "id": "ops:floor.mark:2026-09-19T06:20:00.000Z",
-      "stream": "ops",
-      "kind": "floor.mark",
-      "at": "2026-09-19T06:20:00.000Z",
+      "id": "le-0007-agent.thought",
+      "stream": "agent:putspread-dip-2",
+      "kind": "agent.note",
+      "at": "2026-09-28T14:35:00.000Z",
       "payload": {
-        "account_equity": "1022.19",
-        "account_cash": "967.96",
-        "as_of": "2026-09-19T06:20:00.000Z",
-        "venues": [
-          {
-            "venue": "kalshi",
-            "equity": "512.21",
-            "cash": "493.41",
-            "as_of": "2026-09-19T06:19:58.000Z"
-          },
-          {
-            "venue": "alpaca",
-            "equity": "509.98",
-            "cash": "474.55",
-            "as_of": "2026-09-19T06:19:59.000Z"
-          }
-        ]
+        "text": "The gap down held through the first hour, so I bought the put vertical two weeks out; the bid was …."
       },
-      "digest": "d1b1b14bed5b8fc53a9a2c4f816e33618d5d342faea137140cbc63137c4b75e1"
+      "digest": "a1da530890d48136bd135dbb34de1ecefc0cdb363d05b85014d14f50387d015e"
+    },
+    {
+      "id": "le-0008-agent.thought",
+      "stream": "agent:condor-vrp-3",
+      "kind": "agent.note",
+      "at": "2026-09-28T14:52:00.000Z",
+      "payload": {
+        "text": "Realized volatility since the open runs under half of what the options expect. Holding the condor."
+      },
+      "digest": "b9165146504db7c9a7fa8fc6817b115dcc475bdf4471a71f10bd29492e88edab"
+    },
+    {
+      "id": "le-0009-floor.mark",
+      "stream": "account",
+      "kind": "account.mark",
+      "at": "2026-09-28T14:55:00.000Z",
+      "payload": {
+        "equity": "5694.37",
+        "cash": "5210.12",
+        "as_of": "2026-09-28T14:55:00.000Z"
+      },
+      "digest": "69bc7485e50d6165def3ba1b052ce27a0489b93c97f3703d036eb34b2c379072"
     }
   ]
 }
