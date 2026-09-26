@@ -347,6 +347,26 @@ class Owner(LiveCase):
         self.assertEqual(self.venue.sent[-1]["legs"][0]["position_intent"], "sell_to_close")
 
 
+class AMissedClose(LiveCase):
+    def test_an_index_structure_whose_close_the_house_missed_settles_at_its_last_recorded_level(self):
+        self.clock.set(at(MONDAY, 15, 40))
+        xsp = VERTICAL.replace('"SPY"', '"XSP"')
+        live = self.make([family("xsp", xsp, band="probe", params={"hold": 600, "dte": 0})])
+        live.state.put("paper_proof", {"status": "passed"})
+        self.clock.set(at(MONDAY, 14, 55))
+        self.run_to(14, 56)
+        [pos] = live.book.positions.values()
+        level = live.state.get("levels")["XSP"][0]
+        # The House is away from 14:56 Monday to 09:31 Tuesday: it never saw the close.
+        self.clock.set(at(MONDAY + dt.timedelta(days=1), 9, 31))
+        live.minute()
+        self.assertEqual(live.book.positions, {})
+        row = live.state.rows("SELECT reason, cash FROM positions WHERE pid=?", (pos.pid,))[0]
+        self.assertIn("the House missed the close", row["reason"])
+        self.assertEqual(sorted(r["source"] for r in self.families.forward_rows("xsp")), ["real"])
+        self.assertTrue(level > 0)
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
