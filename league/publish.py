@@ -538,6 +538,9 @@ def to_events(entry: Entry) -> list[dict[str, Any]]:
     if kind == "agent.thought" and agent:
         text = words(p.get("text"), 2000)
         out = (f"agent:{agent}", "agent.note", {"text": text}) if text else None
+    elif kind == "swarm.note" and agent:  # a swarm researcher's notebook entry (league/swarm/), in its own words
+        text = words(p.get("text"), 2000)
+        out = (f"agent:{agent}", "agent.note", {"text": text}) if text else None
     elif kind == "agent.research" and agent and p.get("tool") == "summary":
         text = words("Research: " + str(p.get("summary") or ""), 2000) if str(p.get("summary") or "").strip() else ""
         out = (f"agent:{agent}", "agent.note", {"text": text}) if text else None
@@ -568,13 +571,13 @@ def league_news(kind: str, agent: str, p: Mapping[str, Any]) -> str | None:
     """One plain sentence for the swarm's own events (births, band moves, retirements, audits, new code),
     before `words` masks it. A sentence about an agent starts with its verb: the agent rides the event's own
     `agent` field, and the page puts its name in front. Anything else says nothing."""
-    if kind == "agent.born":
+    if kind in ("agent.born", "swarm.born"):  # swarm.*: the options swarm's own rows (league/swarm/hook.py mirrors them)
         origin = "forked from its parent" if p.get("parent") else "a new family"
         mechanism = str(p.get("mechanism") or "").strip()
         return f"is born, {origin}{': ' + mechanism if mechanism else '.'}"
-    if kind == "agent.died":
+    if kind in ("agent.died", "swarm.retired"):
         return f"retired: {str(p.get('cause') or 'no reason given')}.".replace("..", ".")
-    if kind == "eval.verdict":
+    if kind in ("eval.verdict", "swarm.band"):
         start, end = p.get("band_from"), p.get("band_to")
         if start in BANDS and end in BANDS and start != end:
             reason = " ".join(str(p.get("reason") or "").split()).rstrip(". ")
