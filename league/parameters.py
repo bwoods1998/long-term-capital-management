@@ -29,6 +29,26 @@ ORDERED = (('bid_min', 'bid_max'), ('no_bid_min', 'no_bid_max'), ('yes_bid_min',
            ('min_hours', 'max_hours'), ('min_days', 'max_days'), ('fast', 'slow'),
            ('entry_start', 'entry_end'), ('entry_end', 'flat_at'), ('buy_start', 'buy_end'),
            ('sell_start', 'sell_end'), ('act_start', 'act_end'), ('rsi_low', 'rsi_high'))
+#: The standard knobs of a STRUCTURE program (NEEDS "structures": true, `league/structures.py`), G-LOOP of the
+#: options-desk run, Sept 25, 2026: the lab breeds structures, not only signals, and a program that declares no
+#: bounds of its own can still be searched. Units: `width` dollars between strikes (a $0.50 wing on a $15 stock to a
+#: $10 one on SPY); `dte_min`/`dte_max` whole days to the earliest expiry, 0 (0-DTE) to 45 (the history store's
+#: `max_days`), ordered; `entry_delta` the short (or long) strike's absolute delta; `profit_target` the share of the
+#: most a structure can make at which it is taken; `stop_loss` the multiple of the credit or debit at which it is cut
+#: (a credit structure's is above 1); `exit_minutes_before_close` minutes before the bell, a whole session at most.
+#: A declared bound narrows these, as every standard domain here. The twelve founders of Sept 25 all sit inside them.
+STRUCTURE_BOUNDS = {'width': (0.5, 10), 'dte_min': (0, 45), 'dte_max': (0, 45), 'entry_delta': (0.01, 0.99),
+                    'profit_target': (0.05, 1), 'stop_loss': (0.1, 10), 'exit_minutes_before_close': (0, 390)}
+STRUCTURE_WHOLE = frozenset(('dte_min', 'dte_max'))
+STRUCTURE_ORDERED = (('dte_min', 'dte_max'),)
+#: The structure type (`structure`: "iron_condor", "debit_vertical", ...) is never mutated: a different type is a
+#: different family. So is a width of 0, a same-strike structure's (a calendar, a straddle): its type, not a knob.
+STRUCTURE_FROZEN = frozenset(('structure',))
+
+
+def structural(needs: Mapping[str, Any] | None) -> bool:
+    """Whether these NEEDS are a structure program's (`"structures": True`), whose knobs have the standard ranges above."""
+    return isinstance(needs, Mapping) and needs.get('structures') is True
 
 
 def number(value):
@@ -47,14 +67,24 @@ def _rules(params, needs):
         bounds['target_delta'] = [-1, 1]
     if needs.get('venue') == 'kalshi':
         bounds.update({key: [0, 1] for key in PROBABILITIES if key in params})
+    fixed = set()
+    if structural(needs):
+        for key, (low, high) in STRUCTURE_BOUNDS.items():
+            if key not in params:
+                continue
+            if key == 'width' and number(params[key]) and params[key] == 0:
+                fixed.add(key)  # a same-strike structure's width: its type, never a knob
+            else:
+                bounds[key] = [low, high]
+        fixed.update(STRUCTURE_FROZEN & params.keys())
     # Standard rolling-window knobs cannot request more than the declared input capacity.
     bars = needs.get('bars') or {}
     limit = bars.get('limit') if isinstance(bars, dict) else None
     if number(limit) and limit > 0:
         for key in WINDOWS & params.keys():
             bounds[key][1] = min(500, int(limit))
-    ordered = [list(pair) for pair in ORDERED if all(key in params for key in pair)]
-    errors, frozen = [], set()
+    ordered = [list(pair) for pair in ORDERED + (STRUCTURE_ORDERED if structural(needs) else ()) if all(key in params for key in pair)]
+    errors, frozen = [], fixed
     declared = needs.get('parameter_rules', {})
     if not isinstance(declared, dict) or set(declared) - {'bounds', 'ordered', 'frozen'}:
         return bounds, ordered, frozen, ['parameter_rules must contain only bounds, ordered and frozen']
@@ -105,11 +135,12 @@ def inspect(params: Mapping[str, Any], needs: Mapping[str, Any] | None = None) -
                 finite(v, f'{path}[{i}]')
 
     finite(params, 'params')
+    whole = COUNTS | CLOCKS | (STRUCTURE_WHOLE if structural(needs) else frozenset())
     for key, (low, high) in bounds.items():
         value = params[key]
         if not number(value):
             errors.append(f'{key} must be a finite number, not a boolean or string')
-        elif key in COUNTS | CLOCKS and type(value) is not int:
+        elif key in whole and type(value) is not int:
             errors.append(f'{key} must be an integer')
         elif (low is not None and value < low) or (high is not None and value > high):
             errors.append(f'{key}={value} outside [{low}, {high}]')

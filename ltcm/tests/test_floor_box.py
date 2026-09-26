@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time as real_time
@@ -93,6 +94,7 @@ class FakeBox:
         self.probe = {"run.pid": "-", "loop.pid": "-", "deploy.pid": "-", "stop": "no", "league_stop": "no",
                       "current": "", "previous": "", "runnable": "no", "env": "yes", **probe}
         self.calls: list[tuple] = []
+        self.raw: list = []                        # each exec's command as the script passed it
         self.files: dict[str, bytes] = {}
         self.verdict: str | None = None            # what the watchdog decides about the upload
         self.reasons: list[str] = []
@@ -106,6 +108,13 @@ class FakeBox:
         self.stubborn_loop = False
         self.pip_fails = False
         self.venv = True
+        # The structures guard (the review of Deploy G, Sept 25, 2026): what the previous release lacks, what the
+        # ledger shows on alpaca-paper, or the error the check answers; and what the watchdog's rollback says.
+        self.previous_missing: list[str] = []
+        self.ledger = {"structures": [], "orders": []}
+        self.guard_error: str | None = None
+        self.rollback_answer = {"ok": True, "current": "20260917T070000Z-ba9876543210",
+                                "rolled_back_from": "20260918T070000Z-0123456789ab"}
 
     # ------------------------------------------------------------- what was done, for the asserts
     def execs(self) -> list[str]:
@@ -144,8 +153,23 @@ class FakeBox:
         if kw.get("background") and not isinstance(command, str):
             raise SailboxError("background applies to a shell command string")
         self.calls.append(("exec", text, kw))
+        self.raw.append(command)
         if floor_box.PROBE in text:
             return Result("\n".join(f"{k}={v}" for k, v in self.probe.items()))
+        if not isinstance(command, str) and floor_box.STRUCTURE_GUARD_SNIPPET in command:
+            if self.guard_error:
+                return Result(json.dumps({"error": self.guard_error}))
+            ask = json.loads(command[-1])
+            answer = {"release": None, "checked": True, "structures": [], "orders": []}
+            if ask.get("release"):
+                answer["release"] = {"dir": "/workspace/releases/20260917T070000Z-ba9876543210", "missing": list(self.previous_missing)}
+                if not self.previous_missing:
+                    return Result(json.dumps({**answer, "checked": False}))
+            return Result(json.dumps({**answer, **self.ledger}))
+        if "-m league.watchdog rollback" in text:
+            if self.rollback_answer.get("ok"):
+                self.probe.update(current="releases/" + self.rollback_answer["current"])
+            return Result(json.dumps(self.rollback_answer, indent=1), 0 if self.rollback_answer.get("ok") else 1)
         if "-m league.watchdog status" in text:
             if self.status_is_broken:
                 return Result("Traceback (most recent call last):\n  boom", 1)
@@ -693,7 +717,7 @@ class HostsAddTests(unittest.TestCase):
 class ParserTests(unittest.TestCase):
     def test_every_command_the_owner_is_told_about_exists(self):
         parser = floor_box.build_parser()
-        for command in ("create", "secrets", "start", "stop", "status", "logs", "deploy",
+        for command in ("create", "secrets", "start", "stop", "status", "logs", "deploy", "rollback",
                         "checkpoint", "fork", "sleep", "resume", "terminate"):
             with self.subTest(command=command):
                 self.assertEqual(parser.parse_args(_args(command)).command, command)
@@ -1312,6 +1336,277 @@ class LeagueHostsTests(unittest.TestCase):
                                                                     *opened])
             self.assertEqual(floor_box.missing_league_hosts(have + ["gw.example.workers.dev", "github.com", "codeload.github.com", "api.github.com", *feeds, *data,
                                                                     *opened]), [])
+
+
+
+# --------------------------------------------------------------------------- the structures guard
+# The review of Deploy G (Sept 25, 2026): nothing mechanical stopped a rollback, or a deploy, of a release older than
+# G while alpaca-paper holds a structure. The older code cannot fold the venue's legs (the practice book freezes for
+# every agent on it) and its wind-down sells a structure's first leg alone: a naked short.
+
+CODE = "debit_vertical|+1SPY260928C00580000|-1SPY260928C00581000"
+HELD = {"structures": [{"agent": "structure-7", "code": CODE, "quantity": "1"}], "orders": []}
+LACKS = ["league/house.py: def _structure_practice_account(", "league/book.py: def _fold_structure_legs("]
+
+
+def guard_asks(box: FakeBox) -> list[dict]:
+    """The JSON argument of each structures check the script ran on the box (its last argv element)."""
+    return [json.loads(command[-1]) for command in box.raw if not isinstance(command, str)
+            and floor_box.STRUCTURE_GUARD_SNIPPET in command]
+
+
+class RollbackTests(BoxCase):
+    """`rollback` asks the in-box watchdog to roll back, from the previous release, after the structures guard."""
+
+    probe = {"run.pid": "4001", "loop.pid": "4002", "current": "releases/20260918T070000Z-0123456789ab",
+             "previous": "releases/20260917T070000Z-ba9876543210", "runnable": "yes"}
+
+    def rollbacks(self) -> list[tuple]:
+        return [c for c in self.box.calls if c[0] == "exec" and "-m league.watchdog rollback" in c[1]]
+
+    def guard_asks(self) -> list[dict]:
+        return guard_asks(self.box)
+
+    def test_a_structure_aware_previous_release_is_rolled_back_to_by_the_watchdog_with_the_reason_as_a_parameter(self):
+        code, printed = self.run_cmd("rollback", "--reason", "G's watch; rm -rf / $(x)")
+        self.assertEqual(code, 0)
+        [ask] = self.guard_asks()
+        self.assertEqual(ask["release"], "/workspace/previous")
+        self.assertEqual(ask["book"], "alpaca-paper")
+        [command] = [c for c in self.box.raw if not isinstance(c, str) and "-m league.watchdog rollback" in " ".join(c)]
+        # The reason is a positional parameter, never shell text; it runs from the previous release's code.
+        self.assertEqual(command, ["sh", "-c", 'cd "$1" && exec "$2" -m league.watchdog rollback --base "$3" --reason "$4"',
+                                   "floor_box", "/workspace/previous", PYTHON, "/workspace", "G's watch; rm -rf / $(x)"])
+        self.assertEqual(len(self.rollbacks()), 1)
+        self.assertIn("ROLLED BACK: 20260918T070000Z-0123456789ab -> 20260917T070000Z-ba9876543210", printed)
+        self.assertIn("--ratify earned-live-20260921", printed)
+        self.assertLess(self.box.index("floor_box structure guard"), self.box.index("-m league.watchdog rollback"))
+
+    def test_past_g_while_alpaca_paper_holds_a_structure_is_refused_and_nothing_is_rolled_back(self):
+        self.box.previous_missing = list(LACKS)
+        self.box.ledger = dict(HELD)
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        refusal = str(caught.exception)
+        self.assertTrue(refusal.startswith("REFUSED: the previous release 20260917T070000Z-ba9876543210 lacks the structure-aware practice code"))
+        self.assertIn(f"structure-7 holds 1 {CODE}", refusal)
+        self.assertIn("naked short", refusal)
+        self.assertIn("--force-structures-risk", refusal)
+        self.assertEqual(self.rollbacks(), [])
+
+    def test_an_open_structure_order_refuses_it_too(self):
+        self.box.previous_missing = LACKS[:1]
+        self.box.ledger = {"structures": [], "orders": [{"order_id": "o-9", "code": CODE, "side": "buy", "status": "accepted"}]}
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn(f"order o-9 (buy {CODE}, accepted)", str(caught.exception))
+        self.assertEqual(self.rollbacks(), [])
+
+    def test_past_g_with_alpaca_paper_flat_goes(self):
+        self.box.previous_missing = list(LACKS)
+        code, printed = self.run_cmd("rollback")
+        self.assertEqual(code, 0)
+        self.assertIn("the ledger shows no structure held or ordered on alpaca-paper, so it may go", printed)
+        self.assertEqual(len(self.rollbacks()), 1)
+
+    def test_a_check_that_cannot_read_the_box_refuses(self):
+        self.box.guard_error = "OperationalError: unable to open database file"
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn("could not be read (OperationalError: unable to open database file)", str(caught.exception))
+        self.assertEqual(self.rollbacks(), [])
+
+    def test_the_owner_can_force_it_and_is_warned_loudly(self):
+        self.box.previous_missing = list(LACKS)
+        self.box.ledger = dict(HELD)
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code, printed = self.run_cmd("rollback", "--force-structures-risk")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: --force-structures-risk: the previous release", printed)
+        self.assertIn("WARNING: --force-structures-risk", errors.getvalue())
+        self.assertEqual(len(self.rollbacks()), 1)
+
+    def test_no_rollback_during_a_deploy_or_without_a_previous_release(self):
+        self.box.probe["deploy.pid"] = "5001"
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn("a deploy is running", str(caught.exception))
+        self.box.probe.update({"deploy.pid": "-", "previous": ""})
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn("no previous release", str(caught.exception))
+        self.assertEqual((self.rollbacks(), self.guard_asks()), ([], []))
+
+    def test_a_rollback_the_watchdog_could_not_make_is_exit_one(self):
+        self.box.rollback_answer = {"ok": False, "error": "no previous release to roll back to", "current": "x"}
+        code, printed = self.run_cmd("rollback")
+        self.assertEqual(code, 1)
+        self.assertIn("ROLLBACK FAILED: no previous release to roll back to", printed)
+
+
+class DeployStructureGuardTests(BoxCase):
+    """`deploy` sends no tree without the structure-aware practice code while alpaca-paper holds a structure."""
+
+    probe = DeployTests.probe
+
+    def setUp(self):
+        super().setUp()
+        self.box.files["/workspace/run.sh"] = floor_box.render(floor_box.RUN_SH, PYTHON)
+        self.box.verdict = "promoted"
+
+    def test_a_tree_before_g_is_refused_while_alpaca_paper_holds_a_structure(self):
+        self.box.ledger = dict(HELD)
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("deploy")
+        self.assertTrue(str(caught.exception).startswith("REFUSED: this working tree lacks the structure-aware practice code"))
+        self.assertEqual(self.box.uploads(), [])
+        self.assertFalse([t for t in self.box.execs() if "-m league.watchdog deploy" in t])
+        [ask] = guard_asks(self.box)
+        self.assertEqual((ask["release"], ask["state"], ask["book"]), (None, "/workspace/state", "alpaca-paper"))
+
+    def test_a_ledger_that_cannot_be_read_refuses_it_and_force_sends_it(self):
+        self.box.guard_error = "the box could not run the check"
+        with self.assertRaises(SystemExit):
+            self.run_cmd("deploy")
+        self.assertEqual(self.box.uploads(), [])
+        with contextlib.redirect_stderr(io.StringIO()):
+            code, printed = self.run_cmd("deploy", "--force-structures-risk")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: --force-structures-risk: this working tree lacks", printed)
+        self.assertEqual(len([u for u in self.box.uploads() if u.endswith(".tgz")]), 1)
+
+    def test_a_tree_with_the_structure_code_never_reads_the_ledger(self):
+        tree = [Path("league/__main__.py"), Path("league/config.json"), Path("league/house.py"), Path("league/book.py")]
+        self.box.ledger = dict(HELD)
+        with mock.patch.object(floor_box, "code_files", lambda: list(tree)):
+            code, _ = self.run_cmd("deploy")
+        self.assertEqual(code, 0)
+        self.assertFalse([t for t in self.box.execs() if "floor_box structure guard" in t])
+
+    def test_the_markers_are_read_from_the_files_sent(self):
+        self.assertEqual(floor_box.structure_gaps([Path("league/house.py"), Path("league/book.py")]), [])
+        self.assertEqual(floor_box.structure_gaps([Path("league/house.py")]), [LACKS[1]])
+        self.assertEqual(floor_box.structure_gaps([]), LACKS)
+
+
+class StructureGuardSnippetTests(unittest.TestCase):
+    """The read-only snippet, run for real against a ledger written here, as the box's interpreter runs it."""
+
+    NOW = real_time.time()
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.state = self.root / "state"
+        self.state.mkdir()
+        self.seq = 0
+
+    def iso(self, ago: float = 0.0) -> str:
+        return real_time.strftime("%Y-%m-%dT%H:%M:%S.000Z", real_time.gmtime(self.NOW - ago))
+
+    def ledger(self, rows: list[tuple[str, str, dict]], *, ago: float = 0.0) -> None:
+        import sqlite3
+        from league.ledger import SCHEMA
+        db = sqlite3.connect(self.state / "ledger.sqlite")
+        db.executescript(SCHEMA)
+        for kind, agent, payload in rows:
+            self.seq += 1
+            db.execute("insert into ledger (id, kind, agent, at, public, payload, previous_hash, digest) values (?,?,?,?,?,?,?,?)",
+                       (f"r{self.seq}", kind, agent, payload.pop("_at", self.iso(ago)), 1,
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")), "p", f"d{self.seq}"))
+        db.commit()
+        db.close()
+
+    @staticmethod
+    def inst(code: str | None = CODE, venue: str = "alpaca") -> dict:
+        return {"asset_class": "option", "symbol": "SPY", "venue": venue, "multiplier": "100", "expiry": "2026-09-28",
+                "strike": "580", "right": "call", "market_id": code, "currency": "USD"}
+
+    def fill(self, delta: str, *, book: str = "alpaca-paper", code: str | None = CODE) -> dict:
+        return {"book": book, "instrument": self.inst(code), "position_delta": delta, "cash_delta": "0", "quantity": delta.lstrip("-")}
+
+    def order(self, order_id: str, status: str, *, side: str = "buy", reason: str = "", at: str | None = None) -> dict:
+        row = {"book": "alpaca-paper", "order_id": order_id, "instrument": self.inst(), "side": side, "status": status,
+               "reason": reason, "quantity": "1", "order_type": "limit", "shares": [{"agent": "structure-9", "intent_id": "i", "quantity": "1"}]}
+        if at:
+            row["_at"] = at
+        return row
+
+    def run_guard(self, release: Path | None = None) -> dict:
+        ask = {"state": str(self.state), "release": str(release) if release else None, "book": "alpaca-paper",
+               "markers": [list(pair) for pair in floor_box.STRUCTURE_AWARE_MARKERS], "house": floor_box.LEDGER_HOUSE,
+               "terminal": list(floor_box.TERMINAL_STATUSES), "never_arrived": floor_box.NEVER_ARRIVED,
+               "recheck_seconds": floor_box.NEVER_ARRIVED_RECHECK_SECONDS}
+        done = subprocess.run([sys.executable, "-c", floor_box.STRUCTURE_GUARD_SNIPPET, json.dumps(ask)],
+                              capture_output=True, text=True, timeout=60, cwd="/")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        [line] = done.stdout.splitlines()
+        return json.loads(line)
+
+    def test_it_folds_structure_positions_on_alpaca_paper_only(self):
+        self.ledger([
+            ("book.fill", "structure-1", self.fill("1")),                        # held
+            ("book.fill", "structure-2", self.fill("2")), ("book.fill", "structure-2", self.fill("-2")),   # closed
+            ("book.fill", "structure-3", self.fill("1")), ("book.settle", "structure-3", {"book": "alpaca-paper", "instrument": self.inst(), "payout": "0"}),
+            ("book.fill", "structure-4", self.fill("1", book="options-shadow")),  # another book
+            ("book.fill", "structure-5", self.fill("1", code=None)),             # a single contract
+            ("book.fill", "structure-6", self.fill("-1")), ("book.fill", "structure-6", self.fill("1")),  # oversold, then held
+            ("book.fill", "house", self.fill("-1")),                              # the House row's break row, short
+        ])
+        answer = self.run_guard()
+        self.assertTrue(answer["checked"])
+        self.assertEqual(answer["structures"], [{"agent": "house", "code": CODE, "quantity": "-1"},
+                                                {"agent": "structure-1", "code": CODE, "quantity": "1"},
+                                                {"agent": "structure-6", "code": CODE, "quantity": "1"}])
+        self.assertEqual(answer["orders"], [])
+
+    def test_open_structure_orders_and_a_buy_the_book_still_asks_about_count(self):
+        self.ledger([
+            ("book.order", "house", self.order("o-open", "new")),
+            ("book.order", "house", self.order("o-done", "new")), ("book.order", "house", self.order("o-done", "filled")),
+            ("book.order", "house", self.order("o-lost", "rejected", reason=floor_box.NEVER_ARRIVED)),
+            ("book.order", "house", self.order("o-old", "rejected", reason=floor_box.NEVER_ARRIVED, at=self.iso(3600))),
+            ("book.order", "house", self.order("o-sell", "rejected", side="sell", reason=floor_box.NEVER_ARRIVED)),
+        ])
+        answer = self.run_guard()
+        self.assertEqual(sorted(row["order_id"] for row in answer["orders"]), ["o-lost", "o-open"])
+        self.assertEqual(answer["orders"][0]["agents"], ["structure-9"])
+        self.assertEqual(answer["structures"], [])
+
+    def test_a_release_with_the_code_is_never_read_past_and_one_without_it_is_named(self):
+        (self.state / "ledger.sqlite").write_bytes(b"not a database")
+        release = self.root / "releases" / "g"
+        (release / "league").mkdir(parents=True)
+        (release / "league" / "house.py").write_text("    def _structure_practice_account(self) -> bool:\n")
+        (release / "league" / "book.py").write_text("    def _fold_structure_legs(self, positions):\n")
+        link = self.root / "previous"
+        link.symlink_to(release)
+        answer = self.run_guard(link)
+        self.assertEqual(answer, {"release": {"dir": str(release.resolve()), "missing": []}, "checked": False, "structures": [], "orders": []})
+        (release / "league" / "book.py").write_text("# before G\n")
+        answer = self.run_guard(link)
+        self.assertIn("error", answer)  # the ledger is read now, and cannot be: the caller refuses
+        self.assertIn("DatabaseError", answer["error"])
+
+    def test_an_absent_ledger_holds_nothing_and_a_read_only_one_is_read(self):
+        self.assertEqual(self.run_guard(), {"release": None, "checked": True, "ledger": "absent", "structures": [], "orders": [], "rows": 0})
+        self.ledger([("book.fill", "structure-1", self.fill("1"))])
+        (self.state / "ledger.sqlite").chmod(0o444)
+        self.state.chmod(0o555)
+        self.addCleanup(self.state.chmod, 0o755)
+        self.assertEqual(self.run_guard()["structures"], [{"agent": "structure-1", "code": CODE, "quantity": "1"}])
+
+    def test_its_constants_are_the_houses_own(self):
+        from league import book, ledger
+        self.assertEqual(floor_box.NEVER_ARRIVED, book.NEVER_ARRIVED)
+        self.assertEqual(floor_box.NEVER_ARRIVED_RECHECK_SECONDS, book.NEVER_ARRIVED_RECHECK_SECONDS)
+        self.assertEqual(floor_box.LEDGER_HOUSE, ledger.HOUSE)
+        self.assertEqual(floor_box.STRUCTURE_PRACTICE_BOOK, "alpaca-paper")
+        # This tree carries both markers (it is Deploy G or later).
+        for rel, marker in floor_box.STRUCTURE_AWARE_MARKERS:
+            self.assertIn(marker, (REPO_ROOT / rel).read_text(encoding="utf-8"), rel)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -8,6 +8,7 @@ on one trusted Sailbox and this script is the only thing that talks to it.
     python3 scripts/floor_box.py secrets           the three values the box holds -> /workspace/.env
     python3 scripts/floor_box.py deploy            upload a release; the in-box watchdog stages it,
                                                    canaries it, promotes it, watches it, rolls back
+    python3 scripts/floor_box.py rollback --reason why   the watchdog's rollback to `previous`
     python3 scripts/floor_box.py start             start the supervised `python -m league run` loop
     python3 scripts/floor_box.py status            box, spend, loop, releases, health.json, log tail
     python3 scripts/floor_box.py logs -n 200       the tail of /workspace/league.log (--deploy: deploy.log)
@@ -41,7 +42,11 @@ What this script will not do:
 - **It never decides about real money.** That is `real_money` in `league/config.json` and the
   gateway's kill switch. This script changes neither.
 - **It never moves `current` or `previous`.** A release becomes current because the in-box
-  watchdog promoted it, and stops being current because the watchdog rolled it back.
+  watchdog promoted it, and stops being current because the watchdog rolled it back (`rollback`
+  asks the watchdog to).
+- **It never puts a release older than Deploy G on the box while `alpaca-paper` holds a structure.**
+  `deploy` and `rollback` read the target release for the structure-aware practice code and, when it
+  lacks it, the box's ledger (read-only); they refuse unless `--force-structures-risk` is given.
 
 Box state lives in `.data/ltcm/box.json`: ids, names, the allowlist in effect, the releases sent
 and their verdicts, and the checkpoints taken. It is owner-only (mode 600) and holds no credential.
@@ -67,6 +72,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from ltcm.broker import TERMINAL_STATUSES  # noqa: E402
 from ltcm.sailbox import (  # noqa: E402  (path first, so a checkout runs without installation)
     FLOOR_HOSTS,
     GATEWAY_HOST,
@@ -110,6 +116,121 @@ STOP_FILES = (f"{REMOTE_ROOT}/STOP", f"{STATE_DIR}/STOP")
 #: `league.watchdog deploy` exit codes, mirrored by `deploy` here. 1: no verdict was seen.
 VERDICT_EXIT = {"promoted": 0, "refused": 2, "rolled_back": 3, "failed": 4}
 KEEP_RELEASES = 20
+
+# --------------------------------------------------------------------------- the structures guard
+# The review of Deploy G (the options desk's Wave 2, Sept 25, 2026): once `options_structures.practice_account`
+# is flipped on, `alpaca-paper` holds level-3 structures, each ONE position the book folds the venue's legs
+# into. A release older than G cannot fold them (the practice book then freezes for every agent on it, for
+# good), and its wind-down sells a held structure as its FIRST LEG alone, which for a debit vertical leaves a
+# naked short: legging out and a naked short, both not authorized. Nothing mechanical stopped a rollback or a
+# deploy of such a release; `rollback` and `deploy` here now refuse one while the box's ledger shows a
+# structure held, or a structure order open, on `alpaca-paper` (`--force-structures-risk` overrides, loudly).
+
+#: The practice book whose structures a release before Deploy G cannot hold.
+STRUCTURE_PRACTICE_BOOK = "alpaca-paper"
+#: What a release must carry to hold structures on the Alpaca practice account (both came with Deploy G;
+#: neither is on main or b/integration before it): the switch and the book's fold of the venue's legs.
+STRUCTURE_AWARE_MARKERS = (
+    ("league/house.py", "def _structure_practice_account("),
+    ("league/book.py", "def _fold_structure_legs("),
+)
+
+#: The ledger's agent for the House's own row (`league.ledger.HOUSE`), and the reason an order the venue never had
+#: is closed with (`league.book.NEVER_ARRIVED`), which the book keeps asking about for `NEVER_ARRIVED_RECHECK_SECONDS`
+#: (a buy of a structure the venue may yet show). Spelled here so this script imports no House module; a test
+#: holds them to the House's own.
+LEDGER_HOUSE = "house"
+NEVER_ARRIVED = "the venue has no such order"
+NEVER_ARRIVED_RECHECK_SECONDS = 900
+
+#: Run on the box with the box's interpreter, read-only (sqlite `mode=ro`, `query_only`), one JSON argument:
+#: `{state, release, book, markers, house, terminal, never_arrived, recheck_seconds}`. It prints one JSON line:
+#: `release.missing` (the markers `release` lacks; `release` null when none was named) and, unless the release
+#: carries them all, what the ledger shows on the book (`checked` true): `structures` (each account's structure
+#: positions, folded as `league.book.Book` folds fills and settlements: an agent's position is gone at zero or
+#: below, the House row's at zero) and `orders` (each structure order whose latest row is not terminal, or a buy
+#: the venue did not have that the book still asks about). `{"error": ...}` when anything could not be read.
+#: Standard library only; about 33,000 book rows on Sept 25, 2026, read in well under a second.
+STRUCTURE_GUARD_SNIPPET = r"""
+# floor_box structure guard (read-only)
+import json, pathlib, sqlite3, sys, time
+from datetime import datetime
+from decimal import Decimal
+
+
+def markers(release, wanted):
+    base = pathlib.Path(release).resolve()
+    missing = []
+    for rel, marker in wanted:
+        try:
+            text = (base / rel).read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        if marker not in text:
+            missing.append(rel + ": " + marker)
+    return {"dir": str(base), "missing": missing}
+
+
+def ledger(ask):
+    path = pathlib.Path(ask["state"]) / "ledger.sqlite"
+    if not path.exists():
+        return {"ledger": "absent", "structures": [], "orders": [], "rows": 0}
+    db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    db.execute("pragma query_only=1")
+    book, held, orders, rows = ask["book"], {}, {}, 0
+    query = ("select kind, agent, at, payload from ledger where kind in ('book.fill', 'book.settle', 'book.order') "
+             "and instr(payload, ?) > 0 and instr(payload, '|') > 0 order by seq")
+    for kind, agent, at, raw in db.execute(query, ('"book":' + json.dumps(book),)):
+        p = json.loads(raw)
+        inst = p.get("instrument") or {}
+        code = str(inst.get("market_id") or "")
+        if p.get("book") != book or inst.get("asset_class") != "option" or "|" not in code:
+            continue
+        rows += 1
+        if kind == "book.order":
+            agents = sorted({str(s.get("agent")) for s in (p.get("shares") or []) if isinstance(s, dict)}) or [agent]
+            orders[str(p.get("order_id"))] = {"order_id": str(p.get("order_id")), "code": code, "side": p.get("side"),
+                                             "status": p.get("status"), "reason": str(p.get("reason") or "")[:160],
+                                             "agents": agents, "at": at}
+        elif kind == "book.settle":
+            held.pop((agent, code), None)
+        else:
+            quantity = held.get((agent, code), Decimal(0)) + Decimal(str(p.get("position_delta") or "0"))
+            if quantity == 0 or (agent != ask["house"] and quantity < 0):
+                held.pop((agent, code), None)
+            else:
+                held[(agent, code)] = quantity
+    now = time.time()
+
+    def asked_about(at):
+        try:
+            return now - datetime.fromisoformat(str(at).replace("Z", "+00:00")).timestamp() <= ask["recheck_seconds"]
+        except ValueError:
+            return True  # cannot tell: still asked about
+
+    open_orders = [row for row in orders.values() if row["status"] not in ask["terminal"]
+                   or (row["status"] == "rejected" and row["side"] == "buy" and row["reason"].startswith(ask["never_arrived"])
+                       and asked_about(row["at"]))]
+    return {"structures": [{"agent": a, "code": c, "quantity": str(q)} for (a, c), q in sorted(held.items())],
+            "orders": open_orders, "rows": rows}
+
+
+def guard(ask):
+    out = {"release": None, "checked": False, "structures": [], "orders": []}
+    if ask.get("release"):
+        out["release"] = markers(ask["release"], ask["markers"])
+        if not out["release"]["missing"]:
+            return out
+    out.update(ledger(ask), checked=True)
+    return out
+
+
+try:
+    answer = guard(json.loads(sys.argv[1]))
+except Exception as exc:
+    answer = {"error": type(exc).__name__ + ": " + str(exc)[:300]}
+print(json.dumps(answer))
+"""
 
 #: What the league needs to reach. `hosts` says which of these the recorded allowlist lacks.
 LEAGUE_HOSTS = (
@@ -595,6 +716,76 @@ def remember_release(state: dict[str, Any], entry: Mapping[str, Any]) -> None:
     state["releases"] = rows[-KEEP_RELEASES:]
 
 
+def structure_gaps(files: Sequence[Path]) -> list[str]:
+    """The structure-aware markers (`STRUCTURE_AWARE_MARKERS`) the release packed from `files` lacks: each
+    file must be one of those sent, and say its marker."""
+    sent = {Path(path).as_posix() for path in files}
+    missing = []
+    for rel, marker in STRUCTURE_AWARE_MARKERS:
+        try:
+            present = rel in sent and marker in (REPO_ROOT / rel).read_text(encoding="utf-8")
+        except OSError:
+            present = False
+        if not present:
+            missing.append(f"{rel}: {marker}")
+    return missing
+
+
+def read_structure_guard(api: SailboxClient, box: str, python: str, *, release: str | None = None) -> dict[str, Any]:
+    """Run `STRUCTURE_GUARD_SNIPPET` on the box, read-only: `release` (a release directory there) is checked for
+    the markers first, and the ledger is read only when it lacks one (or when no release is named). Returns the
+    snippet's answer, or `{"error": ...}` when it could not be run or read."""
+    ask = {"state": STATE_DIR, "release": release, "book": STRUCTURE_PRACTICE_BOOK,
+           "markers": [list(pair) for pair in STRUCTURE_AWARE_MARKERS], "house": LEDGER_HOUSE,
+           "terminal": list(TERMINAL_STATUSES), "never_arrived": NEVER_ARRIVED,
+           "recheck_seconds": NEVER_ARRIVED_RECHECK_SECONDS}
+    try:
+        result = api.exec(box, [python, "-c", STRUCTURE_GUARD_SNIPPET, json.dumps(ask)], timeout=180, on_output=None)
+    except SailboxError as error:
+        return {"error": f"the box could not run the check ({str(error)[:200]})"}
+    lines = [line for line in str(result.stdout or "").splitlines() if line.strip()]
+    try:
+        answer = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        return {"error": f"the check gave no answer (exit {getattr(result, 'return_code', '?')}: "
+                         f"{str(getattr(result, 'stderr', '') or '')[-200:]})"}
+    return answer if isinstance(answer, dict) else {"error": "the check's answer was not an object"}
+
+
+def hold_structures(answer: Mapping[str, Any], missing: Sequence[str], *, target: str, force: bool) -> None:
+    """Refuse (SystemExit) to put `target` on the box when it lacks the structure-aware code (`missing`) while the
+    ledger shows a structure held or a structure order open on `alpaca-paper`, or cannot be read; say why it may go
+    otherwise. `force` (`--force-structures-risk`) sends it anyway, with a loud warning."""
+    if not missing:
+        return
+    lacks = "; ".join(missing)
+    if answer.get("error"):
+        risk = (f"the box's ledger could not be read ({str(answer['error'])[:300]}), so nothing shows that "
+                f"{STRUCTURE_PRACTICE_BOOK} holds no structure")
+    else:
+        held = [row for row in answer.get("structures") or [] if isinstance(row, Mapping)]
+        orders = [row for row in answer.get("orders") or [] if isinstance(row, Mapping)]
+        if not held and not orders:
+            say(f"  {target} predates the structure-aware practice code ({lacks}); the ledger shows no structure held "
+                f"or ordered on {STRUCTURE_PRACTICE_BOOK}, so it may go")
+            return
+        shown = [f"{row.get('agent')} holds {row.get('quantity')} {row.get('code')}" for row in held[:6]]
+        shown += [f"order {row.get('order_id')} ({row.get('side')} {row.get('code')}, {row.get('status')})" for row in orders[:6]]
+        risk = (f"the ledger shows {len(held)} structure position(s) and {len(orders)} open structure order(s) on "
+                f"{STRUCTURE_PRACTICE_BOOK}: " + "; ".join(shown))
+    why = (f"{target} lacks the structure-aware practice code ({lacks}) and {risk}. A release before Deploy G cannot "
+           f"fold the venue's legs ({STRUCTURE_PRACTICE_BOOK} would freeze for every agent on it) and its wind-down "
+           "would sell a held structure's first leg alone, a naked short. Release options_structures.practice_account "
+           f"false on the current code and wait until {STRUCTURE_PRACTICE_BOOK} is flat of structures "
+           "(docs/operations.md, Deploy and roll back)")
+    if not force:
+        raise SystemExit(f"REFUSED: {why}. --force-structures-risk sends it anyway.")
+    banner = "!" * 100
+    for line in (banner, f"WARNING: --force-structures-risk: {why}.", "Sending it anyway, as asked.", banner):
+        say(line)
+        print(line, file=sys.stderr, flush=True)
+
+
 # --------------------------------------------------------------------------- commands
 
 
@@ -780,6 +971,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if current and content_of(current) == sha256[:12]:
         say(f"nothing to deploy: the box already runs this working tree ({current})")
         return 0
+    # The structures guard (the review of Deploy G, Sept 25, 2026): a tree without the structure-aware practice
+    # code is not sent while the ledger shows alpaca-paper holding a structure. The box is only read.
+    missing = structure_gaps(files)
+    if missing:
+        hold_structures(read_structure_guard(api, box, python), missing, target="this working tree",
+                        force=args.force_structures_risk)
 
     # run.sh names the interpreter and restart.sh is what the watchdog calls, so both are in
     # place before it starts. A supervisor that is already up keeps the run.sh it started with.
@@ -832,6 +1029,61 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     if verdict == "promoted" and not up(after, "run.pid"):
         say("  the loop is not running: `python3 scripts/floor_box.py start` when ready")
     return VERDICT_EXIT.get(verdict, 1)
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    """Ask the in-box watchdog to roll back (`current` := `previous`, restart the House), after the structures guard.
+
+    The rollback is the watchdog's (`python -m league.watchdog rollback`, run from the previous release, as
+    docs/operations.md has said since Sept 19); this script moves no link itself. Before it is asked, the previous
+    release is read on the box for the structure-aware practice code, and when it lacks it the ledger is read for
+    structures on `alpaca-paper` (`read_structure_guard`, read-only): a rollback past Deploy G while that book holds
+    one is refused (the review of Deploy G, Sept 25, 2026). Exit 0 when the watchdog rolled back and restarted.
+    """
+    state = read_state()
+    box = require_box(state)
+    api = client()
+    python = state.get("python") or "python3"
+    seen = probe(api, box)
+    if seen.get("error"):
+        raise SystemExit(f"the box could not be probed, so nothing was rolled back: {seen['error']}")
+    if up(seen, "deploy.pid"):
+        raise SystemExit(f"a deploy is running on the box (pid {seen['deploy.pid']}); its watchdog rolls back by itself "
+                         "if the House goes bad. Wait for its verdict (`status`), then roll back if still needed.")
+    current, previous = release_of(seen.get("current")), release_of(seen.get("previous"))
+    if not previous:
+        raise SystemExit("there is no previous release on the box to roll back to.")
+    answer = read_structure_guard(api, box, python, release=f"{REMOTE_ROOT}/previous")
+    if answer.get("error"):
+        missing = [f"{rel}: {marker} (not read: the check failed)" for rel, marker in STRUCTURE_AWARE_MARKERS]
+    else:
+        missing = list((answer.get("release") or {}).get("missing") or [])
+    hold_structures(answer, missing, target=f"the previous release {previous}", force=args.force_structures_risk)
+
+    reason = args.reason  # sent below as a positional parameter, never as shell text
+    say(f"rolling back {current} -> {previous}: {reason}")
+    result = api.exec(
+        box,
+        ["sh", "-c", 'cd "$1" && exec "$2" -m league.watchdog rollback --base "$3" --reason "$4"',
+         "floor_box", f"{REMOTE_ROOT}/previous", python, REMOTE_ROOT, reason],
+        timeout=900,
+        on_output=None,
+    )
+    try:
+        report = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        report = {"ok": False, "error": (str(result.stdout or "") + str(getattr(result, "stderr", "") or ""))[-400:]}
+    report = report if isinstance(report, dict) else {"ok": False, "error": str(report)[:400]}
+    after = probe(api, box)
+    if not report.get("ok"):
+        say(f"ROLLBACK FAILED: {str(report.get('error'))[:400]}")
+        say(f"  current={release_of(after.get('current'))}  previous={release_of(after.get('previous'))}")
+        return 1
+    say(f"ROLLED BACK: {report.get('rolled_back_from')} -> {report.get('current')}")
+    say(f"  current={release_of(after.get('current'))}  previous={release_of(after.get('previous'))}")
+    say("  re-ratify now if the restored release's money digest is not the one the grant pins (a rollback of Deploy G "
+        "moves it from be1e3ce9 back to acff5c64): python3 scripts/live_trading.py --ratify earned-live-20260921")
+    return 0
 
 
 def cmd_secrets(args: argparse.Namespace) -> int:
@@ -1382,6 +1634,7 @@ def _now() -> str:
 COMMANDS = {
     "create": cmd_create,
     "deploy": cmd_deploy,
+    "rollback": cmd_rollback,
     "secrets": cmd_secrets,
     "start": cmd_start,
     "stop": cmd_stop,
@@ -1425,6 +1678,13 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--poll-seconds", type=float, default=15.0, help=argparse.SUPPRESS)
     deploy.add_argument("--no-wait", action="store_true",
                         help="return as soon as the watchdog is launched; `status` has the verdict")
+    risk_help = ("send it even when it lacks the structure-aware practice code and alpaca-paper holds a structure "
+                 "(or the ledger cannot be read): a naked short and a frozen practice book follow")
+    deploy.add_argument("--force-structures-risk", action="store_true", help=risk_help)
+
+    rollback = sub.add_parser("rollback", help="the watchdog's rollback (current := previous, restart), after the structures guard")
+    rollback.add_argument("--reason", default="operator rollback")
+    rollback.add_argument("--force-structures-risk", action="store_true", help=risk_help)
 
     sub.add_parser("secrets", help="the three values the box holds -> /workspace/.env (the owner runs this)")
 

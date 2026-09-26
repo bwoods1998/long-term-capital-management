@@ -263,6 +263,16 @@ DEFAULTS: dict[str, Any] = {
     "idle_desk_hours": 48,
     # The deep-market desks (E1): Sol's leaps go to them first (`leap`). game.json names them.
     "deep_desks": [],
+    # G-LOOP (the options-desk run, Sept 25, 2026): the options desk is searched for STRUCTURE programs (`Lab._desk`). Its
+    # tape is built on the House's one CPU and never kept by the House: SPY, QQQ and IWM at 0-7 days over the whole window
+    # were 797,000 option bars, about 300 MB resident on a laptop and about 20 s of a box's CPU a replay (builder S3's
+    # measurements, the run record's row S3), and the House was killed for memory at 14:37Z that day. So the lab builds at
+    # most one options tape every `option_tape_minutes`, holds ONE in memory, sends a batch of at most
+    # `structure_batch_size` on it (16 replays of about 20 s on the 8-vCPU lab box: some 40 s of its time), and gives each
+    # structure replay `structure_candidate_seconds` of its own (six times the 20 s measured) before it is stopped.
+    "option_tape_minutes": 20,
+    "structure_batch_size": 16,
+    "structure_candidate_seconds": 120,
     "luna_model": "gpt-6-luna",
     "luna_effort": "low",
     "luna_max_output_tokens": 12000,
@@ -271,6 +281,16 @@ DEFAULTS: dict[str, Any] = {
     "sol_max_output_tokens": 16000,
 }
 
+#: The key an options tape's steps carry their signal bars under (`league/options_history.py`).
+SIGNAL_BARS = "history_bars"
+#: What Luna and Sol are told of the options desk (G-LOOP, the options-desk run, Sept 25, 2026; `Lab._desk_brief`).
+STRUCTURE_LAB_RULES = ("The lab searches this desk for STRUCTURE programs only: NEEDS must carry \"structures\": true, and each "
+                       "intent is one level-3 structure with defined risk (the contract's options-structures section). Its "
+                       "standard knobs are bounded for you (league/parameters.py STRUCTURE_BOUNDS: width 0.5-10 dollars, "
+                       "dte_min <= dte_max whole days 0-45, entry_delta 0.01-0.99, profit_target 0.05-1, stop_loss 0.1-10, "
+                       "exit_minutes_before_close 0-390); PARAMS['structure'] is never mutated: another type is another program. "
+                       "A structure's cost is its maximum loss and the practice order cap is $75: a stop that buys a credit "
+                       "structure back for more than its wing is refused.")
 #: Trades per day on the search tape: the grid's first behavioural axis.
 TPD_EDGES = (0.2, 1.0, 5.0, 20.0)
 TPD_LABELS = ("under 0.2", "0.2 to 1", "1 to 5", "5 to 20", "20 or more")
@@ -481,6 +501,31 @@ def check_dev_only(tape: Mapping[str, Any], holdout: tuple[str, str]) -> None:
                     raise SealedTape(f"the tape's {name.replace('_', ' ')} reach into the sealed holdout")
 
 
+def is_options_tape(tape: Mapping[str, Any]) -> bool:
+    """An options desk's tape (`league/options_history.py`): built for its call and never kept by the House."""
+    return str(tape.get("asset_class") or "") == "option"
+
+
+def dev_only_options(tape: Mapping[str, Any], holdout: tuple[str, str]) -> dict[str, Any]:
+    """An OPTIONS tape as the lab's batches may see it (G-LOOP, Sept 25, 2026): its underlyings' warm-up bars and its
+    options-feature rows stamped before the sealed holdout ends are left out. The House starts an options tape the day
+    after the holdout (`House._after_holdout`), but the warm-up reaches back before its first step (60 daily bars are
+    about 103 days; 500 fifteen-minute bars about 12), so every options tape carried bars of the holdout's last weeks and
+    the lab's seal refused it whole (`check_dev_only`, `sandbox.holdout_problem`). A search or forward window then starts
+    with less warm-up, never with more data. The House's tape is never mutated; nothing else of it changes."""
+    end = str(holdout[1])[:10]
+
+    def kept(rows: Any) -> list[Any]:
+        return [r for r in rows or [] if isinstance(r, Mapping) and str(r.get("t") or "")[:10] >= end]
+
+    out = dict(tape)
+    for name in ("warmup_bars", "options_features"):
+        series = tape.get(name)
+        if isinstance(series, Mapping):
+            out[name] = {symbol: kept(rows) for symbol, rows in series.items()}
+    return out
+
+
 def search_tape(tape: Mapping[str, Any], fraction: float) -> dict[str, Any]:
     """The first `fraction` of a tape's steps: what the search may see. The rest of the tape is the
     House's out-of-sample test at graduation. The House's cached tape is never mutated."""
@@ -688,6 +733,11 @@ def forward_cut(tape: Mapping[str, Any], cut: float) -> dict[str, Any] | None:
             for symbol, bar in (step.get("bars") or {}).items():
                 if isinstance(bar, Mapping):
                     warm.setdefault(str(symbol), []).append({**bar, "t": bar.get("t") or step.get("t")})
+            # An options tape's signal bars ride on its steps as `history_bars` (the bars that became available by
+            # then; `league/options_history.py`): the steps before the cut hand theirs on as warm-up (G-LOOP, Sept 25, 2026).
+            signals = step.get(SIGNAL_BARS) or {}  # (named once: nothing here reads the history store)
+            for symbol, rows in signals.items():
+                warm.setdefault(str(symbol), []).extend(bar for bar in rows or [] if isinstance(bar, Mapping))
         out["warmup_bars"] = {s: rows[-MAX_BARS:] for s, rows in warm.items()}
     out["forward_cut"] = _iso(cut)
     return out
@@ -1378,6 +1428,9 @@ class Lab:
             raise LabError(f"its NEEDS name nothing in the {niche.id} universe")
         if (niche.asset_class == "option") != (str(needs.get("asset_class") or "") == "option"):
             raise LabError(f"its NEEDS are not for the {niche.id} desk's asset class")
+        if niche.asset_class == "option" and needs.get("structures") is not True:
+            # G-LOOP (Sept 25, 2026): the lab searches the options desk for structure programs only (`_desk`).
+            raise LabError(f"on the {niche.id} desk the lab searches structure programs only (NEEDS \"structures\": true)")
         try:
             needs = niches_module.constrain(needs, niche)
         except ValueError as exc:
@@ -1396,11 +1449,23 @@ class Lab:
                  self._now()))
         return ident
 
-    def _desk(self, niche_id: str) -> Any:
+    def _desk(self, niche_id: str, needs: Mapping[str, Any] | None = None) -> Any:
+        """The desk the lab searches, or None: an open desk the House replays; and, since G-LOOP (the options-desk run,
+        Sept 25, 2026), the options desk for STRUCTURE programs (NEEDS `"structures": true`) where the House replays
+        options (its options history). `needs`: the program's, where the caller has one -- on an options desk only a
+        structure program is searched (a single contract's tape is priced by the affordability line the structure
+        desk left behind); rows already in the lab passed `admit`, which says the same."""
+        from .parameters import structural
+
         niche = self.house.niches.get(niche_id)
-        if niche is None or niche.dormant or not niche.replay or niche.asset_class == "option":
+        if niche is None or niche.dormant:
             return None
-        return niche
+        if niche.asset_class == "option":
+            house = self.house
+            if not (getattr(house.settings, "options_replay", False) and getattr(house, "options_history", None) is not None):
+                return None
+            return niche if needs is None or structural(needs) else None
+        return niche if niche.replay else None
 
     # ----------------------------------------------------------------- seeds
     def seed(self, *, force: bool = False) -> int:
@@ -1414,7 +1479,7 @@ class Lab:
         added = 0
         rows: list[tuple[str, Any, str, str, str]] = []  # (code, niche, author, lineage, idea)
         for agent in self.house.registry.living():
-            niche = self._desk(agent.specialty or "")
+            niche = self._desk(agent.specialty or "", agent.needs)
             if niche is None:
                 continue
             params = {**(static_literal(agent.code, "PARAMS") or {}), **dict(agent.params or {})}
@@ -1431,7 +1496,14 @@ class Lab:
             except Exception as exc:  # noqa: BLE001 - the other seeds still count
                 self.house.alert("warning", f"the lab could not read the foundry's cards ({type(exc).__name__}: {str(exc)[:120]})")
         try:
-            for founder in self.house.founders():
+            founders = list(self.house.founders())
+            # The options desk's structure founders (G-LOOP, Sept 25, 2026), which `House.founders` leaves out (they are
+            # seated one a tick by `league/options_desk.py`): the lab's first structure programs.
+            from . import options_desk
+
+            structure = options_desk.structure_founders(self.house)
+            founders += list(options_desk.founder_rows(self.house, structure).values()) if structure else []
+            for founder in founders:
                 niche = self._desk(founder["niche"])
                 if niche is not None:
                     rows.append((founder["code"], niche, "house", f"founder:{founder['key']}", str(founder.get("why") or "")[:400]))
@@ -1468,6 +1540,11 @@ class Lab:
             raise LabError(failed[1])
         if self._tapes_built >= int(self.settings["max_tapes_per_step"]):
             raise TimeoutError("the step's tape budget is spent")
+        option = str(needs.get("asset_class") or "") == "option"
+        if option:
+            self._option_tape_turn()  # G-LOOP: one options tape every `option_tape_minutes`, or this group waits
+            for other in [k for k, hit in self._tapes.items() if is_options_tape(hit[2])]:
+                self._drop_search_tape(other)  # and ONE in memory: the one before it goes before this one is built
         house = self.house
         with house._tape_lock:
             cached = set(house._tapes)
@@ -1481,6 +1558,8 @@ class Lab:
                 # Only a tape the House had to build counts against the step's budget: one it already
                 # held (an agent's replay built it, or a sibling's search) costs a copy, not a build.
                 self._tapes_built += 1
+            if is_options_tape(tape):
+                tape = dev_only_options(tape, house.holdout_window)
             if wanted:
                 house._require_feeds(needs, wanted, tape.get("feeds_coverage") or {})
             observed = needs.get("observe") or {}
@@ -1517,14 +1596,37 @@ class Lab:
                 house._tapes.pop(tape_id, None)
         steps = cut["steps"]
         ident = "lab:" + hashlib.sha256(f"{tape_id}|{steps[0].get('t')}|{steps[-1].get('t')}|{len(steps)}".encode()).hexdigest()[:24]
-        self._tapes.pop(key, None)
+        self._drop_search_tape(key)
         if len(self._tapes) >= 6:
-            self._tapes.pop(next(iter(self._tapes)))
+            self._drop_search_tape(next(iter(self._tapes)))
         self._tapes[key] = (self._now(), ident, cut)
         source = tape.get("source") if isinstance(tape.get("source"), Mapping) else {}
         self._index_tape(key, ident, str(tape_id), "history-dev" if source.get("window") else "live")
         self._tape_built(key)
         return ident, cut
+
+    def _option_tape_turn(self) -> None:
+        """Raise TimeoutError (the group waits for a later step) unless a search tape of the options desk may be built
+        now: one every `option_tape_minutes` (G-LOOP, Sept 25, 2026). The House never keeps an options tape (Sept 25,
+        2026, `House.tape_for`), so every one the lab asks for is built on the House's one CPU, the whole window's bars."""
+        now = self._now()
+        every = float(self.settings.get("option_tape_minutes") or 0) * 60
+        last = float(getattr(self, "_option_tape_at", 0.0) or 0.0)
+        if last and now - last < every:
+            raise TimeoutError(f"the lab builds one options tape every {every / 60:g} minutes")
+        self._option_tape_at = now
+
+    def _drop_search_tape(self, key: str) -> None:
+        """Let a search copy go; an options tape's is let go by the lab box's digest memo too (`LabBox.forget`),
+        which would otherwise keep it alive."""
+        hit = self._tapes.pop(key, None)
+        if hit is not None and is_options_tape(hit[2]):
+            self._forget_in_box(hit[1])
+
+    def _forget_in_box(self, tape_id: str) -> None:
+        forget = getattr(getattr(self, "_box", None), "forget", None)
+        if forget is not None:
+            forget(tape_id)
 
     def _tape_failures(self) -> dict[str, dict[str, Any]]:
         """Tape key -> its failed builds in a row (`meta` `tape_failures`): the folded error, how many
@@ -1703,10 +1805,13 @@ class Lab:
             # F1 (Sept 25, 2026): the mechanism children first, up to their quota; then the parameter children (and seeds)
             # the `reserved_share` is kept for; then whatever is left of either. Filled in queue order alone, the rest went
             # to more written programs, which sit ahead of the parameter mutants in the queue (`PRIORITY`).
+            # G-LOOP (Sept 25, 2026): a batch on an options tape holds at most `structure_batch_size` (its replays take
+            # some 20 s of the box each, against a Kalshi program's tenth of a second).
+            cap = min(size, max(1, int(settings.get("structure_batch_size") or size))) if is_options_tape(tape) else size
             written = [r for r in group if r["origin"] in RESERVED_ORIGINS]
-            quota = reserved_quota(size, settings.get("reserved_share"))
+            quota = reserved_quota(cap, settings.get("reserved_share"))
             others = [r for r in group if r["origin"] not in RESERVED_ORIGINS]
-            return tape_id, tape, (written[:quota] + others + written[quota:])[:size]
+            return tape_id, tape, (written[:quota] + others + written[quota:])[:cap]
         return None
 
     def evaluate_batch(self) -> dict[str, Any] | None:
@@ -1722,7 +1827,7 @@ class Lab:
         batch = [{"id": r["id"], "code": r["code"], "params": {}} for r in chosen]
         try:
             results = self.box.evaluate(batch, tape_id, tape, stake=float(row1["stake_usd"]), limits=limits,
-                                        timeout=float(settings["timeout"]))
+                                        timeout=float(settings["timeout"]), **self._batch_options(tape))
         except Exception as exc:  # noqa: BLE001 - see below
             if type(exc).__name__ == "TapeRefused" or "unsupported input" in str(exc):
                 # The box's own seal refused the tape (`labbox.LabBox.check`): unavailable data, never a
@@ -1800,6 +1905,13 @@ class Lab:
             self.house.alert("warning", f"the lab box could not start {infrastructure} of {len(chosen)} candidates' processes "
                                         f"(infrastructure; they stay queued)")
         return counts if counts["candidates"] else None
+
+    def _batch_options(self, tape: Mapping[str, Any]) -> dict[str, Any]:
+        """What a batch on this tape asks of the box beyond the defaults: on an options tape, each structure replay's own
+        wall-clock limit (`structure_candidate_seconds`, G-LOOP, Sept 25, 2026). Nothing for any other tape."""
+        if not is_options_tape(tape):
+            return {}
+        return {"candidate_seconds": float(self.settings.get("structure_candidate_seconds") or 120)}
 
     def box_down(self) -> bool:
         return self._now() < float(getattr(self, "_box_down_until", 0.0))
@@ -2186,9 +2298,12 @@ class Lab:
             self._x("UPDATE calls SET written=?, refused=? WHERE id=?", (written, refused, ident))
 
     def _desk_brief(self, niche: Any) -> dict[str, Any]:
-        return {"id": niche.id, "title": niche.title, "venue": niche.venue, "horizons": list(niche.horizons),
-                "asset_class": niche.asset_class, "universe": list(niche.universe[:24]), "brief": niche.brief[:1500],
-                "maker_fee_series": list(niche.maker_fee_series)}
+        brief = {"id": niche.id, "title": niche.title, "venue": niche.venue, "horizons": list(niche.horizons),
+                 "asset_class": niche.asset_class, "universe": list(niche.universe[:24]), "brief": niche.brief[:1500],
+                 "maker_fee_series": list(niche.maker_fee_series)}
+        if niche.asset_class == "option":
+            brief["lab_rules"] = STRUCTURE_LAB_RULES  # G-LOOP (Sept 25, 2026): what the lab admits on this desk
+        return brief
 
     def _shown(self, row: Mapping[str, Any], *, code: bool) -> dict[str, Any]:
         summary = json.loads(row["summary"] or "{}")
@@ -3295,7 +3410,7 @@ class Lab:
         """Candidate id -> the living agent whose current program it is, on every desk the lab searches."""
         out: dict[str, Any] = {}
         for agent in self.house.registry.living():
-            if self._desk(agent.specialty or "") is None:
+            if self._desk(agent.specialty or "", agent.needs) is None:
                 continue
             ident = self.resident_candidate(agent)
             if ident and (ident not in out or self._program_frozen(agent) > self._program_frozen(out[ident])):
@@ -3329,11 +3444,11 @@ class Lab:
     def can_score(self, agent: Any) -> bool:
         """Whether a forward window can ever give this living agent's current program a record (the House's
         seat market keeps a trader's seat while it waits for one): its desk is one the lab searches (`_desk`:
-        never a dormant, unreplayed or options desk), its file has a single literal PARAMS
+        never a dormant or unreplayed desk, and on the options desk a structure program only), its file has a single literal PARAMS
         (`resident_candidate`), and the lab has not blocked that program. The review of #245 (Sept 24, 2026):
         alpaca-options is never searched, so krasker-6, -10, -11 and -14 (3-8 fills at T0) could never have a
         record, and the forward rule kept their seats against every newcomer for good."""
-        if self._desk(getattr(agent, "specialty", None) or "") is None:
+        if self._desk(getattr(agent, "specialty", None) or "", getattr(agent, "needs", None) or {}) is None:
             return False
         ident = self.resident_candidate(agent)
         if not ident:
@@ -3357,12 +3472,15 @@ class Lab:
         the same seal (`check_dev_only`), except on the desks the House replays on the history store
         (Alpaca, no live feed, not options), whose House tape is 2025: there the lab builds the live
         tape of the last `forward_days` days through the House's own data adapter, as `House.tape_for`
-        builds a live one, once a run."""
+        builds a live one, once a run. A structure program's is the options tape of its last `forward_days`
+        (`_forward_options_tape`)."""
         from .agents import niche_of
 
         house = self.house
         venue, horizon, _ = niche_of(needs)
         option = venue == "alpaca" and str(needs.get("asset_class") or "") == "option"
+        if option:
+            return self._forward_options_tape(needs)
         wanted = house._feeds_wanted(needs)
         if not (venue == "alpaca" and bool(house.settings.deep_replay) and not option and not wanted):
             tape_id, tape = house.tape_for(needs)
@@ -3387,6 +3505,36 @@ class Lab:
                                       warmup_bars=warmup)
         check_dev_only(tape, house.holdout_window)
         ident = f"live:alpaca:{','.join(symbols)}:{timeframe}:{warmup}:{horizon}:{_iso(end)}"
+        if len(self._forward_tapes) >= 8:
+            self._forward_tapes.pop(next(iter(self._forward_tapes)))
+        self._forward_tapes[key] = (self._now(), ident, tape)
+        return ident, tape
+
+    def _forward_options_tape(self, needs: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+        """A structure program's forward tape (G-LOOP, Sept 25, 2026): the House's options tape of the last
+        `forward_days` days (`House.tape_for(window=...)`: a tenth of the whole window's bars, never the 126 days
+        rebuilt to keep the few after a program's freeze), with the options features and feeds its NEEDS declare
+        as the House's options tape carries them -- so the refusal that holds for an equity desk's live tape ("no
+        live tape carries options features") does not hold here -- trimmed to development data
+        (`dev_only_options`) and sealed (`check_dev_only`). One is kept, for the run (a structure resident's is
+        some tens of MB: a week of bars); the forward run's `forward_box_seconds` bound the builds of a run."""
+        from .parameters import structural
+
+        if not structural(needs):
+            raise LabError("the lab scores structure programs only on the options desk")
+        house = self.house
+        key = tape_key(needs)
+        hit = self._forward_tapes.get(key)
+        if hit is not None and self._now() - hit[0] < float(self.settings["forward_every_minutes"]) * 60:
+            return hit[1], hit[2]
+        end = self._now()
+        start = end - float(self.settings["forward_days"]) * 86400
+        tape_id, tape = house.tape_for(needs, window=(start, end))
+        tape = dev_only_options(tape, house.holdout_window)
+        check_dev_only(tape, house.holdout_window)
+        ident = f"live:{tape_id}:{_iso(end)}"
+        for other in [k for k, held in self._forward_tapes.items() if is_options_tape(held[2])]:
+            self._forget_in_box(self._forward_tapes.pop(other)[1])
         if len(self._forward_tapes) >= 8:
             self._forward_tapes.pop(next(iter(self._forward_tapes)))
         self._forward_tapes[key] = (self._now(), ident, tape)
@@ -3438,7 +3586,12 @@ class Lab:
         def skip(why: str, n: int) -> None:
             out["skipped"][why] = out["skipped"].get(why, 0) + n
 
-        for (key, cut), rows in groups.items():
+        # The windows of one tape key run together (G-LOOP's review, Sept 25, 2026): the lab holds ONE options forward tape
+        # at a time (`_forward_options_tape`), so a key whose windows sat apart in `forward_due` order was built twice a run.
+        first_seen: dict[str, int] = {}
+        for key, _ in groups:
+            first_seen.setdefault(key, len(first_seen))
+        for (key, cut), rows in sorted(groups.items(), key=lambda item: first_seen[item[0][0]]):
             if time.monotonic() - started >= float(settings["forward_box_seconds"]):
                 skip("the run's box seconds are spent", len(rows))
                 continue
@@ -3466,11 +3619,15 @@ class Lab:
             ident = "fwd:" + hashlib.sha256(f"{base_id}|{cut}|{steps[0].get('t')}|{steps[-1].get('t')}|{len(steps)}".encode()).hexdigest()[:24]
             batch = [{"id": r["id"], "code": r["code"], "params": {}} for r in rows]
             try:
-                results = self.box.evaluate(batch, ident, tape, stake=float(row1["stake_usd"]), limits=limits, timeout=float(settings["timeout"]))
+                results = self.box.evaluate(batch, ident, tape, stake=float(row1["stake_usd"]), limits=limits, timeout=float(settings["timeout"]),
+                                            **self._batch_options(tape))
             except Exception as exc:  # noqa: BLE001 - the box's failure, never a record against anyone
                 self._forward_warn(f"the lab box could not run a forward window ({type(exc).__name__}: {str(exc)[:160]})")
                 skip("the lab box failed", len(rows))
                 break
+            finally:
+                if is_options_tape(tape):
+                    self._forget_in_box(ident)  # G-LOOP: the box's memo never holds an options window after its batch
             by_id = {str(r.get("id")): r for r in results or [] if isinstance(r, Mapping)}
             end = _ts(steps[-1].get("t")) or self._now()
             for r in rows:

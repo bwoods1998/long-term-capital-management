@@ -231,7 +231,16 @@ CONSTITUTION: dict[str, Any] = {
         # TIGHTENED from 10 (evidence honesty cuts both ways); crypto and stocks are loosened to what
         # was measured, since 10 a side was 3x crypto's optimism and 50x the stocks'. A plain number
         # still charges every class (the rollback form), and a class not named pays the largest rate.
-        "evidence": {"paper_weight": 0.5, "alpaca_paper_haircut_bps": {"crypto": 4, "equity": 2, "option": 24}},
+        #
+        # `option_spread` (row O5 of the options-desk run's money table, docs/goals/LTCM_OPTIONS_DESK.md, Sept 25, 2026;
+        # 24-60 bps a side): a level-3 STRUCTURE's fill (`league/structures.py`: one held instrument whose `market_id` names
+        # its type and legs) pays this rate a side on its held notional, on every Alpaca practice book a structure trades
+        # on (`allocator.HAIRCUT_BOOKS`: `alpaca-paper`, and the House's `options-shadow`, whose fills the plan's row says
+        # "must stay conservative"), not the single contract's 24. 60, the top of the row, until it is measured from the
+        # first 30 or more practice structure fills against the structure's touch at intent time: by 17:31Z Sept 25 the
+        # shadow book had filled 4 structure opens and closed none (the run record's watch), so no rate can be measured
+        # yet. A class the table does not name still pays its largest rate (`allocator._haircut_rate`), now 60.
+        "evidence": {"paper_weight": 0.5, "alpaca_paper_haircut_bps": {"crypto": 4, "equity": 2, "option": 24, "option_spread": 60}},
         # 1.01, not the plan's 1.03 (its bounds are 1.0-1.25): measured on the floor at 06:45 UTC,
         # paper agents size a few percent of their $200 purse, so no paper agent without real money
         # had E >= 1.03 (paper +6.1%) and the bunt -- a cheap real test by design -- would have seated
@@ -621,6 +630,49 @@ CONSTITUTION: dict[str, Any] = {
         # of its fills are the founder's), and megacaps-chip-demand-relay's (n 13, bound +0.0010, practice only) moves
         # whole to the program that earned it, mcentee-hddb4ae's eleventh rewrite. Absent: the label a birth carries.
         "family_key": "mechanism",
+        # ---- Real structures (rows O1-O4 of the options-desk run's money table, docs/goals/LTCM_OPTIONS_DESK.md, and the
+        # owner's amendment of 06:01Z Sept 25, 2026, item 4 "real money follows proof, fast"; this run's money-digest
+        # change 1 of 2, Deploy G; O5 is `evidence.alpaca_paper_haircut_bps.option_spread` above). The owner, 18:15Z Sept
+        # 25: "i want rapid recursively learning loop that has paper trading and production trading as soon as possible
+        # based on actual progress made by the agents in the game". Real money follows a structure FAMILY's own record,
+        # through the allocator, inside every cap; the bounds are `allocator.SPREAD_BOUNDS` and `league.ci` refuses a
+        # value outside them (`Allocator.spread_line`, `allocator.spread_rule`).
+        #
+        # `option_spreads_real` (O1, false until O4's line is met by at least one family, then true): the switch. While
+        # false no structure agent (the options desk's agents whose NEEDS say "structures": true) is promoted to real
+        # money by any route, the House sends no structure OPEN to a real book, and a structure agent still on real money
+        # is lent nothing more and goes back to practice once flat. True, by a digest change the grant re-ratifies, in the
+        # same deploy that sets the gateway's `OPTION_STRUCTURES_REAL` to exactly `option_spread_real_types`
+        # (`league.ci` refuses a tree where the two disagree). A close is never refused by it: it only takes risk off.
+        "option_spreads_real": False,
+        # The types a real structure may be, when O1 is on: the debit vertical, the one type the plan authorizes on the
+        # cash account. A credit type (or any other) joins only with the owner's explicit confirmation, recorded in
+        # `allocator.SPREAD_REAL_TYPES_AUTHORIZED` (the amendment's credit grant arrived with its lines cut, and is held).
+        "option_spread_real_types": ["debit_vertical"],
+        # `spread_probe_usd` (O2, $80-150): a structure agent's real stake as a probe (and the floor of its bunt, as
+        # `option_bunt_usd` is a single contract's). $150, the top of the row (the owner: "be bold inside the
+        # envelope"): two $30-75 verticals at once, every order inside the gateway's $75 cap, the grant's Alpaca capital
+        # and the envelope's headroom unchanged (a probe is seated only where the headroom takes it).
+        "spread_probe_usd": "150",
+        # `spread_position_share` (O3, 0.5-1.0): a structure position's cap as a share of the stake, in MAXIMUM LOSS (the
+        # held price S x 100 x structures, `league/structures.py`), not the premium of a leg: a vertical cannot lose more
+        # than it cost. 1.0: a probe may hold its whole stake at risk, one order at most $75 (the gateway's cap, which
+        # meters a multi-leg order at its maximum loss). The book's own rules still apply: `book.DEFAULT_RULES`
+        # max_position_pct 0.50 holds ONE position to half the account's equity ($75 of a $150 probe) until the book
+        # reads this row, so the whole stake is at risk only across two structures.
+        "spread_position_share": "1.0",
+        # `spread_probe_line` (O4): a structure family is probe-eligible when its POOLED record (`families.family_record`
+        # `structures`: every member ever born, each for its stretch in the family, closed structures on its practice
+        # books since each member's evidence cutoff, the O5 haircut paid) has at least `min_practice_closed` closed
+        # practice structures with W_paper (the account-unit growth of those closes, pooled) at or above `min_w_paper`;
+        # OR at least `replay_min_practice_closed` closed practice structure and a PASSED House replay on the options
+        # history (`eval.trial`, of a program the family ran) with at least `replay_min_structures` structures and
+        # out-of-sample growth above `replay_min_oos_growth`. R5 (`family_probe`: no probe on a losing family) applies
+        # unchanged. Measured at 17:31Z Sept 25 (the run record's watch): 12 structure founders on practice, 4 structure
+        # opens filled, none closed, and one founder's replay passed (options-gap-drift, out of sample -0.00024 a block:
+        # not positive), so no family meets it yet. A structure is one closed trade: one flat sale of the held instrument.
+        "spread_probe_line": {"min_practice_closed": 3, "min_w_paper": "1.01", "replay_min_practice_closed": 1,
+                              "replay_min_structures": 20, "replay_min_oos_growth": "0"},
     },
 }
 
@@ -663,4 +715,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '32db7547483829fdf4b2842e4ecbafc91806fa087d95c401815cf09ac72f62ac'
+PINNED_DIGEST = '63b65b348aab76633bdd98cca7e873481f97e628d75b7635454419314d0acc4d'

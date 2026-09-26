@@ -187,16 +187,54 @@ a single-leg option with no `position_intent`, an option named by an asset id, o
 decides on (`symbol`, `legs`, `order_class`, `position_intent`, `side`) spelled any other way. A body
 that is not JSON is a `400`. Stock and crypto orders pass exactly as before.
 
-**The real account** refuses every multi-leg order while `OPTION_STRUCTURES_REAL` is `off` (as
-deployed). A type it names is metered at its **maximum loss**: a debit type at
+**The real account** refuses every multi-leg OPEN while `OPTION_STRUCTURES_REAL` is `off` (as
+deployed), and an open of any type the variable does not name. A type it names is metered at its **maximum loss**: a debit type at
 `limit_price x 100 x qty`, a credit type at `(collateral - credit) x 100 x qty` (the collateral is the
 width, or a condor's wider wing), against `MAX_ORDER_USD_ALPACA` and the day's caps like any order; a
 $0.70 debit vertical is $70 and passes the $75 cap, a $0.80 one is refused. The open or close is read
 from the legs' `position_intent`, never from `X-LTCM-Purpose`: an open labelled an exit is still
 metered. A close takes risk off and is metered at zero; the gate counts every order and refuses a
 zero reservation, so a close reserves one micro-dollar as an exit (health rounds it up to a cent):
-the kill switch and the order count stop it, the dollar caps do not. Admitting a type is a
-money-digest change the owner ratifies.
+the kill switch and the order count stop it, the dollar caps do not. Since Sept 25, 2026 (the route's
+review, MINOR 1) a real close is admitted only when the account **holds every leg it closes** -- a
+`sell_to_close` leg held long and a `buy_to_close` leg held short, at least `qty x ratio_qty` contracts
+each -- read from a signed `GET v2/positions` on the real account, reused for `POSITIONS_CACHE_MS`
+(5 s); a close of a leg not held is a `400` (it would open a position), and positions that cannot be
+read are a `424` that reserves nothing (a 4xx, never a 5xx: the House's adapter reads a 5xx as "the
+venue may have it" and would hold the close as unknown for a minute of polls; a 4xx is sent again at its
+next tick). A leg counts what the account has **available** (`qty_available`, never more than `qty`), so
+legs already committed to a resting close are not closed twice, and a close admitted from the cached
+reading takes its legs out of it. The read never follows a redirect (it carries the real account's keys).
+The practice account is unchanged.
+
+**A short leg bought back alone** (Sept 25, 2026, the review of Deploy G, MAJOR 2). A single-leg option
+order is long premium only on the real account (`buy_to_open`, `sell_to_close`), with one exception: a
+`buy` with `buy_to_close`, the book's buy-back of a short leg a broken real structure left (an uneven
+fill, a long leg sold alone, an assignment). It is admitted by the same rule as a structure close, read as
+a one-leg close: the account's signed positions must show that contract held **short** for at least `qty`
+(available), or it is a `400` ("A single-leg buy_to_close must buy back a short leg the real account
+holds: ..."), and unread positions are a `424`. Admitted, it is an exit whatever `X-LTCM-Purpose` says,
+reserved at one micro-dollar (the kill switch and the order count stop it, the dollar caps do not), its
+limit uncapped, and it leaves the cached reading. Before this, the real route refused it as not long
+premium and the naked short stayed on the account while the House retried it every reading.
+
+**The list gates opens only** (the review of g/money, Sept 25, 2026). A real CLOSE of **any** defined-risk
+type goes whatever `OPTION_STRUCTURES_REAL` says -- `off` included -- once the account's positions show
+every leg held: it only takes risk off, and every shape rule (no legging, no naked short, the sign of the
+limit) still holds on it. Until then `off` refused closes too, and `league.ci` makes `off` the only
+configuration while O1 is off, so any gateway deploy from such a tree would have stranded a held
+structure into expiry. Admitting a type to OPEN is a money-digest change the owner ratifies:
+`OPTION_STRUCTURES_REAL` admits exactly the constitution's `allocator.option_spread_real_types` while
+`allocator.option_spreads_real` (O1) is true, and `off` while it is false, and `league.ci`
+(`check_structures`) refuses a tree where the two disagree, so the two change in one deploy. The gateway
+can be deployed at `off` at any time, a structure held or not.
+
+**Rollbacks while the real account holds a structure.** Never roll the House back past Deploy G, or past
+Track P's Alpaca adapter, while the real book holds a structure: a House before G refuses every real
+structure intent, closes included (only its 15:30 expiry close is sent, through an adapter that cannot
+send one multi-leg order), and a House with G but without that adapter holds every real structure order
+back, closes included (`House._structure_unsendable`: never leg by leg; an error alert says so once a
+day). Close or let the House close the structure first, or roll forward.
 
 ## Jev shadow pilot
 
