@@ -168,7 +168,7 @@ Read-only on the box at 06:03-06:15Z Sept 25 (`allocator-board.json` at 06:03:51
    p50; each founder's replay recorded as the wait it is ("unsupported input: feeds recorded live since"), never a
    failed trial, so the forward-first run's F1/F3 ranking reads it as no replay record (asked 06:58Z). Then the gateway fetch from a research pass (the `web_fetch` ledger row).
 
-## Wrap-up (the owner's message to all four runs, received about 22:45Z Sept 25)
+## Wrap-up (the owner's message to all four runs, received about 01:25Z Sept 26)
 
 - Finish soon, start nothing new: build nothing further; ship only what is built, reviewed and CI-green.
 - Deploy order, each after the previous one's watch ends + 30 min, never while a real Kalshi family's game is in play, never 13:25-20:05Z on a trading day: (1) forward-first Deploy B as soon as tonight's last two real MLB games (AZ-SD, LAD-SF) settle; (2) options Deploy G; (3) forward-first Deploy C; (4) Jev D-J2 (+ its J5 gateway deploy); (5) **this run's K2 (#348: the scale rule K5 and the allocator's tranche line K5b, switched off)**. A run not ready passes its slot to the next.
