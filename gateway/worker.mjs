@@ -69,7 +69,11 @@ export class Gate extends DurableObject {
 
   watchdog() {
     // Claude holds no settlement replaced within half an hour are released on the cron too, not only at the next call.
-    this.ctx.storage.transactionSync(() => this.gate.claudeSweep());
+    try {
+      this.ctx.storage.transactionSync(() => this.gate.claudeSweep());
+    } catch {
+      // A sweep that fails is tried again at the next reserve and the next cron; the watchdog runs regardless.
+    }
     return runWatchdog({ gate: this.gate, env: this.env, mailer: mailerFor(this.env) });
   }
 }

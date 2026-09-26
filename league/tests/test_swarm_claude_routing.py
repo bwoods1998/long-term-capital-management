@@ -136,7 +136,7 @@ class ClaudeRouting(unittest.TestCase):
         result = self.ask(self.router(FakeOpener(refused(503, '{"error": "Claude is not configured.", "cap": "setup"}'))), key="setup")
         self.assertEqual(result["route"], "openai")
         self.assertEqual(self.claude_spent(), Decimal("0"), "the gateway refused before reserving: no phantom hold")
-        self.assertEqual(self.store.get("claude_unsettled"), None)
+        self.assertFalse(self.store.get("claude_unsettled"), "released: nothing left to true up")
         empty = self.ask(self.router(FakeOpener(message("", cost="0.030000"))), key="empty", role="audit")
         self.assertEqual(empty["route"], "openai", "an empty answer is not an audit: Astra reads it instead")
         self.assertEqual(self.claude_spent(), Decimal("0.030000"), "billed at its usage")
@@ -168,6 +168,53 @@ class ClaudeRouting(unittest.TestCase):
         self.assertEqual(list(self.store.get("claude_unsettled")), [sent[3]])
         still = Decimal(str(left[sent[3]]["usd"]))
         self.assertAlmostEqual(float(self.claude_spent()), float(Decimal("0.12") + still), places=5)
+
+    def test_a_restart_mid_call_is_still_trued_up_from_the_gateway(self):
+        def crash(request, timeout=None):
+            filed = SwarmStore(self.root, clock=self.clock)
+            try:
+                self.assertEqual(len(filed.get("claude_unsettled")), 1, "filed in the hold's own transaction, before dispatch")
+            finally:
+                filed.close()
+            raise SystemExit("the swarm restarted mid-call")
+
+        with self.assertRaises(SystemExit):
+            self.ask(self.router(crash))
+        restarted = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(restarted.close)
+        [request_id] = restarted.get("claude_unsettled")
+        self.clock.advance(61)
+        router = self.router(FakeOpener(FakeResponse({"state": "settled", "cost_usd": "0.210000"})), store=restarted)
+        self.assertEqual(router.settle_claude_holds(), 1)
+        self.assertFalse(restarted.get("claude_unsettled"))
+        self.assertAlmostEqual(restarted.spent(["claude"]), 0.21)
+
+    def test_a_true_up_that_lands_while_the_call_is_out_is_not_booked_twice(self):
+        box = {}
+
+        def gateway(request, timeout=None):
+            if request.get_method() == "GET":
+                return FakeResponse({"state": "settled", "cost_usd": "0.184000"})
+            self.clock.advance(61)
+            self.assertEqual(box["router"].settle_claude_holds(), 1, "the gateway settled first; the true-up books it")
+            return message('{"families": []}', cost="0.184000")
+
+        box["router"] = self.router(gateway)
+        self.assertEqual(self.ask(box["router"])["route"], "claude")
+        self.assertEqual(self.claude_spent(), Decimal("0.184000"), "booked once")
+        self.assertFalse(self.store.get("claude_unsettled"))
+
+    def test_the_true_up_pass_stops_at_a_gateway_it_cannot_read(self):
+        router = self.router(FakeOpener(*[socket.timeout("slow") for _ in range(3)]))
+        for key in ("a", "b", "c"):
+            self.ask(router, key=key)
+        self.clock.advance(61)
+        reads = FakeOpener(urllib.error.URLError("hung"), FakeResponse({"state": "released"}), FakeResponse({"state": "released"}))
+        self.assertEqual(self.router(reads).settle_claude_holds(), 0)
+        self.assertEqual(len(reads.calls), 1, "one failed read ends the pass: the heartbeat is never held")
+        self.assertEqual(len(self.store.get("claude_unsettled")), 3)
+        self.assertEqual(self.router(reads).settle_claude_holds(budget_seconds=0), 0)
+        self.assertEqual(len(reads.calls), 1, "no time left: no read")
 
     def test_capped_unconfigured_or_unreadable_claude_leaves_the_existing_routes_exactly_as_they_were(self):
         cases = {

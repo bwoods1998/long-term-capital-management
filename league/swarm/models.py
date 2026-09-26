@@ -295,13 +295,15 @@ class ModelRouter:
     def _ask_claude(self, *, role: str, system: str, user: str, family: str | None, key: str, need_usd: float,
                     schema: Mapping[str, Any] | None, errors: list[str], billed: list[dict[str, Any]],
                     effort: str | None = None) -> dict[str, Any] | None:
-        """The Claude route: the hold is booked (spend kind `claude`) and committed before the gateway hears of the call,
-        so a crash never loses it. The gateway's settled cost replaces it: a refusal, a truncation and an empty answer are
-        billed at their usage, listed in `billed`, and fall through to the next route. A refusal the gateway made before
-        reserving (a 4xx, or a refusal naming its `cap`: no key, the funded total, the kill switch) releases it. An
-        unknown bill keeps it and files it under the call's X-LTCM-Request id (kv `claude_unsettled`), which
-        `settle_claude_holds` trues up from the gateway's own record. None when there is no room, or the call refused or
-        erred (the reason is in `errors`)."""
+        """The Claude route: the hold is booked (spend kind `claude`) and filed under the call's X-LTCM-Request id (kv
+        `claude_unsettled`) in one transaction committed before the gateway hears of the call, so neither a crash nor a
+        restart mid-call loses it: `settle_claude_holds` trues up whatever is still filed from the gateway's own record.
+        The gateway's settled cost replaces the hold: a refusal, a truncation and an empty answer are billed at their
+        usage, listed in `billed`, and fall through to the next route. A refusal the gateway made before reserving (a 4xx,
+        or a refusal naming its `cap`: no key, the funded total, the kill switch) releases it. An unknown bill stays
+        filed. Settling takes the filing out in the same transaction that books the cost, and only when it is still
+        there, so a true-up and the call's own answer never both book it. None when there is no room, or the call
+        refused or erred (the reason is in `errors`)."""
         from ..claude import ClaudeError
 
         cfg = self._claude_cfg()
@@ -324,6 +326,10 @@ class ModelRouter:
                     self.store.add_spend("claude", required, family=family,
                                          detail={"role": role, "hold": key[:120], "request": request_id, "model": model,
                                                  "max_tokens": body["max_tokens"], "effort": body["output_config"]["effort"]})
+                    filed = dict(self.store.get("claude_unsettled") or {})
+                    filed[request_id] = {"usd": required, "family": family, "role": role, "model": model,
+                                         "at": self.store.clock(), "reason": "in flight"}
+                    self.store.put("claude_unsettled", filed)
                     admitted = True
             if admitted:  # only after the outer transaction's commit succeeds
                 hold = required
@@ -334,6 +340,17 @@ class ModelRouter:
             errors.append(f"claude admission: {type(exc).__name__}: {str(exc)[:160]}")
             return None
 
+        def resolve(amount: float, detail: Mapping[str, Any]) -> None:
+            """Book `amount` in place of the hold, once: only while the hold is still filed (a true-up may have)."""
+            with self.store.atomic():
+                filed = dict(self.store.get("claude_unsettled") or {})
+                if request_id not in filed:
+                    return
+                filed.pop(request_id)
+                self.store.put("claude_unsettled", filed)
+                self.store.add_spend("claude", amount - hold, family=family,
+                                     detail={"role": role, "model": model, "settles": key[:120], "request": request_id, **detail})
+
         def settle(cost: Any, detail: Mapping[str, Any]) -> float | None:
             try:
                 amount = Decimal(str(cost)) if cost is not None else None
@@ -341,16 +358,15 @@ class ModelRouter:
                 amount = None
             if amount is None or not amount.is_finite() or amount < 0:
                 return None
-            self.store.add_spend("claude", float(amount) - hold, family=family,
-                                 detail={"role": role, "model": model, "settles": key[:120], **detail})
+            resolve(float(amount), detail)
             return float(amount)
 
         def unknown(reason: str) -> None:
             with self.store.atomic():
-                holds = dict(self.store.get("claude_unsettled") or {})
-                holds[request_id] = {"usd": hold, "family": family, "role": role, "model": model, "at": self.store.clock(),
-                                     "reason": reason[:120]}
-                self.store.put("claude_unsettled", holds)
+                filed = dict(self.store.get("claude_unsettled") or {})
+                if request_id in filed:
+                    filed[request_id] = {**filed[request_id], "reason": reason[:120]}
+                    self.store.put("claude_unsettled", filed)
 
         try:
             client = self.claude_factory(model)  # type: ignore[misc]
@@ -362,7 +378,7 @@ class ModelRouter:
             cost = settle(exc.cost_usd, {"error": type(exc).__name__, "status": status, "stop_reason": stop})
             if cost is None:
                 if exc.cap or (isinstance(status, int) and 400 <= status < 500):
-                    self.store.add_spend("claude", -hold, family=family, detail={"role": role, "refused": status, "cap": exc.cap})
+                    resolve(0.0, {"refused": status, "cap": exc.cap})
                 else:
                     unknown(f"{type(exc).__name__}: {status}")
             elif cost > 0:
@@ -386,10 +402,15 @@ class ModelRouter:
                 "cost_verified": cost is not None, "held_usd": 0.0 if cost is not None else hold,
                 "stop_reason": answer.stop_reason, "usage": dict(answer.usage)}
 
-    def settle_claude_holds(self, *, min_age: float = 60.0, absent_after: float = 1800.0) -> int:
-        """True up the Claude holds whose bill the House never saw, from the gateway's record of each call: its settled
-        (or kept, unknown) cost replaces the hold; a hold the gateway swept to zero, or a call the gateway has no record of
-        after `absent_after` seconds (it never reached the meter), is released. Returns how many were settled."""
+    def settle_claude_holds(self, *, min_age: float = 60.0, absent_after: float = 1800.0, budget_seconds: float = 30.0) -> int:
+        """True up the Claude holds whose bill the House never saw (the call's answer was lost, or the swarm restarted
+        mid-call), from the gateway's record of each call: its settled (or kept, unknown) cost replaces the hold; a hold
+        the gateway swept to zero, or a call the gateway has no record of after `absent_after` seconds (it never reached
+        the meter), is released; a call still held waits. It runs on the main loop, so it stops at the first gateway
+        read that fails and after `budget_seconds`: a hung gateway never holds the heartbeat. Returns how many settled."""
+        import time as _time
+
+        deadline = _time.monotonic() + float(budget_seconds)
         holds = dict(self.store.get("claude_unsettled") or {})
         if not holds or self.claude_factory is None:
             return 0
@@ -402,9 +423,11 @@ class ModelRouter:
             age = self.store.clock() - float(hold.get("at") or 0)
             if age < min_age:
                 continue
+            if _time.monotonic() >= deadline:
+                break  # the rest wait for the next pass
             record = client.settlement(request_id) if callable(getattr(client, "settlement", None)) else None
             if record is None:
-                continue  # the gateway cannot be read now: the hold stands
+                break  # the gateway cannot be read now: every hold stands until the next pass
             state = record.get("state")
             if state in ("settled", "unknown") and record.get("cost_usd") is not None:
                 cost = float(record["cost_usd"])
