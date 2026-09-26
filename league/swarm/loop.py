@@ -7,6 +7,8 @@ One process beside the House loop, niced. Its threads:
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the gate (every few
   minutes), the nightly forward (once a day), the architect (every four hours);
+- RESEEDS (the sprint, Sept 26): below `population.start` while the architect is not due, the seeds' mechanisms are
+  founded again on admitted roots they never tried (`reseed`, at most `population.reseed_max` a pass);
 - THE MAIN LOOP (every few seconds): re-read the settings, check the guard (brake: the Gym to sleep and the
   researchers idle), manage the pool, start the rounds that are due, write the heartbeat, and leave when
   asked (the STOP files, `<root>/swarm.stop`) or when the House's release changed (the House starts the new one).
@@ -36,10 +38,10 @@ from .architect import Architect
 from .gate import Gate
 from .guard import SailGuard, provider_reader
 from .pool import GymPool
-from .researcher import Researcher
+from .researcher import Researcher, migrate_objective
 from .seeds import SEEDS, family_spec, program_for
 from .store import SwarmStore
-from .tournament import Tournament
+from .tournament import INDEX, NOT_ROTATED, Tournament
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 
@@ -160,6 +162,47 @@ class Swarm:
         # architect after it: a round over families that have not run yet would only spend.
         self.store.put("tournament_at", self.clock())
         self.store.put("architect_at", self.clock())
+        return born
+
+    def reseed(self) -> list[str]:
+        """Families from the seeds on admitted roots their mechanism never tried (a seed never founded on its own slice
+        first), while fewer than `population.start` live, at most `population.reseed_max` a pass and one a seed. A
+        reseed of a founded mechanism joins that founder's lineage like a fork (its trials, validated versions and
+        holdout looks); never XSP (its fee), never a calendar or diagonal on an index root. Each is a `swarm.born`."""
+        pop = self.settings.get("population", {})
+        room = min(int(pop.get("start", 48)) - len(self.store.families(alive=True)), int(pop.get("reseed_max", 0)))
+        if room <= 0:
+            return []
+        admitted = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", []) if str(r).upper() not in NOT_ROTATED]
+        families = self.store.families()
+        born: list[str] = []
+        for seed in SEEDS:
+            if len(born) >= room:
+                break
+            mechanism = " ".join(str(seed["mechanism"]).split())
+            kin = [f for f in families if f["mechanism"] == mechanism]
+            tried = {r for f in kin for r in f["roots"]}
+            own = [r.upper() for r in seed["roots"]]
+            choices = ([own] if not kin and all(r in admitted for r in own) else []) + [[r] for r in admitted if r not in tried]
+            for roots in choices:
+                if seed["structure"] in ("calendar", "diagonal") and any(r in INDEX for r in roots):
+                    continue
+                spec = family_spec(seed)
+                spec.update({"id": seed["id"] if roots == own else f"{seed['id']}-{roots[0].lower()}", "roots": roots,
+                             "needs": {**spec["needs"], "roots": roots}, "seed": seed["id"]})
+                founder = next((f for f in kin if f["origin"] in ("seed", "reseed")), None)
+                dead = [f for f in families if f["retired_at"] and f["structure"] == seed["structure"] and sorted(f["roots"]) == roots]
+                with self.store.atomic():
+                    if len(self.store.families(alive=True)) >= int(pop.get("start", 48)):
+                        return born
+                    fam = self.store.add_family(spec, origin="reseed", parent=founder["id"] if founder else None,
+                                                prior_lineage=dead[-1]["lineage"] if dead and not founder else None)
+                self.store.event("swarm.born", fam["id"], {"parent": founder["id"] if founder else None, "mechanism": fam["mechanism"],
+                                                            "structure": fam["structure"], "roots": fam["roots"], "origin": "reseed",
+                                                            "founder": seed.get("founder")})
+                born.append(fam["id"])
+                families.append(fam)
+                break
         return born
 
     # ------------------------------------------------------------------ status and heartbeat
@@ -309,6 +352,10 @@ class Swarm:
             # growing past it toward the ceiling only while the hourly spend is under the pace.
             if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
                 self._round("architect", self.architect.run)
+            elif self.architect.refilling() and not self.architect.due() and self.store.get("tournament_at"):
+                born = self.reseed()
+                if born:
+                    log(f"reseeded {len(born)}: {', '.join(born)}")
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()
@@ -334,6 +381,9 @@ class Swarm:
         born = self.seed()
         if born:
             log(f"seeded {len(born)} families")
+        moved = migrate_objective(self.store)  # once per store: the bests chosen anew under the robust Train objective
+        if moved["migrated"]:
+            log(f"train objective: {moved['migrated']} families' bests chosen anew, {moved['with_best']} with an eligible best")
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})

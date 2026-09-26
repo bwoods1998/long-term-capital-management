@@ -1,17 +1,35 @@
-"""The evidence lines, exactly as the plan states them ("Evidence: fast without fooling ourselves").
+"""The evidence lines, exactly as the plan states them ("Evidence: fast without fooling ourselves"), as amended by
+the owner's decision D2 of Sept 26, 2026.
 
 A search over tens of thousands of programs finds something that looks great on any window by chance,
 so these lines are the swarm's brakes. They may be TIGHTENED on evidence; loosening one is the owner's
 decision, which is why they are constants here and not settings.
 
+D2, THE EVIDENCE REFORM (docs/goals/LTCM_SWARM_SPRINT.md, "Owner decisions"; decided by the owner, Blake, Sept 26
+2026: "D2 evidence reform as written: yes"): "(a) Researchers see Validation only as pass or fail and a count of checks
+passed. (b) The deflated Sharpe uses the traded-day Sharpe, with N = the lineage's validated versions (inherited ones
+included). (c) Frequency: at least 50 trades on at least 25 distinct days. Unchanged: t >= 2, positive in 3 of 4
+quarters, positive at 1.5x the half-spread, and the whole holdout line (bootstrap lower bound above zero with Holm,
+holdout Sharpe at least half of validation's, at most 3 looks per lineage)." Before D2 the line asked for 100 trades
+on 60 days and deflated the all-days Sharpe by every Train trial of the lineage, which capped a family trading a
+fraction f of days at sqrt(f / (1 - f)) and punished sparse mechanisms twice. (a) lives in `diagnostics.py`.
+
 THE VALIDATION LINE (a family's best program, on Validation 2025):
-  - at least 100 trades on at least 60 distinct trading days;
+  - at least 50 trades on at least 25 distinct trading days (D2c);
   - mean P&L per dollar of maximum loss above zero after fees, with a one-sided t of at least 2 (the t on
     DAILY-aggregated P&L per dollar of maximum loss, `t_daily`: correlated intraday entries make a per-trade t
     overstate the evidence, the Gym's review of Sept 26);
-  - a deflated Sharpe probability of at least 0.95 given the LINEAGE's trial count (`league/stats.py`);
+  - a deflated Sharpe probability of at least 0.95 on the TRADED-DAY Sharpe (`t_daily / sqrt(days_traded)` over
+    `days_traded` observations, with the traded-day moments), against the best of N luck, N = the lineage's
+    validated versions (inherited ones included) and the spread of their traded-day Sharpes (D2b; `league/stats.py`);
   - positive in at least 3 of Validation's 4 quarters;
   - positive at 1.5x the half-spread (the stress run's P&L after fees).
+
+THE TRAIN OBJECTIVE (`train_score`, the sprint's "robust Train objective", Sept 26): a version is scored on its WORST
+Train year (the `t_daily` of each year with data, the Gym's `by_year`), times the share of Train quarters that were
+positive. It is eligible to be a family's best only with at least 40 trades on at least 20 traded days in EVERY Train
+year with data; a version whose 1.5x-stress Train run loses is never the best (`researcher.py`). The full-window t
+with a 30-trade floor it replaced rewarded sparse filters that could never meet the line's frequency.
 
 THE HOLDOUT LINE (one look per program version, at most three per lineage; the gate's box only):
   - P&L after fees above zero;
@@ -37,8 +55,8 @@ from typing import Any, Mapping, Sequence
 from .. import stats
 
 # ---------------------------------------------------------------------------- the lines (the plan's)
-MIN_TRADES = 100
-MIN_DAYS = 60
+MIN_TRADES = 50  # D2c (was 100)
+MIN_DAYS = 25    # D2c (was 60)
 MIN_T = 2.0
 MIN_DSR = 0.95
 MIN_QUARTERS_POSITIVE = 3
@@ -50,6 +68,9 @@ ALARM_MIN_LOOKS = 10
 ALARM_PASS_SHARE = 0.30
 BOOTSTRAP_BLOCK = 5
 BOOTSTRAP_DRAWS = 2000
+#: The robust Train objective's eligibility: every Train year with data (the sprint, Sept 26).
+TRAIN_YEAR_MIN_TRADES = 40
+TRAIN_YEAR_MIN_DAYS = 20
 
 
 def _num(value: Any) -> float | None:
@@ -73,7 +94,7 @@ def daily_pnl(result: Mapping[str, Any]) -> list[float]:
             and _num(d[1]) is not None]
 
 
-#: When a summary does not carry the daily series' moments, the deflated Sharpe assumes these: a fat, left tail
+#: When a summary does not carry the traded-day moments, the deflated Sharpe assumes these: a fat, left tail
 #: (short-premium programs have one), never the normal's flattering 0 and 3.
 CONSERVATIVE_SKEW = -1.0
 CONSERVATIVE_KURT = 6.0
@@ -97,36 +118,44 @@ def stressed_of(result: Mapping[str, Any]) -> dict[str, Any] | None:
     return {"status": twin.get("status"), "summary": dict(twin)} if isinstance(twin, Mapping) else None
 
 
-def deflated(summary: Mapping[str, Any], daily: Sequence[float], *, lineage_trials: int, trial_sharpes: Sequence[float]) -> float | None:
-    """The deflated Sharpe probability given the lineage's trials: from the daily series when the result carries
-    it, else from the summary's daily Sharpe, days and moments (conservative moments when they are absent)."""
-    sharpes = [float(x) for x in trial_sharpes if _num(x) is not None]
-    trials = max(1, int(lineage_trials))
-    if len(daily) >= 2:
-        row = stats.deflated_sharpe(list(daily), sharpes, trials)
-        return row["dsr"] if row else None
-    sr = _num(summary.get("sharpe_daily"))
-    n = int(summary.get("days") or 0)
+def traded_sharpe(summary: Mapping[str, Any]) -> float | None:
+    """The Sharpe of the daily returns on maximum loss over the days with entries: `t_daily / sqrt(days_traded)` (D2b).
+    None without a t or a traded day."""
+    t = daily_t(summary)
+    n = int(summary.get("days_traded") or 0)
+    return None if t is None or n < 1 else t / math.sqrt(n)
+
+
+def deflated(summary: Mapping[str, Any], *, validated_versions: int, version_sharpes: Sequence[float]) -> float | None:
+    """The deflated Sharpe probability on the TRADED-DAY Sharpe (D2b): `traded_sharpe` over `days_traded` observations
+    with the traded-day moments (`skew_traded`, `kurt_traded`; conservative ones when absent), against the Sharpe the
+    best of N = `validated_versions` unskilled versions shows by luck (their traded-day Sharpes' spread, never under the
+    1 / n of sampling noise)."""
+    sr = traded_sharpe(summary)
+    n = int(summary.get("days_traded") or 0)
     if sr is None or n < 2:
         return None
-    skew = _num(summary.get("skew_daily"))
-    kurt = _num(summary.get("kurt_daily"))
-    benchmark = stats.expected_max_sharpe(sharpes, trials, fallback_variance=1.0 / n)
+    sharpes = [float(x) for x in version_sharpes if _num(x) is not None]
+    benchmark = stats.expected_max_sharpe(sharpes, max(1, int(validated_versions)), fallback_variance=1.0 / n)
+    skew = _num(summary.get("skew_traded"))
+    kurt = _num(summary.get("kurt_traded"))
     return stats.probabilistic_sharpe(sr, n, CONSERVATIVE_SKEW if skew is None else skew, CONSERVATIVE_KURT if kurt is None else kurt,
                                       benchmark)
 
 
-def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | None, *, lineage_trials: int,
-                    trial_sharpes: Sequence[float]) -> dict[str, Any]:
+def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | None, *, validated_versions: int,
+                    version_sharpes: Sequence[float], lineage_trials: int = 0) -> dict[str, Any]:
     """Does a validation result meet the line? It may be the Gym's validation VIEW (summaries only: no trades,
-    no dates, no daily series); `stressed` is the same program's validation result at 1.5x the half-spread."""
+    no dates, no daily series); `stressed` is the same program's validation result at 1.5x the half-spread.
+    `validated_versions` and `version_sharpes` are the lineage's (`SwarmStore.lineage_validated`, this one included);
+    `lineage_trials` is recorded, no longer a divisor (D2b)."""
     s = dict(result.get("summary") or {})
     trades = int(s.get("trades") or 0)
     days = int(s.get("days_traded") or 0)
     mean = daily_mean(s)
     t = daily_t(s)
     k, n = quarters_positive(s)
-    dsr = deflated(s, daily_pnl(result), lineage_trials=lineage_trials, trial_sharpes=trial_sharpes)
+    dsr = deflated(s, validated_versions=validated_versions, version_sharpes=version_sharpes)
     stress_pnl = _num((stressed or {}).get("summary", {}).get("pnl")) if stressed else None
     checks = {
         "status_ok": result.get("status") == "ok",
@@ -141,19 +170,75 @@ def validation_line(result: Mapping[str, Any], stressed: Mapping[str, Any] | Non
     return {"passed": all(checks.values()), "checks": checks,
             "numbers": {"trades": trades, "days": days, "mean": mean, "t": t, "dsr": dsr, "quarters": f"{k}/{n}",
                         "stress_pnl": stress_pnl, "lineage_trials": int(lineage_trials),
+                        "validated_versions": int(validated_versions), "sharpe_traded": traded_sharpe(s),
                         "sharpe_daily": _num(s.get("sharpe_daily")), "pnl": _num(s.get("pnl"))}}
 
 
-def score(summary: Mapping[str, Any] | None, *, min_trades: int = 30) -> float | None:
-    """One number for "is this version better" on a window: the daily t of the mean return on maximum loss
-    (`t_daily`; the per-trade `t_stat` only from a Gym that does not report it yet), None below `min_trades`
-    trades (too few to say)."""
-    if not summary:
-        return None
-    if int(summary.get("trades") or 0) < min_trades:
-        return None
-    t = daily_t(summary)
-    return t if t is not None else _num(summary.get("t_stat"))
+def checks_passed(line: Mapping[str, Any] | None) -> tuple[int, int]:
+    """(checks met, checks) of a validation line: all a researcher or the architect may know of it besides pass or
+    fail (D2a)."""
+    checks = (line or {}).get("checks") or {}
+    return sum(1 for ok in checks.values() if ok), len(checks)
+
+
+def years_of(result: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """A Train result's per-year rows: the Gym's `by_year`, else computed from its trades and daily series (a Gym bundle
+    from before the block, the same arithmetic: `league.gym.results.by_year`). {} when neither is there."""
+    rows = result.get("by_year")
+    if isinstance(rows, Mapping):
+        return {str(k): dict(v) for k, v in rows.items() if isinstance(v, Mapping)}
+    daily, trades = result.get("daily"), result.get("trades")
+    if not isinstance(daily, list) or not isinstance(trades, list) or not daily:
+        return {}
+    from ..gym.results import by_year  # standard library only, like this module
+
+    try:
+        return by_year([t for t in trades if isinstance(t, Mapping) and t.get("day") and _num(t.get("pnl")) is not None
+                        and _num(t.get("max_loss")) is not None], [d for d in daily if isinstance(d, (list, tuple)) and len(d) >= 2])
+    except (KeyError, TypeError, ValueError):
+        return {}
+
+
+def train_score(result: Mapping[str, Any]) -> dict[str, Any]:
+    """The robust Train objective (the module docstring): {score, eligible, why, worst_year, quarters, years}.
+
+    score = the lowest per-year `t_daily` over the Train years with data, times the share of Train quarters positive (a
+    worst year below zero is scaled by 2 - share instead, so fewer positive quarters never flatter a loss); None when a
+    year has no t. eligible: a score, and at least `TRAIN_YEAR_MIN_TRADES` trades on `TRAIN_YEAR_MIN_DAYS` traded days
+    in every year; `why` names the first year short of it."""
+    years = years_of(result)
+    k, n = quarters_positive(result.get("summary") or {})
+    out: dict[str, Any] = {"score": None, "eligible": False, "why": None, "worst_year": None, "quarters": f"{k}/{n}",
+                           "years": {y: {"trades": int(r.get("trades") or 0), "days_traded": int(r.get("days_traded") or 0),
+                                         "pnl": _num(r.get("pnl")), "t_daily": _num(r.get("t_daily"))} for y, r in sorted(years.items())}}
+    if result.get("status") != "ok" or not years or n <= 0:
+        out["why"] = "no completed Train run with a per-year breakdown"
+        return out
+    ts = {y: r["t_daily"] for y, r in out["years"].items()}
+    if all(t is not None for t in ts.values()):
+        worst = min(ts, key=lambda y: (ts[y], y))
+        share = k / n
+        low = float(ts[worst])
+        out["worst_year"] = worst
+        out["score"] = round(low * share if low >= 0 else low * (2.0 - share), 6)
+    for y, r in out["years"].items():
+        if r["trades"] < TRAIN_YEAR_MIN_TRADES or r["days_traded"] < TRAIN_YEAR_MIN_DAYS:
+            out["why"] = (f"{y} has {r['trades']} trades on {r['days_traded']} days: every Train year needs at least "
+                          f"{TRAIN_YEAR_MIN_TRADES} trades on {TRAIN_YEAR_MIN_DAYS} days")
+            return out
+    if out["score"] is None:
+        out["why"] = "a Train year has no daily t"
+        return out
+    out["eligible"] = True
+    return out
+
+
+def robustness_view(result: Mapping[str, Any]) -> dict[str, Any]:
+    """A robustness run's compact figures for the researcher: status, P&L, `t_daily`, trades, and per year P&L and t."""
+    s = result.get("summary") or {}
+    return {"status": result.get("status"), "pnl": _num(s.get("pnl")), "t_daily": _num(s.get("t_daily")), "trades": s.get("trades"),
+            "by_year": {y: {"pnl": _num(r.get("pnl")), "t_daily": _num(r.get("t_daily")), "trades": r.get("trades")}
+                        for y, r in sorted(years_of(result).items())}}
 
 
 # ---------------------------------------------------------------------------- the holdout line
@@ -337,5 +422,6 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 
 
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
-           "score", "quarters_positive", "daily_pnl", "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS",
-           "LOOKS_PER_LINEAGE"]
+           "train_score", "years_of", "robustness_view", "traded_sharpe", "checks_passed", "quarters_positive", "daily_pnl",
+           "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS", "LOOKS_PER_LINEAGE", "TRAIN_YEAR_MIN_TRADES",
+           "TRAIN_YEAR_MIN_DAYS"]

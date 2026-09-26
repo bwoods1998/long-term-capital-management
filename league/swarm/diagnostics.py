@@ -6,9 +6,12 @@
   implied vol tercile, quarter, type, root, exit reason) as rows of [n, pnl, win rate, pnl per $ of max
   loss], the five worst trades with their context, and the program's errors. Train is the window the
   agents see in full; `read_run` pages through the rest (`section`).
-- VALIDATION (`validation_view`): only the mean return on maximum loss, its t, the quarters positive,
-  and whether the line was met (with the names of the checks that were not). Never trades, days or a
-  daily series.
+- VALIDATION (`validation_view`): pass or fail, and how many of the line's checks passed (the owner's
+  decision D2a, Sept 26: "Researchers see Validation only as pass or fail and a count of checks
+  passed"). Never a number the run measured, nor which checks failed: a researcher that saw Validation's
+  mean, t and failed checks tuned against it, and Validation became a second training set. Lessons
+  written before D2 carried a validation view with numbers; `scrub` takes it out of any text a model
+  reads (the graveyard, the lessons a family is born with).
 - HOLDOUT: pass or fail, from the gate; never here.
 
 Standard library only.
@@ -18,7 +21,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any, Mapping
+
+from . import evidence
 
 SUMMARY_KEYS = ("trades", "days", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss_daily", "t_daily",
                 "sharpe_daily", "mean_return_on_max_loss", "t_stat", "win_rate",
@@ -115,14 +121,37 @@ def section(result: Mapping[str, Any], name: str, *, page: int = 0, per_page: in
 
 
 def validation_view(result: Mapping[str, Any], line: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """What a researcher may know of a validation run: mean, t, quarters positive, the line met or not."""
-    s = result.get("summary") or {}
-    mean = s.get("mean_return_on_max_loss_daily", s.get("mean_return_on_max_loss"))
-    out = {"mean_return_on_max_loss": _r(mean), "t": _r(s.get("t_daily"), 3), "quarters_positive": s.get("quarters_positive")}
-    if line is not None:
-        out["line_met"] = bool(line.get("passed"))
-        out["checks_not_met"] = sorted(k for k, ok in (line.get("checks") or {}).items() if not ok)
-    return out
+    """What a researcher may know of a validation run (D2a): the line met or not and the number of its checks that
+    passed. `result` is not read: nothing it measured reaches a researcher."""
+    passed, of = evidence.checks_passed(line)
+    return {"line_met": bool((line or {}).get("passed")), "checks_passed": passed, "checks": of}
 
 
-__all__ = ["train_view", "section", "validation_view"]
+def validation_words(line: Mapping[str, Any] | None) -> str:
+    """The validation verdict in words for a prompt: "met the line" or "did not meet the line", with the count (D2a)."""
+    view = validation_view({}, line)
+    verdict = "met the validation line" if view["line_met"] else "did not meet the validation line"
+    return f"{verdict} ({view['checks_passed']} of {view['checks']} checks passed)"
+
+
+#: A validation view as lessons before D2 wrote it (`best validation {...}`: its mean, t and failed checks), also when
+#: a length cut took its closing brace.
+_OLD_VIEW = re.compile(r"best validation (?:\{[^{}]*\}?|null|None)")
+
+
+def scrub(text: Any) -> str:
+    """A lesson with any pre-D2 validation view taken out (D2a): it said Validation's numbers and failed checks."""
+
+    def verdict(match: re.Match) -> str:
+        try:
+            view = json.loads(match.group(0)[len("best validation "):])
+        except ValueError:
+            view = None
+        if isinstance(view, dict) and "line_met" in view:
+            return "best validation: " + ("line met" if view.get("line_met") else "line not met")
+        return "best validation: not recorded"
+
+    return _OLD_VIEW.sub(verdict, str(text or ""))
+
+
+__all__ = ["train_view", "section", "validation_view", "validation_words", "scrub"]

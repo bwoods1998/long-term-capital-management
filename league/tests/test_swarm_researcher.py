@@ -102,11 +102,12 @@ class ModelCycles(ResearcherCase):
         first = self.sail.bodies[0]
         self.assertEqual(first["prompt_cache_key"], f"swarm-{self.fam['id']}")
         self.assertIn("THE CONTRACT", first["input"][0]["content"])
-        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run", "retire"], "required"),
-                         "the revise turn takes an explicit research action")
+        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run"], "required"),
+                         "the revise turn always revises: a run, never retire")
         second = self.sail.bodies[1]
         self.assertEqual(([t["name"] for t in second["tools"]], second["tool_choice"]),
-                         (["gym_run", "read_run", "notebook", "graveyard", "submit", "retire"], "auto"), "the read turn has every tool")
+                         (["gym_run", "read_run", "notebook", "graveyard", "submit"], "auto"),
+                         "the read turn has every tool but retire, which a family without two validations is not offered")
         self.assertEqual(first["reasoning"]["effort"], "minimal")
         self.assertEqual(first["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
         self.assertEqual(self.store.spent(["sail_model"]) > 0, True)
@@ -128,15 +129,34 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(outputs, calls, "every call in the history has its output")
         self.assertFalse(any(i.get("type") == "reasoning" for i in body["input"]))
 
-    def test_another_root_is_another_family(self):
+    def test_a_program_may_move_its_family_to_other_admitted_roots(self):
         self.run_first()
+        pooled = self.code.replace("'roots': ['SPY']", "'roots': ['SPY', 'QQQ', 'IWM']")
+        self.steps = [{"calls": [("gym_run", {"code": pooled})]}, {"text": "ok"}]
+        self.researcher().cycle(self.fam["id"])
+        self.assertEqual(self.store.family(self.fam["id"])["roots"], ["SPY", "QQQ", "IWM"])
+        self.assertEqual(self.pool.jobs[-1].roots, ("SPY", "QQQ", "IWM"), "the run's universe is the new roots")
+        self.assertIn("Roots changed", self.store.notebook(self.fam["id"])[-1]["text"])
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 2)
+
+    def test_a_root_outside_the_admitted_list_or_a_sixth_root_is_refused(self):
+        self.run_first()
+        for roots, why in ((["SPY", "TSLA"], "not in the Gym's roots"), (["SPY", "QQQ", "IWM", "XSP", "SPXW", "DIA"], "at most 5")):
+            self.settings["gym"]["roots"] = ["SPY", "QQQ", "IWM", "XSP", "SPXW"] + (["DIA"] if "DIA" in roots else [])
+            self.steps = [{"calls": [("gym_run", {"code": self.code.replace("'roots': ['SPY']", f"'roots': {roots!r}")})]}, {"text": "ok"}]
+            self.researcher().cycle(self.fam["id"])
+            output = json.loads(calls_in(self.sail.bodies[-1])[-1]["output"])
+            self.assertEqual(output["status"], "refused")
+            self.assertIn(why, output["reason"])
+        self.assertEqual((len(self.pool.jobs), self.store.family(self.fam["id"])["roots"]), (1, ["SPY"]))
+
+    def test_a_banded_family_keeps_its_roots(self):
+        self.run_first()
+        self.store.set_band(self.fam["id"], "candidate", reason="synthetic")
         self.steps = [{"calls": [("gym_run", {"code": self.code.replace("'roots': ['SPY']", "'roots': ['QQQ']")})]}, {"text": "ok"}]
         self.researcher().cycle(self.fam["id"])
-        self.assertEqual(len(self.pool.jobs), 1)
-        output = json.loads(calls_in(self.sail.bodies[-1])[-1]["output"])
-        self.assertEqual(output["status"], "refused")
-        self.assertIn("another family", output["reason"])
-        self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
+        self.assertIn("only a Gym family", json.loads(calls_in(self.sail.bodies[-1])[-1]["output"])["reason"])
+        self.assertEqual(self.store.family(self.fam["id"])["roots"], ["SPY"])
 
     def test_a_date_in_the_parameter_overrides_is_refused_before_the_gym(self):
         self.run_first()
@@ -355,15 +375,23 @@ class ModelCycles(ResearcherCase):
         notes = [e for e in self.store.events_after(0) if e["kind"] == "swarm.note"]
         self.assertEqual([n["payload"]["text"] for n in notes], ["lesson a learned"])
 
-    def test_the_status_shows_validation_only_as_mean_t_quarters_and_the_line(self):
+    def test_the_status_shows_validation_only_as_pass_or_fail_and_a_count_of_checks(self):
         self.run_first()
-        self.store.set_state(self.fam["id"], validation_view={"mean_return_on_max_loss": 0.01, "t": 1.2, "quarters_positive": "2/4",
-                                                             "line_met": False, "checks_not_met": ["t"]}, gate="fail")
+        line = {"passed": False, "checks": {"status_ok": True, "trades": True, "days": True, "mean_positive": True, "t": False,
+                                            "dsr": False, "quarters": True, "stress": True},
+                "numbers": {"trades": 173, "days": 61, "mean": 0.0123, "t": 1.234, "dsr": 0.4321, "quarters": "3/4"}}
+        # A pre-D2 view with numbers is still in the state of a family validated before the change: never shown.
+        self.store.set_state(self.fam["id"], validation_line=line, validation_version=1, gate="fail",
+                             validation_view={"mean_return_on_max_loss": 0.0123, "t": 1.234, "quarters_positive": "3/4",
+                                              "line_met": False, "checks_not_met": ["dsr", "t"]})
         self.steps = [{"text": "ok"}]
         self.researcher().cycle(self.fam["id"])
         status = self.sail.bodies[-1]["input"][-1]["content"]
-        self.assertIn('"t": 1.2', status)
+        self.assertIn("Validation of version 1: it did not meet the validation line (6 of 8 checks passed).", status)
+        for leak in ("1.234", "0.0123", "0.4321", "173", "61", "checks_not_met", "dsr", "3/4"):
+            self.assertNotIn(leak, status)
         self.assertIn("The gate's last answer: fail.", status)
+        self.assertIn("at least 50 trades on at least 25 days", status)
 
     def test_a_stall_buys_one_rewrite_from_a_stronger_model_asked_in_the_background(self):
         self.run_first()

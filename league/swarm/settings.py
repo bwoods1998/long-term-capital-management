@@ -20,7 +20,10 @@ REPO = Path(__file__).resolve().parents[2]
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
     # The population (plan: 48 at the start of the training burst, a ceiling of 96, a floor of 16).
-    "population": {"start": 48, "ceiling": 96, "floor": 16},
+    # `reseed_max`: families a main-loop pass founds from the seeds on untried roots while below the start and the architect
+    # is not due (`Swarm.reseed`). Off (0) by default: reseeds fill the gap the architect's refill cadence keys on, so a
+    # swarm that reseeds sees the architect every `every_seconds` instead of every `refill_seconds`.
+    "population": {"start": 48, "ceiling": 96, "floor": 16, "reseed_max": 0},
     "researcher": {
         # DeepSeek-V4-Flash at asap for the inner loop. V4.1-Flash (`long_profile`) is for long, well-cached histories:
         # measured Sept 26 at the cache share a trimmed history gets (44-66%), it cost four times V4-Flash a call, so it
@@ -34,6 +37,12 @@ DEFAULTS: dict[str, Any] = {
         "rewrite_usd_day": 1.0,         # a family's rewrites a day, on their own fuse
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
+        # The bandit's top `top_families` by weight run every cycle on a stronger profile at low effort (the sprint, Sept
+        # 26); the rest stay on `profile`. Null `top_profile` turns it off. The hourly pace below governs these cycles too.
+        "top_profile": "pro_asap",
+        "top_reasoning_effort": "low",
+        "top_families": 10,
+        "top_max_output_tokens": 12000,  # low effort's reasoning (1,800-3,800 tokens measured) and a whole program
         "stall_revisions": 5,
         "rewrites_per_day": 4,
         "rewrite_min_hours": 1.0,
@@ -103,6 +112,9 @@ DEFAULTS: dict[str, Any] = {
         "openai_model": "gpt-6-astra",
         "sail_profile": "k3_balanced",
         "max_output_tokens": 12000,
+        # The operator's research agenda (swarm.json, no deploy): when non-empty, the last section of every architect
+        # request (at most 4,000 characters).
+        "agenda": "",
     },
     "gate": {
         "review_openai_model": "gpt-6-sol",

@@ -11,6 +11,9 @@
   `batch_programs` jobs with the same settings and runs them together, day-major (the Gym's
   `driver.run`: each day's chain is loaded once for the whole batch). The highest priority first (the
   bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company.
+- ROBUSTNESS runs (a new best version re-run on Train at 1.5x the half-spread and at the mid, Sept 26) have the lowest
+  priority (`ROBUSTNESS_PRIORITY`): a box takes them only when nothing else waits AND another Gym box is free (ready or
+  asleep), so they fill idle boxes and never delay a researcher's run or a validation.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
   errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool.
 - COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
@@ -44,6 +47,8 @@ from typing import Any, Callable, Mapping, Sequence
 from .store import SwarmStore
 
 _IDS = itertools.count(1)
+#: Below every other job's (a researcher's run carries its family's share, 0 to 1; validation 1; the gate 5 and 10).
+ROBUSTNESS_PRIORITY = -1.0
 #: The name of every box the pool forks begins with this (and no other box on the account's does).
 NAME_PREFIX = "ltcm-swarm-"
 
@@ -254,7 +259,12 @@ class GymPool:
             return []
         mine.sort(key=lambda j: (-j.priority, j.created, j.id))
         head = mine[0]
-        same = [j for j in mine if j.key() == head.key()][: max(1, int(self.gym.get("batch_programs", 8)))]
+        if head.purpose == "robustness" and not any(b is not box and b.kind == box.kind and b.state in ("ready", "asleep")
+                                                    for b in self.boxes.values()):
+            return []  # the last free box stays free for the inner loop
+        # A robustness run never rides in a researcher's batch (a longer batch would delay the researcher's result).
+        same = [j for j in mine if j.key() == head.key() and (j.purpose == "robustness") == (head.purpose == "robustness")]
+        same = same[: max(1, int(self.gym.get("batch_programs", 8)))]
         wait = float(self.gym.get("batch_wait_seconds", 8))
         if len(same) < int(self.gym.get("batch_programs", 8)) and self.clock() - head.created < wait and not gate:
             return []
@@ -804,4 +814,4 @@ def cleanup_stopped(root: str | Path, client: Any, *, limit: int = 100) -> dict[
             store.close()
 
 
-__all__ = ["GymPool", "GymJob", "PoolError", "Box", "cleanup_stopped"]
+__all__ = ["GymPool", "GymJob", "PoolError", "Box", "cleanup_stopped", "ROBUSTNESS_PRIORITY"]

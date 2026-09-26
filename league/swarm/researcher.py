@@ -8,15 +8,35 @@ first cycle runs its starter program without a model call (seeds only).
 
 THE TOOLS (`TOOLS`): `gym_run` (a new version on Train; its compact diagnostic), `read_run` (a section of
 a past Train run), `notebook` (append / read: its memory), `graveyard` (lessons of retired families),
-`submit` (make a version its best: the tournament validates it), `retire` (explicitly abandon the entire Gym family,
-subject to the population floor). The contract (`league/CONTRACT.md`) is
-the shared, cached prefix of every call; each family's calls carry its own `prompt_cache_key`.
+`submit` (make an eligible version its best: the tournament validates it), `retire` (explicitly abandon the entire
+Gym family). The contract (`league/CONTRACT.md`) is the shared, cached prefix of every call; each family's calls carry
+its own `prompt_cache_key`.
 
-WHAT IT SEES. Train in full; of Validation only the mean, t, quarters positive and the line (met or
-not, and which checks were not); of the holdout only the gate's pass or fail. Never a date in ctx (the
+RETIRE (Sept 26: an unguarded `retire` on the REVISE turn took the population from 49 to 16 in 24 minutes). A REVISE
+turn offers `gym_run` alone: a REVISE always revises. A READ turn offers `retire` only while more families live than
+`population.start` and the family has had at least two validations (`can_retire`); a retire that is refused anyway
+is a plain refusal, never a cycle error (an error backs the family off for up to 30 minutes). The tournament's own
+retirements are unchanged.
+
+WHAT IT SEES. Train in full; of Validation only pass or fail and how many of the line's checks passed (the owner's
+decision D2a, `diagnostics.validation_view`); of the holdout only the gate's pass or fail. Never a date in ctx (the
 Gym enforces it; the safety check refuses date literals before a program reaches the Gym).
 
-STALLS. Five revisions without a better Train score (`evidence.score`) buy ONE rewrite from a stronger
+THE BEST (the robust Train objective, Sept 26): `evidence.train_score`, the worst Train year's daily t times the
+share of Train quarters positive, and a version is eligible only with 40 trades on 20 days in every Train year. A new
+best queues two ROBUSTNESS runs of it on Train (1.5x the half-spread and the mid) at the pool's lowest priority; they
+come back into the family's status, count as trials, and a version that loses at 1.5x is never the best again
+(`robust_failed`; the next eligible candidate takes its place). `migrate_objective` chose every living family's best
+anew under this score once, keeping the old selection in `legacy_best`.
+
+ROOTS. A family holds one to five roots of the admitted list (`gym.roots`). A program whose NEEDS names other
+admitted roots changes the family's roots (a Gym family only); its validation and holdout runs use the version's own
+NEEDS roots (`needs_roots`).
+
+THE TOP TEN. The bandit's top `top_families` by weight run their cycles on `top_profile` (V4-Pro asap) at
+`top_reasoning_effort` (low); the others on `profile`. The swarm's hourly pace governs every cycle alike.
+
+STALLS. Five revisions without a better Train score (`evidence.train_score`) buy ONE rewrite from a stronger
 model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), asked
 in the background (a cycle never waits for it) and run as the family's next cycle's Gym run; at most
 `rewrites_per_day` a family, `rewrite_min_hours` apart; then the counter starts again.
@@ -35,7 +55,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence, public
-from .pool import GymJob, PoolError
+from .pool import ROBUSTNESS_PRIORITY, GymJob, PoolError
 from .store import SwarmStore
 
 CONTRACT = Path(__file__).resolve().parents[1] / "CONTRACT.md"
@@ -68,28 +88,40 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "graveyard", "description": "Search the lessons of retired families (what failed and why).",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
     {"name": "submit", "description": "Make the version behind one of your Train runs your family's best: the hourly tournament "
-                                      "runs your best on Validation and, if it meets the line, sends it to the gate.",
+                                      "runs your best on Validation and, if it meets the line, sends it to the gate. Only a run "
+                                      "eligible under the Train score (40 trades on 20 days in every Train year) at the normal "
+                                      "spread qualifies, and never a version that lost money at 1.5x the half-spread.",
      "parameters": {"type": "object", "properties": {"run_id": {"type": "string"}, "note": {"type": "string"}},
                     "required": ["run_id"]}},
     {"name": "retire", "description": "End research on your entire Gym family when you abandon its mechanism, not merely "
                                      "its latest version. This is final: best programs, evidence and trial counts remain; "
-                                     "no further runs or tools start. Only Gym families above the population minimum can retire.",
+                                     "no further runs or tools start. Offered only while the population is above its start "
+                                     "and your family has had at least two validations.",
      "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
                     "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn requires an explicit research action; a missing call fails and uses the normal backoff.
-TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0], TOOLS[-1]]
+#: A REVISE turn requires a run (a REVISE always revises: `retire` is never offered there); a missing call fails and
+#: uses the normal backoff.
+TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0]]
+#: A READ turn without `retire` (the family may not retire now: `Researcher.can_retire`).
+TOOLS_READ: list[dict[str, Any]] = TOOLS[:-1]
 
 ROLE = """You are a researcher in the LTCM options swarm. You own one family and improve its program in the Gym.
 Work in short cycles. REVISE: call gym_run with your revised program (the whole file in `code`, or only `params` to
-change parameters) and put what you learned from the last run in its `note`. READ: when the result comes back, read it;
-submit the run if it is your best; queue your next gym_run (it opens your next cycle); use read_run, graveyard or the
-notebook only when the diagnostic leaves you unsure. Keep every program inside the contract below; the Gym refuses
-anything else. Reply with tool calls; keep prose short.
-If you conclude the entire family's mechanism should be abandoned, call retire with your reason in either REVISE or
-READ instead of repeating an empty or unchanged program. Retirement is final for the family and preserves its best
-program and all evidence. A rejected version alone is not retirement; the population minimum may refuse retirement.
+change parameters) and put what you learned from the last run in its `note`. A REVISE always revises: never repeat an
+empty or unchanged program. READ: when the result comes back, read it; submit the run if it is your best; queue your
+next gym_run (it opens your next cycle); use read_run, graveyard or the notebook only when the diagnostic leaves you
+unsure. Keep every program inside the contract below; the Gym refuses anything else. Reply with tool calls; keep prose
+short.
+THE TRAIN SCORE you climb is your WORST Train year's daily t, times the share of Train quarters that were positive. A
+version counts only with at least 40 trades on at least 20 days in EVERY Train year, and never if it loses money at 1.5x
+the half-spread (the Gym re-runs each new best at 1.5x and at the mid; the results come back in your status). Seek a
+mechanism that earns in every year, not a filter that shines in one.
+Your family trades one to five of the Gym's roots; to change them, name the new roots in your program's NEEDS.
+The retire tool appears only while the population is above its start and your family has had at least two
+validations. Call it only when you abandon the entire mechanism, not one rejected version. Retirement is final for
+the family and preserves its best program and all evidence.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -136,6 +168,42 @@ def needs_of(code: str) -> dict[str, Any] | None:
     return None
 
 
+def needs_roots(code: Any, fallback: Any = ()) -> tuple[str, ...]:
+    """The roots a program's NEEDS names (upper case, in order, once each), else `fallback`: the universe its validation
+    and holdout runs use (the Gym trades a program's NEEDS roots within the run's roots)."""
+    needs = needs_of(str(code or "")) or {}
+    roots = needs.get("roots")
+    roots = [roots] if isinstance(roots, str) else roots
+    if isinstance(roots, (list, tuple)):
+        out = tuple(dict.fromkeys(str(r).strip().upper() for r in roots if str(r).strip()))
+        if out:
+            return out
+    return tuple(fallback or ())
+
+
+def with_roots(code: str, roots: list[str]) -> str | None:
+    """`code` with its NEEDS literal's roots set to `roots` (a fork's first version on the parent's roots plus one);
+    None when NEEDS is not a literal dict at the top level."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "NEEDS" for t in node.targets):
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                return None
+            if not isinstance(value, dict) or node.value.end_lineno is None or node.value.end_col_offset is None:
+                return None
+            value["roots"] = list(roots)
+            lines = code.splitlines(keepends=True)
+            start = sum(len(x) for x in lines[:node.value.lineno - 1]) + len(lines[node.value.lineno - 1].encode("utf-8")[:node.value.col_offset].decode("utf-8"))
+            end = sum(len(x) for x in lines[:node.value.end_lineno - 1]) + len(lines[node.value.end_lineno - 1].encode("utf-8")[:node.value.end_col_offset].decode("utf-8"))
+            return code[:start] + repr(value) + code[end:]
+    return None
+
+
 def check_code(code: str) -> str | None:
     """Why the Gym would refuse `code` before running it (None when admissible). The Gym's own check when it
     is importable here; the box checks again either way."""
@@ -173,6 +241,23 @@ def sanitize(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+#: A family holds one to five roots of the admitted list (the Gym's NEEDS allows five).
+MAX_ROOTS = 5
+#: Eligible versions a family keeps as candidates for its best: the next takes the place of one that loses at 1.5x.
+CANDIDATES = 5
+
+
+def candidates_with(rows: Any, score: float, version: int, run_id: str) -> list[list[Any]]:
+    """The family's candidates ([score, version, run_id], best first, at most `CANDIDATES`) with this eligible run: a
+    version keeps its highest score."""
+    rows = [list(r) for r in (rows or []) if isinstance(r, (list, tuple)) and len(r) == 3]
+    same = [r for r in rows if int(r[1]) == int(version)]
+    if same and float(same[0][0]) >= float(score):
+        return rows
+    rows = [r for r in rows if int(r[1]) != int(version)] + [[float(score), int(version), str(run_id)]]
+    return sorted(rows, key=lambda r: (-float(r[0]), int(r[1])))[:CANDIDATES]
+
+
 #: A queued run the Gym could not run for a passing reason (busy, restarting, superseded) is retried this many times
 #: before the model hears why; any other Gym error goes to the model at once.
 PENDING_RETRIES = 2
@@ -204,6 +289,8 @@ class Researcher:
         self.starter = starter
         self.background = background
         self._rewriting: dict[str, Any] = {}
+        #: (family, version) whose robustness runs this process queued (a restart loses queued jobs: they are queued again).
+        self._robust: set[tuple[str, int]] = set()
         self.pace: Callable[[], bool] = lambda: False  # the swarm's hourly spend at its pace: no rewrite starts
 
     @property
@@ -221,36 +308,72 @@ class Researcher:
         lessons = spec.get("lessons") or []
         if lessons:
             lines.append("Lessons from the graveyard when you were born:")
-            lines += [f"- {x}" for x in lessons[:3]]
+            lines += [f"- {diagnostics.scrub(x)}" for x in lessons[:3]]
         return "\n".join(lines)
 
     def status(self, fam: Mapping[str, Any]) -> str:
         best = self.store.version(fam["id"], fam.get("best_version"))
         state = fam.get("state") or {}
-        val = state.get("validation_view")
+        line = state.get("validation_line")
         gate = state.get("gate")
         notes = self.store.notebook(fam["id"], limit=5)
         parts = [f"Cycle {int(fam['cycles']) + 1}. Versions so far: {fam['revisions']}. Lineage trials: "
                  f"{self.store.lineage_trials(fam['id'])}. Revisions since a better Train score: {fam['stall']} "
                  f"(a rewrite from a stronger model comes at {self.cfg.get('stall_revisions', 5)})."]
+        if state.get("best_train_version") is not None:
+            parts.append(f"Your best Train score: {fam.get('best_train')} (version {state['best_train_version']}).")
         if best:
-            parts.append(f"Your best: version {best['n']} (Train score {fam.get('best_train')}).")
+            parts.append(f"Your submitted best: version {best['n']}.")
         else:
-            parts.append("No best submitted yet: submit your best Train run.")
-        if val:
-            parts.append(f"Your best on Validation: {json.dumps(val)}.")
-        parts.append("The unchanged validation line requires at least 100 trades on at least 60 days, daily t >= 2, "
-                     "deflated Sharpe probability >= 0.95, 3 of 4 quarters positive, and positive P&L at 1.5x spread. "
-                     "Seek mechanisms that produce enough independent opportunities to measure; never force trades "
-                     "or weaken the evidence requirements.")
+            parts.append("No best submitted yet: submit your best eligible Train run.")
+        if line and state.get("validation_version") is not None:
+            # D2a: pass or fail and a count, never a number Validation measured nor which checks failed.
+            parts.append(f"Validation of version {state['validation_version']}: it {diagnostics.validation_words(line)}.")
+        robust = self.robustness_text(fam)
+        if robust:
+            parts.append(robust)
+        parts.append(f"The validation line requires at least {evidence.MIN_TRADES} trades on at least {evidence.MIN_DAYS} days, "
+                     "daily t >= 2, a deflated Sharpe probability >= 0.95 on traded days, 3 of 4 quarters positive, and positive "
+                     "P&L at 1.5x spread. Seek mechanisms that produce enough independent opportunities to measure; never force "
+                     "trades or weaken the evidence requirements.")
         if gate:
             parts.append(f"The gate's last answer: {gate}.")
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {n['text'][:300]}" for n in notes))
         parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
-                     "otherwise revise and call gym_run, with what you learned in its note. If you abandon the entire "
-                     "mechanism, call retire with your reason.")
+                     "otherwise revise and call gym_run, with what you learned in its note."
+                     + (" If you abandon the entire mechanism, call retire with your reason." if self.can_retire(fam) else ""))
         return "\n".join(parts)
+
+    def robustness_text(self, fam: Mapping[str, Any]) -> str:
+        """The "Robustness" block of the family's status: its best version's Train runs at 1.5x the half-spread and at the
+        mid, compact, once they are back; and the versions that lost at 1.5x."""
+        state = fam.get("state") or {}
+        out = []
+        n = state.get("best_train_version")
+        rows = (state.get("robustness") or {}).get(str(n)) if n is not None else None
+        if rows:
+            parts = [f"{label}: {json.dumps(rows[label], default=str)}" for label in ("stress_1.5", "mid") if rows.get(label)]
+            if parts:
+                out.append(f"Robustness of your best (version {n}, the same Train window): " + "; ".join(parts) + ".")
+        failed = state.get("robust_failed") or []
+        if failed:
+            out.append(f"Versions that lost money on Train at 1.5x the half-spread and can never be your best: "
+                       f"{', '.join(str(v) for v in failed[-8:])}.")
+        return " ".join(out)
+
+    # ------------------------------------------------------------------ retirement, the top ten
+    def can_retire(self, fam: Mapping[str, Any]) -> bool:
+        """`retire` is offered (and accepted) only for a Gym family with at least two validations while more families live
+        than `population.start` (the sprint, Sept 26)."""
+        if fam.get("band") != "gym" or int(fam.get("validations") or 0) < 2:
+            return False
+        return len(self.store.families(alive=True)) > int(self.settings.get("population", {}).get("start", 48))
+
+    def is_top(self, fam: Mapping[str, Any], *, top: int) -> bool:
+        """Among the bandit's `top` families by weight (a weight of zero or none never is)."""
+        weight_rank = sorted((f.get("weight") or 0.0 for f in self.store.families(alive=True)), reverse=True)
+        return bool(weight_rank) and top > 0 and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
 
     # ------------------------------------------------------------------ tools
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
@@ -283,15 +406,26 @@ class Researcher:
         needs = needs_of(code)
         if needs is None:
             return {"status": "refused", "reason": "NEEDS must be a literal dict at the top level"}
-        roots = needs.get("roots") or []
-        roots = [roots] if isinstance(roots, str) else roots
-        extra = sorted({str(r).upper() for r in roots} - set(fam["roots"]))
-        if extra:
-            return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])}; NEEDS names {', '.join(extra)} "
-                                                   "(another root is another family: say so in your notebook)"}
+        roots = list(needs_roots(code))
+        admitted = [str(r).upper() for r in self.settings.get("gym", {}).get("roots", [])]
+        change = bool(roots) and set(roots) != set(fam["roots"])
+        if change:
+            outside = [r for r in roots if r not in admitted]
+            if outside:
+                return {"status": "refused", "reason": f"NEEDS names {', '.join(outside)}, not in the Gym's roots ({', '.join(admitted)})"}
+            if len(roots) > MAX_ROOTS:
+                return {"status": "refused", "reason": f"a family holds at most {MAX_ROOTS} roots; NEEDS names {len(roots)}"}
+            if fam.get("band") != "gym":
+                return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])} in its band; only a Gym family "
+                                                       "changes its roots"}
         with self.store.atomic():
             if self._terminal(fam["id"], out):
                 return {"status": "retired", "reason": "the family is retired; no run started"}
+            if change:  # a new version on other roots of the admitted list: the family's slice follows it
+                self.store.update_family(fam["id"], roots=roots)
+                self.store.note(fam["id"], f"Roots changed from {', '.join(fam['roots'])} to {', '.join(roots)}.")
+                out["roots"] = roots
+                fam = {**fam, "roots": roots}
             version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
         job = GymJob(family=fam["id"], version=version["n"], code=code, params=params, window="train", roots=tuple(fam["roots"]),
                      stress=stress, purpose="train", priority=float(fam.get("weight") or 0.0))
@@ -311,27 +445,51 @@ class Researcher:
                     "hint": "the Gym could not run it now; your version is saved: rerun it next cycle"}
         out["gym_seconds"] = round(self.clock() - began, 2)
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
-        run = self.store.add_run(fam["id"], version["n"], result, window="train", stress=stress, purpose="train",
+        robust = evidence.train_score(result) if stress == 1.0 else None
+        recorded = result
+        if robust is not None and isinstance(result.get("summary"), Mapping):  # the run's row keeps its score (`submit` reads it)
+            recorded = {**result, "summary": {**result["summary"], "train_score": robust["score"], "train_eligible": robust["eligible"]}}
+        run = self.store.add_run(fam["id"], version["n"], recorded, window="train", stress=stress, purpose="train",
                                  program_years=years)
         out["run_id"] = run["run_id"]
         out["trials"] = out.get("trials", 0) + int(run["trials"])
         view = diagnostics.train_view(result, lineage_trials=self.store.lineage_trials(fam["id"]))
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
-        score = evidence.score(result.get("summary")) if stress == 1.0 and result.get("status") == "ok" else None
+        score = robust["score"] if robust is not None and robust["eligible"] else None
+        best = False
         with self.store.atomic():
             current = self.store.family(fam["id"]) or {}
-            if not current.get("retired_at") and score is not None and (current.get("best_train") is None or score > float(current["best_train"])):
-                self.store.update_family(fam["id"], best_train=score, stall=0)
-                self.store.set_state(fam["id"], best_train_run=run["run_id"], best_train_version=version["n"])
-                view["new_best_train_score"] = round(score, 3)
-                out["improved"] = True
-        view["train_score"] = None if score is None else round(score, 3)
-        out["score"] = view["train_score"]
+            state = current.get("state") or {}
+            failed = version["n"] in (state.get("robust_failed") or [])
+            if not current.get("retired_at") and score is not None and not failed:
+                self.store.set_state(fam["id"], train_candidates=candidates_with(state.get("train_candidates"), score, version["n"],
+                                                                                 run["run_id"]))
+                if current.get("best_train") is None or score > float(current["best_train"]):
+                    self.store.update_family(fam["id"], best_train=score, stall=0)
+                    self.store.set_state(fam["id"], best_train_run=run["run_id"], best_train_version=version["n"])
+                    view["new_best_train_score"] = round(score, 3)
+                    out["improved"] = True
+                    best = True
+        if robust is not None:
+            view["train_score"] = {"score": robust["score"], "eligible": robust["eligible"] and not failed,
+                                   "worst_year": robust["worst_year"], "quarters_positive": robust["quarters"], "by_year": robust["years"]}
+            if not robust["eligible"]:
+                view["train_score"]["why_not_eligible"] = robust["why"]
+            elif failed:
+                view["train_score"]["why_not_eligible"] = "this version lost money on Train at 1.5x the half-spread"
+        out["score"] = None if score is None else round(score, 3)
+        if best:
+            self.queue_robustness(fam["id"], version["n"], code, params, needs_roots(code, fam["roots"]))
         return view
 
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
         if name == "retire":
+            # Refused unless offered (`can_retire`); a refusal is a tool answer, never a cycle error (no backoff).
+            if not self.can_retire(self.store.family(fam["id"]) or fam):
+                out["retire_refused"] = True
+                return {"status": "refused", "reason": "retire is not available to your family now (it needs at least two "
+                                                       "validations and a population above its start): keep researching"}
             result = self.store.retire_gym(fam["id"], args.get("reason"),
                                            floor=int(self.settings.get("population", {}).get("floor", 16)), source="researcher")
             if result["status"] == "retired":
@@ -340,9 +498,8 @@ class Researcher:
                     self.pool.cancel_family(fam["id"])
                 except Exception:  # queued work is also rejected by durable-state checks on the next cycle
                     pass
-            elif result.get("deferred") == "population_floor":
-                out["retirement_deferred"] = True
-                out["error"] = "retirement deferred: the population is at its minimum"
+            else:
+                out["retire_refused"] = True
             return result
         if name == "gym_run":
             return self._gym_run(fam, args, out, author=author)
@@ -373,18 +530,141 @@ class Researcher:
         if name == "graveyard":
             rows = self.store.graveyard(str(args.get("query") or ""), limit=5)
             return {"lessons": [{"family": r["family"], "mechanism": r["mechanism"][:200], "structure": r["structure"],
-                                 "roots": r["roots"], "lesson": r["lesson"][:600]} for r in rows]}
+                                 "roots": r["roots"], "lesson": diagnostics.scrub(r["lesson"])[:600]} for r in rows]}
         if name == "submit":
             run = self.store.run(str(args.get("run_id") or ""))
             if run is None or run["family"] != fam["id"] or run["window"] != "train" or run["version"] is None:
                 return {"error": "no such Train run of your family"}
             if run["status"] != "ok":
                 return {"error": f"that run's status is {run['status']}: only a run that completed can be your best"}
+            eligible, why = self.eligible_run(fam, run)
+            if not eligible:
+                return {"error": f"that run cannot be your best: {why}"}
             self.store.update_family(fam["id"], best_version=int(run["version"]))
             self.store.set_state(fam["id"], submitted_run=run["run_id"], submitted_note=str(args.get("note") or "")[:300])
             out["submitted"] = int(run["version"])
             return {"ok": True, "best_version": int(run["version"]), "next": "the tournament validates it within the hour"}
         return {"error": f"unknown tool {name}"}
+
+    def eligible_run(self, fam: Mapping[str, Any], run: Mapping[str, Any]) -> tuple[bool, str]:
+        """Can this Train run's version be the family's best? A run at the normal spread that the Train score finds
+        eligible (its row's score, else its kept full result), of a version that has not lost at 1.5x the half-spread."""
+        if float(run.get("stress") or 1.0) != 1.0 or run.get("purpose") not in (None, "train"):
+            return False, "only a Train run of yours at the normal spread counts"
+        state = (self.store.family(fam["id"]) or fam).get("state") or {}
+        if int(run["version"]) in (state.get("robust_failed") or []):
+            return False, "its version lost money on Train at 1.5x the half-spread"
+        summary = run.get("summary") or {}
+        if "train_eligible" in summary:
+            return (True, "") if summary["train_eligible"] else (False, "it is not eligible under the Train score (40 trades on "
+                                                                         "20 days in every Train year)")
+        result = self.store.run_result(run["run_id"])
+        if result is None:
+            return False, "its full result is no longer kept, so its Train score cannot be checked: run it again"
+        robust = evidence.train_score(result)
+        return (True, "") if robust["eligible"] else (False, str(robust["why"]))
+
+    # ------------------------------------------------------------------ robustness runs
+    def queue_robustness(self, fid: str, n: int, code: str, params: Mapping[str, Any], roots: tuple[str, ...]) -> bool:
+        """Two Train runs of a new best version, at 1.5x the half-spread and at the mid, at the pool's lowest priority (they
+        fill idle boxes and never delay a researcher's run or a validation). Each counts as a trial when it lands; its
+        compact figures go to the family's state (`robustness`), and a loss at 1.5x demotes the version (`robust_landed`).
+        Not waited for; once per version per process."""
+        submit = getattr(self.pool, "submit", None)
+        if submit is None or (fid, int(n)) in self._robust:
+            return False
+        self._robust.add((fid, int(n)))
+        with self.store.atomic():
+            fam = self.store.family(fid) or {}
+            if fam.get("retired_at"):
+                return False
+            rows = dict((fam.get("state") or {}).get("robustness") or {})
+            rows[str(n)] = {"stress_1.5": None, "mid": None, "queued_at": self.clock()}
+            for old in sorted(rows, key=lambda k: float((rows[k] or {}).get("queued_at") or 0))[:-4]:
+                rows.pop(old, None)  # the last four versions' figures are kept
+            self.store.set_state(fid, robustness=rows)
+        for label, stress in (("stress_1.5", evidence.STRESS), ("mid", 0.0)):
+            job = GymJob(family=fid, version=int(n), code=code, params=dict(params or {}), window="train", roots=tuple(roots),
+                         stress=stress, purpose="robustness", priority=ROBUSTNESS_PRIORITY)
+            job.late = lambda result, label=label, stress=stress: self.robust_landed(fid, int(n), label, stress, result)
+            job.late_fail = lambda why, label=label: self.robust_landed(fid, int(n), label, None, {"status": "failed", "reason": why})
+            submit(job)
+        return True
+
+    def ensure_robustness(self, fam: Mapping[str, Any]) -> None:
+        """The best version's robustness runs, when they were never queued or a restart lost them."""
+        state = fam.get("state") or {}
+        n = state.get("best_train_version")
+        if n is None or (fam["id"], int(n)) in self._robust:
+            return
+        rows = (state.get("robustness") or {}).get(str(n)) or {}
+        if rows.get("stress_1.5") and rows.get("mid"):
+            return
+        version = self.store.version(fam["id"], int(n))
+        if version and version.get("code"):
+            self.queue_robustness(fam["id"], int(n), version["code"], version.get("params") or {},
+                                  needs_roots(version["code"], fam["roots"]))
+
+    def robust_landed(self, fid: str, n: int, label: str, stress: float | None, result: Mapping[str, Any]) -> None:
+        """A robustness run's result (on the pool's dispatcher thread): recorded as a trial, its compact figures kept,
+        and a loss at 1.5x the half-spread takes the version out of the family's best (the next candidate takes its place)."""
+        try:
+            fam = self.store.family(fid)
+            if fam is None:
+                return
+            if stress is not None:
+                years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+                self.store.add_run(fid, n, result, window="train", stress=stress, purpose="robustness", program_years=years)
+            view = evidence.robustness_view(result) if stress is not None else {"status": "failed",
+                                                                                "reason": str(result.get("reason") or "")[:200]}
+            demoted = None
+            with self.store.atomic():
+                fam = self.store.family(fid) or fam
+                state = fam.get("state") or {}
+                rows = dict(state.get("robustness") or {})
+                rows[str(n)] = {**(rows.get(str(n)) or {}), label: view}
+                self.store.set_state(fid, robustness=rows)
+                pnl = view.get("pnl")
+                if label == "stress_1.5" and result.get("status") == "ok" and isinstance(pnl, (int, float)) and pnl <= 0 \
+                        and not fam.get("retired_at"):
+                    demoted = self._demote(fam, n)
+            if demoted is not None:
+                self.store.event("swarm.robustness", fid, {"version": n, "action": "demoted", "next": demoted.get("version")})
+                if demoted.get("version") is not None:
+                    version = self.store.version(fid, int(demoted["version"]))
+                    if version and version.get("code"):
+                        self.queue_robustness(fid, int(demoted["version"]), version["code"], version.get("params") or {},
+                                              needs_roots(version["code"], fam["roots"]))
+        except Exception:  # noqa: BLE001 - on the dispatcher's thread: a robustness record never breaks the pool
+            pass
+
+    def _demote(self, fam: Mapping[str, Any], n: int) -> dict[str, Any]:
+        """Version `n` lost at 1.5x: never the best again; the family's next eligible candidate becomes its best (under
+        the store's transaction)."""
+        fid = fam["id"]
+        state = fam.get("state") or {}
+        failed = list(state.get("robust_failed") or [])
+        if n not in failed:
+            failed.append(int(n))
+        rest = [c for c in (state.get("train_candidates") or []) if int(c[1]) not in failed]
+        fields: dict[str, Any] = {}
+        values: dict[str, Any] = {"robust_failed": failed[-50:], "train_candidates": rest}
+        nxt: dict[str, Any] = {"version": None}
+        if state.get("best_train_version") == n:
+            if rest:
+                score, version, run_id = rest[0]
+                fields.update(best_train=float(score), stall=0)
+                values.update(best_train_version=int(version), best_train_run=run_id)
+                nxt = {"version": int(version), "score": float(score)}
+            else:
+                fields.update(best_train=None)
+                values.update(best_train_version=None, best_train_run=None)
+        if fam.get("best_version") == n:
+            fields.update(best_version=None)  # the tournament validates the best by Train score instead
+        if fields:
+            self.store.update_family(fid, **fields)
+        self.store.set_state(fid, **values)
+        return nxt
 
     def _terminal(self, fid: str, out: dict[str, Any]) -> bool:
         fam = self.store.family(fid)
@@ -422,17 +702,26 @@ class Researcher:
                                              f"\n\nIts diagnostic:\n{json.dumps(view, default=str)}"}]
         self.store.save_convo(fam["id"], [{"cycle": 1, "items": items}])
         with self.store.atomic():
-            if view.get("status") == "ok" and view.get("run_id") and not self._terminal(fam["id"], out):
+            eligible = bool((view.get("train_score") or {}).get("eligible"))
+            if view.get("status") == "ok" and view.get("run_id") and eligible and not self._terminal(fam["id"], out):
                 self.store.update_family(fam["id"], best_version=int(view["version"]))
         out["starter"] = True
 
-    def _profile(self, history_chars: int) -> str:
+    def _profile(self, history_chars: int, fam: Mapping[str, Any] | None = None) -> tuple[str, str, int]:
+        """(profile, reasoning effort, max output tokens) of a cycle's model call: the bandit's top `top_families` on
+        `top_profile` at `top_reasoning_effort` (unless the swarm is at its hourly pace); the rest as before."""
+        top = self.cfg.get("top_profile")
+        if top and fam is not None and not self.pace() and self.is_top(fam, top=int(self.cfg.get("top_families", 10))):
+            return (str(top), str(self.cfg.get("top_reasoning_effort", "low")),
+                    int(self.cfg.get("top_max_output_tokens", self.cfg.get("max_output_tokens", 8000))))
+        effort, most = str(self.cfg.get("reasoning_effort", "minimal")), int(self.cfg.get("max_output_tokens", 8000))
         if history_chars > int(self.cfg.get("long_history_chars", 60000)):
-            return str(self.cfg.get("long_profile", "flash41_asap"))
-        return str(self.cfg.get("profile", "flash_asap"))
+            return str(self.cfg.get("long_profile", "flash41_asap")), effort, most
+        return str(self.cfg.get("profile", "flash_asap")), effort, most
 
     def _model_cycle(self, fam: dict[str, Any], out: dict[str, Any]) -> None:
         fid = fam["id"]
+        self.ensure_robustness(fam)
         cycles, pending = self.store.convo(fid)
         cycles = self.trim([c for c in cycles if isinstance(c, dict)])
         n = int(fam["cycles"]) + 1
@@ -490,14 +779,14 @@ class Researcher:
             items = [{"role": "system", "content": self.system}, {"role": "user", "content": self.brief(fam)}]
             items += sanitize(history + current)
             chars = sum(len(json.dumps(i, default=str)) for i in items)
-            profile = self._profile(chars)
+            profile, effort, most = self._profile(chars, fam)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE requires running or explicitly retiring; READ follows a completed run and offers every tool.
+            # REVISE requires a run (never retire); READ follows a completed run and offers every tool, retire only when
+            # the family may retire (`can_retire`).
             revise = not gym_done
-            response = self.router.sail(profile, items, family=fid, key=key, tools=TOOLS_REVISE if revise else TOOLS,
-                                        effort=str(self.cfg.get("reasoning_effort", "minimal")),
-                                        max_output=int(self.cfg.get("max_output_tokens", 8000)), cache_key=f"swarm-{fid}",
-                                        cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
+            tools = TOOLS_REVISE if revise else (TOOLS if self.can_retire(fam) else TOOLS_READ)
+            response = self.router.sail(profile, items, family=fid, key=key, tools=tools, effort=effort, max_output=most,
+                                        cache_key=f"swarm-{fid}", cap_usd_day=float(self.cfg.get("family_usd_day", 2.0)),
                                         tool_choice="required" if revise else "auto")
             out["model_calls"] += 1
             out["cost_usd"] = round(out["cost_usd"] + float(response.cost_usd or 0), 6)
@@ -514,11 +803,6 @@ class Researcher:
                 break
             stop = False
             for call in calls:
-                if out.get("retirement_deferred"):
-                    current.append({"type": "function_call_output", "call_id": call.call_id,
-                                    "output": json.dumps({"status": "refused", "reason": "this cycle is deferred at the population minimum"})})
-                    stop = True
-                    continue
                 if self._terminal(fid, out):
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
@@ -539,8 +823,11 @@ class Researcher:
                     current.append({"type": "function_call_output", "call_id": call.call_id,
                                     "output": json.dumps({"error": "one run is already queued for your next cycle"})})
                     continue
-                if out["tool_calls"] >= max_tools:
-                    result: Any = {"error": "this cycle's tool budget is spent; continue next cycle"}
+                if call.name == "retire" and tools is not TOOLS:  # not offered (a REVISE turn, or `can_retire` said no)
+                    result: Any = {"status": "refused", "reason": "retire is not offered on this turn: revise and run"}
+                    out["retire_refused"] = True  # a plain refusal, never a cycle error (no backoff)
+                elif out["tool_calls"] >= max_tools:
+                    result = {"error": "this cycle's tool budget is spent; continue next cycle"}
                 elif call.error:
                     result = {"error": call.error}
                 else:
@@ -554,17 +841,15 @@ class Researcher:
                 current.append({"type": "function_call_output", "call_id": call.call_id,
                                 "output": json.dumps(result, default=str)[:12000]})
                 fam = self.store.family(fid) or fam
-                if self._terminal(fid, out) or out.get("retirement_deferred"):
+                if self._terminal(fid, out):
                     stop = True
             if stop or pending:
                 break
-        if self._terminal(fid, out) or out.get("retirement_deferred"):
+        if self._terminal(fid, out):
             if pending:
                 for item in current:
                     if item.get("type") == "function_call_output" and item.get("call_id") == pending.get("call_id"):
-                        reason = ("the family retired before the queued run started" if out.get("retired") else
-                                  "the cycle is deferred at the population minimum")
-                        item["output"] = json.dumps({"status": "cancelled", "reason": reason})
+                        item["output"] = json.dumps({"status": "cancelled", "reason": "the family retired before the queued run started"})
             pending = None
         cycles.append({"cycle": n, "items": [i for i in current if i.get("type") != "reasoning"]})
         self.store.save_convo(fid, cycles, pending)
@@ -608,13 +893,11 @@ class Researcher:
         if fid in self._rewriting or state.get("rewrite_ready") or len(today) >= int(self.cfg.get("rewrites_per_day", 4)) \
                 or (today and now - max(float(t) for t in today) < 3600 * float(self.cfg.get("rewrite_min_hours", 1.0))):
             return False
-        weight_rank = sorted((f.get("weight") or 0.0 for f in self.store.families(alive=True)), reverse=True)
-        top = int(self.cfg.get("top_rewrite_families", 10))
-        is_top = bool(weight_rank) and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
+        is_top = self.is_top(fam, top=int(self.cfg.get("top_rewrite_families", 10)))
         profile = str(self.cfg.get("top_rewrite_profile" if is_top else "rewrite_profile", "pro_balanced"))
         latest = self.store.latest_version(fid)
         best = self.store.version(fid, fam.get("best_version")) or latest
-        runs = self.store.runs(fid, window="train", limit=1)
+        runs = [r for r in self.store.runs(fid, window="train", limit=8) if r.get("purpose") != "robustness"][:1]
         last_view = diagnostics.train_view(self.store.run_result(runs[0]["run_id"]) or {}) if runs else {}
         notes = "\n".join(f"- {n['text'][:400]}" for n in self.store.notebook(fid, limit=10))
         user = (f"{self.brief(fam)}\n\nThis family has gone {fam['stall']} revisions without a better Train score. Write a NEW "
@@ -686,4 +969,47 @@ class Researcher:
             self.store.event("swarm.note", fid, {"text": text})
 
 
-__all__ = ["Researcher", "TOOLS", "needs_of", "check_code", "sanitize", "date_like"]
+#: The Train objective the families' bests are chosen by (`store.get("train_objective")`).
+OBJECTIVE = "worst-train-year-v1"
+
+
+def migrate_objective(store: SwarmStore) -> dict[str, Any]:
+    """Once per store (the swarm's start): every living family's best chosen ANEW under `evidence.train_score`, so an old
+    score (the full-Train t with a 30-trade floor) is never compared with a new one. Its kept full Train runs at the
+    normal spread are rescored; the eligible best becomes both its best by Train score and its submitted best (none: both
+    empty until an eligible run comes). The old selection stays in the family's state as `legacy_best`. The stall
+    counter restarts. Returns {"migrated", "with_best"} (zeros when it already ran)."""
+    if store.get("train_objective") == OBJECTIVE:
+        return {"migrated": 0, "with_best": 0}
+    migrated = with_best = 0
+    for fam in store.families(alive=True):
+        fid = fam["id"]
+        state = fam.get("state") or {}
+        rows: list[list[Any]] = []
+        for run in store.runs(fid, window="train", limit=1000):
+            if run["status"] != "ok" or float(run["stress"] or 1.0) != 1.0 or run.get("purpose") == "robustness" or not run.get("path"):
+                continue
+            result = store.run_result(run["run_id"])
+            robust = evidence.train_score(result) if result is not None else None
+            if robust is not None and robust["eligible"] and run.get("version") is not None:
+                rows = candidates_with(rows, float(robust["score"]), int(run["version"]), run["run_id"])
+        legacy = {"best_train": fam.get("best_train"), "best_version": fam.get("best_version"),
+                  "best_train_version": state.get("best_train_version"), "best_train_run": state.get("best_train_run"),
+                  "objective": "full-Train t_daily, 30-trade floor", "replaced_by": OBJECTIVE}
+        best = rows[0] if rows else None
+        with store.atomic():
+            if (store.family(fid) or {}).get("retired_at"):
+                continue
+            store.update_family(fid, best_train=float(best[0]) if best else None, best_version=int(best[1]) if best else None, stall=0)
+            store.set_state(fid, legacy_best=legacy, best_train_version=int(best[1]) if best else None,
+                            best_train_run=best[2] if best else None, train_candidates=rows, robust_failed=[], robustness={})
+        migrated += 1
+        with_best += bool(best)
+    store.put("train_objective", OBJECTIVE)
+    out = {"migrated": migrated, "with_best": with_best}
+    store.event("swarm.status", None, {"action": "train_objective", "objective": OBJECTIVE, **out})
+    return out
+
+
+__all__ = ["Researcher", "TOOLS", "TOOLS_READ", "TOOLS_REVISE", "needs_of", "needs_roots", "with_roots", "check_code", "sanitize",
+           "date_like", "candidates_with", "migrate_objective", "OBJECTIVE"]

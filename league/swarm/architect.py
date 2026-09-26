@@ -7,11 +7,13 @@ the loop runs that growth only while the swarm's hourly spend is under its pace 
 spends nothing by itself: the hourly pace caps every researcher's cycles together.
 
 GPT-6 Astra through the gateway when the OpenAI month has room (and the swarm's OpenAI cap allows), else
-Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, validation summaries, shares), the
-graveyard's lessons, and the GAPS (roots x structure types no living family covers), and answers with new
-families: a mechanism (why it should make money), a structure, a universe slice (roots, days to expiry)
-and a rejection test. The swarm admits those that are well-formed, distinct from the living families and
-inside the population ceiling; each new family's researcher writes its first program (no starter).
+Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, shares, and of Validation only whether the line
+was met and how many of its checks passed: the owner's decision D2a), the graveyard's lessons, and the GAPS (roots x
+structure types no living family covers), and answers with new families: a mechanism (why it should make money), a
+structure, a universe slice (one to five pooled roots of the admitted list, days to expiry) and a rejection test. The
+swarm admits those that are well-formed, distinct from the living families and inside the population ceiling; each
+new family's researcher writes its first program (no starter). The operator steers it without a deploy through
+`architect.agenda` (swarm.json): a non-empty agenda closes the request as "THE OPERATOR'S RESEARCH AGENDA".
 
 Each pass is a `swarm.architect` event; each birth a `swarm.born` event (the site's news).
 Standard library only.
@@ -23,6 +25,8 @@ import json
 import time
 from typing import Any, Callable, Mapping
 
+from . import diagnostics
+from .researcher import MAX_ROOTS
 from .store import STRUCTURES, SwarmStore
 
 #: Two mechanisms are the same idea when their content words overlap this much (Jaccard).
@@ -43,16 +47,21 @@ def same_idea(a: str, b: str) -> bool:
 SYSTEM = """You are the architect of a swarm of AI researchers that trade level-3 options (defined-risk structures only) on one
 brokerage account. Each researcher owns one family: a mechanism, a structure type and a universe slice, and improves a
 program for it in a Gym of real recorded one-minute option quotes (Train 2022-2024; Validation 2025 by summary only; a
-sealed holdout at the gate). Propose NEW families that are likely to clear the validation line (>= 100 trades on >= 60
-days a year, mean P&L per dollar of max loss > 0 with t >= 2 after fees and the spread, a deflated Sharpe that survives the
-lineage's trials, 3 of 4 quarters positive, positive at 1.5x the half-spread). Prefer mechanisms with a reason to exist
+sealed holdout at the gate). Propose NEW families that are likely to clear the validation line (>= 50 trades on >= 25
+days a year, mean P&L per dollar of max loss > 0 with t >= 2 after fees and the spread, a deflated Sharpe on traded days
+that survives the lineage's validated versions, 3 of 4 quarters positive, positive at 1.5x the half-spread). A family's
+Train score is its WORST Train year, so a mechanism must earn in 2022, 2023 and 2024 alike, with at least 40 trades on
+20 days in each. Prefer mechanisms with a reason to exist
 (a risk premium, a flow, a behavioral bias, a venue rule), horizons supported by the available data, and slices the
 swarm does not cover. The strategy still needs enough independent trades to be evaluated. Learn from the graveyard:
 do not re-propose what failed unless you say what is different.
 
-Use only the available roots listed in the current request; that configured list is the Gym's data universe.
-XSP and SPXW are cash-settled index options with no calendars or diagonals. The other available roots are physically
-settled equity or ETF options. Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
+Use only the available roots listed in the current request; that configured list is the Gym's data universe. A
+family may pool one to five of them: the same mechanism on several roots trades more often and is measured sooner
+(days traded on several roots count once a day, so pool roots that trade on different days).
+XSP and SPXW are cash-settled index options with no calendars or diagonals. XSP costs $0.50 a contract, which makes a
+narrow XSP structure uneconomic: use XSP only for structures wide enough to carry that fee. The other available roots
+are physically settled equity or ETF options. Structure types: long_call, long_put, debit_vertical, credit_vertical, iron_condor, iron_butterfly,
 long_butterfly, long_straddle, long_strangle, calendar, diagonal. All listed types compete on the same evidence:
 complexity earns no preference. Single calls and puts are first-class research choices. Consider the simplest
 expression of each mechanism before adding legs; use additional legs when they serve the hypothesis. Use the coverage
@@ -61,7 +70,7 @@ Research support does not imply brokerage execution support; the House checks th
 source, a supported strategy type, or evidence to fill a coverage gap.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "mechanism": "one or two sentences: why it should
-make money", "structure": "<type>", "roots": ["SPY"], "dte": [0, 2], "rejection": "the result that would prove it
+make money", "structure": "<type>", "roots": ["SPY", "QQQ"], "dte": [0, 2], "rejection": "the result that would prove it
 wrong", "sketch": "how the program should decide, in plain words", "parent": "retired family id, if revising its idea"}]}.
 A renamed or revised version of a retired mechanism must name its parent; it inherits the entire lineage's trials
 and three-look holdout ration. Only a different economic mechanism starts a new lineage."""
@@ -133,12 +142,15 @@ class Architect:
         alive = self.store.families(alive=True)
         living_ids = {f["id"] for f in alive}
         board = (self.store.get("leaderboard") or {}).get("board") or []
+        # Of Validation the architect sees what a researcher sees (D2a): the line met or not and the checks passed.
+        lines = {f["id"]: (f.get("state") or {}).get("validation_line") for f in alive}
         living = [{"family": r["family"], "band": r["band"], "structure": r["structure"], "roots": r["roots"],
-                   "validation": r.get("validation"), "share": r.get("share")} for r in board if r["family"] in living_ids][:60]
+                   "validation": diagnostics.validation_view({}, lines.get(r["family"])) if lines.get(r["family"]) else None,
+                   "share": r.get("share")} for r in board if r["family"] in living_ids][:60]
         if not living:
             living = [{"family": f["id"], "structure": f["structure"], "roots": f["roots"], "mechanism": f["mechanism"][:160]}
                       for f in alive][:60]
-        graves = [{"family": g["family"], "structure": g["structure"], "roots": g["roots"], "lesson": g["lesson"][:400]}
+        graves = [{"family": g["family"], "structure": g["structure"], "roots": g["roots"], "lesson": diagnostics.scrub(g["lesson"])[:400]}
                   for g in self.store.graveyard(limit=20)]
         want = self.want()
         roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
@@ -147,11 +159,13 @@ class Architect:
         # During a burst refill, ask for the whole bounded gap. Asking for "3 to 12" repeatedly underfilled a
         # population losing families faster than three births per hour. The admission and spending caps still bind.
         number = str(want) if self.refilling() and want > 0 else f"{min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)}"
+        agenda = str(self.cfg.get("agenda") or "").strip()[:4000]
         return (f"Propose {number} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\n"
                 f"RESEARCH COVERAGE (effort, not profitability; validated means evaluated, not passed):\n{coverage}\n\n"
-                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}")
+                f"GAPS (uncovered structure types by root; [] means all covered):\n{gaps}"
+                + (f"\n\nTHE OPERATOR'S RESEARCH AGENDA:\n{agenda}" if agenda else ""))
 
     def admit(self, rows: Any) -> list[str]:
         cap = self.want()
@@ -162,7 +176,8 @@ class Architect:
             if len(born) >= cap or not isinstance(row, dict):
                 break
             structure = row.get("structure")
-            roots = [str(r).upper() for r in (row.get("roots") or []) if str(r).upper() in allowed_roots][:2]
+            named = [row["roots"]] if isinstance(row.get("roots"), str) else (row.get("roots") or [])
+            roots = list(dict.fromkeys(str(r).upper() for r in named if str(r).upper() in allowed_roots))[:MAX_ROOTS]
             dte = row.get("dte") if isinstance(row.get("dte"), list) and len(row.get("dte")) == 2 else [0, 5]
             mechanism = " ".join(str(row.get("mechanism") or "").split())[:600]
             if structure not in STRUCTURES or not roots or len(mechanism) < 30:
@@ -175,7 +190,7 @@ class Architect:
                 lo, hi = sorted((max(0, min(45, int(dte[0]))), max(0, min(45, int(dte[1])))))
             except (TypeError, ValueError):
                 lo, hi = 0, 5
-            lessons = [g["lesson"][:300] for g in self.store.graveyard(f"{structure} {' '.join(roots)} {mechanism}", limit=3)]
+            lessons = [diagnostics.scrub(g["lesson"])[:300] for g in self.store.graveyard(f"{structure} {' '.join(roots)} {mechanism}", limit=3)]
             spec = {"id": row.get("slug") or mechanism, "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}

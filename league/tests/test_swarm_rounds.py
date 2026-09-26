@@ -56,10 +56,16 @@ class FakeGymPool:
         self.cancelled.append(family)
 
 
-def strong(job):
+def strong(job, t=2.5):
     rng = random.Random(hash((job.family, job.window, job.stress)) & 0xFFFF)
     daily = [rng.gauss(6.0, 10.0) for _ in range(250)]
-    return result(job.name, daily=daily, window=job.window, pnl=sum(daily))
+    return result(job.name, daily=daily, window=job.window, pnl=sum(daily), t=t)
+
+
+def stronger(job):
+    """Strong enough to clear the deflated Sharpe after a weak sibling version was validated (D2b: N = 2, and the spread
+    of the two versions' traded-day Sharpes sets the luck to beat)."""
+    return strong(job, t=4.0)
 
 
 def weak(job):
@@ -109,7 +115,9 @@ class TournamentTests(RoundCase):
         self.assertFalse(row["validation"]["judged"]["b"]["passed"])
         a = self.store.family("a")
         self.assertTrue(a["state"]["gate_ready"])
-        self.assertEqual(set(a["state"]["validation_view"]), {"mean_return_on_max_loss", "t", "quarters_positive", "line_met", "checks_not_met"})
+        self.assertEqual(a["state"]["validation_view"], {"line_met": True, "checks_passed": 8, "checks": 8},
+                         "D2a: pass or fail and a count of checks, never a number")
+        self.assertEqual(self.store.family("b")["state"]["validation_view"]["line_met"], False)
         self.assertEqual(a["trials"], 2)
         self.assertEqual(a["state"]["typical_max_loss_usd"], 60.0)
         self.assertAlmostEqual(sum(f["weight"] for f in self.store.families(alive=True)), 1.0)
@@ -124,7 +132,8 @@ class TournamentTests(RoundCase):
         self.answer = lambda job: {k: v for k, v in strong(job).items() if k != "stress_1.5"}
         out = Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
         self.assertFalse(out["judged"]["a"]["passed"])
-        self.assertIn("stress", self.store.family("a")["state"]["validation_view"]["checks_not_met"])
+        self.assertFalse(self.store.family("a")["state"]["validation_line"]["checks"]["stress"])
+        self.assertEqual(self.store.family("a")["state"]["validation_view"], {"line_met": False, "checks_passed": 7, "checks": 8})
 
     def test_retirement_after_thirty_revisions_without_validation_improvement_respects_the_floor(self):
         for i in range(18):
@@ -149,7 +158,7 @@ class TournamentTests(RoundCase):
         self.store.update_family("f0", since_val_revisions=99, band="candidate")
         self.assertEqual(Tournament(self.store, self.pool, self.settings).retirements(self.store.families(alive=True)), [])
 
-    def test_a_strong_family_forks_onto_another_root_and_the_child_inherits_the_lineage(self):
+    def test_a_strong_family_forks_onto_its_roots_plus_another_and_the_child_inherits_the_lineage(self):
         fam = self.family("a")
         self.store.add_run("a", 1, result("x"), window="train", stress=1.0, purpose="train")
         self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
@@ -157,8 +166,9 @@ class TournamentTests(RoundCase):
         born = t.forks(self.store.families(alive=True))
         self.assertEqual(born, ["a-on-qqq"])
         child = self.store.family("a-on-qqq")
-        self.assertEqual((child["roots"], child["parent"], child["lineage"], child["inherited_trials"]), (["QQQ"], "a", "a", 1))
-        self.assertIn("'QQQ'", self.store.latest_version("a-on-qqq")["code"])
+        self.assertEqual((child["roots"], child["parent"], child["lineage"], child["inherited_trials"]), (["SPY", "QQQ"], "a", "a", 1))
+        from league.swarm.researcher import needs_of
+        self.assertEqual(needs_of(self.store.latest_version("a-on-qqq")["code"])["roots"], ["SPY", "QQQ"], "NEEDS widened")
         self.assertEqual(t.forks(self.store.families(alive=True)), [], "a cooldown between forks")
         born_events = [e for e in self.store.events_after(0) if e["kind"] == "swarm.born"]
         self.assertEqual(born_events[-1]["payload"]["parent"], "a")
@@ -189,7 +199,7 @@ class TournamentTests(RoundCase):
         self.store.add_version("b", "# b\nNEEDS = {'roots': ['QQQ']}\nPARAMS = {}\ndef decide(ctx):\n    return []\n", {}, author="x")
         self.store.update_family("b", best_version=1)
         [c] = Tournament(self.store, self.pool, self.settings).forks(self.store.families(alive=True))
-        self.assertEqual(self.store.family(c)["roots"], ["SPY"])
+        self.assertEqual(self.store.family(c)["roots"], ["QQQ", "SPY"])
         self.assertEqual(self.store.lineage_looks(c), 1, "a's one look, once")
         del a, b
 
@@ -198,7 +208,7 @@ class TournamentTests(RoundCase):
         self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
         t = Tournament(self.store, self.pool, self.settings)
         [b] = t.forks(self.store.families(alive=True))
-        self.assertEqual(self.store.family(b)["roots"], ["QQQ"])
+        self.assertEqual(self.store.family(b)["roots"], ["SPY", "QQQ"])
         self.clock.advance(3600)
         for i in range(2):  # a spends two SPY looks after b was born, then retires
             self.store.add_look("a", 1, f"sha-a{i}", passed=False, p_value=0.5, detail={})
@@ -206,9 +216,39 @@ class TournamentTests(RoundCase):
         self.clock.advance(3600)
         self.store.set_state(b, validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
         [c] = t.forks(self.store.families(alive=True))
-        self.assertEqual(self.store.family(c)["roots"], ["SPY"])
+        self.assertEqual(self.store.family(c)["roots"], ["SPY", "QQQ", "IWM"])
         self.assertEqual(self.store.lineage_looks(c), 2, "SPY's holdout was looked at twice by this lineage")
         self.assertEqual(self.store.lineage_looks(b), 2, "the whole lineage shares the ration across roots and fork dates")
+
+    def test_forks_never_add_xsp_and_a_five_root_family_does_not_fork(self):
+        self.family("a", roots=["SPY", "QQQ", "IWM", "SPXW"])
+        self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        t = Tournament(self.store, self.pool, self.settings)
+        self.assertIn("XSP", self.settings["gym"]["roots"])
+        self.assertEqual(t.forks(self.store.families(alive=True)), [], "the only root left is XSP: no fork")
+        self.family("b", roots=["SPY", "QQQ", "IWM", "XSP", "SPXW"])
+        self.store.set_state("b", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        self.assertIsNone(t.fork(self.store.family("b")))
+
+    def test_a_validation_runs_on_the_versions_own_needs_roots(self):
+        self.family("a")
+        self.store.update_family("a", roots=["QQQ"])  # the family moved on; its best version still needs SPY
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertEqual(self.pool.jobs[-1].roots, ("SPY",))
+
+    def test_the_deflated_sharpe_counts_the_lineages_validated_versions(self):
+        self.family("a")
+        t = Tournament(self.store, self.pool, self.settings)
+        t.validate(self.store.families(alive=True))
+        self.assertEqual(self.store.family("a")["state"]["validation_line"]["numbers"]["validated_versions"], 1)
+        for i in range(3):
+            self.store.add_run("a", 1, result(f"train{i}"), window="train", stress=1.0, purpose="train")
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        t.validate(self.store.families(alive=True))
+        numbers = self.store.family("a")["state"]["validation_line"]["numbers"]
+        self.assertEqual(numbers["validated_versions"], 2, "Train trials are not the N; validated versions are")
+        self.assertGreater(numbers["lineage_trials"], 2)
 
     def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):
         self.family("a")
@@ -234,7 +274,7 @@ class TournamentTests(RoundCase):
         self.answer = weak
         t.validate(self.store.families(alive=True))
         self.store.update_family("a", best_version=1)  # the researcher submits its older (never validated) version
-        self.answer = strong
+        self.answer = stronger
         t.validate(self.store.families(alive=True))
         fam = self.store.family("a")
         self.assertEqual((fam["validated_version"], fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, 1, True))
@@ -246,7 +286,7 @@ class TournamentTests(RoundCase):
     def test_a_version_validated_before_is_judged_again_from_its_recorded_result(self):
         self.family("a")
         t = Tournament(self.store, self.pool, self.settings)
-        self.answer = strong
+        self.answer = stronger
         t.validate(self.store.families(alive=True))
         v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
         self.store.update_family("a", best_version=v2["n"])
