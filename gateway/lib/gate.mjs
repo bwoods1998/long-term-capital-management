@@ -8,6 +8,7 @@
 
 import { caps, venueOrderCap } from './caps.mjs';
 import { monthCapMicro } from './frontier.mjs';
+import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
 import * as account from './account.mjs';
 import { dayCap as pullDayCap } from './github.mjs';
@@ -31,6 +32,8 @@ export const FRONTIER_PREVIOUS_KEY = 'frontier-previous';
 export const PULLS_KEY = 'pulls';
 export const TYPESAFE_KEY = 'typesafe-pilot-v1';
 export const WEB_FETCH_KEY = 'web-fetch';
+//: Claude's funded meter (Sept 26, 2026, the swarm sprint): every call's cost or hold since the key was placed. Never reset.
+export const CLAUDE_KEY = 'claude-funded-v1';
 
 const read = (store, key, fallback) => {
   const raw = store.get(key);
@@ -394,6 +397,76 @@ export function createGate({ store, env = {}, now = Date.now }) {
       return { ok: true, cost_usd: formatUsdMicro(cost) };
     },
 
+    /**
+     * Claude's funded meter (Sept 26, 2026, the swarm sprint; lib/claude.mjs). Unlike the frontier's month it never
+     * starts again: CLAUDE_USD is what the owner funded, and `spent` is every call's cost or hold against it. `inflight`
+     * is the part of `spent` still held (reserved, not yet settled). `roles` and `agents` file each settled cost by
+     * the call's X-LTCM-Role and X-LTCM-Agent; `stops` counts the answers by their stop reason.
+     */
+    claudeMeter() {
+      const row = read(store, CLAUDE_KEY, null) || {};
+      const big = value => { try { return BigInt(value || 0); } catch { return 0n; } };
+      const table = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+      return { spent: big(row.spent), inflight: big(row.inflight), calls: Number(row.calls) || 0,
+        agents: table(row.agents), roles: table(row.roles), stops: table(row.stops) };
+    },
+
+    /** Hold a Claude call's worst case against the funded total, or refuse. The kill switch stops Claude calls too. */
+    claudeReserve({ micro }) {
+      if (killed()) return { ok: false, status: 423, cap: 'kill_switch', error: 'The kill switch is engaged; no Claude calls are being made.' };
+      const cap = claude.capMicro(env);
+      if (cap <= 0n) return { ok: false, status: 403, cap: 'claude_funded', error: 'No Claude budget is configured.' };
+      const amount = BigInt(micro);
+      if (amount <= 0n) return { ok: false, status: 400, error: 'A call must have a positive worst-case cost.' };
+      const row = this.claudeMeter();
+      if (row.spent + amount > cap) {
+        return {
+          ok: false, status: 402, cap: 'claude_funded',
+          error: `This call could cost $${formatUsdMicro(amount)}; $${formatUsdMicro(cap > row.spent ? cap - row.spent : 0n)} is left of the $${formatUsd(cap)} funded.`,
+        };
+      }
+      write(store, CLAUDE_KEY, { ...this._claudeRow(row), spent: String(row.spent + amount), inflight: String(row.inflight + amount) });
+      return { ok: true, micro: String(amount) };
+    },
+
+    /** Replace a hold with what the call cost (`actual`, micro-dollars); null keeps the whole hold: unknown is not free. */
+    claudeSettle({ reserved, actual, agent = null, role = null, stop = null }) {
+      const row = this.claudeMeter();
+      const held = BigInt(reserved);
+      const cost = actual === null || actual === undefined ? held : BigInt(actual);
+      const spent = row.spent - held + cost;
+      const slug = value => (typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) ? value : 'unattributed');
+      const add = (tableRow, name) => ({ ...tableRow, [name]: String(BigInt(tableRow[name] || 0) + cost) });
+      const stopName = typeof stop === 'string' && /^[a-z0-9_]{1,32}$/.test(stop) ? stop : 'none';
+      write(store, CLAUDE_KEY, {
+        ...this._claudeRow(row), spent: String(spent > 0n ? spent : 0n), inflight: String(row.inflight > held ? row.inflight - held : 0n),
+        calls: row.calls + 1, agents: add(row.agents, slug(agent)), roles: add(row.roles, slug(role)),
+        stops: { ...row.stops, [stopName]: (Number(row.stops[stopName]) || 0) + 1 },
+      });
+      return { ok: true, cost_usd: formatUsdMicro(cost) };
+    },
+
+    _claudeRow(row) {
+      return { spent: String(row.spent), inflight: String(row.inflight), calls: row.calls, agents: row.agents, roles: row.roles, stops: row.stops };
+    },
+
+    /** What `/v1/health` reports of Claude: the funded total, what is spent and held, and by whom. */
+    claudeStatus() {
+      const row = this.claudeMeter();
+      const cap = claude.capMicro(env);
+      const usd = table => Object.fromEntries(Object.entries(table).map(([name, value]) => {
+        try { return [name, formatUsdMicro(BigInt(value))]; } catch { return [name, null]; }
+      }));
+      return {
+        // `cap_usd` is the owner's funded total, not a monthly allowance; `spent_usd` includes the holds in flight.
+        funded: true, cap_usd: formatUsd(cap), spent_usd: formatUsdMicro(row.spent),
+        settled_usd: formatUsdMicro(row.spent > row.inflight ? row.spent - row.inflight : 0n), inflight_usd: formatUsdMicro(row.inflight),
+        remaining_usd: formatUsdMicro(cap > row.spent ? cap - row.spent : 0n), calls: row.calls,
+        models: Object.keys(claude.priceTable(env)), configured: typeof env.CLAUDE_API_KEY === 'string' && env.CLAUDE_API_KEY.length > 0,
+        by_role: usd(row.roles), by_agent: usd(row.agents), stops: row.stops,
+      };
+    },
+
     // Pilot commitments never reset with a calendar period or a deployment. An accepted id
     // is never sent upstream a second time, even after an interrupted/ambiguous response.
     typesafeStatus() {
@@ -588,6 +661,7 @@ export function createGate({ store, env = {}, now = Date.now }) {
           };
         })(),
         typesafe: this.typesafeStatus(),
+        claude: this.claudeStatus(),
         github: { day: iso(at).slice(0, 10), pull_requests: this.pullsToday(at), cap: pullDayCap(env) },
         web_fetch: (() => {
           const row = this.webFetchDay(at);

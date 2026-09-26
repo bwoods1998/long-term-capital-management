@@ -58,6 +58,8 @@ export class Gate extends DurableObject {
   refund(request) { return this.ctx.storage.transactionSync(() => this.gate.refund(request)); }
   frontierReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierReserve(request)); }
   frontierSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.frontierSettle(request)); }
+  claudeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeReserve(request)); }
+  claudeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.claudeSettle(request)); }
   typesafeReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeReserve(request)); }
   typesafeSettle(request) { return this.ctx.storage.transactionSync(() => this.gate.typesafeSettle(request)); }
   pullReserve(request) { return this.ctx.storage.transactionSync(() => this.gate.pullReserve(request)); }

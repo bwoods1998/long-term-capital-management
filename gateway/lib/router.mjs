@@ -14,6 +14,9 @@
 //   POST            /v1/notify               one trade notice mailed to the owner, capped per day
 //   GET             /v1/frontier/models      the model ids the OpenAI key can reach, and which are priced
 //   POST            /v1/frontier/responses   one frontier call, reserved and settled against the month
+//   GET             /v1/claude/models        the Claude model ids the Anthropic key can reach, and which are priced
+//   POST            /v1/claude/messages      one Claude call, reserved and settled against the funded total (the
+//                                            kill switch stops it; lib/claude.mjs)
 //   POST            /v1/typesafe/systemone  funded Jev judgments, with durable request identities
 //   POST            /v1/web/fetch            one public page's text for research, capped per day (lib/fetch.mjs)
 //   POST            /v1/github/pr            a proposal becomes a branch and a pull request, never a push
@@ -49,6 +52,7 @@ import {
 import * as kalshi from './kalshi.mjs';
 import * as alpaca from './alpaca.mjs';
 import * as frontier from './frontier.mjs';
+import * as claude from './claude.mjs';
 import * as equity from './equity.mjs';
 import * as account from './account.mjs';
 import * as typesafe from './typesafe.mjs';
@@ -177,6 +181,27 @@ export async function route(request, env, { gate, fetcher = fetch, now = Date.no
   if (path === '/v1/frontier/responses') {
     if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
     return frontierCall(request, env, { gate, fetcher, now });
+  }
+
+  if (path === '/v1/claude/models') {
+    // Free and read-only: which models the Anthropic key can reach, so a price is never set on a guess.
+    if (request.method !== 'GET') return fail('Method not allowed.', 405, { Allow: 'GET' });
+    if (!env.CLAUDE_API_KEY) return json({ error: 'Claude is not configured.', cap: 'setup' }, 503);
+    try {
+      const upstream = await fetcher(`${claude.HOST}/v1/models?limit=100`, {
+        method: 'GET', headers: claudeHeaders(env), redirect: 'manual', signal: AbortSignal.timeout(20000),
+      });
+      const data = await upstream.json().catch(() => null);
+      if (!upstream.ok) return fail(`Anthropic answered HTTP ${upstream.status}.`, 502);
+      return json({ models: (data?.data || []).map(row => row?.id).filter(id => typeof id === 'string').sort(),
+        priced: Object.keys(claude.priceTable(env)) });
+    } catch {
+      return fail('Anthropic did not answer.', 502);
+    }
+  }
+  if (path === '/v1/claude/messages') {
+    if (request.method !== 'POST') return fail('Method not allowed.', 405, { Allow: 'POST' });
+    return claudeCall(request, env, { gate, fetcher, now });
   }
 
   if (path === '/v1/typesafe/systemone') {
@@ -574,6 +599,74 @@ async function frontierCall(request, env, { gate, fetcher, now }) {
       'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
       ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
       ...(tier ? { 'X-LTCM-Billed-Tier': tier } : {}),
+    },
+  });
+}
+
+/** The headers every Anthropic call carries: the key is added here, on the way out, and never comes back. */
+function claudeHeaders(env) {
+  return { 'Content-Type': 'application/json', Accept: 'application/json', 'x-api-key': env.CLAUDE_API_KEY,
+    'anthropic-version': claude.API_VERSION, 'User-Agent': 'ltcm-gateway/1.0' };
+}
+
+/**
+ * One Claude call (Sept 26, 2026, the swarm sprint): refused while the kill switch is engaged, reserved at its worst
+ * case against the funded total, forwarded, and settled from Anthropic's usage block. A refusal (`stop_reason`
+ * "refusal", an HTTP 200) and a truncated answer ("max_tokens") are billed and settle at their usage; a 4xx settles at
+ * zero (refused before any generation); so does a 5xx without a usage block, and so does a call that never answered
+ * (the owner's rule for this meter: Anthropic bills completed work, and the account's own prepaid balance is the
+ * backstop). A 2xx whose usage does not read keeps its whole hold: unknown is not free.
+ */
+async function claudeCall(request, env, { gate, fetcher, now }) {
+  if (!env.CLAUDE_API_KEY) return json({ error: 'Claude is not configured.', cap: 'setup' }, 503);
+  const body = await readBody(request, claude.MAX_REQUEST_BYTES);
+  if (body.error) return fail(body.error, 413);
+  let parsed;
+  try {
+    parsed = JSON.parse(body.text || '');
+  } catch {
+    return fail('The request must be JSON.', 400);
+  }
+  const admitted = claude.admit(parsed, env);
+  if (admitted.error) return fail(admitted.error, admitted.status);
+  const bytes = new TextEncoder().encode(body.text).length;
+  const hold = await gate.claudeReserve({ micro: String(claude.worstCase(admitted.price, bytes, admitted.maxTokens)), at: now() });
+  if (!hold.ok) return json({ error: hold.error, ...(hold.cap ? { cap: hold.cap } : {}) }, hold.status);
+  const agent = request.headers.get(frontier.AGENT_HEADER);
+  const role = request.headers.get(frontier.ROLE_HEADER);
+  const settle = (actual, stop = null) => gate.claudeSettle({ reserved: hold.micro, actual, agent, role, stop, at: now() });
+  let upstream, text;
+  try {
+    upstream = await fetcher(claude.HOST + claude.PATH, {
+      method: 'POST', headers: claudeHeaders(env), body: body.text, redirect: 'manual',
+      // Just under the House's own 600-second read, as the frontier's.
+      signal: AbortSignal.timeout(570000),
+    });
+    text = await upstream.text();  // inside the guard: a body cut off mid-read still settles
+  } catch {
+    const settled = await settle('0', 'no_answer');
+    return json({ error: 'Anthropic did not answer.' }, 502, { 'X-LTCM-Cost-USD': settled.cost_usd });
+  }
+  let answer = null;
+  try { answer = JSON.parse(text); } catch { answer = null; }
+  let actual, stop = null;
+  if (upstream.ok) {
+    actual = claude.actualCost(admitted.price, answer?.usage);
+    stop = typeof answer?.stop_reason === 'string' ? answer.stop_reason : null;
+  } else if (upstream.status >= 400 && upstream.status < 500) {
+    actual = 0n;  // refused before any generation: nothing billed
+    stop = `http_${upstream.status}`;
+  } else {
+    actual = claude.actualCost(admitted.price, answer?.usage) ?? 0n;  // a 5xx is billed only for the usage it reports
+    stop = `http_${upstream.status}`;
+  }
+  const settled = await settle(actual === null ? null : String(actual), stop);
+  return new Response(text, {
+    status: upstream.status,
+    headers: {
+      'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+      ...(settled?.cost_usd ? { 'X-LTCM-Cost-USD': settled.cost_usd } : {}),
     },
   });
 }
