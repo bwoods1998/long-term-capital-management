@@ -94,10 +94,14 @@ class Tournament:
         return {"queued": len(jobs), "judged": judged, "errors": errors}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
-        """The full result of a validation this version already had (the Gym's answer for the same program is the same)."""
+        """The full result of a validation this version already had on the Gym image in use now (the same program on the
+        same code and data answers the same; another image may hold other days, so its result is not reused)."""
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         for row in self.store.runs(fid, window="validation", limit=500):
             if row.get("version") == n and float(row.get("stress") or 1.0) == 1.0 and row.get("path"):
-                return self.store.run_result(row["run_id"])
+                result = self.store.run_result(row["run_id"])
+                if result is not None and result.get("gym_image") == image:
+                    return result
         return None
 
     def judge(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True) -> dict[str, Any] | None:

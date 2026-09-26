@@ -487,6 +487,7 @@ class GymPool:
             if result is None:
                 self._fail(job, "the batch returned no result for this program")
                 continue
+            result = {**result, "gym_image": box.version}  # which Gym (image: code and data) made it
             job.result = result
             job.batch = {**info, "box": box.id, "programs_in_batch": len(batch), "wall_seconds": round(elapsed, 2)}
             days = (result.get("summary") or {}).get("days") or len(result.get("daily") or [])

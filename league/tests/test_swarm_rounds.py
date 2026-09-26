@@ -259,6 +259,21 @@ class TournamentTests(RoundCase):
         self.assertEqual((len(self.validation_jobs()), fam["trials"]), (jobs, trials), "no new Gym run, no new trial")
         self.assertEqual((fam["state"]["validation_version"], fam["state"]["gate_ready"]), (1, True))
 
+    def test_a_recorded_validation_from_another_gym_image_is_not_reused(self):
+        self.family("a")
+        self.pool.image = lambda kind: "sbcp_gym_v0"
+        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_gym_v0"}
+        t = Tournament(self.store, self.pool, self.settings)
+        t.validate(self.store.families(alive=True))
+        v2 = self.store.add_version("a", "# a2\nNEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        t.validate(self.store.families(alive=True))
+        jobs = len(self.validation_jobs())
+        self.pool.image = lambda kind: "sbcp_gym_v1"  # the Gym moved to other data
+        self.store.update_family("a", best_version=1)
+        t.validate(self.store.families(alive=True))
+        self.assertEqual(len(self.validation_jobs()), jobs + 1, "v1 runs again on the new Gym's data")
+
     def test_a_validation_failure_is_recorded_not_raised(self):
         self.family("a")
         self.pool.fail.add("a")
