@@ -302,7 +302,9 @@ qualify to Probe within five minutes (`live.band` rows), and the paper proof run
    `passed`, no working orders, no open real positions but the ones expected.
 6. **The Probe list**: `live.band` rows since Sunday (who became Probe or Sized and why; who stayed a
    Candidate and why: not through the holdout, a type real money does not open, a credit type under $2,000,
-   a typical structure over the Probe's cap). It must match M4's list in the run record.
+   a typical structure over the Probe's cap or unknown). It must match M4's list in the run record. Bands
+   move only while real money is on and the grant active, and a family moved onto real money trades from
+   the NEXT session: only families promoted before Monday's open trade Monday.
 7. **The day**: Sept 28 is a full session (not a half day), no FOMC, CPI or jobs release; 0DTE expiries on
    SPY, QQQ, IWM, XSP and SPXW. No deploy from 13:25Z to 20:05Z except a rollback.
 8. **At the open** (13:30-13:45Z): the paper proof (`live.paper_proof` "passed" in the ledger by about
