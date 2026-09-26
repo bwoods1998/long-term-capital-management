@@ -231,6 +231,20 @@ class Coverage(unittest.TestCase):
         with patch.object(pq,'ParquetFile',side_effect=AssertionError('no per-day read')),self.assertRaises(C.CatalogError):
             self.audit()
 
+    def test_custom_windows_cannot_relabel_a_holdout_as_train(self):
+        for window,bounds in [('train',['2026-01-02','2026-01-03']),
+                              ('validation',['2024-01-02','2025-01-03'])]:
+            windows=dict(self.windows,**{window:bounds})
+            with patch.object(pq,'read_table',side_effect=AssertionError('no store read')),self.assertRaises(C.CatalogError):
+                C.audit_store(self.store,dict(self.calendar,years=[2024,2025,2026]),image(),'cp-a',windows=windows)
+
+    def test_control_metadata_symlink_is_refused_before_any_parquet_read(self):
+        path=self.store/'manifest.parquet'
+        target=Path(self.tmp.name)/'elsewhere.parquet'
+        path.rename(target); path.symlink_to(target)
+        with patch.object(pq,'read_table',side_effect=AssertionError('no redirected read')),self.assertRaises(C.CatalogError):
+            self.audit()
+
     def test_symlink_data_and_metadata_changed_during_audit_cannot_pass(self):
         file=self.store/'nbbo/AAPL/2024-01-02.parquet'
         moved=file.with_suffix('.retained')

@@ -175,7 +175,10 @@ def sessions(calendar: Mapping[str, Any], windows: Mapping[str, Sequence[str]]) 
     result, seen = {}, set()
     for window, bounds in windows.items():
         start, end = map(date, bounds)
-        if start > end or not set(range(start.year, end.year + 1)) <= set(years):
+        permitted_start, permitted_end = map(date,WINDOWS[window])
+        if not permitted_start <= start <= end <= permitted_end:
+            raise CatalogError('requested window is outside the fixed research split')
+        if not set(range(start.year, end.year + 1)) <= set(years):
             raise CatalogError('calendar does not cover the requested window')
         rows, day = [], start
         while day <= end:
@@ -219,6 +222,8 @@ def audit_store(store: Path, calendar: Mapping[str, Any], image: Mapping[str, An
     expected = sessions(calendar, windows)
     expected_rows = sorted(r for rows in expected.values() for r in rows)
     metadata = ('VERSION','manifest.parquet','calendar.parquet','expiries.parquet')
+    if any((store/name).is_symlink() or not (store/name).resolve().is_relative_to(store) for name in metadata):
+        raise CatalogError('store control metadata must remain inside the sealed store')
     control_hashes = {name: digest(store/name) for name in metadata}
     manifest = pq.read_table(store / 'manifest.parquet').to_pylist()
     # Reject before opening any per-day file, including a mislabeled gate without its mark.
