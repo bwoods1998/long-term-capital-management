@@ -116,7 +116,8 @@ class Nightly:
             self.data.stop_backfill()
         try:
             if not state.get("pulled"):
-                ok, out = self.data.run(f"backfill.py run --stages 7 --forward-days {day.isoformat()} --threads 8", timeout=5400)
+                ok, out = self.data.run(f"backfill.py run --stages 7 --forward-days {day.isoformat()} --threads 8 "
+                                        "--passes 3 --pause 120", timeout=5400)
                 if not ok:
                     raise RuntimeError(f"the forward pull failed: {out[-800:]}")
                 state["pulled"] = self.clock().isoformat()
