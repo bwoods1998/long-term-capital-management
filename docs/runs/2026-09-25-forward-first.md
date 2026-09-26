@@ -27,6 +27,16 @@ market hours, until its Done list holds. The Sept 25 gap review (memory note
   `earned-live-20260921` within a minute of each promotion that moves the digest (two digest
   changes, a third only for a money-path defect found in the watch). Nothing in "Not authorized".
 
+## The owner's wrap-up (Sept 26, 2026, 01:26Z)
+
+The owner asked all four runs to finish soon and start nothing new: ship only what is built, reviewed and CI-green, in
+the order forward-first B (as soon as the night's last two real MLB games settle), options G, forward-first C, Jev
+D-J2 (+ J5), Kalshi K2, each after the previous watch + 30 minutes, never while a real Kalshi family's game is in play
+nor 13:25-20:05Z on a trading day; then verify on the box, take the final scoreboard, record what needs a later market
+window (Monday's US session, the next real fill or settlement) as a named window after the run with its numbers, update
+the docs and memory, clean up, open the record's final PR, report, and stop. For this run that replaces the plan's
+"one full US session watched with no deploy" before the report: the Monday session's checks become named windows.
+
 ## The first hour's decisions
 
 1. **The deploy path (04:08-04:22Z).** H1 had already run before this session started: release
