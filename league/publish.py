@@ -1,9 +1,9 @@
 """The public record at blakewoods.us/capital: AI agents trading options (schema 2, Sept 26, 2026).
 
-The site starts over for the options swarm. It shows the Brokerage Account's balance from its equity at
-the reset; total profit since the reset, net of the owner's deposits and withdrawals; the running
-timer; the one number beside it (profit after compute: Sail, OpenAI, ThetaData and market data); the
-swarm (each agent's family, its mechanism in a sentence, its band and its record); the Gym's pace; the
+The site starts over for the options swarm. Its masthead shows the full real-options profit, including
+marked open positions, and the running timer. The Brokerage Account's balance and funding/compute basis
+remain separate. It also shows the swarm (each agent's family, its mechanism in a sentence, its band,
+record and optional promotion checklist); the Gym's pace; the
 open structures with their maximum loss and P&L; and the tape of the agents' decisions in their own
 words. The site's validators are `personal-site/capital/schema.js`; the contract is
 `docs/design.md`; `league/tests/fixtures/site_checkpoint.json` / `site_events.json` are
@@ -413,13 +413,18 @@ def site_agent(value: Any, published_at: str) -> dict[str, Any] | None:
     structure = value.get("structure") if value.get("structure") in STRUCTURE_TYPES else None
     born, retired = site_instant(value.get("born_at")), site_instant(value.get("retired_at"))
     record = value.get("record") if isinstance(value.get("record"), Mapping) else value
-    return {
+    out = {
         "id": agent_id, "family": family, "mechanism": words(value.get("mechanism"), 240), "structure": structure, "band": band,
         "born_at": born if born is not None and _not_after(born, published_at) else None,
         "retired_at": retired if retired is not None and _not_after(retired, published_at) else None,
         "record": {"trials": _count(record.get("trials")) or 0, "revisions": _count(record.get("revisions"), 1_000_000) or 0,
                    "forward": site_tally(record.get("forward")), "real": site_tally(record.get("real"))},
     }
+    if "progress" in value:
+        from .swarm.progress import clean as clean_progress
+
+        out["progress"] = clean_progress(value["progress"], band=band)
+    return out
 
 
 def site_structure(value: Any, published_at: str) -> dict[str, Any] | None:
@@ -875,6 +880,12 @@ class Publisher:
                               and not any(getattr(book, "real_money", False) for book in getattr(house, "books", {}).values()))),
                                 {"as_of": now, "pnl_usd": None}),
         )
+        swarm = getattr(house, "swarm", None)
+        if getattr(swarm, "root", None) is not None:
+            from .swarm.progress import attach as attach_progress
+
+            inputs.agents = self._guard(lambda: attach_progress(inputs.agents, swarm.root,
+                live=getattr(house, "options_live", None), account=inputs.account, now=self.clock()), inputs.agents)
         return inputs
 
     @staticmethod
