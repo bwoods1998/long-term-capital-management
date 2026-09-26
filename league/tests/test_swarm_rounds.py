@@ -285,6 +285,78 @@ class GateTests(RoundCase):
         gate.run()
         self.assertEqual(len(self.store.looks()), 1)
 
+    def newer(self, fid, answer, tag="v2"):
+        """The researcher's newer best, validated by the tournament (`answer` makes it pass or fail the line)."""
+        v = self.store.add_version(fid, f"# {tag}\nNEEDS = {{'roots': ['SPY']}}\nPARAMS = {{}}\ndef decide(ctx):\n    return None\n", {},
+                                   author="x")
+        self.store.update_family(fid, best_version=v["n"])
+        self.answer = answer
+        Tournament(self.store, self.pool, self.settings).validate(self.store.families(alive=True))
+        self.assertEqual(self.store.family(fid)["state"]["validation_version"], v["n"])
+        return v
+
+    def alerts(self):
+        return [e for e in self.store.events_after(0) if e["kind"] == "swarm.status" and e["payload"].get("alert")
+                and e["payload"].get("action") == "look_failed_three_times"]
+
+    def test_a_superseded_versions_look_marker_is_dropped_without_a_refusal_or_an_alert(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.pool.slow.clear()
+        self.newer("a", weak)  # v2 fails the line while v1's look is in flight
+        self.clock.advance(60)
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)  # a restart
+        for _ in range(6):
+            gate.run()
+            self.clock.advance(300)
+        state = self.store.family("a")["state"]
+        self.assertIsNone(state.get("look_inflight"), "nothing is owed for a version no longer validated")
+        self.assertEqual((self.store.refusals("a"), self.alerts()), ([], []))
+        self.assertEqual(len([j for j in self.pool.jobs if j.window == "holdout"]), 1)
+
+    def test_a_late_failure_of_a_superseded_look_clears_its_marker(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        gate.run()
+        job, _ = self.pool.landing[0]
+        self.pool.slow.clear()
+        self.newer("a", weak)
+        job.late_fail("the Gym failed twice")
+        state = self.store.family("a")["state"]
+        self.assertIsNone(state.get("look_inflight"))
+        self.assertFalse(state["gate_ready"], "v2 failed its line: not re-armed")
+        self.assertEqual(self.store.refusals("a"), [])
+
+    def test_a_look_the_gym_cannot_make_is_refused_and_alerted_once(self):
+        self.ready()
+        gate = Gate(self.store, self.pool, self.router, self.settings, clock=self.clock)
+        for _ in range(5):
+            gate.owe("a", 1, "sha-a1")
+        self.assertEqual(len(self.store.refusals("a")), 1)
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_a_late_result_of_an_older_look_never_clears_the_newer_looks_marker(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 4
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()
+        self.pool.slow.clear()
+        self.newer("a", strong)  # v2 passes its line while v1's look is out
+        self.pool.slow.add("a")
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # v2's look goes out too
+        (job1, late1), (job2, _) = self.pool.landing
+        self.assertEqual((job1.version, job2.version), (1, 2))
+        late1(weak(job1))  # v1's result lands: a look, and a fail
+        self.assertEqual(self.store.family("a")["state"]["look_inflight"]["n"], 2, "v2's marker stands")
+        self.pool.slow.clear()
+        self.clock.advance(60)
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # a restart: v2's look is owed
+        self.assertEqual([x["version"] for x in self.store.looks()], [1, 2])
+
     def test_the_gate_looks_only_at_the_version_still_validated(self):
         self.ready("a")
         self.ready("b")

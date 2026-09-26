@@ -147,7 +147,8 @@ class Gate:
             if inflight.get("sha"):
                 at = float(inflight.get("at") or 0)
                 if at < self.started_at or self.clock() - at > limit:
-                    # Its job died with a process (no Gym job survives one), or never came back: the look is owed again.
+                    # Its job died with a process (no Gym job survives one), or never came back: the look is owed again,
+                    # if its version is still the one validated (`owe`); a superseded version's marker is just dropped.
                     self.owe(fam["id"], int(inflight.get("n") or 0), str(inflight["sha"]))
                     fam = self.store.family(fam["id"]) or fam
                     state = fam.get("state") or {}
@@ -247,18 +248,28 @@ class Gate:
             return None
         return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe)
 
+    def clear_marker(self, fid: str, sha: str) -> bool:
+        """Drop the in-flight marker only if it is this look's (a newer version's look may be out meanwhile)."""
+        marker = ((self.store.family(fid) or {}).get("state") or {}).get("look_inflight")
+        if not marker or marker.get("sha") != sha:
+            return False
+        return self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
+
     def owe(self, fid: str, n: int, sha: str) -> None:
-        """The look did not happen: the version is still owed one (if it is still the one validated), three tries; after
-        the third it is refused as the Gym could not look (never forgotten)."""
+        """The look did not happen. Its marker goes; if the version is still the one validated it is owed one again, three
+        tries, and after the third it is refused as the Gym could not look (one refusal and one alert, never forgotten).
+        A superseded version is owed nothing: no try is counted, nothing is refused."""
+        self.clear_marker(fid, sha)
         if self.store.looked(sha):
+            return
+        if ((self.store.family(fid) or {}).get("state") or {}).get("validation_version") != n:
             return
         tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
         self.store.put(f"look_tries:{sha}", tries)
         if tries < 3:
-            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True, look_inflight=None)
-        else:
+            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True)
+        elif self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False) and tries == 3:
             self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
-            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False, look_inflight=None)
             self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
                                                    "text": "the gate box could not make a holdout look three times"})
 
@@ -280,7 +291,8 @@ class Gate:
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
         line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=sha)
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
-        self.store.set_state(fid, look_inflight=None, gated_sha=sha)
+        self.clear_marker(fid, sha)  # only its own: a newer version's look may be in flight
+        self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
                                              "_line": line})  # the numbers stay private (underscore)
         if not line["numbers"].get("holm_reachable", True):
