@@ -265,6 +265,10 @@ class Swarm:
                 self.router.provider.reconcile_stale()
             except Exception:  # noqa: BLE001
                 pass
+            try:  # old conversations out of the Provider's file (the disk)
+                self.router.compact()
+            except Exception:  # noqa: BLE001
+                pass
             if not self.guard.allows():
                 if not was:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")

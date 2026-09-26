@@ -241,8 +241,13 @@ class Tournament:
                           "validation": state.get("validation_numbers"), "gate_ready": bool(state.get("gate_ready")),
                           "closeable": fam["structure"] in CLOSEABLE})
         totals = self.store.totals()
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(began - 3600))
+        cycles = self.store._all("SELECT COUNT(*) AS n, SUM(CASE WHEN payload LIKE '%\"error\"%' THEN 1 ELSE 0 END) AS errors FROM events"
+                                 " WHERE kind='swarm.cycle' AND at >= ?", (since,))[0]
+        last_hour = {"cycles": int(cycles["n"] or 0), "cycle_errors": int(cycles["errors"] or 0),
+                     "usd": {k: round(self.store.spent([k], since=began - 3600), 4) for k in ("sail_model", "gym_box", "openai")}}
         row = {"at": began, "seconds": round(self.clock() - began, 1), "validation": validation, "retired": retired, "born": born,
-               "board": board, "totals": totals}
+               "board": board, "totals": totals, "last_hour": last_hour}
         self.store.event("swarm.tournament", None, row)
         self.store.put("leaderboard", {"at": began, "board": board, "totals": totals})
         return row

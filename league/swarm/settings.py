@@ -108,7 +108,11 @@ DEFAULTS: dict[str, Any] = {
     },
     "guard": {
         "every_seconds": 180,
-        "house_burn_usd_day": 2.0,      # the House's own burn a day (box plus its model calls); a floor on the estimate
+        # The House's own burn a day. The new House box burns ~$0.25-0.75 a day (Sail bills measured use), so the line is
+        # 2 x 1.0 + 30 = $32. `measured_burn` true would use Sail's 24-hour spend less the swarm's instead (it counts
+        # every other box too, and for a day holds a stopped House's history: on Sept 26 that read ~$31 a day).
+        "house_burn_usd_day": 1.0,
+        "measured_burn": False,
         "margin_usd": 30.0,             # scale to zero below 2 x the House's daily burn + this
         "burst_cap_usd": 350.0,         # Sail spend for the training burst
         "burst_until": "2026-09-28T13:30:00Z",

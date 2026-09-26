@@ -262,7 +262,10 @@ class Researcher:
             run = self.store.run(str(args.get("run_id") or ""))
             if run is None or run["family"] != fam["id"] or run["window"] != "train":
                 return {"error": "no such Train run of your family"}
-            result = self.store.run_result(run["run_id"]) or {}
+            result = self.store.run_result(run["run_id"])
+            if result is None:
+                return {"error": "that run's full result is no longer kept (your newest six and your best are)",
+                        "summary": run.get("summary")}
             return diagnostics.section(result, str(args.get("section") or "summary"), page=int(args.get("page") or 0))
         if name == "notebook":
             if args.get("action") == "append":

@@ -148,12 +148,12 @@ class Mirror(HookCase):
         self.assertEqual(step.mirror(ledger), 4)
         self.assertEqual(step.mirror(ledger), 0)
         rows = list(ledger.iter())
-        self.assertEqual([r.kind for r in rows], ["swarm.born", "swarm.cycle", "swarm.band", "swarm.note"])
-        self.assertEqual([r.public for r in rows], [True, False, True, True])
+        self.assertEqual([r.kind for r in rows], ["swarm.born", "swarm.band", "swarm.note"], "cycles stay in the swarm's own table")
+        self.assertEqual([r.public for r in rows], [True, True, True])
         self.assertTrue(all(r.agent == "condor-vrp" for r in rows))
         (self.root / "swarm-mirror.json").unlink()
         self.assertEqual(step.mirror(ledger), 4, "a lost cursor re-mirrors idempotently")
-        self.assertEqual(len(list(ledger.iter())), 4)
+        self.assertEqual(len(list(ledger.iter())), 3)
         store.close()
         # The tape: a note is the agent's note, a birth and a band move are the swarm's news.
         events = [e for r in rows for e in publish.to_events(r)]

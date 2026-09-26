@@ -480,7 +480,31 @@ class SwarmStore:
                         dumps(summary), str(path.relative_to(self.root))))
             if trials:
                 self.bump(fid, trials=trials, since_val_trials=trials)
+            if window == "train":
+                self.prune_runs(fid)
         return self._one("SELECT * FROM runs WHERE run_id=?", (run_id,))  # type: ignore[return-value]
+
+    #: Full Train results kept per family (the newest, plus its best and submitted runs): a three-year result is ~100-400 KB
+    #: compressed and a researcher makes one a minute, which would fill the House box's disk in days. The summary row stays.
+    KEEP_FULL_TRAIN_RUNS = 6
+
+    def prune_runs(self, fid: str) -> int:
+        fam = self.family(fid) or {}
+        state = fam.get("state") or {}
+        keep = {state.get("best_train_run"), state.get("submitted_run")}
+        rows = self._all("SELECT run_id, path FROM runs WHERE family=? AND window='train' AND path IS NOT NULL ORDER BY at DESC, rowid DESC",
+                         (fid,))
+        n = 0
+        for row in rows[self.KEEP_FULL_TRAIN_RUNS:]:
+            if row["run_id"] in keep:
+                continue
+            try:
+                (self.root / row["path"]).unlink()
+            except OSError:
+                pass
+            self._exec("UPDATE runs SET path=NULL WHERE run_id=?", (row["run_id"],))
+            n += 1
+        return n
 
     def run(self, run_id: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM runs WHERE run_id=?", (run_id,))

@@ -84,6 +84,27 @@ class ModelRouter:
             self.store.add_spend(kind, cost, family=family, detail={"profile": profile, "key": key[:120]})
         return response
 
+    def compact(self, *, older_than_seconds: float = 3600.0) -> int:
+        """Blank the request bodies and responses of settled calls older than an hour in the swarm's Provider file. Each
+        body is the whole conversation (~65 KB measured Sept 26) and the swarm makes thousands an hour: kept, they would
+        fill the House box's disk in a day. Costs, usage and statuses stay (the budgets read those); a call is re-read
+        by its key only within its own cycle."""
+        import sqlite3
+        import time as _time
+
+        path = getattr(self.provider, "path", None)
+        if path is None:
+            return 0
+        cutoff = _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime(_time.time() - older_than_seconds))
+        db = sqlite3.connect(str(path), timeout=10, isolation_level=None)
+        try:
+            cur = db.execute("UPDATE requests SET body='{}', response=NULL WHERE status IN "
+                             "('completed','incomplete','failed','cancelled','abandoned') AND updated_at < ? "
+                             "AND (body != '{}' OR response IS NOT NULL)", (cutoff,))
+            return int(cur.rowcount or 0)
+        finally:
+            db.close()
+
     # ------------------------------------------------------------------ OpenAI
     def openai_room(self) -> float:
         """Dollars the swarm may still spend on OpenAI now: the lower of the gateway month's room above the

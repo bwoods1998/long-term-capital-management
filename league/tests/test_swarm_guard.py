@@ -30,7 +30,25 @@ class GuardCase(unittest.TestCase):
         return SailGuard(self.store, self.settings, lambda: self.reading, clock=self.clock)
 
 
+class Defaults(GuardCase):
+    def test_by_default_the_line_is_two_days_of_the_configured_house_burn_plus_thirty(self):
+        self.reading = (40.0, 31.0)  # Sail's 24-hour burn still holds a stopped House's history
+        g = self.guard()
+        out = g.check()
+        self.assertEqual((out["house_day"], out["line"]), (1.0, 32.0))
+        self.assertTrue(g.allows())
+        self.reading = (31.0, 31.0)
+        g.check()
+        self.assertFalse(g.allows())
+
+
 class Guard(GuardCase):
+    """The measured-burn line (guard.measured_burn true)."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings["guard"].update(measured_burn=True, house_burn_usd_day=2.0)
+
     def test_a_healthy_balance_spends(self):
         g = self.guard()
         out = g.check()

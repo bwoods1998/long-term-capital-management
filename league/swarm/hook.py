@@ -37,6 +37,9 @@ from .store import SwarmStore
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
+#: Kept in the swarm's own table only: a cycle a minute a family is thousands of rows an hour, and the House ledger is
+#: append-only on a small disk. The hourly `swarm.tournament` row carries their totals (cycles, trials, spend).
+SKIPPED_KINDS = ("swarm.cycle",)
 MIRROR_CURSOR = "swarm-mirror.json"
 
 
@@ -189,12 +192,15 @@ class SwarmStep:
             return 0
         batch = []
         for r in rows:
+            if r["kind"] in SKIPPED_KINDS:
+                continue
             payload = dict(r["payload"]) if isinstance(r["payload"], dict) else {"value": r["payload"]}
             payload["swarm_seq"] = r["seq"]
             payload["swarm_at"] = r["at"]
             batch.append({"kind": r["kind"], "payload": payload, "agent": r["family"] or "house", "id": f"swarm:{r['seq']}",
                           "public": r["kind"] in PUBLIC_KINDS})
-        ledger.append_many(batch)
+        if batch:
+            ledger.append_many(batch)
         tmp = self.root / (MIRROR_CURSOR + ".tmp")
         tmp.write_text(json.dumps({"seq": rows[-1]["seq"], "at": self.clock()}))
         tmp.replace(self.root / MIRROR_CURSOR)

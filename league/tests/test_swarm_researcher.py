@@ -274,6 +274,23 @@ class RateLimits(unittest.TestCase):
             store.close()
 
 
+class Compaction(ResearcherCase):
+    def test_old_conversations_leave_the_providers_file_and_costs_stay(self):
+        import sqlite3
+
+        self.router.sail("flash_asap", [{"role": "user", "content": "x" * 5000}], family="f", key="old")
+        db = sqlite3.connect(str(self.provider.path))
+        db.execute("UPDATE requests SET updated_at='2020-01-01T00:00:00'")
+        db.commit()
+        self.assertEqual(self.router.compact(), 1)
+        body, response, cost = db.execute("SELECT body, response, cost_usd FROM requests").fetchone()
+        self.assertEqual((body, response), ("{}", None))
+        self.assertIsNotNone(cost)
+        self.assertEqual(self.router.compact(), 0)
+        self.assertGreater(float(self.provider.spent_today("f")), 0)
+        db.close()
+
+
 class History(ResearcherCase):
     def test_history_is_cut_in_chunks_and_old_outputs_shortened(self):
         r = self.researcher()

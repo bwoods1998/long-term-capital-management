@@ -108,6 +108,24 @@ class Runs(StoreCase):
         self.assertEqual((self.store.family(a["id"])["trials"], self.store.family(b["id"])["trials"]), (2, 2))
 
 
+class Pruning(StoreCase):
+    def test_only_the_newest_full_train_results_and_the_best_are_kept(self):
+        fam = self.store.add_family(SPEC, origin="seed")
+        rows = []
+        for i in range(10):
+            self.clock.advance(1)
+            rows.append(self.store.add_run(fam["id"], i + 1, result(f"r{i}"), window="train", stress=1.0, purpose="train"))
+            if i == 1:
+                self.store.set_state(fam["id"], best_train_run=rows[-1]["run_id"])
+        kept = [r["run_id"] for r in rows if self.store.run_result(r["run_id"]) is not None]
+        self.assertEqual(len(kept), SwarmStore.KEEP_FULL_TRAIN_RUNS + 1)
+        self.assertIn(rows[1]["run_id"], kept, "the best stays")
+        self.assertIsNone(self.store.run_result(rows[0]["run_id"]))
+        self.assertEqual(self.store.run(rows[0]["run_id"])["summary"]["trades"], 150, "the summary row stays")
+        self.assertEqual(len(list((Path(self.dir.name) / "swarm-runs").iterdir())), SwarmStore.KEEP_FULL_TRAIN_RUNS + 1)
+        self.assertEqual(self.store.totals()["trials"], 10, "pruning never lowers a count")
+
+
 class EventsAndSpend(StoreCase):
     def test_events_are_append_only(self):
         self.store.event("swarm.status", None, {"a": 1})
