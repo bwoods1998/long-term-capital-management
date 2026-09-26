@@ -269,19 +269,74 @@ class TheReview(CalibrationCase):
 
 
 class Limits(CalibrationCase):
-    def test_the_days_fifty_dollars_admit_one_round_trip(self):
+    def opens(self):
+        return [b for b in self.mine() if b["legs"][0]["position_intent"] == "buy_to_open"]
+
+    def test_cheap_round_trips_repeat_through_the_day_under_the_bound(self):
+        # Filled at the mid both ways, a round trip loses only its fees: each closed one frees its maximum loss, so
+        # every slot of the day sends one.
         self.venue.fill = "limit"
         live = self.start(real_money=True)
+        today = MONDAY.isoformat()
+        for hh, mm in ((10, 2), (12, 32), (14, 32)):
+            if (hh, mm) != (10, 2):
+                self.clock.set(at(MONDAY, hh, mm - 3))
+            self.run_to(hh, mm)
+            self.assertEqual(live.book.positions, {}, f"closed by {hh}:{mm:02d}")
+            self.assertLess(live.calibration.day_possible_loss(today), D("2"), "only the fees are realized")
+        self.assertEqual(len(self.opens()), 3, "three round trips, one a slot")
+        self.assertEqual(live.state.get("calibration")["slots"], {"day": today, "fired": [600, 750, 870]})
+
+    def test_the_next_open_is_refused_once_realized_loss_and_what_is_open_would_pass_fifty(self):
+        closes = []
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "buy_to_open":
+                self.venue.fill = "limit"
+            else:
+                closes.append(body)
+                self.venue.fill = "none" if len(closes) == 1 else "limit"   # the first close rests; the second fills
+
+        self.venue.on_submit = hook
+        live = self.start(real_money=True)
         self.run_to(10, 2)
-        self.assertEqual(len(self.mine()), 2)
-        used = live.calibration.day_used(MONDAY.isoformat())
-        self.assertGreater(used, D("30"))
-        self.assertLessEqual(used, live.table.calibration_day)
-        self.clock.set(at(MONDAY, 12, 30))
-        self.run_to(12, 32)
-        self.assertEqual(len(self.mine()), 2, "the 12:30 slot finds no room under the day's $50")
-        self.assertIn("the day's calibration cap", live.state.get("calibration")["why"])
-        self.assertEqual(live.state.get("calibration")["slots"], {"day": MONDAY.isoformat(), "fired": [600, 750]})
+        [pos] = live.book.positions.values()
+        entry = pos.entry
+        long_leg, short_leg = pos.legs
+        # The market falls: the round trip closes at a dime, a loss of about $37 on a debit of about $0.47.
+        self.market.overrides[long_leg.symbol] = (0.10, 0.12, 20, 20)
+        self.market.overrides[short_leg.symbol] = (0.00, 0.02, 20, 20)
+        self.run_to(10, 7)
+        self.assertEqual(live.book.positions, {})
+        today = MONDAY.isoformat()
+        realized = live.calibration.day_possible_loss(today)
+        self.assertGreater(realized, D("30"))
+        self.assertAlmostEqual(float(realized), (entry - 0.10) * 100 + 0.5, delta=1.0)
+        # While the position was held, the bound counted its maximum loss; now the realized loss stands in for it.
+        del self.market.overrides[long_leg.symbol], self.market.overrides[short_leg.symbol]
+        self.clock.set(at(MONDAY, 12, 29))
+        self.run_to(12, 35)
+        self.assertEqual(len(self.opens()), 1, "a second round trip would put more than $50 of the day at risk")
+        why = live.state.get("calibration")["why"]
+        self.assertIn("the day's calibration bound", why)
+        self.assertEqual(live.state.get("calibration")["slots"]["fired"], [600, 750])
+
+    def test_one_round_trip_at_a_time(self):
+        self.venue.fill = "limit"
+
+        def hook(body):
+            if body["legs"][0]["position_intent"] == "sell_to_close":
+                self.venue.fill = "none"                                  # its closes never fill
+
+        self.venue.on_submit = hook
+        live = self.start(real_money=True)
+        self.run_to(10, 2)
+        self.assertEqual(len(live.book.positions), 1)
+        self.clock.set(at(MONDAY, 12, 29))
+        self.run_to(12, 40)
+        self.assertEqual(len(self.opens()), 1, "the 12:30 slot waits while a calibration position is held")
+        self.assertEqual(len(live.book.positions), 1)
+        self.assertNotIn(750, live.state.get("calibration")["slots"]["fired"])
 
     def test_nothing_goes_before_the_paper_proof_and_the_slot_waits_for_it(self):
         self.venue.fill = "limit"

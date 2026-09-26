@@ -359,7 +359,7 @@ through restarts. Passing records paper execution evidence; the real-money flags
 exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a
 deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure
 with a $100 one-contract floor, 3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%;
-tuition $200 a day; the D3 calibration $50 of maximum loss a day. The gateway's per-order cap is the lower of
+tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The gateway's per-order cap is the lower of
 $1,000 and 25% of equity (a $100 Probe fits at $481.63), 100% of equity opened a day, 250 of 300 orders open.
 
 **The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
@@ -374,8 +374,11 @@ Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mor
 
 **The D3 calibration round trips**: 1-lot SPY and QQQ call verticals one dollar wide nearest the money,
 at 10:00, 12:30 and 14:30 ET; open at the mid, then once at the mid plus a tick; close at the mid, a tick
-under, then the natural (at most six close attempts a position a day, backing off after a refusal). Only
-with real money on, the grant active, real entries open and the paper proof passed; family
+under, then the natural (at most six close attempts a position a day, backing off after a refusal). One
+round trip at a time, within a strict $50 bound on the day's possible loss: a new open goes only while
+today's realized calibration loss (net, floored at zero) plus what is still held or working plus its own
+maximum loss stays within $50; a closed round trip frees its maximum loss. Only with real money on, the
+grant active, real entries open and the paper proof passed; family
 `house:calibration`, never evidence and never Profit (its net is a cost, `compute.other_usd`). Samples:
 `/workspace/state/calibration.sqlite` (0600), read with
 `python3 -m league.live --root /workspace/state --calibration` (per cell: attempts, outcomes, fill rate,

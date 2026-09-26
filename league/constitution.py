@@ -705,7 +705,9 @@ CONSTITUTION: dict[str, Any] = {
     #   House refuses first and says why).
     # - `calibration`: the D3 real-fill calibration round trips (`league/live/calibration.py`): 1-lot SPY and QQQ debit
     #   verticals the House itself sends at mid (then one tick worse) and closes, only to measure real fills, never
-    #   evidence for any family: at most `day_usd` of maximum loss opened a day.
+    #   evidence for any family: a strict bound on the day's possible loss, `day_usd` (a new open goes only while today's
+    #   realized calibration loss, net and floored at zero, plus what is still held or working, plus its own maximum loss
+    #   stays within it; a closed round trip frees its maximum loss).
     #
     # THE SPRINT (docs/goals/LTCM_SWARM_SPRINT.md, Sept 26, 2026; the owner's decisions D1, D3 and D4, all "yes"): the
     # table at the bold end of the plan's ranges -- Probe 5% a structure with a $100 one-contract floor, the family 15%,

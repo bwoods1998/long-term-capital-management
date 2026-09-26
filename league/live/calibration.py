@@ -2,9 +2,11 @@
 
 The owner's decision D3 (the sprint, Sept 26, 2026, `docs/goals/LTCM_SWARM_SPRINT.md`): without real fills the Gym's
 execution cost is a guess, and it is the biggest single term in every family's result. So the House -- not an agent --
-sends 1-lot SPY and QQQ debit verticals, opens and closes them, capped at the constitution's
-`options_money.calibration.day_usd` ($50) of maximum loss opened a day, every session until `live.calibration_samples`
-samples per cell. These are the only orders no agent's intent produced besides the paper route proof. They are never
+sends 1-lot SPY and QQQ debit verticals, opens and closes them, every session until `live.calibration_samples` samples
+per cell, within a strict bound on the day's possible loss: a new open goes only while today's realized calibration loss
+(net, floored at zero), plus the maximum loss of any calibration position still held or open still working, plus its own
+maximum loss (fees included) stays within the constitution's `options_money.calibration.day_usd` ($50). The day can
+never lose more than that, and a closed round trip frees its maximum loss. These are the only orders no agent's intent produced besides the paper route proof. They are never
 evidence for any family.
 
 WHAT IT SENDS (`Calibration.step`, once a session minute, from `OptionsLive._session_minute` after the families' real
@@ -14,8 +16,9 @@ orders of the minute, so it takes only what they left):
   two at once: the symbol with the fewest open-at-mid samples still under the target whose vertical fits every cap. The
   vertical: calls one strike ($1) wide, nearest the money (its centre nearest the underlying, the cheaper at a tie; the
   next nearest of `CANDIDATES` pairs when those contracts are held or worked or it does not fit a cap), on the nearest
-  expiry at least a day out, on contracts no book position or working order holds and no waiting exit needs. At about
-  $0.45 of debit a round trip risks about $45, so the $50 day's cap admits about one round trip a day.
+  expiry at least a day out, on contracts no book position or working order holds and no waiting exit needs; those
+  whose mid debit keeps one lot within the day's bound first. One round trip at a time: a slot waits while a
+  calibration position is held or a calibration order works.
 - The open: a limit at the mid (the Gym's `limit_value("mid")`: the $0.01 net tick, rounded passively). It works
   `WAIT_MINUTES` (its time in force, cancelled by the order path), then goes ONCE more at the mid plus one tick, then
   nothing.
@@ -31,8 +34,8 @@ orders of the minute, so it takes only what they left):
   (250, every leg counted), buying power reserved, and the gateway's own caps and kill switch behind them.
 - New round trips only while: `config.json` real_money, the grant active and every real-entry rule open
   (`OptionsLive.real_block`: the kill switch, the stops, reconciliation, the House), the paper proof PASSED,
-  `live.calibration` true in `<state>/swarm.json` (off by default), the day's cap with room, the book's, the gateway's
-  order and day caps and buying power with room, and the recorder readable. Closes need only the kill switch off.
+  `live.calibration` true in `<state>/swarm.json` (off by default), the day's loss bound with room, the book's, the
+  gateway's order and day caps and buying power with room, and the recorder readable. Closes need only the kill switch off.
 
 NEVER EVIDENCE, NEVER PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's
 slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never
@@ -241,7 +244,8 @@ class Calibration:
         trip = dict(st["trip"]) if st.get("trip") else None
         if trip:
             trip.pop("legs", None)                          # contracts are not a status line's
-        return {"trip": trip, "slots": st.get("slots"), "why": st.get("why"), "day_used_usd": st.get("day_used_usd")}
+        return {"trip": trip, "slots": st.get("slots"), "why": st.get("why"),
+                "day_possible_loss_usd": st.get("day_possible_loss_usd")}
 
     def positions(self) -> list[RPosition]:
         book = self.live.book
@@ -353,6 +357,10 @@ class Calibration:
         if not due:
             self._fire(st, today, slot, f"{today}: every symbol has {target} samples at the mid")
             return
+        # One round trip at a time: a calibration position still held, or a calibration order still working, makes the
+        # slot wait (inside its window).
+        if self.positions() or any(o.working and o.family == FAMILY for o in book.orders.values()):
+            return
         # It yields: a root on which any family works a real order now is left to the families this minute.
         worked = {o.root for o in book.orders.values() if o.working and o.family != FAMILY}
         due = [s for s in due if s not in worked]
@@ -431,7 +439,15 @@ class Calibration:
         why = "no strike one dollar above the nearest is quoted"
         out = []
         pairs = [k for k in by_strike if round(k + WIDTH, 3) in by_strike]
-        for strike in sorted(pairs, key=lambda k: (abs(k + WIDTH / 2 - spot), -k))[:CANDIDATES]:
+        near = sorted(pairs, key=lambda k: (abs(k + WIDTH / 2 - spot), -k))[:CANDIDATES]
+        cap = float(self.live.table.calibration_day)
+
+        def over(k: float) -> bool:
+            debit = float(snap.mid[by_strike[k]]) - float(snap.mid[by_strike[round(k + WIDTH, 3)]])
+            return not (math.isfinite(debit) and debit * V.MULTIPLIER <= cap)
+
+        # Nearest the money, those whose mid debit keeps one lot's maximum loss within the day's bound first.
+        for strike in sorted(near, key=lambda k: (over(k), near.index(k))):
             i, j = by_strike[strike], by_strike[round(strike + WIDTH, 3)]
             symbols = (str(chain.symbol[i]), str(chain.symbol[j]))
             if set(symbols) & held:
@@ -488,10 +504,10 @@ class Calibration:
         equity = live.sizing_equity()
         if equity is None:
             return "no sizing equity"
-        used = self.day_used(today)
-        if used + unit > table.calibration_day:
-            return (f"the day's calibration cap: ${M.cents(used)} used of ${table.calibration_day}; this round trip risks "
-                    f"${M.cents(unit)}")
+        possible = self.day_possible_loss(today)
+        if possible + unit > table.calibration_day:
+            return (f"the day's calibration bound: ${M.cents(possible)} could already be lost today (realized, and what is "
+                    f"open or working) and this round trip risks ${M.cents(unit)}, over ${table.calibration_day}")
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
         exposure = book.exposure(FAMILY, day=today, week_start=week_start)
         loss = M.D(max_loss)
@@ -517,7 +533,7 @@ class Calibration:
             pos = book.positions[sent.pid]                  # filled on arrival: its close carries this round trip's name
             pos.info["cal_trip"] = trip
             book._save_position(pos)
-        self._used_note(today)
+        self._possible_note(today)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": FAMILY, "action": "open", "status": sent.status,
                                              "calibration": offset})
         live.record("live.calibration", {"trip": trip, "symbol": symbol, "action": "open", "offset": offset,
@@ -607,22 +623,38 @@ class Calibration:
             "limit_value": float(order.limit_value), "qty": int(order.qty), "quote": json.dumps(quote, sort_keys=True),
             "mid": quote.get("mid"), "natural": quote.get("natural"), "submitted_at": float(order.placed_at)})
 
-    def day_used(self, today: str) -> M.Decimal:
-        """The maximum loss (and round-trip fees) the calibration's opens took today, from the live state's own order rows
-        (never the recorder): a working open counts whole, an ended one by what filled."""
-        used = M.ZERO
-        for r in self.live.state.rows("SELECT qty, filled_qty, status, max_loss, fees_est, answer FROM orders "
-                                      "WHERE family=? AND action='open' AND day=?", (FAMILY, today)):
-            # A lost order counts whole (it may yet turn up filled), as a working one does.
-            live = r["status"] in ("pending", "working", "unknown", "lost")
-            units = int(r["qty"]) if live else int(r["filled_qty"])
-            share = M.D(units) / max(1, int(r["qty"]))
-            used += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * share
-        return used
+    def day_possible_loss(self, today: str) -> M.Decimal:
+        """The most the calibration can lose on session day `today` as things stand, from the live state's own rows (never
+        the recorder): today's REALIZED net loss (positions closed today, fees included; floored at zero), plus every
+        calibration position still held (its maximum loss and its fees twice, open and close), plus every calibration open
+        still working or unresolved (its remaining maximum loss and round-trip fees; a lost one of today's counts whole: it
+        may yet turn up filled). A new open goes only while this plus its own maximum loss and fees stays within
+        `options_money.calibration.day_usd`, so the day can never lose more; a closed round trip frees its maximum loss."""
+        from .step import ny
 
-    def _used_note(self, today: str) -> None:
+        state = self.live.state
+        realized = M.ZERO
+        for r in state.rows("SELECT cash, closed_at FROM positions WHERE family=? AND status='closed' AND closed_at IS NOT NULL",
+                            (FAMILY,)):
+            if ny(float(r["closed_at"])).date().isoformat() == today:
+                realized += M.D(r["cash"])
+        possible = max(M.ZERO, -realized)
+        for r in state.rows("SELECT qty, opened_qty, max_loss_share, fees, status FROM positions WHERE family=? AND "
+                            "status IN ('open', 'awaiting_expiry', 'unpriced_close')", (FAMILY,)):
+            units = int(r["opened_qty"]) if r["status"] == "unpriced_close" else max(0, int(r["qty"]))
+            possible += M.D(r["max_loss_share"]) * V.MULTIPLIER * units + 2 * M.D(r["fees"])
+        for r in state.rows("SELECT qty, filled_qty, status, max_loss, fees_est, day FROM orders WHERE family=? AND "
+                            "action='open' AND status IN ('pending', 'working', 'unknown', 'lost')", (FAMILY,)):
+            if r["status"] == "lost" and r["day"] != today:
+                continue
+            remaining = int(r["qty"]) if r["status"] == "lost" else max(0, int(r["qty"]) - int(r["filled_qty"]))
+            share = M.D(remaining) / max(1, int(r["qty"]))
+            possible += (M.D(r["max_loss"]) + 2 * M.D(r["fees_est"])) * share
+        return possible
+
+    def _possible_note(self, today: str) -> None:
         st = self._st()
-        st["day_used_usd"] = {"day": today, "usd": str(M.cents(self.day_used(today)))}
+        st["day_possible_loss_usd"] = {"day": today, "usd": str(M.cents(self.day_possible_loss(today)))}
         self._put(st)
 
 
