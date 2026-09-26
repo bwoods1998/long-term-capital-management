@@ -1,6 +1,6 @@
 # Handoff: the options-swarm run
 
-## Current continuation, September 26 18:38Z
+## Current continuation, September 26 18:55Z
 
 Read this update before the historical Claude handoff below. The run record remains the source
 of truth and now includes the **T0 + 12 h scoreboard**. T0 is still **2026-09-26T06:23:14Z**;
@@ -45,12 +45,21 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 - At 18:23Z: 16,358 trials and 22,684.43 durable program-years; 17 alive in the database after
   a birth, 53 retired. The population is refilling from its floor of 16. Median model cycle
   47 seconds. No validation/holdout pass. Do not relax evidence requirements to manufacture one.
+- Cost audit through 18:46:56Z: Sail box billing is $4.22136 finalized plus $0.01723 estimated
+  active cost; House Sail model requests in that window total $22.83364 by token usage and
+  configured prices, not invoice confirmation. Do not add billed boxes to the Gym estimate or
+  the account debit meter. Early laptop trials, aligned billing windows and subscriptions still
+  need reconciliation before exact all-input Net. Private evidence is in `.ltcm-main/`.
 
 ### What remains, in order
 
 1. **Final data completion/adoption.** Core, holdout, 2022 and trade-quote calibration stages are
-   complete. Names were 8,626/23,740 at 18:22Z, with 150 vendor-empty tasks and no failures;
+   complete. Names were 9,369/23,740 at 18:54Z, with 150 vendor-empty tasks and no failures;
    back months were 0/2,374. The completion supervisor is healthy in the ThetaData phase.
+   A read-only local completion watch follows the same live backfill (PID 22487, start ticks
+   3310972); current observations go to `.ltcm-main/completion-watch.jsonl`. Check the existing
+   process and watch before starting anything. Observation failures do not authorize a duplicate
+   collector. The estimated remaining time was about twelve hours, not a completion guarantee.
    Active Gym is still v1, `sbcp_4f1f0577-9b32-4e8d-b610-480bb88d617d`; the gate is disabled.
    Do not select the provisional calibrated pair. Await full ThetaData/SIP, final calibration,
    sealed final pair and actual primary/backup restores. Follow the expanded adoption procedure

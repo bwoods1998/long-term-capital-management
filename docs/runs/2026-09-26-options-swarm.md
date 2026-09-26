@@ -606,6 +606,25 @@ clock never restarts.
   Creation succeeded; no restore was exercised and no clone was started. The current handoff
   now precedes the historical Claude handoff and includes deployed identities, funding, evidence,
   the staged prune and the remaining Sunday/Monday/Tuesday actions. The overall goal stays active.
+- 18:55Z A read-only completion watch is following the existing data process, PID 22487 with
+  start ticks 3310972, and the House completion supervisor. At 18:54Z the same process was live:
+  names 9,369/23,740, 150 vendor-empty tasks, no failures; back months 0/2,374. The supervisor
+  remains in the ThetaData phase with no error. Current throughput gives about twelve more
+  hours, an estimate rather than a deadline. The watch records actual process identity and
+  stops for inspection on completion-phase changes, errors or process loss. It does not restart
+  or alter the collector; an observation timeout is not grounds to start a second job.
+- 18:55Z Cost reconciliation now has direct Sail box billing for T0 through 18:46:56Z:
+  $4.221360571 finalized plus $0.017232712 estimated active cost, covering all 46 returned boxes
+  in the project's app. These are an alternative to the conservative Gym-box ledger estimate,
+  not an additional charge on top of that estimate or the account balance-debit meter. A
+  read-only request audit found $22.83363940 of House Sail model cost for requests created in
+  that window, calculated from response token usage and configured rates; this is not an
+  invoice. Two costs settled after the window, and the audit found no unresolved Sail request
+  hold within that request set. The old laptop provider had no requests in the window, and no
+  separate laptop swarm-trial provider database was found in the searched worktrees. OpenAI
+  holds remain separate from gateway usage. Exact all-input Net stays unknown pending complete
+  trial, billing-window and subscription reconciliation; real-options P&L remains $0. Private
+  receipts are `.ltcm-main/sail-box-cost-window.json` and `cost-evidence-20260926.json`.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
@@ -622,7 +641,7 @@ while the full ThetaData/SIP completion is pending.
    across the pair and the absence of holdout, credentials and network access in the Gym.
    Restore and verify each primary and backup checkpoint sequentially: a producer receipt alone
    does not prove recovery. Terminate verification forks only. The private adoption preflight and
-   sealed-image checks are prepared and passed seven synthetic cases; they have not run on a
+   sealed-image checks are prepared and passed fifteen synthetic cases; they have not run on a
    final pair that does not yet exist.
 2. Quiesce research with `swarm.stop` and collection with `data/nightly.stop`; verify process
    identity and released locks. A House maintenance pause alone does not stop existing research.
