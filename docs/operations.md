@@ -25,7 +25,7 @@ Use the source-of-truth records together: current release, latest completed tick
 
 ## Pause, stop and recover
 
-`floor_box.py maintenance on --reason ...` writes maintenance intent for the House. PAUSE prevents new entries/research while the live path continues reconciliation and exits. `maintenance off` releases that intent. `gateway_admin.py kill` engages the external switch; `unkill` uses the owner's separate credential. A kill prevents new risk; inspect outstanding orders and inventory while exits continue.
+`floor_box.py maintenance on --reason ...` writes maintenance intent for the House. PAUSE prevents new live entries and starting new paid workers while the live path continues reconciliation and exits. A running swarm keeps training; use `<state>/swarm.stop` and verify its lifetime lock is released to quiesce research. `maintenance off` releases that intent. `gateway_admin.py kill` engages the external switch; `unkill` uses the owner's separate credential. A kill prevents new risk; inspect outstanding orders and inventory while exits continue.
 
 `floor_box.py stop --reason ...` stops the runtime. Use a hard stop only when the resulting loss of active exit supervision is intended. Before restart or rollback inspect actual venue inventory, unknown/partial orders and current paper proof. Never clear a reconciliation freeze or delete an order record to obtain a clean status. Resolve the broker/state disagreement and keep the evidence.
 
@@ -50,7 +50,7 @@ The daemon waits for all six ThetaData stages with no failing requests, relays h
 
 The data account supports one ThetaData session. Do not log in from another machine while backfill runs. Use the data tools' remote lease and identity-checked stop/restart, not manual concurrent image or data mutations. A lost lease or session restart failure is fatal to that attempt and cannot publish success. No `--force` is used to pretend missing historical coverage is complete.
 
-Before selecting staged images, inspect coverage, both sealed policies, both checkpoint pairs, matching private model identity, and the recorded engine/data versions. Install the same model privately for live shadow and restart the House outside the protected session window. Update the private active image records and `swarm.json` deliberately; keep the gate disabled until verification is complete. Re-run evidence against the resulting identity rather than transferring old passes.
+Before selecting staged images, inspect coverage, both sealed policies, both checkpoint pairs, matching private model identity, and the recorded engine/data versions. Install the same model privately for live shadow and restart the House outside the protected session window. While both researcher and collector processes are quiesced, adopt the staged `images.json` and `calibration.json` together with the matching `swarm.json` pointers. Retain completion receipts and active-record backups. Check that `gym-forward.json` is absent or refers to the new model and complete forward lineage: a valid manifest overrides the configured gate pointer when the gate is enabled. Restart the pool against the new checkpoint IDs and keep the gate disabled until verification is complete. Re-run evidence against the resulting identity rather than transferring old passes.
 
 The actual fitted table, quotes and trained programs stay private. The public run record may contain hashes, aggregate counts and conclusions only. Paper route fills must never feed calibration.
 

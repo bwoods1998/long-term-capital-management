@@ -6,7 +6,7 @@ One account, one options game, and an honest record of returns and costs. Resear
 
 The House performs short ticks. It owns the hash-chained `ledger.sqlite`, the owner grant handle, public checkpoint publication and supervised jobs. `OptionsLive` reconciles the venue and routes every shadow, paper and real option action. The swarm is a separate process with `swarm.sqlite`, a private program store and notebooks. The optional data daemon has its own lifetime lock and heartbeat. Neither a slow researcher nor an image build blocks a House tick.
 
-The service builds this composition directly. It does not construct a second legacy book, roster, campaign store or researcher alongside it. PAUSE closes admission to new work while the existing live path continues reconciliation and exits. A hard STOP ends the loop; it is not a way to keep exits running.
+The service builds this composition directly. It does not construct a second legacy book, roster, campaign store or researcher alongside it. PAUSE blocks new live entries and starting paid workers while the live path continues reconciliation and exits. A running swarm continues training until `swarm.stop` is set. A hard STOP ends the House loop; it is not a way to keep exits running.
 
 | Earlier responsibility | Current owner |
 |---|---|
