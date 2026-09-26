@@ -136,23 +136,26 @@ class LiveChain:
         self.generation += 1
         return True
 
-    def record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
+    def record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float, only_empty: bool = False) -> bool:
         """Publish an odd/even revision around the complete chain update for concurrent readers."""
         self.quote_revision += 1
         try:
-            return self._record(mi, rows, open_epoch=open_epoch)
+            return self._record(mi, rows, open_epoch=open_epoch, only_empty=only_empty)
         finally:
             self.quote_revision += 1
 
-    def _record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
+    def _record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float, only_empty: bool = False) -> bool:
         """Minute `mi`'s chain read ({OCC: snapshot row}). A quote stamped before today's open, or not two-sided and
-        ordered (0 <= bid <= ask, ask > 0), stays NaN. True when the contract set changed."""
+        ordered (0 <= bid <= ask, ask > 0), stays NaN. `only_empty`: a later read of the same minute (the observe band's)
+        fills only cells still empty and never overwrites a quote already recorded. True when the contract set changed."""
         changed = self._admit(rows.keys())
         if not 0 <= mi < self.m:
             return changed
         for symbol, row in rows.items():
             col = self._col.get(symbol.upper())
             if col is None:
+                continue
+            if only_empty and (math.isfinite(self.bid[mi, col]) or math.isfinite(self.ask[mi, col])):
                 continue
             bid, ask, bs, as_, stamp = quote_of(row)
             if stamp is not None and stamp < open_epoch:

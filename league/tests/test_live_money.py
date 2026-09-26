@@ -32,20 +32,41 @@ def row(**kw):
     return base
 
 
+#: The five multi-leg types the venue closes in one order: the table's real types once a deposit brings credit back.
+FIVE = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"]
+
+
 class TheTable(unittest.TestCase):
-    def test_the_defaults_are_the_plans(self):
+    def test_the_defaults_are_the_sprints(self):
+        """The sprint (Sept 26, 2026), owner decision D4: the bold end of the plan's ranges; D3's calibration cap; the four
+        debit types under $2,000 (the long call and put among them, B4)."""
         t = M.Table.from_constitution()
-        self.assertEqual(t.real_types, ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"))
-        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.03"), 3, D("0.12"), D("60")))
+        self.assertEqual(t.real_types, ("debit_vertical", "long_butterfly", "long_call", "long_put"))
+        self.assertEqual(t.credit_types, ("credit_vertical", "iron_condor", "iron_butterfly"))
+        self.assertEqual((t.probe_share, t.probe_open, t.probe_family_share, t.probe_floor), (D("0.05"), 3, D("0.15"), D("100")))
         self.assertEqual((t.sized_min_trades, t.sized_confidence, t.kelly_fraction), (20, 0.8, 0.25))
-        self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.70")))
-        self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.25"), D("0.50")))
-        self.assertEqual((t.tuition_day, t.tuition_week), (D("100"), D("300")))
+        self.assertEqual((t.sized_share, t.sized_family_share, t.book_share), (D("0.10"), D("0.30"), D("0.90")))
+        self.assertEqual((t.daily_stop_share, t.drawdown_stop_share), (D("0.35"), D("0.60")))
+        self.assertEqual((t.tuition_day, t.tuition_week, t.calibration_day), (D("200"), D("300"), D("50")))
         self.assertEqual((t.max_orders_day, t.max_requests_minute, t.bp_buffer), (250, 150, D("0.10")))
         self.assertEqual((t.gateway_order_max_loss, t.gateway_order_share, t.gateway_day_share, t.gateway_max_orders),
-                         (D("1000"), D("0.15"), D("1.0"), 300))
+                         (D("1000"), D("0.25"), D("1.0"), 300))
         self.assertEqual(t.credit_min_equity, D("2000"))
         self.assertEqual(options_money_problems(), [])
+        # A $100 Probe fits the gateway's per-order cap at the account's $481.63: 25% of it is $120.40.
+        self.assertGreaterEqual(t.gateway_order_share * D("481.63"), t.probe_floor)
+
+    def test_every_d4_row_is_at_the_bold_end_and_inside_the_plans_range(self):
+        c = CONSTITUTION["options_money"]
+        for path, value in (("probe.max_loss_share", "0.05"), ("probe.floor_usd", "100"), ("probe.family_share", "0.15"),
+                            ("book_share", "0.90"), ("daily_stop_share", "0.35"), ("drawdown_stop_share", "0.60"),
+                            ("tuition.day_usd", "200"), ("calibration.day_usd", "50")):
+            node = c
+            for key in path.split("."):
+                node = node[key]
+            self.assertEqual(node, value, path)
+            self.assertEqual(D(OPTIONS_MONEY_BOUNDS[path][1]), D(value), f"{path} is the bold end of its range")
+        self.assertEqual(OPTIONS_MONEY_BOUNDS["gateway.order_equity_share"], ("0", "0.25"))
 
     def test_every_row_outside_its_range_is_refused(self):
         for path, (low, high) in OPTIONS_MONEY_BOUNDS.items():
@@ -73,14 +94,26 @@ class TheTable(unittest.TestCase):
         self.assertNotEqual(money_digest(c), money_digest())
 
     def test_credit_waits_for_two_thousand_dollars_on_equity_alone(self):
+        # As it stands (the sprint): no credit type is a real type, at any equity; they come back with a deposit.
         t = M.Table.from_constitution()
+        for equity in ("1999.99", "2000", "9000"):
+            self.assertIn("credit structure", t.type_allowed("iron_condor", D(equity)))
+            self.assertIn("ratified again", t.type_allowed("credit_vertical", D(equity)))
+        # With the credit types listed again, they open at $2,000 of equity on equity alone (the gateway's own rule).
+        t = table(real_types=FIVE)
         self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
         self.assertIsNone(t.type_allowed("iron_condor", D("2000")))
         # The gateway refuses a credit open under $2,000 on equity alone: no latch from an earlier fill opens it here.
         self.assertIn("credit structure", t.type_allowed("iron_condor", D("1999.99")))
         self.assertIsNone(t.type_allowed("debit_vertical", D("100")))
         self.assertIn("closes in more than one order", t.type_allowed("calendar", D("9000")))
-        self.assertIn("closes in more than one order", t.type_allowed("long_call", D("9000")))
+        self.assertIn("closes in more than one order", t.type_allowed("long_call", D("9000")), "unless it is listed")
+
+    def test_a_long_call_and_a_long_put_are_real_types_at_any_equity(self):
+        t = M.Table.from_constitution()
+        for type_ in ("long_call", "long_put", "debit_vertical", "long_butterfly"):
+            self.assertIsNone(t.type_allowed(type_, D("100")), type_)
+        self.assertIn("closes in more than one order", t.type_allowed("long_straddle", D("9000")))
 
 
 class Bands(unittest.TestCase):
@@ -89,11 +122,11 @@ class Bands(unittest.TestCase):
 
     def test_a_candidate_that_passed_the_holdout_and_fits_is_a_probe(self):
         self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=150.0), D("5481.65"), fwd([]))[0], "probe")
-        # 3% of 5,000 is 150.00: at the line, and a cent over is not a Probe (and not under the $60 floor).
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="150.00"), D("5000"), fwd([]))[0], "probe")
-        band, why = M.band_for(self.t, row(typical_max_loss_usd="150.01"), D("5000"), fwd([]))
+        # 5% of 5,000 is 250.00: at the line, and a cent over is not a Probe (and not under the $100 floor).
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd="250.00"), D("5000"), fwd([]))[0], "probe")
+        band, why = M.band_for(self.t, row(typical_max_loss_usd="250.01"), D("5000"), fwd([]))
         self.assertEqual(band, "candidate")
-        self.assertIn("over the Probe's cap of $150.00", why)
+        self.assertIn("over the Probe's cap of $250.00", why)
 
     def test_an_unknown_typical_loss_keeps_a_candidate_shadow_only(self):
         band, why = M.band_for(self.t, row(typical_max_loss_usd=None), D("5481.65"), fwd([]))
@@ -105,14 +138,19 @@ class Bands(unittest.TestCase):
         self.assertEqual(band, "probe")
 
     def test_the_floor_lets_a_small_account_probe_one_contract(self):
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=60.0), D("481.65"), fwd([]))[0], "probe")
-        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=60.01), D("481.65"), fwd([]))[0], "candidate")
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=100.0), D("481.65"), fwd([]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(typical_max_loss_usd=100.01), D("481.65"), fwd([]))[0], "candidate")
+        self.assertEqual(M.band_for(self.t, row(structure="long_put", typical_max_loss_usd=95.0), D("481.63"), fwd([]))[0],
+                         "probe", "a long put under the floor is a Probe at the account's $481.63")
 
     def test_what_keeps_a_family_shadow_only(self):
         self.assertIn("holdout", M.band_for(self.t, row(holdout_passed=False), D("5000"), fwd([]))[1])
         self.assertIn("more than one order", M.band_for(self.t, row(structure="long_strangle"), D("5000"), fwd([]))[1])
         self.assertIn("credit structure", M.band_for(self.t, row(structure="iron_condor"), D("1999"), fwd([]))[1])
-        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(structure="iron_condor"), D("2000"), fwd([]))[0], "candidate",
+                         "no credit type is real until a deposit re-ratifies the grant")
+        self.assertEqual(M.band_for(table(real_types=FIVE), row(structure="iron_condor"), D("2000"), fwd([]))[0], "probe")
+        self.assertEqual(M.band_for(self.t, row(structure="long_call"), D("5000"), fwd([]))[0], "probe")
         self.assertEqual(M.band_for(self.t, row(band="gym"), D("5000"), fwd([]))[0], "gym")
 
     def test_a_candidate_becomes_a_probe_first_never_sized_at_once(self):
@@ -202,56 +240,59 @@ class Sizing(unittest.TestCase):
                            exposure=M.Exposure(**{k: (D(str(v)) if k not in ("family_open",) else v) for k, v in exposure.items()}))
 
     def test_a_probe_is_sized_by_maximum_loss(self):
-        # 3% of 5,481.65 = 164.4495: two structures of $80.00 (with fees) fit, three do not.
-        self.assertEqual(self.plan(80.00).qty, 2)
-        self.assertEqual(self.plan(164.44).qty, 1)
-        self.assertEqual(self.plan(54.8165).qty, 3)
-        refused = self.plan(164.46)
+        # 5% of 5,481.65 = 274.0825: two structures of $137.00 (with fees) fit, three do not.
+        self.assertEqual(self.plan(137.00).qty, 2)
+        self.assertEqual(self.plan(137.05).qty, 1)
+        self.assertEqual(self.plan(274.08).qty, 1)
+        self.assertEqual(self.plan(91.36).qty, 3)
+        refused = self.plan(274.09)
         self.assertEqual(refused.qty, 0)
-        self.assertIn("over its cap of $164.44", refused.reason)
+        self.assertIn("over its cap of $274.08", refused.reason)
 
-    def test_the_floor_is_one_contract_of_at_most_sixty_dollars(self):
-        self.assertEqual(self.plan(60.00, equity="481.65").qty, 1)
-        self.assertEqual(self.plan(60.01, equity="481.65").qty, 0)
-        self.assertEqual(self.plan(14.00, equity="481.65").qty, 1)    # 3% of 481.65 is 14.44: one by the share
-        self.assertEqual(self.plan(7.00, equity="481.65").qty, 2)
+    def test_the_floor_is_one_contract_of_at_most_a_hundred_dollars(self):
+        self.assertEqual(self.plan(100.00, equity="481.65").qty, 1)
+        self.assertEqual(self.plan(100.01, equity="481.65").qty, 0)
+        self.assertEqual(self.plan(24.00, equity="481.65").qty, 1)    # 5% of 481.65 is 24.08: one by the share
+        self.assertEqual(self.plan(12.00, equity="481.65").qty, 2)
+        # At the account's $481.63 a $100 floor contract fits every cap: the gateway's 25% is $120.40.
+        self.assertEqual(self.plan(100.00, equity="481.63").qty, 1)
 
     def test_three_open_structures_a_probe_family(self):
-        self.assertEqual(self.plan(50, family_open=2).qty, 3)
+        self.assertEqual(self.plan(50, family_open=2).qty, 5)
         self.assertIn("the most a Probe family holds is 3", self.plan(50, family_open=3).reason)
 
     def test_the_family_total(self):
-        # 12% of 5,481.65 = 657.798; 600 open leaves 57.79: one $50 structure, not two.
-        self.assertEqual(self.plan(50, family_loss="600").qty, 1)
-        self.assertEqual(self.plan(50, family_loss="657.80").qty, 0)
-        # The floor: a small account's family may hold one floor contract (12% of 481.65 is 57.80 < 60).
-        self.assertEqual(self.plan(59.00, equity="481.65").qty, 1)
-        self.assertEqual(self.plan(59.00, equity="481.65", family_loss="59").qty, 0)
+        # 15% of 5,481.65 = 822.2475; 770 open leaves 52.24: one $50 structure, not two.
+        self.assertEqual(self.plan(50, family_loss="770").qty, 1)
+        self.assertEqual(self.plan(50, family_loss="822.25").qty, 0)
+        # The floor: a small account's family may hold one floor contract (15% of 481.65 is 72.25 < 100).
+        self.assertEqual(self.plan(99.00, equity="481.65").qty, 1)
+        self.assertEqual(self.plan(99.00, equity="481.65", family_loss="99").qty, 0)
 
     def test_sized_is_quarter_kelly_on_the_lower_bound_between_the_probe_and_ten_percent(self):
         f = fwd([0.3, 0.1, 0.2, 0.15, 0.25] * 4)
         cap = M.structure_cap(self.t, "sized", D("10000"), f)
         self.assertLessEqual(cap, D("1000"))           # 10%
-        self.assertGreaterEqual(cap, D("300"))         # never below the Probe's 3%
+        self.assertGreaterEqual(cap, D("500"))         # never below the Probe's 5%
         import league.stats as S
         expect = min(0.10, 0.25 * f.lcb / f.variance) * 10000
-        self.assertAlmostEqual(float(cap), max(300.0, expect), places=6)
+        self.assertAlmostEqual(float(cap), max(500.0, expect), places=6)
         self.assertEqual(self.plan(100, band="sized", equity="10000", fwd_=f, family_loss="2950").qty, 0)  # 30% family
 
     def test_a_sized_family_whose_kelly_is_under_the_probes_cap_keeps_the_probes_limits(self):
-        weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly under 3%
+        weak = fwd([0.44, -0.28] * 10)                 # mean 0.08, sd 0.37: LCB barely positive, quarter-Kelly under 5%
         self.assertTrue(M.sized_ok(self.t, weak))
         self.assertLess(M.kelly_cap(self.t, D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
         self.assertEqual(M.sizing_band(self.t, "sized", D("5481.65"), weak), "probe")
         self.assertEqual(M.structure_cap(self.t, "sized", D("5481.65"), weak), M.probe_cap(self.t, D("5481.65")))
-        # Sized at a Probe-sized stake never gets the Sized family limits: three open, 12%.
+        # Sized at a Probe-sized stake never gets the Sized family limits: three open, 15%.
         self.assertIn("the most a Probe family holds is 3", self.plan(10, band="sized", fwd_=weak, family_open=3).reason)
-        self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_loss="650").qty, 0)
+        self.assertEqual(self.plan(10, band="sized", fwd_=weak, family_loss="815").qty, 0)
 
     def test_the_book_and_the_gateways_caps(self):
-        self.assertIn("the book's open maximum loss", self.plan(50, book_loss="3837.16").reason)   # 70% = 3837.155
-        self.assertEqual(self.plan(50, book_loss="3780").qty, 1)
-        # The gateway's order cap: min(1,000, 15% of equity) = 822.24 at 5,481.65; a Sized family's 10% is 548.16.
+        self.assertIn("the book's open maximum loss", self.plan(50, book_loss="4933.49").reason)   # 90% = 4933.485
+        self.assertEqual(self.plan(50, book_loss="4880").qty, 1)
+        # The gateway's order cap: min(1,000, 25% of equity) = 1,000 at 5,481.65; a Sized family's 10% is 548.16.
         big = M.plan_open(self.t, band="sized", tuition=False, equity=D("20000"), unit=D("300"),
                           fwd=fwd([0.9, 0.8, 1.0, 0.7] * 5), exposure=M.Exposure())
         self.assertEqual(big.qty, 3)                   # 10% of 20,000 = 2,000 but the gateway's $1,000 binds: 3 x 300
@@ -259,8 +300,8 @@ class Sizing(unittest.TestCase):
 
     def test_tuition_is_one_structure_under_the_day_and_week_budgets(self):
         self.assertEqual(self.plan(40, band="gym", tuition=True).qty, 1)
-        self.assertIn("the day's $100", self.plan(40, band="gym", tuition=True, tuition_day="70").reason)
-        self.assertEqual(self.plan(40, band="gym", tuition=True, tuition_day="60").qty, 1)
+        self.assertIn("the day's $200", self.plan(40, band="gym", tuition=True, tuition_day="170").reason)
+        self.assertEqual(self.plan(40, band="gym", tuition=True, tuition_day="160").qty, 1)
         self.assertIn("the week's $300", self.plan(40, band="gym", tuition=True, tuition_week="270").reason)
 
     def test_a_candidate_trades_no_real_money(self):
@@ -295,14 +336,14 @@ class Stops(unittest.TestCase):
         # The session's first reading is the start of the day; a $5,000 deposit lands at 500.
         s.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
         f = self.flows(1000, [(500, "5000")])
-        s.observe(self.t, at=900, day="d1", equity=D("4111.23"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
-        # base = 481.65 + 5,000 = 5,481.65; day P&L = 4,111.23 - 481.65 - 5,000 = -1,370.42 = -25.0001%: tripped.
+        s.observe(self.t, at=900, day="d1", equity=D("3563.07"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
+        # base = 481.65 + 5,000 = 5,481.65; day P&L = 3,563.07 - 481.65 - 5,000 = -1,918.58 = -35.00005%: tripped.
         self.assertTrue(s.daily_tripped)
         self.assertIn("no new entry today", s.blocked())
         s2 = M.Stops(start_equity=D("481.65"))
         s2.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
-        s2.observe(self.t, at=900, day="d1", equity=D("4111.24"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
-        self.assertFalse(s2.daily_tripped)            # -1,370.41 is under 25% of 5,481.65 (1,370.4125)
+        s2.observe(self.t, at=900, day="d1", equity=D("3563.08"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
+        self.assertFalse(s2.daily_tripped)            # -1,918.57 is under 35% of 5,481.65 (1,918.5775)
         # A deposit that had already landed at the session's first reading is in its base, whatever the venue's
         # last_equity says: no stop on a deposit.
         s3 = M.Stops(start_equity=D("481.65"))
@@ -311,7 +352,7 @@ class Stops(unittest.TestCase):
         self.assertFalse(s3.daily_tripped)
         self.assertEqual(s3.day_pnl, D(0))
         # The next session starts clean.
-        s.observe(self.t, at=1900, day="d2", equity=D("4111.23"), last_equity=D("4111.23"), flows=self.flows(2000, [(500, "5000")]))
+        s.observe(self.t, at=1900, day="d2", equity=D("3563.07"), last_equity=D("3563.07"), flows=self.flows(2000, [(500, "5000")]))
         self.assertFalse(s.daily_tripped)
 
     def test_the_drawdown_stop_latches_on_a_settled_reading_and_only_the_owner_releases_it(self):
@@ -319,9 +360,9 @@ class Stops(unittest.TestCase):
         f = self.flows(100)
         s.observe(self.t, at=50, day="d1", equity=D("1000"), last_equity=D("1000"), flows=f)   # a profit of 518.35: the peak
         self.assertEqual(s.peak_profit, D("518.35"))
-        s.observe(self.t, at=150, day="d2", equity=D("500.01"), last_equity=D("500.01"), flows=self.flows(200, closes=(120.0,)))
-        self.assertFalse(s.drawdown_tripped)           # 49.999%
-        s.observe(self.t, at=250, day="d3", equity=D("500"), last_equity=D("500"), flows=self.flows(300, closes=(220.0,)))
+        s.observe(self.t, at=150, day="d2", equity=D("400.01"), last_equity=D("400.01"), flows=self.flows(200, closes=(120.0,)))
+        self.assertFalse(s.drawdown_tripped)           # 59.999%
+        s.observe(self.t, at=250, day="d3", equity=D("400"), last_equity=D("400"), flows=self.flows(300, closes=(220.0,)))
         self.assertTrue(s.drawdown_tripped)
         self.assertIn("real money paused", s.blocked())
         s.observe(self.t, at=350, day="d3", equity=D("2000"), last_equity=D("500"), flows=self.flows(400, closes=(220.0,)))
@@ -347,13 +388,15 @@ class Stops(unittest.TestCase):
     def test_the_owners_release_restarts_the_peak_from_now(self):
         s = self.stops
         s.observe(self.t, at=50, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(100))
-        s.observe(self.t, at=150, day="d2", equity=D("500"), last_equity=D("500"), flows=self.flows(200))
+        s.observe(self.t, at=150, day="d2", equity=D("400"), last_equity=D("400"), flows=self.flows(200))
         self.assertTrue(s.drawdown_tripped)
         s.release_drawdown()
-        s.observe(self.t, at=250, day="d3", equity=D("500"), last_equity=D("500"), flows=self.flows(300))
+        s.observe(self.t, at=250, day="d3", equity=D("400"), last_equity=D("400"), flows=self.flows(300))
         self.assertFalse(s.drawdown_tripped, "the peak restarted at the release: no new drawdown")
-        s.observe(self.t, at=350, day="d4", equity=D("240"), last_equity=D("240"), flows=self.flows(400))
-        self.assertTrue(s.drawdown_tripped, "a new 50% fall from the restarted peak trips it again")
+        s.observe(self.t, at=300, day="d4", equity=D("160.01"), last_equity=D("160.01"), flows=self.flows(310))
+        self.assertFalse(s.drawdown_tripped, "59.99% from the restarted peak")
+        s.observe(self.t, at=350, day="d5", equity=D("160"), last_equity=D("160"), flows=self.flows(400))
+        self.assertTrue(s.drawdown_tripped, "a new 60% fall from the restarted peak trips it again")
 
     def test_a_pending_deposit_or_withdrawal_settles_nothing(self):
         s = self.stops
@@ -368,7 +411,7 @@ class Stops(unittest.TestCase):
         s = self.stops
         s.observe(self.t, at=100, day="d1", equity=D("1000"), last_equity=D("1000"), flows=self.flows(150))
         # The House was down at the open of d2 and first reads the account mid-session, $300 lower.
-        s.observe(self.t, at=500, day="d2", equity=D("700"), last_equity=D("1000"), flows=self.flows(600))
+        s.observe(self.t, at=500, day="d2", equity=D("650"), last_equity=D("1000"), flows=self.flows(600))
         self.assertTrue(s.daily_tripped)
         self.assertEqual(s.day_base, D("1000"))
 

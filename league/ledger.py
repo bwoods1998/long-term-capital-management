@@ -159,6 +159,10 @@ KINDS: dict[str, bool] = {
     "live.shares": False,       # the stock order that closes an assignment's shares
     "live.paper_proof": False,  # the practice account's multi-leg round trip passed or failed
     "live.alert": False,        # something the live path could not explain
+    # The sprint (B4, Sept 26, 2026). Private: family ids and the calibration's quotes stay on the box.
+    "live.observe": False,      # the observe band's cap held families back (`live.observe_max`)
+    "live.calibration": False,  # a D3 calibration round trip's order, or why a slot sent none
+    "live.expiry_reconciliation": False,  # an expired position's liquidation reconciled from the venue's fills
     # The options swarm (Sept 26, 2026; league/swarm/): its own append-only events, mirrored here by the House's swarm
     # step (`league/swarm/hook.py`), idempotent by id `swarm:<seq>`. Never the House's own agent.* or eval.* kinds: its
     # roster and evaluator read those. Public: the site's tape reads a family's birth, retirement, band move and notes

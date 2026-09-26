@@ -36,7 +36,7 @@ class Funding(unittest.TestCase):
                 self.assertEqual(s.day_pnl, D(0))
                 self.assertFalse(s.daily_tripped)
                 self.assertFalse(s.drawdown_tripped)
-                s.observe(table, at=500, day="d2", equity=(D("5481.65") + amount) * D("0.74"),
+                s.observe(table, at=500, day="d2", equity=(D("5481.65") + amount) * D("0.64"),
                           last_equity=D("5481.65"), flows=M.FlowBook(500, ((200, amount),)))
                 self.assertTrue(s.daily_tripped, "a deposit must not hide the following day's actual loss")
 
@@ -44,7 +44,7 @@ class Funding(unittest.TestCase):
         s, table = M.Stops(start_equity=D("1000")), M.Table.from_constitution()
         s.observe(table, at=100, day="d1", equity=D("1000"), last_equity=D("1000"), flows=M.FlowBook(100, ()))
         queued = M.FlowBook(300, (), unsettled=("CSD queued",), pending_amounts=(D("100"),))
-        s.observe(table, at=200, day="d1", equity=D("450"), last_equity=D("1000"), flows=queued)
+        s.observe(table, at=200, day="d1", equity=D("390"), last_equity=D("1000"), flows=queued)
         self.assertTrue(s.drawdown_tripped)
         s.observe(table, at=400, day="d1", equity=D("700"), last_equity=D("1000"),
                   flows=M.FlowBook(400, ((150, D("100")),)))
@@ -341,7 +341,8 @@ class BandRace(LiveCase):
         from league.swarm.gate import run_sha
 
         live, store, other = self.swarm_live("gym")
-        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"},
+                                                          "live": {"calibration": False}}))
         version = store.add_version("vert", VERTICAL, {"hold": hold}, author="synthetic")
         sha = run_sha(version)
         store.set_state("vert", validation_version=version["n"], validation_line={"passed": True},

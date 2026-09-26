@@ -22,6 +22,7 @@ resumes them, working orders and all.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
@@ -64,6 +65,9 @@ class ShadowAccount(E.Account):
                           fill_model=fill_model or F.FillModel(), max_orders_day=int(max_orders_day))
         super().__init__(stub, cfg, tuple(needs.roots))
         self.instance, self.family = instance, family
+        #: This account's own identity, drawn when it is made and kept across restarts: its trade ids restart when an
+        #: account is made again under the same instance key, so a record keyed by trade id also names the account.
+        self.nonce = os.urandom(6).hex()
         self.exported = 0          # trades already handed to the forward record
         self.winding_down = False  # a superseded instance: no decisions, its positions closed at the natural
         self.began_day: int | None = None
@@ -141,7 +145,7 @@ class ShadowAccount(E.Account):
             "pending_shares": [[_position_state(p), root, shares, ref] for p, root, shares, ref in self.pending_shares],
             "trades": self.trades[self.exported:], "daily": self.daily[-30:], "fill_rows": self.fill_rows[-200:],
             "closed_since": self.closed_since, "rejects_since": self.rejects_since, "winding_down": self.winding_down,
-            "began_day": self.began_day, "ended_day": self.ended_day, "last_mi": self.last_mi,
+            "began_day": self.began_day, "ended_day": self.ended_day, "last_mi": self.last_mi, "nonce": self.nonce,
         }
 
     @classmethod
@@ -164,6 +168,7 @@ class ShadowAccount(E.Account):
         acc.winding_down = bool(row.get("winding_down"))
         acc.began_day, acc.ended_day = row.get("began_day"), row.get("ended_day")
         acc.last_mi = int(row.get("last_mi", -1))
+        acc.nonce = str(row.get("nonce") or acc.nonce)
         return acc
 
 

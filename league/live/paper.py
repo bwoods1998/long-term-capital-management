@@ -10,6 +10,11 @@ positions showing both legs, close filled) is what `passed` means, and real open
 legs' fills as the House reads them), never the calibration: paper fills are synthetic. Every answer is kept in the
 live state's events for the owner's record.
 
+THE SINGLE-LEG PROOF (the sprint's review of #390, Sept 26, 2026): `PaperProof(..., kind="single")`, once the vertical has
+passed, proves the long call's route the same way: a 1-lot SPY call about 1-2% out of the money on the nearest expiry at
+least a day out, bought to open at the natural (the ask) with a single-leg `buy_to_open`, held two minutes, sold to close
+at the natural (the bid) with a single-leg `sell_to_close`. Real long calls and puts open only once it has passed.
+
 The session loop runs this proof with real money off and no real-account client. Passing the paper route never
 changes real-money configuration, enables a grant, promotes a family, or sends an order to the real venue.
 
@@ -28,7 +33,7 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
-from .real import RLeg, limit_price, structure_fill, ROrder
+from .real import RLeg, limit_price, single_body, structure_fill, ROrder
 from .state import LiveState
 from .venue import TERMINAL, Account
 
@@ -38,15 +43,23 @@ TRIES = 3
 ROOT = "SPY"
 
 
+#: The single-leg proof's call: out of the money by about this share of the spot (1-2%).
+SINGLE_OTM = (0.01, 0.02)
+
+
 class PaperProof:
     def __init__(self, state: LiveState, account: Account, *, record: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] | None = None):
+                 clock: Callable[[], float] | None = None, kind: str = "vertical"):
+        if kind not in ("vertical", "single"):
+            raise ValueError(kind)
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
         self.clock = clock or time.time
+        self.kind = kind
+        self.key = "paper_proof" if kind == "vertical" else "paper_proof_single"
 
     def status(self) -> dict:
-        return dict(self.state.get("paper_proof", {}) or {})
+        return dict(self.state.get(self.key, {}) or {})
 
     def passed(self) -> bool:
         row = self.status()
@@ -59,7 +72,7 @@ class PaperProof:
         return list(row.get("legs") or []) if not self.passed() else []
 
     def _put(self, row: Mapping[str, Any]) -> None:
-        self.state.put("paper_proof", dict(row))
+        self.state.put(self.key, dict(row))
 
     @staticmethod
     def _new(day: str, tries: int = 0) -> dict:
@@ -179,7 +192,7 @@ class PaperProof:
         fresh = self._new(day, tries)
         if tries >= TRIES:
             fresh.update(status="failed", why="paper attempts ended flat without a witnessed multi-leg round trip")
-            self.record("live.paper_proof", {"status": "failed", "day": day, "why": fresh["why"]})
+            self.record("live.paper_proof", {"status": "failed", "day": day, "why": fresh["why"], "kind": self.kind})
         self._put(fresh)
         return fresh
 
@@ -197,7 +210,14 @@ class PaperProof:
             return row
         cid = f"{row['attempt']}-c{sum(w['action'] != 'open' for w in row['orders']) + 1}"
         body = {"type": "limit", "time_in_force": "day", "client_order_id": cid}
-        if cleanup:
+        if self.kind == "single" and not cleanup:
+            bid = float(snap.bid[idx[0]])
+            if not (math.isfinite(bid) and bid > 0):
+                row["why"] = "the proof's call has no bid to sell it at"
+                self._put(row)
+                return row
+            body = _single(symbols[0], "close", bid, cid)
+        elif cleanup:
             symbol, qty = remaining[0]
             price = float(snap.ask[idx[0]] if qty < 0 else snap.bid[idx[0]])
             if not math.isfinite(price) or price < 0:
@@ -243,9 +263,10 @@ class PaperProof:
             if mi < start_minute or snap is None:
                 self._put(row)
                 return row
-            legs = self._legs(snap, chain)
+            legs = self._single(snap, chain) if self.kind == "single" else self._legs(snap, chain)
             if legs is None:
-                row["why"] = "no SPY vertical one strike wide is quoted a day or more out"
+                row["why"] = ("no SPY call 1-2% out of the money is quoted a day or more out" if self.kind == "single"
+                              else "no SPY vertical one strike wide is quoted a day or more out")
                 self._put(row)
                 return row
             symbols = [leg[0] for leg in legs]
@@ -253,17 +274,21 @@ class PaperProof:
                 row["why"] = "the selected proof contracts already belong to another paper position"
                 self._put(row)
                 return row
-            natural = legs[0][1] - legs[1][2]
+            natural = legs[0][1] - (legs[1][2] if len(legs) > 1 else 0.0)
             if not (math.isfinite(natural) and natural > 0):
                 return row
             row["tries"] = int(row.get("tries") or 0) + 1
+            prefix = "lv-ps" if self.kind == "single" else "lv-pp"
             row.update(legs=symbols, baseline={s: str(positions.get(s, Decimal(0))) for s in symbols},
-                       attempt=f"lv-pp-{day.replace('-', '')}-{self.state.nonce}-{row['tries']}",
+                       attempt=f"{prefix}-{day.replace('-', '')}-{self.state.nonce}-{row['tries']}",
                        open_witness=False, close_witness=False)
-            body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(round(natural, 2), "open"),
-                    "time_in_force": "day", "client_order_id": row["attempt"] + "-o",
-                    "legs": [{"symbol": symbols[0], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
-                             {"symbol": symbols[1], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_open"}]}
+            if self.kind == "single":
+                body = _single(symbols[0], "open", natural, row["attempt"] + "-o")
+            else:
+                body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(round(natural, 2), "open"),
+                        "time_in_force": "day", "client_order_id": row["attempt"] + "-o",
+                        "legs": [{"symbol": symbols[0], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
+                                 {"symbol": symbols[1], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_open"}]}
             return self._dispatch(row, body, action="open", mi=mi)
         if not row.get("orders") or not self._inventory(row, positions):
             return row
@@ -271,7 +296,8 @@ class PaperProof:
         if not work.get("terminal"):
             return row
         owned = self._owned(row)
-        if work["action"] == "open" and work.get("route_full") and list(owned.values()) == [Decimal(1), Decimal(-1)]:
+        held = [Decimal(1)] if self.kind == "single" else [Decimal(1), Decimal(-1)]
+        if work["action"] == "open" and work.get("route_full") and list(owned.values()) == held:
             if not row.get("open_witness"):
                 row.update(status="open_filled", open_witness=True, filled_at=self.clock())
                 self._event("open_witness", {"cid": work["cid"], "owned": owned})
@@ -282,10 +308,11 @@ class PaperProof:
         flat = not any(owned.values())
         if work["action"] == "close" and work.get("route_full") and row.get("open_witness") and flat:
             row.update(status="passed", close_witness=True, passed_at=self.clock(),
-                       why="a witnessed multi-leg open and close returned the owned contracts to their baseline")
+                       why=(f"a witnessed {'single-leg' if self.kind == 'single' else 'multi-leg'} open and close returned "
+                            "the owned contracts to their baseline"))
             self._put(row)
             self._event("close_witness", {"cid": work["cid"], "owned": owned})
-            self.record("live.paper_proof", {"status": "passed", "day": day})
+            self.record("live.paper_proof", {"status": "passed", "day": day, "kind": self.kind})
             return row
         if flat:
             return self._finish_failed_attempt(row, day)
@@ -293,14 +320,38 @@ class PaperProof:
         self._put(row)
         return self._close(row, snap=snap, chain=chain, mi=mi, cleanup=True)
 
-    @staticmethod
-    def _filled(order: Any, row: Mapping[str, Any], closing: bool) -> bool:
+    def _filled(self, order: Any, row: Mapping[str, Any], closing: bool) -> bool:
         if not isinstance(order, Mapping):
             return False
+        if self.kind == "single":
+            # A single-leg order's own fields (its `legs` is null): the whole contract filled, at a price.
+            filled = order.get("filled_qty")
+            try:
+                return Decimal(str(filled)) >= 1 and order.get("filled_avg_price") not in (None, "")
+            except (ArithmeticError, ValueError):
+                return False
         legs = [RLeg(s, 1 if i == 0 else -1, 1, True, 0.0, "", 0) for i, s in enumerate(row.get("legs") or [])]
         fake = ROrder(0, "", "", "", "close" if closing else "open", "debit_vertical", ROOT, legs, 1, 0.0, "0", None, 0.0, "", 0)
         fill = structure_fill(fake, order)
         return fill is not None and fill[0] >= 1 and not fill[3]
+
+    @staticmethod
+    def _single(snap: Any, chain: Any) -> tuple[tuple[str, float, float]] | None:
+        """The nearest expiry a day or more out: the call whose strike is nearest 1.5% over the spot, within 1-2% out of
+        the money, with a two-sided quote (ask, bid)."""
+        spot = float(snap.spot)
+        if not math.isfinite(spot):
+            return None
+        ok = snap.valid & snap.is_call & (snap.dte >= 1)
+        if not ok.any():
+            return None
+        first = int(snap.dte[ok].min())
+        low, high = spot * (1 + SINGLE_OTM[0]), spot * (1 + SINGLE_OTM[1])
+        pool = np.flatnonzero(ok & (snap.dte == first) & (snap.strike >= low) & (snap.strike <= high) & (snap.bid > 0))
+        if pool.size == 0:
+            return None
+        i = int(pool[np.argmin(np.abs(snap.strike[pool] - spot * (1 + sum(SINGLE_OTM) / 2)))])
+        return ((chain.symbol[i], float(snap.ask[i]), float(snap.bid[i])),)
 
     @staticmethod
     def _legs(snap: Any, chain: Any) -> tuple[tuple[str, float, float], tuple[str, float, float]] | None:
@@ -326,7 +377,14 @@ class PaperProof:
         return ((chain.symbol[i], float(snap.ask[i]), float(snap.bid[i])), (chain.symbol[j], float(snap.ask[j]), float(snap.bid[j])))
 
     def _event(self, what: str, detail: Mapping[str, Any]) -> None:
-        self.state.event("paper_proof." + what, dict(detail))
+        self.state.event(f"{self.key}.{what}", dict(detail))
+
+
+def _single(symbol: str, action: str, price: float, cid: str) -> dict:
+    """The single-leg proof's order body, built by the real route's own `single_body` so the two cannot drift."""
+    order = ROrder(0, cid, "paper-proof", "paper-proof", action, "long_call", ROOT, [RLeg(symbol, 1, 1, True, 0.0, "", 0)],
+                   1, float(price), f"{float(price):.2f}", None, 0.0, "", 0)
+    return single_body(order)
 
 
 __all__ = ["PaperProof"]

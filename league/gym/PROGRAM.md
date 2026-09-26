@@ -139,12 +139,13 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
   contract share that liquidity: the rest keeps working. It never fills on a minute after which the
   mid holds still or moves your way (a passive fill is someone else's good trade). **Not modelled,
   so natural only:** a structure with any leg 8 or more days to expiry (the trade sample stops at 7
-  days; back months fill at or through the natural until they are sampled), and a root the sample
-  never covered. So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes
-  can save much of the half-spread on entries and exits; what it costs is the fills you miss (the
-  market leaves without you) and the adverse selection of the ones you get. Your results' `fills`
-  show what your prices got: fill rate, the share filled at the natural, slippage from the mid in
-  half-spreads.
+  days; back months fill at or through the natural until they are sampled), a root the sample never
+  covered, and a leg further from the money than the sample reached often enough (far wings: a
+  package with such a leg fills only at or through the natural too).
+  So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes can save
+  much of the half-spread on entries and exits; what it costs is the fills you miss (the market
+  leaves without you) and the adverse selection of the ones you get. Your results' `fills` show what
+  your prices got: fill rate, the share filled at the natural, slippage from the mid in half-spreads.
 - A limit off the tick rounds to your own side of the book, so `"mid"` on a one-tick single leg is
   the touch (the bid for a buy, the ask for a sale): the touch fills only in minutes when Train's
   prints there traded through the whole displayed queue ahead of you. A limit behind the touch
@@ -153,17 +154,20 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
 A long wing with no bid is closed at zero. Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee
 ($20.60 a million of premium) on sells, $0.50 plus exchange fees on index options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
 collateral. A debit at or over a bounded structure's width is refused. The gate also runs you at 1.5x
-the half-spread (passive fills pay the extra half-spread too, and a limit that is passive at the real
-quotes stays passive): an edge that lives inside the spread fails.
+the half-spread (passive fills pay the extra half-spread too and fill HALF as often, and a limit that is
+passive at the real quotes stays passive): an edge that lives inside the spread, or only in patient
+fills, fails.
 
 ## The venue's clock
 
 Options trade 09:30-16:00 ET (13:00 on a half day). On a contract expiring today: no new opening order
-from 15:00; no closing order from 15:10 (15:25 SPY/QQQ). An equity structure with a leg expiring today
-that is in the money or out of it by 1% of the strike or less is closed by the House at the natural
-from 10 minutes before that cutoff (`expiry_close`), and liquidated at the natural from 15:30 if it
-gets that close later; one whose every expiring leg is further out of the money is left to expire at
-its intrinsic value (normally zero, no fee). Equity options are physically settled: a short leg left
+from 15:00; no closing order from 15:10 (15:25 SPY/QQQ). From 10 minutes before that cutoff
+(`expiry_close`) the House closes an expiring equity position at the natural when a leg expiring today
+is in the money or out of it by 1% of the strike or less, and an expiring long call or put whatever
+its moneyness while it has a bid; your own close is refused from then. What only gets that close
+later is liquidated at the natural from 15:30; one whose every expiring leg stays further out of the
+money (a long call or put: with no bid) is left to expire at its intrinsic value (normally zero, no
+fee). Equity options are physically settled: a short leg left
 in the money becomes shares, marked to the next session's first price. XSP and SPXW are cash-settled
 at the close at intrinsic value (the recorded settlement where the store has one, else the 16:00
 index level), never liquidated; hold them to expiry if you like; no calendars there. An expiry on a

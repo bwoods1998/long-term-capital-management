@@ -47,6 +47,9 @@ What this script will not do:
 - **It never puts a release older than Deploy G on the box while `alpaca-paper` holds a structure.**
   `deploy` and `rollback` read the target release for the structure-aware practice code and, when it
   lacks it, the box's ledger (read-only); they refuse unless `--force-structures-risk` is given.
+- **It never rolls back to a release that cannot manage the real book while it holds something.** `rollback` reads
+  the box's `live.sqlite` (read-only) for real positions held and real orders working, and the previous release for
+  `real_money` and the long-single code; it refuses unless `--force-real-risk` is given.
 
 Box state lives in `.data/ltcm/box.json`: ids, names, the allowlist in effect, the releases sent
 and their verdicts, and the checkpoints taken. It is owner-only (mode 600) and holds no credential.
@@ -230,6 +233,64 @@ def guard(ask):
 
 try:
     answer = guard(json.loads(sys.argv[1]))
+except Exception as exc:
+    answer = {"error": type(exc).__name__ + ": " + str(exc)[:300]}
+print(json.dumps(answer))
+"""
+
+# --------------------------------------------------------------------------- the real book guard
+# The review of #390 (the sprint, lens 3, Sept 26, 2026): a release whose `league/config.json` has `real_money` false
+# builds no real account (`league/service.py`), so the real book's positions and working orders would sit unmanaged
+# after a rollback to it; and a release before B4 cannot close a long call or put (it would send one as a one-leg
+# multi-leg order), so a same-day long call could be exercised into 100 shares the account cannot carry. `rollback`
+# refuses while the box's live state (`live.sqlite`, read-only) shows a real position held or a real order working and
+# the previous release has `real_money` false or lacks the long-single code (`--force-real-risk` overrides, loudly).
+# Close the real positions, or roll forward, first (docs/operations.md).
+
+#: What a release must carry to manage real long calls and puts (B4): the single-leg order body.
+REAL_BOOK_MARKERS = (("league/live/real.py", "def single_body("),)
+
+#: Run on the box with the box's interpreter, read-only, one JSON argument `{state, release, markers}`: prints one JSON
+#: line `{release: {dir, real_money, missing}, positions, orders}` (open real positions, working real orders), or
+#: `{"error": ...}`. Standard library only.
+REAL_GUARD_SNIPPET = r"""
+# floor_box real book guard (read-only)
+import json, pathlib, sqlite3, sys
+
+
+def release(path, markers):
+    base = pathlib.Path(path).resolve()
+    try:
+        config = json.loads((base / "league" / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        config = {}
+    missing = []
+    for rel, marker in markers:
+        try:
+            text = (base / rel).read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        if marker not in text:
+            missing.append(rel + ": " + marker)
+    return {"dir": str(base), "real_money": isinstance(config, dict) and config.get("real_money") is True,
+            "missing": missing}
+
+
+def book(state):
+    path = pathlib.Path(state) / "live.sqlite"
+    if not path.exists():
+        return {"positions": 0, "orders": 0, "book": "absent"}
+    db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    db.execute("pragma query_only=1")
+    positions = db.execute("select count(*) from positions where status in ('open', 'awaiting_expiry') and qty > 0").fetchone()[0]
+    orders = db.execute("select count(*) from orders where status in ('pending', 'working', 'unknown')").fetchone()[0]
+    return {"positions": int(positions), "orders": int(orders)}
+
+
+try:
+    ask = json.loads(sys.argv[1])
+    answer = {"release": release(ask["release"], ask["markers"]) if ask.get("release") else None}
+    answer.update(book(ask["state"]))
 except Exception as exc:
     answer = {"error": type(exc).__name__ + ": " + str(exc)[:300]}
 print(json.dumps(answer))
@@ -789,6 +850,55 @@ def hold_structures(answer: Mapping[str, Any], missing: Sequence[str], *, target
         print(line, file=sys.stderr, flush=True)
 
 
+def read_real_guard(api: SailboxClient, box: str, python: str, *, release: str) -> dict[str, Any]:
+    """Run `REAL_GUARD_SNIPPET` on the box, read-only: the release's `real_money` and long-single markers, and the live
+    state's open real positions and working real orders. `{"error": ...}` when it could not be run or read."""
+    ask = {"state": STATE_DIR, "release": release, "markers": [list(pair) for pair in REAL_BOOK_MARKERS]}
+    try:
+        result = api.exec(box, [python, "-c", REAL_GUARD_SNIPPET, json.dumps(ask)], timeout=120, on_output=None)
+    except SailboxError as error:
+        return {"error": f"the box could not run the check ({str(error)[:200]})"}
+    lines = [line for line in str(result.stdout or "").splitlines() if line.strip()]
+    try:
+        answer = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        return {"error": f"the check gave no answer (exit {getattr(result, 'return_code', '?')}: "
+                         f"{str(getattr(result, 'stderr', '') or '')[-200:]})"}
+    return answer if isinstance(answer, dict) else {"error": "the check's answer was not an object"}
+
+
+def hold_real_book(answer: Mapping[str, Any], *, target: str, force: bool) -> None:
+    """Refuse (SystemExit) to roll back to `target` while the real book holds a position or works an order and
+    `target` has `real_money` false or lacks the long-single code, or when that cannot be read. `force`
+    (`--force-real-risk`) sends it anyway, with a loud warning."""
+    if answer.get("error"):
+        why = (f"the box's live state or {target} could not be read ({str(answer['error'])[:300]}), so nothing shows "
+               "that the real book is flat or that the release can manage it")
+    else:
+        held, working = int(answer.get("positions") or 0), int(answer.get("orders") or 0)
+        release = answer.get("release") or {}
+        gaps = []
+        if release.get("real_money") is not True:
+            gaps.append("its league/config.json has real_money false (it builds no real account)")
+        if release.get("missing"):
+            gaps.append("it lacks the long-single code (" + "; ".join(release["missing"]) + ")")
+        if not held and not working:
+            say(f"  the real book is flat (no position held, no order working): {target} may go")
+            return
+        if not gaps:
+            say(f"  {target} manages the real book ({held} position(s), {working} working order(s))")
+            return
+        why = (f"the real book holds {held} position(s) and works {working} order(s), and {target}: " + "; ".join(gaps)
+               + ". Its real positions would sit unmanaged (a same-day long call could be exercised into 100 shares the "
+               "account cannot carry). Close the real positions, or roll forward (docs/operations.md, Deploy and roll back)")
+    if not force:
+        raise SystemExit(f"REFUSED: {why}. --force-real-risk sends it anyway.")
+    banner = "!" * 100
+    for line in (banner, f"WARNING: --force-real-risk: {why}.", "Sending it anyway, as asked.", banner):
+        say(line)
+        print(line, file=sys.stderr, flush=True)
+
+
 # --------------------------------------------------------------------------- commands
 
 
@@ -1062,6 +1172,8 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     else:
         missing = list((answer.get("release") or {}).get("missing") or [])
     hold_structures(answer, missing, target=f"the previous release {previous}", force=args.force_structures_risk)
+    hold_real_book(read_real_guard(api, box, python, release=f"{REMOTE_ROOT}/previous"),
+                   target=f"the previous release {previous}", force=args.force_real_risk)
 
     reason = args.reason  # sent below as a positional parameter, never as shell text
     say(f"rolling back {current} -> {previous}: {reason}")
@@ -1688,6 +1800,9 @@ def build_parser() -> argparse.ArgumentParser:
     rollback = sub.add_parser("rollback", help="the watchdog's rollback (current := previous, restart), after the structures guard")
     rollback.add_argument("--reason", default="operator rollback")
     rollback.add_argument("--force-structures-risk", action="store_true", help=risk_help)
+    rollback.add_argument("--force-real-risk", action="store_true",
+                          help="roll back even while the real book holds a position or works an order and the previous "
+                               "release cannot manage it (real_money false, or no long-single code): unmanaged real risk")
 
     sub.add_parser("secrets", help="the three values the box holds -> /workspace/.env (the owner runs this)")
 

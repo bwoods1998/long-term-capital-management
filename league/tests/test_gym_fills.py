@@ -220,6 +220,23 @@ class HonestFills(unittest.TestCase):
         r = self.run_one(store, prog(name="touch", code=behind, limit="touch", tif=60), fill_model=model, stress=0.0)
         self.assertEqual(r["trades"][0]["entry"], 1.00)
 
+    def test_a_stress_run_halves_every_passive_hazard(self):
+        # A resting buy at the touch with hazard h: unstressed it fills on the first minute whose keyed draw is under
+        # h; in a stress run (above 1x) on the first one under h / 2, and pays the extra half-spread there.
+        store = self.make([{"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.10)}}])
+        key = int(store.chain("SPY", D1).key[0])
+        from league.gym.day import ordinal
+        first = lambda p: next(m for m in range(601, 900) if F.draw([key], ordinal(D1), m, "buy") < p)  # noqa: E731
+        h = next(x for x in (0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3) if first(x) != first(x / 2))   # this contract's draws tell them apart
+        model = synth.uniform_model(h, ("SPY",), levels=(0,), classes=("s",), size=10)
+        touch = SINGLE.replace('limit = p["limit"] if p["limit"] in ("natural", "mid") else {"mid": 1}', 'limit = {"price": 1.00}')
+        plain = self.run_one(store, prog(name="t", code=touch, tif=300), fill_model=model)["trades"][0]
+        stressed = self.run_one(store, prog(name="t", code=touch, tif=300), fill_model=model, stress=1.5)["trades"][0]
+        self.assertEqual((plain["filled_minute"], plain["entry"]), (first(h), 1.00))
+        self.assertEqual((stressed["filled_minute"], stressed["entry"]), (first(h / 2), 1.025))
+        self.assertGreater(stressed["filled_minute"], plain["filled_minute"])
+        self.assertEqual(F.STRESS_HAZARD, 0.5)
+
     def test_draws_are_keyed_and_uniform(self):
         u = F.draw([11, 22], 19422, 601, "buy")
         self.assertEqual(u, F.draw([22, 11], 19422, 601, "buy"))

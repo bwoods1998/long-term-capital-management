@@ -174,6 +174,20 @@ class VenueClock(unittest.TestCase):
         self.assertAlmostEqual(r["daily"][0][1], -15.10, places=6)
         self.assertAlmostEqual(r["daily"][1][1], -150.0, places=6)
 
+    def test_an_expiring_long_single_with_a_bid_is_closed_whatever_its_moneyness(self):
+        # The live path's rule (B4): an expiring long call or put is sold from the House's expiry close while it has a
+        # bid, however far out of the money (an exercise would bring 100 shares the account cannot carry).
+        single = OPEN_AT.replace('if p["structure"] == "debit_vertical":', 'if p["structure"] == "long_call":\n'
+                                 '            legs = [{"side": "long", "right": "C", "dte": 0, "strike": p["low"]}]\n'
+                                 '        elif p["structure"] == "debit_vertical":')
+        prog = R.load_program(single.replace("ROOT", "SPY"), name="single", params={"structure": "long_call", "low": 410})
+        [t] = self.run_one(prog, ("SPY",), days=[D1])["trades"]
+        # 410 call, 2.4% out of the money, bid 0.10: sold at 15:15 at the bid. Entry 0.12; fees 0.05 + 0.05.
+        self.assertEqual((t["exit_reason"], t["exit_minute"], t["entry"], t["exit"]), ("expiry_close", 915, 0.12, 0.10))
+        self.assertEqual(t["pnl"], -2.10)
+        # A far vertical (not a single) is still left to expire: the House closes only near the money.
+        self.assertEqual(self.run_one(program("SPY", low=410), ("SPY",), days=[D1])["trades"][0]["exit_reason"], "expired")
+
     def test_half_day_expiry_close_at_1215(self):
         r = self.run_one(program("SPY"), ("SPY",), days=[D3])
         [t] = r["trades"]

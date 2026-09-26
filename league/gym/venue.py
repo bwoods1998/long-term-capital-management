@@ -5,10 +5,11 @@ From the plan's "The venue" and "Fees" (verified Sept 26, 2026), as the House en
 - Options trade 09:30-16:00 ET only (13:00 on a half day).
 - On an EXPIRING contract (a leg that expires today): no new opening order from 15:00 ET; closing
   orders until 15:10 ET (15:25 for SPY and QQQ). An expiring EQUITY structure with a leg that expires
-  today in the money or within 1% of it (`near_money`) is closed at the natural price by the House
-  from 10 minutes before the close cutoff until the cutoff, and liquidated at the natural by the venue
-  from 15:30 ET; one whose every expiring leg is further out of the money is left to expire (worth its
-  intrinsic value at the close, normally zero, with no closing fee), as the live path does
+  today in the money or within 1% of it (`near_money`), or an expiring long call or put with a bid,
+  is closed at the natural price by the House from 10 minutes before the close cutoff until the
+  cutoff; one in or near the money is liquidated at the natural by the venue from 15:30 ET; the rest
+  is left to expire (worth its intrinsic value at the close, normally zero, with no closing fee), as
+  the live path does
   (`league/live/step.py` `_expiry_close` and `_end_of_day`, the constitution's `order_path`
   `near_money_share` 0.01 and `expiry_close_lead_minutes` 10). On a half day the same offsets are
   taken from the 13:00 close.

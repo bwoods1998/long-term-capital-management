@@ -120,8 +120,11 @@ class OneSourceOfTruth(unittest.TestCase):
     table's rows stay inside their bounds."""
 
     FIVE = ["credit_vertical", "debit_vertical", "iron_butterfly", "iron_condor", "long_butterfly"]
-    TYPES_LINE = '"real_types": ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"],'
-    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "off",'
+    # The sprint (B4, Sept 26, 2026): the four debit types under $2,000 of equity, the long call and put among them, open
+    # on the real account; the credit types come back only with a deposit, in one deploy with the gateway.
+    FOUR = ["debit_vertical", "long_butterfly", "long_call", "long_put"]
+    TYPES_LINE = '"real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],'
+    GATEWAY_LINE = '"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",'
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -149,15 +152,19 @@ class OneSourceOfTruth(unittest.TestCase):
 
     def test_the_repository_as_it_stands_agrees(self):
         self.assertEqual(ci.check_structures(), [])
-        self.assertEqual(ci.gateway_structures(), ([], []))
+        self.assertEqual(ci.gateway_structures(), (sorted(self.FOUR), []))
 
     def test_the_table_and_the_gateway_change_together(self):
         self.assertEqual(self.tree(), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway="debit_vertical"), [])
         self.assertEqual(self.tree(types=["debit_vertical"], gateway=" debit_vertical, "), [])
         self.assertEqual(self.tree(gateway="off"), [], "the external boundary may always disable real opens")
-        self.assertEqual(self.tree(gateway=",".join(self.FIVE)), [])
+        self.assertEqual(self.tree(types=self.FIVE, gateway=",".join(self.FIVE)), [])
+        self.assertEqual(self.tree(types=["debit_vertical", "long_put"], gateway="long_put debit_vertical"), [])
         self.assertIn("admits ['debit_vertical'] on the real account", self.tree(gateway="debit_vertical")[0])
+        self.assertIn("admits ['debit_vertical', 'long_butterfly'] on the real account",
+                      self.tree(gateway="debit_vertical,long_butterfly")[0], "the singles change with the table too")
+        self.assertIn("long_calls, not a structure type", self.tree(gateway="debit_vertical,long_calls")[0])
         self.assertIn("admits", self.tree(types=["debit_vertical"], gateway=",".join(self.FIVE))[0])
         # A typo would admit none at the gateway, silently: refused whatever the table says.
         self.assertIn("debit_verticle, not a structure type", self.tree(gateway="debit_verticle")[0])
@@ -177,7 +184,7 @@ class OneSourceOfTruth(unittest.TestCase):
             self.assertTrue(any(var in p for p in refused), (var, refused))
 
     def test_a_money_row_outside_its_range_is_refused(self):
-        refused = self.tree(replace={'"daily_stop_share": "0.25",': '"daily_stop_share": "0.50",'})
+        refused = self.tree(replace={'"daily_stop_share": "0.35",': '"daily_stop_share": "0.50",'})
         self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.35]", " ".join(refused))
         refused = self.tree(replace={'"max_orders_day": 250,': '"max_orders_day": 400,'})
         self.assertIn("order_path.max_orders_day", " ".join(refused))

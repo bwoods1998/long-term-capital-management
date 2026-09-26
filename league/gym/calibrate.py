@@ -2,7 +2,7 @@
 
     python -m league.gym.calibrate --store /data/store --roots SPY,QQQ,IWM,XSP,SPXW \
         [--out /data/calibration/fill_model.json]      # the laptop default: .data/gym/fill_model.json
-        [--prior 600] [--sample-strikes 10]
+        [--prior 600] [--sample-strikes 10] [--min-bucket 6000]
 
 WHAT IT ESTIMATES. For a limit resting at level l (its distance from the mid toward its own natural, in
 half-spreads: 0 at the mid, 1 at the natural), the per-minute hazard that some trade on that contract
@@ -38,11 +38,15 @@ THE ESTIMATOR: a point estimate, not a bound, per root.
 - The rate is the MLE hits / exposure, shrunk toward the next coarser cell where data is thin:
   (root, dte, moneyness, time) -> (root, dte, moneyness) -> (root, dte) -> (root) -> every root
   pooled, each level estimated as (hits + prior x parent rate) / (exposure + prior), `prior` pseudo
-  side-minutes. A cell with no exposure takes its parent's rate. Weights do not depend on the level,
-  so the table stays monotone in it (a nearer-the-natural limit never fills less often).
-- A root, or a root's days-to-expiry bucket, the sample never saw has NO cells: the engine reads zero
-  there (natural fills only). So 8 or more days to expiry (the sample stops at 7) is never modelled,
-  and no root borrows another's liquidity except through the shrinkage of cells it did sample.
+  side-minutes. A time cell with no exposure takes its (root, dte, moneyness) parent's rate. Weights
+  do not depend on the level, so the table stays monotone in it (a nearer-the-natural limit never
+  fills less often).
+- A root, a root's days-to-expiry bucket, or a (root, dte, moneyness) bucket with fewer than
+  `min_bucket` side-minutes of exposure has NO cells: the engine reads zero there (natural fills
+  only). So 8 or more days to expiry (the sample stops at 7) is never modelled, a wing or
+  far-out-of-the-money contract the sample's band barely reaches (10 strikes each side: about 1% on
+  SPXW, 2% on SPY and XSP) never borrows the near-the-money rate that dominates its (root, dte)
+  parent, and no root borrows another's liquidity except through the shrinkage of cells it did sample.
 - Size: for each (root, level, single or multi-leg, days to expiry), the LOWER median over Train's
   hits of the contracts that traded at or through the level in that contract-minute beyond the queue
   ahead (at the touch, the volume less the displayed size; inside the spread, the volume), at least 1. The engine caps a passive fill at it (one structure where the table has no size).
@@ -80,6 +84,8 @@ TOUCH_BUCKET = 0                                         # measured at F.TOUCH, 
 Q_BUCKETS = (TOUCH_BUCKET, *LEVELS)
 #: Pseudo side-minutes a cell borrows from its coarser parent (the shrinkage's strength).
 PRIOR = 600.0
+#: Side-minutes of exposure a (root, dte, moneyness) bucket needs to have cells at all (10x the prior).
+MIN_BUCKET = 6000.0
 #: The trade sample's strikes each side of the money (scripts/data/storelib.py TQ_STRIKE_RANGE), and its reach.
 SAMPLE_STRIKES = 10
 SAMPLE_MAX_DTE = F.MODELLED_DTE
@@ -134,10 +140,10 @@ def lower_median(counts: np.ndarray) -> int:
 
 
 def shrink(exposure: dict[tuple[str, int], float], hits: dict[tuple[str, int], float],
-           prior: float) -> dict[tuple[str, int, int, int], float]:
-    """{(root, d, k, t): rate} for every cell of every (root, days-to-expiry bucket) with exposure, from
-    exposures (side-minutes) and hits keyed by (root, cell code): the MLE shrunk toward (root, d, k),
-    (root, d), (root), then every root pooled (the module docstring). Nothing for what was never seen."""
+           prior: float, min_bucket: float = MIN_BUCKET) -> dict[tuple[str, int, int, int], float]:
+    """{(root, d, k, t): rate} for every cell of every (root, days-to-expiry, moneyness) bucket with at least
+    `min_bucket` side-minutes of exposure, from exposures and hits keyed by (root, cell code): the MLE shrunk
+    toward (root, d, k), (root, d), (root), then every root pooled (the module docstring). Nothing else."""
     total_n = sum(exposure.values())
     if total_n <= 0:
         return {}
@@ -162,7 +168,9 @@ def shrink(exposure: dict[tuple[str, int], float], hits: dict[tuple[str, int], f
                 continue  # never sampled: no cells (natural fills only)
             r1 = (k1[root, d] + prior * r0) / (n1[root, d] + prior)
             for k in K_BUCKETS:
-                r2 = (k2.get((root, d, k), 0.0) + prior * r1) / (n2.get((root, d, k), 0.0) + prior)
+                if n2.get((root, d, k), 0.0) <= 0.0 or n2[root, d, k] < min_bucket:
+                    continue  # never or too little sampled (a wing the band barely reaches): no cells, natural fills only
+                r2 = (k2[root, d, k] + prior * r1) / (n2[root, d, k] + prior)
                 for t in T_BUCKETS:
                     code = (d * 10 + k) * 10 + t
                     out[root, d, k, t] = (hits.get((root, code), 0.0) + prior * r2) / (exposure.get((root, code), 0.0) + prior)
@@ -170,7 +178,7 @@ def shrink(exposure: dict[tuple[str, int], float], hits: dict[tuple[str, int], f
 
 
 def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = None, prior: float = PRIOR,
-        sample_strikes: int = SAMPLE_STRIKES) -> dict:
+        sample_strikes: int = SAMPLE_STRIKES, min_bucket: float = MIN_BUCKET) -> dict:
     """The fitted table and what it was fitted on (see the module docstring)."""
     exposure: dict[tuple[str, int], float] = {}
     hits: dict[str, dict[int, dict[tuple[str, int], float]]] = {cls: {q: {} for q in Q_BUCKETS} for cls in ("s", "m")}
@@ -268,14 +276,15 @@ def fit(store: Store, roots: Sequence[str], *, days: Sequence[dt.date] | None = 
     hazard: dict[str, float] = {}
     for cls in ("s", "m"):
         for q in Q_BUCKETS:
-            for (root, d, k, t), p in shrink(exposure, hits[cls][q], float(prior)).items():
+            for (root, d, k, t), p in shrink(exposure, hits[cls][q], float(prior), float(min_bucket)).items():
                 rounded = round(min(1.0, max(0.0, p)), 6)
                 if rounded > 0:
                     hazard[f"{root}|q{q}|{cls}|d{d}|k{k}|t{t}"] = rounded
     sizes = {f"{root}|q{q}|{cls}|d{d}": lower_median(counts) for (root, q, cls, d), counts in excess.items()}
     return {"source": "league.gym.calibrate", "hazard": dict(sorted(hazard.items())), "size": dict(sorted(sizes.items())),
             "meta": {"fitted_on": seen, "roots": list(roots), "cells_with_exposure": len(exposure),
-                     "prior": float(prior), "sample_strikes": int(sample_strikes), "modelled_dte": F.MODELLED_DTE,
+                     "prior": float(prior), "min_bucket": float(min_bucket), "sample_strikes": int(sample_strikes),
+                     "modelled_dte": F.MODELLED_DTE,
                      "conditions": dict(sorted(codes.items())),
                      "fitted_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                      "rule": "per-root per-minute MLE over quoted contract-minutes in the sample's strike band, shrunk toward "
@@ -292,6 +301,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default=None)
     parser.add_argument("--prior", type=float, default=PRIOR, help="pseudo side-minutes a cell borrows from its coarser parent")
     parser.add_argument("--sample-strikes", type=int, default=SAMPLE_STRIKES, help="the trade sample's strikes each side of the money")
+    parser.add_argument("--min-bucket", type=float, default=MIN_BUCKET,
+                        help="side-minutes a (root, dte, moneyness) bucket needs to have cells")
     args = parser.parse_args(argv)
     store = Store(args.store)
     roots = [r.strip().upper() for r in args.roots.split(",") if r.strip()]
@@ -299,7 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not roots:
         print(f"no Train trade_quote samples in {args.store}")
         return 3
-    table = fit(store, roots, prior=args.prior, sample_strikes=args.sample_strikes)
+    table = fit(store, roots, prior=args.prior, sample_strikes=args.sample_strikes, min_bucket=args.min_bucket)
     out = Path(args.out) if args.out else (Path("/data/calibration/fill_model.json") if Path("/data").is_dir() and Path("/data/store").is_dir()
                                            else LAPTOP_OUT)
     out.parent.mkdir(parents=True, exist_ok=True)

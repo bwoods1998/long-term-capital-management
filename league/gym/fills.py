@@ -36,7 +36,8 @@ keyed by root (Sept 27, 2026) reads as natural-only here, and this table reads a
 the older engine.
 
 Size is capped by the quoted size at the natural. Stress mode widens every leg's half-spread
-(1.5x for the gate's stress test) before the natural is taken.
+(1.5x for the gate's stress test) before the natural is taken, charges a passive fill the extra
+half-spread, and multiplies every passive hazard by STRESS_HAZARD (0.5).
 
 numpy is not needed; Python 3.11+.
 """
@@ -59,6 +60,10 @@ TOUCH = -1.0
 DTE_EDGES = (0, 1, 3, 8)
 #: Passive fills are modelled only through this many days to expiry (the trade sample's reach).
 MODELLED_DTE = 7
+#: In a stress run (stress above 1: the gate's 1.5x twin) every passive hazard is multiplied by this: the
+#: package rate is an upper bound (a complex print may belong to another package), so the stress run also
+#: asks whether the edge survives patient orders filling half as often.
+STRESS_HAZARD = 0.5
 MONEY_EDGES = (0.005, 0.015, 0.03)
 TOD_EDGES = (630, 900)
 DEFAULT_PATHS = ("/data/calibration/fill_model.json",)
@@ -176,4 +181,4 @@ def draw(keys: Sequence[int], day: int, minute: int, side: str) -> float:
 
 
 __all__ = ["FillModel", "draw", "cell", "size_cell", "q_bucket", "dte_bucket", "money_bucket", "tod_bucket", "SEED", "TOUCH",
-           "MODELLED_DTE"]
+           "MODELLED_DTE", "STRESS_HAZARD"]

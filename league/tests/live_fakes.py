@@ -50,6 +50,9 @@ class Market:
         self.center = float(spot)        # the listed strikes stay where they were listed as the spot moves
         self.expiries, self.width = tuple(expiries), width
         self.calls = 0
+        self.chain_reads: list[tuple[str, Any]] = []   # (root, max_pages) of every chain read, in order
+        self.chain_timeouts: list[tuple[str, Any]] = []  # (root, timeout) of every chain read
+        self.contract_reads: list[list[str]] = []       # the symbols of every named-contract read
         self.minute_calls = Rate(100000)
         self.dead: set[str] = set()      # roots whose chain read fails
         self.overrides: dict[str, tuple[float, float, int, int]] = {}
@@ -90,8 +93,11 @@ class Market:
         q = row["latestQuote"]
         return float(q["bp"]), float(q["ap"])
 
-    def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None) -> dict:
+    def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None,
+              max_pages=None, timeout=None) -> dict:
         self.calls += 1
+        self.chain_reads.append((underlying, max_pages))
+        self.chain_timeouts.append((underlying, timeout))
         self.minute_calls.take(force=True)
         if underlying in self.dead:
             raise RuntimeError("market data HTTP 500")
@@ -107,8 +113,10 @@ class Market:
             out[sym] = row
         return out
 
-    def contracts(self, symbols: Iterable[str]) -> dict:
+    def contracts(self, symbols: Iterable[str], timeout=None) -> dict:
         self.calls += 1
+        symbols = list(symbols)
+        self.contract_reads.append(sorted(symbols))
         out = {}
         for sym in symbols:
             rows = self.rows(occ_parts(sym)[0])
@@ -119,7 +127,8 @@ class Market:
     def stocks(self, symbols: Iterable[str]) -> dict:
         self.calls += 1
         t = self.clock()
-        return {s: {"latestTrade": {"p": self.spot if s == "SPY" else 400.0, "t": iso(t - 2)},
+        # QQQ's chain is drawn around the same spot as SPY's (`rows`), so it trades there too; other stocks read 400.
+        return {s: {"latestTrade": {"p": self.spot if s in ("SPY", "QQQ") else 400.0, "t": iso(t - 2)},
                     "latestQuote": {"bp": self.spot - 0.01, "ap": self.spot + 0.01, "t": iso(t - 1)}} for s in symbols}
 
     def bars(self, symbols: Iterable[str], *, timeframe: str, start: str, end: str | None = None) -> dict:
@@ -130,7 +139,10 @@ class Market:
 class Venue:
     """An Alpaca account as the gateway shows it (orders, positions, activities), in memory. `fill` decides what a
     multi-leg order does when it arrives and at each read: "natural" fills whole when its limit meets the legs'
-    natural, "none" rests, "partial" fills one structure a read, "uneven" fills the first leg only."""
+    natural, "none" rests, "partial" fills one structure a read, "uneven" fills the first leg only, "limit" fills whole
+    AT its limit whatever the quotes (a resting order the market came through). A simple (single-leg) order carries
+    `"legs": null`, as the venue answers one; every order carries the venue's `submitted_at`, `filled_at` and
+    `canceled_at` stamps."""
 
     def __init__(self, market: Market, *, venue: str = "alpaca", equity: str = "5481.65", last_equity: str | None = None,
                  clock: Clock | None = None):
@@ -222,7 +234,7 @@ class Venue:
                 if self.cancel_delay:
                     o["status"], o["_cancel_at"] = "pending_cancel", self.clock() + self.cancel_delay
                 else:
-                    o["status"] = "canceled"
+                    o["status"], o["canceled_at"] = "canceled", iso(self.clock())
                 return True, ""
         return False, "HTTP 422 order is not cancelable"
 
@@ -230,12 +242,13 @@ class Venue:
     def _create(self, body: dict) -> dict:
         legs = body.get("legs")
         order = {"id": str(uuid.uuid4()), "client_order_id": body.get("client_order_id"), "status": "new",
+                 "submitted_at": iso(self.clock()), "filled_at": None, "canceled_at": None,
                  "order_class": "mleg" if legs else "simple", "qty": body["qty"], "filled_qty": "0",
                  "limit_price": body.get("limit_price"), "type": body.get("type"), "symbol": body.get("symbol", ""),
                  "side": body.get("side", ""), "time_in_force": body.get("time_in_force"), "_body": body,
                  "legs": [{"id": str(uuid.uuid4()), "symbol": l["symbol"], "side": l["side"], "position_intent": l["position_intent"],
                            "ratio_qty": l["ratio_qty"], "qty": str(int(body["qty"]) * int(l["ratio_qty"])), "filled_qty": "0",
-                           "filled_avg_price": None, "status": "new"} for l in legs or []]}
+                           "filled_avg_price": None, "status": "new"} for l in legs] if legs else None}
         self.book.append(order)
         return order
 
@@ -243,7 +256,7 @@ class Venue:
         for o in self.book:
             if o["status"] == "pending_cancel":
                 if self.clock() >= o["_cancel_at"]:
-                    o["status"] = "canceled"
+                    o["status"], o["canceled_at"] = "canceled", iso(self.clock())
             elif o["status"] in ("new", "accepted", "partially_filled"):
                 self._try_fill(o)
 
@@ -273,10 +286,10 @@ class Venue:
                 bid, ask = self.market.quote(order["symbol"])
                 limit = float(order["limit_price"])
                 buying = order["side"] == "buy"
-                if (buying and ask <= limit + 1e-9) or (not buying and bid >= limit - 1e-9):
-                    order["status"] = "filled"
+                if (buying and ask <= limit + 1e-9) or (not buying and bid >= limit - 1e-9) or self.fill == "limit":
+                    order["status"], order["filled_at"] = "filled", iso(self.clock())
                     order["filled_qty"] = order["qty"]
-                    order["filled_avg_price"] = str(ask if buying else bid)
+                    order["filled_avg_price"] = str(limit if self.fill == "limit" else ask if buying else bid)
                     sign = Decimal(1) if buying else Decimal(-1)
                     self.held[order["symbol"]] = self.held.get(order["symbol"], Decimal(0)) + sign * Decimal(order["qty"])
             return
@@ -285,11 +298,17 @@ class Venue:
         limit = float(order["limit_price"])
         signed = limit if opening else -limit           # the Gym's value a share
         ok = (value <= signed + 1e-9) if opening else (value >= signed - 1e-9)
+        if self.fill == "limit":
+            # At the limit: the first leg's price takes the difference, so the legs' signed sum is exactly the limit.
+            first = order["legs"][0]
+            role = 1 if first["position_intent"] in ("buy_to_open", "sell_to_close") else -1
+            prices = [round(prices[0] + (signed - value) / (role * int(first["ratio_qty"])), 4)] + prices[1:]
+            ok = True
         if not ok:
             return
         qty = int(order["qty"])
         done = int(order["filled_qty"])
-        units = qty - done if self.fill in ("natural", "uneven") else min(qty - done, 1)
+        units = qty - done if self.fill in ("natural", "uneven", "limit") else min(qty - done, 1)
         if units <= 0:
             return
         for leg, price in zip(order["legs"], prices):
@@ -309,6 +328,8 @@ class Venue:
             return
         order["filled_qty"] = str(done + units)
         order["status"] = "filled" if done + units >= qty else "partially_filled"
+        if order["status"] == "filled":
+            order["filled_at"] = iso(self.clock())
 
     @staticmethod
     def _public(o: dict) -> dict:

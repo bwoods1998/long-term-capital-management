@@ -31,7 +31,10 @@ The output (FILE, JSON): {"batch": {...the run's settings, trials, program-years
 refuses gets {"status": "refused", "reason": ...}]}. Each result is `results.view(result, window)`:
 Train returns everything (or `--detail summary`); a validation run returns the validation view only
 (no trades, dates or daily series), runs a 1.5x-stress twin and carries its figures as `stress_1.5`,
-and refuses `--start`/`--end`; holdout and forward runs return the gate's inputs.
+and refuses `--start`/`--end`; holdout and forward runs return the gate's inputs. A stress run (the
+twin, or `--stress` above 1) widens every half-spread by the factor, charges passive fills the extra
+half-spread, and HALVES every passive fill hazard (`fills.STRESS_HAZARD`): "positive at 1.5x" also
+means positive when patient orders fill half as often, since the package rate is an upper bound.
 
 Each unit (a worker's share of programs over one segment) runs in its own process with a deadline
 (`--unit-timeout`, default 30 s a program-day and at least 30 minutes): past it the process is killed

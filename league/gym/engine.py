@@ -13,10 +13,10 @@ The day of a program, minute index i from 1 (09:31) to the last minute before th
 1. its working orders meet row i (arrivals first sent at i - 1);
 2. the venue acts at row i: opening orders on an expiring contract are cancelled at the open
    cutoff (15:00), closing ones at the close cutoff (15:10; 15:25 SPY/QQQ); an equity position with
-   a leg expiring today that is in the money or within 1% of it (`venue.near_money`) is closed at
-   the natural price by the House from 10 minutes before the close cutoff until the cutoff, and by
-   the venue's liquidation from 15:30 (the live path's rule, `league/live/step.py` `_expiry_close`);
-   one whose every expiring leg is further out of the money is left to expire;
+   a leg expiring today that is in the money or within 1% of it (`venue.near_money`), or a long call
+   or put with a bid, is closed at the natural price by the House from 10 minutes before the close
+   cutoff until the cutoff (the live path's rule, `league/live/step.py` `_expiry_close`), and one in
+   or near the money by the venue's liquidation from 15:30; the rest is left to expire;
 3. on a decision minute, decide(ctx) runs and its intents become orders arriving at i + 1.
 At the close: working orders expire; positions expiring today settle (index: cash at the closing
 level, never liquidated; equity legs that were not closed: exercised at $0.01 in the money, and a
@@ -462,6 +462,8 @@ class Account:
                          for leg in legs]
                 model = self.cfg.fill_model
                 p = model.p(order.root, q, shape, snap.minute)
+                if stress > 1.0:
+                    p *= F.STRESS_HAZARD  # a stress run also asks: does it survive patient orders filling half as often?
                 if p <= 0.0 or not self._adverse(day, mi, order.root, legs, mid, opening):
                     return
                 if F.draw([leg.key for leg in legs], day.ordinal, snap.minute, "buy" if opening else "sell") >= p:
@@ -641,8 +643,8 @@ class Account:
                     continue
                 if pos.closing and self.orders.get(pos.closing) is not None and self.orders[pos.closing].forced:
                     continue
-                if not self._near_money(day, mi, pos, rules):
-                    continue  # every expiring leg is further out of the money: it is left to expire
+                if not (self._house_closes(day, mi, pos, rules) if house else self._near_money(day, mi, pos, rules)):
+                    continue  # left to expire (every expiring leg further out of the money; a long single with no bid)
                 if pos.closing and self.orders.get(pos.closing) is not None:
                     self._drop(self.orders[pos.closing], "cancelled")
                 order = L.Order("close", pos.type, root, pos.legs_today(), pos.qty, math.nan, math.nan, math.nan, 0.0,
@@ -651,6 +653,19 @@ class Account:
                 self.orders[work.oid] = work
                 pos.closing = work.oid
                 self._try_fill(day, mi, work)
+
+    @classmethod
+    def _house_closes(cls, day: DayData, mi: int, pos: Position, rules: venue.Rules) -> bool:
+        """The House's expiry close (the live path's `_expiry_close`): a leg in or near the money, and a LONG CALL or
+        PUT whatever its moneyness while it has a bid or no quote to tell (an exercise would bring 100 shares the
+        account cannot carry)."""
+        if pos.type in ("long_call", "long_put"):
+            snap = day.snapshot(pos.root, mi)
+            i = int(pos.idx[0]) if pos.idx is not None else -1
+            bid = float(snap.bid[i]) if snap is not None and i >= 0 else math.nan
+            if not math.isfinite(bid) or bid > 0:
+                return True
+        return cls._near_money(day, mi, pos, rules)
 
     @staticmethod
     def _near_money(day: DayData, mi: int, pos: Position, rules: venue.Rules) -> bool:

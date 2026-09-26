@@ -28,6 +28,7 @@ if HAVE:
 D1 = dt.date(2023, 3, 6)
 DV = dt.date(2025, 3, 3)
 P = 100.0   # the shrinkage prior these tests use: pseudo side-minutes
+FLOOR = 50.0  # the exposure floor these tests use (a day of one contract is 778 side-minutes)
 # The one 0 DTE contract is quoted 09:31-15:59: 389 contract-minutes, each a resting buy and a resting sell. By time
 # of day: to 10:30 59 minutes (118 side-minutes), to 15:00 270 (540), after 60 (120); 778 side-minutes in all.
 
@@ -67,7 +68,7 @@ class Calibration(unittest.TestCase):
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def test_rates_counted_by_hand(self):
-        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
+        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, min_bucket=FLOOR)
         h = table["hazard"]
         # Level 0 (bucket q2): a resting buy at the mid meets the 10:00 print (at or below the mid); a resting sell
         # meets 10:00 and 10:10 (at or above the mid): 3 hits, all before 10:30. Every hit and minute is at 0 DTE and
@@ -75,7 +76,7 @@ class Calibration(unittest.TestCase):
         pooled = 3 / 778
         self.assertEqual(h["SPY|q2|s|d0|k0|t0"], shrunk(3, 118, pooled))
         self.assertEqual(h["SPY|q2|s|d0|k0|t1"], shrunk(0, 540, pooled))    # no print after 10:30: small, never zero
-        self.assertEqual(h["SPY|q2|s|d0|k2|t0"], round(pooled, 6))          # no exposure at all there: its parent's rate
+        self.assertNotIn("SPY|q2|s|d0|k2|t0", h)                           # no exposure there: no cell, natural only
         # 1-2, 3-7 and 8+ days were never sampled here: no cells at all (natural fills only), never a neighbour's.
         self.assertEqual([k for k in h if "|d0|" not in k], [])
         self.assertEqual(F.FillModel.from_json(table).p("SPY", 0.0, [(10, 0.0)], 600), 0.0)
@@ -90,7 +91,7 @@ class Calibration(unittest.TestCase):
         # Multi-leg: the 10:20 complex print at the mid (buy and sell side: 2 hits), from complex prints directly.
         self.assertEqual(h["SPY|q2|m|d0|k0|t0"], shrunk(2, 118, 2 / 778))
         # Monotone in the level: a limit nearer the natural never fills less often.
-        for cell in ("d0|k0|t0", "d0|k0|t1", "d0|k3|t2"):
+        for cell in ("d0|k0|t0", "d0|k0|t1", "d0|k0|t2"):
             rates = [h.get(f"SPY|q{q}|s|{cell}", 0.0) for q in range(6)]
             self.assertEqual(rates, sorted(rates), cell)
         # Size: every hit here traded one contract beyond the (empty, inside the spread) queue.
@@ -107,7 +108,7 @@ class Calibration(unittest.TestCase):
         w = synth.Writer(self.dir)
         w.trade_quote("SPY", D1, prints([(600, 1.00, 18, 60), (600, 1.00, 18, 40), (605, 1.00, 18, 70), (605, 0.99, 18, 31),
                                          (610, 1.10, 18, 150), (620, 1.00, 130, 101)]))
-        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
+        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, min_bucket=FLOOR)
         # Single-leg touch hits: 10:05 (a resting buy) and 10:10 (a resting sell); 10:00 is absorbed by the queue.
         self.assertEqual(table["hazard"]["SPY|q0|s|d0|k0|t0"], shrunk(2, 118, 2 / 778))
         # Multi-leg: one complex contract-minute through the queue.
@@ -137,7 +138,7 @@ class Calibration(unittest.TestCase):
             {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.10)}},
             {"expiration": D1, "strike": 400, "right": "P", "quotes": {571: (1.00, 1.10)}},
         ], prices=400.0)
-        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
+        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, min_bucket=FLOOR)
         # Same three single-leg side hits, twice the population (the put at the same strike is in the sample's
         # band and was quoted all day). No put print is needed.
         self.assertEqual(table["hazard"]["SPY|q2|s|d0|k0|t0"], shrunk(3, 236, 3 / 1556))
@@ -156,7 +157,7 @@ class Calibration(unittest.TestCase):
             rows[k] += extra[k]
         rows["strike"][-1] = 402.0
         w.trade_quote("SPY", D1, rows)
-        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, sample_strikes=1)
+        table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, sample_strikes=1, min_bucket=FLOOR)
         self.assertEqual(table["meta"]["fitted_on"]["contract_minutes"], 4 * 389)
         # All four are within 0.5% of the money (402/400 is just under 1.005 in floating point). The 10:00 and 10:10
         # prints are 3 q2 hits before 10:30 and the 11:40 one 2 more: 5 of 4 x 778 side-minutes in all.
@@ -170,14 +171,14 @@ class Calibration(unittest.TestCase):
         code = lambda m: int(CAL._cells(numpy.array([0]), numpy.array([0.0]), numpy.array([m]))[0])  # noqa: E731
         exposure = {("SPY", code(600)): 100.0, ("SPY", code(700)): 900.0, ("QQQ", code(600)): 1000.0}
         hits = {("SPY", code(600)): 10.0}
-        rates = CAL.shrink(exposure, hits, 100.0)
+        rates = CAL.shrink(exposure, hits, 100.0, 50.0)
         spy = (10 + 100 * 0.005) / 1100                                        # SPY's 10/1000, toward the pool's 0.005
         spy_d = (10 + 100 * spy) / 1100                                        # (SPY, d0): the same data, toward SPY's
         spy_dk = (10 + 100 * spy_d) / 1100                                     # (SPY, d0, k0): again
         self.assertAlmostEqual(rates["SPY", 0, 0, 0], (10 + 100 * spy_dk) / 200)
         self.assertAlmostEqual(rates["SPY", 0, 0, 1], (0 + 100 * spy_dk) / 1000)
         self.assertAlmostEqual(rates["SPY", 0, 0, 2], spy_dk)                  # no data there: the parent, not zero
-        self.assertAlmostEqual(rates["SPY", 0, 1, 0], spy_d)                   # nor at another moneyness
+        self.assertNotIn(("SPY", 0, 1, 0), rates)                              # another moneyness, never seen: no cells
         qqq = (0 + 100 * 0.005) / 1100                                         # QQQ never filled: pulled up by the pool only
         qqq_dk = (0 + 100 * ((0 + 100 * qqq) / 1100)) / 1100
         self.assertAlmostEqual(rates["QQQ", 0, 0, 0], (0 + 100 * qqq_dk) / 1100)
@@ -186,19 +187,38 @@ class Calibration(unittest.TestCase):
         self.assertNotIn(("IWM", 0, 0, 0), rates)                              # a root never sampled: no cells
         self.assertEqual(CAL.shrink({}, {}, 100.0), {})                        # no exposure at all: nothing to say
 
+    def test_a_moneyness_bucket_below_the_floor_has_no_cells(self):
+        # SPY at 0 DTE: 20000 side-minutes at the money with 200 hits (1%), and a far wing (over 3% out) sampled for
+        # only 40 side-minutes with no hit. Without the floor the wing would take a rate pulled toward the 1% its
+        # (root, dte) parent mostly measures at the money; with it, the wing has no cells: natural fills only.
+        cells = lambda money: int(CAL._cells(numpy.array([0]), numpy.array([money]), numpy.array([600]))[0])  # noqa: E731
+        exposure = {("SPY", cells(0.0)): 20000.0, ("SPY", cells(0.04)): 40.0}
+        hits = {("SPY", cells(0.0)): 200.0}
+        loose = CAL.shrink(exposure, hits, 600.0, 0.0)
+        self.assertGreater(loose["SPY", 0, 3, 0], 0.005)                       # the optimism the floor removes
+        floored = CAL.shrink(exposure, hits, 600.0, 6000.0)
+        self.assertNotIn(("SPY", 0, 3, 0), floored)
+        self.assertIn(("SPY", 0, 0, 0), floored)
+        self.assertEqual(CAL.MIN_BUCKET, 6000.0)
+        # A package with that wing as a leg reads zero, whatever its body's rate.
+        table = {f"SPY|q2|{c}|d0|k{k}|t0": r for (_, d, k, t), r in floored.items() for c in "sm"}
+        model = F.FillModel(hazard=table)
+        self.assertGreater(model.p("SPY", 0.0, [(0, 0.0), (0, 0.0)], 600), 0.0)
+        self.assertEqual(model.p("SPY", 0.0, [(0, 0.0), (0, 0.04)], 600), 0.0)
+
     def test_hits_need_the_corresponding_quote_and_a_known_spot(self):
         chain = self.store.chain("SPY", D1)
         chain.bid[600 - chain.open_min, :] = numpy.nan  # remove the mid print's quote exposure
         chain.underlying.price[610 - chain.open_min] = numpy.nan  # remove the ask print's spot
         with patch.object(self.store, "chain", return_value=chain):
-            table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P)
+            table = CAL.fit(self.store, ["SPY"], days=[D1], prior=P, min_bucket=FLOOR)
         self.assertEqual(table["meta"]["fitted_on"]["single"], 0)
         self.assertEqual([k for k in table["hazard"] if "|s|" in k], [])   # no single-leg print survived
         self.assertIn("SPY|q2|m|d0|k0|t0", table["hazard"])                     # the 10:20 complex print did
 
     def test_the_cli_writes_where_it_is_told_and_the_engine_uses_it(self):
         out = self.dir / "cal" / "fill_model.json"
-        self.assertEqual(CAL.main(["--store", str(self.dir), "--roots", "SPY", "--out", str(out), "--prior", "100"]), 0)
+        self.assertEqual(CAL.main(["--store", str(self.dir), "--roots", "SPY", "--out", str(out), "--prior", "100", "--min-bucket", "50"]), 0)
         self.assertEqual(out.stat().st_mode & 0o777, 0o600)
         model = F.FillModel.load(out)
         self.assertNotEqual(model.version, "natural-only")
