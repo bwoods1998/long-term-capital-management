@@ -406,4 +406,9 @@ consumer, no effect); the gate's relevance question is dropped by the gate's own
   (the PR rebases on G before it deploys, as written). Notes kept: the score tolerance has not met a real Jev
   score answer (no caller asks one yet; it fails closed); `too_slow` is judged by the retrieval's own clock.
 
+- **02:23Z Sept 26: the owner sold the real MLB position** ("i sold the mlb game so you can proceed"), so no real
+  family's game is in play and the order proceeds now: a House release (`20260926T022308Z-1931abd19d1f`, forward-
+  first's Deploy B by the order) began its canary at 02:23:08Z. D-J2 still follows B, G and C, each 30 minutes
+  after the previous watch; its exact start is written here first.
+
 ## Report
