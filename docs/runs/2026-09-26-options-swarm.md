@@ -537,6 +537,29 @@ clock never restarts.
   are in progress, with a second independent review of order admission and transaction boundaries.
   The data completion worker remains healthy: names 7,695/23,740, no failing stage; final images
   and calibration have not been adopted.
+- 18:06Z Researcher retirement #376 is merged as `8c9216b6` and deployed in release
+  `20260926T175520Z-f47c08cd0535`; the complete ten-minute watch passed. The three independent
+  findings above were corrected and reproduced with regression probes. Exact-source verification
+  on the actual House passed 275 tests. Researcher-requested retirement preserves strategy,
+  trial and lineage evidence, look reservations and owned exits; admission rechecks identity and
+  eligibility before creating an order. Retirement-floor refusals back off instead of spinning.
+  Thirty researchers retired themselves shortly after rollout; the live population subsequently
+  reached its floor of 16 before the existing architect refill. This is search turnover, not an
+  evidence pass. House and both worker heartbeats are fresh; real money remains off.
+- 18:14Z Agent promotion rings and click-through checklists are merged and deployed on the site
+  (#11, main `0984954`, Worker `7959f35b-0f7d-4bad-b9a5-85dbe060c533`). Rings count only verified
+  current prerequisites; stale or missing evidence clears them. Independent browser review
+  caught and verified a stale-ring fix. The runtime publisher #377 passed both full CI suites,
+  independent comparison against 450 promotion-policy cases, and 78 actual-House tests with
+  two expected site-schema environment skips. Its read-only live-data rehearsal produced
+  13 eligible progress projections among 16 active families in 0.074s, without publishing private
+  scores or changing evidence. Deployment waits for site #12: old open tabs strictly reject a
+  newly added field, so current pages explicitly request progress while legacy reads retain their
+  original shape. All 63 site tests and the independent original-client probe passed.
+- 18:14Z Draft prune #375 is at `ccf9cc27`, incorporating the retirement release; its 277 affected
+  tests and full CI passed. It remains unmerged and undeployed until after Monday's close. An
+  independent review of its money behavior, imports and deployment paths is underway; the next
+  publisher merge will also need folding into the draft.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
@@ -548,6 +571,13 @@ while the full ThetaData/SIP completion is pending.
    distinct sealed Gym/gate templates, two one-year checkpoints per template, and matching
    calibration SHA/model identity in `next-images/images.json` and `next-images/calibration.json`.
    Verify inside each sealed template and privately compare its model hash with the receipt.
+   Check all 25 roots, actual covered windows, every manifest file hash/size and the stock
+   underlying source paired with each options day. Verify matching Train/Validation manifests
+   across the pair and the absence of holdout, credentials and network access in the Gym.
+   Restore and verify each primary and backup checkpoint sequentially: a producer receipt alone
+   does not prove recovery. Terminate verification forks only. The private adoption preflight and
+   sealed-image checks are prepared and passed seven synthetic cases; they have not run on a
+   final pair that does not yet exist.
 2. Quiesce research with `swarm.stop` and collection with `data/nightly.stop`; verify process
    identity and released locks. A House maintenance pause alone does not stop existing research.
    Back up current metadata, `swarm.json`, any model file and forward manifest before changes.
@@ -555,10 +585,16 @@ while the full ThetaData/SIP completion is pending.
    `/data/calibration/fill_model.json` (0600), comparing SHA before and after. Adopt the staged
    image, calibration, universe and calendar records together; preserve the completion receipts.
    Select the final Gym checkpoint and its complete root list in `swarm.json`, keeping the gate
-   pointer disabled. Verify that no stale
-   `gym-forward.json` can override the intended gate pointer; Sunday should have no forward day.
+   pointer disabled. Verify all three gate pointers: swarm settings, optional `gym-forward.json`
+   and `images.json`'s current gate checkpoint, which the nightly collector prefers. Sunday should
+   have no genuine forward day; never discard an unexpected real forward receipt. Check for old
+   image promotions or shadow inventory before switching; pointer changes do not revoke bands.
+   Use fsynced temporary replacements and write the adoption receipt last. A partial failure
+   leaves research and collection stopped until reconciled.
 4. Restart the House so the shadow book loads the new model, then resume supervised research and
-   collection. Verify the deployed release, model identity, pool checkpoint identities and fresh
+   collection. Verify the deployed release, effective `GYM_FILL_MODEL` path, model file hash,
+   constructor wiring and process start after installation; current health does not report the
+   in-memory model identity, so do not claim it does. Verify pool checkpoint identities and fresh
    heartbeats. Prior-image workers must not execute new jobs. Require fresh validation on the
    selected Gym and current engine bundle before enabling the matching final gate checkpoint.
    Preserve all previous trial counts, lineage links, look results and look reservations.
