@@ -25,10 +25,11 @@ orders that measure multi-leg fills and are never evidence). Each row:
 
 THE OBSERVE BAND (the sprint, B4, Sept 26, 2026): `observe(root)` -> one SHADOW-ONLY row per alive Gym-band family that
 has a validated version (its state's `validation_version`: the current best version the tournament validated), whatever
-the validation line, the review or the bundle said. The live path runs it in the shadow book (`<family>@<version>:o`)
-with the version pinned for a session: never real, never tuition, never a forward row, never a band move. A family never
-validated has no row until it is. Each row says `observe: True`, `holdout_passed: False` and `validation_passed: False`,
-so nothing that reads it can take it for a Candidate. `observe(root, family=f, version=n)` is the pinned version `n` of
+the validation line or the bundle said. The live path runs it in the shadow book (`<family>@<version>:o`) with the version
+pinned for a session: never real, never tuition, never a forward row, never a band move. A family never validated has no
+row until it is; a version whose own program review failed, or that the gate refused, has none. Each row says
+`observe: True`, `holdout_passed: False` and `validation_passed: False`, so nothing that reads it can take it for a
+Candidate. `observe(root, family=f, version=n)` is the pinned version `n` of
 `f` while `f` is alive and still in the Gym band ([] otherwise): what the live path admits a pinned instance's shadow
 opens against.
 
@@ -199,12 +200,17 @@ def observe(root: str | Path, *, family: str | None = None, version: int | None 
             continue
         state = fam["state"]
         params = loads(v["params"], {}) or {}
+        sha = run_sha({"sha": v["sha"], "params": params})
+        review, outcome = state.get("review") or {}, state.get("gate_outcome") or {}
+        if (review.get("sha") == sha and review.get("verdict") == "fail") or (
+                outcome.get("sha") == sha and outcome.get("result") == "refused"):
+            continue  # this exact version's program review failed, or the gate refused it: not even shadow
         t = (state.get("validation_numbers") or {}).get("t")
         t = float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t) else None
         out.append({
             "family": fam["id"], "band": "gym", "observe": True, "structure": fam["structure"], "roots": loads(fam["roots"], []),
             "holdout_passed": False, "validation_passed": False, "version": int(v["n"]), "code": code, "params": params,
-            "run_sha": run_sha({"sha": v["sha"], "params": params}), "typical_max_loss_usd": None, "seed_era": True,
+            "run_sha": sha, "typical_max_loss_usd": None, "seed_era": True,
             "forward": None, "validated_version": int(state["validation_version"]), "validation_t": t,
         })
     out.sort(key=lambda r: (r["validation_t"] is None, -(r["validation_t"] or 0.0), r["family"]))

@@ -36,10 +36,21 @@ def credit_table():
 
 
 class Ledger:
+    """The House's ledger as the live path writes to it, with the real ledger's kind check (`league.ledger.KINDS`): the
+    production `Ledger.append` refuses an unknown kind and the live path swallows the error, so a kind it uses must be
+    registered. Every test ends by checking none was unknown (`LiveCase.tearDown`)."""
+
     def __init__(self):
+        from league.ledger import KINDS
+
+        self.kinds = KINDS
         self.rows = []
+        self.unknown = []
 
     def __call__(self, kind, payload, agent=None):
+        if kind not in self.kinds:
+            self.unknown.append(kind)
+            raise ValueError(f"unknown ledger kind {kind!r}")
         self.rows.append((kind, payload, agent))
 
     def of(self, kind):
@@ -70,6 +81,7 @@ class LiveCase(unittest.TestCase):
         if getattr(self, "live", None) is not None:
             self.live.state.close()
         self.dir.cleanup()
+        self.assertEqual(self.ledger.unknown, [], "every ledger kind the live path writes is registered")
 
     def make(self, rows, *, real_money=True, config=None, table=None, observed=()):
         self.families = MemoryFamilies(rows, observed)

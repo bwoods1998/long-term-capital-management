@@ -197,6 +197,77 @@ class Backstop(CalibrationCase):
         self.assertEqual(self.families.forward, {})
 
 
+class TheReview(CalibrationCase):
+    """The review of #390: the closes are budgeted and capped, calibration yields to the families, and it is never
+    Profit (a cost instead)."""
+
+    def closes_do(self, **mode):
+        """The open fills at its limit; every close then meets the venue as `mode` says."""
+        self.venue.fill = "limit"
+
+        def hook(body):
+            if body.get("legs") and body["legs"][0]["position_intent"] == "sell_to_close":
+                for key, value in mode.items():
+                    setattr(self.venue, key, value)
+
+        self.venue.on_submit = hook
+
+    def test_refused_closes_back_off_and_stop_at_six_a_day(self):
+        self.closes_do(submit_mode="reject")                               # every close refused by the venue
+        live = self.start(real_money=True)
+        self.run_to(10, 0)
+        self.assertEqual(len(live.book.positions), 1)
+        self.run_to(15, 40)
+        closes = [b for b in self.mine() if b["legs"][0]["position_intent"] == "sell_to_close"]
+        self.assertEqual(len(closes), C.CLOSE_ATTEMPTS_DAY, "six attempts a day, not one a minute")
+        times = [r["submitted_at"] for r in self.samples() if r["action"] == "close"]
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        self.assertGreaterEqual(gaps[0], 5 * 60 - 1, "five minutes after the first refusal")
+        self.assertGreaterEqual(gaps[1], 10 * 60 - 1, "then ten: the back-off doubles")
+        self.assertLess(live.book.count_today(MONDAY.isoformat()), 40)
+
+    def test_a_natural_of_a_tick_or_less_is_never_sent(self):
+        self.closes_do(fill="none")
+        live = self.start(real_money=True)
+        self.run_to(10, 0)
+        [pos] = live.book.positions.values()
+        long_leg, short_leg = pos.legs
+        self.market.overrides[long_leg.symbol] = (0.01, 0.02, 10, 10)
+        self.market.overrides[short_leg.symbol] = (0.00, 0.01, 10, 10)      # the natural close: 0.01 - 0.01 = 0
+        self.run_to(10, 30)
+        offsets = [r["offset"] for r in self.samples() if r["action"] == "close"]
+        self.assertNotIn("natural", offsets)
+        self.assertLessEqual(len(offsets), 2)
+
+    def test_it_yields_a_root_on_which_a_family_works_an_order(self):
+        resting = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"price": 0.01}, "tag": "t"')
+        self.venue.fill = "limit"
+        live = self.start([family("vert", resting, band="probe", params={"hold": 600})], real_money=True, mm=58)
+        self.venue.fill = "none"
+        self.run_to(10, 0)
+        self.assertTrue([o for o in live.book.orders.values() if o.family == "vert" and o.root == "SPY"])
+        self.assertFalse([b for b in self.mine() if b["legs"][0]["symbol"].startswith("SPY")], "SPY left to the family")
+        self.assertTrue([b for b in self.mine() if b["legs"][0]["symbol"].startswith("QQQ")], "QQQ goes instead")
+
+    def test_it_is_never_profit_and_its_net_is_a_cost(self):
+        from league import trading_profit
+
+        self.assertEqual(trading_profit.CALIBRATION_FAMILY, C.FAMILY)
+        self.venue.fill = "limit"
+        live = self.start(real_money=True)
+        self.run_to(10, 1)
+        [trade] = live.book.closed_trades()
+        self.assertNotEqual(trade["pnl"], 0)
+        at = "2026-09-28T14:05:00.000Z"
+        self.assertEqual(trading_profit.snapshot(self.root, live, at=at)["pnl_usd"], "0.00", "no family traded")
+        cost = live.site_inputs()["compute"]["other_usd"]
+        self.assertEqual(D(cost), max(D(0), -D(str(trade["pnl"]))).quantize(D("0.01")))
+        rows = [{"family": C.FAMILY, "status": "closed", "cash": "12.50"}, {"family": C.FAMILY, "status": "closed", "cash": "-20"}]
+        self.assertEqual(trading_profit.calibration_cost(rows), "7.50")
+        self.assertEqual(trading_profit.calibration_cost(rows[:1]), "0.00", "a gain costs nothing and is not Profit")
+        self.assertIsNone(trading_profit.calibration_cost([]))
+
+
 class Limits(CalibrationCase):
     def test_the_days_fifty_dollars_admit_one_round_trip(self):
         self.venue.fill = "limit"

@@ -76,6 +76,9 @@ LAST_RESORT_MINUTES = 15
 NO_NEW_MINUTES = 60
 #: The nearest pairs tried, in order, when the nearest one's contracts are held or worked or it does not fit a cap.
 CANDIDATES = 4
+#: A position's close attempts a day (the mid, a tick under, then the natural), and the back-off after a refused one.
+CLOSE_ATTEMPTS_DAY = 6
+REJECT_BACKOFF_MINUTES = 5.0
 WIDTH = 1.0
 TICK = V.NET_TICK
 FILE = "calibration.sqlite"
@@ -344,6 +347,11 @@ class Calibration:
         if not due:
             self._fire(st, today, slot, f"{today}: every symbol has {target} samples at the mid")
             return
+        # It yields: a root on which any family works a real order now is left to the families this minute.
+        worked = {o.root for o in book.orders.values() if o.working and o.family != FAMILY}
+        due = [s for s in due if s not in worked]
+        if not due:
+            return  # the slot waits (inside its window) for the families' orders to finish
         reasons, unread = [], []
         for symbol in due:
             picks = self._verticals(day, mi, symbol)
@@ -518,9 +526,25 @@ class Calibration:
             return                                          # the House's own leg closes, or a close already works
         today = day.day.isoformat()
         minute = day.open_min + mi
+        now = live.clock()
         rules = day.rules.get(pos.root) or V.rules_for(pos.root, open_minute=day.open_min, close_minute=day.close_min)
         if pos.expiry == today and minute + 1 >= rules.close_cutoff:
             return                                          # past the expiring close cutoff: the House alerts
+        # Attempts a day, and a back-off after the venue or the gateway refused one: an unfilled or refused close is
+        # never re-sent without end (every one spends the day's order count). The House's own backstop closes a
+        # position still open near the close (`OptionsLive._venue_rules`, `CALIBRATION_BACKSTOP`).
+        tally = dict(pos.info.get("cal_attempts") or {})
+        if tally.get("day") != today:
+            tally = {"day": today, "n": 0, "next_at": 0.0, "backoff": REJECT_BACKOFF_MINUTES}
+        last_sent = live.state.rows("SELECT status FROM orders WHERE pid=? AND family=? AND action='close' "
+                                    "ORDER BY oid DESC LIMIT 1", (pos.pid, FAMILY))
+        if last_sent and last_sent[0]["status"] in ("rejected", "refused") and not tally.get("backed_off_after") == tally["n"]:
+            tally.update(next_at=now + 60.0 * float(tally["backoff"]), backoff=2 * float(tally["backoff"]),
+                         backed_off_after=tally["n"])
+            pos.info["cal_attempts"] = tally
+            book._save_position(pos)
+        if int(tally["n"]) >= CLOSE_ATTEMPTS_DAY or now < float(tally.get("next_at") or 0.0):
+            return
         tried = list(pos.info.get("cal_close") or [])
         last = minute >= day.close_min - LAST_RESORT_MINUTES or bool(live._expiry_close(pos, day, mi, minute))
         offset = "natural" if last or tried[-1:] in (["mid-1"], ["natural"]) else ("mid-1" if tried[-1:] == ["mid"] else "mid")
@@ -531,6 +555,8 @@ class Calibration:
         quote = self._quote(snap, fills, pos.legs, "close", day.open_min + mi)
         if quote["natural"] is None or quote["mid"] is None:
             return
+        if offset == "natural" and quote["natural"] <= TICK + 1e-9:
+            return  # nothing bids for it: a natural of a tick or less cannot fill (it is left to expire, or the backstop)
         rule, _ = CLOSE_OFFSETS[offset]
         try:
             order = L.resolve_close({"close": pos.pid, "limit": rule}, pos.type, fills, pos.qty, snap, day.rules[pos.root],
@@ -539,7 +565,9 @@ class Calibration:
             live.record("live.calibration", {"pid": pos.pid, "action": "close", "offset": offset, "held": str(exc)[:200]})
             return
         value = max(TICK, round(order.limit, 2))            # a debit structure is never given away for nothing
-        refusal = book.path_refusal(pos.legs, opening=False, day=today, house=offset == "natural")
+        # Charged to the day's order budget like a program's close; only the true last resort (the session's last
+        # minutes, or the House's own expiry close) may use the room kept for the House's exits.
+        refusal = book.path_refusal(pos.legs, opening=False, day=today, house=offset == "natural" and last)
         if refusal:
             live.record("live.calibration", {"pid": pos.pid, "action": "close", "offset": offset, "held": refusal[:200]})
             return
@@ -548,6 +576,8 @@ class Calibration:
                               tif=TIF if offset != "natural" else 0, day=today, minute=mi, pid=pos.pid,
                               fees_est=order.fees, why=f"calibration: close at {offset}")
         pos.info["cal_close"] = (tried + [offset])[-20:]
+        tally["n"] = int(tally["n"]) + 1
+        pos.info["cal_attempts"] = tally
         book._save_position(pos)
         self._record(sent, str(pos.info.get("cal_trip") or f"pid-{pos.pid}"), pos.root, pos.legs, "close", offset, quote,
                      quote["mid"])

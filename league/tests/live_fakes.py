@@ -50,6 +50,7 @@ class Market:
         self.center = float(spot)        # the listed strikes stay where they were listed as the spot moves
         self.expiries, self.width = tuple(expiries), width
         self.calls = 0
+        self.chain_reads: list[tuple[str, Any]] = []   # (root, max_pages) of every chain read, in order
         self.minute_calls = Rate(100000)
         self.dead: set[str] = set()      # roots whose chain read fails
         self.overrides: dict[str, tuple[float, float, int, int]] = {}
@@ -90,8 +91,10 @@ class Market:
         q = row["latestQuote"]
         return float(q["bp"]), float(q["ap"])
 
-    def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None) -> dict:
+    def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None,
+              max_pages=None) -> dict:
         self.calls += 1
+        self.chain_reads.append((underlying, max_pages))
         self.minute_calls.take(force=True)
         if underlying in self.dead:
             raise RuntimeError("market data HTTP 500")

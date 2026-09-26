@@ -154,3 +154,20 @@ class AHungChild(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class ASpentBudget(unittest.TestCase):
+    """The review of #390 (lens 3): a minute whose budget is spent before a request goes skips that request; the child
+    is not killed, so its programs keep their memory (a kill is only for a child that did not answer)."""
+
+    def test_nothing_is_sent_and_the_child_is_not_killed(self):
+        from league.live.decider import BudgetSpent, Decider, DeciderError
+
+        d = Decider()
+        killed = []
+        d._kill = lambda: killed.append(True)
+        with self.assertRaises(BudgetSpent) as caught:
+            d._ask(("decide", {}, {}, []), 0.0)
+        self.assertIsInstance(caught.exception, DeciderError, "the House's minute treats it as any decider trouble")
+        self.assertEqual((killed, d.restarts, d.proc), ([], 0, None), "no child was spawned, killed or restarted")

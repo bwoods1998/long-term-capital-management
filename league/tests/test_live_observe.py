@@ -4,6 +4,7 @@ With the fakes of `live_fakes` (the venue's shapes, invented numbers) and the in
 
 import datetime as dt
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -222,6 +223,148 @@ class OwnChild(ObserveCase):
         self.assertNotIn("decider", out)
 
 
+class TheMinute(ObserveCase):
+    """The review of #390 (lenses 1 and 2): the observe band never spends what the real path needs."""
+
+    def test_the_real_batch_keeps_its_budget_and_observe_programs_load_after_it(self):
+        main, other = InlineDecider(), InlineDecider()
+        log = []
+        decide, load = main.decide, other.load
+
+        def timed_decide(*args, **kwargs):
+            log.append(("real", kwargs.get("budget_seconds")))
+            return decide(*args, **kwargs)
+
+        def slow_load(*args, **kwargs):
+            log.append(("load", kwargs.get("budget_seconds")))
+            time.sleep(0.01)
+            return load(*args, **kwargs)
+
+        main.decide, other.load = timed_decide, slow_load
+        self.families = MemoryFamilies([family("vert", VERTICAL, band="probe")],
+                                       [observed(f"obs-{i:02d}", t=float(i)) for i in range(48)])
+        self.live = OptionsLive(self.root, market=self.market, real=self.venue, paper=self.paper, families=self.families,
+                                grant=self.grant, kill_switch=lambda: self.killed, decider=main, observe_decider=other,
+                                config={"require_paper_proof": False}, real_money=True,
+                                performance={"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"},
+                                clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
+                                notify=self.notices.append)
+        self.clock.set(at(MONDAY, 9, 31))
+        self.live.minute()
+        first = log.index(("real", log[0][1])) if log and log[0][0] == "real" else None
+        self.assertEqual(first, 0, "the real batch is asked before any observe program loads")
+        self.assertGreater(log[0][1], 30.0, "with the minute's budget intact")
+        loads = [e for e in log if e[0] == "load"]
+        self.assertEqual(len(loads), 16, "at most `observe_loads_minute` loads a minute")
+        self.assertEqual(len(self.venue.sent), 1, "the real open went")
+        for _ in range(3):
+            self.clock.set(self.clock() + 60)
+            self.live.minute()
+        self.assertEqual(sum(1 for i in self.live.instances.values() if i.observe and i.loaded and not i.error), 48)
+
+    def test_a_failed_load_gets_its_shadow_account_when_it_loads_again(self):
+        main, other = InlineDecider(), InlineDecider()
+        load, failures = other.load, [1]
+
+        def flaky(*args, **kwargs):
+            if failures:
+                failures.pop()
+                raise DeciderError("the observe child did not answer in time")
+            return load(*args, **kwargs)
+
+        other.load = flaky
+        self.families = MemoryFamilies([], [observed("obs")])
+        self.live = OptionsLive(self.root, market=self.market, real=self.venue, paper=self.paper, families=self.families,
+                                grant=self.grant, kill_switch=lambda: self.killed, decider=main, observe_decider=other,
+                                config={"require_paper_proof": False}, real_money=False,
+                                performance={"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"},
+                                clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
+                                notify=self.notices.append)
+        self.run_to(9, 31)
+        self.assertTrue(self.live.instances["obs@1:o"].error.startswith("the decider failed"))
+        self.assertNotIn("obs@1:o", self.live.shadow.accounts)
+        self.run_to(9, 36)
+        self.assertEqual(self.live.instances["obs@1:o"].error, "")
+        self.assertIn("obs@1:o", self.live.shadow.accounts, "made when it loads again")
+        self.assertTrue(self.live.shadow.accounts["obs@1:o"].positions or self.live.shadow.accounts["obs@1:o"].orders)
+
+    def test_observe_chains_are_read_after_the_real_path_under_the_minutes_data_budget(self):
+        qqq = VERTICAL.replace('"SPY"', '"QQQ"')
+        order = []
+        orders = self.venue.orders
+
+        def watched_orders(*args, **kwargs):
+            order.append(("orders", None))
+            return orders(*args, **kwargs)
+
+        self.venue.orders = watched_orders
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})], observed=[observed("obs", code=qqq)])
+        self.market.chain_reads = order
+        self.run_to(9, 33)
+        minute = order[-4:] if len(order) >= 4 else order
+        roots = [r for r, _ in order]
+        self.assertIn("QQQ", roots)
+        first_qqq = roots.index("QQQ")
+        self.assertLess(roots.index("SPY"), first_qqq)
+        self.assertLess(roots.index("orders"), first_qqq, "the account's orders were read before any observe chain")
+        self.assertEqual({pages for r, pages in order if r == "QQQ"}, {3}, "each observe root at most three pages")
+        self.assertEqual({pages for r, pages in order if r == "SPY"}, {None}, "the real path's reads are whole")
+        # With the minute's data budget spent, the observe band reads nothing; the real book is read whatever it holds.
+        live.settings["observe_read_calls"] = 0
+        del order[:]
+        self.run_to(9, 35)
+        self.assertNotIn("QQQ", [r for r, _ in order])
+        self.assertIn("SPY", [r for r, _ in order])
+        self.assertTrue(live.book.positions)
+        self.assertIsNotNone(live.day.snapshot("SPY", 5))
+        del minute
+
+    def test_observe_trades_are_kept_privately_for_the_post_mortem(self):
+        import sqlite3
+
+        live = self.make([], observed=[observed("obs", params={"hold": 3, "opens": 3})])
+        self.run_to(9, 50)
+        path = self.root / "observe.sqlite"
+        self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
+        db = sqlite3.connect(path)
+        rows = db.execute("SELECT instance, family, version, trade_id, pnl, max_loss FROM trades").fetchall()
+        db.close()
+        self.assertTrue(rows)
+        self.assertEqual({(r[0], r[1], r[2]) for r in rows}, {("obs@1:o", "obs", 1)})
+        self.assertEqual(len(rows), len(live.shadow.accounts["obs@1:o"].trades), "each trade once")
+        self.assertEqual(self.families.forward, {}, "never a forward row")
+        live = self.restart()
+        self.clock.set(self.clock() + 60)
+        live.minute()
+        db = sqlite3.connect(path)
+        self.assertEqual(db.execute("SELECT count(*) FROM trades").fetchone()[0], len(rows), "kept across a restart")
+        db.close()
+
+
+class Switches(ObserveCase):
+    def test_a_malformed_swarm_json_switches_observe_and_calibration_off_and_says_so_once(self):
+        (self.root / "swarm.json").write_text("{\"live\": {\"calibration\": true,")      # cut short
+        live = self.make([], observed=[observed("obs")])
+        self.run_to(9, 33)
+        self.assertEqual((live.switches()["observe"], live.switches()["calibration"]), (False, False))
+        self.assertFalse([k for k in live.instances if k.endswith(":o")])
+        told = [text for _, text in self.alerts if "swarm.json could not be read" in text]
+        self.assertEqual(len(told), 1, "once, not every minute")
+        for bad in ("[]", '{"live": "on"}', '"calibration"'):
+            (self.root / "swarm.json").write_text(bad)
+            live._switches = None
+            self.assertEqual((live.switches()["observe"], live.switches()["calibration"]), (False, False), bad)
+
+    def test_without_a_swarm_json_observe_is_on_and_calibration_off(self):
+        (self.root / "swarm.json").unlink()
+        live = self.make([])
+        self.assertEqual((live.switches()["observe"], live.switches()["observe_max"], live.switches()["calibration"]),
+                         (True, 48, False))
+        (self.root / "swarm.json").write_text('{"live": {"calibration": true}}')
+        live._switches = None
+        self.assertEqual((live.switches()["observe"], live.switches()["calibration"]), (True, True))
+
+
 @unittest.skipUnless(HAVE, "numpy not installed")
 class TheSwarmsStore(unittest.TestCase):
     """`bands.observe` and `SwarmFamilies` against the swarm's real store."""
@@ -280,6 +423,18 @@ class TheSwarmsStore(unittest.TestCase):
             self.assertFalse(allowed, "retired: no more opens")
         if families._store is not None:
             families._store.close()
+
+    def test_a_version_whose_own_review_failed_or_the_gate_refused_is_not_observed(self):
+        from league.swarm import bands
+        from league.swarm.gate import run_sha
+
+        for fid in ("reviewed-fail", "refused", "fine", "older-fail"):
+            self.add(fid)
+        sha = {fid: run_sha(self.store.version(fid, 1)) for fid in ("reviewed-fail", "refused", "fine", "older-fail")}
+        self.store.set_state("reviewed-fail", review={"sha": sha["reviewed-fail"], "verdict": "fail"})
+        self.store.set_state("refused", gate_outcome={"sha": sha["refused"], "result": "refused"})
+        self.store.set_state("older-fail", review={"sha": "another-version", "verdict": "fail"})
+        self.assertEqual(sorted(r["family"] for r in bands.observe(self.root)), ["fine", "older-fail"])
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")

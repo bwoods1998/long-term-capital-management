@@ -131,13 +131,14 @@ DEFAULTS: dict[str, Any] = {
         # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
         "openai_reserve_usd": 25.0,
     },
-    # The House's live path's switches (league/live/step.py `OptionsLive.switches`; the sprint, B4, Sept 26, 2026), read
-    # from <state>/swarm.json at runtime so they work in the no-deploy window. A switch is on only while it is JSON true.
-    # They switch work OFF or bound it; no money rule lives here (the money rules are the constitution's).
+    # The House's live path's switches (league/live/step.py `OptionsLive.switches`; the sprint, B4, Sept 26, 2026): these
+    # defaults, overlaid by <state>/swarm.json "live" read DIRECTLY by the live path each minute (never config.json), so
+    # they work in the no-deploy window. A switch is on only while it is JSON true; a swarm.json that is not a JSON object
+    # turns observe and calibration off. They switch work off or bound it; no money rule lives here (the constitution's).
     "live": {
         "observe": True,                # every alive Gym-band family with a validated version trades shadow (never real)
         "observe_max": 48,              # at most this many observe instances (the likeliest by validation t first)
-        "calibration": True,            # the D3 real-fill calibration round trips (real money on, grant, paper proof)
+        "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
     },
     "heartbeat_seconds": 20,

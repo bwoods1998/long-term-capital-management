@@ -288,11 +288,13 @@ class MarketData:
         return payload
 
     def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from: float | None = None,
-              strike_to: float | None = None) -> dict[str, dict[str, Any]]:
-        """Every contract of `underlying` in the window: {OCC: snapshot row}, all pages."""
+              strike_to: float | None = None, max_pages: int = MAX_PAGES) -> dict[str, dict[str, Any]]:
+        """Every contract of `underlying` in the window: {OCC: snapshot row}, all pages (VenueError past `max_pages`:
+        nothing of a partial chain is returned)."""
         out: dict[str, dict[str, Any]] = {}
         token = None
-        for _ in range(MAX_PAGES):
+        pages = max(1, min(MAX_PAGES, int(max_pages)))
+        for _ in range(pages):
             page = self._get(f"/v1beta1/options/snapshots/{urllib.parse.quote(underlying.upper(), safe='')}", {
                 "feed": self.option_feed, "limit": 1000, "expiration_date_gte": expiry_from, "expiration_date_lte": expiry_to,
                 "strike_price_gte": None if strike_from is None else f"{strike_from:.3f}",
@@ -303,7 +305,7 @@ class MarketData:
             token = page.get("next_page_token")
             if not token:
                 return out
-        raise VenueError(f"chain {underlying}: more than {MAX_PAGES} pages")
+        raise VenueError(f"chain {underlying}: more than {pages} pages")
 
     def contracts(self, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
         """Snapshots of named contracts (100 a request)."""

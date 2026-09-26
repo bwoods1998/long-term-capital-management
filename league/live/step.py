@@ -65,6 +65,7 @@ from .calibration import FAMILY as CALIBRATION_FAMILY, Calibration
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
 from .decider import DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
+from .observe import ObserveStore
 from .paper import PaperProof
 from .real import SINGLE_TYPES, RealBook, RLeg, RPosition, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
@@ -90,7 +91,15 @@ DEFAULTS = {
     "decide_timeout": 1.0,
     "max_errors": 25,
     "decider_memory_mb": 2048,
+    "observe_decider_memory_mb": 1024,  # the observe band's own child (the real one keeps `decider_memory_mb`)
     "instance_orders_day": 60,   # a real instance's orders a day, opens and closes (the Gym's `max_orders_day`)
+    # The observe band's chain reads come after the real path, and only while the minute's market-data calls are under
+    # this many, each root at most this many pages (a root over it is skipped this minute; nothing read is dropped).
+    "observe_read_calls": 40,
+    "observe_read_pages": 3,
+    # Observe programs loaded a minute, after the real batch, only while this much of the minute's budget remains.
+    "observe_loads_minute": 16,
+    "observe_load_floor_seconds": 10.0,
 }
 
 
@@ -106,6 +115,7 @@ class Instance:
     band: str = ""
     tuition: bool = False
     observe: bool = False        # the observe band's shadow instance (`<family>@<version>:o`): never real, never a forward row
+    loaded: bool = True          # an observe instance's program has been offered to its decider (`_observe_loads`)
     mode: str = "live"           # live | exit_only | wind_down
     needs: Any = None
     error: str = ""
@@ -152,13 +162,16 @@ class OptionsLive:
             if observe_decider is None:
                 # The observe band's own child (spawned at its first program): a slow or failing observe program can
                 # time out only its own batch and reset only its own child, never the real instances' programs.
+                # Its own address-space cap, half the real child's: the House box is small (4 GB, one vCPU).
                 observe_decider = Decider(timeout=float(self.settings["decide_timeout"]),
                                           max_errors=int(self.settings["max_errors"]),
-                                          memory_mb=int(self.settings["decider_memory_mb"]),
+                                          memory_mb=int(self.settings["observe_decider_memory_mb"]),
                                           log=self.root / "live-decider-observe.log")
         self.decider = decider
         self.observe_decider = observe_decider if observe_decider is not None else decider
         self._switches: dict[str, Any] | None = None
+        self._switches_told = False
+        self.observe_store = ObserveStore(self.root, alert=self.alert, clock=clock)
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
         self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=fill_model or F.FillModel.load())
         self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record) if real is not None else None
@@ -243,26 +256,41 @@ class OptionsLive:
                 pass
         if self.calibration is not None:
             self.calibration.recorder.close()
+        self.observe_store.close()
 
     def switches(self) -> dict[str, Any]:
-        """The live path's switches in `<state>/swarm.json` "live" (`league/swarm/settings.py` DEFAULTS < config.json
-        "swarm" < swarm.json), read once a minute pass so they work without a deploy. A switch is on only while it is JSON
-        true; a malformed count falls back to its default. Unreadable settings switch the optional work OFF (observe and
-        calibration), never anything a position needs."""
+        """The live path's switches: `<state>/swarm.json` "live" read DIRECTLY over the code's defaults
+        (`league/swarm/settings.py` DEFAULTS["live"]: observe on, calibration OFF), once a minute pass, so they work
+        without a deploy. A switch is on only while it is JSON true; a malformed count falls back to its default. A
+        swarm.json that exists but cannot be read, is not a JSON object, or whose "live" is not one switches the optional
+        work OFF (observe and calibration; alerted once), never anything a position needs: a bad file is never taken for
+        the defaults."""
         if self._switches is not None:
             return self._switches
+        import json
+
+        off = {"observe": False, "observe_max": 0, "calibration": False, "calibration_samples": 0}
         try:
             from ..swarm import settings as swarm_settings
 
-            raw = swarm_settings.load(self.root).get("live") or {}
+            defaults = dict(swarm_settings.DEFAULTS["live"])
+            path = self.root / "swarm.json"
+            try:
+                text = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                text = None
+            data = {} if text is None else json.loads(text)
+            raw = data.get("live", {}) if isinstance(data, dict) else None
             if not isinstance(raw, Mapping):
-                raise ValueError("live is not an object")
-            defaults = swarm_settings.DEFAULTS["live"]
+                raise ValueError("swarm.json or its \"live\" is not a JSON object")
         except Exception as exc:  # noqa: BLE001
-            self.alert("warning", f"live: the swarm.json switches could not be read ({type(exc).__name__}): observe and "
-                                  "calibration are off until they can")
-            self._switches = {"observe": False, "observe_max": 0, "calibration": False, "calibration_samples": 0}
+            if not self._switches_told:
+                self._switches_told = True
+                self.alert("warning", f"live: <state>/swarm.json could not be read ({type(exc).__name__}): observe and "
+                                      "calibration are OFF until it can")
+            self._switches = off
             return self._switches
+        self._switches_told = False
 
         def count(key: str, low: int, high: int) -> int:
             value = raw.get(key, defaults[key])
@@ -270,8 +298,9 @@ class OptionsLive:
                 return int(defaults[key])
             return int(value)
 
-        self._switches = {"observe": raw.get("observe") is True, "observe_max": count("observe_max", 0, 256),
-                          "calibration": raw.get("calibration") is True,
+        self._switches = {"observe": raw.get("observe", defaults["observe"]) is True,
+                          "observe_max": count("observe_max", 0, 256),
+                          "calibration": raw.get("calibration", defaults["calibration"]) is True,
                           "calibration_samples": count("calibration_samples", 0, 1000)}
         return self._switches
 
@@ -440,6 +469,11 @@ class OptionsLive:
             inst.run_sha = info.get("run_sha") or inst.run_sha
             inst.error = ""
             inst.error_since = None
+            if inst.kind == "shadow" and inst.key not in self.shadow.accounts:
+                # Whenever it loads: its first load, or a reload after one that failed.
+                self.shadow.accounts[inst.key] = ShadowAccount(
+                    instance=inst.key, family=inst.family, needs=inst.needs, params=inst.params,
+                    capital=float(self.settings["shadow_capital"]), fill_model=self.shadow.fill_model)
         except ProgramRefused as exc:
             inst.error = f"the program does not load: {str(exc)[:200]}"
             inst.fatal = True
@@ -530,22 +564,24 @@ class OptionsLive:
                                                                      "its decider could not recover")):
                     continue
             inst = self.instances.get(key)
-            if inst is not None and not inst.fatal and inst.error.startswith("the decider failed"):
-                if now - inst.retried_at >= 60:
-                    self._load(inst)
+            if (inst is not None and not inst.observe and not inst.fatal and inst.error.startswith("the decider failed")
+                    and now - inst.retried_at >= 60):
+                self._load(inst)                            # an observe instance reloads later (`_observe_loads`)
             if inst is None:
                 inst = Instance(key, str(row["family"]), int(row.get("version") or 0), kind, str(row.get("code") or ""),
                                 dict(row.get("params") or {}), str(row.get("run_sha") or ""), str(row.get("band") or ""), tuition,
                                 observe=key.endswith(":o") and row.get("observe") is True and kind == "shadow" and not tuition)
                 if key.endswith(":o") != inst.observe or (inst.observe and not inst.code):
                     continue  # an observe key is only ever an observe row's, with its program
+                if inst.observe:
+                    # Loaded after the minute's real decisions, under a budget floor (`_observe_loads`): 48 programs
+                    # loading here would spend the budget the real batch needs.
+                    inst.loaded = False
+                    self.instances[key] = inst
+                    continue
                 if not self._load(inst):
                     self.record("live.instance", {"instance": key, "family": inst.family, "error": inst.error}, agent=inst.family)
                     continue
-                if kind == "shadow" and key not in self.shadow.accounts:
-                    self.shadow.accounts[key] = ShadowAccount(instance=key, family=inst.family, needs=inst.needs,
-                                                              params=inst.params, capital=float(self.settings["shadow_capital"]),
-                                                              fill_model=self.shadow.fill_model)
                 if kind == "real":
                     self._persist_instance(inst)
                 self.record("live.instance", {"instance": key, "family": inst.family, "kind": kind, "band": inst.band,
@@ -794,18 +830,27 @@ class OptionsLive:
                 self.shadow.accounts.pop(key, None)
 
     # ------------------------------------------------------------------ chains
-    def _roots(self) -> dict[str, tuple[int, int, float]]:
-        """Each root to read now, with the read window: (dte low, dte high, band)."""
+    def _roots(self, phase: str = "real") -> dict[str, tuple[int, int, float]]:
+        """Each root to read now, with the read window: (dte low, dte high, band). `phase` "real": what the real book, the
+        real and Candidate instances, the paper proof and the calibration need (read first, before the real path);
+        "observe": what the observe band alone needs (read after it, `_observe_phase`)."""
+        observe = phase == "observe"
         out: dict[str, list[float]] = {}
         for inst in self.instances.values():
-            if inst.needs is None:
+            if inst.needs is None or inst.observe != observe:
                 continue
             for root in inst.needs.roots:
                 w = out.setdefault(root, [inst.needs.dte_min, inst.needs.dte_max, inst.needs.band])
                 w[0], w[1], w[2] = min(w[0], inst.needs.dte_min), max(w[1], inst.needs.dte_max), max(w[2], inst.needs.band)
-        for acc in self.shadow.accounts.values():
+        for key, acc in self.shadow.accounts.items():
+            if _is_observe(key) != observe:
+                continue
             for pos in acc.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
+        if observe:
+            margin_dte, margin_band = int(self.settings["read_dte_margin"]), float(self.settings["read_band_margin"])
+            return {r: (int(max(0, w[0])), int(min(60, w[1] + margin_dte)), float(min(0.30, w[2] + margin_band)))
+                    for r, w in out.items()}
         if self.book is not None:
             for pos in self.book.positions.values():
                 out.setdefault(pos.root, [0, 0, 0.02])
@@ -819,9 +864,27 @@ class OptionsLive:
         margin_dte, margin_band = int(self.settings["read_dte_margin"]), float(self.settings["read_band_margin"])
         return {r: (int(max(0, w[0])), int(min(60, w[1] + margin_dte)), float(min(0.30, w[2] + margin_band))) for r, w in out.items()}
 
-    def _read(self, day: LiveDay, mi: int, roots: Mapping[str, tuple[int, int, float]], out: dict) -> None:
+    def _read(self, day: LiveDay, mi: int, roots: Mapping[str, tuple[int, int, float]], out: dict, *,
+              phase: str = "real") -> None:
+        """This minute's chains for `roots`. The "real" phase first (every window the real book, the real and Candidate
+        instances need, their held contracts whatever the windows); the "observe" phase after the real path: only a window
+        the real phase did not cover, only while the minute's data calls are under `observe_read_calls`, each root at most
+        `observe_read_pages` pages. A read merges into the minute's row, so a skipped or failed observe read drops nothing
+        the real phase read."""
         open_epoch = epoch_of(day.day, day.open_min)
-        stocks = [r for r in roots if not uses_parity(r)] + (["SPY"] if any(uses_parity(r) for r in roots) and "SPY" not in roots else [])
+        observe = phase == "observe"
+        if observe:
+            done = getattr(self, "_read_windows", {}) if getattr(self, "_read_minute", None) == (day.day, mi) else {}
+            roots = {r: w for r, w in roots.items()
+                     if not (r in done and done[r][0] <= w[0] and done[r][1] >= w[1] and done[r][2] >= w[2])}
+            if not roots:
+                return
+        else:
+            self._read_minute, self._read_windows = (day.day, mi), dict(roots)
+        priced = {r for r in roots if observe and r in day.chains and 0 <= mi < day.chains[r].m
+                  and math.isfinite(float(day.chains[r].underlying.price[mi]))}
+        wanted = [r for r in roots if r not in priced]
+        stocks = [r for r in wanted if not uses_parity(r)] + (["SPY"] if any(uses_parity(r) for r in wanted) and "SPY" not in wanted else [])
         prices: dict[str, float] = {}
         if stocks:
             try:
@@ -829,12 +892,18 @@ class OptionsLive:
                 prices = {s: stock_price(rows.get(s) or {}, not_before=open_epoch) for s in stocks}
             except Exception as exc:  # noqa: BLE001
                 out.setdefault("data_errors", []).append(f"stocks: {type(exc).__name__}: {str(exc)[:120]}")
-        held = self._held_symbols()
-        changed = False
+        held = self._held_symbols(phase)
+        changed = recorded = False
         levels = dict(self.state.get("levels", {}) or {})
+        pages = {"max_pages": int(self.settings["observe_read_pages"])} if observe else {}
         for root, (lo, hi, band) in roots.items():
+            if observe and self.market.minute_calls.used() >= int(self.settings["observe_read_calls"]):
+                out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
+                continue  # the minute's data budget is spent: the observe band reads this root next minute
             chain = day.chain(root)
-            if not uses_parity(root):
+            if root in priced:
+                spot = float(chain.underlying.price[mi])
+            elif not uses_parity(root):
                 spot = prices.get(root, float("nan"))
             else:
                 known = chain.underlying.price[: mi + 1]
@@ -844,10 +913,10 @@ class OptionsLive:
                 if math.isfinite(spot) and spot > 0:
                     rows = self.market.chain(root, expiry_from=(day.day + dt.timedelta(days=lo)).isoformat(),
                                              expiry_to=(day.day + dt.timedelta(days=hi)).isoformat(),
-                                             strike_from=spot * (1 - band), strike_to=spot * (1 + band))
+                                             strike_from=spot * (1 - band), strike_to=spot * (1 + band), **pages)
                 else:
                     rows = self.market.chain(root, expiry_from=(day.day + dt.timedelta(days=lo)).isoformat(),
-                                             expiry_to=(day.day + dt.timedelta(days=min(hi, lo + 1))).isoformat())
+                                             expiry_to=(day.day + dt.timedelta(days=min(hi, lo + 1))).isoformat(), **pages)
                 extra = [s for s in held.get(root, ()) if s not in rows]
                 if extra:
                     rows.update(self.market.contracts(extra))
@@ -855,15 +924,19 @@ class OptionsLive:
                 out.setdefault("data_errors", []).append(f"{root}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
             changed |= chain.record(mi, rows, open_epoch=open_epoch)
-            level = chain.parity(mi, spot) if uses_parity(root) else spot
-            chain.set_price(mi, level)
-            if math.isfinite(level):
-                levels[root] = [level, self.clock()]
-            self._history(day, root, level, prices.get("SPY", float("nan")))
+            recorded = True
+            if root not in priced:
+                level = chain.parity(mi, spot) if uses_parity(root) else spot
+                chain.set_price(mi, level)
+                if math.isfinite(level):
+                    levels[root] = [level, self.clock()]
+                self._history(day, root, level, prices.get("SPY", float("nan")))
         if levels:
             self.state.put("levels", levels)
         if changed:
             day.remap(self.shadow.accounts.values())
+        elif observe and recorded:
+            day.invalidate()  # the minute's snapshots were built before these quotes merged in
         out["data_calls"] = self.market.minute_calls.used()
 
     def _index_guess(self, root: str, prices: Mapping[str, float]) -> float:
@@ -872,11 +945,15 @@ class OptionsLive:
             return float("nan")
         return spy * (10.0 if root in ("SPXW", "SPX") else 1.0)
 
-    def _held_symbols(self) -> dict[str, set[str]]:
+    def _held_symbols(self, phase: str = "real") -> dict[str, set[str]]:
         """Every contract a book holds or works, real AND shadow: read each minute whatever the programs' windows (in
-        the Gym NEEDS limits only what a program sees; fills, marks and closes use the whole chain)."""
+        the Gym NEEDS limits only what a program sees; fills, marks and closes use the whole chain). `phase` "real": the
+        real book's, the paper proof's and every shadow account's but the observe band's; "observe": the observe band's."""
         out: dict[str, set[str]] = {}
-        for acc in self.shadow.accounts.values():
+        observe = phase == "observe"
+        for key, acc in self.shadow.accounts.items():
+            if _is_observe(key) != observe:
+                continue
             for pos in acc.positions.values():
                 for leg, exp in zip(pos.legs, pos.expirations):
                     out.setdefault(pos.root, set()).add(occ_symbol(pos.root, from_ordinal(int(exp)).isoformat(), leg.is_call, leg.strike))
@@ -901,17 +978,16 @@ class OptionsLive:
         if self.real is not None:
             self._read_account(out)
         self.sync_families(now)
-        roots = self._roots()
-        self._read(day, mi, roots, out)
+        # The real path first: the chains the real book, the real and Candidate instances and the proofs need, the
+        # account's orders, cancels and forced closes, and every real decision. The observe band only after it.
+        self._read(day, mi, self._roots("real"), out)
         jobs: list[dict] = []
-        observe_jobs: list[dict] = []
-        shadow_due = self._shadow_jobs(day, mi - 1, jobs, observe_jobs)
+        shadow_due = self._shadow_jobs(day, mi - 1, jobs, phase="main")
         real_due: dict[str, Instance] = {}
         if self.book is not None:
             self._real_pre(day, mi, now, out)
         self._paper_proof(day, mi, out)
         if self.book is not None:
-            self._calibration_step(day, mi, out)
             for key, inst in self.instances.items():
                 if inst.kind != "real" or inst.error or inst.needs is None:
                     continue
@@ -924,21 +1000,21 @@ class OptionsLive:
                     real_due[key] = inst
         results = self._decide(day, jobs, out)
         for key, acc in shadow_due.items():
-            if self._observed(key):
-                continue  # decided below, in the observe band's own batch
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
         for key, inst in real_due.items():
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer),
                                          self._real_intents(inst, day, mi, answer.get("intents") or [], out)))
-        # The observe band decides last, in its own child, after every real order of the minute has gone.
-        self._observe_decide(day, mi - 1, observe_jobs, shadow_due, out)
+        if self.book is not None:
+            self._calibration_step(day, mi, out)    # after the agents' orders of the minute: it takes what they left
+        # The observe band last: its chains, its program loads and its decisions, in its own child.
+        observed = self._observe_phase(day, mi, out)
         self._export_shadow()
         self._export_real()
         self._retire_finished()
         self.shadow.save()
-        out["shadow"] = {"instances": len(self.shadow.accounts), "decided": len(shadow_due),
+        out["shadow"] = {"instances": len(self.shadow.accounts), "decided": len(shadow_due) + observed,
                          "open": sum(len(a.positions) for a in self.shadow.accounts.values()),
                          "observe": sum(1 for i in self.instances.values() if i.observe)}
         if self.book is not None:
@@ -947,9 +1023,41 @@ class OptionsLive:
                            "orders_today": self.book.count_today(day.day.isoformat())}
         out["blocked"] = self.real_block() or None
 
-    def _observed(self, key: str) -> bool:
-        inst = self.instances.get(key)
-        return bool(inst is not None and inst.observe)
+    def _observe_phase(self, day: LiveDay, mi: int, out: dict, *, load: bool = True) -> int:
+        """The observe band's part of the minute, after the real path: its own chain windows (under the minute's data
+        budget), its program loads (under a budget floor), then its accounts stepped and asked. Returns how many
+        decided."""
+        if not any(i.observe for i in self.instances.values()) and not any(_is_observe(k) for k in self.shadow.accounts):
+            return 0
+        self._read(day, mi, self._roots("observe"), out, phase="observe")
+        if load:
+            self._observe_loads(out)
+        jobs: list[dict] = []
+        due = self._shadow_jobs(day, mi - 1, jobs, phase="observe")
+        self._observe_decide(day, mi - 1, jobs, due, out)
+        return len(due)
+
+    def _observe_loads(self, out: dict) -> None:
+        """Observe programs offered to their child AFTER the minute's real decisions: at most `observe_loads_minute` a
+        minute, and only while `observe_load_floor_seconds` of the minute's budget remains (the rest wait a minute). A
+        failed load is offered again after a minute; the account is made when the program loads (`_load`)."""
+        now = self.clock()
+        due = [i for i in self.instances.values() if i.observe and i.mode == "live" and not i.fatal
+               and (not i.loaded or (i.error.startswith("the decider failed") and now - i.retried_at >= 60))]
+        done = 0
+        for inst in due:
+            if (done >= int(self.settings["observe_loads_minute"])
+                    or self._decision_budget() < float(self.settings["observe_load_floor_seconds"])):
+                out["observe_loads_waiting"] = len(due) - done
+                return
+            first = not inst.loaded
+            inst.loaded = True
+            done += 1
+            ok = self._load(inst)
+            if first:
+                self.record("live.instance", {"instance": inst.key, "family": inst.family, "kind": "shadow", "band": "gym",
+                                              "observe": True, "state": "started" if ok else "failed",
+                                              "error": inst.error or None}, agent=inst.family)
 
     def _observe_decide(self, day: LiveDay, smi: int, jobs: list[dict], due: Mapping[str, ShadowAccount], out: dict) -> None:
         """The observe band's decisions (the module docstring): its own child, the minute's remaining budget."""
@@ -965,16 +1073,18 @@ class OptionsLive:
             self._isolated(key, lambda key=key, acc=acc, answer=answer: (
                 self._stats(key, answer), self._shadow_intents(key, acc, day, smi, answer.get("intents") or [])))
 
-    def _shadow_jobs(self, day: LiveDay, smi: int, jobs: list[dict],
-                     observe_jobs: list[dict] | None = None) -> dict[str, ShadowAccount]:
+    def _shadow_jobs(self, day: LiveDay, smi: int, jobs: list[dict], *, phase: str = "main") -> dict[str, ShadowAccount]:
         """The shadow book steps ONE MINUTE BEHIND the wall clock: at wall minute m it steps minute m - 1, so the Gym's
         engine, which reads the minute after a decision to judge a passive fill (adverse selection), finds that row
-        recorded, exactly as it does in a replay of a stored day. Returns the accounts deciding at `smi`; an observe
-        instance's job goes to `observe_jobs` (its own child's batch), every other to `jobs`."""
+        recorded, exactly as it does in a replay of a stored day. Returns the accounts deciding at `smi`. `phase` "main":
+        every account but the observe band's (asked with the real programs); "observe": the observe band's only (stepped
+        after the real path, asked in its own child)."""
         due: dict[str, ShadowAccount] = {}
         if smi < 0:
             return due
         for key, acc in list(self.shadow.accounts.items()):
+            if _is_observe(key) != (phase == "observe"):
+                continue
             inst = self.instances.get(key)
             if acc.began_day != day.ordinal:
                 acc.begin_day(day)
@@ -1006,7 +1116,7 @@ class OptionsLive:
             job = acc.job(day, smi)
             if job is not None:
                 job["key"], job["mi"] = key, smi
-                (observe_jobs if inst.observe and observe_jobs is not None else jobs).append(job)
+                jobs.append(job)
                 due[key] = acc
         return due
 
@@ -1064,17 +1174,14 @@ class OptionsLive:
         """16:00 (13:00 on a half day): the close's row read, the shadow book's last minute stepped (and asked, as
         the engine asks a program at its last decision minute); no real decision."""
         day.advance(mi)
-        self._read(day, mi, self._roots(), out)
+        self._read(day, mi, self._roots("real"), out)
         jobs: list[dict] = []
-        observe_jobs: list[dict] = []
-        due = self._shadow_jobs(day, mi - 1, jobs, observe_jobs)
+        due = self._shadow_jobs(day, mi - 1, jobs, phase="main")
         results = self._decide(day, jobs, out)
         for key, acc in due.items():
-            if self._observed(key):
-                continue  # decided below, in the observe band's own batch
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
-        self._observe_decide(day, mi - 1, observe_jobs, due, out)
+        self._observe_phase(day, mi, out, load=False)
         self._export_shadow()
         self.shadow.save()
 
@@ -1421,7 +1528,8 @@ class OptionsLive:
                 if not working.forced:
                     # A program's own close (a mid or better limit, a day order) never stands in the House's way.
                     book.cancel(working, f"the House closes it: {force_why}")
-                elif mi - working.placed_minute >= 1:
+                elif mi - working.placed_minute >= 1 and not (expiring and minute + 1 >= rules.close_cutoff):
+                    # Re-priced each minute, but never the last one before the cutoff: none could replace it.
                     book.cancel(working, "re-priced at the natural")
                 continue
             # One position's failure never stops the other forced closes.
@@ -1857,7 +1965,11 @@ class OptionsLive:
         if not trades:
             return
         if _is_observe(acc.instance):
-            return  # the observe band is never a forward row (its trades stay in the shadow book's own record)
+            # Never a forward row: the private post-mortem store only (`league/live/observe.py`). Offered again next
+            # minute if it cannot be written.
+            if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), trades):
+                acc.exported -= len(trades)
+            return
         version = _version_of(acc.instance)
         rows = [{"id": f"{acc.instance}:{t['id']}", "day": t["day"], "pnl": t["pnl"], "max_loss": t["max_loss"], "version": version}
                 for t in trades]
@@ -2027,7 +2139,17 @@ class OptionsLive:
                              "expiry": from_ordinal(int(pos.expirations.min())).isoformat(), "quantity": pos.qty, "real": False,
                              "opened_at": None, "max_loss_usd": round(pos.max_loss_share * V.MULTIPLIER * pos.qty, 2),
                              "pnl_usd": round((mark - pos.entry) * V.MULTIPLIER * pos.qty, 2) if math.isfinite(mark) else None})
-        return {"structures": rows}
+        out: dict[str, Any] = {"structures": rows}
+        if self.book is not None:
+            # The calibration round trips are never Profit (`league/trading_profit.py`): their realized net is a cost,
+            # the schema's `compute.other_usd` (the House adds it to the other steps' part by part).
+            from ..trading_profit import calibration_cost
+
+            cost = calibration_cost(self.state.rows("SELECT family, status, cash FROM positions WHERE family=?",
+                                                    (CALIBRATION_FAMILY,)))
+            if cost is not None:
+                out["compute"] = {"other_usd": cost}
+        return out
 
     def health(self) -> dict:
         with self._lock:

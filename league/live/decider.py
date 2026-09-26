@@ -51,6 +51,11 @@ class DeciderError(RuntimeError):
     """The child failed or did not answer in time (it has been killed and restarted)."""
 
 
+class BudgetSpent(DeciderError):
+    """The minute's budget was spent before a request went: nothing was written, the child is idle and keeps its
+    programs (it is not killed); the House skips this batch."""
+
+
 class ProgramRefused(ValueError):
     """The program did not load (its safety check, NEEDS or PARAMS)."""
 
@@ -365,7 +370,7 @@ class Decider(_Base):
     def _raw(self, message: Any, deadline: float) -> dict:
         end = time.monotonic() + deadline
         if deadline <= 0:
-            raise DeciderError("the decider's minute budget is exhausted")
+            raise BudgetSpent("the decider's minute budget is exhausted")
         if self.proc is None or self.proc.poll() is not None:
             self._spawn(budget_seconds=deadline)
         assert self.proc is not None and self.proc.stdin is not None and self.proc.stdout is not None
@@ -432,6 +437,8 @@ class Decider(_Base):
             elif message[0] == "drop":
                 self._ready.discard(message[1])
             return answer
+        except BudgetSpent:
+            raise  # nothing was sent: the child stays, with every program's memory
         except (DeciderError, ValueError, struct.error) as exc:
             self._kill()
             self.restarts += 1

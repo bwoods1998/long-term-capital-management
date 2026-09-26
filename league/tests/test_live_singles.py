@@ -216,6 +216,22 @@ class ExpiryDay(LiveCase):
         self.run_to(15, 19)
         self.assertEqual(live.book.positions, {})
 
+    def test_the_last_forced_close_before_the_cutoff_is_left_working(self):
+        # The review of #390 (lens 2): re-priced each minute, but the last one before the cutoff is never cancelled, for
+        # nothing could replace it after it.
+        self.clock.set(at(MONDAY, 14, 40))
+        self.expiring(601, (1.40, 1.50, 20, 20), right="P")
+        live = self.make([family("put", LONG, band="probe", structure="long_put",
+                                 params={"hold": 600, "opens": 1, "dte": 0, "right": "P", "strike": 601.0, "after": 0,
+                                         "limit": "natural"})])
+        self.run_to(14, 41)
+        self.venue.fill = "none"
+        self.run_to(15, 30)
+        [working] = [o for o in live.book.orders.values() if o.action == "close"]
+        self.assertTrue(working.forced)
+        self.assertEqual(working.placed_minute, 15 * 60 + 23 - 570, "sent at 15:23 and never cancelled at 15:24")
+        self.assertEqual(working.status, "working")
+
     def test_an_expiring_long_call_with_no_bid_far_out_of_the_money_is_left_to_expire(self):
         self.clock.set(at(MONDAY, 14, 40))
         self.expiring(615, (0.0, 0.01, 0, 50))                           # nothing would buy it; it cannot exercise
