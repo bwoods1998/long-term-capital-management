@@ -374,7 +374,7 @@ class StructurePositionTest(HouseCase):
                          clock=self.clock).checkpoint(self.house)
         position = next(p for d in body["desks"] if d["id"] == agent.id for p in d["positions"] if p["instrument"]["asset_class"] == "option")
         self.assertEqual(position["instrument"]["market_id"], "iron_condor|-1C22.5|+1C23|+1P21.5|-1P22")
-        self.assertEqual(position["instrument"]["symbol"], "CCL 10-02 22.5C")
+        self.assertEqual(position["instrument"]["symbol"], "CCL 10-02 iron condor -22.5C +23C +21.5P -22P")  # named as a structure (Deploy G)
         for desk in body["desks"]:
             for p in desk["positions"]:
                 for field, value in p["instrument"].items():
@@ -1372,3 +1372,24 @@ class SiteAcceptsTheBoardTest(FlywheelCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StructureLabels(unittest.TestCase):
+    """Sept 25, 2026: the site named krasker-22's CCL iron condor "CCL 10-02 22.5C", a single call. A structure held as
+    one instrument is named as one, inside the site's 80 characters."""
+
+    def test_a_structure_is_named_by_its_type_and_legs_and_a_contract_as_before(self):
+        from league.publish import MAX_INSTRUMENT_TEXT, option_label
+
+        condor = {"symbol": "CCL", "expiry": "2026-10-02", "strike": "22.5", "right": "call",
+                  "market_id": "iron_condor|-1CCL261002C00022500|+1CCL261002C00023000|+1CCL261002P00021500|-1CCL261002P00022000"}
+        self.assertEqual(option_label(condor), "CCL 10-02 iron condor -22.5C +23C +21.5P -22P")
+        calendar = {"symbol": "SPY", "expiry": "2026-09-28", "strike": "585", "right": "call",
+                    "market_id": "calendar|-1SPY260928C00585000|+1SPY261005C00585000"}
+        self.assertEqual(option_label(calendar), "SPY 09-28 calendar -585C +585C@10-05")
+        fly = {"symbol": "SPY", "expiry": "2026-09-28", "strike": "580", "right": "call",
+               "market_id": "long_butterfly|+1SPY260928C00580000|-2SPY260928C00581000|+1SPY260928C00582000"}
+        self.assertEqual(option_label(fly), "SPY 09-28 long butterfly +580C -2x581C +582C")
+        self.assertEqual(option_label({"symbol": "F", "expiry": "2026-10-09", "strike": "13", "right": "call"}), "F 10-09 13C")
+        for inst in (condor, calendar, fly):
+            self.assertLessEqual(len(option_label(inst)), MAX_INSTRUMENT_TEXT)

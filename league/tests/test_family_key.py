@@ -77,7 +77,9 @@ class Keys(unittest.TestCase):
         import copy
 
         self.assertEqual(CONSTITUTION["allocator"]["family_key"], "mechanism")
-        self.assertEqual(list(CONSTITUTION["allocator"])[-1], "family_key", "appended at the end of the allocator's rules")
+        # Appended after the rules before it (Deploy B); the options-desk run's O1-O4 rows follow it (Deploy G, Sept 25, 2026).
+        keys = list(CONSTITUTION["allocator"])
+        self.assertEqual(keys[keys.index("family_probe") + 1], "family_key", "appended after the allocator's rules before it")
         self.assertEqual(families.family_key_rule(), "mechanism")
         without = copy.deepcopy(CONSTITUTION)
         del without["allocator"]["family_key"]

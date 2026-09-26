@@ -44,7 +44,10 @@ to paste a secret into a chat or a file.
   swing's look at 10 real settlements on 5 distinct settlement dates with the audit prepared ahead,
   probes that may take with the taker proof from 5, a proven family's members seated on its proof,
   $50 stock and ETF stakes, re-admission by an 80% bound) moves it to `acff5c64…` (constitution
-  `32db7547…`) as built on c/money; recompute on the tree you deploy, and ratify at its promotion.
+  `32db7547…`) as built on c/money; recompute on the tree you deploy, and ratify at its promotion. The options-desk
+  run's Deploy G (its digest change 1 of 2: the real-structure rows O1-O5, O1 `option_spreads_real` false) moves it to
+  `be1e3ce9…` (constitution `63b65b34…`) as built on g/money over b/integration; flipping O1 (change 2 of 2) sets the
+  gateway's `OPTION_STRUCTURES_REAL` to `option_spread_real_types` in the same deploy (`league.ci` `check_structures`).
 - **After a money-rule change**, from a clean worktree at `origin/main`:
 
   ```sh

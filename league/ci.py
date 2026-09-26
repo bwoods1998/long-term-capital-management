@@ -13,7 +13,8 @@ asks a model anything.
    listed in the registry, and run through the replay simulator on a canned tape without one
    error. `game.json` must stay inside its bounds. `config.json` may change only its operating
    dials, never where money or secrets are concerned. Tools must pass the same safety check as
-   strategies, because they run in the same boxes.
+   strategies, because they run in the same boxes. The real-structure money rows (O1-O5) stay
+   inside their bounds, and the gateway admits exactly the structure types they open (`check_structures`).
 3. **The whole test suite**, and with it the replay regression: every founding seed replayed over
    the canned tapes must produce exactly the recorded result, so a change that shifts the
    simulator's arithmetic cannot slip through as a refactor.
@@ -27,6 +28,7 @@ import argparse
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -324,6 +326,65 @@ def check_config(base: str | None, root: Path = REPO, *, baseline: Path | None =
     return problems
 
 
+#: The gateway's line that names the structure types the REAL Alpaca account admits (`gateway/lib/caps.mjs`
+#: `admittedStructures`), in `gateway/wrangler.jsonc` (JSON with comments: the line itself is read, as the gateway's own test does).
+GATEWAY_STRUCTURES_LINE = re.compile(r'^\s*"OPTION_STRUCTURES_REAL"\s*:\s*"([^"\\]*)"\s*,?\s*(//.*)?$')
+
+
+def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
+    """(the structure types the deployed gateway admits on the real account, why it could not be read): read from
+    `gateway/wrangler.jsonc` as `admittedStructures` reads the variable -- "off" or empty admits none. A name that is not a
+    structure type is a problem here (the gateway would admit none, silently: a typo is never a way to switch it)."""
+    from .structure_core import TYPES
+
+    try:
+        text = (root / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [], [f"gateway/wrangler.jsonc: {exc}"]
+    lines = [m.group(1) for m in (GATEWAY_STRUCTURES_LINE.match(line) for line in text.splitlines()) if m]
+    if len([line for line in text.splitlines() if '"OPTION_STRUCTURES_REAL"' in line]) != 1 or len(lines) != 1:
+        return [], ["gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL must be set once, on its own line, to a quoted list"]
+    raw = lines[0].strip()
+    if not raw or raw.lower() == "off":
+        return [], []
+    names = [n for n in re.split(r"[\s,]+", raw) if n]
+    unknown = [n for n in names if n not in TYPES]
+    if unknown:
+        return [], [f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL names {', '.join(unknown)}, not a structure type"]
+    return sorted(set(names)), []
+
+
+def check_structures(root: Path = REPO) -> list[str]:
+    """The options-desk run's money rows (O1-O5, G of Sept 25, 2026) inside their bounds (`allocator.spread_problems`),
+    and ONE source of truth for the structure types real money may open: the gateway's `OPTION_STRUCTURES_REAL` admits
+    exactly `allocator.spread_types_real()` of the tree's own constitution -- `option_spread_real_types` while
+    `option_spreads_real` (O1) is on, none while it is off (the plan's G1: the gateway variable is set in the same deploy
+    that flips O1, never before). The constitution is read from `root` without importing the tree's package."""
+    from . import allocator
+
+    path = root / "league" / "constitution.py"
+    try:
+        # Compiled from its text, never through the import system: a cached bytecode file keyed by the source's mtime and
+        # size could stand in for a file rewritten within the same second (the constitution imports only the standard library).
+        namespace: dict[str, Any] = {"__name__": "_ci_constitution", "__file__": str(path)}
+        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102 - the tree's own constitution
+        constitution = namespace["CONSTITUTION"]
+    except Exception as exc:  # noqa: BLE001 - a constitution that cannot be read is a refusal
+        return [f"league/constitution.py could not be read: {type(exc).__name__}: {exc}"]
+    problems = [f"league/constitution.py: {p}" for p in allocator.spread_problems(constitution)]
+    gateway, unreadable = gateway_structures(root)
+    problems += unreadable
+    if not problems:
+        wanted = sorted(allocator.spread_types_real(constitution))
+        if gateway != wanted:
+            problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
+                            f"but the constitution opens {wanted or 'none'} (allocator.option_spreads_real "
+                            f"{bool(constitution.get('allocator', {}).get('option_spreads_real'))}, "
+                            f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}): "
+                            "the two change together, in one deploy")
+    return problems
+
+
 def run_tests(root: Path = REPO) -> list[str]:
     done = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "league/tests", "-t", "."], cwd=root, capture_output=True, text=True)
     if done.returncode != 0:
@@ -360,6 +421,7 @@ def check(base: str | None, branch: str | None, *, root: Path = REPO, tests: boo
     problems.extend(check_strategies(root))
     problems.extend(check_tools(root))
     problems.extend(check_game(root))
+    problems.extend(check_structures(root))
     problems.extend(check_config(base if role == "operator" or "league/config.json" in paths and (branch or "").startswith(tuple(f"{p}/" for p in PREFIXES)) else None, root))
     if tests and not problems:
         problems.extend(run_tests(root))
