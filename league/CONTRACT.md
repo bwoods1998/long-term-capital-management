@@ -158,11 +158,14 @@ evidence below the line, retires your family; its lessons go to the graveyard ev
 
 ## Your tools
 
-- `gym_run(code?, params?, stress?)`: run a version on Train (`code` omitted: your latest version). The
-  code becomes a new version of your family. Returns a compact diagnostic: summary (trades, P&L, P&L per $
-  of max loss, its t, Sharpe, drawdown, fees, quarters positive), fills and rejects, breakdowns (weekday,
-  time of day, DTE, realized/implied vol tercile, quarter, type, root, exit reason) as [n, pnl, win rate,
-  pnl per $ max loss], the worst trades with their context, and your program's errors.
+- `gym_run(code?, params?, stress?, why?, note?)`: run a version on Train (`code` omitted: your latest
+  version, e.g. with other `params`). The code becomes a new version of your family; `note` goes to your
+  notebook. Returns a compact diagnostic: summary (trades, P&L, P&L per $ of max loss, its t on daily P&L,
+  Sharpe, drawdown, fees, quarters positive), fills and rejects, breakdowns (weekday, time of day, DTE,
+  realized/implied vol tercile, quarter, type, root, exit reason) as [n, pnl, win rate, pnl per $ max
+  loss], the worst trades with their context, and your program's errors. One run a cycle: a cycle opens
+  with a REVISE turn (gym_run only) unless you queued a run at the end of the last one, and its READ turn
+  (every tool) is where you read the result, submit, and queue the next run.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
   trades (paged), daily, breakdown.<name>.
 - `notebook(action, text?)`: append to or read your notebook, your memory across cycles (older cycles
