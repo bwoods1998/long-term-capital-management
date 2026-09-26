@@ -1,6 +1,6 @@
 # Handoff: the options-swarm run
 
-## Current continuation, September 26 18:55Z
+## Current continuation, September 26 19:32Z
 
 Read this update before the historical Claude handoff below. The run record remains the source
 of truth and now includes the **T0 + 12 h scoreboard**. T0 is still **2026-09-26T06:23:14Z**;
@@ -12,7 +12,7 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 
 ### Deployed and verified
 
-- Main is `60b34dd97639cf1c3ec94c41dc7665e90d068965`. House release
+- Deployed code is based on `60b34dd97639cf1c3ec94c41dc7665e90d068965`. House release
   `20260926T181814Z-b4bc25619f84` passed its complete watch at **18:28:53Z**. House, swarm
   (PID 9188) and nightly (PID 9184, start ticks 57687395) match the release. Verify identities
   afresh before acting; do not signal a process from these historical numbers alone.
@@ -53,6 +53,16 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 
 ### What remains, in order
 
+0. **Additional engineering gaps found by completion audit.** Main now includes reviewed,
+   green-CI architect universe fix #378 (`9b4a0f8d`); it is not deployed yet. Shadow order
+   restart fix #379 (`e30e01a6`) passed 61 local and actual-House tests, with full CI pending.
+   W5 (`ltcm-w5-evidence`) is implementing private bounded execution receipts and a read-only
+   post-close report. W4 (`ltcm-lifecycle`) is implementing post-burst prorated Sail budgets,
+   reserved maintenance and a smaller research cohort. Root (`ltcm-frontier-routing`) owns
+   OpenAI role/Flex routing. Independently review every change, require green CI and exact
+   committed-archive House tests before deployment. All are unfinished until verified.
+   Paper/shadow evidence never substitutes for actual real fills in calibration. Do not enable
+   real money or raise funding caps as part of this engineering work.
 1. **Final data completion/adoption.** Core, holdout, 2022 and trade-quote calibration stages are
    complete. Names were 9,369/23,740 at 18:54Z, with 150 vendor-empty tasks and no failures;
    back months were 0/2,374. The completion supervisor is healthy in the ThetaData phase.

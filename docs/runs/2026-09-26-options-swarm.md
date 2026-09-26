@@ -626,6 +626,34 @@ clock never restarts.
   trial, billing-window and subscription reconciliation; real-options P&L remains $0. Private
   receipts are `.ltcm-main/sail-box-cost-window.json` and `cost-evidence-20260926.json`.
 
+- 19:30Z A further completion audit found unfinished engineering requirements. W5 is adding
+  bounded private execution receipts and a read-only post-close report: current paper/real order
+  records lack selected-leg quote/timing/model provenance, and completed shadow detail is lost
+  after export/restart. Paper and shadow observations remain separate from real calibration;
+  no real fill exists to fit. W4 is implementing the post-burst Sail lifecycle, because current
+  defaults do not enforce the Monday prorated period, shared maintenance reservations or a
+  reduced research cohort. Root is wiring nonurgent OpenAI Flex and the existing postmortem
+  output role. These changes are being built and reviewed, **not deployed or complete**.
+- 19:30Z [#378](https://github.com/bwoods1998/long-term-capital-management/pull/378) merged
+  as `9b4a0f8d`. The architect's fixed five-root system prompt and truncated gap list had hidden
+  expanded-universe choices. The prompt now names every configured root and its uncovered
+  structures. Root independently checked 100 synthetic population/universe cases; 115 affected
+  tests passed locally and on the actual House's isolated committed archive. Python 3.11/3.14
+  and gateway CI passed on `7026ed9a`. Production still runs the earlier `60b34dd9` release;
+  merge is not deployment.
+- 19:32Z W1 found and fixed a shadow restart defect: missing `seen/aggressive` state could change
+  a synthetic resting fill from $1.90 to $1.80. [#379](https://github.com/bwoods1998/long-term-capital-management/pull/379)
+  at `e30e01a6` preserves the classification. Old/malformed records retain their prior fallback
+  and explicit unknown provenance; history is not reconstructed. Root reviewed the narrow fix;
+  61 restart/live parity/live step tests pass locally and on the actual House. Full CI and
+  deployment are pending. W5 incorporated the same fix into its separate recorder branch.
+- 19:32Z The live completion watch still follows the same backfill process. At 19:23:51Z names
+  reached 10,020/23,740, with 150 vendor-empty tasks and no failures; back months remain 0/2,374.
+  The estimated remaining duration was about twelve hours. Actual Sail metadata confirms House
+  capacity 1 vCPU/16 GiB/32 GiB and data capacity 8 vCPU/32 GiB/256 GiB. The billing API rates
+  imply full-capacity active bounds $0.1653372/hour and $0.5547744/hour respectively; these are
+  conservative capacity bounds, not measured ongoing burn or a measured nightly runtime.
+
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
 The provisional calibrated pair is not the final pair. Do not select it or spend a holdout look
