@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from league import service
 from league.live_trading import LiveGrant
 
@@ -46,6 +46,33 @@ class Build(BuildCase):
                 self.assertEqual(live.market.client.venue,'alpaca')
                 self.assertEqual(live.paper.client.venue,'alpaca-paper')
                 self.assertEqual(live.real is not None,real)
+
+    def test_entitled_market_reads_do_not_construct_or_call_a_real_execution_account(self):
+        from league.live.venue import Account
+        def make_client(*args, **kwargs):
+            client = Mock(venue=kwargs['venue'])
+            client.request.return_value = (200, {})
+            return client
+        with patch('league.adapters.VenueClient', side_effect=make_client), \
+             patch('league.live.venue.Account', wraps=Account) as accounts:
+            house = self.build()
+        live = house.options_live
+        self.assertIsNone(live.real)
+        self.assertIsNone(live.book)
+        self.assertEqual([kw['venue'] for _, kw in accounts.call_args_list], ['alpaca-paper'])
+        self.assertEqual(live.market.stocks(['SPY']), {})
+        live.market.client.request.assert_called_once_with(
+            'GET', 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=SPY&feed=sip', what='stock snapshots')
+        live.paper.client.request.assert_not_called()
+        self.assertEqual(live.real_block(), 'real money is off (config.json real_money)')
+
+    def test_data_supervision_remains_attached_when_research_is_disabled(self):
+        root = Path(self.dir.name) / 'state'
+        root.mkdir()
+        (root / 'data-nightly.json').write_text('{"enabled": true}')
+        house = self.build(config=NO_LIVE)
+        self.assertIsNotNone(house.swarm)
+        self.assertEqual(house.swarm.nightly.root, root)
     def test_canary_has_no_secrets_or_paid_or_venue_work(self):
         with patch.object(service,'secret',side_effect=AssertionError('no secret')):
             house=self.build(canary=True,real_money=True)

@@ -5,11 +5,8 @@
 import { parsePico, mulPico, picoToMicro, parseUsdMicro, parseCount, PICO } from './money.mjs';
 
 export const REFERENCE_HEADER = 'X-LTCM-Reference-Price';
-// What the order is for. `exit` marks an order that closes or trims a position the floor holds;
-// the dollar caps do not apply to it (Sept 18, 2026: two perp shorts sat past their stops for
-// twenty minutes because the contract had grown past the per-order cap, and the day's cap was
-// spent by the entries). The header is the floor's own claim, so a compromised VM could label an
-// entry an exit: the order count cap still counts every order, and the owner accepts the risk.
+// An exit intent is checked against broker inventory by the route before forwarding.
+// Entry dollar caps do not consume closing capacity; order and request limits still apply.
 export const PURPOSE_HEADER = 'X-LTCM-Purpose';
 
 /** The paths that create an order, by venue. Everything else passes the caps untouched. */
@@ -22,9 +19,6 @@ export const normalizePath = path => String(path || '').replace(/^\/+/, '').repl
 // The only venue paths this gateway will sign. Everything the floor does is here; anything
 // else, a batched order, a withdrawal, a key management call, is refused before signing, so
 // a bug or a compromise on the box can at most do what the floor already does, inside the caps.
-// The one funds move allowed is Kalshi's intra-account shard transfer: money between exchange
-// Each venue route uses its own account; order risk is checked independently below.
-// which cannot leave the account.
 const SEGMENT = '[A-Za-z0-9._~%-]+';
 export const VENUE_PATHS = {
   // Alpaca (Sept 19, 2026). Trading and market data share the credential and the allow-list;
@@ -654,10 +648,8 @@ export function realStockClose(body) {
 }
 
 // --- the practice account ------------------------------------------------------------------------
-// `alpaca-paper` is never metered (no money is behind it), but since Sept 25, 2026 its OPTION orders
-// are held to the same defined-risk shapes: until then an order to the practice account was signed
-// and forwarded with no check at all, so it would have taken a naked short or a ratio spread. What is
-// Non-option orders are rejected by the route before this shape validator runs.
+// Paper orders prove defined-risk option routing. They are unmetered because no real money
+// is behind them; non-option orders are rejected by the route before this shape validator.
 
 //: The fields the practice check decides on. A venue that matches keys case-insensitively would
 //: read `Legs` or `SYMBOL` as one of these, so any other spelling of them is refused.

@@ -24,9 +24,7 @@ version `2026-09-07`, names the create-time network field `egress_policy`; the o
 repository's cached docs describe called it `network_policy`. `create` speaks the current one and
 falls back to the older name when the API rejects it, so the client survives either.
 
-Moved from `ltcm/sailbox.py` in the options overhaul (Sept 26, 2026, trap 4): the operator's tools
-(`scripts/floor_box.py`) must not import the legacy `ltcm` package. `ltcm/sailbox.py` is a thin
-alias of this module until the full prune deletes it.
+Operator and data tools share this module. The former ltcm package has been removed.
 """
 
 from __future__ import annotations
@@ -52,13 +50,8 @@ APPS_BASE = f"https://{APPS_HOST}/v1"
 #: Where the floor's code, logs and data live on the box.
 REMOTE_ROOT = "/workspace"
 
-#: Every host the floor is allowed to open a connection to, and nothing else.
-#:
-#: `api.sailresearch.com` is the model provider; `api.elections.kalshi.com` and `api.coinbase.com`
-#: are the live venues; `blakewoods.us` is the public site the publisher pushes to; the three
-#: `sec.gov` hosts are EDGAR; the two Yahoo hosts and `news.google.com` are research sources;
-#: `docs.sailresearch.com` serves the rate card the provider diffs its frozen prices against; and
-#: `pypi.org` with `files.pythonhosted.org` are needed once, to install `cryptography`.
+#: House egress: Sail models/hosting, the credential gateway, public site, reviewed code
+#: downloads and pinned dependency installation. Sealed program/data images use their own policies.
 FLOOR_HOSTS = ('api.sailresearch.com',
  'sailbox-api.sailresearch.com',
  'docs.sailresearch.com',

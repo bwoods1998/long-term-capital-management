@@ -32,11 +32,11 @@ def build(root):
     if (root/'ledger.sqlite').exists():
         with closing(ro(root/'ledger.sqlite')) as db:
             # Only a readable complete current ledger with no real fill can establish a never-traded book.
-            rows = db.execute("SELECT kind,payload FROM ledger WHERE kind IN ('live.fill','book.fill','ops.budget')")
+            rows = db.execute("SELECT kind,payload FROM ledger WHERE kind IN ('live.fill','book.fill','book.settle','ops.budget')")
             sail = 0.0; seen_meter = False; fills = False
             for kind, raw in rows:
                 payload = json.loads(raw)
-                if kind == 'live.fill' or (kind == 'book.fill' and payload.get('real_money') is True): fills = True
+                if kind == 'live.fill' or (kind in ('book.fill','book.settle') and payload.get('real_money') is True): fills = True
                 if kind == 'ops.budget' and payload.get('what') == 'sail':
                     sail += float(payload['spent_usd']); seen_meter = True
             never_traded = not fills

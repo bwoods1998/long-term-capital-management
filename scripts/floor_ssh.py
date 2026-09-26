@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  sail box ssh alias {box} && ssh ltcm-floor.sail")
     print()
     print("on the box, find and remove what filled the disk, then start the loop again from here:")
-    print("  df -h /; du -xsh /workspace/.data/ltcm/* /state/* /tmp /var/* 2>/dev/null | sort -h | tail -15")
+    print("  df -h /; du -xsh /workspace/state/* /workspace/archive/* /tmp /var/* 2>/dev/null | sort -h | tail -15")
     print("  python3 scripts/floor_box.py start")
     return 0
 

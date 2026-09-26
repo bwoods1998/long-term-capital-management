@@ -167,9 +167,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     if live_enabled(config):
         house.options_live = options_live(house, root, config, real_money=real_money,
                                          token=token, swarm_on=swarm_on)
-    if swarm_on:
-        from .swarm.hook import attach
-        attach(house, root, config)
+    # The hook also owns the data daemon when research is disabled. It applies both switches.
+    from .swarm.hook import attach
+    attach(house, root, config)
     if REPO.parent.name == "releases" and not local_sandbox:
         from .backup import Backup
         from .sailbox import SailboxClient

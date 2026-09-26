@@ -55,15 +55,11 @@ class Signer(Protocol):
         """Return the raw signature bytes, already in the form the venue expects."""
 
 
-
-
-
-
 class GatewaySigner:
     """Gateway mode: this process holds no venue key at all, only a bearer token.
 
-    The order gateway (a separate Cloudflare Worker) holds the Kalshi and Coinbase private keys,
-    signs every request itself, and enforces the hard caps and the kill switch before it forwards
+    The order gateway (a separate Cloudflare Worker) holds the Alpaca credentials,
+    authenticates every request itself, and enforces the hard caps and the kill switch before it forwards
     anything. So an adapter running in gateway mode still builds the same request, but the
     signature it would have produced is empty and `VenueClient` replaces the venue's auth headers
     with `Authorization: Bearer <token>` on the way out.

@@ -2,7 +2,7 @@
 
 Built Sept 26, 2026 (the options-swarm run, Wave 4). The plan is `archive/docs/goals/LTCM_OPTIONS_SWARM.md`
 ("The agent", "The loops", "Evidence", "Compute"); the program contract the researchers write to is
-`league/CONTRACT.md` (taken from the Gym's `league/CONTRACT.md`).
+`league/CONTRACT.md`.
 
 THE PROCESS. The swarm runs as its own process on the House box (`python -m league.swarm run --root
 /workspace/state`), niced, beside the House loop. The House's `swarm` step (`hook.SwarmStep`, one line
