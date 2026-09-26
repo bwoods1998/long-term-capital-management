@@ -228,11 +228,11 @@ class Tournament:
         fams = self.store.families(alive=True)
         validation = self.validate(fams)
         fams = self.store.families(alive=True)
-        shares = self.allocate(fams)
-        retired = self.retirements(fams)
+        self.allocate(fams)  # the shares retirements rank by (the least favoured go first)
+        retired = self.retirements(self.store.families(alive=True))
+        born = self.forks(self.store.families(alive=True))
         fams = self.store.families(alive=True)
-        born = self.forks(fams)
-        fams = self.store.families(alive=True)
+        self.allocate(fams)  # again, so a newborn fork has its share at once
         board = []
         for fam in sorted(fams, key=lambda f: -(f.get("weight") or 0.0)):
             state = fam.get("state") or {}

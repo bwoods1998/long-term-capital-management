@@ -584,10 +584,11 @@ def program_for(spec: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     lo, hi = spec["dte"]
     params.update({"dte_min": int(lo), "dte_max": int(hi)})
     params.update(spec.get("params") or {})
-    needs = dict(spec["needs"])
+    needs = dict(spec.get("needs") or {"roots": list(spec["roots"]), "dte": [int(lo), int(hi)], "band": 0.04, "cadence": 5,
+                                         "history": 25})
     needs.setdefault("start", 571)
     needs.setdefault("end", 958)
-    code = SKELETON.format(fid=spec["id"], mechanism=" ".join(str(spec["mechanism"]).split()), structure=structure,
+    code = SKELETON.format(fid=spec.get("id") or spec.get("founder") or "family", mechanism=" ".join(str(spec["mechanism"]).split()), structure=structure,
                            roots=", ".join(spec["roots"]), dte_lo=lo, dte_hi=hi, signal=signal, needs=repr(needs),
                            params=repr(params), signal_code=sig_code, build_code=BUILDS[structure])
     return code, {}
@@ -596,7 +597,8 @@ def program_for(spec: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
 def family_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
     """The family's record (what the store keeps) from a seed spec."""
     return {"id": spec["id"], "mechanism": spec["mechanism"], "structure": spec["structure"], "roots": list(spec["roots"]),
-            "dte": list(spec["dte"]), "rejection": spec["rejection"], "signal": spec["signal"], "founder": spec.get("founder")}
+            "dte": list(spec["dte"]), "rejection": spec["rejection"], "signal": spec["signal"], "founder": spec.get("founder"),
+            "needs": dict(spec["needs"]), "params": dict(spec.get("params") or {})}
 
 
 __all__ = ["SEEDS", "FOUNDERS", "LIBRARY", "program_for", "family_spec", "SIGNALS", "BUILDS"]

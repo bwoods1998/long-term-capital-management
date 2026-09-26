@@ -297,7 +297,8 @@ class Researcher:
         return out
 
     def _first_cycle(self, fam: Mapping[str, Any], out: dict[str, Any]) -> None:
-        code, params = self.starter(fam.get("spec") or {})  # type: ignore[misc]
+        code, params = self.starter({**(fam.get("spec") or {}), "id": fam["id"], "mechanism": fam["mechanism"],  # type: ignore[misc]
+                                     "structure": fam["structure"], "roots": fam["roots"]})
         view = self._gym_run(fam, {"code": code, "params": params, "why": "the starter program"}, out, author="seed")
         items = [{"role": "user", "content": f"Cycle 1: your family's starter program (version 1) ran on Train.\n\n```python\n{code}\n```"
                                              f"\n\nIts diagnostic:\n{json.dumps(view, default=str)}"}]
