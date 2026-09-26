@@ -60,14 +60,51 @@ def bs_price(spot, strike, years, rate, vol, is_call) -> np.ndarray:
     return np.where(is_call, call, call - spot + disc)
 
 
-def implied_vol(price, spot, strike, years, rate, is_call, *, guess=None, iterations: int = 30,
-                tol: float = 1e-7) -> np.ndarray:
+# The normalized out-of-the-money Black price b(|x|, s) = e^(-|x|/2) N(s/2 - |x|/s) - e^(|x|/2) N(-s/2 - |x|/s),
+# with x = ln(S / (K e^-rT)) and s = vol x sqrt(T): an out-of-the-money option's price is sqrt(S K e^-rT) b.
+# It is increasing in s, so a table over |x| and s inverts by a vectorized binary search: the solve's
+# starting point, within about a percent of the answer, so Newton needs two or three steps.
+_TX = np.linspace(0.0, 0.6, 241)
+_TS = np.exp(np.linspace(np.log(1e-4), np.log(4.0), 256))
+
+
+def _table() -> np.ndarray:
+    x = _TX[:, None]
+    s = _TS[None, :]
+    return np.exp(-x / 2.0) * norm_cdf(s / 2.0 - x / s) - np.exp(x / 2.0) * norm_cdf(-s / 2.0 - x / s)
+
+
+_TB = _table()
+
+
+def _guess_total_vol(abs_x: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """s = vol x sqrt(T) whose normalized price is b at |x| (NaN outside the table)."""
+    row = np.clip(np.rint(abs_x / (_TX[1] - _TX[0])).astype(np.int64), 0, _TX.size - 1)
+    lo = np.zeros(b.shape, dtype=np.int64)
+    hi = np.full(b.shape, _TS.size - 1, dtype=np.int64)
+    for _ in range(9):  # 256 columns
+        mid = (lo + hi) // 2
+        above = _TB[row, mid] >= b
+        hi = np.where(above, mid, hi)
+        lo = np.where(above, lo, mid)
+    b0, b1 = _TB[row, lo], _TB[row, hi]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        w = np.clip((b - b0) / (b1 - b0), 0.0, 1.0)
+    s = np.exp(np.log(_TS[lo]) + w * (np.log(_TS[hi]) - np.log(_TS[lo])))
+    inside = (abs_x <= _TX[-1]) & (b > _TB[row, 0]) & (b < _TB[row, -1])
+    return np.where(inside, s, np.nan)
+
+
+def implied_vol(price, spot, strike, years, rate, is_call, *, guess=None, iterations: int = 24,
+                tol: float = 1e-7, vol_tol: float = 1e-5) -> np.ndarray:
     """Implied vol of each price (NaN where there is none). All inputs broadcast together; `guess`
     (a previous minute's vols, NaN where unknown) warm-starts the solve.
 
     It solves on the OUT-OF-THE-MONEY side: an in-the-money call's time value is the same-strike put's
     price by parity, and solving for that small number is well conditioned where the call's full price
-    is not. Newton steps on the active elements only, bisecting whenever a step leaves the bracket."""
+    is not. Newton steps on the active elements only, bisecting whenever a step leaves the bracket; an
+    element is done when its price is matched to `tol` (relative), or its vol moves less than `vol_tol`,
+    or its bracket is narrower than that (a one-cent quote moves a vol far more)."""
     price, spot, strike, years = np.broadcast_arrays(
         np.asarray(price, dtype=np.float64), np.asarray(spot, dtype=np.float64),
         np.asarray(strike, dtype=np.float64), np.asarray(years, dtype=np.float64))
@@ -88,36 +125,45 @@ def implied_vol(price, spot, strike, years, rate, is_call, *, guess=None, iterat
     call = s <= dk                              # solve as a call where the call is out of the money
     sqrt_t = np.sqrt(t)
     log_sk = np.log(s / k)
-    # Start: a warm guess where one is known, else Brenner-Subrahmanyam on the time value.
+    # Start: a warm guess where one is known, else the normalized-price table, else Brenner-Subrahmanyam.
     vol = np.sqrt(2.0 * np.pi) * tv / (s * sqrt_t)
+    table = _guess_total_vol(np.abs(np.log(s / dk)), tv / np.sqrt(s * dk)) / sqrt_t
+    vol = np.where(np.isfinite(table), table, vol)
     if guess is not None:
         g = np.broadcast_to(np.asarray(guess, dtype=np.float64), shape).ravel()[idx]
-        vol = np.where(np.isfinite(g) & (g > VOL_LO) & (g < VOL_HI), g, vol)
-    vol = np.clip(vol, 0.01, 4.0)
+        # A previous minute's vol is used only where the table has no answer: the table's start is
+        # already within a percent, and a stale vol (a one-cent mid that moved) is not.
+        vol = np.where(np.isfinite(table) | ~(np.isfinite(g) & (g > VOL_LO) & (g < VOL_HI)), vol, g)
+    vol = np.clip(vol, VOL_LO * 2, VOL_HI / 2)
     lo = np.full(idx.size, VOL_LO)
     hi = np.full(idx.size, VOL_HI)
     live = np.arange(idx.size)
+    sign = np.where(call, 1.0, -1.0)
+    rt = rate * t
     for _ in range(iterations):
         v = vol[live]
         st = sqrt_t[live]
         sq = v * st
-        d1 = (log_sk[live] + (rate + 0.5 * v * v) * t[live]) / sq
-        d2 = d1 - sq
-        cl = call[live]
-        sgn = np.where(cl, 1.0, -1.0)
-        model = sgn * (s[live] * norm_cdf(sgn * d1) - dk[live] * norm_cdf(sgn * d2))
+        d1 = (log_sk[live] + rt[live] + 0.5 * v * v * t[live]) / sq
+        sgn = sign[live]
+        s_l = s[live]
+        model = sgn * (s_l * norm_cdf(sgn * d1) - dk[live] * norm_cdf(sgn * (d1 - sq)))
         diff = model - tv[live]
-        vega = s[live] * norm_pdf(d1) * st
+        vega = s_l * norm_pdf(d1) * st
         high = diff > 0
-        hi[live] = np.where(high, v, hi[live])
-        lo[live] = np.where(high, lo[live], v)
+        lo_l = np.where(high, lo[live], v)
+        hi_l = np.where(high, v, hi[live])
+        lo[live] = lo_l
+        hi[live] = hi_l
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             newton = v - diff / vega
-        bad = ~np.isfinite(newton) | (newton <= lo[live]) | (newton >= hi[live])
+        bad = ~np.isfinite(newton) | (newton <= lo_l) | (newton >= hi_l)
         done = np.abs(diff) <= tol * np.maximum(tv[live], 1e-4)
+        nxt = np.where(bad, 0.5 * (lo_l + hi_l), newton)
+        settled = ~done & ((np.abs(nxt - v) < vol_tol) | (hi_l - lo_l < vol_tol))
         # A converged element keeps its vol: a last step from it could leave the bracket and bisect.
-        vol[live] = np.where(done, v, np.where(bad, 0.5 * (lo[live] + hi[live]), newton))
-        live = live[~done]
+        vol[live] = np.where(done, v, nxt)
+        live = live[~(done | settled)]
         if live.size == 0:
             break
     out[idx] = vol

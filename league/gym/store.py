@@ -129,8 +129,8 @@ class DayChain:
     dte: np.ndarray             # int16 calendar days to expiry
     strike: np.ndarray          # float64 dollars
     is_call: np.ndarray         # bool
-    bid: np.ndarray             # float32 [M, C] (minute-major), NaN = no quote
-    ask: np.ndarray             # float32 [M, C]
+    bid: np.ndarray             # float64 [M, C] (minute-major), rounded to 1e-4, NaN = no quote
+    ask: np.ndarray             # float64 [M, C]
     bid_size: np.ndarray        # int32 [M, C]
     ask_size: np.ndarray        # int32 [M, C]
     oi: np.ndarray              # int64 per contract (0 where unknown)
@@ -380,6 +380,9 @@ class Store:
         grid_ask[rows, cols] = ask[keep]
         grid_bsz[rows, cols] = bsz[keep]
         grid_asz[rows, cols] = asz[keep]
+        # Quotes are whole cents (sub-penny at most): rounded once here, the float32 file's noise gone.
+        grid_bid = np.round(grid_bid.astype(np.float64), 4)
+        grid_ask = np.round(grid_ask.astype(np.float64), 4)
         expiration = exp[starts].astype(np.int32)
         chain = DayChain(
             root=root, day=day, open_min=open_min, close_min=close_min,

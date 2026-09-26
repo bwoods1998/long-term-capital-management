@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
-from . import ENGINE_VERSION, fills as F, legs as L, venue
+from . import ENGINE_VERSION, fills as F, greeks as G, legs as L, venue
 from .ctx import Snapshot, build_ctx, order_row, position_row, underlying_view
 from .events import EVENT_NAMES, EventCalendar, rate_on
 from .runtime import Program
@@ -92,6 +92,58 @@ class History:
         return a[:, 0], a[:, 1], a[:, 2], a[:, 3]
 
 
+class GreekBlocks:
+    """One root-day's implied vols and greeks, computed in blocks: when a program first reads a greek
+    at minute i, the engine solves those contracts (and their neighbours: the same expiries, strikes
+    within a margin) at minute i AND the batch's next `block` decision minutes in one vectorized call,
+    so numpy's per-call cost is paid once per block instead of once per minute. The later minutes'
+    values stay in this cache until their own minute: a program at minute i is handed row i only."""
+
+    def __init__(self, chain: "DayChain", rate: float, close_minute: int, wanted: Sequence[int], block: int = 30):
+        self.chain = chain
+        self.rate = rate
+        self.close_minute = close_minute
+        self.wanted = np.array(sorted(set(int(m) for m in wanted)), dtype=np.int64)
+        self.block = int(block)
+        shape = chain.bid.shape
+        self.values = np.full((5,) + shape, np.nan, dtype=np.float64)
+        self.done = np.zeros(shape, dtype=bool)
+
+    def get(self, mi: int, idx: np.ndarray) -> tuple[np.ndarray, ...]:
+        need = idx[~self.done[mi, idx]]
+        if need.size:
+            self._solve(mi, need)
+        v = self.values[:, mi, idx]
+        return v[0], v[1], v[2], v[3], v[4]
+
+    def _solve(self, mi: int, need: np.ndarray) -> None:
+        chain = self.chain
+        later = self.wanted[self.wanted > mi][: self.block - 1]
+        cols = np.concatenate(([mi], later)).astype(np.int64)
+        spot_row = chain.underlying.price[cols]
+        spot = float(chain.underlying.price[mi]) if np.isfinite(chain.underlying.price[mi]) else float(np.nanmean(spot_row))
+        pad = 0.02 * spot if np.isfinite(spot) else 0.0
+        near = np.isin(chain.dte, np.unique(chain.dte[need])) & (chain.strike >= chain.strike[need].min() - pad) & \
+            (chain.strike <= chain.strike[need].max() + pad)
+        rows = np.union1d(np.flatnonzero(near), need)
+        bid = chain.bid[np.ix_(cols, rows)]
+        ask = chain.ask[np.ix_(cols, rows)]
+        with np.errstate(invalid="ignore"):
+            ok = np.isfinite(bid) & np.isfinite(ask) & (ask > 0) & (bid >= 0) & (ask >= bid) & np.isfinite(spot_row)[:, None]
+        r_idx, c_idx = np.nonzero(ok)            # r_idx indexes cols, c_idx indexes rows
+        if r_idx.size:
+            minute = chain.open_min + cols[r_idx]
+            contract = rows[c_idx]
+            mid = 0.5 * (bid[r_idx, c_idx] + ask[r_idx, c_idx])
+            s = spot_row[r_idx]
+            years = G.years_to_expiry(chain.dte[contract], minute, close_minute=self.close_minute)
+            iv = G.implied_vol(mid, s, chain.strike[contract], years, self.rate, chain.is_call[contract])
+            d, g, t, v = G.greeks(s, chain.strike[contract], years, self.rate, iv, chain.is_call[contract])
+            for k, arr in enumerate((iv, d, g, t, v)):
+                self.values[k, cols[r_idx], contract] = arr
+        self.done[np.ix_(cols, rows)] = True
+
+
 class DayData:
     """One trading day: each root's chain once, and one shared snapshot per root and minute."""
 
@@ -113,12 +165,23 @@ class DayData:
         self.events_next = events.flags(events.next_day(day))
         self.history = history
         self._snaps: dict[tuple[str, int], Snapshot] = {}
-        self._last: dict[str, Snapshot] = {}
+        self._blocks: dict[str, GreekBlocks] = {}
+        self._wanted: dict[str, set[int]] = {}
         self._unders: dict[tuple[str, int, int], Any] = {}
         self._minute = -1
 
+    def want(self, root: str, minutes: Any) -> None:
+        """Minutes some program decides on (the greek blocks cover these)."""
+        self._wanted.setdefault(root, set()).update(int(m) for m in minutes)
+
+    def blocks(self, root: str) -> "GreekBlocks | None":
+        found = self._blocks.get(root)
+        if found is None and root in self.chains:
+            found = self._blocks[root] = GreekBlocks(self.chains[root], self.rate, self.close_min, sorted(self._wanted.get(root, ())))
+        return found
+
     def advance(self, mi: int) -> None:
-        """Drop the caches of earlier minutes (keeping each root's last snapshot for the warm start)."""
+        """Drop the caches of earlier minutes."""
         if mi != self._minute:
             self._snaps.clear()
             self._unders.clear()
@@ -132,13 +195,12 @@ class DayData:
         chain = self.chains.get(root)
         if chain is None:
             return None
-        prev = self._last.get(root)
+        blocks = self.blocks(root)
         snap = Snapshot(root, self.open_min + mi, float(chain.underlying.price[mi]), chain.dte, chain.strike, chain.is_call,
                         chain.bid[mi], chain.ask[mi], chain.bid_size[mi], chain.ask_size[mi], oi=chain.oi, rate=self.rate,
-                        close_minute=self.close_min, keys=chain.key,
-                        iv_guess=prev.iv_known if prev is not None else None)
+                        close_minute=self.close_min, keys=chain.key, clean=True,
+                        greeks_source=(lambda idx, _mi=mi, _b=blocks: _b.get(_mi, idx)) if blocks is not None else None)
         self._snaps[key] = snap
-        self._last[root] = snap
         return snap
 
     def under(self, root: str, mi: int, history: int):
@@ -695,7 +757,7 @@ class Account:
         if chain is None or i < 0:
             return math.nan
         for m in range(day.minutes - 1, max(-1, day.minutes - 1 - back), -1):
-            bid, ask = round(float(chain.bid[m, i]), 4), round(float(chain.ask[m, i]), 4)
+            bid, ask = float(chain.bid[m, i]), float(chain.ask[m, i])
             if math.isfinite(bid) and math.isfinite(ask):
                 return 0.5 * (bid + ask)
         return math.nan
@@ -705,8 +767,8 @@ class Account:
         if chain is None or (pos.idx < 0).any():
             return
         for m in range(mi, max(0, mi - 30), -1):
-            bid = np.round(chain.bid[m, pos.idx].astype(np.float64), 4)
-            ask = np.round(chain.ask[m, pos.idx].astype(np.float64), 4)
+            bid = chain.bid[m, pos.idx]
+            ask = chain.ask[m, pos.idx]
             if np.isfinite(bid).all() and np.isfinite(ask).all():
                 sides = np.array([leg.side * leg.ratio for leg in pos.legs], dtype=np.float64)
                 pos.last_mark = float(np.sum(sides * 0.5 * (bid + ask)))
@@ -771,11 +833,14 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
 
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
-        regimes[day.isoformat()] = {root: data.regime(root) for root in data.chains}
         live = [a for a in accounts if a.roots]
         for account in live:
             account.begin_day(data)
         schedules = [account.decision_minutes(data) for account in live]
+        for account, schedule in zip(live, schedules):
+            for root in account.roots:
+                data.want(root, schedule)
+        regimes[day.isoformat()] = {root: data.regime(root) for root in data.chains}
         events_minutes = set()
         for rules in data.rules.values():
             for minute in (rules.open_cutoff, rules.close_cutoff, rules.liquidation):

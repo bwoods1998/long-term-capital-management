@@ -45,7 +45,8 @@ class Snapshot:
 
     def __init__(self, root: str, minute: int, spot: float, dte: Any, strike: Any, is_call: Any, bid: Any, ask: Any,
                  bid_size: Any = None, ask_size: Any = None, *, oi: Any = None, rate: float = 0.0,
-                 close_minute: int = 960, keys: Any = None, iv_guess: Any = None):
+                 close_minute: int = 960, keys: Any = None, iv_guess: Any = None, greeks_source: Any = None,
+                 clean: bool = False):
         self.root = str(root).upper()
         self.minute = int(minute)
         self.spot = float(spot) if spot is not None and np.isfinite(spot) and spot > 0 else _NAN
@@ -53,28 +54,38 @@ class Snapshot:
         self.strike = np.asarray(strike, dtype=np.float64)
         self.is_call = np.asarray(is_call, dtype=bool)
         n = self.strike.shape[0]
-        # Quotes come in whole cents (sub-penny at most); a float32 grid carries ~1e-7 of noise, so
-        # prices are rounded to 1e-4 as they leave it.
-        bid = np.round(np.asarray(bid, dtype=np.float64), 4)
-        ask = np.round(np.asarray(ask, dtype=np.float64), 4)
-        with np.errstate(invalid="ignore"):
-            self.valid = np.isfinite(bid) & np.isfinite(ask) & (ask > 0) & (bid >= 0) & (ask >= bid)
-        self.bid = np.where(self.valid, bid, _NAN)
-        self.ask = np.where(self.valid, ask, _NAN)
+        if clean:
+            # The replay's rows: already float64, rounded, and NaN wherever the quote is not two-sided.
+            self.bid = bid
+            self.ask = ask
+            self.valid = ~np.isnan(bid)
+        else:
+            # Quotes come in whole cents (sub-penny at most); float32 carries ~1e-7 of noise, so prices
+            # are rounded to 1e-4 here.
+            bid = np.round(np.asarray(bid, dtype=np.float64), 4)
+            ask = np.round(np.asarray(ask, dtype=np.float64), 4)
+            with np.errstate(invalid="ignore"):
+                self.valid = np.isfinite(bid) & np.isfinite(ask) & (ask > 0) & (bid >= 0) & (ask >= bid)
+            self.bid = np.where(self.valid, bid, _NAN)
+            self.ask = np.where(self.valid, ask, _NAN)
         self.mid = 0.5 * (self.bid + self.ask)
         zeros = np.zeros(n, dtype=np.int32)
-        self.bid_size = np.where(self.valid, np.asarray(bid_size if bid_size is not None else zeros, dtype=np.int32), 0)
-        self.ask_size = np.where(self.valid, np.asarray(ask_size if ask_size is not None else zeros, dtype=np.int32), 0)
+        if clean:
+            self.bid_size = bid_size
+            self.ask_size = ask_size
+        else:
+            self.bid_size = np.where(self.valid, np.asarray(bid_size if bid_size is not None else zeros, dtype=np.int32), 0)
+            self.ask_size = np.where(self.valid, np.asarray(ask_size if ask_size is not None else zeros, dtype=np.int32), 0)
         self.oi = np.asarray(oi, dtype=np.int64) if oi is not None else np.zeros(n, dtype=np.int64)
         self.keys = np.asarray(keys, dtype=np.int64) if keys is not None else np.arange(n, dtype=np.int64)
         self.rate = float(rate)
         self.close_minute = int(close_minute)
         self._guess = None if iv_guess is None else np.asarray(iv_guess, dtype=np.float64)
-        self._iv = np.full(n, _NAN)
-        self._delta = np.full(n, _NAN)
-        self._gamma = np.full(n, _NAN)
-        self._theta = np.full(n, _NAN)
-        self._vega = np.full(n, _NAN)
+        #: The replay's block cache (`engine.GreekBlocks`): computes this minute's greeks together with
+        #: the batch's next decision minutes, engine-side. None live: solved here, per minute.
+        self._source = greeks_source
+        greeks = np.full((5, n), _NAN)
+        self._iv, self._delta, self._gamma, self._theta, self._vega = greeks
         self._done = np.zeros(n, dtype=bool)
         self._views: dict[tuple, "ChainView"] = {}
 
@@ -86,7 +97,12 @@ class Snapshot:
         """(iv, delta, gamma, theta, vega) of the contracts at `idx`, computing what is not yet known."""
         idx = np.asarray(idx, dtype=np.int64)
         need = idx[~self._done[idx]]
-        if need.size and np.isfinite(self.spot):
+        if need.size and self._source is not None:
+            iv, d, g, t, v = self._source(need)
+            quoted = self.valid[need]
+            for store, values in ((self._iv, iv), (self._delta, d), (self._gamma, g), (self._theta, t), (self._vega, v)):
+                store[need] = np.where(quoted, values, _NAN)
+        elif need.size and np.isfinite(self.spot):
             need = np.unique(need)
             years = G.years_to_expiry(self.dte[need], self.minute, close_minute=self.close_minute)
             guess = None if self._guess is None else self._guess[need]
