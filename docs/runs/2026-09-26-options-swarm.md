@@ -843,6 +843,37 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
 
   An independent review of #381 is also running.
 
+- **21:52Z Wave 0.3 verdict: EXECUTION-BOUND.** 72 validated families' validated versions were
+  re-run on Validation at three fill levels. The diagnostic box was terminated at 21:52Z. These runs
+  count as diagnostic trials: 72 programs × 3 stress levels, plus the 1.5x twin at natural.
+
+  | Fill level | Positive | t ≥ 2 | Meet D2's frequency, t and quarters |
+  |---|---|---|---|
+  | natural | 17 | 3 | - |
+  | half the half-spread (stress 0.5) | 26 | 3 | 1 |
+  | mid (stress 0) | 50 | 20 | 14 |
+
+  - 34 families flip from negative to positive between natural and mid.
+  - 18 of the 20 with t ≥ 2 at mid were already retired.
+  - The edge the search found is real but thin, and it lives mostly in the last half of the
+    half-spread. How close to mid the swarm really fills decides everything.
+
+  Actions taken:
+  - B2 re-prioritised: the fill model becomes an honest point estimate. It had a Wilson lower bound,
+    exposure diluted by never-traded strikes, and a min(single, half complex) multi-leg rule. The
+    adverse-selection rule and the 1.5x stress are kept; mid and touch limits become fillable.
+  - B4 checks that live and Gym limit rules match.
+  - D3's real-fill samples on Monday become the key measurement.
+  - Per-family numbers stay private (`~/Work/.ltcm-main/middiag/`) and never reach researchers.
+- **21:40Z PR #381 held until after Monday.** Its independent review returned merge-after-fixes:
+  - unbounded full-day chain arrays (an out-of-memory risk on the size-s House);
+  - a recorder whose one failure stops every source for the day, with no rotation;
+  - about six fsyncs per real order on the minute thread.
+
+  Findings are posted on the PR. D3 records its own bounded samples in B4's code instead.
+- **21:45Z B3 PR #388 opened:** the Claude gateway route, Claude-first architect and audit, and the
+  diagnostician.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
