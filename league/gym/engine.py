@@ -43,7 +43,8 @@ from .events import EVENT_NAMES, EventCalendar, rate_on
 from .runtime import Program
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .store import DayChain, Store
+    from .day import DayChain
+    from .store import Store
 
 
 def settlement_level(u: Any) -> float:
@@ -549,7 +550,7 @@ class Account:
                                   "reason": pos.reason, "tag": pos.tag})
 
     def _trade_row(self, pos: Position) -> dict:
-        from .store import from_ordinal
+        from .day import from_ordinal
 
         max_loss = pos.max_loss_share * venue.MULTIPLIER * pos.opened_qty
         exit_value = pos.exit_value_qty / pos.opened_qty if pos.opened_qty else math.nan
@@ -778,7 +779,7 @@ class Account:
     def _settle_missed(self, day: DayData, pos: Position) -> None:
         """A position whose expiry fell BETWEEN run days (no chain that day): settled against that day's
         recorded underlying, or, where the store has none, against today's first price as a data hole."""
-        from .store import from_ordinal
+        from .day import from_ordinal
 
         near = int(pos.expirations.min())
         expiry = from_ordinal(near)
@@ -973,7 +974,7 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
                     history.add(root, store.underlying(root, prior).price)
     events = EventCalendar(store.trading_days(), store.session)
     regimes: dict[str, dict[str, dict[str, float]]] = {}
-    from .store import ordinal as to_ordinal
+    from .day import ordinal as to_ordinal
 
     for n, day in enumerate(days):
         data = DayData(store, day, all_roots, events, history, to_ordinal(day))
