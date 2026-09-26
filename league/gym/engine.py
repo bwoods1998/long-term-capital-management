@@ -715,6 +715,16 @@ class Account:
         price = chain.underlying.price if chain is not None else np.zeros(0)
         known = price[np.isfinite(price)]
         level = float(known[-1]) if known.size else math.nan
+        if not math.isfinite(level):
+            # No underlying today (a hole in the store): the position leaves at its last mark, and says so.
+            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            cash = value * venue.MULTIPLIER * pos.qty
+            self.cash += cash
+            pos.cash += cash
+            pos.exit_value_qty += value * pos.qty
+            pos.exit_day, pos.exit_mi, pos.reason, pos.qty = day.ordinal, day.minutes - 1, "expired_without_data", 0
+            self._finish(pos, day)
+            return
         near = int(pos.expirations.min())
         value = 0.0
         shares = 0.0

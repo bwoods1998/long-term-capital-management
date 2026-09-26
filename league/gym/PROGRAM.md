@@ -23,8 +23,8 @@ Rules (a program that breaks one is refused before it runs): imports `math` and 
 starting with `_`; no attribute assignment (keep state in dicts); no numpy file, memory, random or date
 functions (`np.load`, `np.save`, `np.random`, `np.datetime64`, `.tofile`, `.base`, ...); **no year or
 date literal** (an integer 2019-2030, a YYYYMMDD integer, a string holding a year or an ISO date).
-A decide call has 1 second; 25 errors or timeouts disqualify the run. Be deterministic: same inputs,
-same outputs.
+A decide call has 1 second, a run's calls 900 seconds in all; 25 errors or timeouts disqualify the
+run. Be deterministic: same inputs, same outputs.
 
 ## NEEDS
 
@@ -57,7 +57,8 @@ with a two-sided quote now, sorted by expiry, strike, call before put:
 `id` (name the contract in a leg as `{"id": ...}`), `dte`, `strike`, `is_call`, `bid`, `ask`, `mid`,
 `spread`, `bid_size`, `ask_size`, `oi`; computed on first read (Black-Scholes on the mid): `iv`,
 `delta`, `gamma`, `theta` (a calendar day), `vega` (a vol point). Also `spot`, `n`, `expiries` (the
-days to expiry present). A root with no data now is absent from `ctx.chains`.
+days to expiry present). A root with no data now is absent from `ctx.chains` (and `ctx.chain` is None
+when the first root has none): check before you read.
 
 Underlying: `ctx.underlyings[root]` (and `ctx.under`): `price` now, `prices` (today's one-minute
 prices from the open to now), `open`, `high`, `low` (today so far), `prior_close`, and the prior
