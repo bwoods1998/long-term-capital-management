@@ -1076,6 +1076,18 @@ class OptionsLive:
                     f"closed before {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET")
         return ""
 
+    def _program_close_refusal(self, pos: RPosition, day: LiveDay, mi: int) -> str | None:
+        """The expiry rules a program's own close meets (arriving at the next minute, as the Gym's does): the House's
+        expiry close has it, or closing orders on expiring contracts have ended."""
+        minute = day.open_min + mi + 1
+        if self._expiry_close(pos, day, mi, minute):
+            return "close: the House is closing this expiring structure (a leg in or near the money) at the natural"
+        rules = day.rules.get(pos.root)
+        if rules is not None and pos.expiry == day.day.isoformat() and minute >= rules.close_cutoff:
+            return (f"expiry cutoff: closing orders on expiring contracts end at {rules.close_cutoff // 60}:"
+                    f"{rules.close_cutoff % 60:02d} ET")
+        return None
+
     def _pending_exits(self, day: LiveDay, mi: int, out: dict) -> None:
         """Exits waiting for their contracts (another family's open being cancelled for them, or another close): sent as
         soon as the stream is free, before any new open."""
@@ -1092,6 +1104,10 @@ class OptionsLive:
                 continue
             if want.get("day") != today:
                 why = "your close waited past the session's end for its contracts and was dropped: send it again"
+            elif pos.info.get("broken"):
+                why = f"close: this structure is broken ({pos.info['broken']}): the House closes its legs"
+            elif not want.get("forced") and (late := self._program_close_refusal(pos, day, mi)):
+                why = late                                 # the rules a program's close meets, as when it was sent
             else:
                 try:
                     why = self._send_close(pos, day, mi, forced=bool(want.get("forced")), why=str(want.get("why") or ""),
@@ -1349,11 +1365,9 @@ class OptionsLive:
                 return "close: this position already has a working close (cancel it first)"
             if pos.info.get("broken"):
                 return f"close: this structure is broken ({pos.info['broken']}): the House closes its legs"
-            if self._expiry_close(pos, day, mi, minute):
-                return "close: the House is closing this expiring structure (a leg in or near the money) at the natural"
-            rules = day.rules.get(pos.root)
-            if rules is not None and pos.expiry == today and minute >= rules.close_cutoff:
-                return f"expiry cutoff: closing orders on expiring contracts end at {rules.close_cutoff // 60}:{rules.close_cutoff % 60:02d} ET"
+            late = self._program_close_refusal(pos, day, mi)
+            if late:
+                return late
             return self._send_close(pos, day, mi, forced=False, why=str(intent.get("note") or intent.get("tag") or "program")[:200],
                                     out=out, intent=intent)
         if "open" not in intent:

@@ -680,6 +680,36 @@ class VerificationRound(LiveCase):
         self.assertIn(pos.pid, live.book.positions, "yesterday's close (and its price) is never sent")
         self.assertTrue(any("waited past" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "holder"))
 
+    def test_a_waiting_program_exit_meets_the_same_rules_as_a_program_close_when_it_goes(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        far = VERTICAL.replace('"atm": 0', '"atm": 10')                    # out of the money: the House leaves it
+        live = self.make([family("vert", far, band="probe", params={"hold": 600, "dte": 0})])
+        self.run_to(15, 25)
+        [pos] = live.book.positions.values()
+        live.pending_exits[pos.pid] = {"forced": False, "why": "program", "day": "2026-09-28",
+                                       "intent": {"close": pos.pid, "limit": "natural"}}
+        self.run_to(15, 27)
+        closes = [b for b in self.venue.sent if b["legs"][0]["position_intent"] == "sell_to_close"]
+        self.assertEqual(closes, [], "no program close on an expiring contract from the close cutoff")
+        self.assertEqual(live.pending_exits, {})
+        self.assertTrue(any("expiry cutoff" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "vert"))
+
+    def test_a_waiting_exit_of_a_structure_broken_since_is_left_to_the_legs_closes(self):
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        self.run_to(9, 31)
+        [pos] = live.book.positions.values()
+        put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)
+        held = -self.venue.held[put_short.symbol]
+        self.venue.held[put_short.symbol] = D(0)
+        self.venue.held["SPY"] = held * 100
+        self.venue.activity_rows.append({"id": "asn4", "activity_type": "OPASN", "symbol": put_short.symbol, "qty": str(held)})
+        live.pending_exits[pos.pid] = {"forced": False, "why": "program", "day": "2026-09-28",
+                                       "intent": {"close": pos.pid, "limit": "natural"}}
+        live._activities_at = float("-inf")
+        self.run_to(9, 33)
+        whole = [b for b in self.venue.sent if b.get("legs") and b["legs"][0]["position_intent"].endswith("to_close")]
+        self.assertEqual(whole, [], "never a whole-structure close on a broken structure")
+
     def test_a_program_may_close_an_out_of_the_money_expiring_structure_until_the_cutoff(self):
         self.clock.set(at(MONDAY, 14, 50))
         far = VERTICAL.replace('"atm": 0', '"atm": 10')                    # 1.7% out of the money: the House leaves it
