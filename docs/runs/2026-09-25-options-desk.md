@@ -266,10 +266,15 @@ run's `config.json` change is its own new `options_structures` key).
   215/215 gateway tests and `npm run check` on that tree first; the live gateway before it was `adccc8e`, the Kalshi run's K1,
   which main's gateway equalled; `OPTION_STRUCTURES_REAL` "off"). **The House deploy was REFUSED at 03:06:38Z** before its
   canary: "another deploy or rollback is running (pid 14774)", the updater's own release `main-8a108891a84e` (main's head
-  after Deploy B, Merton's #353, strategy files only), staged 02:59:56Z, promoted about 03:00Z, still in its watch. Nothing of
+  after Deploy B, `69539d3a`, Merton's #353, strategy files only), staged 02:59:56Z, in its canary and watch: its verdict
+  **promoted 03:11:40Z** (the lock free from then; this run's wait read it late, 03:27Z: its probe matched its own text). Nothing of
   G reached the House (the updater staged before #344 merged, and it refuses G's protected paths). The gateway's G change is
   compatible with the running House (it sends no multi-leg order; structures are on `options-shadow`). The House deploy runs
   again once that watch ends.
+  **The House deploy, second attempt, started 03:27:39Z:** release `20260926T032739Z-aaf5ac74637c` (the same content,
+  842 files), the watchdog from `main-8a108891a84e`: canary passed, **promoted 03:29:38.967Z**; **grant `earned-live-20260921`
+  ratified 03:29:52Z on `be1e3ce9`** (active; 13 s after the promotion; this run's money-digest change 1 of 2; every changed
+  money rule is a row of the plan's table O1-O5 or `option_spread_real_types`). The watch runs to about 03:40Z.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
