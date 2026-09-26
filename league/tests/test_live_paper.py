@@ -9,7 +9,58 @@ from decimal import Decimal as D
 from league.tests.test_live_step import HAVE, LiveCase
 
 if HAVE:
+    from league.live.decider import InlineDecider
+    from league.live.families import MemoryFamilies
+    from league.live.step import OptionsLive
     from league.tests.live_fakes import MONDAY, at
+
+
+class PaperOnlyProof(LiveCase):
+    def paper_only(self):
+        # Match service.options_live: no real client or book exists while real money is off.
+        self.families = MemoryFamilies()
+        self.live = OptionsLive(self.root, market=self.market, real=None, paper=self.paper,
+                                families=self.families, decider=InlineDecider(), real_money=False,
+                                config={"require_paper_proof": True}, clock=self.clock, record=self.ledger)
+        return self.live
+
+    def test_route_is_proved_with_no_real_client_book_or_eligible_family(self):
+        live = self.paper_only()
+        self.assertIsNone(live.book)
+        self.assertIn("SPY", live._roots())
+        self.run_to(9, 45)
+        self.assertTrue(live.proof.passed(), live.proof.status())
+        self.assertEqual(len(self.paper.sent), 2)
+        self.assertEqual(self.venue.sent, [])
+        self.assertFalse(live.real_money)
+        self.assertEqual(live.instances, {})
+        self.assertIn("real money is off", live.real_block())
+        self.assertFalse(any(self.paper.held.values()))
+        self.assertNotIn("SPY", live._roots(), 'completed proof no longer requires a quote read')
+
+    def test_paper_only_restart_recovers_an_accepted_open_with_a_lost_answer(self):
+        self.paper_only()
+        self.paper.submit_mode = "lost"
+        self.run_to(9, 35)
+        cid = self.live.proof.status()["orders"][0]["cid"]
+        self.live.state.close()
+        self.paper._advance()
+        self.paper.submit_mode = "ok"
+        self.clock.set(at(MONDAY, 9, 36))
+        self.paper_only()
+        self.run_to(9, 46)
+        self.assertTrue(self.live.proof.passed(), self.live.proof.status())
+        self.assertEqual(self.live.proof.status()["orders"][0]["cid"], cid)
+        self.assertEqual(len(self.paper.sent), 2)
+        self.assertEqual(self.venue.sent, [])
+        self.assertFalse(any(self.paper.held.values()))
+
+    def test_weekend_does_not_start_a_paper_proof(self):
+        self.paper_only()
+        self.clock.set(at(MONDAY - dt.timedelta(days=2), 10, 0))
+        self.assertEqual(self.live.minute()["state"], "closed")
+        self.assertEqual(self.paper.sent, [])
+        self.assertEqual(self.venue.sent, [])
 
 
 class DurableProof(LiveCase):
