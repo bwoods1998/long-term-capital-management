@@ -21,6 +21,7 @@ Standard library only (the Gym's driver is imported when a box starts).
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import sys
@@ -142,7 +143,7 @@ class Swarm:
         self.started_at = clock()
         self.why_stopped = ""
         self._beat = float("-inf")
-        self._pace = (float("-inf"), 0.0)
+        self._pace = (float("-inf"), "", 0.0)
 
     # ------------------------------------------------------------------ the population
     def seed(self) -> list[str]:
@@ -174,6 +175,7 @@ class Swarm:
                 "totals": self.store.totals(), "spend_last_hour": spend, "usd_per_hour": round(sum(spend.values()), 4),
                 "median_cycle_seconds": seconds[len(seconds) // 2] if seconds else None, "cycles_last_hour": len(recent),
                 "cycle_errors_last_hour": sum(1 for p in recent if p.get("error")),
+                "researcher_pace": self.pace_status(),
                 "guard": getattr(self.guard, "last", {}), "braked": not self.guard.allows(), "pool": self.pool.status(),
                 "rounds": sorted(k for k, t in self.rounds.items() if t.is_alive())}
 
@@ -208,14 +210,33 @@ class Swarm:
         unavailable = getattr(self.pool, "unavailable", lambda kind="gym": False)
         return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint")) and not unavailable("gym")
 
-    def over_pace(self) -> bool:
-        """The swarm's model spend over the last hour is at `researcher.usd_per_hour` (read at most every 10 s)."""
+    def pace_status(self) -> dict[str, Any]:
+        """The funded researcher stream's trailing-hour spend; absent/null Sail limit keeps the legacy combined cap."""
+        cfg = self.settings.get("researcher", {})
+        sail_limit = cfg.get("sail_usd_per_hour")
+        scope = "sail_model" if sail_limit is not None else "all_models"
+        key = "sail_usd_per_hour" if sail_limit is not None else "usd_per_hour"
+        raw_limit = sail_limit if sail_limit is not None else cfg.get("usd_per_hour", 4.0)
+        try:
+            limit = float(raw_limit)
+            valid = not isinstance(raw_limit, bool) and math.isfinite(limit) and limit >= 0
+        except (TypeError, ValueError, OverflowError):
+            limit, valid = 0.0, False
         now = self.clock()
         cached = self._pace
-        if now - cached[0] >= 10.0:
-            spent = self.store.spent(["sail_model", "openai"], since=now - 3600)
-            cached = self._pace = (now, spent)
-        return cached[1] >= float(self.settings.get("researcher", {}).get("usd_per_hour", 4.0))
+        if now - cached[0] >= 10.0 or now < cached[0] or cached[1] != scope:
+            spent = self.store.spent(["sail_model"] if scope == "sail_model" else ["sail_model", "openai"], since=now - 3600)
+            cached = self._pace = (now, scope, spent)
+        paused = not valid or cached[2] >= limit
+        label = "Sail models" if scope == "sail_model" else "Sail and OpenAI models"
+        reason = (f"invalid researcher.{key}; research paused" if not valid else
+                  f"{label} spent ${cached[2]:.4f} in the last hour, at the ${limit:.4f} pace" if paused else None)
+        return {"scope": scope, "limit_usd_per_hour": limit if valid else None,
+                "spent_last_hour_usd": round(cached[2], 6), "paused": paused, "reason": reason}
+
+    def over_pace(self) -> bool:
+        """No new cycles/rewrites above their configured model pace (spend reads cached for at most 10 s)."""
+        return self.pace_status()["paused"]
 
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
