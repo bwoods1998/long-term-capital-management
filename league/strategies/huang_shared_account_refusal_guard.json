@@ -1,9 +1,0 @@
-{
-  "family": "crypto-15m-prior-window-reset",
-  "name": "huang_shared_account_refusal_guard",
-  "repair": {
-    "key": "strategy_defect:huang-h427345-2:c91e0d9325a8",
-    "parent": "huang-h427345-2"
-  },
-  "why": "Corrected child of huang-h427345-2: preserve its KXBTC15M hourly specialty and pricing logic, but remember House ownership/self-trade refusals and abstain from further entries in affected markets. Born on rung 0 with no inherited qualification; unseen peer conflicts remain subject to House refusal."
-}

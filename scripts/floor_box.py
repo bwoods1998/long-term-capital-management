@@ -35,8 +35,8 @@ What this script will not do:
 - **It never reads a secret except in `secrets`.** The code upload refuses `.env`, anything under
   `.data/`, and any private-key file, whatever the working tree holds. `secrets` is the one
   command that touches them, it uploads bytes it never decodes, and it prints names and sizes.
-- **It never prints the Sail key.** The key is fetched inside `ltcm.sailbox` through
-  `ltcm.provider.default_key_source()` at the moment of each request.
+- **It never prints the Sail key.** The key is fetched inside `league.sailbox` through
+  `league.sailbox.default_key_source()` at the moment of each request.
 - **It never starts trading by itself.** `create` and `deploy` leave the loop exactly as they
   found it; only `start` starts it.
 - **It never decides about real money.** That is `real_money` in `league/config.json` and the
@@ -72,8 +72,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from ltcm.broker import TERMINAL_STATUSES  # noqa: E402
-from ltcm.sailbox import (  # noqa: E402  (path first, so a checkout runs without installation)
+from league.sailbox import (  # noqa: E402  (path first, so a checkout runs without installation)
     FLOOR_HOSTS,
     GATEWAY_HOST,
     REMOTE_ROOT,
@@ -83,6 +82,10 @@ from ltcm.sailbox import (  # noqa: E402  (path first, so a checkout runs withou
     hourly_cost,
     policy_allowlist,
 )
+
+#: An order status nothing comes back from (the same four as `ltcm.broker.TERMINAL_STATUSES`; this
+#: script imports nothing from the legacy `ltcm` package, the options overhaul's trap 4).
+TERMINAL_STATUSES = ("filled", "cancelled", "rejected", "expired")
 
 STATE_PATH = REPO_ROOT / ".data" / "ltcm" / "box.json"
 DEFAULT_APP = "ltcm"

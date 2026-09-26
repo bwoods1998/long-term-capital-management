@@ -64,7 +64,9 @@ jobs:
         run: python3 -m league.ci --base origin/main --branch "$BRANCH"
 
   merge:
-    # Green means merged. This job never runs the branch's code.
+    # OFF since the options overhaul (Sept 26, 2026, trap 3): nothing merges a proposal by itself. The guard and the judge
+    # still report on Merton's pull requests; a person merges. (It was: green means merged, never running the branch's code.)
+    if: false
     needs: [guard, judge]
     runs-on: ubuntu-latest
     timeout-minutes: 5

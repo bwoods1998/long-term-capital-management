@@ -161,7 +161,7 @@ class BurstGame(HouseCase):
         self.assertGreater(float(economy['fork_threshold_usd']), float(economy['endowment_usd']))
         with patch.object(overnight, 'load_turbo', return_value={}):
             self.assertEqual(game_for(load_game(), {'policy': policy})['economy']['fork_threshold_usd'], '2.00')
-        self.assertEqual(overnight.load_turbo()['fork_threshold_usd'], 10)  # the repository's turbo.json
+        self.assertEqual(overnight.load_turbo(), {})  # the repository's turbo.json left with the options overhaul (Sept 26, 2026)
 
     def test_turbo_out_of_range_is_refused(self):
         from unittest.mock import patch
@@ -220,6 +220,7 @@ class TheResearchEconomyDials(unittest.TestCase):
     was dropped, and the burst's own defaults ran instead: the snapshot's ledger shows the teacher
     sitting down about hourly and the architect every 30 to 60 minutes on Sept 23."""
 
+    @unittest.skip("Wave 2b deletes overnight.py: the options overhaul (Sept 26, 2026) took turbo.json out of the repository")
     def test_the_repository_turbo_carries_merton_and_the_sail_research_cap(self):
         from league import overnight
 
@@ -247,10 +248,9 @@ class TheResearchEconomyDials(unittest.TestCase):
         game = load_game()
         self.assertEqual(sorted(game["merton"]["paused_until_profit"]), ["architect", "designer", "operator", "toolsmith"])
         self.assertEqual(game["merton"]["schedule_hours"]["teacher"], 12)
-        self.assertEqual(game["research"]["gate"]["abstain_lock_profile"], "flash_asap")
+        self.assertNotIn("gate", game["research"])  # Jev's research gate left game.json with the options overhaul (Sept 26, 2026)
         for mutate in (lambda g: g["merton"]["schedule_hours"].update(teacher=5), lambda g: g["merton"]["schedule_hours"].update(teacher=25),
-                       lambda g: g["merton"].update(paused_until_profit=["architect", "auditor"]),
-                       lambda g: g["research"]["gate"].update(abstain_lock_profile="pro_asap_turbo")):
+                       lambda g: g["merton"].update(paused_until_profit=["architect", "auditor"])):
             changed = deepcopy(game)
             mutate(changed)
             with self.assertRaises(ValueError):

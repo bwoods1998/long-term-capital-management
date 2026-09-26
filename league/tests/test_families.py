@@ -711,7 +711,7 @@ class FamilySwingOnTheFloor(KalshiHouse):
         was asked for; with an approval on record, a grant narrowed to rung 2 left the family staked above the bunt."""
         agents, book = self.swinging()
         alloc = self.house.allocator
-        with patch.object(self.house, "campaigns", SimpleNamespace(allows_live=lambda rung: rung <= 2)):
+        with patch.object(self.house, "grant", SimpleNamespace(allows_live=lambda rung: rung <= 2)):
             alloc._released = None
             self.assertFalse(alloc._swing_released())
         with patch.object(allocator.Allocator, "_swing_released", return_value=False):

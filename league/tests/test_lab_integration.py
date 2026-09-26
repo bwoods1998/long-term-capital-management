@@ -39,8 +39,10 @@ from league.tests.test_lab import DESK, KNOB, FakeBox, FakeModel, LabCase
 from league.tests.test_lab_batch import LIMITS, BatchSail, seed_candidates, single, small
 from league.tests.test_tick_never_blocks import BOUNDED, StalledSailCase
 
-#: The lab box `league/config.json` names (scripts/lab_box.py created it, Sept 23, 2026).
-CONFIG_BOX = service.load_config()["lab"]["box_id"]
+#: The lab box `league/config.json` named (scripts/lab_box.py created it, Sept 23, 2026); the options overhaul
+#: (Sept 26, 2026) took the `lab` block out of config.json, so the tests name it themselves.
+CONFIG_BOX = "sb_742fe765-f041-450a-acda-e9d898137949"
+LAB_CONFIG = {"box": "ltcm-lab", "box_id": CONFIG_BOX, "size": "l", "box_key": "lab"}
 
 
 def corrupt(raw: bytes) -> bytes:
@@ -185,7 +187,7 @@ class ServicePath(unittest.TestCase):
         # As scripts/lab_box.py leaves it: asleep, its build-time egress still on the record.
         self.sail.boxes[CONFIG_BOX] = {"status": "sleeping", "egress": ["deb.debian.org"], "files": {}, "name": "ltcm-lab"}
         base = service.load_config()
-        self.config = {**base, "feeds": False, "options_history": False, "jev": {"enabled": False}, "real_money": False}
+        self.config = {**base, "feeds": False, "options_history": False, "jev": {"enabled": False}, "real_money": False, "lab": dict(LAB_CONFIG)}
 
     def build(self, **kw):
         def no_network(*args, **kwargs):
@@ -202,6 +204,14 @@ class ServicePath(unittest.TestCase):
             self.addCleanup(house.lab.close)
         return house
 
+    def test_the_options_house_builds_no_lab_even_with_a_lab_box_configured(self):
+        """The options overhaul (Sept 26, 2026, Wave 2a): `service.build` makes no Alpha Lab and binds no lab box."""
+        house = self.build()
+        self.assertIsNone(house.lab)
+        self.assertEqual(house.settings.lab_box, "")
+        self.assertEqual(self.sail.calls, [])
+
+    @unittest.skip("Wave 2b deletes the Alpha Lab: the options House (service.build, Sept 26, 2026) binds no lab box")
     def test_the_service_binds_the_configured_lab_box_and_the_lab_evaluates_on_it(self):
         house = self.build()
         self.assertIsInstance(house.lab, Lab)

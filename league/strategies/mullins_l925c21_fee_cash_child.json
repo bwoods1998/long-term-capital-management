@@ -1,8 +1,0 @@
-{
-  "family": "weather-lab-b8b1fe",
-  "name": "mullins_l925c21_fee_cash_child",
-  "repair": {
-    "key": "order_refusal:kalshi-shadow:needs $# with fees; free cash is $#"
-  },
-  "why": "Corrected child of mullins-l925c21, proposed on rung 0 with no inherited record. Its parent reserves principal alone and received a fee-inclusive cash refusal on KXHIGHCHI. Preserve the parent's effective weather series, daily horizon, parameters and passive NO selection; reserve rounded fees on working buys and new entries using a conservative taker-rate cash budget. Qualification and absence of recurring cash refusals must be established independently."
-}

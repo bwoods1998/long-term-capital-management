@@ -22,6 +22,10 @@ from league.tests.test_house import HouseCase
 from league.triage import Triage
 
 
+def setUpModule():
+    raise unittest.SkipTest('Jev is cut by the options overhaul (Sept 26, 2026): its research gate and move model left game.json and the repository; Wave 2b deletes league/jev.py, league/sensors.py and these tests')
+
+
 class FakeJev:
     """A gateway stand-in: answers every noul question with `p` (or p(text)), or raises."""
 

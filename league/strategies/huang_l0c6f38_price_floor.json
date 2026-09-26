@@ -1,8 +1,0 @@
-{
-  "family": "crypto-15m-lab-335592",
-  "name": "huang_l0c6f38_price_floor",
-  "repair": {
-    "key": "order_refusal:kalshi:buying a longshot at #: the floor buys no event contract under # (longshot buyers lose on Kalshi; se"
-  },
-  "why": "Corrected child of huang-l0c6f38. Its ETH prior-window fade requested a 0.24 real-money entry below the 0.30 floor. Intersect the original 0.20-to-0.80 entry range with the book's longshot floor: 0.15 on rungs 0/1 and 0.30 on rungs 2/3. Preserve parameters and remaining logic; born on rung 0 to qualify independently."
-}

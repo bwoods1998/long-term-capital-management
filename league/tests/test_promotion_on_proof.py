@@ -22,6 +22,7 @@ from league.constitution import CONSTITUTION
 from league.evaluator import Evaluator, event_key
 from league.ledger import Ledger
 from league.tests.fakes import Clock
+from league.tests.fakes import OpenGrant
 
 D = Decimal
 P = allocator._params
@@ -561,7 +562,7 @@ class KalshiHouse(unittest.TestCase):
         self.auditor = FakeAuditor()
         self.house = House(Path(self.dir.name) / "house", brokers={"kalshi": self.real, "kalshi-shadow": self.paper},
                            sandbox=InProcessSandbox(), clock=self.clock, game=game, auditor=self.auditor,
-                           settings=Settings(mark_every_seconds=0, research=False, real_money=True))
+                           grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True))
         self.auditor.ledger = self.house.ledger
         # Without a grant the envelope is the tuition line: room for a $30 bunt and a probe or two.
         tuition = patch.dict(CONSTITUTION["tuition"], {"max_loss_usd": "100"})
@@ -858,7 +859,7 @@ class OptionsProbe(unittest.TestCase):
 
 class GrantSeats(unittest.TestCase):
     def test_the_grants_seat_count_follows_the_smallest_real_stake_the_probe(self):
-        from league.live_trading import policy
+        from league.campaigns import legacy_live_policy as policy
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual((grant["stake_usd"], grant["max_agents"]), ("10", 101))  # floor($1,017.75 / $10)

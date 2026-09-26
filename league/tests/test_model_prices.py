@@ -56,6 +56,7 @@ class ModelPrices(unittest.TestCase):
 
 
 class FoundryModel(unittest.TestCase):
+    @unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
     def test_the_foundry_writes_on_gpt_6_sol_and_the_judges_keep_astra(self):
         game = _json.loads((REPO / "league" / "game.json").read_text(encoding="utf-8"))
         self.assertEqual(foundry_model(game), "gpt-6-sol")

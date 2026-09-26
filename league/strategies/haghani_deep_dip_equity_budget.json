@@ -1,8 +1,0 @@
-{
-  "family": "crypto-alts-reversion",
-  "name": "haghani_deep_dip_equity_budget",
-  "repair": {
-    "key": "order_refusal:alpaca:position would be #% of desk equity, cap #%"
-  },
-  "why": "Corrected child of haghani-56, addressing the latest concentration refusals without changing its Alpaca hourly alternative-coin deep-dip signals, parameters or exits. Explicit quantities are valued at the ask and bounded by supplied limits and half current equity with 2% headroom. Outstanding bids and new entries reserve cash including fees; oversized resting bids are cancelled and below-minimum entries are skipped. Born on rung 0 with no inherited record; must qualify independently."
-}

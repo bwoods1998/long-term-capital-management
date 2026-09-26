@@ -1,9 +1,0 @@
-{
-  "family": "sports-props-mlb-home-run-low-pri-c1ecd7",
-  "name": "hufschmid_40_entry_guards",
-  "repair": {
-    "key": "strategy_defect:hufschmid-40:7b567533bbe8",
-    "parent": "hufschmid-40"
-  },
-  "why": "Corrected child of hufschmid-40: screen ticker identities and reject YES asks below the applicable longshot floor, retaining KXMLBHR, the daily horizon and the parent's low-price ceiling. Limit entries to the screened ask, require resolution within 48 hours and use documented market headroom. The unchanged 0.15 ceiling permits no real-money entries under the 0.30 floor. Born on rung 0 with no inherited qualification; CI and forward recurrence judge the repair."
-}

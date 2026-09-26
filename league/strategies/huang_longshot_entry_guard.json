@@ -1,8 +1,0 @@
-{
-  "family": "crypto-15m-prior-window-reset",
-  "name": "huang_longshot_entry_guard",
-  "repair": {
-    "key": "order_refusal:kalshi-shadow:buying a longshot at #: the floor buys no event contract under # (longshot buyers lose on Kalshi; se"
-  },
-  "why": "Corrected child of huang-h427345-2: exclude YES and NO entry prices below the floor's 0.15 minimum before ranking modeled edges. Preserve the parent's KXBTC15M hourly specialty, observed BTC bars, model and sizing. Born on rung 0 with no record; must qualify independently."
-}

@@ -35,6 +35,7 @@ from league.constitution import CONSTITUTION
 from league.fees import Fees
 from league.ledger import HOUSE, now_iso
 from league.tests.fakes import FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_book import BookCase
 from league.venues import instrument_for
 from league.watchdog import HouseHealth
@@ -597,7 +598,7 @@ class InTheHouse(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             house = House(Path(root) / "house", brokers={"alpaca-paper": FakeBroker("alpaca-paper"), "alpaca": FakeBroker("alpaca", cash="500")},
                           sandbox=InProcessSandbox(), alpaca_data=FakeAlpacaData(), clock=Clock(),
-                          settings=Settings(mark_every_seconds=0, research=False, real_money=True))
+                          grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True))
             try:
                 self.assertTrue(house.books["alpaca"].real_money)
                 self.assertEqual({name: book.fees.option_clearing for name, book in house.books.items()}, {"alpaca-paper": True, "alpaca": True})

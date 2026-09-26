@@ -17,6 +17,7 @@ from league import runner
 from league.replay import run_replay
 from league.sandbox import Run
 from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_house import FakeAlpacaData
 from league.venues import instrument_for
 
@@ -116,7 +117,7 @@ class LadderTest(unittest.TestCase):
         self.auditor = FakeAuditor()
         self.house = House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),
-            alpaca_data=self.data, clock=self.clock, settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game, auditor=self.auditor,
+            alpaca_data=self.data, clock=self.clock, grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True), game=game, auditor=self.auditor,
         )
         self.auditor.ledger = self.house.ledger
         self.price = 80000.0
