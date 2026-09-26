@@ -286,11 +286,19 @@ closes (and cancels of its closes) keep room for the House's own exits under 250
 stops opens at 250 orders while exits go on to 300. An exit waiting for its contracts is kept across a
 restart and dropped at the day's end (its program is told).
 
+Money-band decisions commit only while the selected version and its forward evidence still match.
+Promotion time commits in that same swarm transaction, so a crash cannot bypass the next-session
+wait; a legacy row without a known promotion time starts its wait at the House's first sighting.
+When executed funding changes, the House rereads equity between matching funding histories before
+latching a stop. An account read taken before that transition is only provisional.
+
 Demotion, retirement and an unavailable program cancel the instance's working opens. Programs kept
 for exits still reload after a decider failure; five minutes without recovery makes their positions
 orphans for the House to close. Closed real trades are acknowledged individually, so an older
 position that closes late cannot be lost behind a newer trade's export. After expiry, external
-liquidation fills reconcile the missing legs and fees. Missing fill values leave an explicit
+liquidation fills reconcile the missing legs and fees, including remaining legs of a broken structure.
+Consumed quantity and value are persisted together, so a later cumulative fill price cannot reprice
+contracts already attributed to another family. Missing fill values leave an explicit
 `unpriced_close` row, release stale exposure and block new entries until venue fills or expiry events
 resolve the accounting; estimated intrinsic values never become forward evidence.
 

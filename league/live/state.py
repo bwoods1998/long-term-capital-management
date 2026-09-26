@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS orders_status ON orders(status);
 CREATE TABLE IF NOT EXISTS forward_exports (pid INTEGER PRIMARY KEY, exported_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS dispatch_counts (oid INTEGER PRIMARY KEY, day TEXT NOT NULL, legs INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS external_fill_usage (id TEXT PRIMARY KEY, qty INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS external_fill_usage (id TEXT PRIMARY KEY, qty INTEGER NOT NULL, value_qty REAL);
 CREATE TABLE IF NOT EXISTS fills (
     id INTEGER PRIMARY KEY AUTOINCREMENT, oid INTEGER NOT NULL, pid INTEGER, qty INTEGER NOT NULL, value REAL NOT NULL,
     fees REAL NOT NULL, at REAL NOT NULL);
@@ -84,6 +84,10 @@ class LiveState:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
+        if "value_qty" not in {row["name"] for row in self.db.execute("PRAGMA table_info(external_fill_usage)")}:
+            # A legacy consumed quantity without its value cannot price a later incremental fill honestly.
+            # Leave its value NULL; recovery will keep any further affected position explicitly unpriced.
+            self.db.execute("ALTER TABLE external_fill_usage ADD COLUMN value_qty REAL")
         self._depth = 0
         #: Drawn at every process start and never stored: part of every client order id, so neither a new state nor one
         #: rolled back (a Sail checkpoint restored with its old row ids) sends an id the venue has seen (it refuses a

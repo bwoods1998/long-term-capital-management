@@ -148,6 +148,7 @@ class OptionsLive:
         self.house_open = True
         self.summary: dict[str, Any] = {"state": "idle"}
         self.account_row: dict[str, Any] | None = None
+        self._account_at: float | None = None
         self.flows: M.FlowBook | None = None
         self._families_at = float("-inf")
         self._activities_at = float("-inf")
@@ -322,10 +323,10 @@ class OptionsLive:
             return
         levels = self.state.get("levels", {}) or {}
         for pos in list(self.book.positions.values()):
-            if pos.qty <= 0 or pos.expiry >= today.isoformat() or pos.info.get("broken"):
+            if pos.qty <= 0 or pos.expiry >= today.isoformat() or pos.status == "awaiting_expiry":
                 continue
             level = float((levels.get(pos.root) or [float("nan")])[0])
-            if V.is_index(pos.root) and math.isfinite(level):
+            if V.is_index(pos.root) and math.isfinite(level) and not pos.info.get("broken"):
                 value = sum(leg.side * leg.ratio * _intrinsic(leg, level) for leg in pos.legs)
                 self.book.settle(pos, value, "settled at the last recorded level (the House missed the close)")
             elif pos.status != "awaiting_expiry":
@@ -443,9 +444,7 @@ class OptionsLive:
             if band in ("candidate", "probe", "sized"):
                 band = self._move_band(row, equity)
                 wanted[f"{fid}@{version}:s"] = (row, "shadow", False)
-                live_now = self.instances.get(f"{fid}@{version}:r")
-                if band in ("probe", "sized") and self._real_on() and (
-                        (live_now is not None and live_now.mode == "live") or self._real_eligible(fid)):
+                if band in ("probe", "sized") and self._real_on() and self._real_eligible(fid):
                     wanted[f"{fid}@{version}:r"] = (dict(row, band=band), "real", False)
             elif (band == "gym" and row.get("validation_passed") and not row.get("holdout_passed") and self._real_on()
                   and self.table.tuition_day > 0 and row.get("structure") in self.table.real_types):
@@ -507,20 +506,29 @@ class OptionsLive:
         fid, band = row["family"], row["band"]
         forward_meta = row.get("forward") or {}
         try:
-            fwd = M.forward_stats(self.families.forward_rows(fid), self.table.sized_confidence,
+            forward = self.families.forward_rows(fid)
+            fwd = M.forward_stats(forward, self.table.sized_confidence,
                                   negative=forward_meta.get("negative") if isinstance(forward_meta, Mapping) else None,
                                   version=row.get("version"))
         except Exception:  # noqa: BLE001
-            fwd = M.Forward(0, None, None, None, 0.0, False)
+            self._families_at = float("-inf")
+            return "unavailable"  # no evidence is no authority for a real instance; keep its existing exits
         grant = self._grant()
         if not self._real_on() or not grant or not grant.get("active") or equity is None:
             # No band moves while real money cannot trade (off, no active grant) or the account is unread: a move now
             # would only be undone, and a Probe trades from the session after its move (`_real_eligible`).
             return band
         new, why = M.band_for(self.table, row, equity, fwd, probe_sessions=self._probe_sessions(fid, band))
+        try:
+            confirmed = self.families.confirm_band(row, new, why, forward, at=self.clock())
+        except Exception as exc:  # noqa: BLE001 - no real eligibility on an unconfirmed snapshot
+            self.alert("warning", f"live: {fid}'s money band could not be confirmed ({type(exc).__name__})")
+            confirmed = False
+        if not confirmed:
+            self._families_at = float("-inf")
+            return "stale"
         if new != band:
             try:
-                self.families.set_band(fid, new, why)
                 self.record("live.band", {"family": fid, "from": band, "to": new, "why": why}, agent=fid)
                 if band == "candidate" and new in ("probe", "sized"):
                     moves = dict(self.state.get("band_moves", {}) or {})
@@ -546,6 +554,13 @@ class OptionsLive:
             return 0
         now = self.clock()
         rec = (self.state.get("band_moves", {}) or {}).get(fid)
+        if not rec:
+            try:
+                promoted = self.families.promoted_at(fid)
+            except Exception:  # no verified history means zero proven Probe sessions
+                return 0
+            if promoted is not None:
+                rec = {"band": "probe", "at": promoted}
         if rec and rec.get("band") in ("probe", "sized"):
             since = float(rec["at"])
         else:
@@ -568,14 +583,26 @@ class OptionsLive:
         """A family moved to Probe (or Sized) trades real money from the session AFTER its move (the plan's Probe row:
         "real from its next session"): its move must precede the open of the current (or next) session."""
         move = (self.state.get("band_moves", {}) or {}).get(fid)
-        if not move:
-            return True
         now = self.clock()
+        try:
+            promoted = self.families.promoted_at(fid)
+        except Exception:
+            return False
+        stamps = ([float(move["at"])] if move else []) + ([promoted] if promoted is not None else [])
+        if not stamps:
+            # Legacy/missing promotion metadata never confers same-session entry authority. Persist first sight so
+            # restart keeps the waiting period, while an existing position retains its exit-only program.
+            seen = dict(self.state.get("real_first_seen", {}) or {})
+            if fid not in seen:
+                seen[fid] = now
+                self.state.put("real_first_seen", seen)
+            stamps = [float(seen[fid])]
+        since = max(stamps)
         day = ny(now).date()
         for _ in range(10):
             session = session_minutes(day)
             if session is not None and (day > ny(now).date() or now < epoch_of(day, session[1])):
-                return float(move["at"]) < epoch_of(day, session[0])
+                return since < epoch_of(day, session[0])
             day += dt.timedelta(days=1)
         return False
 
@@ -866,13 +893,23 @@ class OptionsLive:
             if book.frozen and not before:
                 self.alert("error", f"live: real entries frozen: {book.frozen}")
                 self._tell_owner("reconciliation", book.frozen)
-        self._flows(now)
+        funding_confirmed = False
+        if self._flows(now) and self.flows is not None and (
+                self.stops.flow_rows != self.flows.rows or self.stops.flow_transition_at is not None):
+            # A newly executed funding activity may post after this minute's first account read. Bracket a fresh
+            # equity read with two matching funding snapshots before allowing either stop to latch on that equity.
+            funding_before = self.flows.rows
+            self._read_account(out)
+            if self.account_row is not None:
+                self._flows_at = float("-inf")
+                funding_confirmed = self._flows(self.clock()) and self.flows.rows == funding_before
         if self.account_row is not None:
             try:
                 before = (self.stops.daily_tripped, self.stops.drawdown_tripped)
-                self.stops.observe(self.table, at=now, day=today, equity=M.D(self.account_row["equity"]),
+                self.stops.observe(self.table, at=self._account_at if self._account_at is not None else now,
+                                   day=today, equity=M.D(self.account_row["equity"]),
                                    last_equity=M.D(self.account_row.get("last_equity") or self.account_row["equity"]),
-                                   flows=self.flows)
+                                   flows=self.flows, funding_confirmed=funding_confirmed)
                 self.state.put("stops", self.stops.as_state())
                 if self.stops.drawdown_tripped and not before[1]:
                     self.alert("error", f"live: {self.stops.drawdown_why}; real money paused")
@@ -896,6 +933,7 @@ class OptionsLive:
     def _read_account(self, out: dict) -> None:
         try:
             self.account_row = self.real.account()
+            self._account_at = self.clock()
         except Exception as exc:  # noqa: BLE001
             self.account_row = None
             out.setdefault("venue_errors", []).append(f"account: {type(exc).__name__}: {str(exc)[:120]}")
@@ -907,15 +945,15 @@ class OptionsLive:
             out.setdefault("venue_errors", []).append(f"positions: {type(exc).__name__}: {str(exc)[:120]}")
             return None
 
-    def _flows(self, now: float) -> None:
+    def _flows(self, now: float) -> bool:
         if self.real is None or not self.start_at or now - self._flows_at < FLOWS_EVERY:
-            return
+            return False
         self._flows_at = now
         from ltcm.performance import ALPACA_FUNDING
 
         try:
             rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
-            read_at = now
+            read_at = self.clock()
             flows, unsettled, pending_amounts = [], [], []
             start = parse_time(self.start_at) or 0.0
             for r in rows:
@@ -939,8 +977,10 @@ class OptionsLive:
                     closes.append(epoch_of(day, session[1]))
             self.flows = M.FlowBook(read_at=read_at, rows=tuple(sorted(flows)), closes=tuple(sorted(closes)),
                                     unsettled=tuple(unsettled), pending_amounts=tuple(pending_amounts))
+            return True
         except Exception as exc:  # noqa: BLE001 - the stops wait on a reading (provisional only)
             self.alert("warning", f"live: the account's funding could not be read ({type(exc).__name__}: {str(exc)[:120]})")
+            return False
 
     def _activities(self, now: float) -> None:
         """Assignments and exercises (OPASN, OPEXC): the account now holds shares it cannot carry, and a structure is
@@ -1559,7 +1599,11 @@ class OptionsLive:
         if self.book is not None:
             today = day.day.isoformat()
             for pos in list(self.book.positions.values()):
-                if pos.qty <= 0 or pos.expiry != today or pos.info.get("broken"):
+                if pos.qty <= 0 or pos.expiry != today:
+                    continue
+                if pos.info.get("broken"):
+                    pos.status = "awaiting_expiry"
+                    self.book._save_position(pos)
                     continue
                 chain = day.chains.get(pos.root)
                 level = settlement_level(chain.underlying) if chain is not None else float("nan")
@@ -1584,13 +1628,13 @@ class OptionsLive:
 
     def _quiet(self, now: float, out: dict) -> None:
         """Outside the session: the families (so the site's bands stay current) and, every few minutes, the account's
-        orders read (a day order that ended), the option events and a reconciliation that ignores contracts expiring
-        today (the venue settles them in the evening)."""
+        orders read (a day order that ended), option events and physical expired-leg reconciliation."""
         self.sync_families(now)
         if self.book is None or now - float(self.state.get("quiet_at", 0) or 0) < 900:
             return
         self.state.put("quiet_at", now)
         today = ny(now).date()
+        self._missed_close(today)
         try:
             rows = self.real.orders(status="all", after=dt.datetime.fromtimestamp(now - 3 * 86400, dt.timezone.utc).isoformat())
             foreign = self.book.ingest(rows)

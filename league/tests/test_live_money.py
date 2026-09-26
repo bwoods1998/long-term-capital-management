@@ -280,7 +280,7 @@ class Stops(unittest.TestCase):
         s.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
         # $5,000 lands; equity is 5,481.65: no profit, no new peak, no drawdown, no daily move.
         f = self.flows(400, [(250, "5000")])
-        s.observe(self.t, at=300, day="d1", equity=D("5481.65"), last_equity=D("481.65"), flows=f)
+        s.observe(self.t, at=300, day="d1", equity=D("5481.65"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
         self.assertEqual(s.peak_profit, D(0))
         self.assertEqual(s.drawdown, D(0))
         self.assertEqual(s.day_pnl, D(0))
@@ -295,13 +295,13 @@ class Stops(unittest.TestCase):
         # The session's first reading is the start of the day; a $5,000 deposit lands at 500.
         s.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
         f = self.flows(1000, [(500, "5000")])
-        s.observe(self.t, at=900, day="d1", equity=D("4111.23"), last_equity=D("481.65"), flows=f)
+        s.observe(self.t, at=900, day="d1", equity=D("4111.23"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
         # base = 481.65 + 5,000 = 5,481.65; day P&L = 4,111.23 - 481.65 - 5,000 = -1,370.42 = -25.0001%: tripped.
         self.assertTrue(s.daily_tripped)
         self.assertIn("no new entry today", s.blocked())
         s2 = M.Stops(start_equity=D("481.65"))
         s2.observe(self.t, at=100, day="d1", equity=D("481.65"), last_equity=D("481.65"), flows=self.flows(200))
-        s2.observe(self.t, at=900, day="d1", equity=D("4111.24"), last_equity=D("481.65"), flows=f)
+        s2.observe(self.t, at=900, day="d1", equity=D("4111.24"), last_equity=D("481.65"), flows=f, funding_confirmed=True)
         self.assertFalse(s2.daily_tripped)            # -1,370.41 is under 25% of 5,481.65 (1,370.4125)
         # A deposit that had already landed at the session's first reading is in its base, whatever the venue's
         # last_equity says: no stop on a deposit.
@@ -338,7 +338,8 @@ class Stops(unittest.TestCase):
         self.assertFalse(s.daily_tripped)
         self.assertIn("deposits are not read yet", s.blocked())
         # Once the withdrawal is read the reading is settled, and it was no loss at all.
-        s.observe(self.t, at=170, day="d1", equity=D("400"), last_equity=D("1000"), flows=self.flows(200, [(150, "-600")]))
+        s.observe(self.t, at=170, day="d1", equity=D("400"), last_equity=D("1000"),
+                  flows=self.flows(200, [(150, "-600")]), funding_confirmed=True)
         self.assertFalse(s.drawdown_tripped)
         self.assertFalse(s.daily_tripped)
         self.assertIsNone(s.blocked())
