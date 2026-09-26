@@ -224,6 +224,46 @@ clock never restarts.
   checklist in docs/operations.md. 08:47Z the three-lens adversarial review launched as a workflow (money rules
   and sizing; order path and venue safety; gateway and process boundary; a skeptic verifies each major or
   critical finding) against a read-only worktree at 52f41e61 (`~/Work/ltcm-review-362`).
+- 08:49:55Z First new-era release on the new House box: `20260926T084913Z-8158a11cfe3f` (main b68b3800, 723 files,
+  `real_money` false) canaried and PROMOTED in 44 s with the loop NOT started (watch 0); no box created by the
+  canary. previous = main-196fb783261d (Sept 22, old era): **no rollback past 20260926T084913Z-8158a11cfe3f**.
+- 08:53:22Z #361 merged (CI green) and the gateway deployed from main 3f660144 (version 8054eecb; the only change
+  against the deployed a1f9a8e is SAILBOX_ID -> sb_1d99c4a7). 08:59Z the gateway reads the new box as running.
+- 08:58:20Z **Gym image v0** (W1): sbcp_2cde3f22-27b3-4f11-a8db-af3b825df051 (+ copy sbcp_8ef9a704), 30-day TTL, from
+  image box sb_366c435f (asleep). Verified inside: no_network, egress fails, no key, no GATE, 0 files after
+  2025-12-31, windows train+validation only. Store: 5,341 files; Train (2024) 252 days for each of IWM, QQQ,
+  SPXW, SPY, XSP; Validation (2025-01-02..06-04) IWM 105, QQQ 104, SPXW 103, SPY 104, XSP 104. Backfill
+  restarted, ~1,100 underlying-days/h. v1 ETA ~10:40Z; gate ~11:30Z. trade_quote calibration (stage 5) moved
+  ahead of the 20 names (stage 4).
+- ~08:55-09:10Z W4 finished PR #363 (`swarm/loop` a987eb86, CI green): training needs only the Gym image (the gate
+  waits for its own); guard line $32 (house_burn_usd_day 1.0); Provider bodies older than an hour blanked; the
+  swarm keeps its own event table (cycle rows not mirrored); researchers at reasoning "minimal" (28-64 s a
+  turn); V4.1-Flash off (4x the cost at the cache share seen); stall rewrites in the background, 4/day/family
+  (moving to pro_asap); pace cap $4/h of model spend; OpenAI only above a $25 month reserve. Laptop trial: 213
+  cycles on 3 real Gym boxes, median 71 s, p90 114 s, 99.5% < 180 s; gate path end to end on a real gate box
+  with a never-trading program (no strategy's holdout seen). Test spend ~$2 Sail models, <$0.10 boxes, $0.18
+  OpenAI. `league/CONTRACT.md` 75.6 KB -> 12 KB. Under a two-lens adversarial review (evidence; spend/process).
+- ~09:11Z The shared scratchpad directory was emptied (cause unknown; the main session's helper scripts, briefs and
+  queued log, and the builders' scratch files). Running processes unaffected. The main session's files now live
+  in `~/Work/.ltcm-main/`; builders told to keep theirs under their worktree's `.data/`.
+- ~09:08Z **The money review of PR #362** (15 agents): 29 findings, 10 CONFIRMED by a skeptic, 2 refuted, 17 minor
+  (unverified). Critical (two lenses, one bug): a program's resting close on an expiring near-money equity
+  structure blocks the House's forced close (step.py:941), carrying it past the cutoff. Major: `one_record` drops
+  real trades whenever the shadow traded that day (real results never reach Sized/Kelly); Sized never below the
+  Probe cap (outside eighth- to half-Kelly; family 12% -> 30%); candidate -> sized skipping Probe; another
+  family's resting open blocks exits on a shared contract; closes and cancels bypass the order governor and exits
+  have no protected room below the gateway's 300; one malformed intent aborts every family's minute; the shadow
+  stops reading legs that leave the program's window. Refuted: forward record per family vs per version; the
+  parent-filled-legs-uncovered claim. All sent to W5 to fix with tests (`.data/w5/review362.md` in its worktree).
+- 09:14Z **The swarm review of PR #363** (20 agents): 24 findings, 16 CONFIRMED (12 major after the skeptic), 2
+  refuted, 6 minor unverified. Deploy blockers: the Sail guard fails OPEN on a failed balance read; researchers'
+  notes would publish fitted PARAMS and code fragments to the site; box startup failures re-fork l boxes forever;
+  stray boxes never adopted or terminated; a slow heartbeat starts duplicate swarm processes; the supervisor could
+  signal a reused pid (even the House); full Gym results kept forever on the House disk; timed-out Gym jobs still
+  run. Evidence: a failed nightly replay wipes the forward record; a market day counted twice (nightly + shadow);
+  refused/failed programs offered to live as tuition; forward records not tied to a version; no Astra audit at
+  the gate. Refuted: the three-looks limit bypass by forks; boxes left awake on stop. All sent to W4 to fix with
+  tests before the deploy.
 
 ## Scoreboard
 
