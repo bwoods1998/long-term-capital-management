@@ -103,7 +103,9 @@ DEFAULTS: dict[str, Any] = {
         "burst_until": "2026-09-28T13:30:00Z",
         "after_burst_usd_day": 12.0,    # Sail a day after Monday while Net is not positive
         "openai_cap_usd": 150.0,        # OpenAI for the burst, and only while the gateway's month has room
-        "openai_reserve_usd": 5.0,      # never spend the gateway month below this
+        # Never spend the gateway month below this: the House's own roles need its last dollars, and at T0 the month had
+        # $10.89 left (effectively none until the owner funds it), so the swarm spends OpenAI only after a raise.
+        "openai_reserve_usd": 25.0,
     },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this

@@ -73,9 +73,9 @@ class ModelRouter:
                                                  max_output_tokens=int(max_output), desk_cap_usd_per_day=str(cap),
                                                  cache_key=(cache_key or family)[:128], tool_choice=tool_choice)
                 break
-            except Exception as exc:  # noqa: BLE001 - a rate limit is waited out twice (48 researchers share Sail's limits)
+            except Exception as exc:  # noqa: BLE001 - a rate limit or a 5xx is waited out twice (a 502 was seen on Sept 26)
                 code = str(getattr(exc, "code", "") or "")
-                if attempt >= 2 or not any(code.startswith(f"provider_http_{s}") for s in (429, 503, 529)):
+                if attempt >= 2 or not any(code.startswith(f"provider_http_{s}") for s in (429, 500, 502, 503, 504, 529)):
                     raise
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
