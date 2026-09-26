@@ -213,12 +213,14 @@ def plan(
     core: Sequence[str] = CORE_FIVE,
     checks: Sequence[tuple[str, dt.date]] = (),
     forward: Sequence[dt.date] = (),
+    order: Sequence[int] = (1, 2, 3, 4, 5, 6),
 ) -> list[Task]:
     """Every task in the plan's order. `checks` (stage 0, job `chk`) fetch root-days for the
     agreement check into a side directory, never the store. `first` puts some root-days at the head
     (the Gym builder's sample; each in the stage its date belongs to, if that stage is planned).
     Within stage 1: 2024, then 2025, then 2023, each day across the roots, so every root grows
-    together and the Gym can start on any of them."""
+    together and the Gym can start on any of them. `order` is the order the stages are worked in
+    (the plan's is 1..6; on Sept 26 the main session moved 5, the fill-calibration samples, ahead of 4)."""
 
     def days(a: dt.date, b: dt.date) -> list[dt.date]:
         return calendar.days(a, b)
@@ -231,6 +233,8 @@ def plan(
         if key not in seen:
             seen.add(key)
             out.append(task)
+
+    rank = {stage: i for i, stage in enumerate([0, 7, 8, *order])}
 
     for item in checks:
         root, day = item[0], item[1]
@@ -255,6 +259,7 @@ def plan(
         stage = stage_of(root, day, core)
         if stage in stages and calendar.is_trading(day):
             add(Task(stage, "day", root, day))
+    head = len(out)  # the checks and the sample stay at the front, whatever the stage order
     if 1 in stages:
         for a, b in ((dt.date(2024, 1, 1), dt.date(2024, 12, 31)), VALIDATION, (dt.date(2023, 1, 1), dt.date(2023, 12, 31))):
             for day in days(a, b):
@@ -286,7 +291,9 @@ def plan(
             for day in days(a, b):
                 for root in BACK_MONTH_ROOTS:
                     add(Task(6, "back", root, day))
-    return out
+    front, rest = out[:head], out[head:]
+    rest.sort(key=lambda t: rank.get(t.stage, len(rank)))  # stable: each stage keeps its own order
+    return front + rest
 
 
 def stage_of(root: str, day: dt.date, core: Sequence[str] = CORE_FIVE) -> int | None:

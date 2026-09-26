@@ -129,6 +129,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         extra += f" --first {shlex.quote(args.first)}"
     if args.checks:
         extra += f" --checks {shlex.quote(args.checks)}"
+    if args.order:
+        extra += f" --order {shlex.quote(args.order)}"
     if args.slots is not None:
         extra += f" --slots {int(args.slots)}"
     # A string command, detached (Sail's `background`) and in its own session, so the exec's
@@ -255,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--stages", default="1,2,3,5,6")
     s.add_argument("--first", default="")
     s.add_argument("--checks", default="")
+    s.add_argument("--order", default="1,2,3,5,4,6", help="stage order (Sept 26: fill calibration before the names)")
     s.add_argument("--threads", type=int, default=8)
     s.add_argument("--slots", type=int, default=None)
     s.set_defaults(func=cmd_start)

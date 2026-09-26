@@ -557,7 +557,12 @@ class Runner:
         day_rate = len(day_recent) * 3600.0 / span
         summary = sl.summarize(self.tasks, self.store.journal)
         etas, cumulative = {}, 0
-        for stage, row in summary["stages"].items():
+        worked: list[str] = []
+        for task in self.tasks:  # the order the stages are worked in
+            if str(task.stage) not in worked:
+                worked.append(str(task.stage))
+        for stage in worked:
+            row = summary["stages"][stage]
             cumulative += row["planned"] - row["done"]
             etas[stage] = {"remaining": row["planned"] - row["done"],
                            "hours_to_finish": sl.eta_hours(cumulative, rate)}
@@ -814,6 +819,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--names-file", default=None)
     run.add_argument("--checks", default="", help="ROOT:DAY,... fetched first into /data/work/check-store")
     run.add_argument("--forward-days", default="", help="stage 7: these forward days for the whole universe")
+    run.add_argument("--order", default="1,2,3,4,5,6", help="the order the stages are worked in")
     run.add_argument("--threads", type=int, default=8, help="task threads; more than the slots, so decoding overlaps fetching")
     run.add_argument("--decoders", type=int, default=6, help="processes that decode and write the big frames")
     run.add_argument("--passes", type=int, default=12, help="passes over the queue before giving up on failing tasks")
@@ -878,8 +884,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             stages = [int(s) for s in args.stages.split(",") if s.strip()]
             names_file = args.names_file or (str(store.work / "universe.json") if (store.work / "universe.json").exists() else None)
             forward = [dt.date.fromisoformat(d) for d in args.forward_days.split(",") if d.strip()]
+            order = [int(x) for x in args.order.split(",") if x.strip()]
             tasks = sl.plan(calendar, stages=stages, names=_names(names_file), first=_first(args.first),
-                            checks=_first(args.checks), forward=forward)
+                            checks=_first(args.checks), forward=forward, order=order)
             (store.work / "plan.json").write_text(json.dumps({"stages": stages, "tasks": len(tasks), "first": args.first,
                                                               "names": _names(names_file), "at": sl.utc_now()}))
             log.info("run: stages %s, %d tasks, threads %d, decoders %d", stages, len(tasks), args.threads, args.decoders)

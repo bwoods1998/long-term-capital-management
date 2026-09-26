@@ -84,6 +84,16 @@ class Plan(unittest.TestCase):
         self.assertEqual(years[0], 2024)
         self.assertLess(years.index(2025), years.index(2023))
 
+    def test_a_stage_order_puts_the_calibration_samples_before_the_names(self):
+        tasks = sl.plan(calendar(), stages=(1, 2, 3, 4, 5, 6), names=["AAPL"], order=(1, 2, 3, 5, 4, 6),
+                        first=[("SPY", D(2024, 3, 13))])
+        self.assertEqual(tasks[0].id, "day:SPY:2024-03-13")
+        stages = [t.stage for t in tasks[1:]]
+        runs = [s for i, s in enumerate(stages) if i == 0 or stages[i - 1] != s]
+        self.assertEqual(runs, [1, 2, 3, 5, 4, 6])
+        default = sl.plan(calendar(), stages=(4, 5), names=["AAPL"])
+        self.assertLess(max(i for i, t in enumerate(default) if t.stage == 4), min(i for i, t in enumerate(default) if t.stage == 5))
+
     def test_holdout_is_its_own_stage_and_never_in_train_stages(self):
         tasks = sl.plan(calendar(), stages=(1, 2, 3))
         for task in tasks:
