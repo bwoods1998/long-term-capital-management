@@ -35,7 +35,9 @@ plus its open and close fees:
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
-  `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does.
+  `gateway.day_equity_share x E`) are checked here first so the House refuses before the gateway does. Today's opening
+  maximum loss counts every open that reached the venue, filled or not, exactly as the gateway reserves it (it cannot
+  see fills): the cap bounds what is sent; each real instance's orders a day and the gateway's 250 opens bound churn.
 
 THE STOPS (`Stops`), with deposits and withdrawals netted out:
 

@@ -262,11 +262,17 @@ python3 -m league.live --root /workspace/state --clear-assignment     # owner: l
 
 Real entries need all of: `real_money` true; the grant active on the running money digest; the kill
 switch off; no stop tripped (daily 25% of start-of-day equity, drawdown 50% from the peak since the
-reset, deposits netted); reconciliation clean (two readings in a row that disagree freeze entries, two
-clean ones lift it; the LTC dust is known); no unresolved assignment; the paper proof passed; the House
-not paused. Exits need only the kill switch off. Expiring equity structures with a leg in or within 1% of
-the money are closed from ten minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and
-QQQ); index structures settle in cash.
+reset, deposits netted, a pending deposit or withdrawal settling nothing); reconciliation clean (two
+readings in a row that disagree freeze entries, two clean ones lift it; the LTC dust is known); no
+unresolved assignment; the paper proof passed; the House not paused. Exits need only the kill switch
+off, and go first: an exit cancels another family's resting open on its contracts and waits for them.
+Expiring equity structures with a leg in or within 1% of the money are the House's to close from ten
+minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and QQQ): a program's own
+close is cancelled for the forced one; index structures settle in cash. A family moved onto real money
+trades it from the next session; a Candidate whose typical maximum loss is unknown stays shadow-only
+(`live.band` rows with `held` say why, once a day). Each real instance has 60 orders a day (the Gym's);
+a program's closes and cancels keep room for the House's own exits under 250 legs, and the gateway
+stops opens at 250 orders while exits go on to 300.
 
 **Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
 `OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the

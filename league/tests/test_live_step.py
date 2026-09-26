@@ -478,6 +478,18 @@ class ExitsFirst(LiveCase):
         pos = live.book.state.rows("SELECT reason FROM positions")[0]
         self.assertEqual(pos["reason"], "forced")
 
+    def test_a_programs_resting_close_on_an_expiring_contract_is_cancelled_at_the_close_cutoff(self):
+        self.clock.set(at(MONDAY, 14, 50))
+        far = MID_CLOSE.replace('"atm": 0', '"atm": 10')                    # 1.7% out of the money: no forced close
+        live = self.make([family("vert", far, band="probe", params={"hold": 20, "dte": 0})])
+        self.run_to(15, 24)
+        [pos] = live.book.positions.values()
+        resting = live.book.closing_order(pos.pid)
+        self.assertIsNotNone(resting)
+        self.assertNotIn(resting.venue_id, self.venue.cancels)
+        self.run_to(15, 25)
+        self.assertIn(resting.venue_id, self.venue.cancels)                 # the Gym drops it at the cutoff too
+
     def test_an_exit_cancels_another_familys_resting_open_on_its_contract(self):
         live = self.make([family("holder", VERTICAL, band="probe", params={"hold": 10}),
                           family("rester", RESTER, band="probe", params={"hold": 600})])

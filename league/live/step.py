@@ -979,6 +979,8 @@ class OptionsLive:
             age = mi - order.placed_minute if order.day == today else 10_000
             if order.action == "open" and expiring and minute >= rules.open_cutoff:
                 book.cancel(order, "the open cutoff for expiring contracts")
+            elif order.action == "close" and not order.forced and expiring and minute >= rules.close_cutoff:
+                book.cancel(order, "the close cutoff for expiring contracts (the Gym drops it there too)")
             elif order.tif is not None and age >= max(1, order.tif) and (not order.forced or order.action == "close_leg"):
                 book.cancel(order, f"its time in force ({order.tif} minutes) ran out")
             elif order.action == "open" and (shut := self.real_block(opening=True)) and not shut.startswith("the account could not be read"):
