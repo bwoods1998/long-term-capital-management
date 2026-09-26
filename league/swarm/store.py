@@ -302,13 +302,16 @@ class SwarmStore:
                 self._db.execute("BEGIN IMMEDIATE")
             try:
                 yield
-            except BaseException:
-                if outer:
-                    self._db.rollback()
-                raise
-            else:
                 if outer:
                     self._db.commit()
+            except BaseException:
+                if outer:
+                    try:
+                        self._db.rollback()
+                    except BaseException:
+                        # An unusable transaction must never become a later caller's successful commit.
+                        self._db.close()
+                raise
 
     # ------------------------------------------------------------------ key-values
     def get(self, key: str, default: Any = None) -> Any:
