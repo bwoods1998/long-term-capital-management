@@ -90,7 +90,7 @@ out["expiries_last_date"] = str(e["date"].max()) if e.height else None
 out["version"] = (store / "VERSION").read_text().strip()
 out["gate_mark"] = (store / "GATE").is_file()
 out["work_exists"] = os.path.exists("/data/work")
-out["processes"] = subprocess.run(["pgrep", "-fa", "[b]ackfill.py (run|one)|[u]niverse.py|[m]ultiprocessing.spawn"],
+out["processes"] = subprocess.run(["pgrep", "-fa", "[b]ackfill.py (run|one)|[u]niverse.py|[m]ultiprocessing.spawn|[l]eague.gym.calibrate"],
                                   capture_output=True, text=True).stdout.strip()
 print(json.dumps(out))
 """
@@ -134,10 +134,17 @@ def seal(api: Any, box: str) -> Any:
 
 
 def stage_done(journal_lines: list[dict[str, Any]], stages: tuple[int, ...], plan_counts: Mapping[str, int]) -> dict[str, Any]:
-    done: dict[str, int] = {}
+    latest = {}
     for row in journal_lines:
-        if row.get("type") == "task" and row.get("status") in ("ok", "empty"):
-            done[str(row.get("stage"))] = done.get(str(row.get("stage")), 0) + 1
+        if row.get("type") == "task":
+            key = (str(row.get("stage")), row.get("task"))
+            if row.get("status") in ("ok", "empty"):
+                latest[key] = row
+            elif row.get("status") == "invalidated":
+                latest.pop(key, None)
+    done: dict[str, int] = {}
+    for stage, _ in latest:
+        done[stage] = done.get(stage, 0) + 1
     return {str(s): {"done": done.get(str(s), 0), "planned": plan_counts.get(str(s))} for s in stages}
 
 
@@ -245,8 +252,12 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
     bl.STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(bl.STATE_DIR / "images.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
-                      rehearsal=rehearsal, keep=keep, needs=needs, roots=roots)
+        api = api or bl.client()
+        data_box = bl.data_box_id()
+        bl.ensure_running(api, data_box)
+        with bl.RemoteLease(api, data_box):
+            return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
+                          rehearsal=rehearsal, keep=keep, needs=needs, roots=roots)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
@@ -270,14 +281,16 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     if not complete and not force:
         raise SystemExit("the data box does not hold what this image needs yet (--force to build anyway)")
     # 2. a checkpoint of the data box with no download running
-    was_running = api.exec(data_box, ["bash", "-c", "p=$(cat /data/work/backfill.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 $p 2>/dev/null && echo yes || echo no"],
-                           timeout=60).stdout.strip() == "yes"
+    from nightly import BoxHandle
+
+    data = BoxHandle(api, data_box)
+    was_running = data.backfill_running()
     last_args = None
     if was_running:
         last_args = (bl.read_json(bl.DATA_BOX).get("runs") or [{}])[-1].get("args")
-        api.exec(data_box, ["bash", "-c", "p=$(cat /data/work/backfill.pid); kill -- -$p 2>/dev/null || kill $p; "
-                                          "for i in $(seq 1 60); do kill -0 $p 2>/dev/null || break; sleep 1; done; "
-                                          "pkill -f multiprocessing.spawn; true"], timeout=120)
+        if not last_args:
+            raise RuntimeError("cannot stop a backfill without its restart arguments")
+        data.stop_backfill()
         say("  backfill stopped for the checkpoint")
     try:
         source = checkpoint_with_retry(api, data_box, name=f"ltcm-data-for-{kind}-{version}",
@@ -285,9 +298,7 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
                                        sleep=sleep, errors=errors)
     finally:
         if was_running and last_args:
-            command = (f"mkdir -p /data/work && cd {bl.CODE_DIR} && setsid nohup {bl.VENV_PY} backfill.py run {last_args} "
-                       f">> /data/work/backfill.out 2>&1 < /dev/null &")
-            api.exec(data_box, command, timeout=60, background=True)
+            data.start_backfill(last_args)
             say("  backfill restarted")
     say(f"  data box checkpoint {source['checkpoint_id']}")
     # 3. fork, seal first, stop anything carried over
@@ -295,7 +306,8 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     box = fork["sailbox_id"]
     say(f"  fork {box}; sealing")
     seal(api, box)
-    api.exec(box, ["bash", "-c", "pkill -f 'backfill.py|universe.py|multiprocessing' ; rm -f /data/work/backfill.pid; true"], timeout=60)
+    api.exec(box, ["bash", "-c", "pkill -f '[b]ackfill.py|[u]niverse.py|[m]ultiprocessing|[l]ocking.py serve' ; "
+                                  "rm -f /data/work/backfill.pid; true"], timeout=60)
     # 4. prune
     prune_args = spec["prune"] + (f" --roots {','.join(roots)}" if roots else "")
     pruned = bl.run_py(api, box, f"backfill.py prune {prune_args}", timeout=3600).check()
@@ -368,7 +380,9 @@ def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_day
         say(f"  checkpoint {label}: {row['checkpoint_id']}")
     api.sleep(box)
     record = bl.read_json(bl.IMAGES)
-    entry = {"version": version, "box_id": box, "checkpoints": checkpoints, "source_checkpoint": source_checkpoint,
+    previous = (record.get(kind) or {}).get("current") or {}
+    entry = {**(previous if previous.get("box_id") == box else {}),
+             "version": version, "box_id": box, "checkpoints": checkpoints, "source_checkpoint": source_checkpoint,
              "built_at": bl.now(), "ttl_days": ttl_days, "sealed": {"no_network": True}, "windows": list(KINDS[kind]["keep"]),
              "checkpoint_errors": errors, "gate_mark": facts["gate_mark"], "finished_by": "images.py finish",
              "verified": {k: facts[k] for k in ("files", "first_date", "last_date", "manifest_rows", "manifest_windows",

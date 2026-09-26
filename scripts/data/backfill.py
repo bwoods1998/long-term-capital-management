@@ -438,6 +438,8 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         for record in written:
             store.journal.append(record)
         kinds = [r["kind"] for r in written]
+        if "nbbo" in kinds and "underlying" not in kinds:
+            raise RuntimeError("NBBO exists but the underlying series is missing; retry the complete day")
         return {"status": "ok" if "nbbo" in kinds else "empty", "files": kinds, "expiries": len(expiries),
                 "nbbo": stats, "why": None if "nbbo" in kinds else "no NBBO rows"}
 
@@ -640,8 +642,9 @@ class Runner:
                 log.info("round %d done; %d tasks to retry", rounds, len(todo))
         compile_store(self.store, self.calendar)
         self.write_progress()
-        log.info("queue empty after %d rounds", rounds)
-        return 0
+        left = sl.pending(self.tasks, self.store.journal)
+        log.info("queue ended after %d rounds; %d tasks incomplete", rounds, len(left))
+        return 1 if left else 0
 
 
 # ------------------------------------------------------------------------------ compile, prune, adopt
@@ -795,6 +798,61 @@ def adopt(store: Store, records_path: str, calendar: sl.Calendar) -> dict[str, A
     return {"adopted": ok, **compile_store(store, calendar)}
 
 
+def ingest_underlying(store: Store, payload: Any, calendar: sl.Calendar) -> dict[str, Any]:
+    """Trusted House SIP relay; complete bars are placed at their availability minute (+1).
+
+    Every packet is validated before writing any. The data box receives only bars; it never
+    receives the House's gateway token. The caller serializes ingestion with the data-operation
+    lease and pauses a backfill that could rewrite these files.
+    """
+    import math
+    import polars as pl
+    import frames as fr
+
+    packets = payload if isinstance(payload, list) else [payload]
+    prepared, identities = [], set()
+    columns = ("minute", "price", "open", "high", "low", "close", "volume")
+    schema = {name: (pl.Int16 if name == "minute" else pl.Float64) for name in columns}
+    for packet in packets:
+        root, day = packet["root"], dt.date.fromisoformat(packet["day"])
+        sl.rel_path("underlying", root, day)  # canonical uppercase root, no path traversal
+        if root in ("XSP", "SPXW"):
+            raise ValueError("index underlying prices come from options, not SIP stock bars")
+        if (root, day) in identities:
+            raise ValueError("duplicate underlying packet")
+        identities.add((root, day))
+        hours = calendar.hours(day)
+        if hours is None or not packet.get("rows"):
+            raise ValueError("no trading session or no SIP bars")
+        if packet.get("completed_minutes") is not True:
+            raise ValueError("SIP bars must be shifted to their completion minute")
+        rows, minutes = [], set()
+        for row in packet["rows"]:
+            minute = row["minute"]
+            values = {k: float(row[k]) for k in columns if k != "minute"}
+            if (isinstance(minute, bool) or not isinstance(minute, int)
+                    or not hours[0] < minute <= hours[1] or minute in minutes):
+                raise ValueError("invalid, duplicate or incomplete SIP bar minute")
+            if any(not math.isfinite(value) for value in values.values()):
+                raise ValueError("nonfinite SIP bar")
+            if any(values[k] <= 0 for k in ("price", "open", "high", "low", "close")) or values["volume"] < 0:
+                raise ValueError("invalid SIP bar price or volume")
+            if (values["high"] < max(values["open"], values["close"], values["low"])
+                    or values["low"] > min(values["open"], values["close"], values["high"])
+                    or values["price"] != values["close"]):
+                raise ValueError("inconsistent SIP OHLC or price")
+            minutes.add(minute)
+            rows.append({"minute": minute, **values})
+        prepared.append((root, day, pl.DataFrame(rows, schema=schema).sort("minute")))
+    count = 0
+    for root, day, frame in prepared:
+        rows, digest, size = fr.write(frame, store.path("underlying", root, day))
+        store.journal.append(sl.file_record("underlying", root, day, rows=rows, sha256=digest, size=size,
+                                            source="alpaca SIP completed-minute OHLCV v1", fetched_at=sl.utc_now()))
+        count += rows
+    return {"underlying_days": len(prepared), "rows": count, **compile_store(store, calendar)}
+
+
 def invalidate(store: Store, root: str, before: dt.date, why: str) -> dict[str, Any]:
     """Undo a root's results before a date (e.g. fetched under a symbol that was another underlying
     then): the files are deleted and journaled as removed, the tasks journaled as invalidated so the
@@ -863,7 +921,7 @@ def _setup_logging(work: Path) -> None:
     log.setLevel(logging.INFO)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--store", default=sl.STORE_ROOT)
     parser.add_argument("--work", default=sl.WORK_ROOT)
@@ -893,6 +951,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     rc.add_argument("--date", required=True)
     ad = sub.add_parser("adopt")
     ad.add_argument("--records", required=True)
+    sip = sub.add_parser("ingest-underlying", help="ingest completed SIP bars relayed by the House")
+    sip.add_argument("--input", required=True)
     sub.add_parser("verify")
     inv = sub.add_parser("invalidate", help="delete a root's results before a date and queue them again")
     inv.add_argument("--root", required=True)
@@ -924,19 +984,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.cmd == "run":
         _setup_logging(store.work)
+        if args.passes < 1:
+            parser.error("--passes must be positive")
         slots_file = str(store.work / "slots")
         if args.slots is not None:
             Path(slots_file).write_text(str(args.slots))
         elif not Path(slots_file).exists():
             Path(slots_file).write_text("4")
         pid_file = store.work / "backfill.pid"
-        if pid_file.exists():
-            try:
-                other = int(pid_file.read_text().strip())
-                os.kill(other, 0)
-                raise SystemExit(f"a backfill is already running (pid {other})")
-            except (ValueError, ProcessLookupError):
-                pass
+        # The kernel lock, not a recyclable/stale pid, owns the account's one ThetaData session.
         pid_file.write_text(str(os.getpid()))
         try:
             limiter = Limiter(4, slots_file)
@@ -969,9 +1025,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     left = sl.pending(tasks, store.journal)
                     if not left:
                         break
-                    log.warning("pass %d ended with %d tasks not done; next pass in %ds", passes, len(left), args.pause)
-                    time.sleep(args.pause)
-                return 0
+                    log.warning("pass %d ended with %d tasks not done", passes, len(left))
+                    if passes < args.passes:
+                        time.sleep(args.pause)
+                return 1 if left else 0
             finally:
                 POOL.shutdown(wait=False, cancel_futures=True)
         finally:
@@ -1021,6 +1078,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(record, sort_keys=True, default=str))
     elif args.cmd == "adopt":
         print(json.dumps(adopt(store, args.records, calendar)))
+    elif args.cmd == "ingest-underlying":
+        print(json.dumps(ingest_underlying(store, json.loads(Path(args.input).read_text()), calendar)))
     elif args.cmd == "verify":
         print(json.dumps(verify(store)))
     elif args.cmd == "invalidate":
@@ -1038,6 +1097,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         digest, size = sl.sha256_file(args.out)
         print(json.dumps({**result, "tar": args.out, "sha256": digest, "bytes": size}))
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    from locking import process_lock
+
+    # Every entry point that can authenticate shares the kernel lock, including one-off probes.
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--store", default=sl.STORE_ROOT)
+    parser.add_argument("--work", default=sl.WORK_ROOT)
+    parser.add_argument("command", nargs="?")
+    known, _ = parser.parse_known_args(argv)
+    if known.command in ("run", "probe", "one"):
+        with process_lock(Path(known.work) / "session.lock"):
+            return _main(argv)
+    return _main(argv)
 
 
 if __name__ == "__main__":

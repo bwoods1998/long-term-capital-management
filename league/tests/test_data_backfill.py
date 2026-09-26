@@ -200,8 +200,9 @@ class RunnerResume(unittest.TestCase):
             original = bf.compile_store
             bf.compile_store = lambda *a, **k: {}
             try:
-                bf.Runner(tasks, theta, store, calendar(), threads=2, max_failures=3, progress_every=0.05,
-                          task_fn=task_fn).run()
+                status = bf.Runner(tasks, theta, store, calendar(), threads=2, max_failures=3, progress_every=0.05,
+                                   task_fn=task_fn).run()
+                self.assertEqual(status, 1)  # exhausted failures must never advertise a complete forward day
             finally:
                 bf.compile_store = original
             self.assertEqual(calls.count(tasks[0].id), 3)

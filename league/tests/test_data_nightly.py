@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -134,6 +135,15 @@ class TheDay(unittest.TestCase):
         self.assertEqual(nt.next_wake(dt.datetime(2026, 9, 28, 20, 0, tzinfo=UTC), cal),
                          dt.datetime(2026, 9, 29, 6, 0, tzinfo=UTC))
 
+    def test_winter_runs_after_publication_and_outages_catch_up(self):
+        cal = calendar()
+        self.assertEqual(nt.next_wake(dt.datetime(2026, 11, 2, 20, 0, tzinfo=UTC), cal),
+                         dt.datetime(2026, 11, 3, 7, 0, tzinfo=UTC))
+        self.assertEqual(nt.due_days(dt.datetime(2026, 9, 29, 5, 59, tzinfo=UTC), cal), [])
+        self.assertEqual(nt.due_days(dt.datetime(2026, 9, 29, 6, 0, tzinfo=UTC), cal), [dt.date(2026, 9, 28)])
+        self.assertEqual(nt.due_days(dt.datetime(2026, 10, 1, 6, 0, tzinfo=UTC), cal, ["2026-09-28"]),
+                         [dt.date(2026, 9, 29), dt.date(2026, 9, 30)])
+
 
 class Night(unittest.TestCase):
     NOW = dt.datetime(2026, 9, 29, 6, 5, tzinfo=UTC)
@@ -175,6 +185,21 @@ class Night(unittest.TestCase):
         result = nightly.run()
         self.assertTrue(result["checkpoint"])
 
+    def test_sip_relay_runs_before_restart_and_failure_keeps_day_pending(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
+        def relay(day, handle):
+            self.assertEqual(day, self.DAY)
+            self.assertIs(handle, data)
+            self.assertFalse(data.running)
+            raise RuntimeError("missing SIP bars")
+        nightly.relay = relay
+        with self.assertRaises(RuntimeError):
+            nightly.run()
+        self.assertTrue(data.running)
+        self.assertEqual(checkpoints, [])
+        self.assertNotIn("pulled", nightly.state(self.DAY))
+
     def test_a_refused_adoption_is_not_checkpointed_and_the_pull_is_not_repeated(self):
         data, gate, images = FakeData(self.DAY), FakeGate(fail_adopt=True), {}
         nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
@@ -203,6 +228,47 @@ class Night(unittest.TestCase):
         nightly, _, _ = job(FakeData(dt.date(2026, 9, 25)), FakeGate(), {}, now=self.NOW)
         with self.assertRaises(ValueError):
             nightly.run(dt.date(2026, 9, 25))
+
+    def test_explicit_days_cannot_bypass_the_publication_time(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        nightly, _, _ = job(data, gate, images, now=self.NOW - dt.timedelta(minutes=30))
+        with self.assertRaises(ValueError):
+            nightly.run(self.DAY)
+        self.assertEqual(data.calls, [])
+
+    def test_running_backfill_needs_restart_arguments_before_stopping(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        nightly, _, _ = job(data, gate, images, now=self.NOW)
+        nightly.last_backfill_args = None
+        with self.assertRaises(RuntimeError):
+            nightly.run()
+        self.assertTrue(data.running)
+        self.assertNotIn("stop", data.calls)
+
+    def test_a_missing_underlying_is_not_checkpointed(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        data.files.pop(f"{sl.STORE_ROOT}/underlying/SPY/{self.DAY}.parquet")
+        nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
+        with self.assertRaises(RuntimeError):
+            nightly.run()
+        self.assertEqual(checkpoints, [])
+        self.assertNotIn("pulled", images["gate"]["forward_days"][str(self.DAY)])
+
+    def test_a_mismatched_record_path_is_not_uploaded(self):
+        data, gate, images = FakeData(self.DAY), FakeGate(), {}
+        old = data.run
+        def run(args, timeout):
+            ok, out = old(args, timeout)
+            if args.startswith("backfill.py records"):
+                rows = [json.loads(line) for line in out.splitlines()]
+                rows[0]["path"] = "nbbo/../../escape/2026-09-28.parquet"
+                out = "\n".join(json.dumps(row) for row in rows)
+            return ok, out
+        data.run = run
+        nightly, _, checkpoints = job(data, gate, images, now=self.NOW)
+        with self.assertRaises(RuntimeError):
+            nightly.run()
+        self.assertEqual(gate.uploads, {})
 
     def test_a_holiday_is_skipped(self):
         data, gate, images = FakeData(dt.date(2026, 11, 26)), FakeGate(), {}
@@ -252,3 +318,42 @@ class Rehearsal(unittest.TestCase):
         nightly.rehearsal = False
         with self.assertRaises(ValueError):
             nightly.run(day)
+
+
+class Schedule(unittest.TestCase):
+    def test_failed_day_retries_then_publishes_only_a_completed_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            now = [dt.datetime(2026, 9, 29, 6, 0, tzinfo=UTC)]
+            calls = []
+            def run(day):
+                calls.append(day)
+                if len(calls) == 1:
+                    raise RuntimeError("vendor unavailable")
+                return {"day": day.isoformat(), "checkpoint": "sbcp_new", "roots": ["SPY"]}
+            controller = nt.Controller(root, root / "ready.json", calendar(), run=run, clock=lambda: now[0])
+            self.assertEqual(controller.tick()["phase"], "retry")
+            self.assertFalse((root / "ready.json").exists())
+            self.assertEqual(controller.tick()["phase"], "retry")
+            self.assertEqual(len(calls), 1)
+            now[0] += dt.timedelta(minutes=5)
+            self.assertEqual(controller.tick()["phase"], "complete")
+            ready = json.loads((root / "ready.json").read_text())
+            self.assertEqual((ready["day"], ready["gate_checkpoint"]), ("2026-09-28", "sbcp_new"))
+            self.assertEqual((root / "ready.json").stat().st_mode & 0o777, 0o600)
+            # A fresh controller resumes the durable completed record without replaying the day.
+            again = nt.Controller(root, root / "ready.json", calendar(), run=run, clock=lambda: now[0])
+            self.assertEqual(again.tick()["phase"], "waiting")
+            self.assertEqual(len(calls), 2)
+
+    def test_no_forward_day_before_tuesday_and_no_false_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def run(day):
+                raise AssertionError("not due")
+            controller = nt.Controller(root, root / "ready.json", calendar(), run=run,
+                                       clock=lambda: dt.datetime(2026, 9, 26, 16, 0, tzinfo=UTC))
+            self.assertEqual(controller.tick()["next_wake"], "2026-09-29T06:00:00+00:00")
+            with self.assertRaises(ValueError):
+                nt.publish_ready(root / "ready.json", {"day": "2026-09-28"}, controller.clock())
+            self.assertFalse((root / "ready.json").exists())

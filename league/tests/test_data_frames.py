@@ -273,3 +273,37 @@ class Invalidate(unittest.TestCase):
             self.assertEqual(list(store.journal.files()), ["nbbo/META/2022-06-10.parquet"])
             self.assertNotIn("4:day:META:2022-01-07", store.journal.done())
             self.assertIsNone(store.load_expiries("META", days[0]))
+
+
+@unittest.skipIf(pl is None, "polars/pyarrow are not installed here")
+class SipIngest(unittest.TestCase):
+    def packet(self):
+        return {"root": "SPY", "day": DAY.isoformat(), "completed_minutes": True,
+                "rows": [{"minute": 571, "price": 100.5, "open": 100.0, "high": 101.0,
+                          "low": 99.0, "close": 100.5, "volume": 20.0}]}
+
+    def test_completed_bars_are_written_and_journaled_with_ohlcv(self):
+        import backfill as bf
+        with tempfile.TemporaryDirectory() as tmp:
+            store = bf.Store(str(Path(tmp) / "store"), str(Path(tmp) / "work"))
+            got = bf.ingest_underlying(store, self.packet(), sl.Calendar({}))
+            self.assertEqual(got["underlying_days"], 1)
+            frame = pl.read_parquet(store.path("underlying", "SPY", DAY))
+            self.assertEqual(frame.to_dicts(), self.packet()["rows"])
+            self.assertIn("SIP", next(iter(store.journal.files().values()))["source"])
+
+    def test_bad_or_unfinished_bars_never_replace_a_day(self):
+        import backfill as bf
+        with tempfile.TemporaryDirectory() as tmp:
+            store = bf.Store(str(Path(tmp) / "store"), str(Path(tmp) / "work"))
+            for edit in (lambda p: p.update(completed_minutes=False),
+                         lambda p: p["rows"][0].update(minute=570),
+                         lambda p: p["rows"][0].update(high=99.0),
+                         lambda p: p["rows"][0].update(price=float("nan")),
+                         lambda p: p.update(root="XSP"),
+                         lambda p: p.update(root="../bad")):
+                packet = self.packet()
+                edit(packet)
+                with self.assertRaises(ValueError):
+                    bf.ingest_underlying(store, [self.packet(), packet], sl.Calendar({}))
+                self.assertEqual(store.journal.files(), {})

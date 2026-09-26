@@ -11,6 +11,8 @@ import datetime as dt
 import json
 import os
 import sys
+import threading
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -41,7 +43,7 @@ SEALED = {"no_network": True}
 
 CODE_DIR = "/data/code"
 VENV_PY = "/opt/data-venv/bin/python"
-CODE_FILES = ("storelib.py", "frames.py", "backfill.py", "universe.py", "check.py")
+CODE_FILES = ("storelib.py", "frames.py", "backfill.py", "universe.py", "check.py", "locking.py")
 
 SETUP_SCRIPT = r"""
 set -e
@@ -135,6 +137,49 @@ def push_code(api: Any, box: str, files: tuple[str, ...] = CODE_FILES) -> list[s
 def run_py(api: Any, box: str, args: str, *, timeout: int = 600, on_output: Callable[[str, str], None] | None = None) -> Any:
     """Run one of the data tools on a box with the venv's Python."""
     return api.exec(box, ["bash", "-c", f"cd {CODE_DIR} && {VENV_PY} {args}"], timeout=timeout, on_output=on_output)
+
+
+class RemoteLease:
+    """Serialize image builds and nightly jobs even when controllers run on different hosts."""
+
+    def __init__(self, api: Any, box: str):
+        self.api, self.box = api, box
+        self.token = uuid.uuid4().hex
+        self.stop = threading.Event()
+        self.failed = False
+        self.worker = None
+
+    def command(self, action: str) -> bool:
+        return run_py(self.api, self.box, f"locking.py {action} --token {self.token}", timeout=60).ok
+
+    def __enter__(self):
+        push_code(self.api, self.box, ("locking.py",))
+        if not self.command("acquire"):
+            raise RuntimeError("another controller is building an image or pulling the forward day")
+        self.worker = threading.Thread(target=self.renew, daemon=True)
+        self.worker.start()
+        return self
+
+    def renew(self) -> None:
+        while not self.stop.wait(60):
+            try:
+                if not self.command("renew"):
+                    self.failed = True
+                    return
+            except Exception:
+                self.failed = True
+                return
+
+    def __exit__(self, kind, value, traceback):
+        self.stop.set()
+        if self.worker:
+            self.worker.join(timeout=65)
+        try:
+            released = self.command("release")
+        except Exception:
+            released = False
+        if kind is None and (self.failed or not released):
+            raise RuntimeError("the data operation lease was lost; retry before publishing a checkpoint")
 
 
 def theta_env_bytes() -> bytes:

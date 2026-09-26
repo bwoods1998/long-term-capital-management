@@ -114,7 +114,7 @@ def rank(numbers: dict[str, dict[str, Any]], *, names: int, min_days: int) -> li
     return ordered[:names]
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _main(argv: Sequence[str] | None = None) -> int:
     import backfill as bf
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -189,6 +189,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     Path(args.out).write_text(json.dumps(out, indent=1))
     print(json.dumps({"names": names, "roots": core + names, "seconds": out["seconds"], "requests": theta.requests}))
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    from locking import process_lock
+
+    if any(arg in ("-h", "--help") for arg in (sys.argv[1:] if argv is None else argv)):
+        return _main(argv)
+    with process_lock(Path(sl.WORK_ROOT) / "session.lock"):
+        return _main(argv)
 
 
 if __name__ == "__main__":
