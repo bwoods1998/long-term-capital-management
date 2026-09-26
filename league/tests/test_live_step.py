@@ -557,6 +557,24 @@ class BrokenLegs(LiveCase):
         self.assertEqual(live.book.positions, {})
 
 
+class OptionEventsOnce(LiveCase):
+    def test_an_old_assignment_is_never_read_again_however_many_events_follow(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.venue.activity_rows.append({"id": "a00001", "activity_type": "OPASN", "symbol": "SPY260925C00600000", "qty": "1",
+                                         "date": "2026-09-25", "transaction_time": "2026-09-25T20:00:00Z"})
+        for i in range(2100):
+            self.venue.activity_rows.append({"id": f"b{i:05d}", "activity_type": "OPEXP", "symbol": "SPY260926P00500000",
+                                             "qty": "1", "date": "2026-09-27", "transaction_time": "2026-09-27T20:00:00Z"})
+        self.run_to(9, 31)
+        for _ in range(3):
+            live._activities_at = float("-inf")
+            self.clock.set(self.clock() + 60)
+            live.minute()
+        seen = [p for p, a in self.ledger.of("live.option_event") if p["kind"] == "OPASN"]
+        self.assertEqual(len(seen), 1, "the old assignment was processed once")
+        self.assertEqual(sum(1 for n in self.notices if n["stop"] == "assignment"), 1)
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])

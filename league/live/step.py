@@ -148,6 +148,7 @@ class OptionsLive:
         self._families_at = float("-inf")
         self._activities_at = float("-inf")
         self._activities_changed = False
+        self._stock_held = False
         self._flows_at = float("-inf")
         self._last_minute: tuple[str, int] | None = None
         self._thread: threading.Thread | None = None
@@ -865,15 +866,21 @@ class OptionsLive:
         if self.real is None or now - self._activities_at < ACTIVITIES_EVERY:
             return
         self._activities_at = now
-        seen = set(self.state.get("activities_seen", []) or [])
+        # Read from a cursor (the latest event's day, less a day), never again from the reset: the ids seen are kept by
+        # day and pruned with it, so an old assignment is never read twice however many events follow.
+        cursor = str(self.state.get("activities_cursor") or (self.start_at or "")[:10] or "")
+        seen: dict[str, str] = dict(self.state.get("activities_seen_by_day", {}) or {})
+        after = (dt.date.fromisoformat(cursor) - dt.timedelta(days=1)).isoformat() if cursor else None
         try:
-            rows = self.real.activities(list(OPTION_EVENTS), after=self.start_at or None)
+            rows = self.real.activities(list(OPTION_EVENTS), after=after)
         except Exception as exc:  # noqa: BLE001
             self.alert("warning", f"live: option events could not be read ({type(exc).__name__})")
             return
-        fresh = [r for r in rows if str(r.get("id")) not in seen]
+        def event_day(r: Mapping[str, Any]) -> str:
+            return str(r.get("date") or r.get("transaction_time") or "")[:10]
+        fresh = [r for r in rows if str(r.get("id")) not in seen and (not after or not event_day(r) or event_day(r) >= after)]
         for r in fresh:
-            seen.add(str(r.get("id")))
+            seen[str(r.get("id"))] = event_day(r)
             kind, symbol = str(r.get("activity_type")), str(r.get("symbol") or "").upper()
             self.record("live.option_event", {"kind": kind, "symbol": symbol, "qty": str(r.get("qty")), "_row": dict(r)})
             contracts = abs(int(M.D(r.get("qty") or 0)))
@@ -891,7 +898,13 @@ class OptionsLive:
                 self.alert("error", f"live: {why}: real entries frozen until it is resolved; its shares are closed and the "
                                     "structure's other legs closed alone")
                 self._tell_owner("assignment", why)
-        self.state.put("activities_seen", sorted(seen)[-2000:])
+        days = [d for d in seen.values() if d]
+        if days:
+            cursor = max(days + ([cursor] if cursor else []))
+            floor = (dt.date.fromisoformat(cursor) - dt.timedelta(days=3)).isoformat()
+            seen = {k: d for k, d in seen.items() if not d or d >= floor}
+            self.state.put("activities_cursor", cursor)
+        self.state.put("activities_seen_by_day", seen)
         self._activities_changed = bool(fresh)
         self._close_shares()
         self._resolve_latch()
@@ -923,7 +936,7 @@ class OptionsLive:
             return
         broken = [p for p in self.book.positions.values() if p.info.get("broken")]
         shares = self.state.get("shares", {}) or {}
-        if not broken and not any(shares.values()) and not self.book.frozen and not self.book.mismatch:
+        if not broken and not any(shares.values()) and not self._stock_held and not self.book.frozen and not self.book.mismatch:
             self.state.execute("DELETE FROM kv WHERE key='assignment_latch'")
             self.record("live.stop", {"stop": "assignment", "released": True, "why": f"resolved: {latch.get('why')}"})
 
@@ -935,7 +948,9 @@ class OptionsLive:
             positions = self.real.positions()
             working = {str(o.get("symbol") or "").upper() for o in self.real.orders(status="open")}
         except Exception:  # noqa: BLE001
+            self._stock_held = True   # unread: not known to be clear
             return
+        self._stock_held = any(str(r.get("asset_class")) == "us_equity" and M.D(r.get("qty") or 0) != 0 for r in positions)
         for row in positions:
             if str(row.get("asset_class")) != "us_equity" or str(row.get("symbol") or "").upper() in working:
                 continue
