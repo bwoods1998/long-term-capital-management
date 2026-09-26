@@ -194,6 +194,43 @@ class SwarmFrontierRouting(unittest.TestCase):
         self.assertEqual(self.sail_calls, [])
         self.assertEqual(self.store.spent(["openai"]), 0)
 
+    def test_failure_from_sqlite_commit_itself_rolls_back_before_fallback(self):
+        def deny_commit(action, first, *_):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_TRANSACTION and first == "COMMIT" else sqlite3.SQLITE_OK
+
+        self.store._db.set_authorizer(deny_commit)
+        opener = FakeOpener(ok())
+        router = self.router(opener)
+        original = router.sail
+        transactions_seen = []
+
+        def observed_sail(*args, **kwargs):
+            transactions_seen.append(self.store._db.in_transaction)
+            return original(*args, **kwargs)
+
+        router.sail = observed_sail
+        self.assertEqual(self.ask(router)["route"], "sail")
+        self.assertEqual(opener.calls, [])
+        self.assertEqual(transactions_seen, [False])
+        other = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(other.close)
+        self.assertEqual(other.spent(["openai"]), 0)
+        self.store._db.set_authorizer(None)
+
+    def test_failed_commit_and_failed_rollback_abort_both_paid_routes(self):
+        def deny_finish(action, first, *_):
+            return sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_TRANSACTION and first in ("COMMIT", "ROLLBACK") else sqlite3.SQLITE_OK
+
+        self.store._db.set_authorizer(deny_finish)
+        opener = FakeOpener(ok())
+        with self.assertRaisesRegex(ModelError, "readable budget store"):
+            self.ask(self.router(opener))
+        self.assertEqual(opener.calls, [])
+        self.assertEqual(self.sail_calls, [])
+        other = SwarmStore(self.root, clock=self.clock)
+        self.addCleanup(other.close)
+        self.assertEqual(other.spent(["openai"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -177,6 +177,15 @@ class ModelRouter:
             db.close()
 
     # ------------------------------------------------------------------ OpenAI
+    def _require_committed_store(self) -> None:
+        try:
+            with self.store._lock:
+                pending = self.store._db.in_transaction
+        except Exception:
+            raise ModelError("model dispatch requires a readable budget store") from None
+        if pending:
+            raise ModelError("model dispatch cannot run inside an uncommitted store transaction")
+
     def _openai_cap_room(self) -> float:
         try:
             cap = Decimal(str(self.settings.get("guard", {}).get("openai_cap_usd", 150.0)))
@@ -211,9 +220,7 @@ class ModelRouter:
         `desk` and `cap_usd_day` are the Provider's fuse for the Sail call. Admission and the durable hold are atomic
         across store connections; verified cost settles it, a 4xx refusal releases it, and an unknown bill retains it.
         Unknown cost is reported as None with held_usd, never as a free answer."""
-        with self.store._lock:
-            if self.store._db.in_transaction:
-                raise ModelError("model dispatch cannot run inside an uncommitted store transaction")
+        self._require_committed_store()
         errors = []
         hold = None
         if openai_model:
@@ -265,6 +272,9 @@ class ModelRouter:
                 if isinstance(status, int) and 400 <= status < 500:
                     self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
+        # A failed COMMIT/ROLLBACK may have left the admission store unusable. Do not turn that
+        # failure into another paid call on the fallback provider.
+        self._require_committed_store()
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
             response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
