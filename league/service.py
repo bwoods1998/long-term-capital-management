@@ -121,6 +121,14 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
                     inbox=Path(house.root) / "repairs-inbox")
 
 
+def auto_update(config: dict[str, Any]) -> bool:
+    """Whether the in-box updater pulls main by itself: only when `config.json` says `"auto_update":
+    true`. A missing key means OFF (the options overhaul, Sept 26, 2026, trap 3: the old default of
+    on let the updater ship main's heads into a House that nobody had deployed; the prune ships as
+    the owner's deploys, and the updater stays off until the overhaul has run a day)."""
+    return config.get("auto_update", False) is True
+
+
 def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     """The Alpha Lab's box key when `config.json` `lab` names its box by id (`box_id`, the box
     `scripts/lab_box.py create` made, which `LabBox.from_config` binds under this same key) and is
@@ -400,7 +408,7 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         from .backup import Backup
 
         house.backup = Backup(SailboxClient(), house.ledger)
-    if not canary and REPO.parent.name == "releases" and config.get("auto_update", True):
+    if not canary and REPO.parent.name == "releases" and auto_update(config):
         # On the House box the code runs from <base>/releases/<id>: there, main is pulled every
         # half hour and handed to the watchdog. On a developer's machine nothing updates itself.
         from .updater import Updater

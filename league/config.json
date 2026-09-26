@@ -19,7 +19,7 @@
   "_about_options_history_daily_expiries": "The review of Deploy G (Sept 25, 2026): true makes the House's daily options-history refresh ingest EVERY expiry of SPY, QQQ and IWM (league/options_history.py DAILY_EXPIRIES) and backfill them across the replay window once; false keeps the weekly refresh (the last expiry of each week), as before G. Deploy G ships it false. Turn it on ONLY in a later release that changes nothing but this key, in an announced, watched quiet slot (the backfill holds an ops slot for tens of minutes and thousands of gateway GETs), recording House RSS and tick time during it and at the first every-expiry structure tape. Once the store holds every expiry, NEVER roll back past Deploy G without first deleting the non-weekly SPY/QQQ/IWM bars: the older code's tape has no weekly filter and would build tapes about four times the size (House._options_history_daily_expiries).",
   "options_history_daily_expiries": false,
   "real_money": true,
-  "auto_update": true,
+  "auto_update": false,
   "release_train_hours": 4,
   "tick_seconds": 30,
   "mark_every_seconds": 300,
