@@ -261,6 +261,15 @@ run's `config.json` change is its own new `options_structures` key).
   (the owner sold AZ-SD, LAD-SF and NYM-WSH; CIN-TOR starts about 19:07Z)). Steps: #344 merged; the gateway (`npx wrangler
   deploy --tag <sha>` from `~/Work/ltcm-deploy/gateway` at the new main, every gateway test re-run first); then the House
   (`floor_box.py deploy` through the ratify wrapper; ratify on `be1e3ce9` within a minute of promotion).
+  **#344 merged 03:06:07Z** (main `a1f9a8e7`, the tree of `e34d90c6`; money digest `be1e3ce9`). **Gateway deployed 03:06:25Z**
+  (`npx wrangler deploy --tag a1f9a8e` from `~/Work/ltcm-deploy/gateway`, version `ab391ab4-f45f-40eb-a0c0-6a4c2df77421`;
+  215/215 gateway tests and `npm run check` on that tree first; the live gateway before it was `adccc8e`, the Kalshi run's K1,
+  which main's gateway equalled; `OPTION_STRUCTURES_REAL` "off"). **The House deploy was REFUSED at 03:06:38Z** before its
+  canary: "another deploy or rollback is running (pid 14774)", the updater's own release `main-8a108891a84e` (main's head
+  after Deploy B, Merton's #353, strategy files only), staged 02:59:56Z, promoted about 03:00Z, still in its watch. Nothing of
+  G reached the House (the updater staged before #344 merged, and it refuses G's protected paths). The gateway's G change is
+  compatible with the running House (it sends no multi-leg order; structures are on `options-shadow`). The House deploy runs
+  again once that watch ends.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
