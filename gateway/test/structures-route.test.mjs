@@ -26,7 +26,7 @@ const env = (extra = {}) => ({
   ALPACA_PAPER_SECRET_KEY: 'paper-secret-held-by-the-worker',
   // As deployed (wrangler.jsonc, Sept 26, 2026): the real account capped by maximum loss against its equity.
   MAX_ORDER_USD: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
-  MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.15', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
+  MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.25', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
   CAP_TIMEZONE: 'America/New_York', POSITIONS_CACHE_MS: '0',
   ...extra,
 });
@@ -190,7 +190,8 @@ test('REVIEW: with OPTION_STRUCTURES_REAL off, a held real structure is still cl
 });
 
 test('with OPTION_STRUCTURES_REAL="debit_vertical" and $500 of equity: a $0.70 vertical is metered at $70 and passes, $0.80 is refused over 15% of equity, a credit vertical is not admitted, a close is metered at zero', async () => {
-  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical' };
+  // The mechanism at a 15% share (the deployed share is 25% since the sprint; its own test is below).
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical', MAX_ORDER_EQUITY_SHARE: '0.15' };
   const gate = gateFor(settings);
 
   const open = await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings, gate });
@@ -259,8 +260,9 @@ test('a structure close passes a spent day and a spent order cap, but not the ki
 });
 
 test('an admitted credit type is metered at its collateral less the credit, and opens only at $2,000 of equity', async () => {
-  // Sept 26, 2026 (the options-swarm run, Wave 5): at $2,000 the per-order cap is 15% of it, $300.
-  const settings = { OPTION_STRUCTURES_REAL: 'iron_condor,credit_vertical' };
+  // Sept 26, 2026 (the options-swarm run, Wave 5): at $2,000 the per-order cap is 15% of it, $300 (the mechanism at a 15%
+  // share; the deployed share is 25% since the sprint).
+  const settings = { OPTION_STRUCTURES_REAL: 'iron_condor,credit_vertical', MAX_ORDER_EQUITY_SHARE: '0.15' };
   const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
   const one = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity: '2000.00' });
   assert.equal(one.response.status, 200);
@@ -282,16 +284,25 @@ test('an admitted credit type is metered at its collateral less the credit, and 
   assert.match((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).body.error, /debit_vertical is not admitted/);
 });
 
-test('the deployed configuration keeps real structure opens disabled for paper readiness', () => {
-  // Sept 26, 2026 (the options-swarm run, Wave 5): until today "off". wrangler.jsonc is JSON with comments: the line
-  // itself is the check.
+test('the deployed configuration opens exactly the four debit types on the real account (the sprint, Sept 26, 2026)', async () => {
+  // Until the sprint "off". The owner's D1 and D4: the two debit structures and a single long call or put, the
+  // constitution's `options_money.real_types` (league.ci holds the two equal); no credit type under $2,000 of equity.
+  // wrangler.jsonc is JSON with comments: the line itself is the check.
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const lines = config.split('\n').filter(line => /"OPTION_STRUCTURES_REAL"/.test(line));
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "off",?\s*$/);
+  assert.match(lines[0], /^\s*"OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",?\s*$/);
   const listed = /"OPTION_STRUCTURES_REAL": "([^"]*)"/.exec(lines[0])[1];
-  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }),
-    [], 'no real opening order is admitted by the deployed configuration');
+  assert.deepEqual(admittedStructures({ OPTION_STRUCTURES_REAL: listed }), ['debit_vertical', 'long_butterfly', 'long_call', 'long_put']);
+  const settings = { OPTION_STRUCTURES_REAL: listed };
+  // A debit vertical opens; a credit vertical and a condor do not, at any equity.
+  assert.equal((await call(post('alpaca', mleg(VERTICAL, '0.70')), { settings })).response.status, 200);
+  const condor = [leg(occ(579, 'P'), BTO), leg(occ(580, 'P'), STO), leg(occ(590), STO), leg(occ(591), BTO)];
+  for (const equity of ['500.00', '5000.00']) {
+    const refused = await call(post('alpaca', mleg(condor, '-0.38')), { settings, equity });
+    assert.equal(refused.response.status, 400, equity);
+    assert.match(refused.body.error, /An iron_condor is not admitted on the real account/);
+  }
 });
 
 // --- a real close must close legs the account holds (Sept 25, 2026; the route's review, MINOR 1) ---------------------------

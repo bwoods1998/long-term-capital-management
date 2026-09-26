@@ -331,6 +331,10 @@ def check_config(base: str | None, root: Path = REPO, *, baseline: Path | None =
 #: The gateway's line that names the structure types the REAL Alpaca account admits (`gateway/lib/caps.mjs`
 #: `admittedStructures`), in `gateway/wrangler.jsonc` (JSON with comments: the line itself is read, as the gateway's own test does).
 GATEWAY_STRUCTURES_LINE = re.compile(r'^\s*"OPTION_STRUCTURES_REAL"\s*:\s*"([^"\\]*)"\s*,?\s*(//.*)?$')
+#: The single-contract types the gateway's list may name besides the structure spec's (`gateway/lib/caps.mjs`
+#: SINGLE_LEG_TYPES; `constitution.OPTIONS_SINGLE_TYPES`): a long call and a long put, one contract bought to open (the
+#: sprint, B4, Sept 26, 2026). Held equal to both by `league/tests/test_live_singles.py`.
+GATEWAY_SINGLE_TYPES = ("long_call", "long_put")
 
 
 def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
@@ -350,7 +354,7 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
     if not raw or raw.lower() == "off":
         return [], []
     names = [n for n in re.split(r"[\s,]+", raw) if n]
-    unknown = [n for n in names if n not in TYPES]
+    unknown = [n for n in names if n not in TYPES and n not in GATEWAY_SINGLE_TYPES]
     if unknown:
         return [], [f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL names {', '.join(unknown)}, not a structure type"]
     return sorted(set(names)), []

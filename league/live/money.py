@@ -31,7 +31,8 @@ plus its open and close fees:
 - Sized: `sized.kelly_fraction` of Kelly on the LOWER bound (`stats.quarter_kelly`: fraction x lcb / variance of the
   per-trade return on maximum loss) of `E` a structure, never above `sized.max_loss_share x E`; the family at most
   `sized.family_share x E`. A Sized family whose Kelly stake is under the Probe's cap is sized under the Probe's limits
-  (3% a structure, 3 open, 12% the family): Sized limits never apply at a Probe-sized stake.
+  (`probe.max_loss_share` a structure, `probe.open_per_family` open, `probe.family_share` the family): Sized limits never
+  apply at a Probe-sized stake.
 - Tuition: exactly one structure, only while the day's and the week's tuition maximum loss has room.
 - Every open: the book's open maximum loss at most `book_share x E`; the gateway's caps (one order's maximum loss at
   most min(`gateway.order_max_loss_usd`, `gateway.order_equity_share x E`), today's opening maximum loss at most
@@ -110,6 +111,7 @@ class Table:
     drawdown_stop_share: Decimal
     tuition_day: Decimal
     tuition_week: Decimal
+    calibration_day: Decimal
     max_orders_day: int
     max_requests_minute: int
     bp_buffer: Decimal
@@ -143,6 +145,7 @@ class Table:
             book_share=D(t["book_share"]), daily_stop_share=D(t["daily_stop_share"]),
             drawdown_stop_share=D(t["drawdown_stop_share"]),
             tuition_day=D(t["tuition"]["day_usd"]), tuition_week=D(t["tuition"]["week_usd"]),
+            calibration_day=D(t["calibration"]["day_usd"]),
             max_orders_day=int(path["max_orders_day"]), max_requests_minute=int(path["max_requests_minute"]),
             bp_buffer=D(path["bp_buffer"]), near_money_share=D(path["near_money_share"]),
             expiry_close_lead_minutes=int(path["expiry_close_lead_minutes"]),
@@ -158,6 +161,10 @@ class Table:
 
     def type_allowed(self, type_: str, equity: Decimal) -> str | None:
         """Why real money may not open `type_` now, or None."""
+        if type_ in self.credit_types and type_ not in self.real_types:
+            return (f"a {type_} is a credit structure: credit opens are not among the types real money opens "
+                    f"({', '.join(self.real_types)}) until a deposit takes equity to ${self.credit_min_equity} and the "
+                    "grant is ratified again (limited margin under it); shadow only until then")
         if type_ not in self.real_types:
             return (f"a {type_} is not one of the types real money opens ({', '.join(self.real_types)}): "
                     "it closes in more than one order at the venue; shadow only until a paper round trip proves it")
@@ -338,8 +345,8 @@ def kelly_cap(table: Table, equity: Decimal, fwd: Forward | None) -> Decimal:
 
 def sizing_band(table: Table, band: str, equity: Decimal, fwd: Forward | None) -> str:
     """The limits a real open is sized under: a Sized family whose Kelly stake is under the Probe's cap keeps the
-    Probe's limits (3% a structure, 3 open, 12% the family): the Sized family and count limits never apply at a
-    Probe-sized stake (the review of #362, C3)."""
+    Probe's limits (its share a structure, its open count, its family share): the Sized family and count limits never
+    apply at a Probe-sized stake (the review of #362, C3)."""
     if band == "sized" and kelly_cap(table, equity, fwd) < probe_cap(table, equity):
         return "probe"
     return band

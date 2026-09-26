@@ -4,6 +4,11 @@ The live book's position cash includes entry/exit cashflows and recorded trading
 Adding the remaining position's marked value gives its whole P&L, including partial closes.
 Every historical position is counted, even after its family leaves the public roster.
 Missing marks or unresolved inventory produce an unknown result, never an invented zero.
+
+The D3 calibration round trips (`league/live/calibration.py`, family `house:calibration`) are the House's own
+measurement, not trading: their positions and their pending orders are left out of Profit here. They are not published
+as a cost either: the site's figure after compute is the account's equity change less compute, and equity already
+carries their result.
 """
 from __future__ import annotations
 
@@ -15,6 +20,10 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
+
+
+#: The calibration round trips' family (`league.live.calibration.FAMILY`, held equal by its test): never Profit.
+CALIBRATION_FAMILY = 'house:calibration'
 
 
 def total(rows: Sequence[Mapping[str, Any]], marks: Mapping[int, Any]) -> str | None:
@@ -90,11 +99,13 @@ def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False
             db.row_factory = sqlite3.Row
             version = db.execute('PRAGMA data_version').fetchone()[0]
             db.execute('BEGIN')
-            rows = [dict(row) for row in db.execute('SELECT * FROM positions')]
-            uncertain = db.execute("SELECT 1 FROM orders WHERE status IN ('pending','unknown') LIMIT 1").fetchone()
+            everything = [dict(row) for row in db.execute('SELECT * FROM positions')]
+            rows = [row for row in everything if row.get('family') != CALIBRATION_FAMILY]
+            uncertain = any(dict(row).get('family') != CALIBRATION_FAMILY for row in db.execute(
+                "SELECT * FROM orders WHERE status IN ('pending','unknown')"))
             recon = db.execute("SELECT value FROM kv WHERE key='recon'").fetchone()
             frozen = (json.loads(recon[0]) or {}).get('frozen') if recon else None
-            if uncertain or frozen or (not rows and not never_traded):
+            if uncertain or frozen or (not everything and not never_traded):
                 return unknown
             marks, valued_at = {}, at
             book = getattr(live, 'book', None)

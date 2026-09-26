@@ -182,6 +182,11 @@ cd /workspace/previous && /workspace/.venv/bin/python -m league.watchdog rollbac
   `--force-structures-risk` overrides it; use it only when the venue itself shows the account flat
   of option legs. Never roll back to a release that cannot close a structure the real account holds
   in one multi-leg order: close it first, or roll forward.
+- **The real book** (the sprint, Sept 26, 2026). `rollback` refuses while the box's `live.sqlite` shows a
+  real position held or a real order working and the previous release has `real_money` false (it builds no
+  real account: the positions would sit unmanaged) or lacks the long-single code (it cannot close a long
+  call or put; a same-day long call could be exercised into 100 shares the account cannot carry).
+  `--force-real-risk` overrides it. **Close the real positions, or roll forward, before a rollback.**
 - **The gateway:** `npx wrangler rollback` in `gateway/`. **The site:** the same in
   `~/Work/personal-site`.
 
@@ -293,8 +298,10 @@ real entries now, the stops, reconciliation, the paper proof, every instance).
 On the root House, the decider runs under host uid/gid 65534 with no supplementary groups, in a
 mandatory private network namespace. Its runtime is a root-owned read-only source copy under `/tmp`;
 the production env stays root-owned mode 0600 and the state/deploy directories must not be writable
-by other users. Local runs as an ordinary user retain that user's file permissions. One child and
-one memory allowance are shared, so a hung or exhausted child can cost all programs that minute.
+by other users. Local runs as an ordinary user retain that user's file permissions. The real and Candidate
+programs share one child and one memory allowance (2 GB), so a hung or exhausted child can cost all of them
+that minute; the observe band's programs run in a second child (1 GB), asked after the real decisions. A
+minute whose budget is spent skips a request without killing a child.
 Loads, pipe writes, decisions and recovery share at most 40 seconds, clamped to five seconds before
 the next minute. Recovery after a timeout happens within a later request's budget.
 
@@ -305,15 +312,18 @@ python3 -m league.live --root /workspace/state --clear-assignment     # owner: l
 ```
 
 Real entries need all of: `real_money` true; the grant active on the running money digest; the kill
-switch off; no stop tripped (daily 25% of start-of-day equity, drawdown 50% from the peak since the
+switch off; no stop tripped (daily 35% of start-of-day equity, drawdown 60% from the peak since the
 reset, deposits netted, a pending deposit or withdrawal settling nothing); reconciliation clean (two
 readings in a row that disagree freeze entries, two clean ones lift it; the LTC dust is known); no
-unresolved assignment; the paper proof passed; the House not paused. Exits need only the kill switch
+unresolved assignment; the paper proof passed (for a long call or put, the single-leg proof too); the
+House not paused. Exits need only the kill switch
 off, and go first: an exit cancels another family's resting open on its contracts and waits for them.
 A forced exit also cancels a blocking program close; ordinary exits do so after waiting two minutes.
 Expiring equity structures with a leg in or within 1% of the money are the House's to close from ten
 minutes before the close cutoff (15:00 ET for most roots, 15:15 for SPY and QQQ): a program's own
-close is cancelled for the forced one; index structures settle in cash. A family moved onto real money
+close is cancelled for the forced one; index structures settle in cash. An expiring long call or put is
+the House's to sell there whatever its moneyness while it has a bid (never exercised: the account cannot
+carry 100 shares). The last forced close before the cutoff is never cancelled for a re-price. A family moved onto real money
 trades it from the next session; a Candidate whose typical maximum loss is unknown stays shadow-only
 (`live.band` rows with `held` say why, once a day). A Probe becomes Sized only after five real Probe
 trades and a whole session at Probe. Each real instance has 60 orders a day (the Gym's), charged for
@@ -345,12 +355,41 @@ The paper route proof runs from 09:35 ET during this readiness stage, even with 
 client, grant or eligible family. It keeps an unfinished attempt's identity and owned contracts
 through restarts. Passing records paper execution evidence; the real-money flags remain off.
 
-**Turning real money on** (M4b): the gateway deployed with the caps by maximum loss and
-`OPTION_STRUCTURES_REAL` set to the five types; a second owner deploy with `real_money` true (the
-release carries the options money table: a new money digest); `python3 scripts/live_trading.py
---ratify` within a minute of it (`--enable` the first time). Then the House promotes Candidates that
-qualify to Probe within five minutes (`live.band` rows). Real entries still require the paper route
-proof's witnessed round trip, whether it passed during readiness or in the current session.
+**The money table (the sprint, owner decision D4, Sept 26, 2026)**: real types under $2,000 of equity are
+exactly `debit_vertical`, `long_butterfly`, `long_call`, `long_put` (the credit types come back only with a
+deposit to $2,000, in one deploy with the gateway, and a re-ratified grant); Probe 5% of equity a structure
+with a $100 one-contract floor, 3 open, 15% the family; the book 90%; daily stop 35%, drawdown stop 60%;
+tuition $200 a day; the D3 calibration's day bounded at $50 of possible loss. The gateway's per-order cap is the lower of
+$1,000 and 25% of equity (a $100 Probe fits at $481.63), 100% of equity opened a day, 250 of 300 orders open.
+
+**The single-leg paper proof**: once the vertical's has passed, the practice account opens and closes a
+1-lot SPY call about 1-2% out of the money (nearest expiry at least a day out, at the natural, held two
+minutes) with single-leg orders. Real long calls and puts open only after it (`paper_proof_single`).
+
+**The observe band**: every alive Gym-band family's validated version trades the shadow book as
+`<family>@<version>:o`, its version pinned for the session (pins in `live.sqlite`), never real, never a
+forward row, never on the site. Its programs load and decide after every real decision of the minute, in
+their own decider child (1 GB); its chains are read after the real path, under the minute's data budget.
+Its trades are kept in `/workspace/state/observe.sqlite` (0600) for the post-mortem only.
+
+**The D3 calibration round trips**: 1-lot SPY and QQQ call verticals one dollar wide nearest the money,
+at 10:00, 12:30 and 14:30 ET; open at the mid, then once at the mid plus a tick; close at the mid, a tick
+under, then the natural (at most six close attempts a position a day, backing off after a refusal). One
+round trip at a time, within a strict $50 bound on the day's possible loss: a new open goes only while
+today's realized calibration loss (net, floored at zero) plus what is still held or working plus its own
+maximum loss stays within $50; a closed round trip frees its maximum loss. Only with real money on, the
+grant active, real entries open and the paper proof passed; family
+`house:calibration`, never evidence and never Profit (the equity-based figure after compute carries it). Samples:
+`/workspace/state/calibration.sqlite` (0600), read with
+`python3 -m league.live --root /workspace/state --calibration` (per cell: attempts, outcomes, fill rate,
+mean fill against the mid in ticks, median seconds to fill). Off by default: `swarm.json`
+`{"live": {"calibration": true}}` turns it on.
+
+**Turning real money on** (M4b; the sprint's R2): the gateway deployed first (`OPTION_STRUCTURES_REAL`
+`debit_vertical,long_butterfly,long_call,long_put`, `MAX_ORDER_EQUITY_SHARE` 0.25); then the owner deploy
+with `real_money` true (a new money digest); `python3 scripts/live_trading.py --enable` (first time), then
+`--ratify` within a minute. Then the House promotes Candidates that qualify to Probe within five minutes
+(`live.band` rows). Real entries still require the paper route proofs' witnessed round trips.
 
 ### Monday's pre-open (12:00-13:25Z Sept 28)
 
@@ -366,11 +405,17 @@ proof's witnessed round trip, whether it passed during readiness or in the curre
    that landed: `--ratify` now (capital follows it up to the ceiling; above the ceiling is the owner's call).
 4. **The gateway**: `python3 scripts/gateway_admin.py status`: `kill_switch` false; `max_loss` shows a
    fresh equity reading (it reads the account on the first open if stale), the per-order cap = the lower of
-   $1,000 and 15% of equity, today's opening maximum loss 0 of 100% of equity, credit opens admitted only if
-   equity >= $2,000; `caps.max_day_orders` 300; the deployed `OPTION_STRUCTURES_REAL` is the five types.
+   $1,000 and 25% of equity, today's opening maximum loss 0 of 100% of equity; `caps.max_day_orders` 300; the
+   deployed `OPTION_STRUCTURES_REAL` is `debit_vertical,long_butterfly,long_call,long_put`.
 5. **The live state**: `python3 -m league.live --root /workspace/state`: `stops` not tripped (no
    `drawdown_tripped`), `reconciliation.frozen` empty, no `assignment_latch`, `paper_proof` absent or
    `passed`, no working orders, no open real positions but the ones expected.
+5b. **The sprint's checks**: `health.json` `options_live.fill_model` names the refitted model (its `source`
+   and `version`; `GYM_FILL_MODEL` or `/data/calibration/fill_model.json`, loaded once at the House's start);
+   `options_live.observe.switches` shows observe on and calibration as intended; `swarm.json` reads as a
+   JSON object; after 13:30Z `options_live.observe.pins` lists the session's families; after the proofs,
+   `paper_proof_single` passed; after 14:00Z `options_live.calibration.slots` and
+   `python3 -m league.live --root /workspace/state --calibration`.
 6. **The Probe list**: `live.band` rows since Sunday (who became Probe or Sized and why; who stayed a
    Candidate and why: not through the holdout, a type real money does not open, a credit type under $2,000,
    a typical structure over the Probe's cap or unknown). It must match M4's list in the run record. Bands
@@ -428,10 +473,12 @@ proof's witnessed round trip, whether it passed during readiness or in the curre
 | `PAUSE` | `/workspace/state/` | absent | the maintenance pause | `floor_box.py maintenance` |
 | `STOP`, `state/STOP` | `/workspace/` | absent | the loop ends | `floor_box.py stop` / `start` |
 | Kill switch | the gateway | off | every real order-creating call refused | `gateway_admin.py kill` / `unkill` |
-| `MAX_ORDER_USD*`, `MAX_DAY_USD`, `MAX_DAY_ORDERS` | `gateway/wrangler.jsonc` | $75, $4,000, 2,000 | caps by notional; to become caps by maximum loss (live path) | gateway deploy |
-| `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | off | structure types real money may open; must equal the constitution's list | gateway deploy with the matching House deploy and a ratify |
+| `MAX_ORDER_MAX_LOSS_USD`, `MAX_ORDER_EQUITY_SHARE`, `MAX_DAY_EQUITY_SHARE`, `MAX_DAY_ORDERS`, `MAX_DAY_OPEN_ORDERS` | `gateway/wrangler.jsonc` | $1,000, 0.25, 1.0, 300, 250 | the real account's caps by maximum loss; equal to the constitution's `options_money.gateway` | gateway deploy with the matching House deploy |
+| `OPTION_STRUCTURES_REAL` | `gateway/wrangler.jsonc` | `debit_vertical,long_butterfly,long_call,long_put` | the types real money may open; must equal the constitution's `options_money.real_types` (`league.ci`) | gateway deploy with the matching House deploy and a ratify |
+| `live.observe`, `live.observe_max` | `swarm.json` on the box | true, 48 | the observe band and its cap; read each minute, no deploy (a swarm.json that is not a JSON object turns it off) | edit `swarm.json` |
+| `live.calibration`, `live.calibration_samples` | `swarm.json` on the box | false, 30 | the D3 round trips (still only with real money on, the grant and the paper proof); samples a symbol's open-at-mid cell stops at | edit `swarm.json` |
 | `FRONTIER_MONTH_USD`, `FRONTIER_MONTH_MAX_USD`, `FRONTIER_FUNDED_MONTH` | `gateway/wrangler.jsonc` | $707, September 2026 only | the OpenAI month; expires before an unfunded month can renew it | gateway deploy |
-| The money rules | `league/constitution.py` | Deploy G's (money `be1e3ce9`); the options table arrives with the live path | what real money may do | owner deploy, then `--ratify` |
+| The money rules | `league/constitution.py` | the sprint's D4 table (money `ad9bd54c`) | what real money may do | owner deploy, then `--ratify` |
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace.
 Set the optional `researcher.sail_usd_per_hour` to the funded Sail rate to pace Sail models separately;

@@ -15,13 +15,19 @@ if HAVE:
     from league.tests.live_fakes import MONDAY, at
 
 
+PASSED = {"schema": 2, "status": "passed", "open_witness": True, "close_witness": True}
+
+
 class PaperOnlyProof(LiveCase):
+    """The multi-leg vertical's proof (the single-leg proof, which follows it, is taken as passed here: `SingleLeg`)."""
+
     def paper_only(self):
         # Match service.options_live: no real client or book exists while real money is off.
         self.families = MemoryFamilies()
         self.live = OptionsLive(self.root, market=self.market, real=None, paper=self.paper,
                                 families=self.families, decider=InlineDecider(), real_money=False,
                                 config={"require_paper_proof": True}, clock=self.clock, record=self.ledger)
+        self.live.state.put("paper_proof_single", PASSED)
         return self.live
 
     def test_route_is_proved_with_no_real_client_book_or_eligible_family(self):
@@ -65,7 +71,9 @@ class PaperOnlyProof(LiveCase):
 
 class DurableProof(LiveCase):
     def make_proof(self):
-        return self.make([], config={"require_paper_proof": True})
+        live = self.make([], config={"require_paper_proof": True})
+        live.state.put("paper_proof_single", PASSED)   # the vertical's proof alone (`SingleLeg` has the single's)
+        return live
 
     def restart(self, hh=9, mm=36, *, day=MONDAY):
         self.live.state.close()
@@ -272,3 +280,48 @@ class DurableProof(LiveCase):
         self.assertFalse(self.live.proof.passed())
         self.assertEqual(len(self.paper.sent), 1)
         self.assertIn("contracts or quantity differ", self.live.proof.status()["why"])
+
+
+class SingleLeg(LiveCase):
+    """The review of #390 (lens 3): the single-leg route proved on the practice account too, once the vertical's has
+    passed; a real long call or put waits for it."""
+
+    LONG_CALL = """
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    if ctx.positions or ctx.orders:
+        return []
+    return [{"open": "long_call", "root": "SPY", "qty": 1, "limit": "natural",
+             "legs": [{"side": "long", "right": "C", "dte": 1, "strike": 603.0}]}]
+"""
+
+    def test_after_the_vertical_a_long_call_round_trip_and_real_singles_wait_for_it(self):
+        from league.tests.live_fakes import family
+
+        live = self.make([family("call", self.LONG_CALL, band="probe", structure="long_call", typical=60.0)],
+                         config={"require_paper_proof": True})
+        while not live.proof.passed():
+            self.clock.set(self.clock() + 60)
+            live.minute()
+        self.assertFalse(live.proof_single.passed())
+        self.clock.set(self.clock() + 60)
+        live.minute()
+        self.assertEqual(self.venue.sent, [], "no real long call before the single-leg proof")
+        self.assertTrue(any("single-leg route" in p["why"] for p, a in self.ledger.of("live.refusal")))
+        self.run_to(10, 0)
+        self.assertTrue(live.proof_single.passed(), live.proof_single.status())
+        singles = [b for b in self.paper.sent if not b.get("legs")]
+        self.assertEqual([(b["side"], b["position_intent"], b["type"]) for b in singles],
+                         [("buy", "buy_to_open", "limit"), ("sell", "sell_to_close", "limit")])
+        symbol = singles[0]["symbol"]
+        strike = int(symbol[-8:]) / 1000
+        self.assertEqual(symbol[-9], "C")
+        self.assertTrue(600 * 1.01 <= strike <= 600 * 1.02, strike)
+        self.assertEqual(singles[0]["symbol"], singles[1]["symbol"])
+        self.assertFalse(any(self.paper.held.values()), "the practice account is flat again")
+        self.run_to(10, 2)
+        self.assertEqual([b.get("position_intent") for b in self.venue.sent][:1], ["buy_to_open"],
+                         "the real long call goes once both routes are proved")

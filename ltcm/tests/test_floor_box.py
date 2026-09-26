@@ -115,6 +115,11 @@ class FakeBox:
         self.guard_error: str | None = None
         self.rollback_answer = {"ok": True, "current": "20260917T070000Z-ba9876543210",
                                 "rolled_back_from": "20260918T070000Z-0123456789ab"}
+        # The real book guard (the review of #390, lens 3): the previous release's real_money and long-single code, and
+        # what the box's live.sqlite shows (open real positions, working real orders), or the error the check answers.
+        self.previous_real = {"real_money": True, "missing": []}
+        self.real_book = {"positions": 0, "orders": 0}
+        self.real_guard_error: str | None = None
 
     # ------------------------------------------------------------- what was done, for the asserts
     def execs(self) -> list[str]:
@@ -156,6 +161,11 @@ class FakeBox:
         self.raw.append(command)
         if floor_box.PROBE in text:
             return Result("\n".join(f"{k}={v}" for k, v in self.probe.items()))
+        if not isinstance(command, str) and floor_box.REAL_GUARD_SNIPPET in command:
+            if self.real_guard_error:
+                return Result(json.dumps({"error": self.real_guard_error}))
+            ask = json.loads(command[-1])
+            return Result(json.dumps({"release": {"dir": ask["release"], **self.previous_real}, **self.real_book}))
         if not isinstance(command, str) and floor_box.STRUCTURE_GUARD_SNIPPET in command:
             if self.guard_error:
                 return Result(json.dumps({"error": self.guard_error}))
@@ -1425,6 +1435,46 @@ class RollbackTests(BoxCase):
         self.assertEqual(code, 0)
         self.assertIn("WARNING: --force-structures-risk: the previous release", printed)
         self.assertIn("WARNING: --force-structures-risk", errors.getvalue())
+        self.assertEqual(len(self.rollbacks()), 1)
+
+    def test_a_previous_release_that_cannot_manage_the_real_book_is_refused_while_it_holds_something(self):
+        for previous, book, why in (
+                ({"real_money": False, "missing": []}, {"positions": 1, "orders": 0}, "real_money false"),
+                ({"real_money": True, "missing": ["league/live/real.py: def single_body("]}, {"positions": 0, "orders": 2},
+                 "lacks the long-single code")):
+            with self.subTest(why=why):
+                self.box.calls.clear()
+                self.box.previous_real, self.box.real_book = previous, book
+                with self.assertRaises(SystemExit) as caught:
+                    self.run_cmd("rollback")
+                refusal = str(caught.exception)
+                self.assertTrue(refusal.startswith("REFUSED: the real book holds"), refusal)
+                self.assertIn(why, refusal)
+                self.assertIn("--force-real-risk", refusal)
+                self.assertEqual(self.rollbacks(), [])
+
+    def test_a_flat_real_book_or_a_capable_release_goes(self):
+        self.box.previous_real = {"real_money": False, "missing": ["league/live/real.py: def single_body("]}
+        code, printed = self.run_cmd("rollback")
+        self.assertEqual(code, 0)
+        self.assertIn("the real book is flat", printed)
+        self.box.calls.clear()
+        self.box.previous_real, self.box.real_book = {"real_money": True, "missing": []}, {"positions": 2, "orders": 1}
+        code, printed = self.run_cmd("rollback")
+        self.assertEqual(code, 0)
+        self.assertIn("manages the real book (2 position(s), 1 working order(s))", printed)
+
+    def test_an_unreadable_live_state_refuses_and_the_owner_can_force_it(self):
+        self.box.real_guard_error = "OperationalError: database disk image is malformed"
+        with self.assertRaises(SystemExit) as caught:
+            self.run_cmd("rollback")
+        self.assertIn("could not be read (OperationalError", str(caught.exception))
+        self.assertEqual(self.rollbacks(), [])
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code, printed = self.run_cmd("rollback", "--force-real-risk")
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: --force-real-risk", errors.getvalue())
         self.assertEqual(len(self.rollbacks()), 1)
 
     def test_no_rollback_during_a_deploy_or_without_a_previous_release(self):
