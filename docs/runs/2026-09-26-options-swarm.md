@@ -654,6 +654,69 @@ clock never restarts.
   imply full-capacity active bounds $0.1653372/hour and $0.5547744/hour respectively; these are
   conservative capacity bounds, not measured ongoing burn or a measured nightly runtime.
 
+- 20:30Z **Owner direction clarified and documented.** All Alpaca-supported options strategies
+  and securities belong in the research target, with simple calls/puts given equal opportunity.
+  The initial five and next 20 roots are collection batches, not a permanent universe boundary.
+  Broader roots/expiries require suitable history, settlement rules and explicit readiness; covered
+  strategies require inventory/collateral and assignment handling. Build a general agent paper
+  environment, not just the existing SPY route proof. Rapid hypothesis/replay/diagnosis/revision
+  loops, persistent lessons and useful evidence should drive compute. Trial count is activity,
+  not profitability. The thoughts-first, minimally worded website and real per-agent progress
+  remain the presentation requirements and are already deployed. Goal, README, design,
+  operations and researcher/Gym contracts are updated in [#382](https://github.com/bwoods1998/long-term-capital-management/pull/382)
+  (`f53003c3`), independently accepted, with full CI finishing. The contract/Gym guide affect
+  prompts and bundle identity on deployment; preserve old evidence and require fresh binding.
+- 20:30Z **Measured breadth and current limits.** At 20:01Z the House recorded 17,631 trials,
+  25,212.33 durable program-years, 16 active families and 57 retired. Fifteen active families
+  were multi-leg and one long-put; no validation passes or holdout looks. At 20:04Z the actual
+  Alpaca asset lookup returned 6,305 optionable equity/ETF assets, 6,177 tradable. These are
+  discovery counts, not verified historical coverage or account-contract eligibility. The Gym
+  supports 11 types but actively trains only five roots; covered strategies are absent. Current
+  data collection covers 0–14 DTE on 25 roots and extends 15–45 DTE on SPY/QQQ; syntax accepting
+  60 DTE does not provide that data. Private discovery receipt remains in `.ltcm-main/`.
+- 20:30Z Main is `e73e7740`: #379 shadow restart and [#380](https://github.com/bwoods1998/long-term-capital-management/pull/380)
+  role/Flex routing are merged after independent review and green CI. #380 passed 221 affected
+  tests locally and on the actual House. The deployed release remains `60b34dd9`; nothing in
+  this checkpoint enables real money. At 20:00Z House health had no warnings, brokerage equity
+  was $481.63/cash $481.60 with no open orders/options positions, Sail was $188.34, and September
+  OpenAI gateway spending was $599.88/$707. No new brokerage deposit or October allowance.
+- 20:30Z [#383](https://github.com/bwoods1998/long-term-capital-management/pull/383), exact
+  `948d1153`, removes architect instructions favoring the five complex production-adapter types
+  and 0–5 DTE. It exposes all configured strategy coverage, retained/retired effort and actual
+  gaps, and requests the full bounded refill batch without changing admission or evidence rules.
+  Independent probes verified lineage trial accounting and a population change during admission;
+  95 affected tests pass locally and on the actual House. Full CI/deployment pending.
+- 20:30Z [#384](https://github.com/bwoods1998/long-term-capital-management/pull/384), exact
+  `29453f2d`, adds read-only catalog/backlog planning and explicit sealed-Gym coverage auditing.
+  Discovery alone marks nothing ready; it does not automatically collect or grant paper/live
+  eligibility. Independent review/full CI pending. [#385](https://github.com/bwoods1998/long-term-capital-management/pull/385),
+  exact `80cbf01b`, adds the funded post-burst lifecycle, maintenance commitments, cohort allocation
+  and receipt-bound backfill cutoff; 261 combined focused tests and the final 52 affected data
+  tests passed, with independent review/full CI pending. Do not deploy either unfinished review.
+- 20:30Z [#381](https://github.com/bwoods1998/long-term-capital-management/pull/381) has private
+  bounded execution receipts and a read-only report. Root verified fixes for reader/writer WAL
+  contention and future-session order contamination; exact `d3a5ca05` passed 228 actual-House
+  tests (227 passes, one skip). Full CI exposed a process-global SIGALRM handler ownership defect
+  when legacy and Gym runners execute in one process. W5 reproduced it and is fixing it with a
+  regression; the PR remains unmerged. The general agent paper book and automatic post-close
+  scheduler have saved designs, not implementations. Paper diagnostics remain separate from
+  unseen forward evidence, real fills, live profit and calibration.
+- 20:30Z The existing backfill remains PID 22487/start ticks 3310972; names were 11,255/23,740
+  at 20:28Z, 150 vendor-empty tasks, no failures; back months 0/2,374. The completion supervisor
+  remains in ThetaData with no error. Estimated remaining duration about thirteen hours. Active
+  Gym v1 and gate-off state are unchanged. T0, Monday's session, post-close prune and Tuesday's
+  first actual forward collection retain their original clocks; none is claimed complete.
+
+- 20:34Z **Documentation update and breadth fix merged.** #382 merged at 20:32:41Z as
+  `3d464985` after independent acceptance and green Python 3.11/3.14 and gateway CI. The eight
+  Gym-driver tests passed locally; the actual House's isolated archive matched the contract/guide
+  hashes and deterministic bundle. Its eight integration tests skipped because pyarrow is not
+  installed on the House. #383 merged at 20:34:33Z as `f789e7e0` after independent review, 95
+  local/House tests and all CI checks. Main now contains both; the production release remains
+  unchanged. Updated this handoff and the private continuation memory to preserve the broader
+  direction and current gaps. #381's handler correction is pushed as `f2b670fb`, with the new
+  regression and 29 Gym tests passing; full discovery/CI verification is still running.
+
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
 The provisional calibrated pair is not the final pair. Do not select it or spend a holdout look

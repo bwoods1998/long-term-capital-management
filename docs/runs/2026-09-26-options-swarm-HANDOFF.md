@@ -1,6 +1,6 @@
 # Handoff: the options-swarm run
 
-## Current continuation, September 26 19:32Z
+## Current continuation, September 26 20:34Z
 
 Read this update before the historical Claude handoff below. The run record remains the source
 of truth and now includes the **T0 + 12 h scoreboard**. T0 is still **2026-09-26T06:23:14Z**;
@@ -9,6 +9,27 @@ the next four-hour scoreboard is 22:23Z. The overall goal is active and is **not
 This continuation completes engineering, data, paper/shadow operation and readiness. It has not
 enabled autonomous real-money execution: `real_money=false`, no live grant, real openings off.
 No strategy has passed validation, no holdout look has occurred, and profitability is unproven.
+
+### Owner direction: breadth, rapid learning and visible progress
+
+The owner wants the harness to give **all supported options strategies and securities** a path
+through research, historical testing and Alpaca paper execution. Simple long calls and puts
+compete alongside spreads; complexity earns no preference. Covered calls and cash-secured puts
+need their own inventory/collateral, assignment and exit mechanics. The first five and next
+20 roots are data batches, not a permanent universe limit. Keep explicit coverage by root and
+expiry; discovering a symbol does not supply its history or correct settlement rules.
+
+Prioritize short hypothesis/replay/diagnosis/revision loops, persistent lessons, useful exploration
+and evidence-directed compute. Agent counts and trials measure activity, not an established edge.
+The site should show genuine thoughts and each agent's actual promotion progress with minimal
+surrounding text; that interface is deployed. The goal remains profitable production trading
+beginning Monday, but current evidence does not establish that result.
+
+The goal, README, design, operations and researcher/Gym contracts record this direction in
+[#382](https://github.com/bwoods1998/long-term-capital-management/pull/382), merged as `3d464985`
+at 20:32Z after independent review and green CI. Researcher instructions and Gym guide
+changes take effect only at deployment and change the Gym bundle identity. Preserve historical
+trials, lineages and holdout looks; new validation/gate evidence must bind the deployed bundle.
 
 ### Deployed and verified
 
@@ -35,16 +56,22 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 
 ### Funding and search
 
-- Owner confirmed Sail $200 and OpenAI API $124 after top-ups. Observed Sail about **$189.90**
-  at 18:23Z; reserve remains $32, researcher Sail-model allowance $2.25/hour. OpenAI September
-  gateway spending **$598.17 / $707**, with no October allowance added. Do not raise caps based
+- Owner confirmed Sail $200 and OpenAI API $124 after top-ups. Observed Sail about **$188.34**
+  at 20:00Z; reserve remains $32, researcher Sail-model allowance $2.25/hour. OpenAI September
+  gateway spending **$599.88 / $707**, with no October allowance added. Do not raise caps based
   on the older unfunded plan. The conservative unresolved $2 architect hold remains accounted
   for separately from settled costs.
 - Brokerage equity **$481.63**, cash $481.60, no open orders or option position. No new deposit
   has been verified. Profit on the site is **$0.00**, unrelated to compute or deposits.
-- At 18:23Z: 16,358 trials and 22,684.43 durable program-years; 17 alive in the database after
-  a birth, 53 retired. The population is refilling from its floor of 16. Median model cycle
-  47 seconds. No validation/holdout pass. Do not relax evidence requirements to manufacture one.
+- At 20:01Z: 17,631 trials and 25,212.33 durable program-years; 16 active families, 57 retired.
+  Fifteen active families are multi-leg and one is long-put. Historical families included single
+  calls, but the architect favored spreads; #383 removes that prompt bias. The active Gym still
+  trains only SPY, QQQ, IWM, XSP and SPXW. No validation/holdout pass. Do not relax evidence
+  requirements to manufacture one.
+- At 20:04Z the actual Alpaca asset lookup returned 6,305 optionable equity/ETF assets, 6,177
+  tradable. This is the discovery universe, not verified history or account-contract readiness.
+  The simulator has 11 types, including long calls/puts; covered inventory is absent. The paper
+  path is still a single SPY route proof, not a general agent paper book.
 - Cost audit through 18:46:56Z: Sail box billing is $4.22136 finalized plus $0.01723 estimated
   active cost; House Sail model requests in that window total $22.83364 by token usage and
   configured prices, not invoice confirmation. Do not add billed boxes to the Gym estimate or
@@ -53,23 +80,33 @@ No strategy has passed validation, no holdout look has occurred, and profitabili
 
 ### What remains, in order
 
-0. **Additional engineering gaps found by completion audit.** Main now includes reviewed,
-   green-CI architect universe fix #378 (`9b4a0f8d`); it is not deployed yet. Shadow order
-   restart fix #379 (`e30e01a6`) passed 61 local and actual-House tests, with full CI pending.
-   W5 (`ltcm-w5-evidence`) is implementing private bounded execution receipts and a read-only
-   post-close report. W4 (`ltcm-lifecycle`) is implementing post-burst prorated Sail budgets,
-   reserved maintenance and a smaller research cohort. Root (`ltcm-frontier-routing`) owns
-   OpenAI role/Flex routing. Independently review every change, require green CI and exact
-   committed-archive House tests before deployment. All are unfinished until verified.
-   Paper/shadow evidence never substitutes for actual real fills in calibration. Do not enable
-   real money or raise funding caps as part of this engineering work.
+0. **Finish the broader research and paper harness.** Main `f789e7e0` includes reviewed,
+   green-CI #378 (complete universe context), #379 (shadow restart state) and #380 (role/Flex
+   routing with durable spending reservations), #382 (direction docs) and #383 (research breadth).
+   None is deployed yet. #383 removes the architect's complex-strategy/short-horizon preference
+   and shows actual research coverage; independent review, 95 local/actual-House tests and full
+   CI passed on `948d1153`, merged at 20:34Z. #384 (`29453f2d`)
+   builds the discovery/coverage catalog and data backlog, under independent review. It neither
+   expands the collector automatically nor grants paper/live eligibility.
+   W5's #381 execution recorder/report passed the focused local/House review, but full CI exposed
+   an existing SIGALRM ownership defect through the new test order; W5 fixed it in `f2b670fb`
+   with a regression, with full CI rerunning. This also changes the Gym bundle. W4's #385
+   (`80cbf01b`) implements post-burst budgets, maintenance commitments, the smaller
+   cohort and owned-backfill cutoff; independent review/full CI are pending. A general paper
+   book is designed, not implemented. Its first delivery must support singles as well as
+   verified spreads, preserve separate ownership from legacy paper holdings and the route proof,
+   and record partial fills, cancels, expiry and restarts correctly. Broader exits and covered
+   inventory remain explicit follow-up work. The automatic post-close scheduler is also absent.
+   Require independent review, green CI and exact committed-archive House checks before deploy.
+   Paper/shadow outcomes never substitute for real fills in calibration or promotion. Do not
+   enable real money or raise funding caps as part of this engineering work.
 1. **Final data completion/adoption.** Core, holdout, 2022 and trade-quote calibration stages are
-   complete. Names were 9,369/23,740 at 18:54Z, with 150 vendor-empty tasks and no failures;
+   complete. Names were 11,255/23,740 at 20:28Z, with 150 vendor-empty tasks and no failures;
    back months were 0/2,374. The completion supervisor is healthy in the ThetaData phase.
    A read-only local completion watch follows the same live backfill (PID 22487, start ticks
    3310972); current observations go to `.ltcm-main/completion-watch.jsonl`. Check the existing
    process and watch before starting anything. Observation failures do not authorize a duplicate
-   collector. The estimated remaining time was about twelve hours, not a completion guarantee.
+   collector. The estimated remaining time was about thirteen hours, not a completion guarantee.
    Active Gym is still v1, `sbcp_4f1f0577-9b32-4e8d-b610-480bb88d617d`; the gate is disabled.
    Do not select the provisional calibrated pair. Await full ThetaData/SIP, final calibration,
    sealed final pair and actual primary/backup restores. Follow the expanded adoption procedure
