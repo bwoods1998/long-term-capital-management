@@ -918,6 +918,30 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
   
   With robustness-job aging for liveness, these go back to B1.
 
+- **22:59-23:11Z R1 deployed.** Main `5ba25909` (#388 Claude + #389 search and D2).
+  - House checkpoint `sbcp_05f4d395` (pre-r1-sprint) taken first. The money digest is unchanged
+    (`8dba0b1f`).
+  - Release `20260926T225946Z-22b18ea9f452` was staged, canaried and PROMOTED at 23:00:24Z, and passed
+    its 10-minute watch.
+  - Swarm restarted (pid 11170) on the release. The migration re-picked 34 families' bests, 20 with an
+    eligible best, 0 errors.
+  - The Claude diagnostician is live: 15 eligible; the first rewrite and a retire note, $0.34 by 23:12Z.
+- **23:08Z Settings** (backup `swarm.json.before-r1-*`):
+  - `researcher.top_profile` null (cost);
+  - `architect.agenda` (the operator's research agenda, 3.2 KB);
+  - `claude.usd_cap` 70 (the pre-Monday budget).
+- **23:15Z** `gym.start_boxes` 6: the queue was 41 on 4 boxes during the re-validation and robustness
+  wave.
+- **23:14Z Claude architect timeout.** The architect's first Claude call hit Anthropic's edge 524,
+  because a non-streaming, high-effort answer ran past 100 s; it fell back to Astra/Sail. B3 is
+  building streaming (gateway SSE pass-through plus the House client), to ship with R2.
+- **Reviews in flight:**
+  - #387 (B2's honest fill model) needs one more fix: an exposure floor for unsampled moneyness. The
+    operator also added a guard: stress runs halve passive hazards. Then it merges main.
+  - #390 (B4's live path): all three lenses verified. Money and venue lenses: safe to deploy. Evidence
+    lens: fixed after a double count (calibration losses as compute) was removed. Final follow-ups
+    (quote overwrite, calibration re-quote, time-bounded observe reads) are on `a06854d9` or later.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
@@ -984,5 +1008,17 @@ Observed 18:22–18:24Z; counters advance during the read. Funding is not revenu
 | 7 | Execution | no new real-option orders or positions; account equity $481.63/cash $481.60, plus legacy crypto dust. Real money off, no grant. Gateway's two earlier legacy orders are unchanged. Independent SPY paper proof is prepared for Monday, not yet observed in-session. |
 | 8 | Compute | Sail about $189.86–189.90; reserve $32, guard unbraked. Last-hour tracked cost $3.4006: Sail models $1.6391, estimated Gym $1.4416, OpenAI $0.3199. Funded Sail model cap remains $2.25/hour. OpenAI September $598.17/$707, $108.83 remaining; no October allowance added. |
 | 9 | Harness | current main `60b34dd9`; 834 text files / 323,380 lines across active league, ltcm, scripts, gateway and docs, excluding archive. Eight recorded watchdog restarts since T0. Main CI 11m09s (3.11), 12m06s (3.14), gateway 8s. Draft prune stays for after Monday close; its previous integrated head passes in under two minutes, latest guard fix awaits CI/review. |
+
+### Sprint scoreboard, T0 + 17 h (23:12Z Sept 26, after R1)
+
+| # | Metric | Value |
+|---|---|---|
+| 1 | Population | 34 alive, up from 16 at the sprint's start (21:24Z); 66 retired; 32 running; 8 born in the last hour. The researcher retire tool is now guarded (only above 48, never on REVISE) |
+| 2 | Throughput | 690 cycles/h, median cycle 85 s (re-validation wave); Gym queue 41 on 4 boxes, pool raised to 6 |
+| 3 | Robustness | 8 robustness runs in the first 10 minutes after R1. Mid-fill diagnostic verdict: execution-bound (natural 17/72 positive; mid 50/72) |
+| 4 | Evidence | 19,732 trials, 30,467 program-years. 0 validation passes under the D2 line yet (the re-validation is under way). 0 holdout looks. Gate ON (core-calibrated-v1 pair) |
+| 5 | Readiness | `real_money` false; grant not enabled; gateway types "off" (all by design until R2); Claude route live |
+| 6 | Money | equity $481.63 cash; 0 orders; 0 option positions |
+| 7 | Compute | Sail $184.75 (burn about $45/day; guard line $32, unbraked). OpenAI September about $602 of $707. Claude $0.34 of the $70 pre-Monday cap |
 
 ## Report
