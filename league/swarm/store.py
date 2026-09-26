@@ -452,7 +452,9 @@ class SwarmStore:
     # ------------------------------------------------------------------ runs
     def add_run(self, fid: str, version: int | None, result: Mapping[str, Any], *, window: str, stress: float, purpose: str,
                 program_years: float = 0.0) -> dict[str, Any]:
-        """Record one Gym result (every result is a trial when its `trials` says so) and keep it in full."""
+        """Record one Gym result (every result is a trial when its `trials` says so) and keep it in full. The same
+        evaluation run again (same code, parameters, data and settings: the same `run_id`) is stored once and still
+        counted: every evaluation the Gym makes is a trial."""
         run_id = str(result.get("run_id") or code_sha(dumps(result))[:24])
         trials = int(result.get("trials", 0) or 0)
         status = str(result.get("status") or "unknown")
@@ -460,11 +462,16 @@ class SwarmStore:
         if status == "refused":
             summary = {"reason": result.get("reason")}
         with self._lock:
-            existing = self._one("SELECT * FROM runs WHERE run_id=? AND family=?", (run_id, fid))
+            mine = f"{run_id}-{fid}"[:64]
+            existing = self._one("SELECT * FROM runs WHERE (run_id=? OR run_id=?) AND family=?", (run_id, mine, fid))
             if existing is not None:
-                return existing
+                if trials:
+                    self._exec("UPDATE runs SET trials=trials+?, program_years=program_years+? WHERE run_id=?",
+                               (trials, float(program_years), existing["run_id"]))
+                    self.bump(fid, trials=trials, since_val_trials=trials)
+                return self._one("SELECT * FROM runs WHERE run_id=?", (existing["run_id"],))  # type: ignore[return-value]
             if self._one("SELECT 1 FROM runs WHERE run_id=?", (run_id,)) is not None:
-                run_id = f"{run_id}-{fid}"[:64]
+                run_id = mine
             path = self.runs_dir / f"{run_id}.json.gz"
             path.write_bytes(gzip.compress(dumps(result).encode("utf-8"), compresslevel=5))
             self._exec("INSERT INTO runs(run_id, family, version, window, stress, purpose, at, status, trials, program_years, summary, path)"

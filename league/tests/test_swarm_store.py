@@ -103,7 +103,9 @@ class Runs(StoreCase):
         two = self.store.add_run(b["id"], 1, r, window="train", stress=1.0, purpose="train")
         self.assertNotEqual(one["run_id"], two["run_id"])
         self.assertEqual(self.store.add_run(a["id"], 1, r, window="train", stress=1.0, purpose="train")["run_id"], one["run_id"])
-        self.assertEqual(self.store.totals()["trials"], 2)
+        self.assertEqual(self.store.add_run(b["id"], 1, r, window="train", stress=1.0, purpose="train")["run_id"], two["run_id"])
+        self.assertEqual(self.store.totals()["trials"], 4, "the same evaluation again is stored once and still counted")
+        self.assertEqual((self.store.family(a["id"])["trials"], self.store.family(b["id"])["trials"]), (2, 2))
 
 
 class EventsAndSpend(StoreCase):

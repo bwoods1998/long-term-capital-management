@@ -199,6 +199,35 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(self.researcher().cycle(self.fam["id"])["skipped"], "retired")
 
 
+class RateLimits(unittest.TestCase):
+    def test_a_rate_limit_is_waited_out_twice_then_raised(self):
+        from ltcm.provider import Provider, ProviderError
+
+        from league.tests.swarm_fakes import ScriptedSail
+
+        with tempfile.TemporaryDirectory() as d:
+            store = SwarmStore(Path(d))
+            sail = ScriptedSail(lambda body: {"text": "ok"})
+            fails = {"n": 2}
+
+            def transport(method, route, body=None, idempotency_key=None):
+                if method == "POST" and fails["n"] > 0:
+                    fails["n"] -= 1
+                    raise ProviderError("provider_http_429", retry_after=1)
+                return sail(method, route, body, idempotency_key)
+
+            prov = Provider(Path(d) / "p.sqlite", transport=transport, floor_cap_usd_per_day="100")
+            slept = []
+            router = ModelRouter(store, prov, settings=copy.deepcopy(S.DEFAULTS), sleep=slept.append)
+            response = router.sail("flash_asap", [{"role": "user", "content": "hi"}], family="f", key="k1")
+            self.assertEqual((response.output_text, slept), ("ok", [1, 1]))
+            fails["n"] = 3
+            with self.assertRaises(ProviderError):
+                router.sail("flash_asap", [{"role": "user", "content": "hi"}], family="f", key="k2")
+            prov.close()
+            store.close()
+
+
 class Helpers(unittest.TestCase):
     def test_needs_of_reads_the_literal(self):
         self.assertEqual(needs_of('NEEDS = {"roots": ["SPY"]}\n'), {"roots": ["SPY"]})

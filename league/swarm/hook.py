@@ -61,7 +61,9 @@ class SwarmStep:
 
     # ------------------------------------------------------------------ the House calls this
     def tick(self, house: Any = None, open_for_business: bool = True) -> dict[str, Any]:
-        out: dict[str, Any] = {"process": self.supervise()}
+        # A House paused for maintenance (or with its meter stopped) starts no new paid work: it starts no swarm. One
+        # already running goes on (the Gym trains through a pause); `<state>/swarm.stop` is how to stop it.
+        out: dict[str, Any] = {"process": self.supervise(may_start=open_for_business)}
         ledger = getattr(house, "ledger", None)
         if ledger is not None:
             try:
@@ -95,7 +97,7 @@ class SwarmStep:
                 return f"{stop.name} is down"
         return ""
 
-    def supervise(self) -> dict[str, Any]:
+    def supervise(self, *, may_start: bool = True) -> dict[str, Any]:
         settings = settings_mod.load(self.root, config=self.config)
         now = self.clock()
         beat = self.heartbeat() or {}
@@ -130,6 +132,9 @@ class SwarmStep:
                 self._signal(int(pid), signal.SIGTERM)
                 self.terminating = (int(pid), now)
                 info["action"] = "restart: " + ("its heartbeat is stale" if stale else "it runs another release")
+            return info
+        if not may_start:
+            info["idle"] = "the House is not open for business"
             return info
         backoff = min(1800.0, 30.0 * (2 ** min(self.failed_starts, 6)))
         if now - self.last_start < backoff:

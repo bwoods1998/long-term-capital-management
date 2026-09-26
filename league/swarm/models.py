@@ -47,7 +47,10 @@ class ModelRouter:
     """Routes the swarm's calls (the module docstring)."""
 
     def __init__(self, store: SwarmStore, provider: Any, *, settings: Mapping[str, Any], frontier_factory: Callable[[str], Any] | None = None,
-                 month: Any = None):
+                 month: Any = None, sleep: Callable[[float], None] | None = None):
+        import time as _time
+
+        self.sleep = sleep or _time.sleep
         self.store = store
         self.provider = provider
         self.settings = settings
@@ -62,10 +65,20 @@ class ModelRouter:
         """One Sail call, deduped on `key` (a crash-retry re-reads the stored response). Raises the
         Provider's errors (`BudgetExceeded` when a cap would be breached)."""
         cap = cap_usd_day if cap_usd_day is not None else float(self.settings.get("researcher", {}).get("family_usd_day", 2.0))
-        response = self.provider.respond(profile, list(items), tools=list(tools) if tools else None, desk_id=family,
-                                         session_id=family, request_key=key[:200], reasoning_effort=effort,
-                                         max_output_tokens=int(max_output), desk_cap_usd_per_day=str(cap),
-                                         cache_key=(cache_key or family)[:128], tool_choice=tool_choice)
+        attempt = 0
+        while True:
+            try:
+                response = self.provider.respond(profile, list(items), tools=list(tools) if tools else None, desk_id=family,
+                                                 session_id=family, request_key=key[:200], reasoning_effort=effort,
+                                                 max_output_tokens=int(max_output), desk_cap_usd_per_day=str(cap),
+                                                 cache_key=(cache_key or family)[:128], tool_choice=tool_choice)
+                break
+            except Exception as exc:  # noqa: BLE001 - a rate limit is waited out twice (48 researchers share Sail's limits)
+                code = str(getattr(exc, "code", "") or "")
+                if attempt >= 2 or not any(code.startswith(f"provider_http_{s}") for s in (429, 503, 529)):
+                    raise
+                attempt += 1
+                self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
         cost = float(response.cost_usd or 0)
         if cost:
             self.store.add_spend(kind, cost, family=family, detail={"profile": profile, "key": key[:120]})

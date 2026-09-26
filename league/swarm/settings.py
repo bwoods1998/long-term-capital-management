@@ -37,8 +37,10 @@ DEFAULTS: dict[str, Any] = {
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
         "history_cycles": 4,            # cycles of conversation kept; older ones live in the notebook
         "concurrency": 48,              # researchers in flight at once
-        "family_usd_day": 2.0,          # each family's daily model budget (the Provider's desk cap)
-        "floor_usd_day": 60.0,          # every researcher together, a day (the Provider's floor cap)
+        # Measured Sept 26 (DeepSeek-V4-Flash asap, effort low): $0.001-0.003 a cycle, so ~25 cycles an hour is ~$1.8 a
+        # family a day. The fuses are loose; the guard's burst cap and the House's line are the brakes.
+        "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap)
+        "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap)
         "idle_seconds": 5,              # between a family's cycles
         "note_every_cycles": 6,         # a public note to the tape at most this often per family
     },

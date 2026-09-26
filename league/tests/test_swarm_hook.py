@@ -80,6 +80,15 @@ class Supervise(HookCase):
         self.assertIn("swarm.stop", self.step().supervise()["idle"])
         self.assertEqual(self.spawned, [])
 
+    def test_a_house_not_open_for_business_starts_no_swarm_but_leaves_one_running(self):
+        step = self.step()
+        self.assertEqual(step.supervise(may_start=False)["idle"], "the House is not open for business")
+        self.assertEqual(self.spawned, [])
+        step.supervise()
+        self.beat(1000)
+        self.assertNotIn("idle", step.supervise(may_start=False))
+        self.assertEqual(self.signals, [])
+
     def test_a_stale_heartbeat_is_a_hang_it_terminates_then_kills_then_restarts(self):
         step = self.step()
         step.supervise()
