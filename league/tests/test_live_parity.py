@@ -4,6 +4,7 @@ same trades as the Gym's own `engine.Account.step`. And the live chain's contrac
 
 import datetime as dt
 import unittest
+from unittest.mock import patch
 
 try:
     import numpy as np
@@ -141,6 +142,50 @@ class ContractIdentity(unittest.TestCase):
         chain.record(90, market.chain("XSP", expiry_from="2026-09-28", expiry_to="2026-09-29"), open_epoch=at(MONDAY, 9, 30, 0))
         level = chain.parity(90, float("nan"))
         self.assertAlmostEqual(level, market.level("XSP"), delta=0.05)
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class QuoteRevision(unittest.TestCase):
+    def test_normal_quote_writes_are_odd_even_when_geometry_does_not_change(self):
+        clock = Clock(at(MONDAY, 10, 0))
+        market = Market(clock, width=1)
+        chain = LiveDay(MONDAY, 570, 960, trading_days=trading_days_around(MONDAY)).chain("SPY")
+        rows = market.chain("SPY", expiry_from="2026-09-28", expiry_to="2026-09-28")
+        rows = {next(iter(rows)): next(iter(rows.values()))}
+        self.assertEqual(chain.quote_revision, 0)
+        self.assertTrue(chain.record(30, rows, open_epoch=at(MONDAY, 9, 30, 0)))
+        self.assertEqual(chain.quote_revision, 2)
+        generation = chain.generation
+        seen = []
+
+        class WatchedQuotes(np.ndarray):
+            def __setitem__(self, key, value):
+                seen.append(("quote_write", chain.quote_revision))
+                super().__setitem__(key, value)
+
+        chain.bid, chain.ask = chain.bid.view(WatchedQuotes), chain.ask.view(WatchedQuotes)
+        admit = chain._admit
+        def observe_admit(symbols):
+            seen.append(("admit", chain.quote_revision))
+            return admit(symbols)
+        with patch.object(chain, "_admit", side_effect=observe_admit):
+            self.assertFalse(chain.record(31, rows, open_epoch=at(MONDAY, 9, 30, 0)))
+        self.assertEqual(seen, [("admit", 3), ("quote_write", 3), ("quote_write", 3)])
+        self.assertEqual(chain.quote_revision, 4)
+        self.assertEqual(chain.generation, generation)
+
+    def test_invalid_minutes_and_admission_errors_always_finish_on_an_even_revision(self):
+        chain = LiveDay(MONDAY, 570, 960, trading_days=trading_days_around(MONDAY)).chain("SPY")
+        self.assertFalse(chain.record(-1, {}, open_epoch=0))
+        self.assertEqual(chain.quote_revision, 2)
+        def broken_admit(symbols):
+            self.assertEqual(chain.quote_revision, 3)
+            raise ValueError("unreadable contract admission")
+        with patch.object(chain, "_admit", side_effect=broken_admit), self.assertRaisesRegex(ValueError, "admission"):
+            chain.record(0, {}, open_epoch=0)
+        self.assertEqual(chain.quote_revision, 4)
+        self.assertFalse(chain.record(0, {}, open_epoch=0))
+        self.assertEqual(chain.quote_revision, 6)
 
 
 if __name__ == "__main__":
