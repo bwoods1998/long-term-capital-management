@@ -146,6 +146,89 @@ class ModelCycles(ResearcherCase):
             self.assertIn("date", json.loads(calls_in(self.sail.bodies[-1])[-1]["output"])["reason"].lower())
         self.assertEqual(len(self.pool.jobs), 1, "none reached the Gym")
 
+    def test_a_refused_input_stays_in_revise_until_a_run_completes(self):
+        self.run_first()
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 2025}})]},
+                      {"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "read it"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual([b["tool_choice"] for b in self.sail.bodies], ["required", "required", "auto"])
+        self.assertEqual(len(self.pool.jobs), 2, "the refused input consumed no run; the repair ran once")
+        self.assertEqual((out["trials"], self.store.family(self.fam["id"])["trials"]), (1, 2))
+        self.assertNotIn("error", out)
+
+    def test_a_queued_refusal_is_reported_truthfully_and_revised(self):
+        self.run_first()
+        cycles, _ = self.store.convo(self.fam["id"])
+        self.store.save_convo(self.fam["id"], cycles, {"call_id": "queued-bad", "author": "synthetic",
+                                                    "arguments": {"params": {"vrp_min": 2025}}})
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "read it"}]
+        out = self.researcher().cycle(self.fam["id"])
+        first = self.sail.bodies[0]
+        self.assertEqual(first["tool_choice"], "required")
+        context = json.dumps(first["input"])
+        self.assertIn("queued last cycle did not complete a Gym run", context)
+        self.assertIn("a date or a year", context)
+        self.assertNotIn("queued last cycle ran:", context)
+        self.assertEqual((len(self.pool.jobs), out["trials"]), (2, 1))
+        self.assertIsNone(self.store.convo(self.fam["id"])[1])
+        self.assertNotIn("error", out)
+
+    def test_a_refused_stronger_rewrite_needs_repair_before_read(self):
+        self.run_first()
+        cycles, _ = self.store.convo(self.fam["id"])
+        self.store.save_convo(self.fam["id"], cycles, {"call_id": "old-queued", "author": "synthetic",
+                                                    "arguments": {"params": {"vrp_min": 1.5}}})
+        self.store.set_state(self.fam["id"], rewrite_ready={"code": "def decide(:", "profile": "pro_asap"})
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}, {"text": "read it"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual([b["tool_choice"] for b in self.sail.bodies], ["required", "auto"])
+        self.assertEqual(len(self.pool.jobs), 2, "the rewrite supersedes the old queued input even when refused")
+        self.assertEqual(self.pool.jobs[-1].params, {"vrp_min": 1.3})
+        self.assertEqual(out["trials"], 1)
+
+    def test_an_unsuccessful_gym_evaluation_keeps_the_one_run_budget_and_revises(self):
+        self.run_first()
+        self.pool.answer = lambda job: result(job.name, status="failed", roots=job.roots)
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]},
+                      {"calls": [("gym_run", {"params": {"vrp_min": 1.5}})]}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual([b["tool_choice"] for b in self.sail.bodies], ["required", "required"])
+        self.assertEqual((len(self.pool.jobs), out["trials"]), (2, 1), "failed evidence still counts exactly once")
+        self.assertTrue(out["pending_run"], "the repair runs next cycle, within the existing one-run limit")
+
+    def test_an_ambiguous_rewrite_run_does_not_dispatch_a_second_run(self):
+        self.run_first()
+        self.store.set_state(self.fam["id"], rewrite_ready={"code": self.code, "profile": "pro_asap"})
+        self.pool.fail = "late"
+        self.steps = [{"calls": [("gym_run", {"params": {"vrp_min": 1.3}})]}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(self.sail.bodies[0]["tool_choice"], "required")
+        self.assertEqual(len(self.pool.jobs), 2, "the uncertain rewrite still consumes the cycle's dispatch")
+        self.assertTrue(out["pending_run"])
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
+        callback, landed = self.pool.late
+        callback(landed)
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 2, "late evidence keeps its original count")
+
+    def test_a_required_reply_without_a_tool_is_a_bounded_failure_with_backoff(self):
+        from league.swarm.loop import Scheduler
+
+        self.run_first()
+        self.steps = [{"text": "no experiment"}, {"calls": [("gym_run", {})]}]
+        researcher = self.researcher()
+        scheduler = Scheduler(self.store, clock=self.clock)
+        self.assertEqual(scheduler.take(), self.fam["id"])
+        out = researcher.cycle(self.fam["id"])
+        self.assertEqual((out["model_calls"], out["tool_calls"], len(self.pool.jobs)), (1, 0, 1))
+        self.assertIn("required gym_run returned no tool call", out["error"])
+        self.assertEqual(out["protocol_error"], "required gym_run returned no tool call")
+        self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
+        self.assertEqual(len(self.steps), 1, "no unbounded model retry")
+        self.assertEqual(self.store.convo(self.fam["id"])[0][-1]["cycle"], 2, "the failed response remains auditable")
+        scheduler.release(self.fam["id"], out)
+        self.clock.advance(5)
+        self.assertIsNone(scheduler.take(), "a protocol failure uses the existing error cooldown")
+
     def test_rewrites_are_asap_on_their_own_small_fuse_and_wait_for_the_pace(self):
         self.run_first()
         self.assertEqual(self.settings["researcher"]["rewrite_profile"], "pro_asap")
