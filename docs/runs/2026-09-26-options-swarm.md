@@ -28,7 +28,7 @@ clock never restarts.
 | M0 Safe and archived | T0 + 1 h | | |
 | M1 Data flowing | T0 + 2 h | 06:58Z (T0 + 35 min) | data box downloading since 06:49:43Z; universe chosen (W1) |
 | M2 The House is options-only | Sat morning | 07:49:25Z | #359 merged, CI green; updater off, tools off `ltcm`, grant `options-swarm-20260928`, options-only service and tick |
-| M3 The swarm is training | Sat 16:00Z | | |
+| M3 The swarm is training | Sat 16:00Z | 10:33Z | site reset (07:21Z); the fresh House live on new state (10:22Z); 6 sealed Gym boxes running programs; 48 families, 46 researchers cycling (299 cycles in 11 min, median 79.6 s) |
 | M4 Gated | Sun 22:00Z | | |
 | M4b The live path deployed | Sun 22:00Z | | |
 | M5 Monday's open | Mon 13:30Z | | |
@@ -303,6 +303,13 @@ clock never restarts.
 | 7 | Execution | no option order; 0 orders today |
 | 8 | Compute | Sail balance $118.79 (was $34/day before the pause); OpenAI month $596.11 of $607; ThetaData Standard $80/mo |
 | 9 | Harness | CI 14m12s (3.14) / 10m44s (3.11); 1,103 files, 360,821 lines (league 90,343 + tests 80,279; ltcm 50,460 + tests 42,762); 119 docs .md; README 104.6 KB; CONTRACT 75.6 KB |
+- 10:33:10Z **M3 holds** (`scripts/verify_swarm.py --root /workspace/state` on the box, +11 min): process PASS
+  (pid 5336, heartbeat 11.6 s, release = the House's); 48 families alive, 46 running; 299 cycles in the first
+  11 minutes, median 79.55 s, 3 cycle errors; 331 trials (331 program-years); pool: 6 Gym boxes (4 ready, 2
+  busy), 64 batches, 0 failed jobs, 1,158 box-seconds (~30% busy); spend $0.54/h (models $0.47, boxes $0.07);
+  guard PASS (balance $115.56, line $32, not braked, 28.6 GB free); ledger PASS (48 swarm.born, 47 swarm.note,
+  0 House agent.born); gate WAIT (no gate image); tournament not yet (due an hour after founding, ~11:22Z).
+  The researchers, not the Gym, are the bottleneck.
 
 ### T0 + 4 h (10:23Z Sept 26)
 
