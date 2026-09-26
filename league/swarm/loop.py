@@ -6,7 +6,8 @@ One process beside the House loop, niced. Its threads:
   then the longest-waiting) and running one cycle, while the guard allows;
 - THE GYM POOL's dispatchers (one per box) and forks (`pool.py`);
 - ROUNDS on their own threads so none blocks another: the tournament (hourly), the gate (every few
-  minutes), the nightly forward (once a day), the architect (every four hours);
+  minutes), the nightly forward (once a day), the architect (every four hours), the diagnostician (every few
+  minutes, Claude on the stuck and the nearly-there families);
 - THE MAIN LOOP (every few seconds): re-read the settings, check the guard (brake: the Gym to sleep and the
   researchers idle), manage the pool, start the rounds that are due, write the heartbeat, and leave when
   asked (the STOP files, `<root>/swarm.stop`) or when the House's release changed (the House starts the new one).
@@ -33,6 +34,7 @@ from typing import Any, Callable, Mapping
 
 from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import Architect
+from .diagnostician import Diagnostician
 from .gate import Gate
 from .guard import SailGuard, provider_reader
 from .pool import GymPool
@@ -137,6 +139,8 @@ class Swarm:
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         self.architect = Architect(self.store, self.router, self.settings, clock=clock)
+        self.diagnostician = Diagnostician(self.store, self.router, self.settings, pool=self.pool, researcher=self.researcher,
+                                           clock=clock)
         self.stop = threading.Event()
         self.workers: list[threading.Thread] = []
         self.rounds: dict[str, threading.Thread] = {}
@@ -166,7 +170,7 @@ class Swarm:
     def status(self) -> dict[str, Any]:
         now = self.clock()
         hour = now - 3600
-        spend = {k: round(self.store.spent([k], since=hour), 4) for k in ("sail_model", "gym_box", "openai")}
+        spend = {k: round(self.store.spent([k], since=hour), 4) for k in ("sail_model", "gym_box", "openai", "claude")}
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(hour))
         recent = [json.loads(row["payload"]) for row in
                   self.store._all("SELECT payload FROM events WHERE kind='swarm.cycle' AND at >= ? ORDER BY seq DESC LIMIT 3000", (since,))]
@@ -309,6 +313,8 @@ class Swarm:
             # growing past it toward the ceiling only while the hourly spend is under the pace.
             if self.architect.due() and self.store.get("tournament_at") and (self.architect.refilling() or not self.over_pace()):
                 self._round("architect", self.architect.run)
+            if self.diagnostician.due():  # Claude's own funded line and daily budget, not the researchers' pace
+                self._round("diagnostician", self.diagnostician.run)
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()

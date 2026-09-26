@@ -141,6 +141,32 @@ DEFAULTS: dict[str, Any] = {
         "calibration": False,           # the D3 real-fill round trips: ON only by swarm.json {"live": {"calibration": true}}
         "calibration_samples": 30,      # a symbol's round trips stop once its open-at-mid cell has this many samples
     },
+    # Claude through the gateway (Sept 26, 2026, the swarm sprint; league/claude.py). The gateway's CLAUDE_USD ($100, the
+    # owner's funded total) is the hard line; `usd_cap` is the swarm's own Claude line inside it and `reserve_usd` is never
+    # spent (the House's post-mortem). `roles` are the calls Claude answers first; removing one routes it as before.
+    "claude": {
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "usd_cap": 100.0,
+        "reserve_usd": 5.0,
+        "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
+        "roles": ["architect", "audit", "diagnostician"],
+    },
+    # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites
+    # its mechanism or writes its lesson. Eligible: `min_validations` validations without passing, or the latest
+    # validation passing at least `near_miss_checks` of the line's checks; at most once a family every `family_hours`,
+    # within `usd_day` of Claude spend a day.
+    "diagnostician": {
+        "enabled": True,
+        "every_seconds": 300,
+        "per_round": 2,
+        "family_hours": 6.0,
+        "usd_day": 15.0,
+        "min_validations": 2,
+        "near_miss_checks": 6,
+        "structured": True,             # a JSON-schema answer (structured outputs); false reads the JSON from the text
+        "retry_truncated": True,        # one retry at medium effort after an answer cut off at max_tokens
+    },
     "heartbeat_seconds": 20,
     "stale_heartbeat_seconds": 240,     # the House restarts a swarm whose heartbeat is older than this
     "nice": 10,

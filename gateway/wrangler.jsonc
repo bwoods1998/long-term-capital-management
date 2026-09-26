@@ -10,6 +10,7 @@
   //   ALPACA_KEY_ID, ALPACA_SECRET_KEY            the real account, venue `alpaca`
   //   ALPACA_PAPER_KEY_ID, ALPACA_PAPER_SECRET_KEY  the paper account, venue `alpaca-paper`
   //   OPENAI_SECRET_KEY                           /v1/frontier/*
+  //   CLAUDE_API_KEY                              /v1/claude/* (the Anthropic key; CLAUDE_USD below meters it)
   //   TYPE_SAFE_TOKEN                             the bounded Jev shadow pilot
   //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write)
   //   GATEWAY_TOKEN                               the runtime's bearer token, 32+ characters
@@ -129,6 +130,16 @@
     // other call is held to; the reservation is sized from the max_output_tokens admitted under the
     // ceiling. A role not named here, or a call with no role, keeps 16,000.
     "FRONTIER_ROLE_MAX_OUTPUT": "{\"postmortem\":64000}",
+
+    // Claude (Sept 26, 2026, the swarm sprint's B3; lib/claude.mjs, POST /v1/claude/messages). The key is the secret
+    // CLAUDE_API_KEY. CLAUDE_USD is the owner's FUNDED TOTAL on the Anthropic account ($100, decision D7), not a month:
+    // the meter never resets, so raise it only by what the owner adds. CLAUDE_MODELS is the price table and the
+    // allowlist (a model absent here is refused), dollars per million tokens from
+    // platform.claude.com/docs/en/about-claude/pricing on Sept 26, 2026: `input` the uncached rate, `cache_write` the
+    // 5-minute write (1.25x input; the one-hour cache is refused), `cache_read` a hit (0.05x on Opus 5.5, 0.1x on
+    // Sonnet 5), `output` output and thinking. No long-context premium on either model.
+    "CLAUDE_USD": "100",
+    "CLAUDE_MODELS": "{\"claude-opus-5-5\":{\"input\":4,\"cache_write\":5,\"cache_read\":0.2,\"output\":20},\"claude-sonnet-5\":{\"input\":2,\"cache_write\":2.5,\"cache_read\":0.2,\"output\":10}}",
     // Where the frontier model's proposals become pull requests, and how many may open in one
     // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
     // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
