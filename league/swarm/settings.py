@@ -81,7 +81,7 @@ DEFAULTS: dict[str, Any] = {
         "workers": 8,
         "split": 8,                      # the inner loop's segments (latency: one program, 3 years, 8 cores)
         "train_split": 8,
-        "validation_split": 4,
+        "validation_split": 1,          # Validation, holdout and forward run whole (the Gym refuses to split them)
         "run_timeout_seconds": 900,
         "idle_sleep_seconds": 600,      # a box idle this long sleeps (sleeping boxes cost nothing)
         "box_usd_hour": 0.20,           # a busy l box (Sail bills measured use; $0.12-0.20/h measured Sept 26)
@@ -165,7 +165,8 @@ DEFAULTS: dict[str, Any] = {
         "effort": "high",
         "usd_cap": 100.0,
         "reserve_usd": 5.0,
-        "max_tokens": 16000,            # thinking and the answer together (the gateway's non-streaming ceiling)
+        "max_tokens": 16000,            # thinking and the answer together (up to 32,000 streamed; 16,000 not)
+        "stream": True,                 # server-sent events through the gateway: no hop waits 100 s in silence (HTTP 524)
         "roles": ["architect", "audit", "diagnostician"],
     },
     # The diagnostician (league/swarm/diagnostician.py): Claude reads a family that is stuck or nearly there and rewrites

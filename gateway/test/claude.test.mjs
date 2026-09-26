@@ -84,7 +84,7 @@ test('settlement: uncached input, cache writes, cache reads and output each at i
 
 test('admission: inline text, adaptive thinking, an effort and a JSON-schema format; everything that bills beyond the body is refused', () => {
   const env = settings();
-  assert.deepEqual(admit(body(), env), { model: 'claude-opus-5-5', price: OPUS, maxTokens: 16000 });
+  assert.deepEqual(admit(body(), env), { model: 'claude-opus-5-5', price: OPUS, maxTokens: 16000, stream: false });
   assert.equal(admit(body({ thinking: undefined, output_config: undefined }), env).model, 'claude-opus-5-5');
   assert.equal(admit(body({ system: 'plain', output_config: { effort: 'max', format: { type: 'json_schema', schema: { type: 'object' } } } }), env).maxTokens, 16000);
   assert.equal(admit(body({ messages: [{ role: 'user', content: [{ type: 'text', text: 'a', cache_control: { type: 'ephemeral', ttl: '5m' } }] }] }), env).model,
@@ -94,7 +94,7 @@ test('admission: inline text, adaptive thinking, an effort and a JSON-schema for
   const mark = { type: 'ephemeral' };
   for (const change of [
     { temperature: 0.2 }, { top_p: 0.9 }, { tools: [{ name: 'x', input_schema: {} }] }, { tool_choice: { type: 'any' } }, { speed: 'fast' },
-    { inference_geo: 'us' }, { service_tier: 'auto' }, { stream: true }, { metadata: { user_id: 'x' } }, { mcp_servers: [] },
+    { inference_geo: 'us' }, { service_tier: 'auto' }, { stream: 'true' }, { metadata: { user_id: 'x' } }, { mcp_servers: [] },
     { thinking: { type: 'disabled' } }, { thinking: { type: 'enabled', budget_tokens: 4000 } }, { thinking: { type: 'adaptive', display: 'raw' } },
     { output_config: { effort: 'extreme' } }, { output_config: { task_budget: { type: 'tokens', total: 20000 } } },
     { output_config: { format: { type: 'json_object' } } }, { max_tokens: MAX_TOKENS + 1 }, { max_tokens: 0 }, { max_tokens: '16000' },

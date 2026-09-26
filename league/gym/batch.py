@@ -9,15 +9,32 @@ DIR holds programs as `*.py`; a `<name>.json` beside one holds its parameter ove
 a list of dicts (each a separate run: a trial). Each worker takes a share of the programs and runs
 them together, loading each day's chain once. `--split N` also cuts the window into N consecutive
 segments run in parallel and merged per program (the inner loop's latency: one program over three
-years on eight cores); positions still open at a segment's end close there, so split and unsplit
-runs differ slightly, and each is deterministic.
+years on eight cores). A segment boundary is an accounting split, not a trade:
+
+- positions still open at the end of a segment that another continues are valued there at the mid,
+  with no fee (exit reason `split_mark`; the day's equity already marks them there, so the daily P&L
+  up to the boundary is the unsplit run's); only the window's last segment closes what is open at the
+  natural, as an unsplit run does;
+- each later segment's programs first replay the WARMUP_DAYS trading days before it (in the same
+  window) deciding but never trading, so their STATE is warm, then start with the full capital and
+  nothing open.
+
+So a split run differs from an unsplit one only by what the positions open at a boundary would have
+done after it (their later P&L and exit costs are not counted) and by STATE older than the warm-up;
+each is deterministic (the segments and warm-up days are fixed by the window and N). Only Train is
+ever split: a Validation, holdout or forward run is the whole window in one piece whatever `--split`
+says (the batch reports `split` 1), so no mid mark or warm-up can touch the evidence that selects,
+gates or sizes a family.
 
 The output (FILE, JSON): {"batch": {...the run's settings, trials, program-years, seconds...},
 "results": [one result per (program, parameters), in DIR's order; a program the safety check
 refuses gets {"status": "refused", "reason": ...}]}. Each result is `results.view(result, window)`:
 Train returns everything (or `--detail summary`); a validation run returns the validation view only
 (no trades, dates or daily series), runs a 1.5x-stress twin and carries its figures as `stress_1.5`,
-and refuses `--start`/`--end`; holdout and forward runs return the gate's inputs.
+and refuses `--start`/`--end`; holdout and forward runs return the gate's inputs. A stress run (the
+twin, or `--stress` above 1) widens every half-spread by the factor, charges passive fills the extra
+half-spread, and HALVES every passive fill hazard (`fills.STRESS_HAZARD`): "positive at 1.5x" also
+means positive when patient orders fill half as often, since the package rate is an upper bound.
 
 Each unit (a worker's share of programs over one segment) runs in its own process with a deadline
 (`--unit-timeout`, default 30 s a program-day and at least 30 minutes): past it the process is killed
@@ -48,6 +65,8 @@ from typing import Any, Sequence
 from . import ENGINE_VERSION
 
 EXIT_OK, EXIT_USAGE, EXIT_MISSING, EXIT_SEALED = 0, 2, 3, 4
+#: Trading days a later segment of a split run replays first, without trading (a week).
+WARMUP_DAYS = 5
 
 
 def find_programs(directory: str | os.PathLike) -> list[tuple[str, str, dict]]:
@@ -201,6 +220,8 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
 
     if window == "validation" and (start or end):
         raise ValueError("a validation run is the whole window: no start or end cut")
+    if window != "train":
+        split = 1  # only Train is split (the module docstring): no mid mark ever counts as evidence
     began = time.time()
     gate = mint_gate_capability(store_root, gate_reason) if gate_reason else None
     store = Store(store_root, gate=gate)
@@ -217,7 +238,9 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
     segments = _segments(days, split) if days else [(start, end)]
     cfg_kw = {"window": window, "roots": roots, "stress": float(stress), "capital": float(capital), "fill_model_path": fill_model_path}
     per_segment = max(1, math.ceil(max(1, workers) / len(segments)))
-    units = [(store_root, gate_reason, dict(cfg_kw), s, seg, chunk, detail, _fault_hang)
+    last = len(segments) - 1
+    units = [(store_root, gate_reason, dict(cfg_kw, split_mark=s < last, warmup=WARMUP_DAYS if s > 0 else 0), s, seg, chunk,
+              detail, _fault_hang)
              for s, seg in enumerate(segments) for chunk in _chunks(valid, per_segment) if chunk]
     parts: dict[int, dict[int, dict]] = {}
     produced: list[tuple[int, int, dict]] = []

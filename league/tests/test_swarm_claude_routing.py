@@ -22,7 +22,7 @@ from league.swarm.models import ModelError, ModelRouter
 from league.swarm.settings import DEFAULTS
 from league.swarm.store import SwarmStore
 from league.tests.swarm_fakes import Clock, FakeMonth
-from league.tests.test_claude import message
+from league.tests.test_claude import FakeStream, events, message
 from league.tests.test_frontier import GATEWAY, FakeOpener, FakeResponse, ok
 
 
@@ -89,14 +89,24 @@ class ClaudeRouting(unittest.TestCase):
         self.assertEqual(self.store.spent(["openai"]), 0)
         self.assertEqual(self.openai.calls, [])
         body, headers = opener.body(), opener.headers()
-        self.assertEqual((body["model"], body["max_tokens"], body["output_config"], body["thinking"]),
-                         ("claude-opus-5-5", 16000, {"effort": "high"}, {"type": "adaptive"}))
+        self.assertEqual((body["model"], body["max_tokens"], body["output_config"], body["thinking"], body["stream"]),
+                         ("claude-opus-5-5", 16000, {"effort": "high"}, {"type": "adaptive", "display": "summarized"}, True),
+                         "streamed by default: no hop waits 100 s in silence")
         self.assertEqual(body["system"][0]["cache_control"], {"type": "ephemeral"}, "the stable prefix is cached")
         self.assertEqual((headers["x-ltcm-role"], headers["x-ltcm-agent"]), ("architect", "swarm-architect"))
         rows = self.store._all("SELECT usd, detail FROM spend WHERE kind='claude' ORDER BY seq")
         self.assertEqual(len(rows), 2, "the hold, then its settlement")
         self.assertGreater(rows[0]["usd"], 0.32, "held at the worst case: 16,000 output tokens alone are $0.32")
         self.assertAlmostEqual(self.router(opener).claude_spent(role="architect"), 0.184)
+
+    def test_a_streamed_answer_settles_at_the_gateways_tail_and_a_broken_stream_falls_through(self):
+        result = self.ask(self.router(FakeOpener(FakeStream(events('{"families": []}', cost="0.184000")))))
+        self.assertEqual((result["route"], result["json"], result["cost_usd"]), ("claude", {"families": []}, 0.184))
+        self.assertEqual(self.claude_spent(), Decimal("0.184000"))
+        self.assertFalse(self.store.get("claude_unsettled"))
+        broken = self.ask(self.router(FakeOpener(FakeStream(events(), fail=socket.timeout("quiet"), fail_after=5))), key="quiet")
+        self.assertEqual(broken["route"], "openai", "a stalled stream falls through to Astra")
+        self.assertEqual(len(self.store.get("claude_unsettled")), 1, "its bill is unknown: trued up from the gateway later")
 
     def test_the_hold_is_durable_before_dispatch_and_an_unknown_bill_keeps_it(self):
         seen = []

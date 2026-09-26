@@ -27,6 +27,11 @@ export const API_VERSION = '2023-06-01';
 //: The most output one call may ask for. Non-streaming calls above it risk an HTTP timeout before the
 //: answer comes back (a House read is 600 seconds); the reservation is sized from the `max_tokens` admitted.
 export const MAX_TOKENS = 16000;
+//: The most a STREAMED call may ask for (Sept 27, 2026): its events flow as they are made, so no hop waits in silence
+//: (a non-streamed high-effort answer ran past Cloudflare's 100-second wait in front of api.anthropic.com: HTTP 524).
+export const MAX_TOKENS_STREAM = 32000;
+//: A streamed call is cut after this long: just above the House's own 600-second limit, so the House gives up first.
+export const STREAM_TIMEOUT_MS = 660000;
 //: The largest request body read (a 1M-token context is not needed by any role; this bounds the reservation too).
 export const MAX_REQUEST_BYTES = 1024 * 1024;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -35,7 +40,8 @@ const MODEL_ID = /^claude-[a-z0-9-]{1,60}$/;
 export const REQUEST_HEADER = 'X-LTCM-Request';
 const REQUEST_ID = /^[A-Za-z0-9:._-]{1,160}$/;
 //: A hold with no settlement this long after it was made is released to zero: every call answers or is cut off within
-//: ten minutes (570 s here, 600 s at the House), so only a Worker that died between reserve and settle leaves one.
+//: eleven minutes (570 s unstreamed and 660 s streamed here, 600 s at the House), so only a Worker that died between
+//: reserve and settle leaves one.
 export const STALE_HOLD_MS = 30 * 60 * 1000;
 //: How many of the House's requests the meter remembers the outcome of.
 export const RECENT_REQUESTS = 256;
@@ -153,9 +159,10 @@ function outputConfigValid(config) {
 }
 
 /**
- * Check a request body before it is sent: `{ model, price, maxTokens }` or `{ error, status }`. Only inline text,
- * adaptive thinking, an effort and a JSON-schema answer format are admitted. Streaming is refused (the usage block
- * that settles the bill comes with a complete answer), and so is an assistant turn last (Anthropic refuses a prefill).
+ * Check a request body before it is sent: `{ model, price, maxTokens, stream }` or `{ error, status }`. Only inline
+ * text, adaptive thinking, an effort and a JSON-schema answer format are admitted, and an assistant turn last is
+ * refused (Anthropic refuses a prefill). `stream: true` (Sept 27, 2026) is metered from the event stream itself
+ * (`StreamMeter`) and may ask for up to MAX_TOKENS_STREAM.
  */
 export function admit(body, env = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'The request must be a JSON object.', status: 400 };
@@ -163,7 +170,8 @@ export function admit(body, env = {}) {
   const table = priceTable(env);
   const row = MODEL_ID.test(model) && Object.hasOwn(table, model) ? table[model] : null;
   if (!row) return { error: `No price is configured for model "${model}"; an unpriced call is refused.`, status: 403 };
-  if (body.stream !== undefined && body.stream !== false) return { error: 'Streaming calls cannot be metered here and are refused.', status: 400 };
+  if (body.stream !== undefined && typeof body.stream !== 'boolean') return { error: 'stream is true or false.', status: 400 };
+  const stream = body.stream === true;
   const allowed = new Set(['model', 'max_tokens', 'system', 'messages', 'thinking', 'output_config', 'stream']);
   const extra = Object.keys(body).filter(key => !allowed.has(key));
   if (extra.length) {
@@ -200,8 +208,108 @@ export function admit(body, env = {}) {
     return { error: `output_config takes an effort (${EFFORTS.join(', ')}) and a json_schema format, nothing else.`, status: 400 };
   }
   const maxTokens = body.max_tokens;
-  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > MAX_TOKENS) {
-    return { error: `max_tokens is required, between 1 and ${MAX_TOKENS}.`, status: 400 };
+  const ceiling = stream ? MAX_TOKENS_STREAM : MAX_TOKENS;
+  if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > ceiling) {
+    return { error: `max_tokens is required, between 1 and ${ceiling}${stream ? '' : ` (${MAX_TOKENS_STREAM} when streamed)`}.`, status: 400 };
   }
-  return { model, price: row, maxTokens };
+  return { model, price: row, maxTokens, stream };
+}
+
+/**
+ * Server-sent events, read incrementally: `push(bytes)` returns the events its bytes completed, `end()` whatever the
+ * stream's end completes. An event is its parsed `data` JSON (Anthropic's carry their own `type`), or
+ * `{ type: 'unreadable' }` when its data is not JSON.
+ */
+export function sseParser() {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const parse = block => {
+    const data = block.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+    if (!data) return null;
+    try {
+      const value = JSON.parse(data);
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : { type: 'unreadable' };
+    } catch {
+      return { type: 'unreadable' };
+    }
+  };
+  const drain = () => {
+    const out = [];
+    for (let at = buffer.search(/\r?\n\r?\n/); at >= 0; at = buffer.search(/\r?\n\r?\n/)) {
+      const block = buffer.slice(0, at);
+      buffer = buffer.slice(at).replace(/^\r?\n\r?\n/, '');
+      const event = parse(block);
+      if (event) out.push(event);
+    }
+    return out;
+  };
+  return {
+    push(bytes) {
+      buffer += decoder.decode(bytes, { stream: true });
+      return drain();
+    },
+    end() {
+      buffer += decoder.decode();
+      const out = drain();
+      const event = buffer.trim() ? parse(buffer) : null;
+      buffer = '';
+      return event ? [...out, event] : out;
+    },
+  };
+}
+
+/**
+ * What one streamed answer used, read from its events: input and cache usage from `message_start`, output from the
+ * last `message_delta` (its usage is cumulative, and any count it carries replaces the start's), the stop reason, an
+ * `error` event, and whether `message_stop` came.
+ */
+export class StreamMeter {
+  constructor() {
+    this.started = false;
+    this.output = false;
+    this.stopped = false;
+    this.usage = {};
+    this.stop = null;
+    this.error = null;
+  }
+
+  observe(event) {
+    if (!event || typeof event !== 'object') return;
+    const merge = usage => {
+      if (usage && typeof usage === 'object' && !Array.isArray(usage)) {
+        for (const [key, value] of Object.entries(usage)) if (value !== null && value !== undefined) this.usage[key] = value;
+      }
+    };
+    if (event.type === 'message_start') {
+      this.started = true;
+      merge(event.message?.usage);
+    } else if (event.type === 'message_delta') {
+      merge(event.usage);
+      if (typeof event.delta?.stop_reason === 'string') this.stop = event.delta.stop_reason;
+    } else if (event.type === 'content_block_start' || event.type === 'content_block_delta') {
+      this.output = true;
+    } else if (event.type === 'message_stop') {
+      this.stopped = true;
+    } else if (event.type === 'error') {
+      this.error = typeof event.error?.type === 'string' ? event.error.type : 'error';
+    }
+  }
+
+  get geo() {
+    return typeof this.usage.inference_geo === 'string' ? this.usage.inference_geo : null;
+  }
+
+  /**
+   * `{ cost, stop }`: the cost in micro-dollars, or null when it is unknown (the whole hold stays spent). A complete
+   * answer settles at its usage. An `error` event before any output settles at the usage `message_start` reported (the
+   * input), and unknown before `message_start` or once output has begun: its tokens were made and are not counted
+   * until the final `message_delta`, and unknown is not free. A stream that broke, or ended without `message_stop`, is
+   * unknown: the call ran and may be billed.
+   */
+  settlement(price, { broken = false } = {}) {
+    const cost = () => (this.started ? actualCost(price, this.usage) : null);
+    if (this.stopped && !this.error) return { cost: cost(), stop: this.stop || 'end_turn' };
+    if (this.error) return { cost: this.output ? null : cost(), stop: 'stream_error' };
+    return { cost: null, stop: broken ? 'stream_broken' : 'stream_cut' };
+  }
 }
