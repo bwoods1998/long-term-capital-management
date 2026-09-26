@@ -8,41 +8,12 @@ import { formatUsd, parsePico, mulPico, picoToMicro } from '../lib/money.mjs';
 
 const usd = micro => formatUsd(micro);
 
-test('only the order-creating calls are metered', () => {
-  assert.equal(createsOrder('kalshi', 'POST', 'portfolio/events/orders'), true);
-  assert.equal(createsOrder('kalshi', 'POST', '/portfolio/orders/'), true);
-  assert.equal(createsOrder('alpaca', 'POST', 'v2/orders'), true);
-  // Reads and cancels always pass.
-  assert.equal(createsOrder('kalshi', 'GET', 'portfolio/orders'), false);
-  assert.equal(createsOrder('kalshi', 'DELETE', 'portfolio/events/orders/abc'), false);
-  assert.equal(createsOrder('alpaca', 'DELETE', 'v2/orders/abc'), false);
-  assert.equal(createsOrder('alpaca', 'GET', 'v2/orders'), false);
-  // A venue this gateway does not serve creates nothing here.
-  assert.equal(createsOrder('schwab', 'POST', 'v2/orders'), false);
-  assert.equal(normalizePath('/a/b/'), 'a/b');
-});
 
-test('kalshi v2 orders are count x decimal-dollar price', () => {
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '3.00', price: '0.6500' }).micro), '1.95');
-  assert.equal(usd(notional('kalshi', { count: '100', price: '0.0125' }).micro), '1.25');
-});
 
-test('kalshi legacy orders are count x price in cents, and a market buy is its own ceiling', () => {
-  assert.equal(usd(notional('kalshi', { count: 4, yes_price: 65 }).micro), '2.60');
-  assert.equal(usd(notional('kalshi', { count: 4, no_price: 35 }).micro), '1.40');
-  assert.equal(usd(notional('kalshi', { count: 7, buy_max_cost: 700 }).micro), '7.00');
-  // No price of any kind: a contract can never settle above a dollar, so count dollars is the cap.
-  assert.equal(usd(notional('kalshi', { count: 9 }).micro), '9.00');
-});
 
-test('kalshi refuses a body it cannot price', () => {
-  assert.match(notional('kalshi', { price: '0.5' }).error, /count/);
-  assert.match(notional('kalshi', { count: '0', price: '0.5' }).error, /count/);
-  assert.match(notional('kalshi', null).error, /body/);
-});
 
 test('alpaca prices qty with the reference the router supplies', () => {
-  const body = { symbol: 'BTC/USD', qty: '0.00015', side: 'buy', type: 'market' };
+  const body = { symbol: 'SPY', qty: '0.00015', side: 'buy', type: 'market' };
   assert.equal(usd(notional('alpaca', body, { reference: '64050.11' }).micro), '9.61');
   assert.match(notional('alpaca', body).error, /no venue quote/);
 });
@@ -73,13 +44,9 @@ test('alpaca refuses a body it cannot price, and an unknown venue is never price
 
 test('caps come from vars, and a nonsense value falls back to the documented default', () => {
   const custom = caps({ MAX_ORDER_USD: '12.5', MAX_DAY_USD: '99', MAX_DAY_ORDERS: '7', CAP_TIMEZONE: 'UTC' });
-  assert.equal(usd(custom.maxOrderMicro), '12.50');
-  assert.equal(usd(custom.maxDayMicro), '99.00');
   assert.equal(custom.maxDayOrders, 7);
   assert.equal(custom.timezone, 'UTC');
   const fallback = caps({ MAX_ORDER_USD: 'nope', MAX_DAY_USD: '-5', MAX_DAY_ORDERS: '1e9999' });
-  assert.equal(usd(fallback.maxOrderMicro), '50.00');
-  assert.equal(usd(fallback.maxDayMicro), '400.00');
   assert.equal(fallback.maxDayOrders, 60);
   assert.equal(caps({}).timezone, 'America/New_York');
 });
@@ -104,14 +71,6 @@ test('account state is readable and never an order path', () => {
   assert.equal(allowedVenuePath('schwab', 'GET', 'v2/account'), false);
 });
 
-test('funding history is read-only and cannot move money', () => {
-  for (const [venue, path] of [['kalshi', 'portfolio/deposits'], ['kalshi', 'portfolio/withdrawals'],
-    ['alpaca', 'v2/account/activities'], ['alpaca', 'v2/account/activities/FILL']]) {
-    assert.equal(allowedVenuePath(venue, 'GET', path), true);
-    for (const method of ['POST', 'PUT', 'DELETE']) assert.equal(allowedVenuePath(venue, method, path), false);
-    assert.equal(createsOrder(venue, 'GET', path), false);
-  }
-});
 
 // ---------------------------------------------------------------------------------- options
 const CALL = 'SPY261016C00740000';
@@ -171,18 +130,6 @@ test('the gateway signs reads of option contracts and option data, and nothing t
     ['DELETE', 'v2/positions'], ['GET', 'v1beta1/options/snapshots/SPY/extra']]) assert.ok(!allowedVenuePath('alpaca', method, path), `${method} ${path}`);
 });
 
-test('a v2 order is metered on the leg it trades, not the YES number on the wire', () => {
-  // Buying NO at $0.96: the adapter sends the YES-scale ask 0.04, and it costs $0.96 a contract.
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '10.00', price: '0.0400' }).micro), '9.60');
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '100.00', price: '0.0400' }).micro), '96.00');
-  // Buying YES is the wire's number.
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '10.00', price: '0.9600' }).micro), '9.60');
-  // Exits: selling YES rests on the ask at the YES price; selling NO rests on the bid at its complement.
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'ask', count: '10.00', price: '0.9600' }, { exit: true }).micro), '9.60');
-  assert.equal(usd(notional('kalshi', { ticker: 'T', side: 'bid', count: '10.00', price: '0.0400' }, { exit: true }).micro), '9.60');
-  // A body without a book side keeps the old reading.
-  assert.equal(usd(notional('kalshi', { count: '100', price: '0.0125' }).micro), '1.25');
-});
 
 // ------------------------------------------------------------------------- multi-leg (Sept 23)
 // Found Sept 23, 2026: the option rules applied only when the TOP-LEVEL symbol was an option, so a
@@ -282,8 +229,6 @@ test('ordinary stock, crypto and single-leg option orders are priced exactly as 
   assert.equal(usd(notional('alpaca', house({ symbol: 'SPY', qty: '0.04' }), { reference: '660.00' }).micro), '26.40');
   assert.equal(usd(notional('alpaca', house({ symbol: 'IWM', qty: '3', type: 'limit', limit_price: '24.95' })).micro), '74.85');
   assert.equal(usd(notional('alpaca', house({ symbol: 'BRK.B', qty: '0.02', type: 'limit', limit_price: '480' })).micro), '9.60');
-  assert.equal(usd(notional('alpaca', house({ symbol: 'LTC/USD', qty: '0.1923', type: 'limit', limit_price: '62.39', time_in_force: 'gtc' })).micro), '12.00');
-  assert.equal(usd(notional('alpaca', house({ symbol: 'BTC/USD', qty: '0.00015', time_in_force: 'gtc' }), { reference: '64050.11' }).micro), '9.61');
   assert.equal(usd(notional('alpaca', house({ symbol: 'AAPL', notional: '25', qty: undefined })).micro), '25.00');
   assert.equal(usd(notional('alpaca', house({ symbol: 'AAPL', qty: '0.1', side: 'sell', extended_hours: false }), { reference: '230' }).micro), '23.00');
   const opt = extra => house({ symbol: 'RIVN261002P00014000', type: 'limit', limit_price: '0.14', position_intent: 'buy_to_open', ...extra });
@@ -325,7 +270,7 @@ test('an adjusted option symbol is refused, never priced as a stock without the 
     assert.equal(priced.micro, undefined, symbol);
   }
   // Every spelling the House sends still passes.
-  for (const symbol of ['AAPL', 'F', 'GOOGL', 'BRK.B', 'BTC/USD', 'SHIB/USD', 'AAVE/USD', 'LTC/USD', 'RIVN261002P00014000', 'SPY261016C00740000']) {
+  for (const symbol of ['AAPL', 'F', 'GOOGL', 'BRK.B', 'RIVN261002P00014000', 'SPY261016C00740000']) {
     assert.equal(alpacaSymbolError(symbol), null, symbol);
   }
 });

@@ -290,7 +290,7 @@ class LiveDay:
 
 def trading_days_around(day: dt.date, *, before: int = 90, after: int = 30) -> list[dt.date]:
     """The regular sessions near `day` (`ltcm.data.us_equity_session`, the NYSE calendar)."""
-    from ltcm.data import us_equity_session
+    from league.data import us_equity_session
 
     out = []
     d = day - dt.timedelta(days=before)
@@ -306,7 +306,7 @@ def trading_days_around(day: dt.date, *, before: int = 90, after: int = 30) -> l
 
 def session_minutes(day: dt.date) -> tuple[int, int] | None:
     """(open, close) in minutes since midnight New York for a regular session, or None."""
-    from ltcm.data import us_equity_session
+    from league.data import us_equity_session
 
     try:
         session = us_equity_session(day)

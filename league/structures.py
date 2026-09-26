@@ -42,15 +42,15 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
-from ltcm.adapters.alpaca import alpaca_symbol
-from ltcm.broker import Instrument, RejectedOrder, money
+from league.adapters.alpaca import alpaca_symbol
+from league.broker import Instrument, RejectedOrder, money
 
 from . import structure_core as core
 from .venues import instrument_for
 
 # THE RULES LIVE IN `league/structure_core.py` (Sept 25, 2026, builder S3): the options replay runs in
 # the agent's box with the standard library only, so the one implementation of the spec is written over
-# OCC codes there, and this module is its House face: the same names over `ltcm.broker.Instrument`.
+# OCC codes there, and this module is its House face: the same names over `league.broker.Instrument`.
 # Every rule below delegates; `league/tests/test_structure_parity.py` pins the two for every type and
 # refusal.
 ZERO = core.ZERO

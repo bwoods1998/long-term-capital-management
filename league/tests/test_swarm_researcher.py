@@ -341,7 +341,7 @@ class ModelCycles(ResearcherCase):
 
 class RateLimits(unittest.TestCase):
     def test_a_rate_limit_is_waited_out_twice_then_raised(self):
-        from ltcm.provider import Provider, ProviderError
+        from league.provider import Provider, ProviderError
 
         from league.tests.swarm_fakes import ScriptedSail
 
@@ -368,7 +368,7 @@ class RateLimits(unittest.TestCase):
             store.close()
 
     def test_a_call_that_timed_out_is_booked_at_its_hold(self):
-        from ltcm.provider import Provider, ProviderError
+        from league.provider import Provider, ProviderError
 
         with tempfile.TemporaryDirectory() as d:
             store = SwarmStore(Path(d))
@@ -402,7 +402,7 @@ class Holds(unittest.TestCase):
     (S7). Sail answers the POST 'in progress' and the Provider stops polling at once (poll_timeout 0)."""
 
     def setUp(self):
-        from ltcm.provider import Provider
+        from league.provider import Provider
 
         from league.tests.swarm_fakes import response_payload
 
@@ -415,7 +415,7 @@ class Holds(unittest.TestCase):
         payload = {}
 
         def transport(method, route, body=None, idempotency_key=None):
-            from ltcm.provider import ProviderError
+            from league.provider import ProviderError
 
             if self.fail_code:
                 raise ProviderError(self.fail_code)
@@ -439,7 +439,7 @@ class Holds(unittest.TestCase):
         return float(self.prov._db.execute("SELECT cost_usd FROM requests").fetchone()[0])
 
     def test_a_timed_out_call_asked_again_books_its_cost_not_its_hold_and_its_cost(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
 
         for _ in range(3):  # three rounds while it is still running: one hold
             with self.assertRaises(ProviderError):
@@ -451,7 +451,7 @@ class Holds(unittest.TestCase):
         self.assertAlmostEqual(self.store.spent(["sail_model"]), self.cost(), places=6)
 
     def test_a_hold_the_provider_settles_or_releases_later_is_trued_up(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
 
         with self.assertRaises(ProviderError):
             self.ask("k1")
@@ -465,7 +465,7 @@ class Holds(unittest.TestCase):
         self.assertEqual(self.store.get("unsettled") or {}, {})
 
     def test_a_released_hold_is_reversed(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
 
         self.fail_code = "provider_transport_timeout"  # the POST's answer was lost: Sail may or may not have it
         with self.assertRaises(ProviderError):
@@ -477,7 +477,7 @@ class Holds(unittest.TestCase):
         self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
 
     def test_a_server_error_nothing_accepted_books_nothing(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
 
         self.fail_code = "provider_http_503"
         with self.assertRaises(ProviderError):

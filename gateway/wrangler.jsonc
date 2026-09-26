@@ -1,72 +1,44 @@
+// Options gateway. Credentials are Worker secrets; see README.md. Owner-funded caps are explicit.
 {
-  // The order gateway. It holds the Kalshi private key, both Alpaca key pairs (real and paper),
-  // the OpenAI key and the GitHub token as Worker secrets so the Sail VM that runs the House never
-  // has them: the VM can ask for an order, a frontier call or a pull request, but only this
-  // Worker can authenticate one, and only within the caps below.
-  //
-  // Secrets, set from gateway/ with `npx wrangler secret put <NAME>` and never written to this
-  // file (`npx wrangler secret list` prints the names that are placed):
-  //   KALSHI_KEY_ID, KALSHI_PRIVATE_KEY,
-  //   ALPACA_KEY_ID, ALPACA_SECRET_KEY            the real account, venue `alpaca`
-  //   ALPACA_PAPER_KEY_ID, ALPACA_PAPER_SECRET_KEY  the paper account, venue `alpaca-paper`
-  //   OPENAI_SECRET_KEY                           /v1/frontier/*
-  //   TYPE_SAFE_TOKEN                             the bounded Jev shadow pilot
-  //   GITHUB_TOKEN (fine-grained, this one repository, Contents and Pull requests read/write)
-  //   GATEWAY_TOKEN                               the runtime's bearer token, 32+ characters
-  //   GATEWAY_ADMIN_TOKEN                         the owner's; the only token /v1/unkill accepts
-  //   SAIL_API_KEY                                the watchdog; without it the watchdog only reports
-  // Mail needs no secret: it goes out through the EMAIL binding below. The first run's
-  // COINBASE_KEY_NAME and COINBASE_API_SECRET are obsolete (`npx wrangler secret delete <NAME>`).
-  //
-  // It is also the box's supervisor. Every five minutes it reads the PRODUCTION checkpoint, the
-  // Sail credit balance and the state of the House box, resumes and restarts the box when it can,
-  // and mails the owner when it cannot -- so the single human step left is adding Sail credit.
-  // While the production tape is empty (404) it resumes and restarts nothing. Which release of
-  // the code the box runs is the in-box watchdog's business (league/watchdog.py), not this one's.
   "name": "ltcm-gateway",
   "main": "worker.mjs",
   "compatibility_date": "2026-09-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
   "preview_urls": false,
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "Gate" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Gate"] }],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GATE",
+        "class_name": "Gate"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Gate"
+      ]
+    }
+  ],
   "send_email": [
     {
       "name": "EMAIL",
       "destination_address": "blakewoods98@gmail.com",
-      "allowed_sender_addresses": ["agent@blakewoods.us"]
+      "allowed_sender_addresses": [
+        "agent@blakewoods.us"
+      ]
     }
   ],
   "vars": {
-    // Hard caps, in US dollars. A cap is only ever lowered by editing this file and redeploying,
-    // which is a change the owner makes, not a change the VM can make.
-    // History: the first run sized these so a desk's own limits bound first, and on Sept 18,
-    // 2026 (the arena) raised them to bound a runaway loop rather than a position.
-    // Sept 19, 2026 (the rebuild): two accounts of about $800 each. One order is never more than a
-    // tenth of an account, and a day's submitted notional is a few times the floor's capital
-    // because resting quotes are replaced as prices move. An order sent with `X-LTCM-Purpose: exit`
-    // skips the dollar caps; the paper venue is never metered at all.
-    // Sept 26, 2026 (the options-swarm run, Wave 5; docs/goals/LTCM_OPTIONS_SWARM.md, "Money"): the
-    // REAL Alpaca venue is capped by MAXIMUM LOSS and follows the account (lib/account.mjs). The
-    // gateway reads the account's equity itself (GET v2/account with the real keys, no older than
-    // EQUITY_CAP_MAX_AGE_MS for an opening order; an opening order with no such reading is a 503 the
-    // House sends again, and exits never wait on it). One opening order may lose at most the lower of
-    // MAX_ORDER_MAX_LOSS_USD and MAX_ORDER_EQUITY_SHARE of equity; the day's opening maximum loss at
-    // most MAX_DAY_EQUITY_SHARE of equity and never above MAX_DAY_USD_ALPACA, the owner's whole
-    // $10,000 envelope; a credit structure opens only at CREDIT_MIN_EQUITY_USD of equity or more.
-    // Exits (closes, buy-backs, the sale of assigned shares) meet no dollar cap and are not counted
-    // in the day's opening maximum loss. MAX_DAY_ORDERS counts every order, exits included (under the
-    // venue's 390 a day), and no order opens once the day's orders reach MAX_DAY_OPEN_ORDERS: the
-    // last 50 are kept for exits. A single contract bought to open goes only when
-    // OPTION_STRUCTURES_REAL names long_call or long_put (it names neither). The real venue's stock
-    // orders close assigned shares only, and its crypto orders are refused. MAX_ORDER_USD_ALPACA ($75
-    // of premium) is gone: MAX_ORDER_USD, MAX_ORDER_USD_KALSHI and MAX_DAY_USD ($4,000 of notional a
-    // day, as before) bound Kalshi alone (the review of Wave 5, m17).
-    "MAX_ORDER_USD": "75",
-    "MAX_ORDER_USD_KALSHI": "75",
-    "MAX_DAY_USD": "4000",
     "MAX_DAY_USD_ALPACA": "10000",
     "MAX_DAY_ORDERS": "300",
     "MAX_DAY_OPEN_ORDERS": "250",
@@ -75,97 +47,20 @@
     "MAX_DAY_EQUITY_SHARE": "1.0",
     "CREDIT_MIN_EQUITY_USD": "2000",
     "EQUITY_CAP_MAX_AGE_MS": "120000",
-    // Sept 21: $104.14 already metered plus $75 owner-reported remaining credit, less ~$5
-    // operating reserve. This is an aggregate ceiling, not a fresh $174 allowance.
-    // Sept 21 22:15 UTC: the owner added $200 of OpenAI credit -> $374.
-    // Sept 23 06:40 UTC: $308.46 metered this month and the owner reports about $100 of OpenAI
-    // credit funded, so the month is aligned to metered + funded, rounded down -> $408.
-    // Sept 24 01:34 UTC (the close-the-gaps run's T0): $394.46 metered this month and the owner
-    // states $213 of OpenAI credit funded (he added $200), so the month is aligned to metered +
-    // funded, rounded down -> $607.
-    // Sept 26: owner confirms $124 remaining after adding $100. Raise the existing aggregate
-    // ceiling by exactly that addition: $607 -> $707 (metered $596.29 at confirmation).
-    // This credit funds September only; October requires a freshly reconciled allowance.
     "FRONTIER_MONTH_USD": "707",
     "FRONTIER_FUNDED_MONTH": "2026-09",
-    // Sept 23: compute follows profit (lib/equity.mjs). The month's cap is FRONTIER_MONTH_USD plus
-    // COMPUTE_PROFIT_SHARE of the real accounts' equity above EQUITY_BASELINE_USD (the live grant's
-    // capital, Kalshi $517.75 + Alpaca $500), read here with the venue keys, and exactly
-    // FRONTIER_MONTH_USD when that equity cannot be read. FRONTIER_MONTH_MAX_USD holds the raise to
-    // what the OpenAI account is funded for: the owner's rule is no cap above funded money, so it
-    // equals the month until the owner funds more (health then still reports what profit earned,
-    // `frontier.profit_index.earned_usd`). Raise it with each OpenAI top-up bought from profit.
-    "COMPUTE_PROFIT_SHARE": "0.3",
-    "EQUITY_BASELINE_USD": "1017.75",
-    "FRONTIER_MONTH_MAX_USD": "707",
-    // Owner increased the classification experiment to $20, fully backed by retained phase holds. No reset
-    // by month or restart. No production trading/release decision consumes these answers.
-    // Sept 23 06:40 UTC: $16.14 metered and the owner reports $26 funded at Jev -> metered +
-    // funded, rounded down: $42.
-    "TYPESAFE_PILOT_USD": "42",
-    "TYPESAFE_PILOT_END": "2026-09-21T11:01:16.977Z",
-    // Continue unused original allowance after the owner resumed the game. No resets or refills.
-    "TYPESAFE_PERSISTENT": "true",
-    // Dollars per million tokens: input, cached input, output. A model absent here is refused.
-    // From developers.openai.com/api/docs/pricing on Sept 19, 2026. Input is priced at the
-    // cache-write rate, the dearest an input token can be, so the meter errs high. `uncached` is
-    // the list rate for a token neither read nor written (1/1.25 of the write rate, prompt-caching
-    // guide, Sept 22, 2026); it applies only when the usage block reports `cache_write_tokens`.
-    // GPT-6 Sol and Luna from their Sept 22, 2026 launch: Sol $2 plain / $0.20 cached / $10 output,
-    // Luna $0.10 / $0.01 / $0.50; writes 1.25x plain; above 272K input tokens input and cache
-    // rates double and output is 1.5x. Both ids were reachable with the key on Sept 22, 2026
-    // (GET /v1/frontier/models).
-    // Sept 26, 2026 (the options-swarm run, Wave 5): `flex` is a model's rates on the flex tier
-    // (`service_tier: "flex"`), exactly half of each standard rate, long-context ones included. A
-    // flex call is reserved at the standard worst case (OpenAI may serve it on another tier) and
-    // settled at these rates only when the answer reports `"service_tier": "flex"`; a 429 (no flex
-    // capacity) settles at zero. A model without `flex` cannot be sent on the flex tier.
     "FRONTIER_MODELS": "{\"gpt-6-astra\":{\"input\":12.5,\"cached\":1,\"output\":50,\"long_input\":25.0,\"long_cached\":2,\"long_output\":75.0,\"uncached\":10,\"long_uncached\":20,\"flex\":{\"input\":6.25,\"cached\":0.5,\"output\":25,\"long_input\":12.5,\"long_cached\":1,\"long_output\":37.5,\"uncached\":5,\"long_uncached\":10}},\"gpt-5.6-sol\":{\"input\":5,\"cached\":0.4,\"output\":20,\"long_input\":10,\"long_cached\":0.8,\"long_output\":30.0,\"uncached\":4,\"long_uncached\":8},\"gpt-5.6-terra\":{\"input\":2.5,\"cached\":0.2,\"output\":12,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":18.0,\"uncached\":2,\"long_uncached\":4},\"gpt-5.6-luna\":{\"input\":0.25,\"cached\":0.02,\"output\":1.2,\"long_input\":0.5,\"long_cached\":0.04,\"long_output\":1.7999999999999998,\"uncached\":0.2,\"long_uncached\":0.4},\"gpt-6-sol\":{\"input\":2.5,\"cached\":0.2,\"output\":10,\"long_input\":5.0,\"long_cached\":0.4,\"long_output\":15.0,\"uncached\":2,\"long_uncached\":4,\"flex\":{\"input\":1.25,\"cached\":0.1,\"output\":5,\"long_input\":2.5,\"long_cached\":0.2,\"long_output\":7.5,\"uncached\":1,\"long_uncached\":2}},\"gpt-6-luna\":{\"input\":0.125,\"cached\":0.01,\"output\":0.5,\"long_input\":0.25,\"long_cached\":0.02,\"long_output\":0.75,\"uncached\":0.1,\"long_uncached\":0.2,\"flex\":{\"input\":0.0625,\"cached\":0.005,\"output\":0.25,\"long_input\":0.125,\"long_cached\":0.01,\"long_output\":0.375,\"uncached\":0.05,\"long_uncached\":0.1}}}",
-    // Sept 26, 2026 (the options-swarm run, Wave 5): a role's own output ceiling, by the
-    // `X-LTCM-Role` header (a slug). The weekly post-mortem writes more than the 16,000 tokens every
-    // other call is held to; the reservation is sized from the max_output_tokens admitted under the
-    // ceiling. A role not named here, or a call with no role, keeps 16,000.
     "FRONTIER_ROLE_MAX_OUTPUT": "{\"postmortem\":64000}",
-    // Where the frontier model's proposals become pull requests, and how many may open in one
-    // UTC day. The token that opens them is the secret GITHUB_TOKEN; without it the route is a
-    // 503. Nothing here merges: CI judges a pull request and a repository workflow merges it.
     "GITHUB_REPO": "bwoods1998/long-term-capital-management",
     "GITHUB_MAX_PULLS_PER_DAY": "96",
-    // Trade notices a day (one per live fill and settlement). Sept 17, 2026: 40 held the day's
-    // notices from noon on once three live favorites desks were filling.
     "NOTIFY_MAX_PER_DAY": "300",
-    // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
-    // Sept 25, 2026 (the options-desk run): the multi-leg option structures the REAL Alpaca account
-    // admits, a comma-separated list of the structure spec's types (`debit_vertical`,
-    // `credit_vertical`, `iron_condor`, ...; lib/caps.mjs STRUCTURE_TYPES). An admitted structure is
-    // metered at its maximum loss against the caps above; "off", or any name that is not a type,
-    // admits none, and every multi-leg OPEN to the real account is refused. A CLOSE of any
-    // defined-risk type goes whatever this says, once the account's positions hold its legs (the
-    // review of g/money, Sept 25, 2026: "off" never strands a held structure). The practice account
-    // (`alpaca-paper`) takes every defined-risk type unmetered whatever this says. Opening it is a
-    // separately deployed choice: when enabled it lists exactly the constitution's
-    // `options_money.real_types`; "off" is always accepted as the stricter boundary by league.ci.
-    // Sept 26, 2026 (the options-swarm run, Wave 5): the five types Alpaca closes in one order. The
-    // credit types (credit_vertical, iron_condor, iron_butterfly) open only while the gateway's own
-    // reading of the account's equity is at least CREDIT_MIN_EQUITY_USD; debit types need no
-    // threshold. Every open still meets the caps by maximum loss above. Keep opens off for paper readiness.
     "OPTION_STRUCTURES_REAL": "off",
-
-    // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",
-    // A single inline model turn may legitimately take up to 25 minutes (FOREGROUND_TIMEOUT);
-    // the watchdog must not restart a box that is merely thinking.
     "CHECKPOINT_STALE_SECONDS": "1800",
     "RESTART_COOLDOWN_SECONDS": "1800",
     "RESTART_COMMAND": "/workspace/restart.sh",
-    // Set to the Sailbox id once the box exists. Empty means the watchdog only reports.
-    // Sept 26, 2026 08:41Z: the House box is sb_1d99c4a7 (ltcm-house), a fork of checkpoint sbcp_9dc7fd6b
-    // with its state cleared; the old sb_d36bc830 failed a Sail runtime upgrade (interrupted_restorable).
     "SAILBOX_ID": "sb_1d99c4a7-bee2-4226-ba7b-c694ccd857d3",
-
-    // Funding and mail. Sail's `range` understands 1h/6h/24h/7d/30d/period and silently falls
-    // back to 30d for anything else, so "a day" is spelled 24h.
     "SAIL_USAGE_RANGE": "24h",
     "LOW_BALANCE_USD": "60",
     "CRITICAL_BALANCE_USD": "20",
@@ -173,5 +68,7 @@
     "ALERT_FROM": "agent@blakewoods.us",
     "ALERT_TO": "blakewoods98@gmail.com"
   },
-  "observability": { "enabled": false }
+  "observability": {
+    "enabled": false
+  }
 }

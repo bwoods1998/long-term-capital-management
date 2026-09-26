@@ -1,7 +1,7 @@
 """The standard-library core of level-3 structures: what `league/structures.py` means, over OCC codes.
 
 Sept 25, 2026 (the options-desk run, builder S3). `league/structures.py` is the House's one
-implementation of the structure spec, and it speaks `ltcm.broker.Instrument`; the options replay runs
+implementation of the structure spec, and it speaks `league.broker.Instrument`; the options replay runs
 inside the agent's sealed box with the standard library only (`league/sandbox.py` uploads its kit of
 files beside `replay.py`), where neither `ltcm` nor `league` can be imported. So the rules live HERE,
 over OCC strings and Decimals, and `structures.py` delegates every one of them to this module: which
@@ -16,7 +16,7 @@ The held price S a share = K + sum(ratio x long leg) - sum(ratio x short leg), K
 for a debit structure, the widest wing for a credit one): its cost is its maximum loss, an open buys it
 and a close sells it (the module docstring of `structures.py` says why).
 
-Money is Decimal and `money` refuses floats, as `ltcm.broker.money` does; the replay, whose estimates
+Money is Decimal and `money` refuses floats, as `league.broker.money` does; the replay, whose estimates
 are floats, converts with `dec`.
 """
 
@@ -50,7 +50,7 @@ _LEG = re.compile(rf"\|([+-])([12])({OCC_PATTERN})")
 
 
 def money(value: Any) -> Decimal:
-    """Parse a price or quantity strictly: finite, from str/int/Decimal, never float (as `ltcm.broker.money`)."""
+    """Parse a price or quantity strictly: finite, from str/int/Decimal, never float (as `league.broker.money`)."""
     if isinstance(value, bool) or isinstance(value, float):
         raise ValueError(f"floats and bools are not money: {value!r}")
     try:
@@ -68,7 +68,7 @@ def dec(value: Any) -> Decimal:
 
 
 def occ_code(root: str, expiry: str, right: str, strike: Any) -> str:
-    """The OCC 21-character symbol (as `ltcm.adapters.alpaca.alpaca_symbol` spells an option)."""
+    """The OCC 21-character symbol (as `league.adapters.alpaca.alpaca_symbol` spells an option)."""
     day = str(expiry or "").replace("-", "")
     if len(day) != 8:
         raise ValueError(f"alpaca: option expiry {expiry!r} is not YYYY-MM-DD")

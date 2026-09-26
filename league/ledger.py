@@ -57,6 +57,7 @@ HOUSE = "house"
 
 #: kind -> whether the row is public by default. A kind not listed here cannot be written.
 KINDS: dict[str, bool] = {
+    "provider.request": False,  # private request identity, usage and settled cost
     # An agent's life.
     "agent.born": True,
     "agent.strategy": True,  # a strategy version adopted: code hash, params, generation
@@ -113,6 +114,7 @@ KINDS: dict[str, bool] = {
     "tool.blocked": True,  # reviewed but still unimplemented; retained for engineering
     "playbook.entry": True,
     # Operations.
+    "ops.tick": False,  # completed supervisor tick, including an idle market
     "ops.started": True,
     "ops.alert": True,
     "ops.budget": True,

@@ -911,7 +911,7 @@ class OptionsLive:
         if self.real is None or not self.start_at or now - self._flows_at < FLOWS_EVERY:
             return
         self._flows_at = now
-        from ltcm.performance import ALPACA_FUNDING
+        from league.performance import ALPACA_FUNDING
 
         try:
             rows = self.real.activities(sorted(ALPACA_FUNDING), after=self.start_at)
@@ -925,7 +925,7 @@ class OptionsLive:
                 if when is None or when <= start or status in ("canceled", "cancelled", "failed", "rejected"):
                     continue
                 if status not in ("executed", "complete", "completed"):
-                    # As `ltcm.performance` reads funding: only a settled flow is netted; a pending one settles nothing.
+                    # As `league.performance` reads funding: only a settled flow is netted; a pending one settles nothing.
                     unsettled.append(f"{r.get('activity_type')} {amount} {status}")
                     pending_amounts.append(amount)
                     continue

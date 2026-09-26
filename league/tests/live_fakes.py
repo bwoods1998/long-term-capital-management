@@ -15,7 +15,7 @@ import numpy as np
 
 from league.gym import greeks as G
 from league.live.venue import Rate, Submitted, occ_parts, occ_symbol
-from ltcm.data import TransportError
+from league.data import TransportError
 
 NY = ZoneInfo("America/New_York")
 MONDAY = dt.date(2026, 9, 28)

@@ -1,8 +1,0 @@
-{
-  "family": "options-breakout",
-  "name": "krasker_occ_first",
-  "repair": {
-    "key": "bug_report:alpaca-options:25e76e7891"
-  },
-  "why": "New child of krasker: use OCC-first contract identity for chain lookup, held-option exits and explicit occ order routing. Retains the parent's specialty, parameters and trading rules; starts at rung 0 and must qualify independently."
-}

@@ -90,12 +90,12 @@ from typing import Any, Callable, Mapping
 
 # The House's own session calendar: `league/house.py` imports this function (`_session_open`,
 # `session_time`) and `market_open_at` built on it (`_shut_session`). The holiday list lives there once.
-from ltcm.data import DataError, to_datetime, us_equity_session
+from league.data import DataError, to_datetime, us_equity_session
 
 from .watchdog import Releases, _ledger_ro, epoch, iso, tree_digest
 
 REPO = "bwoods1998/long-term-capital-management"
-TREES = ("league", "ltcm", "playbooks", "scripts", "deploy")  # what scripts/floor_box.py sends too
+TREES = ("league", "scripts", "deploy")  # what scripts/floor_box.py sends too
 MAX_TARBALL_BYTES = 40 * 1024 * 1024
 MAX_FILE_BYTES = 5 * 1024 * 1024
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -113,7 +113,7 @@ FAILED = ("failure", "timed_out", "action_required", "startup_failure", "stale")
 #: what a green check run means, so a candidate that changes them is refused here and reaches the
 #: box only as the owner's deploy. The test suite fails on GitHub when this pin and the files
 #: disagree, so a workflow edit that forgets the pin cannot pass its own checks either.
-TRUSTED_WORKFLOWS_SHA256 = "41a12b3a08a2d4388b01b3e28bc364b762f2668665b3438a286643759365ac00"
+TRUSTED_WORKFLOWS_SHA256 = "914eb7c42a1ff3348ba4ccfc95c0f99b24f03574a1a2bccfefb4c80e13ebf983"
 #: How long main's head may sit with no completed required checks before the owner is told.
 PENDING_ALERT_SECONDS = 2 * 3600
 EGRESS_HINT = ("api.github.com is not on the box's egress allowlist; the owner adds it with "

@@ -1,9 +1,0 @@
-{
-  "family": "options-pullback",
-  "name": "krasker_3_occ_order_identity",
-  "repair": {
-    "key": "strategy_defect:krasker-3:6b111d55b55b",
-    "parent": "krasker-3"
-  },
-  "why": "Corrected child of krasker-3: emit option entries and exits with occ and prefer explicit OCC identity when matching chain rows, positions, and working orders. Preserves the parent's Alpaca options specialty, symbols, horizon, parameters, and trading logic. Born on rung 0 with no inherited record; must qualify independently."
-}

@@ -130,17 +130,15 @@ class Frontier:
         )
         commitment = "frontier:" + secrets.token_hex(16)
         if self.spend_guard is not None:
-            from .campaigns import CampaignClosed
-
             if self.model not in MODEL_CEILINGS:
-                raise FrontierError("the campaign has no verified price for this model")
+                raise FrontierError("the spend guard has no verified price for this model")
             # One UTF-8 byte per possible input token plus framing, including the long-context
             # and cache-write premiums. Standard service only; no built-in paid tools.
             input_rate, output_rate = MODEL_CEILINGS[self.model]
             hold = (Decimal(len(request.data) + 4096) * input_rate + Decimal(body["max_output_tokens"]) * output_rate) / 1000000
             try:
                 self.spend_guard.reserve(commitment, "foundation-review", hold)
-            except CampaignClosed as exc:
+            except RuntimeError as exc:
                 raise FrontierError(str(exc)) from None
         try:
             with self.opener(request, timeout=self.timeout) as response:

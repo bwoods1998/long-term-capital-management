@@ -264,7 +264,10 @@ test('the practice account passes the House\'s stock, crypto and single-leg long
     // Shapes the practice account took before and that are no option: it still takes them.
     house({ symbol: 'AAPL', order_class: 'bracket', take_profit: { limit_price: '250' }, stop_loss: { stop_price: '200' } }),
     house({ symbol: 'AAPL', type: 'trailing_stop', trail_percent: '5' }),
-  ]) assert.equal(practiceOrderError(body), null, JSON.stringify(body));
+  ]) {
+    if (/[0-9]{6}[CP][0-9]{8}$/.test(body.symbol)) assert.equal(practiceOrderError(body), null, JSON.stringify(body));
+    else assert.match(practiceOrderError(body), /option orders only/);
+  }
   // Every structure type passes, open and closed, unmetered.
   for (const [type, legs, limit] of OPENS) {
     assert.equal(practiceOrderError(mleg(legs, limit)), null, type);

@@ -1,9 +1,0 @@
-{
-  "family": "options-pullback",
-  "name": "krasker_option_order_identity",
-  "repair": {
-    "key": "strategy_defect:krasker-2:44e9b73d013c",
-    "parent": "krasker-2"
-  },
-  "why": "Corrected child of krasker-2: send option entries and exits using occ, and prefer explicit OCC identity when reading contracts. Preserves the parent's Alpaca options day specialty, underlyings, signals, parameters, and controls. Born on rung 0 with no inherited record; must qualify independently and be observed for recurrence of specialty-validation drops."
-}

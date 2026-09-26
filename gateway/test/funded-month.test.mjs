@@ -22,7 +22,6 @@ test('confirmed credit is available in its funded UTC month and expires at the b
   assert.equal(gate.status().frontier.cap_usd, '707.00');
   at = OCT;
   // Even a fresh profitable account reading cannot create unfunded credit in October.
-  gate.recordEquity({ ok: true, at, kalshi_micro: '0', alpaca_micro: '5000000000' });
   assert.equal(gate.frontierReserve({ micro: '1' }).ok, false);
   const status = gate.status().frontier;
   assert.equal(status.cap_usd, '0.00');

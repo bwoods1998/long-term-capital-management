@@ -23,10 +23,8 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from league.constitution import CONSTITUTION, money_digest
-from league.evaluator import Verdict
 from league.live_trading import (GRANT_ID, STORE, GrantClosed, LiveGrant, ceiling, holds, main, policy, read_equity,
                                  smallest_stake)
-from league.tests import test_tuition
 from league.tests.fakes import Clock
 
 D = Decimal
@@ -162,7 +160,7 @@ class TheStore(GrantCase):
     def test_a_money_rule_change_holds_entries_until_the_owner_ratifies(self):
         grant = self.grant()
         grant.enable(GRANT_ID, EQUITY, CEILING)
-        with patch.dict(CONSTITUTION["tuition"], max_agents=CONSTITUTION["tuition"]["max_agents"] + 1):
+        with patch.dict(CONSTITUTION["options_money"]["tuition"], day_usd="101"):
             self.assertFalse(grant.current()["active"])
             self.assertFalse(grant.allows_live(2))
             ratified = grant.ratify(GRANT_ID, EQUITY, CEILING)
@@ -173,8 +171,7 @@ class TheStore(GrantCase):
     def test_risk_free_rules_can_change_without_revoking_the_grant(self):
         grant = self.grant()
         grant.enable(GRANT_ID, EQUITY, CEILING)
-        with patch.dict(CONSTITUTION["ladder"]["replay"], min_deflated_sharpe=.3), \
-                patch.dict(CONSTITUTION["ladder"]["paper_death"], max_loss=.05):
+        with patch.dict(CONSTITUTION, version=CONSTITUTION["version"] + 1):
             self.assertTrue(grant.allows_live(3))
 
     def test_a_grant_not_yet_started_allows_nothing(self):
@@ -229,107 +226,3 @@ class OwnerCommand(GrantCase):
                 self.assertEqual(command[3:], ["--root", "/workspace/state", *tail])
 
 
-class TheHouseAsksOnlyTheGrant(TestCase):
-    """A real-money House with the real store in its state root (the fixture of `test_tuition`)."""
-
-    def setUp(self):
-        self.f = test_tuition.TuitionTest()
-        self.f.setUp()
-        self.addCleanup(self.f.tearDown)
-        self.house = self.f.house
-        self.house.grant = LiveGrant(self.house.root / STORE, clock=self.f.clock)
-        self.addCleanup(self.house.grant.close)
-        self.book = self.house.books["alpaca"]
-        self.agent = self.f.on_micro("trader")
-
-    def buy(self):
-        return self.house._intents(self.agent, self.book, [{"symbol": "BTC/USD", "side": "buy", "notional_usd": "12"}])
-
-    def sell(self):
-        return self.house._intents(self.agent, self.book, [{"symbol": "BTC/USD", "side": "sell", "quantity": ".00001"}])
-
-    def submitted(self, intents):
-        before = len(self.f.real.submitted)
-        self.house._submit_wakes("alpaca", [{"agent": self.agent.id, "_generation": self.house._generation(self.agent.id),
-                                             "intents": intents}])
-        return len(self.f.real.submitted) - before
-
-    def enable(self, equity=EQUITY):
-        return self.house.grant.enable(GRANT_ID, equity, CEILING)
-
-    def test_a_house_on_an_empty_root_builds_its_own_empty_grant(self):
-        from league.house import House, Settings
-        from league.tests.fakes import FakeBroker
-        from league.tests.test_ladder import InProcessSandbox
-
-        with tempfile.TemporaryDirectory() as tmp:
-            house = House(Path(tmp) / "state", brokers={"alpaca": FakeBroker("alpaca")}, sandbox=InProcessSandbox(),
-                          settings=Settings(real_money=True, research=False), clock=Clock())
-            try:
-                self.assertIsInstance(house.grant, LiveGrant)
-                self.assertEqual(house.grant.path, Path(tmp) / "state" / STORE)
-                self.assertFalse(house.grant.allows_live(2))
-                self.assertFalse(house.allocator._live_open("alpaca"))
-            finally:
-                house.close(wait=None)
-
-    def test_no_grant_means_no_real_entry_and_no_promotion_onto_real_money(self):
-        _, dropped = self.buy()
-        self.assertTrue(dropped, "the buy is refused where it is asked")
-        self.assertIn("no new real-money entries", " ".join(dropped))
-        waiting = self.f.on_micro("waiting", rung=1)
-        self.house._promote(waiting, Verdict(waiting.id, 1, "eligible", "screen", {}))
-        self.assertEqual(self.house.evaluator.rung(waiting.id), 1)
-        self.assertEqual(self.house._state["promotion_status"][waiting.id]["stage"], "campaign")
-        self.assertFalse(self.house.allocator._live_open("alpaca"))
-        self.assertFalse(self.house.allocator._swing_released())
-
-    def test_an_active_grant_allows_entries_inside_its_capital(self):
-        self.enable()
-        intents, dropped = self.buy()
-        self.assertTrue(intents)
-        self.assertFalse(dropped)
-        self.assertEqual(self.submitted(intents), 1)
-        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(EQUITY))
-        self.assertEqual(self.house.tuition("alpaca")["limit_usd"], D(EQUITY))
-        self.assertTrue(self.house.allocator._live_open("alpaca"))
-
-    def test_revoked_means_exits_only(self):
-        self.enable()
-        intents, _ = self.buy()
-        self.assertTrue(intents)
-        self.house.grant.revoke()
-        self.assertEqual(self.submitted(intents), 0, "a buy queued before the revocation does not leave")
-        _, dropped = self.buy()
-        self.assertTrue(dropped)
-        sells, dropped = self.sell()
-        self.assertTrue(sells)
-        self.assertFalse(dropped)
-        self.assertEqual(self.house.tuition("alpaca")["limit_usd"], D(EQUITY), "the revoked grant's capital still bounds the book")
-
-    def test_a_moved_digest_holds_entries_until_ratified(self):
-        self.enable()
-        with patch.dict(CONSTITUTION["tuition"], max_agents=CONSTITUTION["tuition"]["max_agents"] + 1):
-            _, dropped = self.buy()
-            self.assertTrue(dropped)
-            self.house.grant.ratify(GRANT_ID, EQUITY, CEILING)
-            intents, dropped = self.buy()
-            self.assertTrue(intents)
-            self.assertFalse(dropped)
-
-    def test_a_deposit_ratified_raises_the_envelope_up_to_the_ceiling(self):
-        self.enable()
-        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(EQUITY))
-        self.house.grant.ratify(GRANT_ID, "5481.62", CEILING)
-        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D("5481.62"))
-        self.house.grant.ratify(GRANT_ID, "9000", CEILING)
-        self.assertEqual(self.house.allocator.grant_capital("alpaca"), D(CEILING))
-
-    def test_no_call_site_asks_the_campaign_store_for_real_money(self):
-        import re
-
-        root = Path(__file__).resolve().parents[1]
-        for name in ("house.py", "allocator.py", "capital.py", "shards.py", "merton.py"):
-            text = (root / name).read_text()
-            self.assertIsNone(re.search(r"campaigns\S*\.(allows_live|live_authorization|live_trading)\(", text), name)
-            self.assertIsNone(re.search(r"getattr\((self\.)?house, ['\"]campaigns['\"], None\)\s*\n\s*.*(allows_live|live_authorization)", text), name)

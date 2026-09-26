@@ -326,7 +326,7 @@ test('the kill switch and exhausted caps each raise their own alert', async () =
   const gate = gateWith();
   const { mailer, sent } = recorder();
   gate.setKill(true, NOW);
-  for (let i = 0; i < 60; i += 1) gate.setKill(false, NOW), gate.reserve({ micro: '1000000' });
+  for (let i = 0; i < 60; i += 1) gate.setKill(false, NOW), gate.reserve({ micro: '1000000', venue: 'alpaca', exit: true });
   gate.setKill(true, NOW);
   const { fetcher } = cloud();
   await runWatchdog({ gate, env: ENV, fetcher, mailer, now: NOW });

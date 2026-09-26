@@ -24,10 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-try:  # after the prune the Sail client lives in league/
-    from league.sailbox import SailboxClient, SailboxError, Transport, normalize_hosts, policy_allowlist  # type: ignore
-except ImportError:  # pragma: no cover - today it is in the legacy package
-    from ltcm.sailbox import SailboxClient, SailboxError, Transport, normalize_hosts, policy_allowlist  # noqa: F401
+from league.sailbox import SailboxClient, SailboxError, Transport, normalize_hosts, policy_allowlist
 
 STATE_DIR = Path(os.environ.get("LTCM_GYM_STATE") or (REPO_ROOT / ".data" / "gym"))
 DATA_BOX = STATE_DIR / "data_box.json"
@@ -87,7 +84,7 @@ def _key_source() -> str:
     try:  # the floor's parser: owner-only regular files, exactly one key
         from league.sailbox import _key_from_env_file  # type: ignore
     except ImportError:  # pragma: no cover - before the prune
-        from ltcm.provider import _key_from_env_file
+        from league.provider import _key_from_env_file
 
     key = os.environ.get("SAIL_API_KEY", "").strip()
     if key:

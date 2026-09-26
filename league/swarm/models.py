@@ -1,6 +1,6 @@
 """The swarm's model calls: Sail for the inner loop and every fallback, OpenAI only when it has room.
 
-- SAIL (`ModelRouter.sail`): the Responses API through `ltcm.provider.Provider` (durable request rows,
+- SAIL (`ModelRouter.sail`): the Responses API through `league.provider.Provider` (durable request rows,
   reservations before dispatch, settled costs, a per-family daily cap and a floor cap). Its own request
   file in the state root, `swarm-provider.sqlite`. Each family's calls carry its own `prompt_cache_key`,
   so its history is read from the cache on every turn.
@@ -240,7 +240,7 @@ def build_router(root: Any, store: SwarmStore, settings: Mapping[str, Any], *, c
     import os
     from pathlib import Path
 
-    from ltcm.provider import Provider
+    from league.provider import Provider
 
     researcher = settings.get("researcher", {})
     provider = Provider(Path(root) / "swarm-provider.sqlite", floor_cap_usd_per_day=str(researcher.get("floor_usd_day", 60.0)),

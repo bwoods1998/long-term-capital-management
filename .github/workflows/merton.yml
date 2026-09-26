@@ -1,11 +1,7 @@
 name: Merton
 
-# Pull requests opened by Merton (branches merton/<role>/<slug>) are judged here and merged here.
-# Nothing else merges them, and Merton holds no way to.
-#
-# `pull_request_target` runs THIS file as it is on main, never the branch's copy, so a branch
-# cannot rewrite its own judge. The jobs that touch the branch's code hold a read-only token and
-# no secret; the one job that can write never checks the branch out.
+# Automatic helper proposals are judged with read-only tokens. All merges and deployments
+# remain owner actions. pull_request_target guards with main's own path policy.
 
 "on":
   pull_request_target:
@@ -48,7 +44,7 @@ jobs:
     # The branch's own code: content checks and the whole league suite. Read-only token, no secrets.
     needs: guard
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,34 +54,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Content checks, the replay regression and the league suite
+      - name: Install the pinned Gym dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-gym.txt
+      - name: Content checks and the options suite
         env:
           BRANCH: ${{ github.head_ref }}
         run: python3 -m league.ci --base origin/main --branch "$BRANCH"
 
-  merge:
-    # OFF since the options overhaul (Sept 26, 2026, trap 3): nothing merges a proposal by itself. The guard and the judge
-    # still report on Merton's pull requests; a person merges. (It was: green means merged, never running the branch's code.)
-    if: false
-    needs: [guard, judge]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      pull-requests: write
-      actions: write
-    steps:
-      - name: Squash-merge and delete the branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --squash --delete-branch "$PR_URL"
-      - name: Run the push checks on the merged main
-        # A push made with this token starts no workflow, so the squash commit would never carry
-        # the checks the House box requires on the exact commit it deploys (league/updater.py).
-        # A dispatch is the one event this token may start. Measured Sept 22, 2026: #86 and #88
-        # landed on main with no check run at all.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh workflow run checks.yml --ref main

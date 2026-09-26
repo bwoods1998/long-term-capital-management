@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import floor_box  # noqa: E402
-from ltcm.service import load_env  # noqa: E402
+from league.service import load_env  # noqa: E402
 
 API = "https://sailbox-api.sailresearch.com/v1"
 

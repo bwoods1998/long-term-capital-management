@@ -6,8 +6,8 @@ import unittest
 from decimal import Decimal
 
 from league.live.venue import Account, MarketData, Rate, RateLimited, occ_parts, parse_time, quote_of, stock_price
-from ltcm.adapters import GatewaySigner, VenueClient
-from ltcm.data import TransportError
+from league.adapters import GatewaySigner, VenueClient
+from league.data import TransportError
 
 GATEWAY = "https://gateway.example"
 

@@ -365,7 +365,7 @@ class AccountingTests(unittest.TestCase):
     cost = M.Holds.cost
 
     def test_reaper_then_retry_never_books_the_same_settled_response_twice(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
         with self.assertRaises(ProviderError):
             self.ask()
         self.done = True
@@ -376,7 +376,7 @@ class AccountingTests(unittest.TestCase):
         self.assertAlmostEqual(self.store.spent(["sail_model"]), self.cost(), places=6)
 
     def test_a_released_request_can_reserve_again_when_retried(self):
-        from ltcm.provider import ProviderError
+        from league.provider import ProviderError
         self.fail_code = "provider_transport_timeout"
         with self.assertRaises(ProviderError):
             self.ask()

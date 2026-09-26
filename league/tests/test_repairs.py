@@ -9,11 +9,11 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
-from league import ci, strategies
+from league import ci
 from league.engineer import Engineer, NEEDS_CORE
 from league.frontier import Answer, FrontierError
 from league.ledger import Ledger
-from league.merton import ForgeError, Merton, parse_proposal
+from league.merton import ForgeError, ProposalFollower, parse_proposal
 from league.tests.fakes import Clock
 from league.worklist import Sources, Worklist, normalize_reason
 
@@ -144,7 +144,7 @@ class DeterministicSources(Base):
     def test_a_merton_pr_refused_by_ci_is_reported_but_a_repair_s_own_is_not(self):
         self.ledger.append("merton.change", {"number": 72, "status": "opened", "role": "architect", "title": "t", "paths": ["league/strategies/x.py"]})
         self.ledger.append("merton.change", {"number": 72, "status": "refused by CI", "role": "architect", "title": "t", "paths": ["league/strategies/x.py"]})
-        self.ledger.append("merton.change", {"number": 90, "status": "refused by CI", "role": "toolsmith", "repair": "k", "paths": []})
+        self.ledger.append("merton.change", {"number": 90, "status": "refused by CI", "role": "engineer", "repair": "k", "paths": []})
         self.assertEqual(self.scan(), ["ci_failure:pr-72"])
         self.assertEqual(self.worklist.get("ci_failure:pr-72").details["paths"], ["league/strategies/x.py"])
 
@@ -221,6 +221,8 @@ class FakeGitHub:
         return {"ok": True, "branch": f"merton/{role}/{slug}-{number}", "number": number, "head": f"{number:040x}"}
 
     def status(self, number):
+        if number not in self.verdicts:
+            raise ForgeError("unavailable test PR")
         failure = self.verdicts[number]
         return {"number": number, "state": "closed" if failure is None else "open", "merged": failure is None, "head": f"{number:040x}",
                 "checks": {"conclusion": "success" if failure is None else "failure"}}
@@ -228,6 +230,8 @@ class FakeGitHub:
     def failures(self, number):
         if not self.readable:
             raise ForgeError("HTTP 404: Not found.")
+        if number not in self.verdicts:
+            raise ForgeError("unavailable test PR")
         failure = self.verdicts[number]
         return {"number": number, "failures": [] if failure is None else [{"name": "judge", "annotations": [{"message": failure}]}]}
 
@@ -235,7 +239,7 @@ class FakeGitHub:
 class EngineerLoop(Base):
     def engineer(self, frontier, forge, **settings):
         base = {"min_seconds_between_calls": 0, "observe_hours": 1.0, "max_job_usd": "5.00"}
-        self.merton = Merton(frontier, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
+        self.merton = ProposalFollower(forge, self.ledger, clock=self.clock)
         return Engineer(frontier, forge, self.ledger, self.worklist, clock=self.clock, repo=self.repo,
                         settings={**base, **settings}, code_of=lambda a: {"family": "fam", "code": GOOD} if a == "parent" else None)
 
@@ -245,7 +249,7 @@ class EngineerLoop(Base):
         return key
 
     def tool_answer(self, content=TOOL):
-        return {"summary": "a quote helper", "role": "toolsmith", "slug": "midpoint", "title": "Add a midpoint helper", "body": "b",
+        return {"summary": "a quote helper", "role": "engineer", "slug": "midpoint", "title": "Add a midpoint helper", "body": "b",
                 "files": [{"path": "league/tools/midpoint.py", "content": content}, {"path": "league/tests/test_tool_midpoint.py", "content": TOOL_TEST}],
                 "needs_core": None}
 
@@ -283,31 +287,23 @@ class EngineerLoop(Base):
         passes = [e.payload for e in self.ledger.iter(kinds="merton.pass") if e.payload.get("role") == "engineer"]
         self.assertEqual([p["cost_usd"] for p in passes], ["0.50", "0.50"], "every paid call is a row the pacer reads")
 
-    def test_a_strategy_defect_is_bought_only_for_a_living_parent_that_has_traded(self):
-        """Sept 23, 2026: 16 repair children born, 0 forward active blocks, 7 died on rung 0; $0.70 a
-        born child. A dead parent's defect is closed; a living parent waits until it has traded."""
-        dead = self.job(key="strategy_defect:ghost:abcdef123456", kind="strategy_defect", agents=("ghost",))
-        self.ledger.append("agent.born", {"founder": None, "specialty": "kalshi-sports"}, agent="ghost", id="born:ghost")
-        self.ledger.append("agent.died", {"cause": "displaced"}, agent="ghost")
-        waiting = self.job(key="strategy_defect:parent:abcdef123456", kind="strategy_defect", agents=("parent",))
-        frontier = FakeFrontier(self.tool_answer(), self.tool_answer())
-        engineer = self.engineer(frontier, FakeGitHub())
+    def test_private_strategy_reports_never_buy_or_publish_a_helper_repair(self):
+        keys = [self.job(key=kind+":parent", kind=kind, agents=("parent",))
+                for kind in ("strategy_defect", "audit_veto")]
+        frontier = FakeFrontier(self.tool_answer())
+        forge = FakeGitHub()
+        engineer = self.engineer(frontier, forge)
+        engineer.code_of = lambda _: self.fail("private program callback must not be read")
         engineer.step()
-        self.assertEqual(self.worklist.get(dead).state, "rejected")
-        self.assertIn("dead parent", self.worklist.get(dead).note)
-        self.assertEqual(self.worklist.get(waiting).state, "admitted", "alive but never traded: it waits, for free")
-        self.assertEqual(frontier.asked, [], "nothing was bought")
-        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "dust", "quantity": "1"}, agent="parent")
-        engineer.step()
-        self.assertEqual((self.worklist.get(waiting).state, frontier.asked), ("admitted", []), "the House's dust sweep is not a trade")
-        self.ledger.append("book.fill", {"book": "kalshi-shadow", "source": "venue", "quantity": "1"}, agent="parent")
-        engineer.step()
-        self.assertEqual(self.worklist.get(waiting).state, "testing")
-        self.assertEqual(len(frontier.asked), 1)
-        # A shared defect (not one agent's strategy) is untouched by the rule.
+        self.assertEqual([self.worklist.get(k).state for k in keys], ["dormant", "dormant"])
+        self.assertEqual(frontier.asked, [])
+        self.assertEqual(forge.proposed, [])
         shared = self.job()
         engineer.step()
         self.assertEqual(self.worklist.get(shared).state, "testing")
+        packet = json.loads(frontier.asked[0]["user"])
+        self.assertNotIn("code", packet)
+        self.assertNotIn("existing_strategies", packet)
 
     def test_attempts_are_bounded_and_the_costs_are_kept(self):
         key = self.job()
@@ -415,7 +411,7 @@ class EngineerLoop(Base):
         forge.verdicts[72] = "league/strategies/registry.json lists x.py, which does not exist"
         self.worklist.report(key="ci_failure:pr-72", kind="ci_failure", summary="CI refused #72", evidence=[], agents=[],
                              source="operator", severity="medium", details={"pr": 72})
-        frontier = FakeFrontier({"summary": "nothing to do", "role": "teacher", "files": [], "needs_core": None})
+        frontier = FakeFrontier({"summary": "nothing to do", "role": "engineer", "files": [], "needs_core": None})
         engineer = self.engineer(frontier, forge)
         engineer.step()
         self.assertIn("does not exist", json.loads(frontier.asked[0]["user"])["ci_failure_of_the_reported_pr"])
@@ -424,7 +420,7 @@ class EngineerLoop(Base):
 
     def test_a_fix_outside_the_allowlist_is_dormant_as_needing_core_authority(self):
         key = self.job()
-        answer = {"summary": "the book must seat them", "role": "toolsmith", "files": [{"path": "league/book.py", "content": "x"}], "needs_core": None}
+        answer = {"summary": "the book must seat them", "role": "engineer", "files": [{"path": "league/book.py", "content": "x"}], "needs_core": None}
         engineer = self.engineer(FakeFrontier(answer), FakeGitHub())
         engineer.step()
         job = self.worklist.get(key)
@@ -520,83 +516,8 @@ class EngineerLoop(Base):
         self.assertEqual(len(frontier.asked), 2)
         self.assertEqual({self.worklist.get(first).state, self.worklist.get(second).state}, {"testing"})
 
-    def test_a_refusal_fixed_by_a_new_strategy_is_not_reopened_by_agents_still_on_the_old_code(self):
-        """Sept 22, 2026: the hawkins horizon repair (#100) shipped as a new child strategy, and
-        hawkins-9 -- still on the old code -- reopened it within the hour."""
-        (self.repo / "league/strategies/old.py").write_text(GOOD)
-        key = self.job(key="order_refusal:kalshi-shadow:this market is expected to resolve in # hours", kind="order_refusal",
-                       agents=("parent", "old-b"), severity="high")
-        answer = {"summary": "guard the horizon", "role": "architect", "slug": "guarded", "title": "Guarded child", "body": "b", "needs_core": None,
-                  "files": [{"path": "league/strategies/parent_guarded.py", "content": GOOD},
-                            {"path": "league/strategies/parent_guarded.json", "content": json.dumps({"name": "parent-guarded", "family": "other", "why": "fix"})}]}
-        forge = FakeGitHub()
-        engineer = self.engineer(FakeFrontier(answer, answer), forge)
-        engineer.step()
-        self.deploy(forge.proposed[0]["files"])
-        self.merton.follow()
-        engineer.step()
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "observing")
-        self.worklist.report(key=key, kind="order_refusal", summary="again", agents=["old-b"], source="refusals", severity="high",
-                             evidence=[{"seq": 999, "at": "2099-01-01T00:00:00.000Z", "agent": "old-b", "excerpt": "old code, refused again"}])
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "observing", "a new file cannot change an agent already on the old code")
-        self.worklist.report(key=key, kind="order_refusal", summary="again", agents=["new-c"], source="refusals", severity="high",
-                             evidence=[{"seq": 1000, "at": "2099-01-01T00:00:01.000Z", "agent": "new-c", "excerpt": "a new agent refused too"}])
-        engineer.step()
-        notes = [h["note"] for h in self.worklist.get(key).history if h["state"] == "revising"]
-        self.assertTrue(any("recurred after deployment" in note for note in notes), notes)
 
-    def test_a_strategy_defect_becomes_a_new_child_that_inherits_nothing(self):
-        (self.repo / "league/strategies/old.py").write_text(GOOD)
-        key = self.job(key="audit_veto:parent", kind="audit_veto", agents=("parent",), severity="blocker")
-        answer = {"summary": "round after checking", "role": "architect", "slug": "fixed", "title": "Corrected child", "body": "b", "needs_core": None,
-                  "files": [{"path": "league/strategies/old.py", "content": GOOD},
-                            {"path": "league/strategies/parent_fixed.py", "content": GOOD},
-                            {"path": "league/strategies/parent_fixed.json", "content": json.dumps({"name": "parent-fixed", "family": "other", "why": "fix"})}]}
-        forge = FakeGitHub()
-        engineer = self.engineer(FakeFrontier(answer), forge)
-        engineer.step()
-        files = {f["path"]: f["content"] for f in forge.proposed[0]["files"]}
-        self.assertNotIn("league/strategies/old.py", files, "an existing strategy file is never rewritten")
-        described = json.loads(files["league/strategies/parent_fixed.json"])
-        self.assertEqual(described["family"], "fam", "the child stays in its parent's family, so its trials count there")
-        self.assertEqual(described["repair"], {"key": key, "parent": "parent"})
-        self.deploy(forge.proposed[0]["files"])
-        self.merton.follow()
-        engineer.step()
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "observing")
-        self.clock.advance(7200)
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "observing", "a corrected strategy is a fix only once it is born")
-        self.ledger.append("agent.born", {"founder": "parent-fixed", "family": "fam", "parent": None}, agent="child")
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "verified")
 
-    def test_a_corrected_child_that_fails_its_replay_closes_the_job_with_the_reasons(self):
-        """Sept 23, 2026: the child is replayed before any seat (House.enroll -> Foundry.takes_strategy);
-        the engineer reads the refusal instead of waiting forever for a birth that cannot come."""
-        (self.repo / "league/strategies/old.py").write_text(GOOD)
-        key = self.job(key="audit_veto:parent", kind="audit_veto", agents=("parent",), severity="blocker")
-        answer = {"summary": "s", "role": "architect", "slug": "fixed", "title": "Corrected child", "body": "b", "needs_core": None,
-                  "files": [{"path": "league/strategies/parent_fixed.py", "content": GOOD},
-                            {"path": "league/strategies/parent_fixed.json", "content": json.dumps({"name": "parent-fixed", "family": "other", "why": "fix"})}]}
-        forge = FakeGitHub()
-        engineer = self.engineer(FakeFrontier(answer), forge)
-        engineer.step()
-        self.deploy(forge.proposed[0]["files"])
-        self.merton.follow()
-        engineer.step()
-        engineer.step()
-        self.assertEqual(self.worklist.get(key).state, "observing")
-        self.clock.advance(7200)
-        self.ledger.append("trace.record", {"task": "hypothesis.evaluate", "id": "c1", "outcome": "failed", "strategy": "parent-fixed",
-                                            "detail": "0 closed trades, 20 needed"})
-        engineer.step()
-        job = self.worklist.get(key)
-        self.assertEqual(job.state, "dormant")
-        self.assertIn("failed replay before any seat: failed: 0 closed trades", job.note)
 
     def test_a_merged_fix_whose_files_never_run_is_not_verified(self):
         key = self.job()
@@ -644,20 +565,20 @@ class FollowAfterRefusal(Base):
                 return self.statuses[number]
 
         forge = Forge()
-        merton = Merton(None, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
+        merton = ProposalFollower(forge, self.ledger, clock=self.clock)
         self.ledger.append("tool.request", {"name": "midpoint", "description": "a helper"}, agent="a", id="req-1")
         digest = __import__("hashlib").sha256(TOOL.encode()).hexdigest()
-        self.ledger.append("merton.change", {"role": "toolsmith", "branch": "merton/toolsmith/mid", "number": 46, "status": "opened",
+        self.ledger.append("merton.change", {"role": "engineer", "branch": "merton/toolsmith/mid", "number": 46, "status": "opened",
                                              "paths": ["league/tools/midpoint.py"], "file_digests": {"league/tools/midpoint.py": digest},
                                              "tool_answers": [{"request": "req-1", "outcome": "built"}]})
         forge.statuses[46] = {"state": "open", "merged": False, "head": "a" * 40, "checks": {"conclusion": "failure"}}
         self.assertEqual([r["status"] for r in merton.follow()], ["refused by CI"])
         forge.statuses[46] = {"state": "open", "merged": False, "head": "b" * 40, "checks": {"conclusion": "failure"}}
         self.assertEqual(merton.follow(), [], "a refused change is asked about on its own slower cadence")
-        self.clock.advance(Merton.REFUSED_POLL_SECONDS + 1)
+        self.clock.advance(ProposalFollower.REFUSED_POLL_SECONDS + 1)
         self.assertEqual([r["head"] for r in merton.follow()], ["b" * 40], "a refusal of a new head is its own row")
         forge.statuses[46] = {"state": "closed", "merged": True, "head": "c" * 40, "checks": {"conclusion": "success"}}
-        self.clock.advance(Merton.REFUSED_POLL_SECONDS + 1)
+        self.clock.advance(ProposalFollower.REFUSED_POLL_SECONDS + 1)
         with patch("league.merton.__file__", str(self.root / "league/merton.py")):
             self.assertEqual([r["status"] for r in merton.follow()], ["merged"])
             self.assertEqual(self.ledger.count(kinds="tool.fulfilled"), 0, "a merge is not a deployment")
@@ -675,62 +596,13 @@ class FollowAfterRefusal(Base):
                 Forge.asked += 1
                 return {"state": "open", "checks": {"conclusion": "failure"}}
 
-        merton = Merton(None, Forge(), self.ledger, evidence=lambda role: {}, clock=self.clock)
+        merton = ProposalFollower(Forge(), self.ledger, clock=self.clock)
         self.ledger.append("merton.change", {"number": 5, "status": "refused by CI"})
         self.clock.advance(15 * 86400)
         merton.follow()
         self.assertEqual(Forge.asked, 0)
 
 
-class RegistryCollisions(Base):
-    STALE = [{"name": "old-one", "family": "f", "file": "old_one.py", "why": "w"}]
-
-    def proposal(self, name):
-        stem = name.replace("-", "_")
-        stale = self.STALE + [{"name": name, "family": "f", "file": f"league/strategies/{stem}.py", "why": "new"}]
-        return parse_proposal("architect", {"files": [
-            {"path": f"league/strategies/{stem}.py", "content": GOOD},
-            {"path": "league/strategies/registry.json", "content": json.dumps(stale)}]}, Decimal(0))
-
-    def test_two_concurrent_strategy_additions_both_survive(self):
-        directory = self.repo / "league/strategies"
-        (directory / "old_one.py").write_text(GOOD)
-        (directory / "old_one.json").write_text(json.dumps({"name": "old-one", "family": "f", "why": "w"}))
-        first, second = self.proposal("first-idea"), self.proposal("second-idea")
-        for proposal in (first, second):
-            self.assertNotIn("league/strategies/registry.json", [f["path"] for f in proposal.files])
-            self.assertEqual(len(proposal.files), 2)
-        for proposal in (first, second):  # merged one after the other, from the same stale copy
-            for row in proposal.files:
-                (self.repo / row["path"]).write_text(row["content"])
-        self.assertEqual(sorted(r["name"] for r in strategies.registry(directory)), ["first-idea", "old-one", "second-idea"])
-        self.assertEqual(strategies.problems(directory), [])
-        self.assertEqual(ci.check_strategies(self.repo), [])
-
-    def test_ci_still_refuses_an_undescribed_or_misdescribed_strategy(self):
-        directory = self.repo / "league/strategies"
-        (directory / "lonely.py").write_text(GOOD)
-        self.assertIn("not described", " ".join(ci.check_strategies(self.repo)))
-        (directory / "lonely.json").write_text(json.dumps({"name": "lonely", "family": "f", "why": "w", "file": "other.py"}))
-        self.assertIn("describes lonely.py", " ".join(ci.check_strategies(self.repo)))
-        (directory / "ghost.json").write_text(json.dumps({"name": "ghost", "family": "f", "why": "w"}))
-        self.assertIn("does not exist", " ".join(ci.check_strategies(self.repo)))
-        (directory / "Bad-Name.json").write_text("{}")
-        self.assertIn("named after its strategy file", " ".join(strategies.problems(directory)))
-
-    def test_a_merton_branch_may_not_write_the_retired_registry(self):
-        with patch("league.ci.changed_paths", return_value=["league/strategies/registry.json"]), \
-                patch("league.ci.check_strategies", return_value=[]), patch("league.ci.check_tools", return_value=[]), \
-                patch("league.ci.check_game", return_value=[]), patch("league.ci.check_config", return_value=[]):
-            problems = ci.check("origin/main", "merton/architect/x-1234abcd", tests=False)
-        self.assertTrue(any("retired" in p for p in problems), problems)
-
-    def test_refusals_become_github_annotations(self):
-        import io
-
-        out = io.StringIO()
-        ci.annotate(["the test suite failed:\nFAIL: x (100%)"], out=out)
-        self.assertEqual(out.getvalue(), "::error title=league.ci refused::the test suite failed:%0AFAIL: x (100%25)\n")
 
 
 class RepairsFollowEvidence(unittest.TestCase):
@@ -789,7 +661,7 @@ class TheDrill(Base):
 
         forge = FakeGitHub(judge=ci_runs_the_drill_test)
         frontier = FakeFrontier()
-        merton = Merton(frontier, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
+        merton = ProposalFollower(forge, self.ledger, clock=self.clock)
         engineer = Engineer(frontier, forge, self.ledger, self.worklist, clock=self.clock, repo=self.repo,
                             settings={"synthetic_observe_minutes": 20, "min_seconds_between_calls": 1800},
                             inbox=self.root / "state" / "repairs-inbox")
@@ -817,7 +689,7 @@ class TheDrill(Base):
 
         key = drill_report(self.worklist, "t2")
         forge = FakeGitHub(judge=lambda files: "something unrelated broke")
-        merton = Merton(None, forge, self.ledger, evidence=lambda role: {}, clock=self.clock)
+        merton = ProposalFollower(forge, self.ledger, clock=self.clock)
         engineer = Engineer(None, forge, self.ledger, self.worklist, clock=self.clock, repo=self.repo, settings={})
         for _ in range(3):
             engineer.step()
@@ -830,19 +702,9 @@ if __name__ == "__main__":
     unittest.main()
 
 
-from league.tests.test_house import BUYER, HouseCase  # noqa: E402
+from league.tests.test_house import HouseCase  # noqa: E402
 
 
-class EvidenceWeightOfTheHouse(HouseCase):
-    def test_real_money_and_earning_records_weigh_three_replay_only_half(self):
-        from league.service import evidence_weight_of
-        live, paper, replay = self.seated("live"), self.seated("paper"), self.house.spawn("replay", "test-family", BUYER, reason="test")
-        self.house.evaluator.promote(live.id, 2, "test")
-        weight = evidence_weight_of(self.house)
-        self.assertEqual(weight([live.id, replay.id]), 3.0)
-        self.assertEqual(weight([paper.id]), 1.0)
-        self.assertEqual(weight([replay.id, "long-dead"]), 0.5)
-        self.assertEqual(weight([]), 1.0)
 
 
 class WiredIntoTheHouse(HouseCase):

@@ -83,7 +83,7 @@ from league.sailbox import (  # noqa: E402  (path first, so a checkout runs with
     policy_allowlist,
 )
 
-#: An order status nothing comes back from (the same four as `ltcm.broker.TERMINAL_STATUSES`; this
+#: An order status nothing comes back from (the same four as `league.broker.TERMINAL_STATUSES`; this
 #: script imports nothing from the legacy `ltcm` package, the options overhaul's trap 4).
 TERMINAL_STATUSES = ("filled", "cancelled", "rejected", "expired")
 
@@ -93,7 +93,7 @@ DEFAULT_NAME = "ltcm-floor"
 
 #: What a release is made of. The league imports its venue adapters, broker types, risk engine,
 #: provider and data readers from `ltcm`, so both ride along; each package carries its config.json.
-UPLOAD_TREES = ("league", "ltcm", "playbooks", "scripts", "deploy")
+UPLOAD_TREES = ("league", "scripts", "deploy")
 
 #: Never uploaded by the code path, whatever the working tree looks like.
 SKIP_DIRS = {"__pycache__", ".git", ".venv", ".data", ".ruff_cache", ".pytest_cache", "history"}
@@ -134,8 +134,8 @@ STRUCTURE_PRACTICE_BOOK = "alpaca-paper"
 #: What a release must carry to hold structures on the Alpaca practice account (both came with Deploy G;
 #: neither is on main or b/integration before it): the switch and the book's fold of the venue's legs.
 STRUCTURE_AWARE_MARKERS = (
-    ("league/house.py", "def _structure_practice_account("),
-    ("league/book.py", "def _fold_structure_legs("),
+    ("league/live/real.py", "class RealBook:"),
+    ("league/live/paper.py", "class PaperProof:"),
 )
 
 #: The ledger's agent for the House's own row (`league.ledger.HOUSE`), and the reason an order the venue never had
@@ -218,6 +218,33 @@ def ledger(ask):
             "orders": open_orders, "rows": rows}
 
 
+def live(ask):
+    path = pathlib.Path(ask["state"]) / "live.sqlite"
+    if not path.exists():
+        return {"structures": [], "orders": []}
+    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        db.execute("pragma query_only=1")
+        db.execute("begin")
+        positions = [{"agent": str(instance), "code": "live:" + str(pid), "quantity": str(qty), "status": status}
+                     for pid, instance, qty, status in db.execute("select pid,instance,qty,status from positions where status != 'closed' or qty != 0")]
+        orders = [{"order_id": "live:" + str(oid), "status": status, "agents": [instance]}
+                  for oid, instance, status in db.execute("select oid,instance,status from orders where status not in ('filled','cancelled','canceled','rejected','expired')")]
+        kv = {key: json.loads(value) for key, value in db.execute("select key,value from kv where key in ('recon','paper_proof')")}
+        recon = kv.get("recon") or {}
+        if not isinstance(recon, dict) or recon.get("frozen"):
+            raise RuntimeError("live reconciliation is frozen or unreadable")
+        proof = kv.get("paper_proof") or {}
+        if not isinstance(proof, dict):
+            raise RuntimeError("paper inventory is unreadable")
+        if proof and (proof.get("status") not in ('passed', 'waiting') or any(proof.get(k) for k in ('open_id', 'open_cid', 'inventory', 'position_qty'))):
+            # A failed/ambiguous proof can still own a partial structure. A new release must retain
+            # its cleanup path even when there are no real positions yet.
+            if proof.get("status") != 'passed' or proof.get('inventory') or proof.get('position_qty'):
+                orders.append({"order_id": "paper-proof", "status": proof.get("status"), "agents": []})
+        db.rollback()
+    return {"structures": positions, "orders": orders}
+
+
 def guard(ask):
     out = {"release": None, "checked": False, "structures": [], "orders": []}
     if ask.get("release"):
@@ -225,6 +252,9 @@ def guard(ask):
         if not out["release"]["missing"]:
             return out
     out.update(ledger(ask), checked=True)
+    current = live(ask)
+    out["structures"].extend(current["structures"])
+    out["orders"].extend(current["orders"])
     return out
 
 
@@ -236,83 +266,21 @@ print(json.dumps(answer))
 """
 
 #: What the league needs to reach. `hosts` says which of these the recorded allowlist lacks.
-LEAGUE_HOSTS = (
-    "api.sailresearch.com",          # cheap-model inference and search
-    "sailbox-api.sailresearch.com",  # the agents' boxes
-    "blakewoods.us",                 # the public site
-    "api.elections.kalshi.com",      # Kalshi market data (orders go through the gateway)
-    "news.google.com",               # the commons' news reader
-    "github.com",                    # merged code, pulled without credentials
-    "codeload.github.com",
-    "api.github.com",                # the check runs on the exact commit the updater deploys (league/updater.py)
-    # The live feeds the House records for its strategies (league/feeds.py): ESPN's scoreboards, and
-    # perpetual funding, open interest and DVOL. On FLOOR_HOSTS since the arena of Sept 18, 2026.
-    "site.api.espn.com",
-    "www.okx.com",
-    "www.deribit.com",
-    "api.hyperliquid.xyz",
-    "futures.kraken.com",
-    # The key-free data hosts the owner allowed on Sept 24, 2026 for the close-the-gaps run's
-    # recorders (docs/goals/LTCM_CLOSE_THE_GAPS.md, workstream I). Weather: Open-Meteo's forecast,
-    # ensemble and historical-forecast APIs, and the NWS API (the settlement authority's own
-    # forecast; NWS and SEC ask for a User-Agent naming the requester and a contact address).
-    # Earnings times: EDGAR full-text search and Nasdaq's calendar. Rates: SOFR and par yields.
-    # Sports: ESPN's core API carries odds and win probabilities. Attention: TSA volumes and
-    # polling averages, HTML pages. The keyed hosts (api.eia.gov, api.the-odds-api.com) stay the
-    # owner's step.
-    "api.open-meteo.com",
-    "ensemble-api.open-meteo.com",
-    "historical-forecast-api.open-meteo.com",
-    "api.weather.gov",
-    "www.sec.gov",
-    "efts.sec.gov",
-    "api.nasdaq.com",
-    "markets.newyorkfed.org",
-    "home.treasury.gov",
-    "sports.core.api.espn.com",
-    "www.tsa.gov",
-    "www.realclearpolling.com",
-    # The key-free data hosts added by the Kalshi-scale run on Sept 25-26, 2026 (workstream I2, the
-    # owner's standing approval): each passed the plan's rule -- key-free, public, terms that permit
-    # automated access, no bot wall -- and has a recorder in league/open_feeds.py (its docstring names
-    # the terms read). Settlement weather: the IEM's parse of the NWS climate reports, the Aviation
-    # Weather Center's METARs, NCEI's daily summaries.
-    "mesonet.agron.iastate.edu",
-    "aviationweather.gov",
-    "www.ncei.noaa.gov",
-    # Macro releases and calendars: BLS's public data API (v1, key-free: 25 queries a day), the
-    # Treasury's FiscalData, the ECB's euro reference rates, the CFTC's Commitments of Traders
-    # (Socrata, no token) and the Federal Reserve Board's FOMC calendar.
-    "api.bls.gov",
-    "api.fiscaldata.treasury.gov",
-    "www.ecb.europa.eu",
-    "publicreporting.cftc.gov",
-    "www.federalreserve.gov",
-    # Attention, hazards and crypto network data: Wikimedia's pageviews, GDELT's news volume and tone,
-    # the National Hurricane Center's active storms, the USGS earthquake feed, mempool.space's
-    # bitcoin mempool and fees, and alternative.me's crypto fear and greed index.
-    "wikimedia.org",
-    "api.gdeltproject.org",
-    "www.nhc.noaa.gov",
-    "earthquake.usgs.gov",
-    "mempool.space",
-    "api.alternative.me",
-    # Government releases and notices: the White House's presidential actions (what Kalshi's
-    # KXTRUMPACT settles on), the Federal Register's API, EIA's public price tables, the NWS's raw
-    # climate reports as issued, BLS's and BEA's release calendars, and Nasdaq's trade halts.
-    "www.whitehouse.gov",
-    "www.federalregister.gov",
-    "www.eia.gov",
-    "tgftp.nws.noaa.gov",
-    "www.bls.gov",
-    "www.bea.gov",
-    "www.nasdaqtrader.com",
-)
+LEAGUE_HOSTS = ('api.sailresearch.com',
+ 'sailbox-api.sailresearch.com',
+ 'docs.sailresearch.com',
+ 'blakewoods.us',
+ 'ltcm-gateway.blake-woods-personal-site.workers.dev',
+ 'github.com',
+ 'codeload.github.com',
+ 'api.github.com',
+ 'pypi.org',
+ 'files.pythonhosted.org')
 
 
 def floor_config() -> dict[str, Any]:
     """The packaged config that names the gateway: the league's, else the first run's, else {}."""
-    for package in ("league", "ltcm"):
+    for package in ("league",):
         try:
             config = json.loads((REPO_ROOT / package / "config.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -900,37 +868,23 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def bootstrap_python(api: SailboxClient, box: str) -> str:
-    """A Python on the box: a venv when the image allows one, else the system interpreter.
-
-    The league is standard library only: the gateway signs every venue request, so nothing on the
-    box needs `cryptography` to run. `ltcm.adapters` still imports it lazily (its direct-signing
-    path, which the box never takes), so it is installed when it can be and its absence is said
-    and survived. It comes from `pypi.org` and `files.pythonhosted.org`, both on the allowlist;
-    Debian package mirrors deliberately are not, so this never reaches for `apt`.
-    """
+    """Prepare a Python with the pinned numpy needed by the live decision and mark paths."""
     venv = f"{REMOTE_ROOT}/.venv"
-    made = api.exec(
-        box, ["sh", "-c", f"python3 -m venv {venv} >/dev/null 2>&1 && echo ok || echo no"],
-        timeout=300, on_output=None,
-    )
-    if "ok" in made.stdout:
-        python = f"{venv}/bin/python"
-        install = (f"{python} -m pip install --disable-pip-version-check --quiet --upgrade pip; "
-                   f"{python} -m pip install --disable-pip-version-check --quiet cryptography")
-    else:
+    made = api.exec(box, ["sh", "-c", f"python3 -m venv {venv} >/dev/null 2>&1 && echo ok || echo no"], timeout=300, on_output=None)
+    python = f"{venv}/bin/python" if "ok" in made.stdout else "python3"
+    if python == "python3":
         say("  no venv on this image; using the system interpreter instead")
-        python = "python3"
-        install = ("python3 -m pip install --disable-pip-version-check --quiet "
-                   "--break-system-packages cryptography || "
-                   "python3 -m pip install --disable-pip-version-check --quiet cryptography")
-    try:
-        installed = api.exec(box, ["sh", "-c", install], timeout=900, on_output=stream).ok
-    except SailboxError as error:
-        say(f"  pip could not be run ({str(error)[:160]})")
-        installed = False
-    if not installed:
-        say("  `cryptography` did not install. The league does not need it (the gateway signs "
-            "everything); only the first run's direct-signing adapters would.")
+    requirements = "\n".join(line for line in (REPO_ROOT / "requirements-gym.txt").read_text().splitlines() if line.startswith("numpy==")) + "\n"
+    if not requirements.strip():
+        raise SystemExit("no pinned numpy requirement found")
+    target = f"{REMOTE_ROOT}/requirements-house.txt"
+    api.upload(box, target, requirements.encode(), mode=0o600)
+    flag = " --break-system-packages" if python == "python3" else ""
+    installed = api.exec(box, ["sh", "-c", f"{python} -m pip install --disable-pip-version-check --quiet{flag} -r {target}"],
+                         timeout=900, on_output=stream)
+    if not installed.ok:
+        raise SystemExit("numpy installation failed; the options House cannot run without it")
+    api.exec(box, [python, "-c", "import numpy"], timeout=60, on_output=None).check()
     return python
 
 
@@ -1084,109 +1038,46 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         return 1
     say(f"ROLLED BACK: {report.get('rolled_back_from')} -> {report.get('current')}")
     say(f"  current={release_of(after.get('current'))}  previous={release_of(after.get('previous'))}")
-    say("  re-ratify now if the restored release's money digest is not the one the grant pins (a rollback of Deploy G "
-        "moves it from be1e3ce9 back to acff5c64): python3 scripts/live_trading.py --ratify earned-live-20260921")
+    say("  re-ratify now if the restored release's money digest is not the one the grant pins: python3 scripts/live_trading.py --ratify options-swarm-20260928")
     return 0
 
 
 def cmd_secrets(args: argparse.Namespace) -> int:
-    """Push the owner's credentials to the box. The only command here that reads one.
-
-    Run by the owner, from the owner's machine, on purpose. With a gateway named in
-    `league/config.json` (how the House runs) the box gets exactly three values, composed from
-    the local `.env` into `/workspace/.env`, mode 600, and no venue key. It refuses a source that
-    is group- or world-readable and prints names and byte counts only. No value is decoded,
-    logged or kept.
-
-    Without a gateway anywhere in the config the first run's direct mode still applies (the whole
-    `.env` and every file in `.data/ltcm/keys/`, to the same paths on the box). The league cannot
-    run that way; it is kept for a checkout that predates the gateway.
-    """
+    """Send only the three House values from mode-600 .env. No direct-venue mode remains."""
     state = read_state()
     box = require_box(state)
     api = client()
-
-    sources: list[tuple[Path, str]] = []
     env_path = REPO_ROOT / SECRET_ENV
-    gateway_mode = bool(floor_config().get("gateway_url"))
-    if gateway_mode:
-        # The box needs three values and gets three: the venue keys stay in the gateway, so a
-        # fork or a checkpoint of the box can never reach a venue on its own.
-        if not env_path.is_file():
-            raise SystemExit(f"nothing to send: no {SECRET_ENV}")
-        if stat.S_IMODE(env_path.stat().st_mode) & 0o077:
-            raise SystemExit(f"{SECRET_ENV} is group- or world-readable. `chmod 600` it first.")
-        wanted = compose_box_env(env_path.read_bytes())
-        missing = [name for name in BOX_ENV_NAMES if f"{name}=".encode() not in wanted]
-        if missing:
-            raise SystemExit(f"{SECRET_ENV} lacks {', '.join(missing)}; the box needs all of them")
-        api.upload(box, ENV_FILE, wanted, mode=0o600)
-        say(f"  {SECRET_ENV} -> {ENV_FILE}  ({len(wanted):,} bytes, {len(BOX_ENV_NAMES)} values, mode 600)")
-        say("  venue keys stay in the gateway; none were sent")
-        del wanted
-        # The first run's state on the box is history and nothing here deletes under it, so a
-        # key file an earlier direct-mode `secrets` put there is the owner's to remove.
-        legacy = sorted({str(n) for n in (state.get("secret_names") or []) if n != SECRET_ENV}
-                        | {str(n) for n in (state.get("legacy_key_names") or [])})
-        if legacy:
-            state["legacy_key_names"] = legacy
-            say(f"  NOTE: box.json says an earlier `secrets` put {', '.join(legacy)} under "
-                f"{REMOTE_ROOT}/.data/ltcm/keys. This script no longer deletes anything under "
-                f"{REMOTE_ROOT}/.data; if it is still there, removing it is the owner's step.")
-        state["secrets_pushed_at"] = _now()
-        state["secret_names"] = [SECRET_ENV]
-        write_state(state)
-        say("")
-        say("credentials are on the box. `python3 scripts/floor_box.py start` when ready.")
-        return 0
-    if env_path.is_file():
-        sources.append((env_path, f"{REMOTE_ROOT}/.env"))
-    keys_dir = REPO_ROOT / SECRET_KEYS
-    if keys_dir.is_dir():
-        for key in sorted(keys_dir.iterdir()):
-            if key.is_file() and not key.is_symlink():
-                sources.append((key, f"{REMOTE_ROOT}/.data/ltcm/keys/{key.name}"))
-    if not sources:
-        raise SystemExit(f"nothing to send: no {SECRET_ENV} and no files in {SECRET_KEYS}")
-
-    for source, _ in sources:
-        if source.is_symlink():
-            raise SystemExit(f"{source.name} is a symlink; refusing")
-        if stat.S_IMODE(source.stat().st_mode) & 0o077:
-            raise SystemExit(
-                f"{source.name} is group- or world-readable. `chmod 600` it first: a credential "
-                "that anyone on this machine can read is not one this script will copy anywhere."
-            )
-
-    api.exec(
-        box,
-        ["sh", "-c", f"mkdir -p {REMOTE_ROOT}/.data/ltcm/keys && "
-                     f"chmod 700 {REMOTE_ROOT}/.data {REMOTE_ROOT}/.data/ltcm "
-                     f"{REMOTE_ROOT}/.data/ltcm/keys"],
-        timeout=60,
-        on_output=None,
-    ).check()
-
-    for source, target in sources:
-        raw = source.read_bytes()          # bytes in, bytes out; nothing is parsed or printed
-        api.upload(box, target, raw, mode=0o600)
-        say(f"  {source.name} -> {target}  ({len(raw):,} bytes, mode 600)")
-        del raw
-
-    check = api.exec(
-        box,
-        ["sh", "-c", f"ls -l {REMOTE_ROOT}/.env {REMOTE_ROOT}/.data/ltcm/keys/ 2>/dev/null "
-                     "| awk '{print $1, $NF}'"],
-        timeout=60,
-        on_output=None,
-    )
-    say(check.stdout.strip() or "  (no listing)")
+    if env_path.is_symlink():
+        raise SystemExit(".env is a symlink; refusing")
+    # The box needs three values and gets three: the venue keys stay in the gateway, so a
+    # fork or a checkpoint of the box can never reach a venue on its own.
+    if not env_path.is_file():
+        raise SystemExit(f"nothing to send: no {SECRET_ENV}")
+    if stat.S_IMODE(env_path.stat().st_mode) & 0o077:
+        raise SystemExit(f"{SECRET_ENV} is group- or world-readable. `chmod 600` it first.")
+    wanted = compose_box_env(env_path.read_bytes())
+    missing = [name for name in BOX_ENV_NAMES if f"{name}=".encode() not in wanted]
+    if missing:
+        raise SystemExit(f"{SECRET_ENV} lacks {', '.join(missing)}; the box needs all of them")
+    api.upload(box, ENV_FILE, wanted, mode=0o600)
+    say(f"  {SECRET_ENV} -> {ENV_FILE}  ({len(wanted):,} bytes, {len(BOX_ENV_NAMES)} values, mode 600)")
+    say("  venue keys stay in the gateway; none were sent")
+    del wanted
+    # The first run's state on the box is history and nothing here deletes under it, so a
+    # key file an earlier direct-mode `secrets` put there is the owner's to remove.
+    legacy = sorted({str(n) for n in (state.get("secret_names") or []) if n != SECRET_ENV}
+                    | {str(n) for n in (state.get("legacy_key_names") or [])})
+    if legacy:
+        state["legacy_key_names"] = legacy
+        say(f"  NOTE: box.json says an earlier `secrets` put {', '.join(legacy)} under "
+            f"{REMOTE_ROOT}/.data/ltcm/keys. This script no longer deletes anything under "
+            f"{REMOTE_ROOT}/.data; if it is still there, removing it is the owner's step.")
     state["secrets_pushed_at"] = _now()
-    state["secret_names"] = [s.name for s, _ in sources]
+    state["secret_names"] = [SECRET_ENV]
     write_state(state)
     say("")
     say("credentials are on the box. `python3 scripts/floor_box.py start` when ready.")
-    say("NOTE: a checkpoint taken from here on carries these files, and so does any fork of it.")
     return 0
 
 
@@ -1375,9 +1266,14 @@ def cmd_status(args: argparse.Namespace) -> int:
         say(f"last deploy  nothing in {DEPLOYS_JSONL} yet")
     house = report.get("house_health")
     if isinstance(house, Mapping):
-        say(f"house        living={house.get('living')} dead={house.get('dead')} "
-            f"ledger_seq={house.get('ledger_seq')} real_money={house.get('real_money')} "
+        say(f"house        ledger_seq={house.get('ledger_seq')} real_money={house.get('real_money')} "
             f"release={house.get('release')}  updated={house.get('at')}")
+        live = house.get("options_live")
+        if isinstance(live, Mapping):
+            say(f"options      instances={live.get('instances')} frozen={live.get('frozen')} "
+                f"blocked={live.get('blocked')} paper_proof={live.get('paper_proof')}")
+        if isinstance(house.get("swarm"), Mapping):
+            say("swarm        " + json.dumps(house["swarm"], sort_keys=True, default=str)[:500])
         for name, book in sorted((house.get("books") or {}).items()):
             book = book if isinstance(book, Mapping) else {}
             frozen = f"FROZEN: {str(book.get('frozen'))[:160]}" if book.get("frozen") else "ok"

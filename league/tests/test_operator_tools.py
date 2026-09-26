@@ -51,7 +51,7 @@ class TheToolsImportNothingFromTheLegacyPackage(unittest.TestCase):
     def test_floor_box_terminal_statuses_are_the_brokers(self):
         import importlib.util
 
-        from ltcm.broker import TERMINAL_STATUSES
+        from league.broker import TERMINAL_STATUSES
 
         spec = importlib.util.spec_from_file_location("floor_box_for_test", ROOT / "scripts" / "floor_box.py")
         module = importlib.util.module_from_spec(spec)
@@ -59,17 +59,12 @@ class TheToolsImportNothingFromTheLegacyPackage(unittest.TestCase):
         self.assertEqual(tuple(module.TERMINAL_STATUSES), tuple(TERMINAL_STATUSES))
 
 
-class TheLegacySailboxNameIsTheLeagueModule(unittest.TestCase):
-    def test_one_module_under_two_names(self):
-        import league.sailbox
-        import ltcm.sailbox
-        from ltcm import sailbox
-
-        self.assertIs(ltcm.sailbox, league.sailbox)
-        self.assertIs(sailbox, league.sailbox)
-        from ltcm.sailbox import SailboxClient
-
-        self.assertIs(SailboxClient, league.sailbox.SailboxClient)
+class TheSailboxDependencyIsFolded(unittest.TestCase):
+    def test_legacy_package_is_absent_and_operator_uses_league(self):
+        import importlib.util
+        self.assertIsNone(importlib.util.find_spec("ltcm"))
+        from league.sailbox import SailboxClient
+        self.assertEqual(SailboxClient.__module__, "league.sailbox")
 
     def test_the_key_comes_from_the_environment_and_never_into_an_error(self):
         from unittest.mock import patch

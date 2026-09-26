@@ -1,36 +1,8 @@
-"""The repair engineer: the worker that turns the worklist into running fixes.
-
-It is Merton's sixth job, and it has no more authority than the other five. It takes the
-highest-priority admitted repair job (`league/worklist.py`), shows the frontier model the job's
-original evidence and the code it concerns, and turns the answer into a pull request through
-the same gateway route, the same path guard (`league/ci.py`) and the same CI as every other
-proposal. It follows that pull request: a refusal is read back as CI's own failure text and
-sent for a revision, at most `max_attempts` times; a merge is not the end -- the job waits
-until the RUNNING release holds the exact files (`canary`), then watches the triggering signal
-for an observation window (`observing`) and is `verified` only if it has not come back.
-
-Authority, deliberately unchanged (the chief-architect handoff, Sept 20, 2026: do not broaden
-the file allowlist before an external spending broker and an independent release verifier
-exist). The engineer may write what the architect, toolsmith, operator and teacher may:
-strategies, tools and their tests, the operating dials, lessons. A strategy defect is fixed by
-a NEW child strategy file, born on rung 0 in the parent's family, with no record: it qualifies
-on its own evidence and never inherits its parent's results. A fix that needs anything else --
-the House, the books, the venues, replay, data adapters, CI, the gateway -- is recorded as
-`dormant` with the reason "needs core authority", and costs nothing more.
-
-Money. Every paid call goes through the House's `Frontier` (the campaign reserves its worst case
-before the call and settles after) and is written as a `merton.pass` row with role "engineer",
-which is what the pacer reads for the day's OpenAI spend. Each job has its own ceiling
-(`max_job_usd`) checked against the call's worst case BEFORE it is made, so a job can never
-spend past it; the rows keep every dollar a rejected or dormant job cost. The engineer's own
-settings live in `league/engineer.json`, which no Merton role may write.
-
-Restarts. Every transition is a `repair.status` row, written before the work it announces. A job
-found in `reproducing` or `patching` when a step begins was interrupted (one step runs at a
-time): the interrupted call's worst-case hold is booked as spent and the next attempt is a new,
-recorded request -- never an untracked duplicate. An answer already paid for is kept in the row
-that follows it (`_files`), so a forge outage re-proposes the same files without buying them
-again.
+"""Optional helper repair loop. It proposes pure helpers and their tests, follows CI,
+and verifies a repair only after the exact files run through an observation window.
+Private strategy changes belong to the swarm. The engineer never merges, deploys,
+changes money rules, or receives a private program through its code callback.
+Interrupted calls retain their cost reservation; forge retries reuse paid proposals.
 """
 
 from __future__ import annotations
@@ -50,8 +22,8 @@ from .worklist import Job, Worklist
 REPO = Path(__file__).resolve().parents[1]
 SETTINGS_PATH = Path(__file__).resolve().parent / "engineer.json"
 CONTRACT = Path(__file__).resolve().parent / "CONTRACT.md"
-#: The roles whose paths a repair may use. Not the designer: `game.json` is the economy's rules.
-ROLES = ("architect", "toolsmith", "operator", "teacher")
+#: The sole public repair role. Private strategy work never uses a GitHub proposal.
+ROLES = ("engineer",)
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "max_attempts": 3,
@@ -77,47 +49,21 @@ PROTECTIVE = ("daily loss", "at risk on one market", "at risk across the live de
               "one account cannot hold both")
 #: Refusals caused by House code (seat allocation, reconciliation): outside every role's paths.
 CORE_REFUSALS = ("has no seat on the", "is frozen until it reconciles")
-#: The kinds whose fix is a corrected child of one agent's strategy.
+#: Legacy program reports are retained as dormant private research work.
 STRATEGY_KINDS = ("strategy_defect", "audit_veto")
 NEEDS_CORE = "needs core authority"
 
-BRIEF = """You are the repair engineer of a small real-money trading league. You are given ONE job from its repair
-worklist: a defect or missing input the floor's own records keep reporting, with the original evidence, the agents
-it affects, and the code it concerns. Fix it with the smallest change that makes the reported problem stop, or say
-plainly that you cannot. You never trade, never merge, and never judge your own work: CI does, then the running
-floor does, by whether the problem comes back.
-
-You may write ONLY these paths, and one answer uses ONE role's paths:
-- architect: league/strategies/<stem>.py (the strategy contract below) plus its own description
-  league/strategies/<stem>.json = {"name", "family", "why"}. Never league/strategies/registry.json.
-- toolsmith: league/tools/<name>.py (pure Python: whitelisted imports only, no files, no network, no attribute
-  assignment) plus league/tests/test_tool_<name>.py (unittest, proving it on known values).
-- operator: league/config.json, the WHOLE file, changing only keys in permitted_dials, inside their bounds.
-- teacher: league/playbook/<YYYY-MM-DD>-<slug>.md, one specific, checkable lesson under 600 words.
-Everything else -- the House, the books, the venues, replay, data adapters, the evaluator, CI, the gateway -- is
-outside your authority. If the real fix needs any of it, answer with needs_core naming the paths; do not write a
-workaround that hides the defect, and do not write a lesson that only restates it.
-
-Never loosen, bypass or route around a risk limit, a money rule, a venue rule or the horizon rule: a refusal by one
-of them is the rule working. The thing to fix is the strategy or the knowledge that keeps asking for what it forbids.
-
-A defect in ONE agent's strategy is fixed by a NEW corrected child strategy: a new file with a new name, never an
-edit of an existing file. It is born on rung 0 with no record and must qualify on its own evidence. Keep it in the
-parent's specialty (same venue, horizon, series or symbols) and write the parent's family in its description.
-
-When CI refused your previous attempt you are shown its failure text and the files you sent: fix exactly what it
-says and send the WHOLE corrected files again.
-
-Answer with ONE JSON object and nothing else:
-{"summary": "two or three plain sentences: the defect, the fix, and how its absence will be observed",
- "role": "architect | toolsmith | operator | teacher",
- "slug": "lowercase-words-with-dashes",
- "title": "the pull request's title, under 100 characters",
- "body": "the pull request's description: the evidence, the change, how it will be judged",
- "files": [{"path": "...", "content": "the WHOLE file"}],
- "needs_core": null or {"reason": "what must change and why no allowed path can do it", "paths": ["..."]}}
-Give "files": [] and "needs_core": null when the evidence does not support a change; the job is then closed as
-rejected, with its cost."""
+BRIEF = """You are the options House repair engineer. Fix one reported helper defect using the provided evidence.
+You may propose ONLY pure Python helpers in league/tools/ and tests in league/tests/test_tool_*.py.
+The role is engineer. Never trade, merge, deploy, change money rules, or publish a program, quote or fitted value.
+The swarm's architect owns private strategy changes; report a program defect with needs_core instead.
+If the fix needs any other path, return needs_core with its reason and paths. Do not hide the defect with a workaround.
+When CI refuses a prior attempt, use its actual failure text and send complete corrected files.
+Return one JSON object:
+{"summary":"defect, fix and observation", "role":"engineer", "slug":"lowercase-words", "title":"PR title",
+ "body":"evidence and validation", "files":[{"path":"...", "content":"whole file"}],
+ "needs_core":null}
+Use files:[] for no justified change, or needs_core:{"reason":"...","paths":["..."]} for owner work."""
 
 
 def load_settings(path: Path = SETTINGS_PATH) -> dict[str, Any]:
@@ -144,6 +90,8 @@ class Engineer:
                  code_of: Callable[[str], Mapping[str, Any] | None] = lambda agent: None, repo: Path = REPO,
                  evidence: Callable[[], Mapping[str, Any]] = lambda: {}, sources: Any = None, summary_path: Path | None = None,
                  inbox: Path | None = None, evidence_weight: Callable[[Iterable[str]], float] = lambda agents: 1.0):
+        from .merton import ProposalFollower
+        self.follower = ProposalFollower(forge, ledger, clock=clock)
         self.frontier = frontier
         self.forge = forge
         self.ledger = ledger
@@ -194,6 +142,7 @@ class Engineer:
             if self.sources is not None:
                 out["reported"] = self.sources.scan()
             if self.settings.get("enabled"):
+                self.follower.follow()
                 self._work(out)
         finally:
             self._summarize(out)
@@ -311,19 +260,8 @@ class Engineer:
                                           "outside every Merton role's paths")
         if job.attempt >= int(settings["max_attempts"]):
             return self._dormant(job, f"attempt limit reached ({job.attempt} of {settings['max_attempts']}); costs kept")
-        if job.kind == "strategy_defect" and not self._scripted(job):
-            # Sept 23, 2026: a corrected child of a strategy nobody runs, or that never traded, buys
-            # nothing. Measured: 16 repair children born, 0 forward active blocks, 7 died on rung 0;
-            # $0.70 a born child. A defect of a dead parent is closed; a living parent that has not
-            # traded since its seat waits, free, until it does. (An audit veto's parent has reached
-            # the paper screen, so it has traded by construction and is not asked again.)
-            why = self._parent_idle(job)
-            if why:
-                if why.startswith("dead"):
-                    self.worklist.transition(job.key, "rejected", attempt=job.attempt, pr=job.pr,
-                                             note=f"not worth a patch: {why}; a repair of a strategy nobody runs buys nothing")
-                    return "rejected"
-                return None  # the parent lives but has not traded: the job waits at no cost
+        if job.kind in STRATEGY_KINDS:
+            return self._dormant(job, "private program changes belong to the swarm researcher; no public repair proposed")
         scripted = self._scripted(job)
         prior = job.state
         packet = self._packet(job)
@@ -381,22 +319,6 @@ class Engineer:
             return self._after_failure(job, attempt, cost, f"patch {attempt} failed: {type(exc).__name__}: {str(exc)[:200]}")
         return self._propose(job, attempt, cost, answer)
 
-    def _parent_idle(self, job: Job) -> str:
-        """Why a strategy defect is not worth a paid patch now, or "" when its parent is alive and
-        has traded. The parent is the job's named agent (a `strategy_defect:<agent>:<sha>` key names
-        one); "traded" is any fill of its own at a venue (never the House's dust sweeps), which an
-        agent only has once seated. Read from the ledger, so no House callback is needed."""
-        parents = sorted(job.agents)
-        if not parents:
-            return ""
-        alive = [p for p in parents if self.ledger.last("agent.died", agent=p) is None
-                 and (self.code_of(p) is not None or self.ledger.get(f"born:{p}") is not None)]
-        if not alive:
-            return f"dead parent(s) {', '.join(parents[:4])}"
-        for parent in alive:
-            if any(e.payload.get("source") != "dust" for e in self.ledger.read(kinds="book.fill", agent=parent, limit=50, newest=True)):
-                return ""
-        return f"parent(s) {', '.join(alive[:4])} alive but without a fill since the seat"
 
     def _after_failure(self, job: Job, attempt: int, cost: Decimal, note: str, **extra: Any) -> str:
         if attempt >= int(self.settings["max_attempts"]):
@@ -421,7 +343,7 @@ class Engineer:
             self._pass(job, attempt, cost, "no role inside the repair allowlist")
             return self._after_failure(job, attempt, cost, f"patch {attempt} named no allowed role ({str(answer.get('role'))[:40]})")
         proposal = parse_proposal(role, dict(answer), cost)
-        files, notes = self._child_only(job, role, proposal.files)
+        files, notes = proposal.files, []
         outside = [d for d in proposal.dropped if "outside what the" in d or "no role may change" in d]
         if not files:
             summary = proposal.summary or "no change"
@@ -449,42 +371,6 @@ class Engineer:
                                  extra={"_proposal": pending, "digests": _files_digest(files), "dropped": proposal.dropped[:8] + notes[:4]})
         return self._open(self.worklist.get(job.key) or job)
 
-    def _child_only(self, job: Job, role: str, files: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[str]]:
-        """A strategy defect is fixed by a NEW child file whose description names its parent and
-        the repair: an existing strategy file is never rewritten, so no record can carry over."""
-        if role != "architect":
-            return files, []
-        from . import strategies
-
-        parent = sorted(job.agents)[0] if job.kind in STRATEGY_KINDS and job.agents else None
-        family = (self.code_of(parent) or {}).get("family") if parent else None
-        kept, notes = [], []
-        for row in files:
-            path = row["path"]
-            if path.endswith(".py") and (self.repo / path).exists():
-                notes.append(f"{path}: already exists; a repair adds a new child strategy instead of editing one")
-                continue
-            if path.endswith(".json") and path.startswith("league/strategies/"):
-                try:
-                    described = json.loads(row["content"])
-                except ValueError:
-                    kept.append(row)
-                    continue
-                if isinstance(described, dict):
-                    if family:
-                        described["family"] = family
-                    described["repair"] = {"key": job.key, **({"parent": parent} if parent else {})}
-                    described["file"] = path.rsplit("/", 1)[1][:-5] + ".py"
-                    try:
-                        _, content = strategies.describe(described)
-                    except KeyError:
-                        kept.append(row)
-                        continue
-                    row = {"path": path, "content": content}
-            kept.append(row)
-        stems = {r["path"][:-3] for r in kept if r["path"].endswith(".py")}
-        kept = [r for r in kept if not (r["path"].endswith(".json") and r["path"][:-5] not in stems)]
-        return kept, notes
 
     def _open(self, job: Job) -> str:
         """Propose the files the last `testing` row holds (paid for already)."""
@@ -525,20 +411,14 @@ class Engineer:
         self._after_failure(job, attempt, hold, note)
 
     # --------------------------------------------------------------------- following
-    @staticmethod
-    def _strategy_only(digests: Mapping[str, Any]) -> bool:
-        """A fix that only adds strategy files cannot change an agent already running: its effect
-        is the corrected child it brings. So the agents that reported the problem on the old code
-        do not count as its recurrence; any other agent still does. Measured Sept 22, 2026: the
-        hawkins horizon repair (#100) shipped as a new child strategy, and hawkins-9, still on the
-        old code, reopened it within the hour."""
-        return bool(digests) and all(str(path).startswith("league/strategies/") for path in digests)
 
     def _change(self, number: int) -> dict[str, Any] | None:
         rows = [e.payload for e in self.ledger.read(kinds="merton.change", limit=2000, newest=True) if e.payload.get("number") == number]
         return dict(rows[-1]) if rows else None
 
     def _advance(self, job: Job) -> str | None:
+        if job.kind in STRATEGY_KINDS:
+            return self._dormant(job, "private program changes belong to the swarm researcher; no public repair followed")
         if job.state == "testing":
             if job.pr is None:
                 return self._open(job) if isinstance(job.last_status.get("_proposal"), dict) else None
@@ -562,7 +442,7 @@ class Engineer:
                 self.worklist.transition(job.key, "observing", attempt=job.attempt, pr=job.pr, commit=job.commit,
                                          note=f"the running release ({release}) holds PR #{job.pr}'s files; watching for recurrence",
                                          extra={"deployed_at": now_iso(self.clock), "release": release, "digests": digests,
-                                                "exclude": sorted(job.agents) if job.kind in STRATEGY_KINDS or self._strategy_only(digests) else []})
+                                                "exclude": []})
                 return "observing"
             merged_at = job.last_status.get("merged_at") or job.state_at
             if self.clock() - _epoch(str(merged_at)) > float(self.settings["canary_timeout_hours"]) * 3600:
@@ -585,20 +465,10 @@ class Engineer:
                       else float(self.settings["observe_hours"]) * 3600)
             if self.clock() - _epoch(since) < window:
                 return None
-            child = self._child_born(job)
-            if child is False:
-                refused = self._child_refused(job)
-                if refused:
-                    # Sept 23, 2026: the corrected child is replayed before any seat (House.enroll ->
-                    # Foundry.takes_strategy); one that fails is never born, and its job is closed
-                    # with the replay's reasons rather than bought again.
-                    return self._dormant(job, f"the corrected child failed replay before any seat: {refused[:400]}")
-                return None  # a corrected strategy is only a fix once it is alive and judged on its own
             self.worklist.transition(job.key, "verified", attempt=job.attempt, pr=job.pr, commit=job.commit,
-                                     note=f"no recurrence for {window / 3600:.2f} h after the fix was running ({job.last_status.get('release')})"
-                                          + (f"; child {child} is born on rung 0" if isinstance(child, str) else ""))
+                                     note=f"no recurrence for {window / 3600:.2f} h after the fix was running ({job.last_status.get('release')})")
             return "verified"
-        if job.state == "verified" and job.kind not in STRATEGY_KINDS:
+        if job.state == "verified":
             again = job.evidence_after(job.state_at)
             if again:
                 self.worklist.transition(job.key, "admitted", attempt=job.attempt, pr=job.pr,
@@ -647,41 +517,7 @@ class Engineer:
         except OSError:
             return False
 
-    def _child_born(self, job: Job) -> str | bool | None:
-        """None when this job has no child to wait for; the child's id once born; else False."""
-        if job.kind not in STRATEGY_KINDS:
-            return None
-        names = []
-        for path in (job.carry.get("digests") or {}):
-            if path.startswith("league/strategies/") and path.endswith(".json"):
-                try:
-                    names.append(json.loads((self.repo / path).read_text(encoding="utf-8")).get("name"))
-                except (OSError, ValueError):
-                    continue
-        if not names:
-            return None
-        for entry in self.ledger.iter(kinds="agent.born"):
-            if entry.payload.get("founder") in names:
-                return entry.agent
-        return False
 
-    def _child_refused(self, job: Job) -> str | None:
-        """The replay verdict that refused this job's corrected child before any seat (the foundry's
-        `hypothesis.evaluate` trace naming the strategy), or None while it is pending or was born."""
-        names = set()
-        for path in (job.carry.get("digests") or {}):
-            if path.startswith("league/strategies/") and path.endswith(".json"):
-                try:
-                    names.add(json.loads((self.repo / path).read_text(encoding="utf-8")).get("name"))
-                except (OSError, ValueError):
-                    continue
-        if not names:
-            return None
-        for entry in self.ledger.read(kinds="trace.record", limit=2000, newest=True):
-            p = entry.payload
-            if p.get("task") == "hypothesis.evaluate" and p.get("strategy") in names and p.get("outcome") not in (None, "passed"):
-                return f"{p.get('outcome')}: {str(p.get('detail') or '')[:300]}"
-        return None
 
     # ----------------------------------------------------------------------- evidence
     def _packet(self, job: Job) -> dict[str, Any]:
@@ -689,12 +525,6 @@ class Engineer:
         view["evidence"] = job.evidence
         packet: dict[str, Any] = {"job": view, "details": job.details, "attempt": job.attempt + 1,
                                   "max_attempts": self.settings["max_attempts"], "today": time.strftime("%Y-%m-%d", time.gmtime(self.clock()))}
-        code = {}
-        for agent in sorted(job.agents)[:3]:
-            found = self.code_of(agent)
-            if found:
-                code[agent] = {k: found.get(k) for k in ("family", "niche", "venue", "horizon", "needs", "params", "code")}
-        packet["code"] = code
         if job.attempt and job.carry.get("_failure"):
             packet["previous"] = {"ci_failure": job.carry.get("_failure"), "files": job.carry.get("_files") or [],
                                   "pr": job.carry.get("failed_pr")}
@@ -703,9 +533,7 @@ class Engineer:
             text = self._failure_text(job.details["pr"])
             if text:
                 packet["ci_failure_of_the_reported_pr"] = text
-        packet["permitted_dials"] = {key: {"min": low, "max": high} for key, (low, high) in ci.CONFIG_DIALS.items()}
         packet["existing_tools"] = sorted(p.name for p in (self.repo / "league" / "tools").glob("*.py"))
-        packet["existing_strategies"] = sorted(p.name for p in (self.repo / "league" / "strategies").glob("*.py"))
         try:
             packet.update(self.evidence() or {})
         except Exception:  # noqa: BLE001 - extra context is optional
@@ -727,7 +555,7 @@ def _ambiguous(exc: FrontierError) -> bool:
 
 
 def _epoch(iso: str) -> float:
-    from ltcm.broker import instant
+    from league.broker import instant
 
     parsed = instant(iso)
     return parsed.timestamp() if parsed else 0.0
@@ -786,7 +614,7 @@ def checksum(values):
     return sum(values){offset}
 '''
 
-    base = {"role": "toolsmith", "slug": f"drill-{drill}", "needs_core": None}
+    base = {"role": "engineer", "slug": f"drill-{drill}", "needs_core": None}
     if attempt == 1:
         return {**base, "summary": "SYNTHETIC drill patch 1: deliberately wrong; its own test must fail in CI.",
                 "title": f"SYNTHETIC repair drill {drill}: patch 1 (fails by design)",

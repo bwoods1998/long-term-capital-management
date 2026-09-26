@@ -34,7 +34,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import ENGINE_VERSION
 
 REPO = Path(__file__).resolve().parents[2]
-LEAGUE_FILES = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py")
+LEAGUE_FILES = ("league/__init__.py", "league/safety.py", "league/structure_core.py", "league/stats.py", "league/CONTRACT.md")
 RETRYABLE = (408, 425, 429, 500, 502, 503, 504)
 
 

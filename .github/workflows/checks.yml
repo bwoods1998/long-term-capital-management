@@ -4,10 +4,7 @@ name: Checks
   push:
     branches: [main]
   pull_request:
-  # The House box deploys a commit of main only when THESE checks passed on that exact commit
-  # (`league/updater.py`). A merge made with the Actions token starts no workflow -- GitHub's rule --
-  # so a commit Merton's merge job leaves on main would never carry them: the merge job dispatches
-  # this workflow, and the hourly run catches any head that still has none.
+  # Owner deployments verify checks on the exact commit. The in-box updater stays off.
   workflow_dispatch:
   schedule:
     - cron: "23 * * * *"
@@ -35,9 +32,7 @@ jobs:
         run: npm run check && npm test
   tests:
     runs-on: ubuntu-latest
-    # 20, not 10 (Sept 24, 2026): the 3.14 job hit a 10-minute limit twice in a row on Deploy C' (#274:
-    # 15:58:41-16:08:56Z and 16:09:28-16:19:43Z) while 3.11 took 9m07s; it had sat at the limit since Sept 23.
-    timeout-minutes: 20
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -54,10 +49,7 @@ jobs:
         # of the repository is standard library only. Nothing to install on a tree without the file.
         run: |
           if [ -f requirements-gym.txt ]; then python3 -m pip install --disable-pip-version-check -r requirements-gym.txt; fi
-      - name: Run the first run's runtime tests
-        # Both suites run until the full prune (Wave 2b) deletes ltcm/ and its tests.
-        run: python3 -m unittest discover -s ltcm/tests -t .
       - name: Run the league's tests
         run: python3 -m unittest discover -s league/tests -t .
-      - name: The league's content checks (strategies, tools, game and config bounds)
+      - name: Validate public examples, helper safety and options money bounds
         run: python3 -m league.ci --no-tests

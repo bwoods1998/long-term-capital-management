@@ -44,7 +44,7 @@ class NeedsRefused(CodeRefused):
 
 @dataclass(frozen=True)
 class Needs:
-    """What a program asks the engine for (PROGRAM.md, "NEEDS")."""
+    """What a program asks the engine for (league/CONTRACT.md, "NEEDS")."""
 
     roots: tuple[str, ...]
     dte_min: int
