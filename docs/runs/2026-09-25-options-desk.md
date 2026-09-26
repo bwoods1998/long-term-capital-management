@@ -249,6 +249,12 @@ run's `config.json` change is its own new `options_structures` key).
   entries wait until those sales are booked (the forward-first and Kalshi runs' book; told 02:23Z). The watchdog reads a
   book frozen before a promotion as inherited, never a rollback (`watchdog.py` 237-251). **Deploy B started 02:22:58Z** (the
   forward-first run's record); **Deploy G starts at B's watch-end plus 30 minutes**, written here first.
+  **Deploy B done** (the forward-first run, 02:36Z): release `20260926T022308Z-1931abd19d1f` (main `206e7952`) promoted
+  02:24:53Z, grant ratified 02:25:10Z on `acff5c64`, watch passed, deploy exit 02:35:19Z; read on the box 02:52Z: that release,
+  `ops.started` 02:26:20Z, every book unfrozen but the real `kalshi` (the owner's sales, inherited), the site's checkpoints
+  accepted again from 02:24:20Z (#342). **G may start from 03:05:19Z.** Main moved to `69539d3a` (Merton's #353, strategy files
+  only, merged 02:49:19Z): merged into `g/integration` (`e34d90c6`, `league.ci` passes, money digest `be1e3ce9`, gateway
+  215/215); **G starts when CI is green on `e34d90c6` (about 03:15Z)**, the exact start written here first.
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
