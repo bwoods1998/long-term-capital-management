@@ -25,7 +25,7 @@ clock never restarts.
 
 | Milestone | Target | Done at | Evidence |
 |---|---|---|---|
-| M0 Safe and archived | T0 + 1 h | | |
+| M0 Safe and archived | T0 + 1 h | 08:05:56Z | old House stopped and grant revoked; gzip-tested state archive copied to laptop with matching SHA; old lab terminated (original log below) |
 | M1 Data flowing | T0 + 2 h | 06:58Z (T0 + 35 min) | data box downloading since 06:49:43Z; universe chosen (W1) |
 | M2 The House is options-only | Sat morning | 07:49:25Z | #359 merged, CI green; updater off, tools off `ltcm`, grant `options-swarm-20260928`, options-only service and tick |
 | M3 The swarm is training | Sat 16:00Z | 10:33Z | site reset (07:21Z); the fresh House live on new state (10:22Z); 6 sealed Gym boxes running programs; 48 families, 46 researchers cycling (299 cycles in 11 min, median 79.6 s) |
@@ -437,6 +437,39 @@ clock never restarts.
   coordinated with #362 so bid/ask columns cannot be mixed across updates. The new site schema
   must deploy before this publisher. Existing account movement, deposits, compute and crypto dust
   do not become the website's Profit number; no real options trades means zero.
+
+- 16:42Z Personal-site #10 merged at `0458a88` and deployed as Worker version
+  `2506e646-25d9-4e7e-a2be-082c3b9ad3ca`. All 55 tests, production build and deployment dry run
+  passed. Independent production Chromium checks saw the real 66-family roster (49 Practice,
+  17 retired), durable partner aliases, two headline metrics, no standalone structures/table,
+  and readable details on a 375px phone. Keyboard/focus, 320px/390px layouts, thought dwell and
+  expansion, simulated live updates and stale-value behavior passed separately. The production
+  WebSocket connected; no new thought was invented during the research pause.
+- 16:45-16:49Z #371 and final #362 head `7cf0dff8` passed full CI and merged; main is `4472c334`.
+  Final W5 parity/paper tests passed 23/23 on the House, including persisted recovered fill answers
+  and concurrent quote revisions. Profit passed 35 tests on the House (one cross-site Node test
+  skipped because the box has no site checkout; numpy tests **did** run). The integrated actual-W5
+  synthetic book produced -$6.28 open and -$12.57 closed including fees; frozen/concurrent records
+  withheld their public value. The earlier description of that skip as numpy-related was incorrect.
+- 16:49Z Gateway main `4472c334` deployed as `20a6b706-3f78-4690-8da4-e2d711cb80cc`, keeping
+  `OPTION_STRUCTURES_REAL=off`, September funded month and $707 OpenAI ceiling. House release
+  `20260926T164943Z-04457584301d` passed canary and promoted at 16:50:15Z; its ten-minute watch is
+  still running. At 16:53Z the actual House has `options_live=true`, session state `closed`, no
+  health failure, and `real_money=false`. Swarm and forward worker restarted on the same release;
+  the latter still waits for Tuesday 06:00Z. The site first published verified Profit **$0.00** at
+  16:50:47Z. No grant activation or real order was performed.
+- 16:54Z The quiet public notes were traced through both cursors: publication was caught up to the
+  ledger and swarm source. Research was paused by its combined $2.25/hour pace: $2 of unresolved
+  OpenAI architect reservation plus Sail spend exceeded it. #372 introduces an optional separately
+  funded Sail pace, keeping the existing OpenAI holds and month/burst limits. Independent review
+  passed 45 checks, and the exact head `e3e66525` passed 70 tests on the House. CI and deployment
+  are pending; the private setting has not been switched yet.
+- 16:54Z Root found the paper proof was coupled to real execution. #373 (`4b9f8757`) schedules the
+  existing bounded paper proof with no real client/book/grant/family, preserving restart ownership
+  and weekend silence. 114 focused tests passed both locally and on the House. Independent review
+  and full CI are pending. This is synthetic evidence only; the actual paper route remains Monday's
+  check. Separately, W5 is reproducing/fixing a researcher protocol defect where a refused Gym
+  call could be described as a completed experiment; no evidence requirement is being loosened.
 
 ### Monday pre-open and forward-run checklist (prepared Saturday; results still pending)
 
