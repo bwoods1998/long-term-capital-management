@@ -22,6 +22,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+#: The live state's file in the House's state root.
+STATE_FILE = "live.sqlite"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS instances (
@@ -172,4 +175,4 @@ def read_json(path: str | Path, default: Any = None) -> Any:
         return default
 
 
-__all__ = ["LiveState", "write_json_atomic", "read_json", "dumps", "loads"]
+__all__ = ["STATE_FILE", "LiveState", "write_json_atomic", "read_json", "dumps", "loads"]

@@ -14,8 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from .state import LiveState
-from .step import STATE_FILE
+from .state import STATE_FILE, LiveState
 
 
 def main(argv: list[str] | None = None) -> dict:

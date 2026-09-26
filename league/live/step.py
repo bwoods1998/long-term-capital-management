@@ -55,11 +55,10 @@ from .families import MemoryFamilies
 from .paper import PaperProof
 from .real import RealBook, RLeg, RPosition, real_legs
 from .shadow import SHADOW_FILE, ShadowAccount, ShadowBook, needs_of
-from .state import LiveState
+from .state import STATE_FILE, LiveState
 from .venue import OPTION_EVENTS, Account, MarketData, VenueError, occ_parts, stock_price
 
 NEW_YORK = ZoneInfo("America/New_York")
-STATE_FILE = "live.sqlite"
 FAMILIES_EVERY = 300.0
 ACTIVITIES_EVERY = 300.0
 FLOWS_EVERY = 300.0

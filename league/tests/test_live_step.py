@@ -278,6 +278,34 @@ class TheClose(LiveCase):
         self.assertEqual(live.book.frozen, "")
 
 
+class Owner(LiveCase):
+    def test_the_owners_command_releases_the_drawdown_pause_through_the_live_state(self):
+        import contextlib
+        import io
+
+        from league.live.__main__ import main
+
+        live = self.make([family("vert", VERTICAL, band="probe")])
+        live.stops.drawdown_tripped, live.stops.drawdown_why = True, "a test's drawdown"
+        self.assertIn("real money paused", live.real_block())
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["--root", str(self.root), "--release-drawdown"])
+        live.minute()
+        self.assertFalse(live.stops.drawdown_tripped)
+        self.assertIsNone(live.state.get("owner_release_drawdown"))
+        self.assertTrue(any(p.get("released") for p, a in self.ledger.of("live.stop")))
+
+    def test_a_program_that_dies_leaves_its_real_positions_to_the_house_to_close(self):
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
+        self.run_to(9, 31)
+        self.assertEqual(len(live.book.positions), 1)
+        inst = live.instances["vert@1:r"]
+        inst.error, inst.fatal = "disqualified: 25 errors", True
+        self.run_to(9, 33)
+        self.assertEqual(live.book.positions, {})
+        self.assertEqual(self.venue.sent[-1]["legs"][0]["position_intent"], "sell_to_close")
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
