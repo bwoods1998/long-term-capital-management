@@ -200,16 +200,13 @@ def _on_alarm(signum: int, frame: Any) -> None:
         raise ProgramTimeout("decide ran past its time limit")
 
 
-_ALARM_INSTALLED = False
-
-
 def _can_alarm() -> bool:
-    global _ALARM_INSTALLED
     if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
         return False
-    if not _ALARM_INSTALLED:
+    # Signal handlers belong to the process, not this module. Another runner may have
+    # replaced ours since the last load/decision; reclaim it before arming each call.
+    if signal.getsignal(signal.SIGALRM) is not _on_alarm:
         signal.signal(signal.SIGALRM, _on_alarm)
-        _ALARM_INSTALLED = True
     return True
 
 

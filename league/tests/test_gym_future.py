@@ -4,6 +4,7 @@ reach them; the runtime contains a misbehaving program. Synthetic stores only.""
 import datetime as dt
 import math
 import shutil
+import signal
 import tempfile
 import unittest
 
@@ -236,6 +237,31 @@ class TheSafetyCheck(unittest.TestCase):
 
 @unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
 class TheRuntime(unittest.TestCase):
+    @unittest.skipUnless(hasattr(signal, "setitimer"), "wall-clock alarms unavailable")
+    def test_a_foreign_alarm_handler_does_not_replace_the_gym_timeout(self):
+        previous = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+        def restore():
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            signal.signal(signal.SIGALRM, previous)
+            signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+
+        self.addCleanup(restore)
+        code = GOOD.replace("    return []", "    x = 0\n    while True:\n        x += 1")
+        runner = R.load_program(code).start(timeout=0.05)
+
+        def another_runner(signum, frame):
+            raise RuntimeError("another runtime owns this signal")
+
+        # The legacy runner and other in-process libraries can install their own handler
+        # after this Runner was created. The Gym must reclaim it before each bounded call.
+        signal.signal(signal.SIGALRM, another_runner)
+        self.assertEqual(runner.decide(None), [])
+        self.assertEqual(runner.timeouts, 1)
+        self.assertEqual(runner.errors, 1)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
     def test_a_runaway_decide_is_stopped_and_counted(self):
         code = GOOD.replace("    return []", "    x = 0\n    while True:\n        x += 1")
         runner = R.load_program(code).start(timeout=0.05, max_errors=2)

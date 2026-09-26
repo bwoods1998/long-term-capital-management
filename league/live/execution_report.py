@@ -292,7 +292,8 @@ def report(root: Path, day: str) -> dict:
     out = {"schema": 1, "day": day, "private": True, "complete": False, "gaps": [], "orders": [],
            "trades": [], "rejections": [], "model_identities": [], "calibration": {"action": "none", "paper_eligible": False,
            "shadow_eligible": False, "real_fit": "not_attempted; requires separately reviewed complete exposure"},
-           "goal_note": "The Done sentence mentions paper calibration; the detailed fill contract excludes synthetic paper fills."}
+           "goal_note": "The original Done wording included paper calibration. The clarified goal uses Train trade_quote "
+                        "and eligible actual real fills only; synthetic paper fills remain diagnostic."}
     path = Path(root) / FILE
     if not path.is_file():
         out["gaps"].append("execution_database_missing")
