@@ -140,6 +140,9 @@ open is closed at the natural. Stop sending closes on an expiring contract after
 you see only its mean return on maximum loss, its t, the quarters positive, and whether the line was met
 (which checks were not). Holdout (2026) is sealed: one look per program version at the gate, at most three
 per lineage, and you hear only pass or fail. Forward days (after Sept 25, 2026, and live) are the judge.
+Every fork shares that ration across all roots, including looks made after the fork. Reusing identical
+program code on the same structure and roots joins lineages; renaming a family or changing its parameters
+never creates a fresh ration. A revised retired mechanism must identify its parent.
 
 **Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
 siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The gate deflates your validation Sharpe by your lineage's trial count, so a thousand sweeps that

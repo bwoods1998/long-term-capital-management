@@ -45,6 +45,8 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
             for r in db.execute("SELECT family, source, day, pnl, max_loss, version FROM forward"):
                 rows.setdefault(r["family"], []).append(dict(r))
             banded = {r["id"]: (loads(r["state"], {}) or {}).get("banded_version") for r in db.execute("SELECT id, state FROM families")}
+            links = list(db.execute("SELECT a,b FROM lineage_links")) if db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lineage_links'").fetchone() else []
         finally:
             db.close()
     except sqlite3.Error:
@@ -53,6 +55,10 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     # on the slice of), the count its evidence is deflated by.
     by_line: dict[str, int] = {}
     prior: dict[str, str] = {}
+    connected: dict[str, set[str]] = {}
+    for a, b in links:
+        connected.setdefault(a, set()).add(b)
+        connected.setdefault(b, set()).add(a)
     for f in fams:
         by_line[f["lineage"]] = by_line.get(f["lineage"], 0) + int(f["trials"] or 0)
         before = (loads(f["spec"], {}) or {}).get("prior_lineage")
@@ -60,10 +66,14 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
             prior[f["id"]] = str(before)
 
     def lineage_trials(line: str) -> int:
-        seen: list[str] = []
-        while line and line not in seen:
-            seen.append(line)
-            line = prior.get(line, "")
+        seen, pending = set(), [line]
+        while pending:
+            line = pending.pop()
+            if not line or line in seen:
+                continue
+            seen.add(line)
+            pending.extend(connected.get(line, set()) - seen)
+            pending.append(prior.get(line, ""))
         return sum(by_line.get(x, 0) for x in seen)
 
     alive = [f for f in fams if not f["retired_at"]]
