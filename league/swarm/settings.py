@@ -91,6 +91,8 @@ DEFAULTS: dict[str, Any] = {
     },
     "architect": {
         "every_seconds": 14400,
+        "refill_seconds": 3600,         # while fewer than population.start live: hourly, up to the gap (max_refill a pass)
+        "max_refill": 12,
         "min_new": 3,
         "max_new": 6,
         "openai_model": "gpt-6-astra",

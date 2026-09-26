@@ -636,6 +636,38 @@ class ArchitectTests(RoundCase):
         {"slug": "tsla", "mechanism": "Single-name momentum after earnings with debit verticals on the move.", "structure": "debit_vertical",
          "roots": ["TSLA"]}]}
 
+    def populate(self, n):
+        for i in range(n):
+            self.store.add_family({**SPEC, "id": f"pop-{i}", "mechanism": f"Idea number {'abcdefghijklmnopqrstuvwxyz'[i % 26]} "
+                                   f"{i // 26} of the founding population, a condor on the index."}, origin="seed")
+
+    def many(self, n):
+        return {"families": [{"slug": f"new-{i}", "mechanism": f"A distinct mechanism {'abcdefghijklmnop'[i]} for why a spread pays "
+                                                                f"on this index after a {'abcdefghijklmnop'[i]} event.",
+                              "structure": "iron_condor", "roots": ["QQQ"], "dte": [0, 2]} for i in range(n)]}
+
+    def test_below_the_start_population_the_architect_refills_hourly_up_to_the_gap(self):
+        self.populate(40)
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        self.store.put("architect_at", self.clock())
+        self.clock.advance(3600)
+        self.assertTrue(arch.refilling() and arch.due(), "40 alive of the 48 the swarm starts with: hourly")
+        self.replies = [{"text": json.dumps(self.many(12))}]
+        out = arch.run()
+        self.assertEqual(len(out["born"]), 8, "up to the start population")
+        self.assertIn("Propose 3 to 8 new families", self.sail.bodies[-1]["input"][-1]["content"])
+
+    def test_at_the_start_population_it_grows_every_four_hours_three_to_six_at_a_time(self):
+        self.populate(50)
+        arch = Architect(self.store, self.router, self.settings, clock=self.clock)
+        self.store.put("architect_at", self.clock())
+        self.clock.advance(3600)
+        self.assertFalse(arch.refilling() or arch.due())
+        self.clock.advance(4 * 3600)
+        self.assertTrue(arch.due())
+        self.replies = [{"text": json.dumps(self.many(12))}]
+        self.assertEqual(len(arch.run()["born"]), 6)
+
     def test_it_admits_only_well_formed_families_and_they_read_the_graveyard(self):
         self.family("old")
         self.store.bury("old", "straddles on SPY bled theta on quiet days")
@@ -693,6 +725,7 @@ class ArchitectTests(RoundCase):
         self.assertEqual(self.store.lineage_trials(born), 31)
 
     def test_every_four_hours(self):
+        self.populate(48)  # the start population: the plan's cadence (below it the architect refills hourly)
         a = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.assertTrue(a.due())
         self.replies = [{"text": json.dumps({"families": []})}]

@@ -175,6 +175,23 @@ class Process(LoopCase):
         worker.join(10)
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [])
 
+    def test_the_architect_grows_the_population_only_under_the_pace_but_always_refills_it(self):
+        sw = self.swarm()
+        sw.seed()
+        self.store.add_spend("sail_model", float(self.settings["researcher"]["usd_per_hour"]) + 0.5)  # the hour's spend is past the pace
+        self.store.put("tournament_at", time.time())
+        self.store.put("architect_at", 0.0)
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertNotIn("architect", sw.rounds, "48 alive: no growth while the money is spent")
+        for fam in self.store.families(alive=True)[:10]:
+            self.store.retire(fam["id"], "test")
+        sw.step()
+        for t in list(sw.rounds.values()):
+            t.join(30)
+        self.assertIn("architect", sw.rounds, "38 alive: it refills whatever the pace")
+
     def test_it_leaves_on_a_stop_file_or_a_new_release(self):
         sw = self.swarm()
         self.assertEqual(sw.should_stop(), "")

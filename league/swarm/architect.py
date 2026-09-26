@@ -1,5 +1,11 @@
 """The architect: every four hours, 3-6 new families from the leaderboard, the graveyard and the gaps.
 
+The population (plan: 48 at the start, a ceiling of 96, a floor of 16): while fewer families live than the
+start (retirements drained it), it REFILLS: every `refill_seconds` (an hour), up to the gap to the start
+(at most `max_refill` a pass). At or above the start it grows toward the ceiling at the plan's pace, and
+the loop runs that growth only while the swarm's hourly spend is under its pace (money allows). A birth
+spends nothing by itself: the hourly pace caps every researcher's cycles together.
+
 GPT-6 Astra through the gateway when the OpenAI month has room (and the swarm's OpenAI cap allows), else
 Kimi-K3 balanced on Sail. It reads the leaderboard (families, bands, validation summaries, shares), the
 graveyard's lessons, and the GAPS (roots x structure types no living family covers), and answers with new
@@ -64,8 +70,22 @@ class Architect:
     def cfg(self) -> Mapping[str, Any]:
         return self.settings.get("architect", {})
 
+    def refilling(self) -> bool:
+        """Fewer families live than the swarm starts with."""
+        return len(self.store.families(alive=True)) < int(self.settings.get("population", {}).get("start", 48))
+
     def due(self) -> bool:
-        return self.clock() - float(self.store.get("architect_at", 0.0) or 0.0) >= float(self.cfg.get("every_seconds", 14400))
+        every = float(self.cfg.get("refill_seconds", 3600)) if self.refilling() else float(self.cfg.get("every_seconds", 14400))
+        return self.clock() - float(self.store.get("architect_at", 0.0) or 0.0) >= every
+
+    def want(self) -> int:
+        """How many families this pass may admit: the gap to the start while refilling (at most `max_refill`), else
+        `max_new`; never past the ceiling."""
+        pop = self.settings.get("population", {})
+        alive = len(self.store.families(alive=True))
+        start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
+        n = min(int(self.cfg.get("max_refill", 12)), start - alive) if alive < start else int(self.cfg.get("max_new", 6))
+        return max(0, min(max(n, int(self.cfg.get("min_new", 3))), ceiling - alive))
 
     def gaps(self) -> list[str]:
         roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
@@ -88,17 +108,15 @@ class Architect:
                       for f in self.store.families(alive=True)][:60]
         graves = [{"family": g["family"], "structure": g["structure"], "roots": g["roots"], "lesson": g["lesson"][:400]}
                   for g in self.store.graveyard(limit=20)]
-        room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
-        want = max(0, min(int(self.cfg.get("max_new", 6)), room))
+        want = self.want()
         roots = ", ".join(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
-        return (f"Propose {max(int(self.cfg.get('min_new', 3)), 1)} to {max(want, 1)} new families, on these roots only (the Gym "
+        return (f"Propose {min(max(int(self.cfg.get('min_new', 3)), 1), max(want, 1))} to {max(want, 1)} new families, on these roots only (the Gym "
                 f"holds their data): {roots}.\n\nLIVING FAMILIES "
                 f"(leaderboard):\n{json.dumps(living)}\n\nTHE GRAVEYARD:\n{json.dumps(graves)}\n\nGAPS (no living family):\n"
                 f"{', '.join(self.gaps()[:60])}")
 
     def admit(self, rows: Any) -> list[str]:
-        room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
-        cap = max(0, min(int(self.cfg.get("max_new", 6)), room))
+        cap = self.want()
         living = {(f["mechanism"].lower()[:80], tuple(f["roots"]), f["structure"]) for f in self.store.families(alive=True)}
         allowed_roots = set(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
         born = []
