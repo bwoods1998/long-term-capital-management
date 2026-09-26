@@ -1,12 +1,20 @@
 """Profit is the full real-options record, not a clipped roster or account movement."""
 import json
+import datetime as dt
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from league.publish import SiteInputs, build_checkpoint
-from league.trading_profit import snapshot, total
+from league.trading_profit import marked_value, snapshot, total
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 AT = '2026-09-28T15:00:00.000Z'
 
@@ -42,7 +50,7 @@ class TradingProfitTest(unittest.TestCase):
             self.assertEqual(snapshot(directory, None, at=AT, never_traded=True)['pnl_usd'], '0.00')
             path = Path(directory) / 'live.sqlite'
             db = sqlite3.connect(path)
-            db.executescript('CREATE TABLE positions(pid,qty,entry,cash,status,info); CREATE TABLE orders(status);')
+            db.executescript('CREATE TABLE positions(pid,qty,entry,cash,status,info); CREATE TABLE orders(status); CREATE TABLE kv(key,value);')
             db.executemany('INSERT INTO positions VALUES (?,0,1,2.5,\'closed\',\'{}\')', [(i,) for i in range(200)])
             db.commit()
             before = path.read_bytes()
@@ -51,6 +59,50 @@ class TradingProfitTest(unittest.TestCase):
             db.execute("INSERT INTO orders VALUES ('unknown')"); db.commit()
             self.assertIsNone(snapshot(directory, None, at=AT)['pnl_usd'])
             db.close()
+
+    def test_persisted_freeze_blocks_profit_without_an_inmemory_book(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = sqlite3.connect(Path(directory) / 'live.sqlite')
+            db.executescript("CREATE TABLE positions(pid,qty,entry,cash,status,info); CREATE TABLE orders(status); CREATE TABLE kv(key,value);"
+                             "INSERT INTO positions VALUES (1,0,1,25,'closed','{}');"
+                             "INSERT INTO kv VALUES ('recon','{\"frozen\":\"unknown venue inventory\"}');")
+            db.commit(); db.close()
+            self.assertIsNone(snapshot(directory, None, at=AT)['pnl_usd'])
+
+    def test_concurrent_fill_invalidates_aggregate_and_old_mark_keeps_its_timestamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'live.sqlite'
+            db = sqlite3.connect(path)
+            db.execute('PRAGMA journal_mode=WAL')
+            db.executescript("CREATE TABLE positions(pid,qty,entry,cash,status,info); CREATE TABLE orders(status); CREATE TABLE kv(key,value);"
+                             "INSERT INTO positions VALUES (1,2,1,-202,'open','{}');")
+            db.commit()
+            live = SimpleNamespace(day=object(), book=SimpleNamespace(frozen='', positions={}))
+            older = '2026-09-28T14:30:00.000Z'
+            with patch('league.trading_profit.marked_value', return_value=(220, older)):
+                self.assertEqual(snapshot(directory, live, at=AT), {'as_of': older, 'pnl_usd': '18.00'})
+            def concurrent(row, day):
+                self.assertEqual(row['qty'], 2)
+                db.execute('UPDATE positions SET qty=1,cash=-83'); db.commit()
+                return 220, AT
+            with patch('league.trading_profit.marked_value', side_effect=concurrent):
+                self.assertIsNone(snapshot(directory, live, at=AT)['pnl_usd'])
+            db.close()
+
+    @unittest.skipIf(np is None, 'the live quote grid requires numpy')
+    def test_mark_uses_copied_columns_and_database_quantity_with_real_quote_time(self):
+        chain = SimpleNamespace(day=dt.date(2026, 9, 28), open_min=570, generation=1,
+                                bid=np.array([[1., .4], [1.2, .5]]), ask=np.array([[1.2, .6], [1.4, .7]]),
+                                column=lambda symbol: {'long': 0, 'short': 1}.get(symbol, -1))
+        row = position(1, '-202', 2, 'open', root='SPY',
+                       legs=json.dumps([{'symbol':'long','side':1,'ratio':1}, {'symbol':'short','side':-1,'ratio':1}]))
+        value, stamp = marked_value(row, SimpleNamespace(chains={'SPY':chain}))
+        self.assertEqual(value, 140)
+        self.assertEqual(stamp, '2026-09-28T13:31:00.000Z')
+        chain.bid[1,0] = np.nan
+        value, stamp = marked_value(row, SimpleNamespace(chains={'SPY':chain}))
+        self.assertEqual(value, 120)
+        self.assertEqual(stamp, '2026-09-28T13:30:00.000Z')
 
     def test_existing_corrupt_state_is_unknown(self):
         with tempfile.TemporaryDirectory() as directory:

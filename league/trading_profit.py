@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from contextlib import closing
+import datetime as dt
 import json
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 
 def total(rows: Sequence[Mapping[str, Any]], marks: Mapping[int, Any]) -> str | None:
@@ -41,6 +43,34 @@ def total(rows: Sequence[Mapping[str, Any]], marks: Mapping[int, Any]) -> str | 
         return None
 
 
+def marked_value(row: Mapping[str, Any], day: Any) -> tuple[Decimal, str] | None:
+    """Copy only this position's quote columns; value the immutable database quantity."""
+    import numpy as np
+
+    if day is None:
+        return None
+    chain = day.chains.get(row['root'])
+    if chain is None:
+        return None
+    legs = json.loads(row['legs'])
+    generation = chain.generation
+    indices = [chain.column(leg['symbol']) for leg in legs]
+    if not indices or min(indices) < 0:
+        return None
+    bids, asks = chain.bid[:, indices].copy(), chain.ask[:, indices].copy()
+    if generation != chain.generation:
+        return None
+    good = np.flatnonzero((np.isfinite(bids) & np.isfinite(asks) & (bids >= 0) & (asks >= bids)).all(axis=1))
+    if not len(good):
+        return None
+    minute = int(good[-1])
+    mark = sum(Decimal(str(leg['side'])) * Decimal(str(leg['ratio']))
+               * (Decimal(str(bids[minute, i])) + Decimal(str(asks[minute, i]))) / 2 for i, leg in enumerate(legs))
+    mark_at = (dt.datetime.combine(chain.day, dt.time(), tzinfo=ZoneInfo('America/New_York'))
+               + dt.timedelta(minutes=chain.open_min + minute)).astimezone(dt.timezone.utc)
+    return mark * int(row['qty']) * 100, mark_at.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
 def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False) -> dict[str, Any]:
     """Read the options run's state only. No venue calls and no mutations."""
     unknown = {'as_of': at, 'pnl_usd': None}
@@ -55,30 +85,31 @@ def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False
     try:
         with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=1)) as db:
             db.row_factory = sqlite3.Row
+            version = db.execute('PRAGMA data_version').fetchone()[0]
             db.execute('BEGIN')
-            rows = [dict(row) for row in db.execute('SELECT pid,qty,entry,cash,status,info FROM positions')]
+            rows = [dict(row) for row in db.execute('SELECT * FROM positions')]
             uncertain = db.execute("SELECT 1 FROM orders WHERE status IN ('pending','unknown') LIMIT 1").fetchone()
-        if uncertain or (not rows and not never_traded):
-            return unknown
-        marks = {}
-        book = getattr(live, 'book', None)
-        if getattr(book, 'frozen', None):
-            return unknown
-        for row in rows:
-            if row['status'] == 'closed':
-                continue
-            position = (getattr(book, 'positions', {}) or {}).get(row['pid'])
-            if position is None or any(getattr(position, key) != row[key] for key in ('qty','entry','cash')):
+            recon = db.execute("SELECT value FROM kv WHERE key='recon'").fetchone()
+            frozen = (json.loads(recon[0]) or {}).get('frozen') if recon else None
+            if uncertain or frozen or (not rows and not never_traded):
                 return unknown
-            # Use precisely the live book's existing mark; never mix a stale in-memory
-            # quantity with a newly persisted partial close.
-            from .live.step import _pnl
-
-            unrealized = _pnl(position, live.day)
-            if unrealized is None:
+            marks, valued_at = {}, at
+            book = getattr(live, 'book', None)
+            if getattr(book, 'frozen', None):
                 return unknown
-            marks[row['pid']] = (Decimal(str(row['entry'])) * int(row['qty']) * 100
-                                 + Decimal(str(unrealized)))
-        return {'as_of': at, 'pnl_usd': total(rows, marks)}
-    except (OSError, sqlite3.Error, ValueError, TypeError, KeyError, AttributeError, ImportError):
+            for row in rows:
+                if row['status'] == 'closed':
+                    continue
+                marked = marked_value(row, getattr(live, 'day', None))
+                if marked is None:
+                    return unknown
+                marks[row['pid']], mark_at = marked
+                if mark_at > at:
+                    return unknown
+                valued_at = min(valued_at, mark_at)
+            db.rollback()
+            if db.execute('PRAGMA data_version').fetchone()[0] != version:
+                return unknown  # a fill/freeze changed while quote columns were being copied
+        return {'as_of': valued_at, 'pnl_usd': total(rows, marks)}
+    except (OSError, sqlite3.Error, ValueError, TypeError, LookupError, AttributeError, ImportError, InvalidOperation):
         return unknown
