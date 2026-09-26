@@ -120,29 +120,60 @@ Size: `qty`, or `max_loss` dollars (the most whole structures whose maximum loss
 
 ## How orders fill (honestly)
 
-An order meets the quotes of the minute AFTER your decision. A limit at or through the natural price
-(long legs at the ask, short legs at the bid) fills at the natural, up to the quoted size (the
-smallest leg's size over its ratio); the rest keeps taking the natural as size appears. A limit
-better than the natural works until its tif: it fills at its limit when the natural comes through it,
-and otherwise only with the fill model's calibrated probability for that distance from the mid (none
-at all until the model is calibrated: assume mid orders do not fill), and never on a minute after
-which the market moves your way (a passive fill is someone else's good trade). Draws are keyed by
-contract and minute, not by you. A long wing with no bid is closed at zero.
-Fees: OCC, ORF, CAT on every contract, TAF and SEC on sells, $0.50 plus exchange fees on index
-options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
+An order meets the quotes of the minute AFTER your decision, and every chance in a fill is drawn by
+(contract, minute), never by you:
+
+- **Natural** (long legs at the ask, short legs at the bid), or any limit at or through it, always
+  fills, at the natural, up to the quoted size (the smallest leg's size over its ratio); the rest
+  keeps taking the natural as size appears. It pays every leg's whole half-spread, in and out.
+- **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the
+  natural (`{"mid": k}`: k ticks from the mid toward the natural; `"mid"`; `{"price": v}`) works for
+  its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if
+  the natural has come through it, and otherwise with the fill model's probability for that minute:
+  how often Train's recorded trades printed at or through that distance from the mid on a quoted
+  contract-minute like yours (the same root, days to expiry, moneyness, time of day), a point
+  estimate pooled toward coarser cells where data is thin. A multi-leg package gets the LOWEST of
+  its legs' rates, each leg at its own strike and expiry, from complex-order prints and never above
+  that leg's single-leg rate. A passive fill takes at most the contracts Train's fills at that
+  distance typically found (one structure where unknown), and in one minute all your orders on a
+  contract share that liquidity: the rest keeps working. It never fills on a minute after which the
+  mid holds still or moves your way (a passive fill is someone else's good trade). **Not modelled,
+  so natural only:** a structure with any leg 8 or more days to expiry (the trade sample stops at 7
+  days; back months fill at or through the natural until they are sampled), a root the sample never
+  covered, and a leg further from the money than the sample reached often enough (far wings: a
+  package with such a leg fills only at or through the natural too).
+  So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes can save
+  much of the half-spread on entries and exits; what it costs is the fills you miss (the market
+  leaves without you) and the adverse selection of the ones you get. Your results' `fills` show what
+  your prices got: fill rate, the share filled at the natural, slippage from the mid in half-spreads.
+- A limit off the tick rounds to your own side of the book, so `"mid"` on a one-tick single leg is
+  the touch (the bid for a buy, the ask for a sale): the touch fills only in minutes when Train's
+  prints there traded through the whole displayed queue ahead of you. A limit behind the touch
+  fills only when the market comes through it.
+
+A long wing with no bid is closed at zero. Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee
+($20.60 a million of premium) on sells, $0.50 plus exchange fees on index options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
 collateral. A debit at or over a bounded structure's width is refused. The gate also runs you at 1.5x
-the half-spread (passive fills pay the extra half-spread too): an edge that lives inside the spread
-fails.
+the half-spread (passive fills pay the extra half-spread too and fill HALF as often, and a limit that is
+passive at the real quotes stays passive): an edge that lives inside the spread, or only in patient
+fills, fails.
 
 ## The venue's clock
 
 Options trade 09:30-16:00 ET (13:00 on a half day). On a contract expiring today: no new opening order
-from 15:00; no closing order from 15:10 (15:25 SPY/QQQ); from 15:30 whatever remains of an equity
-position is liquidated at the natural. Equity options are physically settled: a short leg left in the
-money becomes shares, marked to the next session's first price. XSP and SPXW are cash-settled at the
-close (the recorded settlement where the store has one, else the 16:00 index level; hold them to
-expiry if you like; no calendars there). An expiry on a day the run did not replay settles all the
-same. At the end of a run everything open is closed at the natural.
+from 15:00; no closing order from 15:10 (15:25 SPY/QQQ). From 10 minutes before that cutoff
+(`expiry_close`) the House closes an expiring equity position at the natural when a leg expiring today
+is in the money or out of it by 1% of the strike or less, and an expiring long call or put whatever
+its moneyness while it has a bid; your own close is refused from then. What only gets that close
+later is liquidated at the natural from 15:30; one whose every expiring leg stays further out of the
+money (a long call or put: with no bid) is left to expire at its intrinsic value (normally zero, no
+fee). Equity options are physically settled: a short leg left
+in the money becomes shares, marked to the next session's first price. XSP and SPXW are cash-settled
+at the close at intrinsic value (the recorded settlement where the store has one, else the 16:00
+index level), never liquidated; hold them to expiry if you like; no calendars there. An expiry on a
+day the run did not replay settles all the same. At the end of a run everything open is closed at
+the natural; at an inner boundary of a split Train run it is valued at the mid with no fee
+(`split_mark`). Validation, holdout and forward runs are never split.
 
 ## What a run tells you
 

@@ -503,7 +503,9 @@ class GymPool:
         self.store.set_box_state(box.id, "busy")
         head = batch[0]
         roots = sorted({r for j in batch for r in j.roots})
-        split = head.split or int(self.gym.get("train_split" if head.window == "train" else "validation_split", self.gym.get("split", 8)))
+        # Only Train is split (a boundary values open positions at the mid): every other window runs whole.
+        split = head.split or (int(self.gym.get("train_split", self.gym.get("split", 8))) if head.window == "train"
+                               else int(self.gym.get("validation_split", 1)))
         programs = {job.name: (job.code, dict(job.params or {})) for job in batch}
         began = self.clock()
         try:

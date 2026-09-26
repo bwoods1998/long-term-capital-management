@@ -37,18 +37,30 @@ def model_receipt(blob: bytes) -> dict[str, Any]:
     if not isinstance(hazard, dict):
         raise ValueError("calibration has no hazard table")
     for key, value in hazard.items():
-        if (not re.fullmatch(r"q[1-5]\|[sm]\|d[0-9]+\|k[0-9]+\|t[0-9]+", key)
+        # ROOT|q|class|dte|moneyness|time (league/gym/fills.py, Sept 27, 2026): q0 is the touch, q1-q5 the levels from
+        # a quarter-spread short of the mid; d0-d2 only (8+ days to expiry is never modelled).
+        if (not re.fullmatch(r"[A-Z][A-Z0-9.]{0,7}\|q[0-5]\|[sm]\|d[0-2]\|k[0-9]+\|t[0-9]+", key)
                 or isinstance(value, bool) or not isinstance(value, (float, int))
                 or not math.isfinite(value) or not 0 <= value <= 1):
             raise ValueError("invalid calibrated hazard")
+    size = table.get("size") or {}
+    if not isinstance(size, dict):
+        raise ValueError("calibration size is not a table")
+    for key, value in size.items():
+        if (not re.fullmatch(r"[A-Z][A-Z0-9.]{0,7}\|q[0-5]\|[sm]\|d[0-2]", key)
+                or isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError("invalid calibrated size")
     raw_samples = table.get("meta", {}).get("fitted_on", {})
     samples = {key: int(raw_samples[key]) for key in ("days", "prints", "single", "multi", "stock_option", "dropped")
                if key in raw_samples}
     if int(samples.get("days", 0)) < 1 or int(samples.get("prints", 0)) < 1:
         raise ValueError("calibration has no Train evidence")
-    version = "fm-" + hashlib.sha256(json.dumps(hazard, sort_keys=True).encode()).hexdigest()[:16] if hazard else "natural-only"
-    return {"sha256": hashlib.sha256(blob).hexdigest(), "model_version": version,
-            "cells": len(hazard), "samples": samples, "fitted_at": table.get("meta", {}).get("fitted_at")}
+    from league.gym.fills import FillModel  # the engine's own version string: the receipt names what boxes will load
+
+    version = FillModel.from_json(table).version
+    return {"sha256": hashlib.sha256(blob).hexdigest(), "model_version": version, "cells": len(hazard), "sizes": len(size),
+            "roots": sorted({key.split("|", 1)[0] for key in hazard}), "samples": samples,
+            "fitted_at": table.get("meta", {}).get("fitted_at")}
 
 
 def sealed(api: Any, box: str, kind: str) -> None:

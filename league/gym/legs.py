@@ -16,7 +16,8 @@ The natural price of an open buys every long leg at its ask and sells every shor
 of a close, the reverse. Limit rules: "natural"; "mid"; {"mid": k} (k ticks from the mid toward the
 natural, never past it); {"price": v} (an explicit value). Multi-leg values trade in $0.01; a single
 long call or put in its contract's tick (`venue.leg_tick`). A limit off the tick is rounded to the
-passive side (less paid on an open, more asked on a close).
+passive side (less paid on an open, more asked on a close): "mid" on a one-tick single leg is the
+touch (the bid for a buy), which fills per the fill model's touch cell (`fills.py`).
 
 The type of a multi-leg structure is validated by `league/structure_core.classify`, the House's own
 definition, so a structure the Gym admits is one the House would; a long call or put is one long

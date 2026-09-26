@@ -25,6 +25,6 @@ numpy and pyarrow are needed by the engine (`requirements-gym.txt`); this file i
 """
 
 #: Bumped whenever the engine's arithmetic changes what a run returns: it is part of every run's hash.
-ENGINE_VERSION = "gym-engine-1"
+ENGINE_VERSION = "gym-engine-2"
 #: The store layout this engine reads.
 STORE_VERSION = "store-v1"

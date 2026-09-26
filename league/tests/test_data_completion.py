@@ -22,19 +22,35 @@ import storelib as sl
 
 class CalibrationReceipt(unittest.TestCase):
     def test_receipt_contains_identity_and_counts_without_the_fitted_table(self):
-        table = {"source": "league.gym.calibrate", "hazard": {"q2|s|d0|k0|t0": 0.1},
+        table = {"source": "league.gym.calibrate", "hazard": {"SPY|q2|s|d0|k0|t0": 0.1},
                  "meta": {"fitted_on": {"days": 2, "prints": 20}}}
         receipt = calibration.model_receipt(json.dumps(table).encode())
         self.assertTrue(receipt["model_version"].startswith("fm-"))
         self.assertEqual(receipt["samples"]["days"], 2)
         self.assertNotIn("hazard", receipt)
         for bad in (float("nan"), float("inf"), -0.1, 1.1, True):
-            table["hazard"]["q2|s|d0|k0|t0"] = bad
+            table["hazard"]["SPY|q2|s|d0|k0|t0"] = bad
+            with self.assertRaises(ValueError):
+                calibration.model_receipt(json.dumps(table).encode())
+        # Cells are keyed by root; the touch (q0) is a valid level; 8+ days (d3), an unknown level or no root are not.
+        table["hazard"] = {"SPY|q0|s|d0|k0|t0": 0.01, "QQQ|q0|m|d1|k2|t1": 0.002}
+        table["size"] = {"SPY|q0|s|d0": 3}
+        receipt = calibration.model_receipt(json.dumps(table).encode())
+        self.assertEqual((receipt["cells"], receipt["sizes"], receipt["roots"]), (2, 1, ["QQQ", "SPY"]))
+        from league.gym.fills import FillModel
+        self.assertEqual(receipt["model_version"], FillModel.from_json(table).version)
+        for key in ("SPY|q6|s|d0|k0|t0", "SPY|q-1|s|d0|k0|t0", "SPY|q2|s|d3|k0|t0", "q2|s|d0|k0|t0"):
+            table["hazard"] = {key: 0.01}
+            with self.assertRaises(ValueError):
+                calibration.model_receipt(json.dumps(table).encode())
+        table["hazard"] = {"SPY|q0|s|d0|k0|t0": 0.01}
+        for bad in ({"SPY|q0|s|d0": 0}, {"SPY|q0|s|d0": 1.5}, {"SPY|q0|s|d3": 2}):
+            table["size"] = bad
             with self.assertRaises(ValueError):
                 calibration.model_receipt(json.dumps(table).encode())
 
     def test_both_images_receive_the_same_private_model_before_any_checkpoint(self):
-        blob = json.dumps({"source": "league.gym.calibrate", "hazard": {"q2|s|d0|k0|t0": 0.1},
+        blob = json.dumps({"source": "league.gym.calibrate", "hazard": {"SPY|q2|s|d0|k0|t0": 0.1},
                            "meta": {"fitted_on": {"days": 2, "prints": 20}}}).encode()
         class API:
             def __init__(self):

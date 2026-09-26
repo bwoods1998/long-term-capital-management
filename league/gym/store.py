@@ -17,6 +17,11 @@ A DayChain is the whole day of one root as dense [minute, contract] grids (NaN w
 quote that minute): minute index 0 is the open (09:30, 570) and the last is the close (16:00, 960;
 13:00 on a half day). A row is the NBBO in force AT that minute's start, so a decision at minute m
 sees row m and its order meets row m + 1 (`engine.py`).
+
+HORIZONS. A day's NBBO file holds whatever the backfill wrote: 0-14 days to expiry for every root,
+and for SPY and QQQ the 15-45 day back months (stage 6) merged into the same file. The reader serves
+every contract the file has, whatever its expiry; `max_dte` and `describe` say how far each root's
+data reaches (from the files' Parquet statistics, no quote read).
 """
 
 from __future__ import annotations
@@ -36,6 +41,8 @@ from .day import EPOCH, SEALED, WINDOWS, DayChain, Underlying, contract_key, fro
 
 GATE_MARK = "GATE"
 KINDS = ("nbbo", "underlying", "oi", "trade_quote")
+#: The front collection's reach in days to expiry (the backfill's `MAX_DTE`): further is a back month.
+FRONT_DTE = 14
 
 
 class StoreRefused(PermissionError):
@@ -311,6 +318,27 @@ class Store:
             chain.oi[idx[hit]] = _numpy(oi, "open_interest", np.int64)[hit]
         return chain
 
+    def max_dte(self, root: str, day: dt.date) -> int | None:
+        """The furthest expiry in a root-day's NBBO file, in days to expiry (None: no file). From the file's
+        Parquet statistics where it has them, else from its expiration column alone."""
+        self.check(day)
+        path = self.path("nbbo", root, day)
+        if not path.is_file():
+            return None
+        meta = pq.ParquetFile(path).metadata
+        best: dt.date | None = None
+        column = meta.schema.names.index("expiration")
+        for g in range(meta.num_row_groups):
+            stats = meta.row_group(g).column(column).statistics
+            if stats is None or not stats.has_min_max or not isinstance(stats.max, dt.date):
+                best = None
+                break
+            best = stats.max if best is None else max(best, stats.max)
+        if best is None:
+            exp = _date_ordinals(pq.read_table(path, columns=["expiration"]).column("expiration"))
+            return int(exp.max()) - ordinal(day) if exp.size else None
+        return (best - day).days
+
     def trade_quote(self, root: str, day: dt.date) -> pa.Table:
         """The trade prints with the NBBO at each (fill calibration). Train days only, whoever asks."""
         if window_of(day) != "train":
@@ -321,13 +349,20 @@ class Store:
         return pq.read_table(path, memory_map=True)
 
 
-def describe(store: Store, window: str, roots: Sequence[str]) -> dict[str, Any]:
-    """What a box holds for a window: days per root and kind (the driver's data check)."""
+def describe(store: Store, window: str, roots: Sequence[str], *, sample: int = 20) -> dict[str, Any]:
+    """What a box holds for a window: days per root and kind (the driver's data check), and how far each
+    root's chains reach: `dte` = [the shortest, the longest] furthest expiry over every `sample`-th NBBO
+    day (and the last), and `back_months` = the share of those days reaching past FRONT_DTE."""
     out: dict[str, Any] = {"store": str(store.root), "window": window, "gate": store.gate, "roots": {}}
     for root in roots:
-        row = {}
+        row: dict[str, Any] = {}
         for kind in ("nbbo", "underlying", "oi"):
             row[kind] = len(store.days(window, [root], kind=kind))
+        days = store.days(window, [root])
+        picked = sorted(set(days[::max(1, int(sample))] + days[-1:]))
+        reach = [x for x in (store.max_dte(root, d) for d in picked) if x is not None]
+        row["dte"] = [min(reach), max(reach)] if reach else None
+        row["back_months"] = round(sum(x > FRONT_DTE for x in reach) / len(reach), 4) if reach else None
         out["roots"][root.upper()] = row
     return out
 

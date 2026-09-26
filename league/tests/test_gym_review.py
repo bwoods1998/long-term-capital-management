@@ -92,7 +92,7 @@ def decide(ctx):
         store = self.store("s2", [D1], lambda w: synth.flat_day(w, "SPY", D1, [
             {"expiration": D2, "strike": 400, "right": "C", "quotes": {571: (2.00, 2.20)}},
             {"expiration": D2, "strike": 401, "right": "C", "quotes": {571: (1.40, 1.60)}}], prices=400.5))
-        model = F.FillModel(hazard={f"q{q}|m|d{d}|k{k}|t{t}": 0.3 for q in range(6) for d in range(4) for k in range(4) for t in range(3)})
+        model = synth.uniform_model(0.3, ("SPY",))
         pnl = [self.run_one(store, self.PASSIVE, fill_model=model, stress=s)["summary"]["pnl"] for s in (1.0, 1.5, 3.0)]
         self.assertGreater(pnl[0], pnl[1])
         self.assertGreater(pnl[1], pnl[2])
@@ -100,7 +100,7 @@ def decide(ctx):
     def test_2_no_passive_fill_into_a_favourable_move(self):
         rising = {m: (2.00 + 0.01 * (m - 571), 2.20 + 0.01 * (m - 571)) for m in range(571, 961)}
         falling = {m: (2.00 - 0.001 * (m - 571), 2.20 - 0.001 * (m - 571)) for m in range(571, 961)}
-        model = F.FillModel(hazard={f"q{q}|m|d{d}|k{k}|t{t}": 1.0 for q in range(6) for d in range(4) for k in range(4) for t in range(3)})
+        model = synth.uniform_model(1.0, ("SPY",))
         opener = self.PASSIVE.replace("ctx.minute >= 700", "ctx.minute >= 10000")
         for name, quotes, fills in (("up", rising, 0), ("down", falling, 1)):
             store = self.store(name, [D1], lambda w, q=quotes: synth.flat_day(w, "SPY", D1, [
@@ -301,8 +301,9 @@ def decide(ctx):
             prices={570: 450.0, 960: 452.30}, extra={"settle": 452.80}))
         [t] = self.run_one(store, self.CARRY.replace('"dte": 1', '"dte": 0'), roots=("XSP",))["trades"]
         self.assertEqual((t["exit"], t["exit_reason"]), (-0.80, "settled"))
+        # The front leg's quotes end at 15:00, so neither the House's expiry close (15:15) nor the liquidation can fill.
         cal = self.store("s12b", [D1, D2], lambda w: synth.flat_day(w, "SPY", D1, [
-            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.05), 929: (None, None)}},
+            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.05), 900: (None, None)}},
             {"expiration": D2, "strike": 400, "right": "C", "quotes": {571: (3.00, 3.20)}}], prices={570: 400.0, 940: 399.0}))
         code = '''
 NEEDS = {"roots": ["SPY"], "dte": [0, 5], "band": 0.2, "cadence": 5, "start": 600}
@@ -318,7 +319,8 @@ def decide(ctx):
         [t] = self.run_one(cal, code, days=[D1])["trades"]
         self.assertEqual(t["exit_reason"], "forced_mark")
         self.assertEqual(t["exit"], 3.00)                    # the long back leg at its bid, not its 3.10 mid
-        self.assertEqual(t["fees"], 0.05 + 0.05 + 0.06)      # open (buy 3.20, sell 1.00) and the back leg's sale at 3.00
+        # Open (buy 3.20; sell 1.00: 0.04359 + 0.00206) and the back leg's sale at 3.00 (0.04359 + 0.00618): 0.05 each.
+        self.assertEqual(t["fees"], 0.15)
 
 
 if __name__ == "__main__":
