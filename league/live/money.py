@@ -439,6 +439,8 @@ class Stops:
     last_profit: Decimal | None = None   # the profit at the latest settled reading (where a release restarts the peak)
     last_reading: list | None = None     # [time, equity, day] of the latest reading (the next session's base)
     last_reading_flows: Decimal | None = None
+    flow_rows: tuple | None = None       # executed funding snapshot previously observed
+    flow_transition_at: float | None = None  # new snapshot still needs equity bracketed by matching funding reads
     tainted: bool = False                # a funding read showed a pending flow: readings before the next clean read drop
     pending: list = field(default_factory=list)  # [(time, equity, last_equity, day)]: flows not read after them yet
 
@@ -449,6 +451,8 @@ class Stops:
                 "sod_equity": None if self.sod_equity is None else str(self.sod_equity), "sod_at": self.sod_at,
                 "sod_flows": None if self.sod_flows is None else str(self.sod_flows),
                 "last_reading_flows": None if self.last_reading_flows is None else str(self.last_reading_flows),
+                "flow_rows": None if self.flow_rows is None else [[t, str(a)] for t, a in self.flow_rows],
+                "flow_transition_at": self.flow_transition_at,
                 "daily_why": self.daily_why, "drawdown": None if self.drawdown is None else str(self.drawdown),
                 "drawdown_tripped": self.drawdown_tripped, "drawdown_why": self.drawdown_why,
                 "drawdown_at": self.drawdown_at, "provisional": self.provisional,
@@ -469,6 +473,8 @@ class Stops:
         out.sod_at = row.get("sod_at")
         out.sod_flows = None if row.get("sod_flows") is None else D(row["sod_flows"])
         out.last_reading_flows = None if row.get("last_reading_flows") is None else D(row["last_reading_flows"])
+        out.flow_rows = None if row.get("flow_rows") is None else tuple((float(t), D(a)) for t, a in row["flow_rows"])
+        out.flow_transition_at = row.get("flow_transition_at")
         out.daily_tripped = bool(row.get("daily_tripped"))
         out.daily_why = str(row.get("daily_why") or "")
         out.drawdown = None if row.get("drawdown") is None else D(row["drawdown"])
@@ -490,11 +496,13 @@ class Stops:
         if self.daily_tripped:
             return f"the daily stop: {self.daily_why} (no new entry today)"
         if self.provisional:
+            if self.flow_transition_at is not None:
+                return f"funding transition not verified: {self.provisional}"
             return f"a stop's line is crossed on a reading whose deposits are not read yet: {self.provisional}"
         return None
 
     def observe(self, table: Table, *, at: float, day: str, equity: Decimal, last_equity: Decimal,
-                flows: "FlowBook | None") -> None:
+                flows: "FlowBook | None", funding_confirmed: bool = False) -> None:
         """One reading of the account at `at` (epoch seconds) on New York session day `day`, with the account's
         `last_equity` (its equity at the previous session's close). `flows` is the funding history as last read
         (None: never read)."""
@@ -514,6 +522,22 @@ class Stops:
         if flows is None:
             self.provisional = "the account's funding history has not been read"
             return
+        changed = self.flow_rows != flows.rows if self.flow_rows is not None else bool(flows.rows)
+        self.flow_rows = flows.rows
+        if changed:
+            # Funding can execute after account() but before activities() returns, with the old request timestamp.
+            # No earlier equity reading can be permanently judged against this newly observed funding snapshot.
+            self.pending = [(at, equity, last_equity, day)]
+            self.flow_transition_at = flows.read_at
+            self.tainted = True
+        if self.flow_transition_at is not None:
+            bracketed = (not changed and self.flow_transition_at < at <= flows.read_at)
+            if not funding_confirmed and not bracketed:
+                self.pending.clear()
+                self._judge(table, at, equity, last_equity, day, flows, settled=False)
+                self.provisional = self.provisional or "funding changed; awaiting equity between matching funding histories"
+                return
+            self.flow_transition_at = None
         if flows.unsettled:
             # Pending requests are not profit or capital. Judge contemporaneous readings without them; do not later
             # replay these readings against executed rows whose timestamps may still be their request timestamps.

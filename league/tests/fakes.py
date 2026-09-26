@@ -15,5 +15,3 @@ def iso(clock) -> str:
     from league.ledger import now_iso
 
     return now_iso(clock)
-
-

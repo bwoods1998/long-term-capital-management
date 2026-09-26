@@ -594,6 +594,3 @@ test('REVIEW m14: a real single-leg sell_to_close must sell a contract held long
   assert.equal((await send(sell('1'), { gate, settings: cached, tape: alpacaVenue({ positions: [{ symbol: CALL, qty: '3', side: 'long' }] }) })).status, 400);
   await send(sell('1'), { tape: alpacaVenue({ positions: [] }) });  // a read with the cache off empties it for what follows
 });
-
-
-

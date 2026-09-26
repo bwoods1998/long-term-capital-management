@@ -65,6 +65,7 @@ class LiveChain:
         self.underlying = Underlying(price=np.full(self.m, np.nan))
         self._col: dict[str, int] = {}
         self.generation = 0          # bumped at every rebuild (indices change)
+        self.quote_revision = 0      # one writer: odd during record(), even once every quote write has ended
 
     @property
     def minutes(self) -> int:
@@ -136,6 +137,14 @@ class LiveChain:
         return True
 
     def record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
+        """Publish an odd/even revision around the complete chain update for concurrent readers."""
+        self.quote_revision += 1
+        try:
+            return self._record(mi, rows, open_epoch=open_epoch)
+        finally:
+            self.quote_revision += 1
+
+    def _record(self, mi: int, rows: Mapping[str, Mapping[str, Any]], *, open_epoch: float) -> bool:
         """Minute `mi`'s chain read ({OCC: snapshot row}). A quote stamped before today's open, or not two-sided and
         ordered (0 <= bid <= ask, ask > 0), stays NaN. True when the contract set changed."""
         changed = self._admit(rows.keys())

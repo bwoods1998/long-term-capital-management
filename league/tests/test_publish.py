@@ -49,7 +49,9 @@ ALLOWED_KEYS = {
 
 def keys_ok(test, body):
     """Every key in `body` is one the site's schema names for that block, and nothing else."""
-    test.assertEqual(set(body), ALLOWED_KEYS["top"])
+    test.assertEqual(set(body) - {"trading"}, ALLOWED_KEYS["top"])
+    if body.get("trading") is not None:
+        test.assertEqual(set(body["trading"]), {"as_of", "pnl_usd"})
     for block in ("run", "account", "performance", "compute", "gym"):
         if body[block] is not None:
             test.assertEqual(set(body[block]), ALLOWED_KEYS[block], block)
@@ -533,6 +535,13 @@ class PublisherTest(LedgerCase):
         self.assertEqual(len(body["structures"]), 4)
         house.site_inputs = lambda: 1 / 0
         self.assertEqual(publisher.checkpoint(house)["agents"], [])
+
+    def test_missing_options_book_after_a_real_fill_is_not_reported_as_zero_profit(self):
+        publisher = self.publisher()
+        house = FakeHouse(self.ledger)
+        self.assertEqual(publisher.checkpoint(house)["trading"]["pnl_usd"], "0.00")
+        self.row("book.fill", fill(vertical()))
+        self.assertIsNone(publisher.checkpoint(house)["trading"]["pnl_usd"])
 
 
     def test_the_tape_fixture_is_this_modules_own_output(self):

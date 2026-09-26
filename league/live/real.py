@@ -834,7 +834,8 @@ class RealBook:
                 continue
             remaining = pos.info.get("unpriced_remaining") or {l.symbol: self.leg_remaining(pos, l) for l in pos.legs}
             takes = []
-            available = {r["id"]: int(r["qty"]) for r in self.state.rows("SELECT * FROM external_fill_usage")}
+            available = {r["id"]: {"qty": int(r["qty"]), "value": r["value_qty"]}
+                         for r in self.state.rows("SELECT * FROM external_fill_usage")}
             complete = True
             for leg in pos.legs:
                 need = int(remaining.get(leg.symbol, 0))
@@ -842,10 +843,19 @@ class RealBook:
                     if (fill["symbol"] != leg.symbol or fill["side"] != ("sell" if leg.side > 0 else "buy")
                             or fill["at"] < pos.opened_at or need <= 0):
                         continue
-                    take = min(need, max(0, int(fill["qty"]) - available.get(fill["id"], 0)))
+                    consumed = available.get(fill["id"], {"qty": 0, "value": 0.0})
+                    left = int(fill["qty"]) - consumed["qty"]
+                    if left <= 0 or consumed["value"] is None:
+                        continue
+                    unconsumed_value = float(fill["price"]) * int(fill["qty"]) - consumed["value"]
+                    if unconsumed_value < -0.000001:
+                        continue  # a correction or incomplete cumulative history cannot invent a negative fill price
+                    price = max(0.0, unconsumed_value / left)
+                    take = min(need, left)
                     if take:
-                        takes.append((leg, fill, take))
-                        available[fill["id"]] = available.get(fill["id"], 0) + take
+                        takes.append((leg, fill, take, price))
+                        available[fill["id"]] = {"qty": consumed["qty"] + take,
+                                                  "value": consumed["value"] + price * take}
                         need -= take
                 complete &= need == 0
             if not complete:
@@ -858,14 +868,14 @@ class RealBook:
                     alerts.append(f"{pos.family}'s {pos.type}: expired legs are absent; exposure cleared, P&L awaiting venue fills")
                 continue
             with self.state.transaction():
-                for leg, fill, take in takes:
-                    price = float(fill["price"])
+                for leg, fill, take, price in takes:
                     single = RLeg(leg.symbol, leg.side, 1, leg.is_call, leg.strike, leg.expiry, leg.key)
                     fee = leg_fees(pos.root, [single], [price], take, "close")
                     pos.cash += leg.side * price * V.MULTIPLIER * take - fee
                     pos.fees += fee
                     pos.exit_value_qty += leg.side * price * take
-                    self.state.upsert("external_fill_usage", {"id": fill["id"], "qty": available[fill["id"]]}, "id")
+                    self.state.upsert("external_fill_usage", {"id": fill["id"], "qty": available[fill["id"]]["qty"],
+                                                             "value_qty": available[fill["id"]]["value"]}, "id")
                 pos.qty = 0
                 pos.info.pop("unpriced_remaining", None)
                 pos.info.pop("unpriced_qty", None)

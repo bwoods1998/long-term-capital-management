@@ -114,6 +114,7 @@ KINDS: dict[str, bool] = {
     "tool.blocked": True,  # reviewed but still unimplemented; retained for engineering
     "playbook.entry": True,
     # Operations.
+    "canary.proof": False,  # synthetic runtime and structure verification, never trading evidence
     "ops.tick": False,  # completed supervisor tick, including an idle market
     "ops.started": True,
     "ops.alert": True,

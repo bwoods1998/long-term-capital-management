@@ -315,6 +315,7 @@ class SiteInputs:
     gym: Mapping[str, Any] | None = None
     agents: list[Mapping[str, Any]] = field(default_factory=list)
     structures: list[Mapping[str, Any]] = field(default_factory=list)
+    trading: Mapping[str, Any] | None = None
 
     @classmethod
     def of(cls, value: "SiteInputs | Mapping[str, Any]") -> "SiteInputs":
@@ -356,6 +357,16 @@ def site_compute(value: Any, published_at: str) -> dict[str, Any] | None:
     if not _not_after(at, published_at):
         at = published_at
     return {"as_of": at, **{part: _money(value.get(part)) for part in COMPUTE_PARTS}}
+
+
+def site_trading(value: Any, published_at: str) -> dict[str, Any] | None:
+    """Aggregate real-options P&L only, with its accounting snapshot timestamp."""
+    if not isinstance(value, Mapping):
+        return None
+    at = site_instant(value.get("as_of"))
+    if not _not_after(at, published_at):
+        return None
+    return {"as_of": at, "pnl_usd": _money(value.get("pnl_usd"), signed=True)}
 
 
 def site_gym(value: Any, published_at: str) -> dict[str, Any] | None:
@@ -466,6 +477,8 @@ def build_checkpoint(inputs: "SiteInputs | Mapping[str, Any]", published_at: str
         "agents": shown,
         "structures": structures[:MAX_STRUCTURES],
     }
+    if given.trading is not None:
+        body["trading"] = site_trading(given.trading, published_at)
     return fit(body)
 
 
@@ -658,6 +671,7 @@ class _Folds:
         self.revisions: dict[str, int] = {}
         self.mechanism: dict[str, str] = {}
         self.tallies: dict[tuple[str, bool], list[Any]] = {}  # (agent, real) -> [trades, wins, pnl]
+        self.real_options_seen = False
 
     def advance(self) -> "_Folds":
         with self.lock:
@@ -677,6 +691,9 @@ class _Folds:
 
     def _fold(self, entry: Entry) -> None:
         kind, p, agent = entry.kind, entry.payload, entry.agent
+        if (kind in ("book.fill", "book.settle") and p.get("real_money") is True
+                and (p.get("instrument") or {}).get("asset_class") == "option"):
+            self.real_options_seen = True
         if kind == "ops.budget":
             if p.get("what") == "sail" and p.get("spent_usd") is not None:
                 self.sail = (ZERO if self.sail is None else self.sail) + Decimal(str(p["spent_usd"]))
@@ -842,6 +859,8 @@ class Publisher:
                 given = {}
         folds = self._guard(lambda: self._folded(house), None)
         now = now_iso(self.clock)
+        from .trading_profit import snapshot as trading_snapshot
+
         inputs = SiteInputs(
             started_at=given["started_at"] if "started_at" in given else self._guard(lambda: self._started(house), None),
             account=given["account"] if "account" in given else self.account(house),
@@ -850,6 +869,11 @@ class Publisher:
             gym=given.get("gym"),
             agents=list(given["agents"]) if "agents" in given else [],
             structures=list(given["structures"]) if "structures" in given else [],
+            trading=self._guard(lambda: trading_snapshot(
+                self.state_path.parent, getattr(house, "options_live", None), at=now,
+                never_traded=(folds is not None and not folds.real_options_seen
+                              and not any(getattr(book, "real_money", False) for book in getattr(house, "books", {}).values()))),
+                                {"as_of": now, "pnl_usd": None}),
         )
         return inputs
 
@@ -886,6 +910,3 @@ class Publisher:
             for part, rate in rates.items():
                 out[part] = rate * months
         return out
-
-
-

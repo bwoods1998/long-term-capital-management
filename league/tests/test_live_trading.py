@@ -224,5 +224,3 @@ class OwnerCommand(GrantCase):
                 command = api.return_value.exec.call_args.args[1]
                 self.assertIn("from league.live_trading import main", command[2])
                 self.assertEqual(command[3:], ["--root", "/workspace/state", *tail])
-
-

@@ -60,4 +60,3 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref }}
         run: python3 -m league.ci --base origin/main --branch "$BRANCH"
-

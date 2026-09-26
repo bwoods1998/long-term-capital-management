@@ -10,21 +10,24 @@ positions showing both legs, close filled) is what `passed` means, and real open
 legs' fills as the House reads them), never the calibration: paper fills are synthetic. Every answer is kept in the
 live state's events for the owner's record.
 
-An open not filled in `WAIT_MINUTES` is cancelled and sent again at a fresh natural, `TRIES` times in all; after that the
-proof has failed for the day, the owner is told, and real opens stay shut until the next session (or until the owner
-sets `live.require_paper_proof` false).
+A timed-out or uneven order is cancelled, then read until the venue confirms it is terminal. Each owned leg is
+reconciled and closed before another attempt, at most `TRIES` opens per session. Client ids, order bodies and the
+initial inventory are committed before dispatch; ambiguous answers and session changes never discard ownership.
+An unreadable order or position snapshot cannot pass the proof. Unrelated paper positions are left alone.
 """
 
 from __future__ import annotations
 
 import math
+import time
+from decimal import Decimal
 from typing import Any, Callable, Mapping
 
 import numpy as np
 
 from .real import RLeg, limit_price, structure_fill, ROrder
 from .state import LiveState
-from .venue import TERMINAL, Account, occ_parts
+from .venue import TERMINAL, Account
 
 WAIT_MINUTES = 8
 HOLD_MINUTES = 2
@@ -37,109 +40,255 @@ class PaperProof:
                  clock: Callable[[], float] | None = None):
         self.state, self.account = state, account
         self.record = record or (lambda *a, **k: None)
-        self.clock = clock or (lambda: 0.0)
+        self.clock = clock or time.time
 
     def status(self) -> dict:
         return dict(self.state.get("paper_proof", {}) or {})
 
     def passed(self) -> bool:
-        return self.status().get("status") == "passed"
+        row = self.status()
+        return (row.get("schema") == 2 and row.get("status") == "passed"
+                and row.get("open_witness") is True and row.get("close_witness") is True)
+
+    def held_symbols(self) -> list[str]:
+        """Keep an unfinished attempt's contracts in the read window across session changes."""
+        row = self.status()
+        return list(row.get("legs") or []) if not self.passed() else []
 
     def _put(self, row: Mapping[str, Any]) -> None:
         self.state.put("paper_proof", dict(row))
 
-    def step(self, *, day: str, mi: int, snap: Any, chain: Any, start_minute: int = 5) -> dict:
-        """One minute of the proof (`snap`, `chain`: SPY's snapshot and chain now)."""
-        row = self.status()
-        if row.get("status") == "passed":
+    @staticmethod
+    def _new(day: str, tries: int = 0) -> dict:
+        return {"schema": 2, "day": day, "status": "waiting", "tries": tries, "orders": []}
+
+    def _positions(self) -> dict[str, Decimal]:
+        rows = self.account.positions()
+        if not isinstance(rows, list):
+            raise ValueError("positions are not a list")
+        out = {}
+        for item in rows:
+            symbol, qty = str(item["symbol"]), Decimal(str(item["qty"]))
+            if not symbol or not qty.is_finite() or symbol in out:
+                raise ValueError("invalid or duplicate position")
+            out[symbol] = qty
+        return out
+
+    @staticmethod
+    def _owned(row: Mapping[str, Any]) -> dict[str, Decimal]:
+        out = {symbol: Decimal(0) for symbol in row.get("legs") or []}
+        for order in row.get("orders") or []:
+            for symbol, qty in (order.get("fills") or {}).items():
+                out[symbol] += Decimal(str(qty))
+        return out
+
+    @staticmethod
+    def _fills(work: Mapping[str, Any], answer: Mapping[str, Any]) -> dict[str, str]:
+        """Cumulative signed contracts on this order only; never infer fills from account inventory."""
+        body = work["body"]
+        requested = body.get("legs") or [body]
+        actual = answer.get("legs") or [answer]
+        by_symbol = {str(leg.get("symbol")): leg for leg in actual}
+        if (len(by_symbol) != len(actual) or set(by_symbol) != {leg["symbol"] for leg in requested}
+                or Decimal(str(answer.get("qty"))) != Decimal(str(body["qty"]))):
+            raise ValueError("the order's contracts or quantity differ from the dispatched request")
+        out = {}
+        for leg in requested:
+            symbol = leg["symbol"]
+            value = by_symbol.get(symbol)
+            if value is None or value.get("side") != leg["side"]:
+                raise ValueError("order does not identify every requested leg and side")
+            qty = Decimal(str(value.get("filled_qty") or "0"))
+            target = Decimal(str(body["qty"])) * Decimal(str(leg.get("ratio_qty") or "1"))
+            previous = abs(Decimal(str((work.get("fills") or {}).get(symbol) or "0")))
+            if not qty.is_finite() or qty < previous or qty < 0 or qty > target or qty != qty.to_integral_value():
+                raise ValueError("invalid or regressed cumulative leg fill")
+            out[symbol] = str(qty if leg["side"] == "buy" else -qty)
+        return out
+
+    def _dispatch(self, row: dict, body: dict, *, action: str, mi: int) -> dict:
+        work = {"action": action, "body": body, "cid": body["client_order_id"], "at": self.clock(),
+                "minute": mi, "status": "unknown", "fills": {}, "terminal": False}
+        row["orders"].append(work)
+        row.update(status="open_sent" if action == "open" else "close_sent", why="awaiting the dispatched order")
+        # FULL synchronous SQLite commit before POST. A crash at any later instruction looks up this same id.
+        self._put(row)
+        answer = self.account.submit(body, exit=action != "open")
+        self._event(action + "_sent", {"body": body, "ok": answer.ok, "error": answer.error, "answer": answer.order})
+        if answer.ok and answer.order:
+            work["id"] = answer.order.get("id")
+        elif not answer.unknown:
+            # An explicit rejection/unsent request owns nothing. A timeout, missing answer or process death does not.
+            work.update(status="rejected", terminal=True, rejected=True)
+        row["why"] = answer.error or "the order was accepted; awaiting fill and inventory witnesses"
+        self._put(row)
+        return row
+
+    def _refresh(self, row: dict) -> None:
+        work = row["orders"][-1]
+        if work.get("rejected"):
+            return
+        answer = self.account.order_by_client_id(work["cid"])
+        if answer is None:
+            row["why"] = "the dispatched order is not yet found; its outcome remains unresolved"
+            self._put(row)
+            return
+        if str(answer.get("client_order_id") or "") != work["cid"]:
+            raise ValueError("the lookup returned another client order id")
+        work["fills"] = self._fills(work, answer)
+        work.update(id=answer.get("id"), status=str(answer.get("status") or ""))
+        work["terminal"] = work["status"] in TERMINAL
+        work["route_full"] = (work["action"] in ("open", "close") and
+                              self._filled(answer, row, work["action"] == "close"))
+        changed = work.get("answer") != answer
+        work["answer"] = dict(answer)
+        with self.state.transaction():
+            self._put(row)
+            if changed:
+                self._event("order_observed", {"cid": work["cid"], "action": work["action"], "answer": answer})
+        if work["terminal"]:
+            return
+        values = [abs(Decimal(qty)) for qty in work["fills"].values()]
+        uneven = len(values) > 1 and max(values) != min(values)
+        aged = self.clock() - float(work["at"]) >= WAIT_MINUTES * 60
+        if (uneven or aged) and work.get("id"):
+            if self.clock() - float(work.get("cancel_at") or 0) >= 60:
+                work["cancel_at"] = self.clock()
+                self._put(row)  # a lost cancel answer is also recovered by this order's id
+                ok, why = self.account.cancel(work["id"])
+                self._event("cancel", {"cid": work["cid"], "ok": ok, "why": why})
+            row["why"] = "waiting for the venue to confirm the order is terminal after cancellation"
+            self._put(row)
+
+    def _inventory(self, row: dict, positions: Mapping[str, Decimal]) -> bool:
+        owned = self._owned(row)
+        for symbol, qty in owned.items():
+            actual = positions.get(symbol, Decimal(0)) - Decimal(row["baseline"][symbol])
+            if actual != qty:
+                row["why"] = f"paper inventory disagrees with this attempt's recorded fills for {symbol}"
+                self._put(row)
+                return False
+        return True
+
+    def _finish_failed_attempt(self, row: dict, day: str) -> dict:
+        self._event("attempt_flat", {"attempt": row, "day": day})
+        tries = int(row.get("tries") or 0) if row.get("day") == day else 0
+        fresh = self._new(day, tries)
+        if tries >= TRIES:
+            fresh.update(status="failed", why="paper attempts ended flat without a witnessed multi-leg round trip")
+            self.record("live.paper_proof", {"status": "failed", "day": day, "why": fresh["why"]})
+        self._put(fresh)
+        return fresh
+
+    def _close(self, row: dict, *, snap: Any, chain: Any, mi: int, cleanup: bool) -> dict:
+        owned = self._owned(row)
+        if snap is None:
             return row
-        if row.get("day") != day:
-            row = {"day": day, "status": "waiting", "tries": 0}
-        if row.get("status") == "failed" or mi < start_minute:
+        # Buy back an owned short before selling an owned long. Unrelated account holdings are never touched.
+        remaining = sorted(((s, q) for s, q in owned.items() if q), key=lambda item: item[1])
+        symbols = [remaining[0][0]] if cleanup else list(row["legs"])
+        idx = [chain.column(s) for s in symbols]
+        if not idx or min(idx) < 0 or not all(bool(snap.valid[i]) for i in idx):
+            row["why"] = "an owned contract has no current quote for its close"
+            self._put(row)
+            return row
+        cid = f"{row['attempt']}-c{sum(w['action'] != 'open' for w in row['orders']) + 1}"
+        body = {"type": "limit", "time_in_force": "day", "client_order_id": cid}
+        if cleanup:
+            symbol, qty = remaining[0]
+            price = float(snap.ask[idx[0]] if qty < 0 else snap.bid[idx[0]])
+            if not math.isfinite(price) or price < 0:
+                return row
+            body.update(symbol=symbol, qty=str(abs(qty)), side="buy" if qty < 0 else "sell",
+                        position_intent="buy_to_close" if qty < 0 else "sell_to_close", limit_price=f"{max(0.01, price):.2f}")
+        else:
+            natural = float(snap.bid[idx[0]]) - float(snap.ask[idx[1]])
+            if not math.isfinite(natural):
+                return row
+            body.update(order_class="mleg", qty="1", limit_price=limit_price(max(0.0, round(natural, 2)), "close"),
+                        legs=[{"symbol": symbols[0], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_close"},
+                              {"symbol": symbols[1], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_close"}])
+        return self._dispatch(row, body, action="cleanup" if cleanup else "close", mi=mi)
+
+    def step(self, *, day: str, mi: int, snap: Any, chain: Any, start_minute: int = 5) -> dict:
+        """Advance one durable attempt. A new session never discards unresolved orders or owned contracts."""
+        row = self.status()
+        if self.passed():
+            return row
+        if row.get("schema") != 2:
+            if row and (row.get("tries") or row.get("legs") or row.get("status") not in (None, "waiting")):
+                row.update(status="blocked", why="legacy paper proof has no inventory/dispatch witnesses; owner reconciliation required")
+                self._put(row)
+                return row
+            row = self._new(day)
+        if row["status"] == "blocked":
+            return row
+        # Reset only a clean idle attempt. Active work remains owned even if it is from another session.
+        if row["status"] in ("waiting", "failed") and not row.get("orders") and row.get("day") != day:
+            row = self._new(day)
+        if row["status"] == "failed":
+            return row
+        try:
+            if row.get("orders"):
+                self._refresh(row)
+            positions = self._positions()
+        except Exception as exc:  # noqa: BLE001 - no new dispatch or pass without readable evidence
+            row["why"] = f"paper proof evidence unreadable: {str(exc)[:160]}"
             self._put(row)
             return row
         if row["status"] == "waiting":
-            if snap is None:
+            if mi < start_minute or snap is None:
+                self._put(row)
                 return row
             legs = self._legs(snap, chain)
             if legs is None:
                 row["why"] = "no SPY vertical one strike wide is quoted a day or more out"
                 self._put(row)
                 return row
-            natural = legs[0][1] - legs[1][2]  # long leg's ask less the short leg's bid
+            symbols = [leg[0] for leg in legs]
+            if any(positions.get(symbol, Decimal(0)) for symbol in symbols):
+                row["why"] = "the selected proof contracts already belong to another paper position"
+                self._put(row)
+                return row
+            natural = legs[0][1] - legs[1][2]
             if not (math.isfinite(natural) and natural > 0):
                 return row
             row["tries"] = int(row.get("tries") or 0) + 1
-            cid = f"lv-paper-proof-{day.replace('-', '')}-{row['tries']}"
+            row.update(legs=symbols, baseline={s: str(positions.get(s, Decimal(0))) for s in symbols},
+                       attempt=f"lv-pp-{day.replace('-', '')}-{self.state.nonce}-{row['tries']}",
+                       open_witness=False, close_witness=False)
             body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(round(natural, 2), "open"),
-                    "time_in_force": "day", "client_order_id": cid,
-                    "legs": [{"symbol": legs[0][0], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
-                             {"symbol": legs[1][0], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_open"}]}
-            answer = self.account.submit(body, exit=False)
-            self._event("open_sent", {"body": body, "ok": answer.ok, "error": answer.error, "answer": answer.order})
-            if not answer.ok:
-                row.update(status="failed" if row["tries"] >= TRIES else "waiting", why=f"the open was refused: {answer.error}")
-            else:
-                row.update(status="open_sent", open_id=answer.order.get("id"), open_cid=cid, sent_minute=mi,
-                           legs=[legs[0][0], legs[1][0]], limit=body["limit_price"])
-            self._put(row)
+                    "time_in_force": "day", "client_order_id": row["attempt"] + "-o",
+                    "legs": [{"symbol": symbols[0], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
+                             {"symbol": symbols[1], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_open"}]}
+            return self._dispatch(row, body, action="open", mi=mi)
+        if not row.get("orders") or not self._inventory(row, positions):
             return row
-        if row["status"] in ("open_sent", "close_sent"):
-            closing = row["status"] == "close_sent"
-            venue_id = row.get("close_id" if closing else "open_id")
-            try:
-                order = self.account.order_by_client_id(row.get("close_cid" if closing else "open_cid"))
-            except Exception as exc:  # noqa: BLE001 - asked again next minute
-                row["why"] = f"could not read the order: {str(exc)[:160]}"
+        work = row["orders"][-1]
+        if not work.get("terminal"):
+            return row
+        owned = self._owned(row)
+        if work["action"] == "open" and work.get("route_full") and list(owned.values()) == [Decimal(1), Decimal(-1)]:
+            if not row.get("open_witness"):
+                row.update(status="open_filled", open_witness=True, filled_at=self.clock())
+                self._event("open_witness", {"cid": work["cid"], "owned": owned})
                 self._put(row)
-                return row
-            status = str((order or {}).get("status") or "")
-            filled = self._filled(order, row, closing)
-            if filled:
-                self._event("close_filled" if closing else "open_filled", {"order": order})
-                if closing:
-                    row.update(status="passed", passed_minute=mi, why="the multi-leg route opened and closed a structure")
-                    self.record("live.paper_proof", {"status": "passed", "day": day})
-                else:
-                    row.update(status="open_filled", filled_minute=mi)
-            elif status in TERMINAL or mi - int(row.get("sent_minute") or mi) >= WAIT_MINUTES:
-                if status not in TERMINAL and venue_id:
-                    self.account.cancel(venue_id)
-                self._event("unfilled", {"order": order, "closing": closing})
-                if closing:
-                    row.update(status="open_filled", why="the close did not fill; sent again")
-                else:
-                    row.update(status="failed" if int(row.get("tries") or 0) >= TRIES else "waiting",
-                               why=f"the open did not fill ({status or 'working'})")
-            self._put(row)
-            if row["status"] == "failed":
-                self.record("live.paper_proof", {"status": "failed", "day": day, "why": row.get("why")})
+            if self.clock() - float(row["filled_at"]) >= HOLD_MINUTES * 60:
+                return self._close(row, snap=snap, chain=chain, mi=mi, cleanup=False)
             return row
-        if row["status"] == "open_filled" and mi - int(row.get("filled_minute") or mi) >= HOLD_MINUTES:
-            if snap is None:
-                return row
-            symbols = row.get("legs") or []
-            idx = [chain.column(s) for s in symbols]
-            if len(idx) != 2 or min(idx) < 0:
-                return row
-            natural = float(snap.bid[idx[0]]) - float(snap.ask[idx[1]])  # sell the long at its bid, buy the short at its ask
-            if not math.isfinite(natural):
-                return row
-            natural = max(0.0, round(natural, 2))
-            cid = f"lv-paper-proof-{day.replace('-', '')}-close-{int(row.get('close_tries') or 0) + 1}"
-            body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(natural, "close"),
-                    "time_in_force": "day", "client_order_id": cid,
-                    "legs": [{"symbol": symbols[0], "ratio_qty": "1", "side": "sell", "position_intent": "sell_to_close"},
-                             {"symbol": symbols[1], "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_close"}]}
-            answer = self.account.submit(body, exit=True)
-            self._event("close_sent", {"body": body, "ok": answer.ok, "error": answer.error, "answer": answer.order})
-            row["close_tries"] = int(row.get("close_tries") or 0) + 1
-            if answer.ok:
-                row.update(status="close_sent", close_id=answer.order.get("id"), close_cid=cid, sent_minute=mi)
-            elif row["close_tries"] >= TRIES:
-                row.update(status="failed", why=f"the close was refused: {answer.error}")
+        flat = not any(owned.values())
+        if work["action"] == "close" and work.get("route_full") and row.get("open_witness") and flat:
+            row.update(status="passed", close_witness=True, passed_at=self.clock(),
+                       why="a witnessed multi-leg open and close returned the owned contracts to their baseline")
             self._put(row)
-        return row
+            self._event("close_witness", {"cid": work["cid"], "owned": owned})
+            self.record("live.paper_proof", {"status": "passed", "day": day})
+            return row
+        if flat:
+            return self._finish_failed_attempt(row, day)
+        row["status"] = "recovering"
+        self._put(row)
+        return self._close(row, snap=snap, chain=chain, mi=mi, cleanup=True)
 
     @staticmethod
     def _filled(order: Any, row: Mapping[str, Any], closing: bool) -> bool:

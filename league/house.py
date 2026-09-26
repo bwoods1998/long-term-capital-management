@@ -572,4 +572,3 @@ class House:
             value = {"restarts_24h": None, "restarts_24h_in_session": None, "last_start": {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}}
         self._data_cache["restarts"] = (now, value)
         return value
-

@@ -296,7 +296,9 @@ class Venue:
             if self.fill == "uneven" and leg is not order["legs"][0]:
                 continue
             before = Decimal(leg["filled_qty"])
-            add = Decimal(units * int(leg["ratio_qty"]))
+            add = min(Decimal(units * int(leg["ratio_qty"])), Decimal(leg["qty"]) - before)
+            if add <= 0:
+                continue  # a later read of an uneven order cannot fill its already-complete leg again
             old = Decimal(str(leg["filled_avg_price"] or 0))
             leg["filled_avg_price"] = str(round((old * before + Decimal(str(price)) * add) / (before + add), 4))
             leg["filled_qty"] = str(before + add)
@@ -362,4 +364,5 @@ def family(name: str, code: str, *, band: str = "probe", structure: str = "debit
     return {"family": name, "band": band, "structure": structure, "roots": ["SPY"], "holdout_passed": holdout,
             "validation_passed": validation, "version": version, "code": code, "params": dict(params or {}),
             "run_sha": f"sha-{name}-{version}", "typical_max_loss_usd": typical, "seed_era": True,
+            "real_promoted_at": at(MONDAY - dt.timedelta(days=7), 9, 0) if band in ("probe", "sized") else None,
             "forward": {"trades": 0, "negative": False}}

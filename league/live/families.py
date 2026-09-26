@@ -20,7 +20,7 @@ from __future__ import annotations
 import copy
 import threading
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 
 class SwarmFamilies:
@@ -55,6 +55,48 @@ class SwarmFamilies:
         with self.lock:
             self._db().set_band(family, band, reason=reason)
 
+    def confirm_band(self, expected: Mapping[str, Any], band: str, reason: str,
+                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None) -> bool:
+        """Commit a decision only while its identity, eligibility and exact evidence snapshot still hold.
+
+        The gate uses another SQLite connection and can demote, retire or replace this version while the House
+        calculates its money band. The immediate transaction excludes those writers through the final band write.
+        Even an unchanged Probe/Sized band requires confirmation before scheduling a real instance.
+        """
+        from ..swarm.gate import run_sha
+
+        with self.lock:
+            store = self._db()
+            with store.atomic():
+                fam = store.family(str(expected["family"]))
+                if not fam or fam["retired_at"] or fam["band"] != expected["band"]:
+                    return False
+                state = fam["state"] or {}
+                version = state.get("banded_version")
+                if version != expected.get("version"):
+                    return False
+                selected = store.version(fam["id"], version)
+                if selected is None or run_sha(selected) != expected.get("run_sha"):
+                    return False
+                typical = (state.get("typical_by_version") or {}).get(str(version),
+                    state.get("typical_max_loss_usd") if state.get("validation_version") == version else None)
+                if (typical != expected.get("typical_max_loss_usd")
+                        or state.get("forward") != expected.get("forward")
+                        or store.forward(fam["id"]) != list(forward)):
+                    return False
+                if band != fam["band"]:
+                    if store.set_band(fam["id"], band, reason=reason) != fam["band"]:
+                        return False
+                    if fam["band"] == "candidate" and band in ("probe", "sized"):
+                        store.set_state(fam["id"], live_promoted_at=float(store.clock() if at is None else at))
+                return True
+
+    def promoted_at(self, family: str) -> float | None:
+        with self.lock:
+            row = self._db().family(family)
+            value = (row["state"] or {}).get("live_promoted_at") if row else None
+            return None if value is None else float(value)
+
 
 class MemoryFamilies:
     """In memory (tests; a House whose swarm is off). Rows as `SwarmFamilies.read` returns them."""
@@ -63,6 +105,7 @@ class MemoryFamilies:
         self.rows = {str(r["family"]): dict(r) for r in rows}
         self.forward: dict[str, dict[tuple[str, str], dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
+        self.promotions: dict[str, float] = {}
         self.lock = threading.Lock()
 
     def read(self) -> list[dict]:
@@ -92,6 +135,28 @@ class MemoryFamilies:
             if family in self.rows and self.rows[family].get("band") != band:
                 self.rows[family]["band"] = band
                 self.moves.append((family, band, reason))
+
+    def confirm_band(self, expected: Mapping[str, Any], band: str, reason: str,
+                     forward: Sequence[Mapping[str, Any]], *, at: float | None = None) -> bool:
+        with self.lock:
+            family = str(expected["family"])
+            current = self.rows.get(family)
+            if current != expected:
+                return False
+            rows = [dict(v, source=k[0]) for k, v in sorted(self.forward.get(family, {}).items())]
+            if rows != list(forward):
+                return False
+            if current["band"] != band:
+                if current["band"] == "candidate" and band in ("probe", "sized") and at is not None:
+                    self.promotions[family] = float(at)
+                self.rows[family]["band"] = band
+                self.moves.append((family, band, reason))
+            return True
+
+    def promoted_at(self, family: str) -> float | None:
+        with self.lock:
+            value = self.promotions.get(family, self.rows.get(family, {}).get("real_promoted_at"))
+            return None if value is None else float(value)
 
 
 __all__ = ["SwarmFamilies", "MemoryFamilies"]
