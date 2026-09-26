@@ -410,6 +410,34 @@ clock never restarts.
   correction passed independent review, 29 focused laptop tests and its on-box regression. Both
   await full CI. Wave 2b is being built only as a draft and will not merge before Monday's close.
 
+- 16:21Z #369 and #370 passed full CI and merged. Main `570f023c` is running as House release
+  `20260926T161049Z-6a9300a67fbb`; the canary and the complete ten-minute watch passed, with the
+  final promoted verdict at 16:21:27Z. The House and swarm heartbeats are fresh and no health
+  failure is reported. Real money remains off. The previous release is
+  `20260926T105515Z-b25acc7981e2`, safely after the archived-House rollback boundary.
+- 16:12Z The private forward/completion seed was installed with matching hashes and restrictive
+  permissions. After verifying the exact deployed sources, root enabled the data worker and the
+  full-completion daemon. The collector holds its process-identity lock, reports a fresh heartbeat
+  and waits for **Tuesday Sept 29 06:00Z**. Completion is waiting on the healthy Theta backfill,
+  with no error. Active Gym/gate pointers were not changed. The final SIP-complete images and
+  Train-only calibrated fill model remain Sunday work.
+- 16:27Z #362 head `285f7135` passed 135 focused tests on the actual House. Root independently
+  reran the four adversarial paper-proof probes: an ambiguous open survives restart under the same
+  client order ID; uneven partial fills never pass and owned inventory is cleaned up; an unfinished
+  prior-day proof survives restart; unavailable position evidence blocks dispatch. All four now
+  produce the expected outcomes. These are synthetic fault probes, not a venue route proof.
+- 16:34Z The owner requested a quieter website: only Profit and Running at the top; a bare balance
+  chart; durable LTCM-partner names; an Agents dot-stage view with strategy/results on click; and
+  genuine agent notes as the prominent live hook. W4 is finishing desktop/mobile/browser checks
+  in the separate personal-site worktree. Root reviewed the first captures. No invented activity
+  or fixture P&L will be published. The production site still awaits that reviewed deployment.
+- 16:34Z Root's #371 adds a public aggregate of the complete real-options book, including retired
+  families, fees and partial closes. Independent review found and fixed persisted-freeze and
+  concurrent-fill errors; 35 focused tests pass locally. A quote-update revision fence is being
+  coordinated with #362 so bid/ask columns cannot be mixed across updates. The new site schema
+  must deploy before this publisher. Existing account movement, deposits, compute and crypto dust
+  do not become the website's Profit number; no real options trades means zero.
+
 ### Monday pre-open and forward-run checklist (prepared Saturday; results still pending)
 
 This continuation prepares paper/shadow operation and leaves `real_money=false`, the grant
