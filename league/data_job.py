@@ -73,7 +73,7 @@ class NightlySupervisor:
         self.last_start = float('-inf')
         self.failures = 0
         self.accounted = True
-        self.terminating: tuple[dict[str, Any], float] | None = None
+        self.terminating: tuple[dict[str, Any], float, str] | None = None
         self.first_seen: tuple[int, str, float] | None = None
 
     def verified(self, record: dict[str, Any]) -> bool:
@@ -105,7 +105,7 @@ class NightlySupervisor:
         pid, start = int(record['pid']), str(record['start'])
         try:
             self.kill(pid, signal.SIGTERM)
-            self.terminating = (dict(record, pid=pid, start=start), self.clock())
+            self.terminating = (dict(record, pid=pid, start=start), self.clock(), reason)
             out['action'] = 'stopping: ' + reason
         except ProcessLookupError:
             out['action'] = 'process exited'
@@ -122,6 +122,12 @@ class NightlySupervisor:
         own_alive = self.child is not None and self.child.poll() is None
         running = held or own_alive
         if not held and own_alive:
+            # /proc can be temporarily unavailable immediately after Popen. An unreaped
+            # direct child cannot have its PID reused; capture its start token once readable.
+            if not self.child_identity.get('start'):
+                seen = self.proc(self.child.pid)
+                if seen is not None and self.child.poll() is None:
+                    self.child_identity['start'] = seen[1]
             record = self.child_identity
         out: dict[str, Any] = {'enabled': enabled, 'running': running, 'pid': record.get('pid') if running else None}
         same_beat = bool(record.get('start')) and all(beat.get(key) == record.get(key) for key in ('pid', 'start', 'release'))
@@ -136,10 +142,19 @@ class NightlySupervisor:
             if same_beat and key in beat:
                 out[key] = beat[key]
 
+        stops = [path for path in (self.root / 'STOP', self.root.parent / 'STOP', self.data / 'nightly.stop') if path.exists()]
         if self.terminating:
-            identity, since = self.terminating
+            identity, since, reason = self.terminating
             pid = int(identity['pid'])
             if self.verified(identity):
+                # A job may begin between the last idle heartbeat and TERM. The daemon
+                # handles TERM by finishing that job. Honor a fresh busy heartbeat during
+                # release handover, including after the ordinary termination grace.
+                same_identity = all(beat.get(key) == identity.get(key) for key in ('pid', 'start', 'release'))
+                if (reason == 'another release' and enabled and not stops and same_identity
+                        and age is not None and -5 <= age < 300 and beat.get('busy') is True):
+                    out['action'] = 'waiting for current data job before release change'
+                    return out
                 if now - since >= 120 and self.verified(identity):
                     try:
                         self.kill(pid, signal.SIGKILL)
@@ -149,7 +164,6 @@ class NightlySupervisor:
                 return out
             self.terminating = None
 
-        stops = [path for path in (self.root / 'STOP', self.root.parent / 'STOP', self.data / 'nightly.stop') if path.exists()]
         if not enabled or stops:
             reason = f'{stops[0].name} is set' if stops else 'disabled'
             out['idle'] = reason

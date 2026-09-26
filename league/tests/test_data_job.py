@@ -149,6 +149,39 @@ class Supervisor(unittest.TestCase):
         self.assertIn('another release', step.tick()['action'])
         self.assertEqual(self.signals, [(900050, signal.SIGTERM)])
 
+    def test_release_handover_honors_job_that_started_after_the_idle_heartbeat(self):
+        old = self.release.parent / 'old-release'
+        self.hold(release=old, busy=False)
+        step = self.step()
+        step.tick()
+        self.assertEqual(self.signals, [(900050, signal.SIGTERM)])
+        # The old process received TERM after entering a long data job.
+        self.now += 121
+        self.hold(release=old, busy=True)
+        self.assertIn('waiting for current data job', step.tick()['action'])
+        self.assertEqual(self.signals, [(900050, signal.SIGTERM)])
+        # A dead heartbeat still permits recovery; busy does not disable the watchdog.
+        self.now += 301
+        step.tick()
+        self.assertEqual(self.signals[-1], (900050, signal.SIGKILL))
+
+    def test_start_identity_is_retried_after_a_transient_proc_read_failure(self):
+        step = self.step()
+        first = True
+        def proc(pid):
+            nonlocal first
+            if first:
+                first = False
+                return None
+            return self.procs.get(pid)
+        step.proc = proc
+        step.tick()
+        self.assertIsNone(step.child_identity['start'])
+        self.now += 91
+        step.tick()
+        self.assertEqual(self.signals, [(self.children[0].pid, signal.SIGTERM)])
+        self.assertEqual(len(self.children), 1)
+
     def test_disabled_and_stop_files_stop_existing_daemon(self):
         self.hold()
         self.enable(False)
