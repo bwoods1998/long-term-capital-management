@@ -82,10 +82,8 @@ class ModelRouter:
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
         cost = float(response.cost_usd or 0)
-        held = self._take_hold(key)  # booked when an earlier ask of this key timed out: the cost replaces it
-        if cost - held:
-            detail = {"profile": profile, "key": key[:120], "desk": family, **({"replaces_hold": round(held, 6)} if held else {})}
-            self.store.add_spend(kind, cost - held, family=family.split(":", 1)[0], detail=detail)
+        self._account_sail(key, cost, kind=kind, family=family.split(":", 1)[0], settled=True,
+                           detail={"profile": profile, "key": key[:120], "desk": family})
         return response
 
     #: Errors after which Sail may have run (and billed) a call whose answer never came back.
@@ -99,13 +97,29 @@ class ModelRouter:
         except Exception:  # noqa: BLE001 - a fake Provider: nothing known
             return None
 
-    def _take_hold(self, key: str) -> float:
-        with self.store.lock:
+    def _account_sail(self, key: str, usd: float, *, kind: str, family: str | None,
+                      settled: bool, detail: Mapping[str, Any], released: bool = False) -> bool:
+        """Replace a request's booked cost atomically. A reaper or cached retry cannot book it a second time."""
+        key = key[:200]
+        with self.store.atomic():
             holds = dict(self.store.get("unsettled") or {})
-            hold = holds.pop(key[:200], None)
-            if hold is not None:
-                self.store.put("unsettled", holds)
-        return float((hold or {}).get("usd") or 0.0)
+            row = self.store._one("SELECT booked_usd, settled FROM model_costs WHERE request_key=?", (key,))
+            if row and row["settled"]:
+                return False
+            # Upgrade an existing pre-stage-3 hold without booking it again.
+            booked = float(row["booked_usd"] if row else (holds.get(key) or {}).get("usd") or 0)
+            if settled:
+                holds.pop(key, None)
+            else:
+                holds[key] = {"usd": usd, "kind": kind, "family": family, "at": time.time()}
+            self.store.put("unsettled", holds)
+            self.store._exec("INSERT INTO model_costs(request_key, booked_usd, settled) VALUES(?,?,?) "
+                             "ON CONFLICT(request_key) DO UPDATE SET booked_usd=excluded.booked_usd, settled=excluded.settled",
+                             (key, usd, int(settled and not released)))
+            if usd != booked:
+                self.store.add_spend(kind, usd - booked, family=family,
+                                     detail={**detail, **({"replaces_hold": round(booked, 6)} if booked else {})})
+            return True
 
     def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
         """A call that failed after it was sent (a poll or transport timeout: Sail may have run it and billed it) is
@@ -119,14 +133,8 @@ class ModelRouter:
         usd = float(row["cost_usd"] if row["cost_usd"] is not None else row["reserved_usd"] or 0)
         if usd <= 0:
             return
-        with self.store.lock:
-            holds = dict(self.store.get("unsettled") or {})
-            if key[:200] in holds:
-                return  # booked when it first failed: never twice
-            holds[key[:200]] = {"usd": usd, "kind": kind, "family": family.split(":", 1)[0], "at": time.time()}
-            self.store.put("unsettled", holds)
-            self.store.add_spend(kind, usd, family=family.split(":", 1)[0],
-                                 detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": code or type(exc).__name__})
+        self._account_sail(key, usd, kind=kind, family=family.split(":", 1)[0], settled=False,
+                           detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": code or type(exc).__name__})
 
     def settle_holds(self) -> int:
         """True up the holds booked for unanswered calls once the Provider knows: its settled cost replaces the hold,
@@ -137,17 +145,14 @@ class ModelRouter:
             if row is None:
                 continue
             if row["status"] == "abandoned" and row["cost_usd"] is None:
-                delta = -float(hold["usd"])
+                cost = 0.0
             elif row["cost_usd"] is not None and row["status"] not in ("prepared", "dispatched"):
-                delta = float(row["cost_usd"]) - float(hold["usd"])
+                cost = float(row["cost_usd"])
             else:
                 continue  # still unknown: the hold stands
-            if self._take_hold(key) == 0.0:
-                continue  # settled by a caller meanwhile
-            if delta:
-                self.store.add_spend(hold.get("kind") or "sail_model", delta, family=hold.get("family"),
-                                     detail={"key": key[:120], "settles_hold": round(float(hold["usd"]), 6)})
-            n += 1
+            n += int(self._account_sail(key, cost, kind=hold.get("kind") or "sail_model", family=hold.get("family"),
+                                        settled=True, released=row["status"] == "abandoned" and row["cost_usd"] is None,
+                                        detail={"key": key[:120], "settles_hold": round(float(hold["usd"]), 6)}))
         return n
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:

@@ -28,6 +28,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import secrets
 import time
 from typing import Any, Callable, Mapping
 
@@ -149,11 +150,16 @@ class Gate:
                 if at < self.started_at or self.clock() - at > limit:
                     # Its job died with a process (no Gym job survives one), or never came back: the look is owed again,
                     # if its version is still the one validated (`owe`); a superseded version's marker is just dropped.
-                    self.owe(fam["id"], int(inflight.get("n") or 0), str(inflight["sha"]))
+                    self.owe(fam["id"], int(inflight.get("n") or 0), str(inflight["sha"]), marker=inflight)
                     fam = self.store.family(fam["id"]) or fam
                     state = fam.get("state") or {}
+            if state.get("look_inflight"):
+                continue  # one look per family in flight; its reservation must survive until it resolves
             if fam["band"] != "gym" or not state.get("gate_ready"):
                 continue
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            if state.get("validation_image") != image:
+                continue  # the tournament owes validation on the current data before any holdout is opened
             n = state.get("validation_version")
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
@@ -163,8 +169,11 @@ class Gate:
                 continue
             if (state.get("look_inflight") or {}).get("sha") == sha:
                 continue  # its look is in flight
-            if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
-                self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
+            if self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
+                if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
+                    self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
+                else:
+                    out["waiting"].append(fam["id"])
                 continue
             review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
             if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
@@ -229,24 +238,33 @@ class Gate:
         looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
         waiting is recorded and judged when it lands (`finish`), against the validation it was sent for."""
         n = int(version["n"])
-        vsharpe = ((fam.get("state") or {}).get("validation_numbers") or {}).get("sharpe_daily")
+        state = fam.get("state") or {}
+        vsharpe = (state.get("validation_numbers") or {}).get("sharpe_daily")
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        marker = {"sha": sha, "n": n, "at": self.clock(), "token": secrets.token_hex(8)}
         # Compare-and-set under the store's lock: only the version still validated is looked at; the marker says a look
         # is in flight (not `gated_sha`: a look cut off by a restart must be owed, not forgotten).
-        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gate_ready=False,
-                                                look_inflight={"sha": sha, "n": n, "at": self.clock()}):
-            return None
+        with self.store.atomic():
+            current = self.store.family(fam["id"]) or {}
+            if current.get("retired_at") or self.store.looked(sha) or \
+                    self.store.lineage_looks(fam["id"], include_inflight=True) >= evidence.LOOKS_PER_LINEAGE:
+                return None
+            if not self.store.compare_and_set_state(fam["id"], {"validation_version": n, "validation_image": image,
+                                                               "look_inflight": None}, gate_ready=False, look_inflight=marker):
+                return None
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
                      roots=tuple(fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout", priority=10.0)
         try:
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
-                                   late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe),
-                                   late_fail=lambda why: self.owe(fam["id"], n, sha))
+                                   late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe,
+                                                              validation_image=image, marker=marker),
+                                   late_fail=lambda why: self.owe(fam["id"], n, sha, marker=marker))
         except PoolError as exc:
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
-                self.owe(fam["id"], n, sha)
+                self.owe(fam["id"], n, sha, marker=marker)
             return None
-        return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe)
+        return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe, validation_image=image, marker=marker)
 
     def clear_marker(self, fid: str, sha: str) -> bool:
         """Drop the in-flight marker only if it is this look's (a newer version's look may be out meanwhile)."""
@@ -255,10 +273,17 @@ class Gate:
             return False
         return self.store.compare_and_set_state(fid, {"look_inflight": marker}, look_inflight=None)
 
-    def owe(self, fid: str, n: int, sha: str) -> None:
+    def owe(self, fid: str, n: int, sha: str, *, marker: Mapping[str, Any] | None = None) -> None:
         """The look did not happen. Its marker goes; if the version is still the one validated it is owed one again, three
         tries, and after the third it is refused as the Gym could not look (one refusal and one alert, never forgotten).
         A superseded version is owed nothing: no try is counted, nothing is refused."""
+        with self.store.atomic():
+            state = (self.store.family(fid) or {}).get("state") or {}
+            if marker is not None and state.get("look_inflight") != marker:
+                return  # an old attempt's callback cannot cancel or count a newer attempt
+            self._owe(fid, n, sha)
+
+    def _owe(self, fid: str, n: int, sha: str) -> None:
         self.clear_marker(fid, sha)
         if self.store.looked(sha):
             return
@@ -274,17 +299,23 @@ class Gate:
                                                    "text": "the gate box could not make a holdout look three times"})
 
     def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
-               validation_sharpe: Any = None) -> bool | None:
+               validation_sharpe: Any = None, validation_image: Any = None, marker: Mapping[str, Any] | None = None) -> bool | None:
         """Record a holdout result as the look it is (once: a second result for the same version is ignored) and answer.
         A result the Gym could not produce (an engine error, no data) is no look: it stays owed. Nothing here undoes a
         newer validation the tournament wrote while the look ran."""
+        with self.store.atomic():
+            return self._finish(fid, version, sha, result, validation_sharpe=validation_sharpe, validation_image=validation_image,
+                                marker=marker)
+
+    def _finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
+                validation_sharpe: Any, validation_image: Any, marker: Mapping[str, Any] | None) -> bool | None:
         fam = self.store.family(fid)
         if fam is None or self.store.looked(sha):
             return None
         n = int(version["n"])
         if result.get("status") in ("error", "no_data"):
             self.store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "status": result.get("status")})
-            self.owe(fid, n, sha)
+            self.owe(fid, n, sha, marker=marker)
             return None
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         self.store.add_run(fid, n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
@@ -299,21 +330,46 @@ class Gate:
             self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
         self.tell(fid, "pass" if line["passed"] else "fail")
         self.outcome(fid, sha, "passed" if line["passed"] else "failed")
-        if line["passed"]:
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+        if line["passed"] and fam["band"] == "gym" and not fam.get("retired_at") and validation_image == image:
             self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
 
     # ------------------------------------------------------------------ the nightly forward
+    def forward_target(self) -> dict[str, str] | None:
+        ready = self.settings.get("forward", {}).get("ready") or {}
+        if ready.get("day") and ready.get("gate_checkpoint") == self.settings.get("gym", {}).get("gate_checkpoint"):
+            return {"day": ready["day"], "checkpoint": ready["gate_checkpoint"]}
+        return None
+
+    def forward_pending(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")
+                and (f.get("state") or {}).get("forward_replay") !=
+                {"target": target, "version": (f.get("state") or {}).get("banded_version") or f.get("best_version")}]
+
     def forward_due(self) -> bool:
         now = self.clock()
+        target = self.forward_target()
+        if target is not None:
+            attempt = self.store.get("forward_attempt") or {}
+            return bool(self.forward_pending(target)) and (attempt.get("target") != target or
+                   now - float(attempt.get("at") or 0) >= float(self.settings.get("forward", {}).get("every_seconds", 3600)))
         today = dt.datetime.fromtimestamp(now, dt.timezone.utc)
         after = int(self.settings.get("forward", {}).get("after_hour_utc", 7))
-        return today.hour >= after and self.store.get("forward_day") != today.date().isoformat()
+        attempted = self.store.get("forward_legacy_attempt") or {}
+        banded = any(f["band"] in ("candidate", "probe", "sized") for f in self.store.families(alive=True))
+        return bool(banded and self.settings.get("gym", {}).get("gate_checkpoint")) and today.hour >= after and \
+            self.store.get("forward_day") != today.date().isoformat() and (attempted.get("day") != today.date().isoformat() or
+            now - float(attempted.get("at") or 0) >= float(self.settings.get("forward", {}).get("every_seconds", 3600)))
 
     def forward(self) -> dict[str, Any]:
+        target = self.forward_target()
+        if target is not None:
+            return self.forward_ready(target)
         now = self.clock()
-        self.store.put("forward_day", dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat())
+        today = dt.datetime.fromtimestamp(now, dt.timezone.utc).date().isoformat()
+        self.store.put("forward_legacy_attempt", {"day": today, "at": now})
         banded = [f for f in self.store.families(alive=True) if f["band"] in ("candidate", "probe", "sized")]
         out: dict[str, Any] = {"families": len(banded), "trades": 0, "moves": []}
         if not banded or not self.settings.get("gym", {}).get("gate_checkpoint"):
@@ -323,6 +379,7 @@ class Gate:
             n = (fam.get("state") or {}).get("banded_version") or fam.get("best_version")
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
+                out.setdefault("failed", []).append(fam["id"])
                 continue
             job = GymJob(family=fam["id"], version=int(n), code=version["code"], params=version.get("params") or {}, window="forward",
                          roots=tuple(fam["roots"]), gate="nightly forward replay", purpose="forward", priority=5.0)
@@ -343,14 +400,70 @@ class Gate:
             move = self.judge_forward(fam["id"])
             if move:
                 out["moves"].append(move)
+        if jobs and not out.get("failed") and not out.get("errors"):
+            self.store.put("forward_day", today)
         self.store.event("swarm.gate", None, {"action": "forward", **out})
         return out
 
-    def record_forward(self, fid: str, n: int, result: Mapping[str, Any]) -> int | None:
+    def forward_ready(self, target: Mapping[str, Any]) -> dict[str, Any]:
+        """Replay a delivered checkpoint, retrying only families whose version has not finished it successfully."""
+        self.store.put("forward_attempt", {"target": target, "at": self.clock()})
+        families = self.forward_pending(target)
+        out: dict[str, Any] = {"families": len(families), "trades": 0, "moves": [], "target": target}
+        roots = set((self.settings.get("forward", {}).get("ready") or {}).get("roots") or [])
+        jobs = []
+        for fam in families:
+            n = (fam.get("state") or {}).get("banded_version") or fam.get("best_version")
+            version = self.store.version(fam["id"], n)
+            if version is None or not version.get("code") or not set(fam["roots"]).issubset(roots):
+                out.setdefault("failed", []).append(fam["id"])
+                continue
+            job = GymJob(family=fam["id"], version=int(n), code=version["code"], params=version.get("params") or {},
+                         window="forward", roots=tuple(fam["roots"]), end=target["day"], gate="nightly forward replay",
+                         purpose="forward", priority=5.0)
+            jobs.append((fam["id"], int(n), self.pool.submit(job)))
+        for fid, n, job in jobs:
+            try:
+                result = self.pool.wait(job, float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
+                                        late=lambda r, fid=fid, n=n: self.record_ready_forward(fid, n, r, target))
+            except PoolError as exc:
+                out.setdefault("errors", {})[fid] = str(exc)[:200]
+                continue
+            added = self.record_ready_forward(fid, n, result, target, judge=False)
+            if added is None:
+                out.setdefault("failed", []).append(fid)
+            else:
+                out["trades"] += added
+            move = self.judge_forward(fid)
+            if move:
+                out["moves"].append(move)
+        self.store.event("swarm.gate", None, {"action": "forward", **out})
+        return out
+
+    def record_ready_forward(self, fid: str, n: int, result: Mapping[str, Any], target: Mapping[str, Any], *,
+                             judge: bool = True) -> int | None:
+        self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        days = {str(row[0]) for row in result.get("daily") or [] if row}
+        if target != self.forward_target() or result.get("gym_image") != target["checkpoint"] or target["day"] not in days:
+            self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n,
+                                                 "why": "the replay does not cover the ready checkpoint and day"})
+            return None
+        added = self.record_forward(fid, n, result, record=False)
+        if added is not None:
+            self.store.set_state(fid, forward_replay={"target": target, "version": n})
+            if not self.forward_pending(target):
+                self.store.put("forward_day", target["day"])
+                self.store.put("forward_completed", {"target": target, "at": self.clock()})
+            if judge:
+                self.judge_forward(fid)
+        return added
+
+    def record_forward(self, fid: str, n: int, result: Mapping[str, Any], *, record: bool = True) -> int | None:
         """A nightly replay's run (a trial) and, ONLY when it ran cleanly, its trades as version n's nightly record (the
         latest good run replaces that version's nightly record: every forward day is rerun each night). A replay that
         erred, found no data or was disqualified leaves the record as it was (None, and a `forward_failed` event)."""
-        self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        if record:
+            self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
         if result.get("status") != "ok":
             self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n, "status": result.get("status")})
             return None
@@ -367,6 +480,10 @@ class Gate:
     def judge_forward(self, fid: str) -> dict[str, Any] | None:
         """The banded version's forward record (`evidence.forward_record`: its own rows, one source a day); a Candidate
         whose record is negative goes back to the Gym, and its version is never tuition again."""
+        with self.store.atomic():
+            return self._judge_forward(fid)
+
+    def _judge_forward(self, fid: str) -> dict[str, Any] | None:
         fam = self.store.family(fid)
         if fam is None or fam["band"] not in ("candidate", "probe", "sized"):
             return None
@@ -375,7 +492,8 @@ class Gate:
         record = evidence.forward_record(self.store.forward(fid), version=n)
         self.store.set_state(fid, forward=record)
         if record["negative"] and fam["band"] == "candidate":
-            self.store.set_band(fid, "gym", reason=f"its forward record turned negative over {record['trades']} trades")
+            if self.store.set_band(fid, "gym", reason=f"its forward record turned negative over {record['trades']} trades") is None:
+                return None
             if state.get("banded_sha"):
                 version = self.store.version(fid, n)
                 if version is not None:

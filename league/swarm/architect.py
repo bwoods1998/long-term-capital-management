@@ -56,7 +56,9 @@ condors, iron butterflies, long butterflies) can reach real money soon.
 
 Reply with ONE JSON object: {"families": [{"slug": "short-kebab-name", "mechanism": "one or two sentences: why it should
 make money", "structure": "<type>", "roots": ["SPY"], "dte": [0, 2], "rejection": "the result that would prove it
-wrong", "sketch": "how the program should decide, in plain words"}]}"""
+wrong", "sketch": "how the program should decide, in plain words", "parent": "retired family id, if revising its idea"}]}.
+A renamed or revised version of a retired mechanism must name its parent; it inherits the entire lineage's trials
+and three-look holdout ration. Only a different economic mechanism starts a new lineage."""
 
 
 class Architect:
@@ -85,7 +87,7 @@ class Architect:
         alive = len(self.store.families(alive=True))
         start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
         n = min(int(self.cfg.get("max_refill", 12)), start - alive) if alive < start else int(self.cfg.get("max_new", 6))
-        return max(0, min(max(n, int(self.cfg.get("min_new", 3))), ceiling - alive))
+        return max(0, min(n, ceiling - alive))
 
     def gaps(self) -> list[str]:
         roots = list(self.settings.get("gym", {}).get("roots", ["SPY", "QQQ", "IWM", "XSP", "SPXW"]))
@@ -145,10 +147,15 @@ class Architect:
             # (its trials and holdout looks, so re-proposing never resets the count its evidence is deflated by); another
             # idea is a new lineage that still counts the slice's trials (`prior_lineage`) but not its look ration.
             dead = [f for f in self.store.families(alive=False) if f["structure"] == structure and sorted(f["roots"]) == sorted(roots)]
-            same = [f for f in dead if same_idea(f["mechanism"], mechanism)]
-            parent = same[-1]["id"] if same else None
+            same = [f for f in dead if f["id"] in (row.get("parent"), row.get("slug")) or same_idea(f["mechanism"], mechanism)]
+            declared = self.store.family(str(row.get("parent"))) if row.get("parent") else None
+            parent = declared["id"] if declared and declared["structure"] == structure else (same[-1]["id"] if same else None)
             prior = dead[-1]["lineage"] if dead and not parent else None
-            fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
+            with self.store.lock:
+                if len(self.store.families(alive=True)) >= int(self.settings.get("population", {}).get("ceiling", 96)):
+                    break
+                fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
+                living.add((mechanism.lower()[:80], tuple(roots), structure))
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
             self.store.event("swarm.born", fam["id"], {"parent": parent, "mechanism": mechanism, "structure": structure,

@@ -64,10 +64,16 @@ class Tournament:
         jobs = []
         errors = {}
         judged = {}
+        image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         for fam in fams:
             n = self.candidate_version(fam)
-            if n is None or n == fam.get("validated_version"):
+            if n is None:
                 continue
+            state = fam.get("state") or {}
+            if n == fam.get("validated_version") and state.get("validation_image") == image:
+                continue
+            if state.get("validation_image") != image:
+                self.store.compare_and_set_state(fam["id"], {"validation_image": state.get("validation_image")}, gate_ready=False)
             version = self.store.version(fam["id"], n)
             if version is None or not version.get("code"):
                 continue
@@ -122,7 +128,8 @@ class Tournament:
                                    program_years=years)
         with self.store.lock:  # the candidate check and the verdict's writes, never interleaved with another judge
             fam = self.store.family(fid) or fam
-            if self.candidate_version(fam) != int(n):
+            image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
+            if self.candidate_version(fam) != int(n) or result.get("gym_image") != image:
                 return None  # stale: its trials count, its verdict does not
             return self._verdict(fid, fam, n, result, counted=record)
 
@@ -141,8 +148,16 @@ class Tournament:
         self.store.update_family(fid, **fields)
         if counted:  # a re-judged recorded result is no new validation for the bandit
             self.store.bump(fid, validations=1)
+        state = fam.get("state") or {}
+        typical = dict(state.get("typical_by_version") or {})
+        if state.get("validation_version") is not None and state.get("typical_max_loss_usd") is not None:
+            typical.setdefault(str(state["validation_version"]), state["typical_max_loss_usd"])
+        loss = typical_max_loss(result)
+        if loss is not None:
+            typical[str(n)] = loss
         self.store.set_state(fid, validation_view=view, validation_line=line, validation_version=n,
-                             typical_max_loss_usd=typical_max_loss(result),
+                             validation_image=result.get("gym_image"),
+                             typical_max_loss_usd=loss, typical_by_version=typical,
                              validation_numbers={"mean": mean, "t": t, "sharpe_daily": summary.get("sharpe_daily"),
                                                  "quarters": summary.get("quarters_positive")},
                              gate_ready=bool(line["passed"]))
@@ -180,7 +195,10 @@ class Tournament:
         for _, fam in scored[: int(self.cfg.get("fork_top", 3))]:
             if alive + len(born) >= ceiling:
                 break
-            child = self.fork(fam)
+            with self.store.lock:
+                if len(self.store.families(alive=True)) >= ceiling:
+                    break
+                child = self.fork(fam)
             if child:
                 born.append(child)
         return born
@@ -199,8 +217,7 @@ class Tournament:
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
                          "structure": fam["structure"], "roots": [root]})
             spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
-            # Its trials and its looks count through the lineage (`SwarmStore.lineage_looks`: every look this lineage
-            # made on the child's slice, before or after the fork, and what reached the parent through its forks).
+            # The entire connected lineage shares its trials and three holdout looks, including later looks on other roots.
             child = self.store.add_family(spec, origin="fork", parent=fam["id"])
             best = self.store.version(fam["id"], self.candidate_version(fam))
             if best and best.get("code"):

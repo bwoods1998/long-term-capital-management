@@ -207,7 +207,7 @@ class TournamentTests(RoundCase):
         [c] = t.forks(self.store.families(alive=True))
         self.assertEqual(self.store.family(c)["roots"], ["SPY"])
         self.assertEqual(self.store.lineage_looks(c), 2, "SPY's holdout was looked at twice by this lineage")
-        self.assertEqual(self.store.lineage_looks(b), 0, "b's own slice was never looked at")
+        self.assertEqual(self.store.lineage_looks(b), 2, "the whole lineage shares the ration across roots and fork dates")
 
     def test_a_late_validation_of_an_older_version_never_overwrites_a_newer_one(self):
         self.family("a")
@@ -418,6 +418,9 @@ class GateTests(RoundCase):
         self.newer("a", strong)  # v2 passes its line while v1's look is out
         self.pool.slow.add("a")
         Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # v2's look goes out too
+        self.assertEqual(len(self.pool.landing), 1, "the older look still reserves the family's place")
+        self.clock.advance(2200)
+        Gate(self.store, self.pool, self.router, self.settings, clock=self.clock).run()  # the old attempt expired
         (job1, late1), (job2, _) = self.pool.landing
         self.assertEqual((job1.version, job2.version), (1, 2))
         late1(weak(job1))  # v1's result lands: a look, and a fail
@@ -544,6 +547,9 @@ class GateTests(RoundCase):
     def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
         from league.swarm import bands
 
+        self.pool.image = lambda kind: "sbcp_synthetic_gym"
+        self.answer = lambda job: {**strong(job), "gym_image": "sbcp_synthetic_gym"}
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "sbcp_synthetic_gym"}}))
         self.ready()
         self.settings["gym"]["gate_checkpoint"] = None
         self.replies = [{"text": json.dumps({"verdict": "pass"})}] * 2
