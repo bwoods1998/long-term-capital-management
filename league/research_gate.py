@@ -62,6 +62,54 @@ frequent than the clock already allows.
    pass for displacement, and the House gives the agent its turn back. The refund and this rule
    read the same predicate, so no refunded session is ever counted as a pass.
 
+9. **Research runs on outcomes** (Sept 25, 2026, the forward-first run, F2; `clock_runs:
+   real_positions`). Replayed on the T0 snapshot (the 24 hours to 04:23Z Sept 25; `scripts/gate_replay.py`):
+   2,566 sessions, $87.65, 547 candidates, and the clock was the costliest trigger -- 387 `clock` runs
+   ($27.72), 350 of them idle agents re-running every 12 minutes at the winners' pace (mcentee-hfadaea
+   33 sessions in the day), and the clock's 201 retained candidates had 9 adoptions or forks; 122
+   `heartbeat` runs, 121 of them a newborn's first session at age 0 (an unresearched agent's `last` is
+   0); 275 samples of locked winners retained 4 candidates. So the clock (and the backoff it carries) runs only an agent ON
+   REAL MONEY that holds a position or a working order there, or met a refusal since its last session
+   (`House._holds_real_money`'s test). Everyone else waits for evidence: a fill, a settlement, a refusal
+   (once, rule 11), an active forward block, a teacher's lesson naming it (rule 12), a code or rung
+   change, a verdict, a repair, a fulfilled request, a desk note, a market that opened, a lifted blocker,
+   and one outcome of an idle program: `barren_wakes` (10) more wakes with live markets and nothing done
+   since its last session (`idle_runs: barren`; adopting new code resets the count, `House._commit_research`).
+   A market that is only closed is the calendar, not an outcome: it waits for the open. The heartbeat is
+   `max_skip_hours` (24) for a real agent and `practice_max_skip_hours` (72) for a practice agent, counted
+   from the gate's first sight of an agent that never researched, so a newborn trades before it researches.
+   An agent on rung 0 (replay only, no forward outcome possible until it passes) keeps its clock, with its
+   backoff, and is neither paused (rule 10) nor locked (rule 7): research is its only way up and
+   `replay_deadline_epochs` (72 hours) bounds it. Until the review of #311 the pause overrode that clock,
+   and a replay-only agent, which cannot fill, waited on the 10% sample until it was killed as never
+   qualified; its sessions after three empty ones still run on `abstain_lock_profile`.
+10. **A practice agent's pause** (F2). After `practice_pause_after` (3) abstaining sessions in a row a
+   practice agent (not on rung 0) researches only on news of its own program (`PAUSE_NEWS`: a code or
+   rung change, a repair verdict about it, a teacher's lesson naming it, its idle program's barren
+   outcome) and on its own trading (`PAUSE_DAILY`: a fill or an active forward block) at most once per
+   UTC day -- no settlement, refusal, desk note, heartbeat or Jev question -- until a session produces a
+   candidate or a replay. Review of #311, replayed on the T0 snapshot: the fill-only pause ran every
+   fill-woken session (452, $5.36: 10 candidates, 1 adoption) and blocked the productive news; this rule
+   runs 794 sessions instead of 1,038 (+44 samples), 259 candidates instead of 253 and 90 adoptions or
+   forks instead of 85, for $34.58 instead of $33.71. A real agent keeps rule 7's lock. The
+   sample still draws from both (rule 5), at most once per `sample_hours` (6) per agent under this rule,
+   not once per research interval: a winner's interval is 12 minutes, and 10% of its skips was 272
+   sessions a day. Paused and locked sessions run on `abstain_lock_profile`.
+11. **A refusal triggers research once per agent, reason and day** (X2; `refusal_dedupe`). Measured on the
+   T0 snapshot: 670 refusals in 24 hours from 86 distinct (agent, day, reason) triples, which bought 437
+   prompt sessions (`House.research_due`'s refusal fast path, 23 candidates) and 107 gate runs (4). The
+   reason is the refusal's first reason with its numbers and tickers taken out (`refusal_class`), on its
+   book; any session that runs uses up the keys of the refusals it saw. The fast path asks
+   `refusal_news` before it runs and writes a `research.gate` row (`reason: refusal`) when it does.
+12. **Lessons are the teacher's, and half the floor is the control** (F2 and F4). A `playbook.entry` wakes
+   an agent only when its source is in `lesson_sources` (the teacher's): 134 of the 204 lesson-triggered
+   rows at T0 had no teacher lesson behind them, only a desk-mate's post-mortem. Under `lesson_arm:
+   parity` a lesson wakes only agents whose id hashes even (`lesson_arm`); the odd half is the control
+   the hourly yield row compares on forward growth over 3 days (`yield_ledger.teacher_lift`). A control
+   agent is neither woken by, asked Jev about, nor shown by `playbook_read` a lesson that names it for
+   those 3 days (`withheld`; review of #311: 413 `playbook_read` calls by 121 agents in the 24 hours to
+   T0, so the control read the lesson whenever it researched for any other reason).
+
 Each decision writes one private `research.gate` row, with `trigger` (the class of evidence that
 woke it, or the skip's reason) and `record` (winner, loser, unproven or idle) so the yield of each
 trigger can be measured against the session it bought. Repeated skips for the same reason are
@@ -96,13 +144,27 @@ TRIGGER_KINDS = ("book.fill", "book.settle", "book.refused", "agent.strategy", "
                  "eval.block", "audit.verdict")
 #: Under the abstention lock (rule 7) only these wake an agent: its own outcomes at the venue.
 ABSTAIN_LOCK_TRIGGERS = frozenset(("book.fill", "book.settle", "book.refused"))
+#: Under a practice agent's pause (rule 10) news of its own program wakes it as ever (review of #311,
+#: Sept 25, 2026: a code change, a rung change, a repair verdict about it, a lesson naming it, its idle
+#: program's outcome) ...
+PAUSE_NEWS = frozenset(("code", "rung", "repair.status", "lesson", "barren"))
+#: ... and its own trading (a fill, an active forward block) at most once per UTC day.
+PAUSE_DAILY = frozenset(("book.fill", "eval.block"))
+PAUSE_TRIGGERS = PAUSE_NEWS | PAUSE_DAILY
 #: Which class of evidence a run is credited to when several arrived at once (`trigger` on the row):
 #: the venue's own verdicts first, then the House's, then what other agents wrote.
 TRIGGER_PRIORITY = ("book.settle", "book.fill", "book.refused", "audit.verdict", "eval.verdict", "repair.status", "eval.block",
-                    "code", "rung", "lesson", "tool.fulfilled", "library.note", "window", "market", "unblocked",
+                    "code", "rung", "lesson", "tool.fulfilled", "library.note", "window", "market", "unblocked", "barren",
                     "agent.strategy", "credit.grant", "jev")
 #: Records that still research on the clock when `clock_runs` is `winners_and_idle`.
 CLOCK_RECORDS = frozenset(("winner", "idle"))
+#: `clock_runs` values: the Sept 22 rule, the Sept 23 rule, and research on outcomes (F2, Sept 25, 2026).
+CLOCK_RULES = ("all", "winners_and_idle", "real_positions")
+#: `idle_runs` values (rule 9): an idle program's outcome wakes it, nothing does, or (the Sept 23 rule for
+#: idle agents alone) its idle cadence does.
+IDLE_RULES = ("barren", "off", "clock")
+#: `lesson_arm` values (rule 12): every agent a lesson names, or the even half by `lesson_arm`.
+LESSON_ARMS = ("all", "parity")
 #: Verdicts written on every mark while nothing is decided (1,071 `look` and 161 `progress` of
 #: 1,321 verdicts on Sept 22). Counting them would wake every paper agent every five minutes.
 ROUTINE_VERDICTS = frozenset(("look", "progress"))
@@ -130,11 +192,20 @@ DEFAULTS: dict[str, Any] = {
     "active_fill_hours": 24,
     # Sept 23, 2026 (rules 6 and 7 above): who may run on the clock alone, and how many abstaining
     # sessions in a row lock research to fills, settlements and refusals. `all` / 0 restore the rule
-    # of Sept 22.
-    "clock_runs": "winners_and_idle",
+    # of Sept 22; `winners_and_idle` the rule of Sept 23; `real_positions` is F2 (rules 9 and 10).
+    "clock_runs": "real_positions",
     "abstain_lock_after": 3,
     # Sept 24, 2026 (rule 7): the profile a locked agent's new session runs on; "" leaves it alone.
     "abstain_lock_profile": "flash_asap",
+    # Sept 25, 2026 (F2, rules 9 and 10; read only under `clock_runs: real_positions`).
+    "practice_max_skip_hours": 72,
+    "practice_pause_after": 3,
+    "idle_runs": "barren",
+    "sample_hours": 6,
+    "lesson_arm": "parity",
+    # Sept 25, 2026 (X2 and F2, rules 11 and 12; read under every `clock_runs`).
+    "refusal_dedupe": True,
+    "lesson_sources": ["teacher"],
 }
 #: Provider server errors (Sept 24, 2026): the vendor failed the session, so the researcher refunds
 #: what its turns were charged. The brief's 502 and 504, and the rest of the family the researcher
@@ -148,6 +219,74 @@ RELEVANCE = ("Does this note report evidence, a lesson, a new tool or data, or a
 def _epoch(iso: str) -> float:
     from datetime import datetime
     return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+
+
+_TICKER = re.compile(r"\b[A-Z][A-Z0-9]*(?:[-.][A-Z0-9.]+)+\b")
+_NUMBER = re.compile(r"\d[\d,.]*")
+
+
+def refusal_class(text: Any) -> str:
+    """A refusal's reason without what varies between two refusals of the same rule: its numbers and
+    its market tickers. "one event may hold at most 25% of the stake: KXBTCD-26SEP2501 would hold $3.80
+    of this account's $13.27 ..." and the same refusal at $4.10 of $13.40 on another event are one class
+    (rule 11; the 670 refusals of the 24 hours to T0 were 86 (agent, day, class) triples)."""
+    text = _NUMBER.sub("#", _TICKER.sub("T", str(text or "")))
+    return re.sub(r"\s+", " ", text).strip().lower()[:120]
+
+
+def refusal_key(entry: Any) -> str:
+    """The key rule 11 counts once per agent and day: the refusal's UTC day, its book and its class."""
+    p = entry.payload
+    reasons = p.get("reasons") or [""]
+    return f"{str(entry.at)[:10]}|{p.get('book') or ''}|{refusal_class(reasons[0] if reasons else '')}"
+
+
+def lesson_arm(agent_id: str) -> str:
+    """Which arm of the teacher's comparison an agent is in (rule 12): `lesson` when the first byte of
+    the sha256 of its id is even, else `control`. Stable across restarts and releases, and independent of
+    the desk, the family and the order agents were born in."""
+    return "lesson" if hashlib.sha256(str(agent_id).encode("utf-8")).digest()[0] % 2 == 0 else "control"
+
+
+#: Desk names without their venue that are ordinary words in a lesson ("the market is open", "prices",
+#: "its options"): a lesson names those desks only by their full id.
+GENERIC_DESKS = frozenset(("open", "prices", "options", "attention"))
+
+
+def lesson_words(agent_id: str, *names: Any) -> set[str]:
+    """What a lesson may call an agent by (rule 12): its id, its family, its desk and specialty, and the
+    desk without its venue ("crypto-15m" for kalshi-crypto-15m) unless that is an ordinary word. The
+    teacher writes "crypto-15m" and "sports", almost never the desk's id: of the twelve teacher lessons
+    of Sept 23-24, eight named no living agent by desk, specialty or family id and four named one; by
+    these words ten name 1 to 32 each (T0 snapshot)."""
+    words = {str(agent_id).lower()} | {str(n).lower() for n in names if n}
+    for name in list(words):
+        venue, _, short = name.partition("-")
+        if venue in ("kalshi", "alpaca") and short and short not in GENERIC_DESKS:
+            words.add(short)
+    return {w for w in words if w}
+
+
+def lesson_terms(entry: Any) -> set[str]:
+    """Every run of up to six whole hyphenated words in a lesson's title and text ("kalshi-crypto-15m-lab"
+    gives "crypto-15m", "kalshi-crypto" ...), so a name matches only on word boundaries and by set lookup.
+    Desk, family and agent names run to four words."""
+    text = f"{entry.payload.get('title') or ''} {entry.payload.get('text') or ''}".lower()
+    terms: set[str] = set()
+    for token in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text):
+        parts = token.split("-")[:12]
+        terms.update("-".join(parts[i:j]) for i in range(len(parts)) for j in range(i + 1, min(len(parts), i + 6) + 1))
+    return terms
+
+
+def lesson_names(words: Any, entry: Any, sources: Any = ("teacher",), terms: set[str] | None = None) -> bool:
+    """Whether a `playbook.entry` is a lesson (its source is one of `sources`) that names one of `words`
+    (`lesson_words`) on word boundaries. A post-mortem (`source: graveyard`) is never a lesson: 134 of the
+    204 lesson-triggered gate rows of the 24 hours to T0 had only one behind them."""
+    if str(entry.payload.get("source") or "") not in set(sources or ()):
+        return False
+    terms = lesson_terms(entry) if terms is None else terms
+    return any(word in terms for word in words)
 
 
 def provider_fault(reason: Any) -> bool:
@@ -340,11 +479,122 @@ class ResearchGate:
                 "market": "closed" if idle.get("shut", 0) > 0 else "open", "window": int(idle.get("offered", 0)) > 0}
 
     def _bootstrap(self, agent: Any, st: dict[str, Any]) -> None:
-        """First sight of an agent (a fresh deploy): its last research summary is the baseline."""
+        """First sight of an agent (a fresh deploy): its last research summary is the baseline.
+        `since` (Sept 25, 2026) is when the gate first saw it: the heartbeat of an agent that never
+        researched counts from here under rule 9, not from the epoch."""
         summary = self.inactivity.last_summary(agent.id)
         # Never researched: nothing to compare with, and the clock's first pass is the baseline.
         seq = summary.seq if summary is not None else self.ledger.head()[0]
-        st.update(self._snapshot(agent), seq=seq, outcome_seq=0, streak=0, recheck_at=0.0, notes_seq=seq)
+        st.update(self._snapshot(agent), seq=seq, outcome_seq=0, streak=0, recheck_at=0.0, notes_seq=seq,
+                  since=self.house.clock())
+
+    # ------------------------------------------------------------------ F2 facts
+    def _f2(self, settings: Mapping[str, Any]) -> bool:
+        return str(settings.get("clock_runs") or "all") == "real_positions"
+
+    def _money(self, agent: Any) -> tuple[bool, bool]:
+        """(on real money, holds a position or a working order there): the book the House puts it on
+        (`House.book_of`) is a real-money book, and it has holdings or open orders on it -- the test of
+        `House._holds_real_money`. Unreadable is practice with nothing held."""
+        try:
+            book = self.house.book_of(agent)
+        except Exception:  # noqa: BLE001 - a book that cannot be read is no real money
+            return False, False
+        if book is None or not getattr(book, "real_money", False):
+            return False, False
+        try:
+            holds = agent.id in book.accounts and bool(book.account(agent.id).holdings or book.open_orders(agent.id))
+        except Exception:  # noqa: BLE001 - unreadable holdings are no position
+            holds = False
+        return True, holds
+
+    def _rung(self, agent: Any) -> int | None:
+        try:
+            return int(self.house.evaluator.rung(agent.id))
+        except Exception:  # noqa: BLE001 - an unreadable rung is none
+            return None
+
+    def _paused(self, settings: Mapping[str, Any], real: bool, streak: int, agent: Any = None) -> bool:
+        """Rule 10: a practice agent after `practice_pause_after` abstaining sessions in a row, unless it
+        is on rung 0 (`agent` given): a replay-only agent cannot fill, and research is its only way up."""
+        after = int(settings.get("practice_pause_after") or 0)
+        if not (self._f2(settings) and not real and after > 0 and streak >= after):
+            return False
+        return agent is None or self._rung(agent) != 0
+
+    def _pause_filter(self, st: dict[str, Any], found: list[str], now: float) -> list[str]:
+        """What wakes a paused practice agent (rule 10): news of its program (`PAUSE_NEWS`) always, its own
+        trading (`PAUSE_DAILY`) when it has not already bought a session this UTC day
+        (`pause_trade_day`, which the run records)."""
+        kept = [t for t in found if t.split(":", 1)[0] in PAUSE_NEWS]
+        trading = [t for t in found if t.split(":", 1)[0] in PAUSE_DAILY]
+        if trading and st.get("pause_trade_day") != now_iso(lambda: now)[:10]:
+            kept += trading
+        return kept
+
+    def _used(self, st: dict[str, Any], day: str) -> set[str]:
+        return set((st.get("refusals") or {}).get(day) or ())
+
+    def _refusals_since(self, agent: Any, st: dict[str, Any], *, book: str | None = None) -> list[Any]:
+        rows = self.ledger.read(kinds="book.refused", agent=agent.id, after=int(st.get("seq") or 0), limit=1000)
+        return [e for e in rows if book is None or e.payload.get("book") == book]
+
+    def _consume_refusals(self, agent: Any, st: dict[str, Any], also: Any = None) -> tuple[int, int]:
+        """Rule 11: a session is running, so every refusal since the baseline has been seen: its key is
+        used for its day. `also` is the refusal the House's fast path ran on, which is before the
+        baseline when the gate first saw the agent at that refusal. Returns (new keys, refusals whose key
+        was already used). Keeps the keys of the last two UTC days."""
+        used = {day: set(keys) for day, keys in (st.get("refusals") or {}).items()}
+        new = dup = 0
+        rows = self._refusals_since(agent, st)
+        if also is not None and all(e.seq != also.seq for e in rows):
+            rows.insert(0, also)
+        for entry in rows:
+            key = refusal_key(entry)
+            day = key[:10]
+            if key in used.setdefault(day, set()):
+                dup += 1
+            else:
+                used[day].add(key)
+                new += 1
+        keep = sorted(used)[-2:]
+        st["refusals"] = {day: sorted(used[day])[-200:] for day in keep}
+        return new, dup
+
+    def refusal_news(self, agent: Any, refusal: Any, *, take: bool = False) -> bool:
+        """The House's refusal fast path asks here first (rule 11): is there a refusal on `refusal`'s book
+        since this agent's last session whose (day, book, class) has not already bought research today,
+        and is the agent not paused (rule 10)? With `take` (the fast path is about to queue the session)
+        the run is recorded like any other -- a `research.gate` row with `reason: refusal`, the baseline
+        moved, the keys used -- and True returned. The gate switched off, or `refusal_dedupe` off, is the
+        rule before Sept 25, 2026: every new refusal is news."""
+        settings = self.settings
+        if not settings.get("enabled", True):
+            return True
+        with self.state.lock:
+            st = self.state.agent(agent.id)
+            if "seq" not in st:
+                self._bootstrap(agent, st)
+            self._absorb_outcomes(agent, st)
+            streak = int(st.get("streak") or 0)
+            real = self._money(agent)[0] if self._f2(settings) else False
+            if self._paused(settings, real, streak, agent):
+                return False
+            book = refusal.payload.get("book") if refusal is not None else None
+            rows = self._refusals_since(agent, st, book=book)
+            if refusal is not None and all(e.seq != refusal.seq for e in rows):
+                rows.insert(0, refusal)  # first sight at this refusal: the bootstrap's baseline is past it
+            if settings.get("refusal_dedupe", True):
+                fresh = [e for e in rows if refusal_key(e) not in self._used(st, refusal_key(e)[:10])]
+            else:
+                fresh = rows
+            if not fresh:
+                return False
+            if not take:
+                return True
+            extra = {"money": "real" if real else "practice"} if self._f2(settings) else {}
+            return self._run(agent, st, "run", "refusal", [f"book.refused:{len(fresh)}"], sampled=False,
+                             record=self.record_of(agent), _refusal=refusal, **extra)
 
     def _absorb_outcomes(self, agent: Any, st: dict[str, Any]) -> None:
         """Fold research summaries since the last look into the abstention streak."""
@@ -378,9 +628,14 @@ class ResearchGate:
     # ---------------------------------------------------------------- triggers
     def triggers(self, agent: Any, st: dict[str, Any]) -> list[str]:
         after = int(st.get("seq") or 0)
+        settings = self.settings
+        dedupe = bool(settings.get("refusal_dedupe", True))
         counts: Counter = Counter()
         for entry in self.ledger.read(kinds=TRIGGER_KINDS, agent=agent.id, after=after, limit=1000):
             if entry.kind == "book.fill" and entry.payload.get("source") == "dust":
+                continue
+            if entry.kind == "book.refused" and dedupe and refusal_key(entry) in self._used(st, str(entry.at)[:10]):
+                # Rule 11 (X2, Sept 25, 2026): this reason already bought this agent research today.
                 continue
             if entry.kind == "credit.grant" and str(entry.payload.get("reason") or "").startswith("epoch payout"):
                 # The hourly payout says nothing new about the agent. Measured Sept 23, 2026: during
@@ -438,27 +693,90 @@ class ResearchGate:
             current = self._blocker_now(agent)
             if current != blocker:
                 found.append(f"unblocked:{blocker}->{current}")
+        barren = self._barren_outcome(agent, st, settings)
+        if barren:
+            found.append(barren)
         return found
+
+    def _barren_outcome(self, agent: Any, st: dict[str, Any], settings: Mapping[str, Any]) -> str:
+        """Rule 9's one outcome of an idle program (`idle_runs: barren`, under `real_positions` only):
+        `barren_wakes` more wakes with live markets in front of it and nothing done since its last
+        session (or since the gate first counted, `barren_seen`), as `barren:<n>`. "" otherwise."""
+        if not self._f2(settings) or str(settings.get("idle_runs") or "off") != "barren":
+            return ""
+        try:
+            barren = int(self.house.idle_run(agent).get("barren") or 0)
+        except Exception:  # noqa: BLE001 - an unreadable idle run is no outcome
+            return ""
+        if "barren_seen" not in st:
+            st["barren_seen"] = barren  # first count under this rule: no burst of runs at deploy
+            return ""
+        seen = int(st.get("barren_seen") or 0)
+        if barren < seen:
+            # Acting or new code reset the count: count from zero from now on (review of #311: seen 40,
+            # then 45 after a reset, read as 5).
+            st["barren_seen"] = seen = 0
+        grown = barren - seen
+        need = int((((getattr(self.house, "game", None) or {}).get("research") or {}).get("idle") or {}).get("barren_wakes") or 10)
+        return f"barren:{grown}" if grown >= need else ""
 
     def _about_it(self, agent: Any, after: int) -> list[str]:
         """Rows without an agent column that are still about this agent: a repair verdict whose key
         names it (`strategy_defect:<agent>:<sha>`), and a teacher's lesson that names its desk or
-        family (Sept 23, 2026: the study's "a new lesson relevant to its desk")."""
+        family (Sept 23, 2026: the study's "a new lesson relevant to its desk"). Since Sept 25, 2026 a
+        lesson is a `playbook.entry` whose source is in `lesson_sources` (the teacher's; never a
+        post-mortem, rule 12), and under `lesson_arm: parity` with `real_positions` it wakes only the
+        lesson arm (`lesson_arm`)."""
         found = []
         states: Counter = Counter()
         for entry in self.ledger.read(kinds="repair.status", after=after, limit=500):
             if f":{agent.id}:" in str(entry.payload.get("key") or "") + ":":
                 states[str(entry.payload.get("state") or "")] += 1
         found += [f"repair.status:{state}" for state in sorted(states) if state]
-        words = {str(w).lower() for w in (getattr(agent, "niche", None), getattr(agent, "specialty", None), agent.family) if w}
-        lessons = 0
-        for entry in self.ledger.read(kinds="playbook.entry", after=after, limit=200):
-            text = f"{entry.payload.get('title') or ''} {entry.payload.get('text') or ''}".lower()
-            if any(word in text for word in words):
-                lessons += 1
+        settings = self.settings
+        if self._f2(settings) and str(settings.get("lesson_arm") or "all") == "parity":
+            # When the arms were first split: the hourly yield row compares them from here (F4).
+            self.state.data.setdefault("lesson_arm_since", now_iso(self.house.clock))
+            if lesson_arm(agent.id) != "lesson":
+                return found  # the control arm: the teacher's lift is measured against it
+        words = lesson_words(agent.id, getattr(agent, "niche", None), getattr(agent, "specialty", None), agent.family)
+        sources = settings.get("lesson_sources") or ["teacher"]
+        lessons = sum(1 for entry in self.ledger.read(kinds="playbook.entry", after=after, limit=200)
+                      if lesson_names(words, entry, sources))
         if lessons:
             found.append(f"lesson:{lessons}")
         return found
+
+    def withheld(self, agent: Any, entry: Any) -> bool:
+        """Whether a `playbook.entry` is held back from this agent (rule 12; review of #311, Sept 25, 2026):
+        under `lesson_arm: parity` with `real_positions`, a teacher's lesson (source in `lesson_sources`)
+        written since the arms were split that names a control-arm agent, for `merton.lift.teacher_days`
+        (3) after it was written -- the window `yield_ledger.teacher_lift` measures. Neither Jev's relevance
+        question (`_relevant_notes`) nor the researcher's `playbook_read` (`Researcher.withheld`, wired by
+        league/service.py) shows it to that agent meanwhile; every other entry, and every lesson after its
+        window, is everyone's. Measured at T0: 413 `playbook_read` calls by 121 agents in 24 hours, so a
+        control agent that researched for any other reason read the lesson that named it, and the lift
+        compared two arms that had both read it. Anything unreadable holds nothing back."""
+        try:
+            settings = self.settings
+            if not settings.get("enabled", True) or not self._f2(settings) or str(settings.get("lesson_arm") or "all") != "parity":
+                return False
+            if lesson_arm(agent.id) != "control":
+                return False
+            sources = settings.get("lesson_sources") or ["teacher"]
+            if str(entry.payload.get("source") or "") not in set(sources):
+                return False
+            since = self.state.data.get("lesson_arm_since")
+            at = _epoch(entry.at)
+            if not since or at < _epoch(since):
+                return False
+            lift = ((getattr(self.house, "game", None) or {}).get("merton") or {}).get("lift") or {}
+            if self.house.clock() - at > float(lift.get("teacher_days") or 3) * 86400:
+                return False
+            words = lesson_words(agent.id, getattr(agent, "niche", None), getattr(agent, "specialty", None), agent.family)
+            return lesson_names(words, entry, sources)
+        except Exception:  # noqa: BLE001 - the control arm must never cost an agent the playbook
+            return False
 
     def lock_profile(self, agent: Any) -> str | None:
         """The profile a NEW session of this agent runs on while it is under the abstention lock
@@ -468,11 +786,18 @@ class ResearchGate:
         settings = self.settings
         profile = str(settings.get("abstain_lock_profile") or "")
         lock_after = int(settings.get("abstain_lock_after") or 0)
-        if not settings.get("enabled", True) or not profile or lock_after <= 0:
+        if not settings.get("enabled", True) or not profile:
             return None
         with self.state.lock:
             streak = int(self.state.agent(agent.id).get("streak") or 0)
-        if streak < lock_after or self.record_of(agent) == "idle":
+        if self._f2(settings):
+            # Rule 10 (Sept 25, 2026): a paused practice agent's fill session, and a locked real agent's,
+            # run on the cheapest profile; idleness buys no exemption once the clock runs nobody idle.
+            # A rung-0 agent is neither paused nor locked (it keeps its clock), but after three empty
+            # sessions its sessions run on the cheapest profile, as they did under rule 7.
+            real = self._money(agent)[0]
+            return profile if self._paused(settings, real, streak, agent) or (lock_after > 0 and streak >= lock_after) else None
+        if lock_after <= 0 or streak < lock_after or self.record_of(agent) == "idle":
             return None
         return profile
 
@@ -506,6 +831,8 @@ class ResearchGate:
         for entry in self.ledger.read(kinds=("library.note", "playbook.entry"), after=after, limit=1000):
             if entry.agent == agent.id or (entry.kind == "library.note" and entry.payload.get("niche") == niche):
                 continue
+            if entry.kind == "playbook.entry" and self.withheld(agent, entry):
+                continue  # rule 12: the control arm is not asked about the lesson that names it
             other = str(entry.payload.get("niche") or "")
             if other and not other.startswith(venue):
                 continue  # a note from the other venue's desks is not this strategy's business
@@ -545,33 +872,60 @@ class ResearchGate:
             settings = self.settings
             streak = int(st.get("streak") or 0)
             record = self.record_of(agent)
+            f2 = self._f2(settings)
+            real, holding = self._money(agent) if f2 else (False, False)
+            # Under rule 9 every row says which money the agent is on, so the watch can read that the
+            # clock and the 24-hour heartbeat went only to real money.
+            tags: dict[str, Any] = {"record": record, **({"money": "real" if real else "practice"} if f2 else {})}
             if forced:
-                return self._run(agent, st, "run", forced, [forced], sampled=False, record=record)
+                return self._run(agent, st, "run", forced, [forced], sampled=False, **tags)
             found = self.triggers(agent, st)
             lock_after = int(settings.get("abstain_lock_after") or 0)
-            locked = lock_after > 0 and streak >= lock_after and record != "idle"
-            if locked:
+            # Rule 9: an agent on rung 0 (replay only) keeps its clock; it is neither paused nor locked.
+            rung0 = f2 and self._rung(agent) == 0
+            paused = not rung0 and self._paused(settings, real, streak)
+            # Rule 7's idle exemption kept an idle agent's cadence; under rule 9 no idle agent has one.
+            locked = not paused and not rung0 and lock_after > 0 and streak >= lock_after and (f2 or record != "idle")
+            if paused:
+                # Rule 10: a practice agent after three empty sessions waits for news of its program, or
+                # its own trading once a day.
+                found = self._pause_filter(st, found, now)
+                if any(t.split(":", 1)[0] in PAUSE_DAILY for t in found):
+                    st["pause_trade_day"] = now_iso(lambda: now)[:10]
+            elif locked:
                 # Rule 7: after `abstain_lock_after` empty sessions only its own venue outcomes count.
                 found = [t for t in found if t.split(":", 1)[0] in ABSTAIN_LOCK_TRIGGERS]
             if found:
-                return self._run(agent, st, "run", "trigger", found, sampled=False, record=record)
+                return self._run(agent, st, "run", "trigger", found, sampled=False, **tags)
             if now < float(st.get("recheck_at") or 0):
                 return False  # inside a skipped slot: re-checked only for triggers until the next one
             after = int(settings["after"])
             current = st.get("blocker")
             blocked = bool(current) and streak >= int(settings["blocker_after"])
-            # Rule 6: the clock alone runs a winner and an idle agent; everyone else waits for evidence.
-            clock = (str(settings.get("clock_runs") or "all") != "winners_and_idle" or record in CLOCK_RECORDS) and not locked
+            if f2:
+                # Rule 9: the clock runs an agent on real money that holds a position or a working order
+                # there or met a refusal since its last session, and an agent on rung 0 (replay only).
+                clock = not locked and not paused and ((real and (holding or bool(self._refusals_since(agent, st))))
+                                                       or rung0
+                                                       or (record == "idle" and settings.get("idle_runs") == "clock"))
+            else:
+                # Rule 6: the clock alone runs a winner and an idle agent; everyone else waits for evidence.
+                clock = (str(settings.get("clock_runs") or "all") != "winners_and_idle" or record in CLOCK_RECORDS) and not locked
             receipt: dict[str, Any] = {}
             interval = float(self.house.research_interval_hours(agent)) * 3600
             if clock and streak < after and not blocked:
-                return self._run(agent, st, "run", "clock", [], sampled=False, record=record)
-            hits, answered = ([], True) if locked else self._relevant_notes(agent, st, receipt)
+                return self._run(agent, st, "run", "clock", [], sampled=False, **tags)
+            hits, answered = ([], True) if (locked or paused) else self._relevant_notes(agent, st, receipt)
             if hits:
-                return self._run(agent, st, "run", "jev_relevant_note", hits, sampled=False, receipt=receipt, record=record)
-            if now - last >= float(settings["max_skip_hours"]) * 3600:
-                return self._run(agent, st, "run", "heartbeat", [], sampled=False, receipt=receipt, record=record)
-            if locked:
+                return self._run(agent, st, "run", "jev_relevant_note", hits, sampled=False, receipt=receipt, **tags)
+            heartbeat = float(settings["practice_max_skip_hours"] if f2 and not real else settings["max_skip_hours"])
+            # Rule 9: an agent that never researched (`last` 0) counts from the gate's first sight of it.
+            since = float(st.get("since") or 0) if f2 and not last else last
+            if not paused and now - since >= heartbeat * 3600:
+                return self._run(agent, st, "run", "heartbeat", [], sampled=False, receipt=receipt, **tags)
+            if paused:
+                reason = f"practice_pause:{streak}"
+            elif locked:
                 reason = f"abstain_lock:{streak}"
             elif not clock:
                 reason = f"nothing_new:{record}"
@@ -580,17 +934,29 @@ class ResearchGate:
             else:
                 factor = min(2 ** (streak - after + 1), float(settings["max_factor"]))
                 if now - last >= interval * factor:
-                    return self._run(agent, st, "run", "backoff_elapsed", [], sampled=False, receipt=receipt, record=record)
+                    return self._run(agent, st, "run", "backoff_elapsed", [], sampled=False, receipt=receipt, **tags)
                 reason = f"backoff:{streak}"
             if not answered:
                 reason += ":jev_unavailable"
             st["recheck_at"] = now + interval
             st["slot"] = int(st.get("slot") or 0) + 1
-            if self._sampled(agent, last, st["slot"]):
-                return self._run(agent, st, "sample", reason, [], sampled=True, receipt=receipt, record=record)
-            self._skip(agent, st, reason, receipt, record=record)
+            if self._draw(agent, st, last, now, settings):
+                return self._run(agent, st, "sample", reason, [], sampled=True, receipt=receipt, **tags)
+            self._skip(agent, st, reason, receipt, **tags)
             self.state.save()
             return False
+
+    def _draw(self, agent: Any, st: dict[str, Any], last: float, now: float, settings: Mapping[str, Any]) -> bool:
+        """Whether this skip is sampled (rule 5). Under rule 10 an agent is drawn at most once per
+        `sample_hours` window, whatever its research interval; otherwise once per skipped slot."""
+        hours = float(settings.get("sample_hours") or 0)
+        if not self._f2(settings) or hours <= 0:
+            return self._sampled(agent, last, st["slot"])
+        window = int(now // (hours * 3600))
+        if st.get("sample_window") == window:
+            return False
+        st["sample_window"] = window
+        return self._sampled(agent, float(window), 0)
 
     def _row(self, agent: Any, decision: str, reason: str, triggers: list[str], *, sampled: bool,
              sessions: int = 1, receipt: Mapping[str, Any] | None = None, **extra) -> None:
@@ -615,34 +981,66 @@ class ResearchGate:
         if int(episode.get("pending") or 0) > 0:
             self._row(agent, "skip", episode["reason"], [], sampled=False, sessions=int(episode["pending"]),
                       aggregated=True, since=episode.get("since"), cost_usd_total=episode.get("cost", "0"),
-                      record=episode.get("record"))
+                      record=episode.get("record"), **({"money": episode["money"]} if episode.get("money") else {}))
         st["episode"] = None
 
-    def _skip(self, agent: Any, st: dict[str, Any], reason: str, receipt: Mapping[str, Any], *, record: str | None = None) -> None:
+    def _skip(self, agent: Any, st: dict[str, Any], reason: str, receipt: Mapping[str, Any], *, record: str | None = None,
+              money: str | None = None) -> None:
         episode = st.get("episode")
+        tags = {"record": record, **({"money": money} if money else {})}
         if episode and episode.get("reason") != reason:
             self._flush(agent, st)
             episode = None
         if not episode:
             # The first skip of an episode is written at once; repeats are counted and flushed.
-            self._row(agent, "skip", reason, [], sampled=False, receipt=receipt, record=record)
-            st["episode"] = {"reason": reason, "pending": 0, "since": now_iso(self.house.clock), "cost": "0", "record": record}
+            self._row(agent, "skip", reason, [], sampled=False, receipt=receipt, **tags)
+            st["episode"] = {"reason": reason, "pending": 0, "since": now_iso(self.house.clock), "cost": "0", **tags}
             return
         episode["pending"] = int(episode.get("pending") or 0) + 1
         episode["cost"] = format(Decimal(episode.get("cost") or "0") + Decimal(str(receipt.get("cost") or 0)), "f")
         if episode["pending"] >= int(self.settings["aggregate_sessions"]):
             self._flush(agent, st)
-            st["episode"] = {"reason": reason, "pending": 0, "since": now_iso(self.house.clock), "cost": "0", "record": record}
+            st["episode"] = {"reason": reason, "pending": 0, "since": now_iso(self.house.clock), "cost": "0", **tags}
 
     def _run(self, agent: Any, st: dict[str, Any], decision: str, reason: str, triggers: list[str], *,
              sampled: bool, receipt: Mapping[str, Any] | None = None, **extra: Any) -> bool:
         self._flush(agent, st)
+        # Rule 11: this session sees every refusal since the baseline, so their keys are used today.
+        new, dup = self._consume_refusals(agent, st, extra.pop("_refusal", None))
+        totals = self.state.data.setdefault("totals", {})
+        totals["refusal_keys"] = int(totals.get("refusal_keys") or 0) + new
+        if dup:
+            totals["refusals_deduped"] = int(totals.get("refusals_deduped") or 0) + dup
+            extra = {**extra, "refusals_deduped": dup}
         self._row(agent, decision, reason, triggers, sampled=sampled, receipt=receipt, **extra)
         # The baseline is the ledger head at dispatch: anything recorded during the session is
         # news for the next decision (conservative: it can only cause a run, never hide one).
         st.update(self._snapshot(agent), seq=self.ledger.head()[0], recheck_at=0.0, blocker=None)
         st["notes_seq"] = st["seq"]
+        if "barren_seen" in st or self._f2(self.settings):
+            try:
+                st["barren_seen"] = int(self.house.idle_run(agent).get("barren") or 0)  # rule 9 counts from here
+            except Exception:  # noqa: BLE001 - an unreadable idle run keeps the old count
+                pass
         self.state.save()
+        return True
+
+
+def refusal_news(house: Any, agent: Any, refusal: Any, *, take: bool = False) -> bool:
+    """`House.research_due`'s refusal fast path asks this before it runs (rule 11): the House's gate
+    (`house.jev_floor.gate`) decides whether the refusal is news, and with `take` records the run. With
+    no gate wired, or a gate that raises, every new refusal is news, as before Sept 25, 2026: the gate
+    saves money and must never cost research."""
+    gate = getattr(getattr(house, "jev_floor", None), "gate", None)
+    if gate is None:
+        return True
+    try:
+        return bool(gate.refusal_news(agent, refusal, take=take))
+    except Exception as exc:  # noqa: BLE001 - fail open, as `JevFloor.research_due` does
+        try:
+            house.alert("warning", f"research gate's refusal check failed open for {agent.id} ({type(exc).__name__}: {str(exc)[:160]})")
+        except Exception:  # noqa: BLE001
+            pass
         return True
 
 
@@ -722,7 +1120,15 @@ def report(ledger: Any, *, sensor: Any = None, after: int = 0) -> dict[str, Any]
     for row in by_trigger.values():
         row["usd_per_candidate"] = format(row["cost_usd"] / row["candidates"], ".4f") if row["candidates"] else None
         row["cost_usd"] = format(row["cost_usd"], "f")
+    # Sept 25, 2026 (rules 9 and 11): which money each run's agent was on, by reason, so the watch reads
+    # that the clock and the 24-hour heartbeat went only to real money; and the refusals deduplicated.
+    by_money: dict[str, Counter] = {}
+    for e in decisions:
+        if e.payload.get("decision") in ("run", "sample") and e.payload.get("money"):
+            by_money.setdefault(str(e.payload["money"]), Counter())[str(e.payload.get("reason") or "").split(":")[0]] += 1
     return {
+        "by_money": {money: dict(sorted(reasons.items(), key=lambda kv: -kv[1])) for money, reasons in sorted(by_money.items())},
+        "refusals_deduped": sum(int(e.payload.get("refusals_deduped") or 0) for e in decisions),
         "by_trigger": dict(sorted(by_trigger.items(), key=lambda kv: -kv[1]["runs"])),
         "decisions": len(decisions), "runs": sum(1 for e in decisions if e.payload.get("decision") == "run"),
         "skipped_sessions": skipped, "sampled": len(samples), "sampled_finished": finished, "sampled_misses": misses,

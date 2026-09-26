@@ -1063,3 +1063,184 @@ class TheWatchNeverRollsBackForTheLab(Case):
             reading = watch()
             self.assertTrue(reading.ok, reading.reasons)
         self.assertFalse(read_health(root, now=self.clock()).ok, "status still says so")
+
+
+# ------------------------------------------------------------------------------- environment
+def raised(make, *, inside=None, cause=None, suppress=False):
+    """The exception `make()` raises, raised the way the House's clients raise theirs: inside the
+    handler of `inside` (so `inside` is its `__context__`), `from cause`, or `from None`."""
+    try:
+        if inside is None:
+            if cause is not None:
+                raise make() from cause
+            raise make()
+        try:
+            raise inside
+        except BaseException:
+            if suppress:
+                raise make() from None
+            raise make()
+    except BaseException as exc:  # noqa: BLE001
+        return exc
+
+
+class TheEnvironmentClassifier(unittest.TestCase):
+    """H2 (the forward-first run, Sept 25, 2026): an alert about a call outside the House's process is
+    marked `environment` only when the SERVICE failed -- a 5xx, 429, 408 or 425, a timeout, a refused,
+    reset or unreachable connection, a name that did not resolve -- never when this code did."""
+
+    def http_error(self, url, code, msg):
+        import urllib.error
+
+        error = urllib.error.HTTPError(url, code, msg, {}, io.BytesIO(b""))
+        self.addCleanup(error.close)
+        return error
+
+    def test_a_services_failure_is_marked(self):
+        import errno
+        import http.client
+        import socket
+        import urllib.error
+
+        from league.publish import PublishError
+        from league.sandbox import SandboxError
+        from ltcm.data import TransportError as DataTransportError
+        from ltcm.provider import TransportError as ProviderTransportError
+        from ltcm.sailbox import SailboxError
+
+        sail_503 = SailboxError("sailbox api 503: prepare checkpoint warm snapshot: rpc error: code = DeadlineExceeded", status=503)
+        for exc in (
+            sail_503,  # Sept 24-25, 2026: 73 of these rolled back six releases
+            SailboxError("sailbox api 429: slow down", status=429),
+            raised(lambda: SailboxError("sailbox transport failed: TimeoutError"), inside=TimeoutError("timed out"), suppress=True),
+            raised(lambda: SandboxError("agent: SailboxError: sailbox api 502: bad gateway"), cause=SailboxError("sailbox api 502", status=502)),
+            self.http_error("https://api.github.com/x", 502, "Bad Gateway"),
+            urllib.error.URLError(ConnectionRefusedError(errno.ECONNREFUSED, "refused")),
+            urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")),
+            socket.gaierror(socket.EAI_NONAME, "Name or service not known"),
+            TimeoutError("The read operation timed out"),
+            ConnectionResetError(errno.ECONNRESET, "reset by peer"),
+            http.client.RemoteDisconnected("Remote end closed connection without response"),
+            OSError(errno.ENETUNREACH, "Network is unreachable"),
+            PublishError("the site refused the checkpoint: HTTP 503 upstream", status=503),
+            raised(lambda: PublishError("the site did not answer: URLError"), inside=urllib.error.URLError(TimeoutError("timed out")),
+                   suppress=True),
+            # Sept 23, 2026: five wakes failed on the gateway's read timeout (haghani-52 at 07:35:14Z the first)
+            raised(lambda: DataTransportError("GET https://ltcm-gateway/v1/alpaca-paper/v2/orders/x failed: The read operation timed out"),
+                   cause=TimeoutError("The read operation timed out")),
+            raised(lambda: ProviderTransportError("provider_http_503"),
+                   inside=self.http_error("https://api.sail/v1", 503, "Service Unavailable"), suppress=True),
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertTrue(wd.service_failed(exc))
+                self.assertEqual(wd.environment("sail", exc), {"environment": "sail"})
+
+    def test_this_codes_own_failure_is_never_marked(self):
+        """The unit test the brief asks for: an alert on the Sail path raised by a code exception is the House's."""
+        import errno
+        import http.client
+        import urllib.error
+
+        from league.publish import PublishError
+        from league.sandbox import SandboxError
+        from ltcm.provider import TransportError as ProviderTransportError
+        from ltcm.sailbox import SailboxError
+
+        sail_503 = SailboxError("sailbox api 503", status=503)
+        for exc in (
+            TypeError("unsupported operand type(s) for +: 'int' and 'str'"),
+            KeyError("sailbox_id"),
+            AttributeError("'NoneType' object has no attribute 'get'"),
+            ValueError("not JSON"),
+            raised(lambda: KeyError("checkpoint_id"), inside=sail_503),  # a bug in the handler of a 503 is still a bug
+            raised(lambda: TypeError("bad payload"), inside=urllib.error.URLError(TimeoutError("timed out"))),
+            urllib.error.URLError("unknown url type: htps"),  # a URL this code built
+            http.client.InvalidURL("nonnumeric port: 'x'"),
+            raised(lambda: SandboxError("agent: TypeError: bad payload"), cause=TypeError("bad payload")),
+            SailboxError("sailbox api 400: invalid ttl_seconds", status=400),  # a payload this code built
+            SailboxError("sailbox api 401: bad key", status=401),
+            SailboxError("sailbox api 404: no such box", status=404),
+            SailboxError("not a Sailbox id"),  # the client's own validation: no status, no network under it
+            self.http_error("https://api.github.com/x", 404, "Not Found"),
+            PublishError("the site refused the checkpoint: HTTP 400 schema", status=400),
+            ProviderTransportError("provider_key_missing"),
+            RuntimeError("sailbox api 503: said in words, not a status"),
+            RuntimeError("1 running boxes are named ltcm-floor"),
+            FileNotFoundError(errno.ENOENT, "No such file or directory"),
+            sqlite3.OperationalError("database is locked"),
+            None,
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertFalse(wd.service_failed(exc))
+                self.assertEqual(wd.environment("sail", exc), {})
+        self.assertEqual(wd.environment("", sail_503), {}, "no service named, no marker")
+
+    def test_an_exception_raised_while_a_services_failure_was_handled_is_the_houses(self):
+        """Review of H2 (Sept 25, 2026): a RuntimeError of this code's own -- a BookError, a SandboxError, a dict changed
+        during iteration -- raised in the except block of a timeout, without `from`, is a new failure of the House's,
+        never judged by the one it was handling. The House's clients wrap a failure `from exc` or `from None`, and
+        those are still judged by it."""
+        import errno
+
+        from league.book import BookError
+        from league.sandbox import SandboxError
+        from ltcm.sailbox import SailboxError
+
+        for exc in (
+            raised(lambda: RuntimeError("dictionary changed size during iteration"), inside=ConnectionResetError(errno.ECONNRESET, "reset")),
+            raised(lambda: BookError("invariant broken"), inside=TimeoutError("timed out")),
+            raised(lambda: SandboxError("agent: the batch failed"), inside=SailboxError("sailbox api 503", status=503)),
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertFalse(wd.service_failed(exc))
+        for exc in (
+            raised(lambda: SandboxError("agent: SailboxError: sailbox api 503"), inside=SailboxError("sailbox api 503", status=503), suppress=True),
+            raised(lambda: SandboxError("agent: the batch timed out"), cause=TimeoutError("timed out")),
+        ):
+            with self.subTest(exc=repr(exc)[:90]):
+                self.assertTrue(wd.service_failed(exc))
+
+
+class EnvironmentAlertsInTheWatch(ReadHealthTest):
+    """H2: an error alert marked `environment` is counted in the reading's detail and never a reason,
+    in the watch after a promotion and in the canary alike; an unmarked one still is."""
+
+    SAIL = "The daily backup of the House box failed on Sail's side (SailboxError: sailbox api 503: prepare checkpoint warm snapshot)."
+
+    def test_an_environment_alert_is_counted_and_never_a_reason(self):
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})
+        since = ledger.head()[0]
+        ledger.append("ops.alert", {"level": "error", "text": self.SAIL, "environment": "sail", "failures": 1,
+                                    "began_at": wd.iso(self.clock())})  # began INSIDE the watch: nothing to inherit
+        ledger.append("ops.alert", {"level": "error", "text": "a warning repeated 10 times in 30 minutes: publishing failed (PublishError)",
+                                    "environment": "site", "began_at": wd.iso(self.clock())})
+        write_health(self.root, self.clock, seq=ledger.head()[0])
+        for label, kw in (("the watch", {"inherited_before": self.clock() - 600}), ("a canary", {})):
+            with self.subTest(label):
+                health = self.read(since_seq=since, **kw)
+                self.assertTrue(health.ok, health.reasons)
+                self.assertEqual((health.detail["error_alerts"], health.detail["environment_alerts"]), (0, 2))
+                self.assertEqual(health.detail["environment_first"], {"seq": since + 1, "service": "sail", "text": self.SAIL})
+
+    def test_the_houses_own_errors_still_roll_back_beside_an_outage(self):
+        ledger = self.ledger()
+        ledger.append("ops.started", {"books": []})
+        since = ledger.head()[0]
+        ledger.append("ops.alert", {"level": "error", "text": self.SAIL, "environment": "sail"})
+        ledger.append("ops.alert", {"level": "error", "text": "tick failed: KeyError: 'settled'"})
+        ledger.append("ops.alert", {"level": "error", "text": "a marker that is not a service", "environment": True})
+        ledger.append("ops.alert", {"level": "error", "text": "an empty marker", "environment": "  "})
+        write_health(self.root, self.clock, seq=ledger.head()[0])
+        health = self.read(since_seq=since, inherited_before=self.clock() - 600)
+        self.assertFalse(health.ok)
+        self.assertEqual((health.detail["error_alerts"], health.detail["environment_alerts"]), (3, 1))
+        self.assertIn("3 error alert(s) since seq 1; the first, at seq 3: tick failed: KeyError: 'settled'", health.reasons[0])
+
+    def test_no_environment_alert_is_zero(self):
+        ledger = self.ledger()
+        since = ledger.head()[0]
+        write_health(self.root, self.clock, seq=since)
+        health = self.read(since_seq=since)
+        self.assertEqual(health.detail["environment_alerts"], 0)
+        self.assertNotIn("environment_first", health.detail)

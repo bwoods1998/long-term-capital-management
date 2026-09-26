@@ -5,6 +5,7 @@ from pathlib import Path
 
 from league.tapes import (
     DAY,
+    DEFAULT_MAX_MARKETS,
     TIMEFRAME_SECONDS,
     AlpacaData,
     KalshiData,
@@ -12,6 +13,8 @@ from league.tapes import (
     is_crypto,
     iso,
     listed_close,
+    listing_errors,
+    listing_window,
     load_env,
     parse_strike,
     parse_time,
@@ -686,6 +689,44 @@ class KalshiMarketsTest(unittest.TestCase):
         rows = KalshiData(data, clock=clock).markets(["KXNFLGAME"], max_hours_to_close=12)
         self.assertEqual([row["market"] for row in rows], ["KXNFLGAME-26SEP10AB-A"])
         self.assertEqual((rows[0]["close_time"], rows[0]["hours_to_close"], rows[0]["hours_to_resolve"]), ("2026-09-10T20:15:00Z", 6.2167, 6.2167))
+
+    def test_the_listing_window_hides_games_in_progress_and_caps_the_rows(self):
+        """Sept 25, 2026 (K1): a game market's hours_to_close runs to the game's expected end, three hours
+        after the start, so the 200 soonest to close were every game in progress. Two opt-in NEEDS keys:
+        `min_hours_to_close` and `max_markets`; a listing asked without them is what it always was."""
+        def game(code, hours):  # a game whose markets are expected to end `hours` from NOW
+            end = iso(NOW + hours * 3600)
+            return [live(f"KXNCAAFSPREAD-26SEP10{code}-{code[:3]}{n}", "0.40", "0.44", "2026-09-12T17:00:00Z", can_close_early=True,
+                         expected_expiration_time=end) for n in (3, 7)]
+        data = FakeMarketData({"KXNCAAFSPREAD": [game("ONEAAA", 1.5) + game("TWOBBB", 3.2) + game("THRCCC", 5.0) + game("FOUDDD", 2.99)]})
+        kalshi = KalshiData(data, clock=clock)
+        everything = kalshi.markets(["KXNCAAFSPREAD"], max_hours_to_close=12)
+        self.assertEqual([row["market"].split("-")[1] for row in everything][::2], ["26SEP10ONEAAA", "26SEP10FOUDDD", "26SEP10TWOBBB", "26SEP10THRCCC"])
+        started = kalshi.markets(["KXNCAAFSPREAD"], max_hours_to_close=12, min_hours_to_close=3.0)
+        self.assertEqual([row["market"] for row in started], [row["market"] for row in everything if row["hours_to_close"] >= 3.0])
+        self.assertEqual({row["market"].split("-")[1] for row in started}, {"26SEP10TWOBBB", "26SEP10THRCCC"})
+        capped = kalshi.markets(["KXNCAAFSPREAD"], max_hours_to_close=12, min_hours_to_close=3.0, limit=3)
+        self.assertEqual(capped, started[:3])  # still soonest to close first, after the floor
+        self.assertEqual(kalshi.markets(["KXNCAAFSPREAD"], max_hours_to_close=12, limit=200), everything)
+
+    def test_the_listing_window_a_strategys_needs_declare(self):
+        self.assertEqual((listing_window({}), listing_errors({})), ((0.0, DEFAULT_MAX_MARKETS), []))
+        self.assertEqual(DEFAULT_MAX_MARKETS, 200)
+        self.assertEqual(listing_window({"max_hours_to_close": 30, "min_hours_to_close": 3.0, "max_markets": 500}), (3.0, 500))
+        self.assertEqual(listing_window({"min_hours_to_close": 2}), (2.0, 200))
+        for needs, wrong in (({"min_hours_to_close": -1}, "at least 0"), ({"min_hours_to_close": True}, "at least 0"),
+                             ({"min_hours_to_close": "3"}, "at least 0"), ({"min_hours_to_close": float("nan")}, "at least 0"),
+                             ({"max_hours_to_close": 30, "min_hours_to_close": 30}, "under max_hours_to_close (30)"),
+                             ({"min_hours_to_close": 24.0}, "under max_hours_to_close (24)"),
+                             ({"max_markets": 0}, "from 1 to 500"), ({"max_markets": 501}, "from 1 to 500"),
+                             ({"max_markets": 300.0}, "from 1 to 500"), ({"max_markets": False}, "from 1 to 500")):
+            with self.subTest(needs=needs):
+                errors = listing_errors(needs)
+                self.assertEqual(len(errors), 1)
+                self.assertIn(wrong, errors[0])
+                # A wake reads a key it would refuse as absent: never a failed wake.
+                self.assertEqual(listing_window(needs), (0.0, 200))
+        self.assertEqual(listing_window({"min_hours_to_close": -1, "max_markets": 300}), (0.0, 300))
 
     def test_a_market_paid_after_it_stops_trading_shows_both_times(self):
         data = FakeMarketData({"KXHIGHNY": [[live("KXHIGHNY-26SEP10-T78", "0.91", "0.93", "2026-09-10T20:00:00Z", can_close_early=True, expected_expiration_time="2026-09-11T10:00:00Z")]]})

@@ -57,6 +57,7 @@ class GraduatesFirst(LabCase):
         """As test_lab's graduation tests: queue Luna children and evaluate them into the archive."""
         ids = [self.queue(code, origin="luna") for code in codes]
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         return ids
 
     def test_no_house_mutation_is_staked_while_a_graduate_waits(self):
@@ -127,7 +128,7 @@ class EvidencedNewcomers(SeatCase):
         self.assertIsNone(self.house._weakest(self.rules))
         self.assertEqual(self.house._weakest(self.rules, evidenced=True).id, young.id)
         self.house.kill(young, "displaced", "test")
-        self.clock.advance(float(self.house.settings.tick_seconds) + 1)  # one displacement a desk a tick
+        self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)  # one displacement a desk a minute
         # Sept 24, 2026: a never-traded paper seat first has its fair chance (an hour on a desk with no clock) --
         # after Deploy B evidenced waiters took each other's seats 33 s to 14 min after birth.
         self.assertIsNone(self.house._weakest(self.rules, evidenced=True), "inside its fair chance")
@@ -165,7 +166,7 @@ class EvidencedNewcomers(SeatCase):
         loser = self.house._weakest(self.rules)
         self.house.kill(loser, "displaced", "test")
         self.assertIsNone(self.house._weakest(self.rules))
-        self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+        self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)
         self.assertEqual(self.house._weakest(self.rules).id, (second if loser.id == first.id else first).id)
 
 
@@ -296,8 +297,10 @@ class SeatCaps(unittest.TestCase):
         niches = {row["id"]: row for row in json.loads((root / "niches.json").read_text())["niches"]}
         # R2 (Sept 24, 2026): the seats follow the waiters that remain once the search's closed desks are taken out
         # (niches.json `_about` has the 15:06Z count behind each), and fewer where the search is closed.
-        for desk, cap in {"kalshi-weather": 17, "kalshi-sports": 19, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
-                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 8, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
+        # Sept 25, 2026 (K1, K1c, K3): sports 19 -> 25 and weather 17 -> 21, a seat for each of the flagged founders;
+        # crypto-15m 8 -> 4, the floor its `yields_seats` gives founders down to.
+        for desk, cap in {"kalshi-weather": 21, "kalshi-sports": 25, "alpaca-index-etfs": 18, "alpaca-megacaps": 16,
+                          "alpaca-crypto-alts": 16, "kalshi-crypto-15m": 4, "kalshi-crypto-strikes": 6, "kalshi-sports-props": 6,
                           "kalshi-attention": 4}.items():
             self.assertEqual(niches[desk]["max_members"], cap, desk)
         turbo = json.loads((root / "turbo.json").read_text())

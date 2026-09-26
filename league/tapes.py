@@ -550,6 +550,48 @@ def _listed_stop(row: "dict[str, Any]", close_ts: float) -> float:
 #: A market that may close early lists a close well after it will really stop trading. The live
 #: view asks this much further ahead, and keeps what is expected to RESOLVE inside the window.
 EARLY_CLOSE_SLACK_SECONDS = 72 * 3600
+#: How many markets a Kalshi wake is shown, soonest to close first, unless its NEEDS say otherwise
+#: (`max_markets`, 1 to `MAX_MARKETS`).
+DEFAULT_MAX_MARKETS = 200
+MAX_MARKETS = 500
+
+
+def listing_errors(needs: "dict[str, Any]") -> "list[str]":
+    """What is wrong with the listing window a strategy's NEEDS declare (Sept 25, 2026, the
+    Kalshi-scale run's K1), or []. Two OPT-IN keys, absent from every strategy written before them:
+
+    - `min_hours_to_close`: a number, at least 0 and under `max_hours_to_close` (24 when absent);
+      only markets whose `hours_to_close` is at least this are shown.
+    - `max_markets`: a whole number from 1 to `MAX_MARKETS`; how many are shown (200 when absent).
+
+    Measured on the slate of Sept 26-27, 2026: a Kalshi game market's `hours_to_close` runs to the
+    game's expected END, so the 200 soonest to close were every game in progress -- from the noon
+    kickoffs on Saturday a college-football strategy was shown no game it could still enter."""
+    errors: "list[str]" = []
+    if "min_hours_to_close" in needs:
+        floor = needs["min_hours_to_close"]
+        ceiling = _float(needs.get("max_hours_to_close")) if needs.get("max_hours_to_close") else 24.0
+        if isinstance(floor, bool) or not isinstance(floor, (int, float)) or _float(floor) is None or float(floor) < 0:
+            errors.append(f"min_hours_to_close must be a number of hours at least 0, not {floor!r}")
+        elif ceiling is not None and float(floor) >= ceiling:
+            errors.append(f"min_hours_to_close ({floor}) must be under max_hours_to_close ({ceiling:g})")
+    if "max_markets" in needs:
+        cap = needs["max_markets"]
+        if isinstance(cap, bool) or not isinstance(cap, int) or not 1 <= cap <= MAX_MARKETS:
+            errors.append(f"max_markets must be a whole number from 1 to {MAX_MARKETS}, not {cap!r}")
+    return errors
+
+
+def listing_window(needs: "dict[str, Any]") -> "tuple[float, int]":
+    """(min_hours_to_close, max_markets) a strategy's Kalshi listing is shown with: (0.0, 200)
+    unless its NEEDS declare valid ones (`listing_errors`; an invalid key is read as absent, so a
+    wake never fails on it -- a birth is refused by it instead, `niches.constrain`)."""
+    floor, cap = 0.0, DEFAULT_MAX_MARKETS
+    if "min_hours_to_close" in needs and not listing_errors({k: needs[k] for k in ("min_hours_to_close", "max_hours_to_close") if k in needs}):
+        floor = float(needs["min_hours_to_close"])
+    if "max_markets" in needs and not listing_errors({"max_markets": needs["max_markets"]}):
+        cap = int(needs["max_markets"])
+    return floor, cap
 
 
 def _day_windows(start_ts: float, end_ts: float) -> "list[tuple[int, int]]":
@@ -710,10 +752,13 @@ class KalshiData:
         return resolution(row, close_ts, lags=self.settle_lags, at=float(self.clock()))
 
     # ---------------------------------------------------------------- snapshot
-    def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = 200, max_age: "float | None" = None) -> "list[dict[str, Any]]":
+    def markets(self, series: "list[str]", *, max_hours_to_close: float = 24.0, limit: int = DEFAULT_MAX_MARKETS, max_age: "float | None" = None,
+                min_hours_to_close: float = 0.0) -> "list[dict[str, Any]]":
         """The open markets of these series that stop trading or resolve within
         `max_hours_to_close`, soonest first, in the CONTRACT.md shape. Only a market with a
-        two-sided touch is shown; at most `limit` rows (the soonest to close)."""
+        two-sided touch is shown, and only one whose `hours_to_close` is at least
+        `min_hours_to_close` (a strategy's opt-in NEEDS key: a game in progress is not shown to
+        one that enters only before the start); at most `limit` rows (the soonest to close)."""
         names = self._series(series)
         hours = _float(max_hours_to_close)
         if hours is None or hours <= 0:
@@ -726,7 +771,8 @@ class KalshiData:
                 shown = self._live_row(raw, name, now, horizon_ts, lags=self.settle_lags)
                 if shown is not None:
                     rows[shown[1]["market"]] = shown
-        ordered = sorted(rows.values(), key=lambda pair: (pair[0], pair[1]["market"]))
+        floor = _float(min_hours_to_close) or 0.0
+        ordered = sorted((pair for pair in rows.values() if pair[1]["hours_to_close"] >= floor), key=lambda pair: (pair[0], pair[1]["market"]))
         return [row for _, row in ordered[: max(0, int(limit))]]
 
     @staticmethod

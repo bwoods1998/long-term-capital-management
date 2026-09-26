@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from league.constitution import CONSTITUTION
 from league.house import SEAT_WAIT_WARN_SECONDS, House, Newcomer
 from league.ledger import now_iso
 from league.tests.test_house import BUYER
@@ -115,6 +116,7 @@ class GraduatesLeave(LabCase):
     def waiting_graduate(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")
         self.house.evaluator.promote(resident.id, 2, "test: real money")  # nobody may be displaced: the graduate waits
@@ -147,6 +149,7 @@ class GraduatesLeave(LabCase):
     def test_no_seat_is_made_for_a_graduate_on_a_desk_the_search_closes(self):
         self.queue(KNOB, origin="luna")
         self.lab.evaluate_batch()
+        self.forward_wins()  # F1 (Sept 25, 2026): a winning forward window of its own before the House's replay
         self.niche.max_members = 1
         resident = self.seated("resident")  # never trades
         self.clock.advance(3601)  # past its fair chance: an evidenced newcomer may take a never-traded seat
@@ -234,7 +237,7 @@ class StaleSeats(EvidenceCase):
             loser = self.house._weakest(self.rules, evidenced=True, newcomer=scored)
             self.house.kill(loser, "displaced", "test")
             self.assertIsNone(self.house._weakest(self.rules, evidenced=True, newcomer=scored))
-            self.clock.advance(float(self.house.settings.tick_seconds) + 1)
+            self.clock.advance(float(self.house.settings.desk_displacement_seconds) + 1)
             self.assertEqual(self.house._weakest(self.rules, evidenced=True, newcomer=scored).id, (second if loser.id == first.id else first).id)
 
     def test_a_desk_with_no_clock_measured_keeps_the_plain_grace_and_the_fair_chance_holds_everywhere(self):
@@ -437,6 +440,12 @@ class NewCodeFamilies(EvidenceCase):
     them (28 living) named other markets or another style."""
 
     def setUp(self):
+        # The Sept 24 rule this class pins is the label rule: C8 (the forward-first run, Sept 25, 2026; the constitution's
+        # `allocator.family_key` "mechanism") keys every birth by its mechanism instead, which league/tests/test_family_key.py
+        # tests. Without the key a birth keeps its label, with this rule for a research fork: the rollback form.
+        label = patch.dict(CONSTITUTION["allocator"], {"family_key": "label"})
+        label.start()
+        self.addCleanup(label.stop)
         super().setUp()
         self.house.close(wait=None)  # a House with a Kalshi practice book too, as test_seat_evidence's RetainedCandidates
         from league.economy import load_game

@@ -67,7 +67,7 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass, asdict
 from decimal import Decimal
-from typing import Any, Mapping, Sequence
+from typing import Any, Collection, Mapping, Sequence
 
 from .agents import Agent, niche_of
 from .constitution import CONSTITUTION
@@ -478,7 +478,7 @@ class Foundry:
         for a merged corrected child admitted through `takes_strategy`)."""
         by_strategy = {name: card["id"] for name, card in self.strategy_cards().items()}
         out = {}
-        for a in self.house.registry.agents.values():
+        for a in list(self.house.registry.agents.values()):  # a copy: births land from other threads (the review of #297)
             founder = str(a.founder or "")
             if founder.startswith("card:"):
                 out[founder[5:]] = a
@@ -618,7 +618,7 @@ class Foundry:
         if isinstance(evidence, dict) and evidence.get("niche"):
             return str(evidence["niche"])
         kind, _, name = key.partition(":")
-        for agent in self.house.registry.agents.values():
+        for agent in list(self.house.registry.agents.values()):
             if (kind == "line" and (agent.line or agent.name) == name) or (kind == "family" and agent.family == name):
                 return agent.specialty
         return (self.cards().get(key) or {}).get("niche")
@@ -637,7 +637,7 @@ class Foundry:
         except ImportError:
             return set()
         out = set()
-        for agent in self.house.registry.agents.values():
+        for agent in list(self.house.registry.agents.values()):
             if self._is_retired(agent, retired):
                 text = docstring(agent.code)
                 if text:
@@ -748,7 +748,7 @@ class Foundry:
         `fast_lane_reopen_blocks` active blocks; the calls go to the open fast desks by yield."""
         def build():
             house = self.house
-            children = {a.id: a for a in house.registry.agents.values() if str(a.founder or "").startswith("card:") and a.specialty}
+            children = {a.id: a for a in list(house.registry.agents.values()) if str(a.founder or "").startswith("card:") and a.specialty}
             desks: dict[str, dict[str, Any]] = {}
             for entry in house.ledger.iter(kinds="eval.block"):
                 agent = children.get(entry.agent)
@@ -879,11 +879,25 @@ class Foundry:
                          + (f"; mechanism: {words[:160]}" if words else ""))
         return lines
 
+    @staticmethod
+    def _same_program(parent: Agent, child: Agent) -> bool:
+        """Whether `child` runs its parent's program: the same code, or -- under C8 (Sept 25, 2026; the constitution's
+        `allocator.family_key` "mechanism") -- the same family, which a child keeps only while its program is its
+        parent's beyond PARAMS (`families.MechanismIndex.place`). A research child that changed only its PARAMS
+        literal ran its parent's mechanism and was still read as a new one (its purpose, "tighten the band", stood for
+        the family's mechanism); one born into its own family is a mechanism of its own, whatever its label said."""
+        from .families import family_key_rule
+
+        if family_key_rule() == "mechanism":
+            return parent.family == child.family and parent.venue == child.venue
+        return parent.code_sha256 == child.code_sha256
+
     def _mechanism(self, agent: Agent) -> tuple[str, str]:
         """(words, where they came from): what an agent's program does, stated where that program was
         written -- its card's `mechanism`, the purpose it was adopted or born with (an architect's why,
         a research candidate's purpose), its founding seed's `why` -- walking up past parameter
-        mutations, which run their parent's program. Never the code."""
+        mutations, which run their parent's program (`_same_program`: under C8, past every child in its
+        parent's family). Never the code."""
         house = self.house
         seeds = {f.get("key"): f.get("seed") for niche in house.niches.values() for f in niche.founders}
         current, seen = agent, set()
@@ -901,7 +915,7 @@ class Foundry:
             if seed and SEED_WHY.get(seed):
                 return SEED_WHY[seed], f"founding seed {seed}"
             parent = house.registry.get(current.parent) if current.parent else None
-            if parent is None or parent.code_sha256 != current.code_sha256:
+            if parent is None or not self._same_program(parent, current):
                 born = house.ledger.get(f"born:{current.id}")
                 reason = str((born.payload if born is not None else {}).get("reason") or "").strip()
                 if reason and not reason.startswith(_MUTATION_REASONS):
@@ -1796,7 +1810,7 @@ class Foundry:
         return result
 
     def _families(self) -> set[str]:
-        return self._folded("families", lambda: {a.family for a in self.house.registry.agents.values()}
+        return self._folded("families", lambda: {a.family for a in list(self.house.registry.agents.values())}
                             | {str(e.payload.get("family")) for e in self.house.ledger.iter(kinds="eval.trial")}
                             | {str(c.get("family")) for c in self.cards().values()})
 
@@ -1806,24 +1820,32 @@ class Foundry:
 
     # ------------------------------------------------------------------ refill
     def refill(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
-               mutations: bool = True, reserved: Sequence[str] = ()) -> Agent | None:
+               mutations: bool = True, reserved: Sequence[str] = (), only: Collection[str] | None = None,
+               seat_chosen: bool = False) -> Agent | None:
         """The newcomer, when routine refill is the foundry's: a replay-passing card first (best desk
         evidence first), else an evidence-driven mutation inside its share, else nobody.
 
         `mutations` off and `reserved` (Sept 23, 2026, the seat market): while a lab graduate waits
-        for a seat the House stakes no mutation, and the desks graduates wait for are theirs first."""
-        child = self._admit(rules, living=living, loser=loser, reserved=reserved)
+        for a seat the House stakes no mutation, and the desks graduates wait for are theirs first.
+
+        `only` and `seat_chosen` (F3, the forward-first run, Sept 25, 2026: the House's seat market): only
+        these cards may be admitted -- the waiters the House still counts, never one that left its queue --
+        and, `seat_chosen`, into the seat the House chose (`loser`, None for a free one): its quota for a
+        merged strategy's card (`House._strategy_births`)."""
+        child = self._admit(rules, living=living, loser=loser, reserved=reserved, only=only, seat_chosen=seat_chosen)
         if child is None and mutations:
             child = self._evidence_mutation(rules, living=living, loser=loser)
-        if child is not None:
+        if child is not None and not seat_chosen:  # the quota's birth is not the refill's: its cadence stands
             with self.house._state_lock:
                 self.house._state.setdefault("last_newcomer", {})["at"] = self._now()
         return child
 
     def _admit(self, rules: Mapping[str, Any], *, living: Sequence[Agent], loser: Agent | None,
-               reserved: Sequence[str] = ()) -> Agent | None:
+               reserved: Sequence[str] = (), only: Collection[str] | None = None, seat_chosen: bool = False) -> Agent | None:
         house = self.house
         waiting = self.inventory()
+        if only is not None:
+            waiting = [c for c in waiting if c["id"] in only]  # F3: the waiters the House's seat market still counts
         if not waiting:
             return None
         rank = {d.niche: (d.score, d) for d in self.desk_scores()}
@@ -1840,7 +1862,7 @@ class Foundry:
                 continue  # a lab graduate waits for this desk: its next seat is the graduate's
             evaluation = self.evaluations()[card["id"]]
             displaced = loser
-            if members.get(niche.id, 0) >= niche.max_members:
+            if not seat_chosen and members.get(niche.id, 0) >= niche.max_members:
                 # A full desk makes room from its own weakest (which also frees a full league's
                 # seat). The card passed replay: a replay-only or never-traded resident makes way
                 # inside its grace (`House._weakest`, `evidenced`, Sept 23, 2026).

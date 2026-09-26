@@ -148,6 +148,41 @@ LEAGUE_HOSTS = (
     "sports.core.api.espn.com",
     "www.tsa.gov",
     "www.realclearpolling.com",
+    # The key-free data hosts added by the Kalshi-scale run on Sept 25-26, 2026 (workstream I2, the
+    # owner's standing approval): each passed the plan's rule -- key-free, public, terms that permit
+    # automated access, no bot wall -- and has a recorder in league/open_feeds.py (its docstring names
+    # the terms read). Settlement weather: the IEM's parse of the NWS climate reports, the Aviation
+    # Weather Center's METARs, NCEI's daily summaries.
+    "mesonet.agron.iastate.edu",
+    "aviationweather.gov",
+    "www.ncei.noaa.gov",
+    # Macro releases and calendars: BLS's public data API (v1, key-free: 25 queries a day), the
+    # Treasury's FiscalData, the ECB's euro reference rates, the CFTC's Commitments of Traders
+    # (Socrata, no token) and the Federal Reserve Board's FOMC calendar.
+    "api.bls.gov",
+    "api.fiscaldata.treasury.gov",
+    "www.ecb.europa.eu",
+    "publicreporting.cftc.gov",
+    "www.federalreserve.gov",
+    # Attention, hazards and crypto network data: Wikimedia's pageviews, GDELT's news volume and tone,
+    # the National Hurricane Center's active storms, the USGS earthquake feed, mempool.space's
+    # bitcoin mempool and fees, and alternative.me's crypto fear and greed index.
+    "wikimedia.org",
+    "api.gdeltproject.org",
+    "www.nhc.noaa.gov",
+    "earthquake.usgs.gov",
+    "mempool.space",
+    "api.alternative.me",
+    # Government releases and notices: the White House's presidential actions (what Kalshi's
+    # KXTRUMPACT settles on), the Federal Register's API, EIA's public price tables, the NWS's raw
+    # climate reports as issued, BLS's and BEA's release calendars, and Nasdaq's trade halts.
+    "www.whitehouse.gov",
+    "www.federalregister.gov",
+    "www.eia.gov",
+    "tgftp.nws.noaa.gov",
+    "www.bls.gov",
+    "www.bea.gov",
+    "www.nasdaqtrader.com",
 )
 
 

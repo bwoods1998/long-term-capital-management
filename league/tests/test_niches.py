@@ -84,7 +84,9 @@ class TheFile(unittest.TestCase):
         options = self.niches["alpaca-options"]
         self.assertFalse(options.dormant)
         self.assertFalse(options.replay)
-        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback"])
+        # The two single-leg founders, then the structure founders that passed the House's structure replay
+        # (Sept 25, 2026), which only `league/options_desk.py` seats.
+        self.assertEqual([f["key"] for f in options.founders], ["options-breakout", "options-pullback"] + ['options-gap-drift', 'options-condor-vrp', 'options-putspread-dip', 'options-ironfly-quiet', 'options-strangle-cheap', 'options-calendar-term', 'options-butterfly-pin', 'options-orb', 'options-trend-vertical', 'options-reversal', 'options-skew', 'options-diagonal'])
         self.assertEqual(options.desk, "krasker")
         self.assertIn("LONG PREMIUM ONLY", options.brief)
         call = instrument_for("alpaca", {"occ": "F260925C00013000"})
@@ -216,11 +218,20 @@ OUTSIDER = BUYER.replace("test-buyer", "test-outsider").replace('"symbol": "BTC/
 class InTheHouse(HouseCase):
     def test_the_founders_are_the_niches_founders_with_a_family_a_program_a_specialty(self):
         rows = self.house.founders()
-        self.assertEqual(len(rows), sum(len(n.founders) for n in self.house.niches.values()))
+        from league import runner, seeds
+
+        # A structure founder (NEEDS "structures": true) is seated by league/options_desk.py, never by House.found.
+        structure = sum(1 for n in self.house.niches.values() for f in n.founders
+                        if runner.needs_of(seeds.load(f["seed"]))["needs"].get("structures") is True)
+        self.assertEqual(len(rows), sum(len(n.founders) for n in self.house.niches.values()) - structure)
+        self.assertGreaterEqual(structure, 1)
         by_key = {r["key"]: r for r in rows}
         self.assertEqual((by_key["favorites-daily"]["family"], by_key["favorites-daily"]["niche"]), ("kalshi-favorites", "kalshi-weather"))
         self.assertEqual((by_key["football-favorites"]["family"], by_key["soccer-favorites"]["family"]), ("sports-favorites", "sports-favorites"))
         self.assertEqual(by_key["alts-trend"]["family"], "crypto-alts-trend")
+        # A founder whose key is its seed's name is that seed's own family: each league's consensus founder its own.
+        self.assertEqual([by_key[f"consensus-{league}"]["family"] for league in ("nfl", "ncaaf", "mlb", "mls", "ligamx")],
+                         [f"sports-consensus-{league}" for league in ("nfl", "ncaaf", "mlb", "mls", "ligamx")])
         # Every agent of a desk is numbered from one partner's name.
         self.assertEqual({r["name"] for r in rows if r["niche"] == "kalshi-sports"}, {"meriwether"})
         self.assertEqual(by_key["options-breakout"]["name"], "krasker")
@@ -251,15 +262,18 @@ class InTheHouse(HouseCase):
 
     def test_a_desk_numbers_its_agents_and_a_child_takes_the_next_number(self):
         born = self.house.found(["meriwether"])
-        self.assertEqual([a.id for a in born], ["meriwether", "meriwether-2", "meriwether-3", "meriwether-4", "meriwether-5", "meriwether-6"])
+        # Six founders, and since Sept 25, 2026 the five sports-consensus founders (one a league) and the UFC one.
+        self.assertEqual([a.id for a in born], ["meriwether"] + [f"meriwether-{n}" for n in range(2, 13)])
         self.assertEqual({a.line for a in born}, {"meriwether"})
         self.assertEqual([a.founder for a in born][:2], ["football-favorites", "football-longshot-no"])
-        self.assertEqual(self.house.found(["meriwether"]), [])  # idempotent, though six share the name
+        self.assertEqual([a.founder for a in born][6:], ["consensus-nfl", "consensus-ncaaf", "consensus-mlb", "consensus-mls", "consensus-ligamx",
+                                                         "h2h-ufc"])
+        self.assertEqual(self.house.found(["meriwether"]), [])  # idempotent, though twelve share the name
         parent = born[2]
         self.house.economy.grant(parent.id, "10", "test")
         self.house.niches["kalshi-sports"].max_members = 20
         child = self.house.fork(parent)
-        self.assertEqual((child.id, child.line, child.parent), ("meriwether-7", "meriwether", parent.id))
+        self.assertEqual((child.id, child.line, child.parent), ("meriwether-13", "meriwether", parent.id))
 
     def test_an_architects_strategy_joins_a_desk_and_is_born_once(self):
         from league import strategies

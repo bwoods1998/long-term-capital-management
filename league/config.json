@@ -7,9 +7,17 @@
   "sail_app": "ltcm",
   "alpaca_feed": "sip",
   "alpaca_option_feed": "opra",
+  "options_structures": {
+    "_about": "Which book the options desk's structures trade on (the House reads `book`): options-shadow, the House's own practice account over live OPRA quotes (league/options_shadow.py), or alpaca-paper, the Alpaca practice account's multi-leg route. The shadow account's starting_cash matters only when options-shadow.json does not exist yet: 20 structure agents' practice stakes of $200 are $4,000.",
+    "book": "options-shadow",
+    "shadow": {
+      "starting_cash": "100000"
+    }
+  },
   "real_money": true,
   "auto_update": true,
-  "tick_seconds": 60,
+  "release_train_hours": 4,
+  "tick_seconds": 30,
   "mark_every_seconds": 300,
   "replay_days": 21,
   "inference_daily_cap_usd": "20.00",
@@ -20,15 +28,23 @@
     "_about": "The record's first point. start_equity was reset on Sept 19, 2026 (the owner's decision) to what the two real accounts held that afternoon, before the league's first real trade; the public chart draws start_equity plus the league's own real-money result."
   },
   "jev": {
-    "_about": "Jev as the cheap sensor (league/sensors.py). Caps are per UTC day across every purpose; the gateway's lifetime allowance stays the authority. Set enabled false to run the House exactly as before.",
+    "_about": "Jev as the cheap sensor (league/sensors.py) and the move sensor (league/jev_features.py). The caps are one daily pool per UTC day across every purpose: $1.50 and 25,000 calls, aligned to the ~$25 funded Jev balance (Sept 25, 2026). The move sensor serves a free model (no Jev) for every shown market and spends at most move.daily_usd ($0.75) on Jev: static labels once per market for the Jev shadow model, then a paced sample of states. The gateway's lifetime allowance stays the authority. Set enabled false to run the House exactly as before.",
     "enabled": true,
-    "daily_usd": "0.25",
-    "daily_calls": 400,
+    "daily_usd": "1.50",
+    "daily_calls": 25000,
     "purpose_calls": {
-      "gate": 150,
-      "triage": 120,
-      "links": 60,
-      "exposure": 40
+      "gate": 3000,
+      "triage": 1500,
+      "links": 1000,
+      "exposure": 500,
+      "move": 7500
+    },
+    "move": {
+      "enabled": true,
+      "interval_seconds": 300,
+      "max_markets_per_cycle": 800,
+      "retention_days": 14,
+      "daily_usd": "0.75"
     },
     "research_gate": {
       "enabled": true,

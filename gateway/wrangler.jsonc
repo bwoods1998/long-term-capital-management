@@ -100,6 +100,14 @@
     "NOTIFY_MAX_PER_DAY": "300",
     // The calendar the daily counters roll on: the floor's own trading day.
     "CAP_TIMEZONE": "America/New_York",
+    // Sept 25, 2026 (the options-desk run): the multi-leg option structures the REAL Alpaca account
+    // admits, a comma-separated list of the structure spec's types (`debit_vertical`,
+    // `credit_vertical`, `iron_condor`, ...; lib/caps.mjs STRUCTURE_TYPES). An admitted structure is
+    // metered at its maximum loss against the caps above; "off", or any name that is not a type,
+    // admits none, and every multi-leg order to the real account is refused. The practice account
+    // (`alpaca-paper`) takes every defined-risk type unmetered whatever this says. Opening it is a
+    // money-digest change the owner ratifies, not one the VM can make.
+    "OPTION_STRUCTURES_REAL": "off",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",
