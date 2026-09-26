@@ -4,7 +4,8 @@
     rows = bands.read(root)        # never raises, never waits more than a second ([] when it cannot read)
 
 One row per family the live path may run: every family in the Candidate, Probe or Sized band, and every
-family in the Gym band whose validated version met the validation line (execution tuition: 1-lot real
+family in the Gym band whose validated version met the validation line AND passed the gate's review and audit,
+and whose holdout look (or forward record) has not failed and was not refused (execution tuition: 1-lot real
 orders that measure multi-leg fills and are never evidence). Each row:
 
     family                the family's id
@@ -61,7 +62,7 @@ def read(root: str | Path) -> list[dict[str, Any]]:
                 if fam["band"] in LIVE_BANDS and state.get("banded_version"):
                     wanted[fam["id"]] = int(state["banded_version"])
                 elif fam["band"] == "gym" and (state.get("validation_line") or {}).get("passed") and state.get("validation_version"):
-                    wanted[fam["id"]] = int(state["validation_version"])
+                    wanted[fam["id"]] = int(state["validation_version"])  # tuition: checked against its review below
             versions = {}
             for fid, n in wanted.items():
                 row = db.execute("SELECT n, sha, params, path FROM versions WHERE family=? AND n=?", (fid, n)).fetchone()
@@ -84,11 +85,22 @@ def read(root: str | Path) -> list[dict[str, Any]]:
         params = loads(v["params"], {}) or {}
         from .gate import run_sha
 
+        sha = run_sha({"sha": v["sha"], "params": params})
+        if fam["band"] == "gym":
+            # Tuition only for a validated version the review (and the audit) passed and the gate has not failed, refused
+            # or demoted: a program the reviewer called dangerous, or one whose holdout or forward record failed, never
+            # sends a real order.
+            review = state.get("review") or {}
+            outcome = state.get("gate_outcome") or {}
+            if review.get("sha") != sha or review.get("verdict") != "pass":
+                continue
+            if outcome.get("sha") == sha and outcome.get("result") in ("refused", "failed", "demoted"):
+                continue
         validated = state.get("validation_version") == v["n"] and bool((state.get("validation_line") or {}).get("passed"))
         out.append({
             "family": fam["id"], "band": fam["band"], "structure": fam["structure"], "roots": loads(fam["roots"], []),
             "holdout_passed": fam["band"] in LIVE_BANDS, "validation_passed": validated or fam["band"] in LIVE_BANDS,
-            "version": int(v["n"]), "code": code, "params": params, "run_sha": run_sha({"sha": v["sha"], "params": params}),
+            "version": int(v["n"]), "code": code, "params": params, "run_sha": sha,
             "typical_max_loss_usd": state.get("typical_max_loss_usd") if state.get("validation_version") == v["n"] else None,
             "seed_era": True, "forward": state.get("forward"),
         })

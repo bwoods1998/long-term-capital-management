@@ -249,7 +249,10 @@ class Reads(HookCase):
             store.add_version(fam["id"], f"# {fam['id']}\nNEEDS = {{}}\n", {"k": 1}, author="seed")
         store.set_state(a["id"], banded_version=1, validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=60.0)
         store.set_band(a["id"], "candidate", reason="passed")
-        store.set_state(b["id"], validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=45.0)
+        from league.swarm.gate import run_sha
+
+        store.set_state(b["id"], validation_version=1, validation_line={"passed": True}, typical_max_loss_usd=45.0,
+                        review={"sha": run_sha(store.version(b["id"], 1)), "verdict": "pass"})
         store.close()
         rows = {r["family"]: r for r in bands.read(self.root)}
         self.assertEqual(set(rows), {"condor-vrp", "tuition"})
@@ -260,6 +263,25 @@ class Reads(HookCase):
                                                 "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward"})
         self.assertIn("# tuition", rows["tuition"]["code"])
         self.assertEqual((rows["tuition"]["typical_max_loss_usd"], rows["tuition"]["seed_era"]), (45.0, True))
+
+    def test_tuition_rows_are_only_reviewed_and_not_yet_failed_versions(self):
+        from league.swarm.gate import run_sha
+
+        store = SwarmStore(self.root, clock=self.clock)
+        cases = {}
+        for fid in ("unreviewed", "reviewed", "refused", "looked-failed", "demoted"):
+            fam = store.add_family({**SPEC, "id": fid}, origin="seed")
+            v = store.add_version(fam["id"], f"# {fid}\nNEEDS = {{}}\n", {}, author="seed")
+            store.set_state(fid, validation_version=v["n"], validation_line={"passed": True})
+            cases[fid] = run_sha(v)
+        store.set_state("reviewed", review={"sha": cases["reviewed"], "verdict": "pass"})
+        store.set_state("refused", review={"sha": cases["refused"], "verdict": "fail"}, gate_outcome={"sha": cases["refused"], "result": "refused"})
+        store.set_state("looked-failed", review={"sha": cases["looked-failed"], "verdict": "pass"},
+                        gate_outcome={"sha": cases["looked-failed"], "result": "failed"})
+        store.set_state("demoted", review={"sha": cases["demoted"], "verdict": "pass"},
+                        gate_outcome={"sha": cases["demoted"], "result": "demoted"})
+        store.close()
+        self.assertEqual([r["family"] for r in bands.read(self.root)], ["reviewed"])
 
     def test_bands_read_never_raises(self):
         self.assertEqual(bands.read(self.root / "nowhere"), [])

@@ -210,7 +210,11 @@ def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, 
     s = dict(result.get("summary") or {})
     pnl = _num(s.get("pnl"))
     daily = daily_pnl(result)
-    boot = block_bootstrap(daily, seed=seed)
+    # Enough draws that the smallest p the bootstrap can give (1 / (draws + 1)) stays well under the smallest Holm
+    # threshold (alpha / m, m = every look so far and this one): 20x, capped at 200,000.
+    m = len([p for p in previous_ps if _num(p) is not None]) + 1
+    draws = min(200_000, max(BOOTSTRAP_DRAWS, int(math.ceil(20.0 * m / HOLDOUT_ALPHA))))
+    boot = block_bootstrap(daily, seed=seed, draws=draws)
     p = boot["p"] if boot else 1.0
     holm, threshold = holm_passes(p, previous_ps)
     sharpe = stats.sharpe(daily) if len(daily) >= 2 else None
@@ -225,6 +229,7 @@ def holdout_line(result: Mapping[str, Any], *, validation_sharpe: float | None, 
     return {"passed": all(checks.values()), "checks": checks, "p": p,
             "numbers": {"pnl": pnl, "mean_daily": boot["mean"] if boot else None, "lcb95": boot["lcb95"] if boot else None,
                         "p": p, "holm_threshold": threshold, "looks_before": len(previous_ps), "sharpe_daily": sharpe,
+                        "draws": draws, "holm_reachable": 1.0 / (draws + 1) <= HOLDOUT_ALPHA / m,
                         "validation_sharpe_daily": validation_sharpe, "days": len(daily)}}
 
 
@@ -234,22 +239,58 @@ def leakage_alarm(looks: int, passes: int) -> bool:
 
 
 # ---------------------------------------------------------------------------- the forward record
-def forward_record(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """A family's forward record (nightly + shadow + real): trades, wins, P&L, the mean return on maximum
-    loss and its 80% one-sided lower bound. Sized needs >= 20 trades, mean > 0 and the bound > 0; a
-    Candidate whose record is negative over >= 20 trades loses its band."""
-    roms = [float(t["pnl"]) / float(t["max_loss"]) for t in trades if _num(t.get("max_loss")) and float(t["max_loss"]) > 0]
-    n = len(trades)
-    pnl = sum(float(t["pnl"]) for t in trades)
-    mean = sum(roms) / len(roms) if roms else None
-    lcb80 = None
-    if len(roms) >= 2:
-        sd = math.sqrt(sum((r - mean) ** 2 for r in roms) / (len(roms) - 1))  # type: ignore[operator]
-        lcb80 = mean - stats.t_quantile(0.80, len(roms) - 1) * sd / math.sqrt(len(roms))  # type: ignore[operator]
-    return {"trades": n, "wins": sum(1 for t in trades if float(t["pnl"]) > 0), "pnl_usd": round(pnl, 2),
-            "mean_rom": mean, "lcb80": lcb80,
+SOURCE_ORDER = ("real", "shadow", "nightly")
+
+
+def one_record(rows: Sequence[Mapping[str, Any]], *, version: Any = None) -> list[Mapping[str, Any]]:
+    """The forward rows that count (the live path's rule, league/live/money.py, agreed Sept 26): (1) only the CURRENT
+    program version's rows once any row carries a version (rows without one count only while none does); (2) ONE
+    source a market day: real, else shadow, else the nightly replay (the three trade the same decisions on the same
+    day: counting them all would count one decision two or three times and narrow the bound that sizes money)."""
+    rows = list(rows)
+    if any(r.get("version") is not None for r in rows):
+        rows = [r for r in rows if r.get("version") is not None and version is not None and int(r["version"]) == int(version)]
+    by_day: dict[str, dict[str, list]] = {}
+    for r in rows:
+        by_day.setdefault(str(r.get("day") or ""), {}).setdefault(str(r.get("source") or ""), []).append(r)
+    out: list[Mapping[str, Any]] = []
+    for day in sorted(by_day):
+        for source in SOURCE_ORDER + ("",):
+            if by_day[day].get(source):
+                out.extend(by_day[day][source])
+                break
+    return out
+
+
+def _returns(rows: Sequence[Mapping[str, Any]]) -> list[float]:
+    out = []
+    for r in rows:
+        p, m = _num(r.get("pnl")), _num(r.get("max_loss"))
+        if p is not None and m is not None and m > 0:
+            out.append(p / m)
+    return out
+
+
+def forward_record(trades: Sequence[Mapping[str, Any]], *, version: Any = None) -> dict[str, Any]:
+    """A family's forward record over `one_record`: r = P&L / maximum loss a trade (a trade without a positive maximum
+    loss is no return, and is not counted in n); the mean of r and its 80% one-sided lower bound (`stats.mean_bounds`).
+    negative: n >= 20 and mean < 0 (a Candidate goes back to the Gym). sized: n >= 20, mean > 0 and the bound > 0 (the
+    live path adds the band condition). real_bad: at least 10 real trades with mean <= 0 (the live path holds or lowers
+    the band)."""
+    rows = one_record(trades, version=version)
+    returns = _returns(rows)
+    n = len(returns)
+    bounds = stats.mean_bounds(returns, 0.20) if n >= 2 else None
+    mean = bounds["mean"] if bounds else (returns[0] if n == 1 else None)
+    lcb80 = bounds["lcb"] if bounds else None
+    real = _returns([r for r in rows if r.get("source") == "real"])
+    real_mean = sum(real) / len(real) if real else None
+    return {"trades": n, "rows": len(rows), "wins": sum(1 for x in returns if x > 0),
+            "pnl_usd": round(sum(float(r.get("pnl") or 0.0) for r in rows), 2), "mean_rom": mean, "lcb80": lcb80,
             "sized": n >= 20 and mean is not None and mean > 0 and lcb80 is not None and lcb80 > 0,
-            "negative": n >= 20 and pnl < 0}
+            "negative": n >= 20 and mean is not None and mean < 0,
+            "real_trades": len(real), "real_bad": len(real) >= 10 and real_mean is not None and real_mean <= 0,
+            "version": version}
 
 
 # ---------------------------------------------------------------------------- the bandit
@@ -296,5 +337,5 @@ def _allocate(draws: Mapping[str, float], total: float, out: dict[str, float]) -
 
 
 __all__ = ["validation_line", "holdout_line", "block_bootstrap", "holm_passes", "leakage_alarm", "forward_record", "thompson",
-           "score", "quarters_positive", "daily_pnl", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS",
+           "score", "quarters_positive", "daily_pnl", "one_record", "MIN_TRADES", "MIN_DAYS", "MIN_T", "MIN_DSR", "STRESS",
            "LOOKS_PER_LINEAGE"]

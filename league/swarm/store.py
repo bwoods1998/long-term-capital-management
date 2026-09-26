@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS forward (
     pnl REAL NOT NULL,
     max_loss REAL NOT NULL,
     at TEXT NOT NULL,
+    version INTEGER,
     PRIMARY KEY (family, source, trade_id)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -242,6 +243,9 @@ class SwarmStore:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(SCHEMA)
+            columns = {r[1] for r in self._db.execute("PRAGMA table_info(forward)")}
+            if "version" not in columns:  # a store made before forward rows carried their program version
+                self._db.execute("ALTER TABLE forward ADD COLUMN version INTEGER")
         self._db.row_factory = sqlite3.Row
 
     # ------------------------------------------------------------------ plumbing
@@ -599,27 +603,33 @@ class SwarmStore:
         return self._all("SELECT * FROM refusals ORDER BY seq")
 
     # ------------------------------------------------------------------ forward records
-    def add_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
-        """Forward trades (nightly replays here; shadow and real from the House), each once by id."""
+    def add_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]], *, version: int | None = None) -> int:
+        """Forward trades (nightly replays here; shadow and real from the live path), each once by id, each with the
+        program VERSION that made it (a trade's own `version`, else `version`): a new version starts its own record."""
         if source not in ("nightly", "shadow", "real"):
             raise ValueError(source)
         n = 0
         with self._lock:
             for t in trades:
-                cur = self._exec("INSERT OR IGNORE INTO forward(family, source, trade_id, day, pnl, max_loss, at) VALUES(?,?,?,?,?,?,?)",
+                v = t.get("version", version)
+                cur = self._exec("INSERT OR IGNORE INTO forward(family, source, trade_id, day, pnl, max_loss, at, version)"
+                                 " VALUES(?,?,?,?,?,?,?,?)",
                                  (fid, source, str(t["id"]), str(t.get("day") or ""), float(t["pnl"]), float(t.get("max_loss") or 0.0),
-                                  self.now()))
+                                  self.now(), None if v is None else int(v)))
                 n += cur.rowcount or 0
         return n
 
-    def replace_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
-        """A source's whole record anew (the nightly replay reruns every forward day: its latest run is the record)."""
+    def replace_forward(self, fid: str, source: str, trades: Iterable[Mapping[str, Any]], *, version: int) -> int:
+        """One version's record from one source anew (the nightly replay reruns every forward day: its latest good run
+        is the record). Other versions' and sources' rows are untouched."""
         with self._lock:
-            self._exec("DELETE FROM forward WHERE family=? AND source=?", (fid, source))
-            return self.add_forward(fid, source, trades)
+            self._exec("DELETE FROM forward WHERE family=? AND source=? AND version=?", (fid, source, int(version)))
+            return self.add_forward(fid, source, trades, version=version)
 
-    def forward(self, fid: str) -> list[dict[str, Any]]:
-        return self._all("SELECT * FROM forward WHERE family=? ORDER BY day, trade_id", (fid,))
+    def forward(self, fid: str, *, version: int | None = None) -> list[dict[str, Any]]:
+        if version is None:
+            return self._all("SELECT * FROM forward WHERE family=? ORDER BY day, trade_id", (fid,))
+        return self._all("SELECT * FROM forward WHERE family=? AND version=? ORDER BY day, trade_id", (fid, int(version)))
 
     # ------------------------------------------------------------------ events and spend
     def event(self, kind: str, family: str | None, payload: Mapping[str, Any]) -> int:

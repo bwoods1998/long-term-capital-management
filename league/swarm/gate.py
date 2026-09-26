@@ -92,6 +92,38 @@ class Gate:
                 "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
                 "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
 
+    # ------------------------------------------------------------------ the audit
+    def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
+        """The gate's audit (plan: GPT-6 Astra, high, standard): asked through the gateway ONLY when the OpenAI month has
+        room; otherwise no second call is made and the record says the Sail reviewer stood in for it."""
+        model = self.cfg.get("audit_openai_model", "gpt-6-astra")
+        need = float(self.cfg.get("audit_need_usd", 1.0))
+        if not model or self.router.openai_room() < need:
+            return {"verdict": "pass", "route": "sail-reviewer", "model": None,
+                    "note": "OpenAI had no room: the Sail reviewer's verdict stands for the audit"}
+        user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
+                f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
+        answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
+                                 key=f"swarm:{fam['id']}:audit:{version['n']}", openai_model=model,
+                                 sail_profile=str(self.cfg.get("review_sail_profile", "pro_balanced")),
+                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need)
+        verdict = (answer.get("json") or {}).get("verdict")
+        return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
+                "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
+                "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
+
+    def outcome(self, fid: str, sha: str, result: str) -> None:
+        """What the gate did with a version (refused, failed, passed, waiting, demoted): the live path runs a Gym-band
+        family's validated version as tuition only while this says nothing worse than waiting (`bands.read`)."""
+        self.store.set_state(fid, gate_outcome={"sha": sha, "result": result, "at": self.clock()})
+
+    def refuse(self, fam: Mapping[str, Any], n: int, sha: str, stage: str, reasons: list[str], out: dict[str, Any]) -> None:
+        self.store.refuse(fam["id"], n, stage, "; ".join(reasons) or f"refused by the {stage}")
+        self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
+        self.outcome(fam["id"], sha, "refused")
+        self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")")
+        out["refused"].append(fam["id"])
+
     # ------------------------------------------------------------------ one round
     def run(self) -> dict[str, Any]:
         self.store.put("gate_at", self.clock())
@@ -115,32 +147,43 @@ class Gate:
             if self.store.looked(sha) or state.get("gated_sha") == sha:
                 continue
             if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
-                self.store.refuse(fam["id"], n, "rations", "the lineage's three holdout looks are spent")
-                self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
-                self.tell(fam["id"], "fail (the lineage's three holdout looks are spent)")
-                out["refused"].append(fam["id"])
+                self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
+                continue
+            review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
+            if review is None:  # the review and the audit, once a version: also what tuition needs before any look
+                try:
+                    review = self.review(fam, version)
+                except Exception as exc:  # noqa: BLE001 - no reviewer, no look
+                    self.store.event("swarm.gate", fam["id"], {"action": "review_error", "version": n, "error": str(exc)[:300]})
+                    continue
+                self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review,
+                                                           "not_the_plans_reviewer": review.get("route") != "openai"})
+                if review["verdict"] == "unclear":
+                    attempts = int(self.store.get("review_attempt:" + fam["id"], 0)) + 1
+                    self.store.put("review_attempt:" + fam["id"], attempts)
+                    if attempts < 3:
+                        continue
+                    review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
+                if review["verdict"] == "pass":
+                    try:
+                        audit = self.audit(fam, version)
+                    except Exception as exc:  # noqa: BLE001
+                        self.store.event("swarm.gate", fam["id"], {"action": "audit_error", "version": n, "error": str(exc)[:300]})
+                        continue
+                    self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
+                    if audit["verdict"] != "pass":
+                        review = {**review, "verdict": "fail", "stage": "audit",
+                                  "reasons": audit.get("reasons") or ["the audit could not reach a verdict"]}
+                    review["audit"] = audit
+                review = {**review, "sha": sha, "version": n}
+                self.store.set_state(fam["id"], review=review)
+            if review["verdict"] != "pass":
+                self.refuse(fam, n, sha, review.get("stage") or "review", review.get("reasons") or [], out)
                 continue
             if not self.settings.get("gym", {}).get("gate_checkpoint"):
                 out["waiting"].append(fam["id"])
-                self.tell(fam["id"], "waiting (the gate image is not ready yet)")
-                continue
-            try:
-                review = self.review(fam, version)
-            except Exception as exc:  # noqa: BLE001 - no reviewer, no look
-                self.store.event("swarm.gate", fam["id"], {"action": "review_error", "version": n, "error": str(exc)[:300]})
-                continue
-            self.store.event("swarm.gate", fam["id"], {"action": "review", "version": n, **review})
-            if review["verdict"] == "unclear":
-                attempts = int(self.store.get("review_attempt:" + fam["id"], 0)) + 1
-                self.store.put("review_attempt:" + fam["id"], attempts)
-                if attempts < 3:
-                    continue
-                review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
-            if review["verdict"] == "fail":
-                self.store.refuse(fam["id"], n, "review", "; ".join(review["reasons"]) or "refused by the review")
-                self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
-                self.tell(fam["id"], "fail (the review: " + "; ".join(review["reasons"])[:400] + ")")
-                out["refused"].append(fam["id"])
+                self.outcome(fam["id"], sha, "waiting")
+                self.tell(fam["id"], "waiting (reviewed; the gate image is not ready yet)")
                 continue
             look = self.look(fam, version, sha)
             if look is not None:
@@ -152,39 +195,55 @@ class Gate:
     def look(self, fam: Mapping[str, Any], version: Mapping[str, Any], sha: str) -> bool | None:
         """The one holdout look. None when the gate box did not run it (no look is spent). The version is marked as
         looked at BEFORE the box runs it, so a slow look is never started twice; one that lands after the gate stopped
-        waiting is recorded and judged when it lands (`finish`)."""
+        waiting is recorded and judged when it lands (`finish`), against the validation it was sent for."""
         n = int(version["n"])
+        vsharpe = ((fam.get("state") or {}).get("validation_numbers") or {}).get("sharpe_daily")
         self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
                      roots=tuple(fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout", priority=10.0)
         try:
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
-                                   late=lambda r: self.finish(fam["id"], version, sha, r))
+                                   late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe))
         except PoolError as exc:
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
-                self.store.set_state(fam["id"], gated_sha=None, gate_ready=True)
+                self.owe(fam["id"], n, sha)
             return None
-        return self.finish(fam["id"], version, sha, result)
+        return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe)
 
-    def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any]) -> bool | None:
-        """Record a holdout result as the look it is (once: a second result for the same version is ignored) and answer."""
+    def owe(self, fid: str, n: int, sha: str) -> None:
+        """The look did not happen: the version is still owed one (if it is still the one validated), three tries."""
+        tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
+        self.store.put(f"look_tries:{sha}", tries)
+        state = (self.store.family(fid) or {}).get("state") or {}
+        if tries < 3 and state.get("validation_version") == n:
+            self.store.set_state(fid, gated_sha=None, gate_ready=True)
+
+    def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
+               validation_sharpe: Any = None) -> bool | None:
+        """Record a holdout result as the look it is (once: a second result for the same version is ignored) and answer.
+        A result the Gym could not produce (an engine error, no data) is no look: it stays owed. Nothing here undoes a
+        newer validation the tournament wrote while the look ran."""
         fam = self.store.family(fid)
         if fam is None or self.store.looked(sha):
             return None
         n = int(version["n"])
+        if result.get("status") in ("error", "no_data"):
+            self.store.event("swarm.gate", fid, {"action": "look_failed", "version": n, "status": result.get("status")})
+            self.owe(fid, n, sha)
+            return None
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
         self.store.add_run(fid, n, result, window="holdout", stress=1.0, purpose="holdout", program_years=years)
-        state = fam.get("state") or {}
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
-        line = evidence.holdout_line(result, validation_sharpe=(state.get("validation_numbers") or {}).get("sharpe_daily"),
-                                     previous_ps=previous, seed=sha)
+        line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=sha)
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
                                              "_line": line})  # the numbers stay private (underscore)
+        if not line["numbers"].get("holm_reachable", True):
+            self.store.event("swarm.status", None, {"action": "holm_unreachable", "looks": len(previous) + 1})
         self.tell(fid, "pass" if line["passed"] else "fail")
+        self.outcome(fid, sha, "passed" if line["passed"] else "failed")
         if line["passed"]:
-            self.store.update_family(fid, best_version=n)
             self.store.set_state(fid, banded_version=n, banded_sha=version["sha"], banded_at=self.clock())
             self.store.set_band(fid, "candidate", reason="passed its holdout look")
         return bool(line["passed"])
@@ -219,7 +278,11 @@ class Gate:
             except PoolError as exc:
                 out.setdefault("errors", {})[fam["id"]] = str(exc)[:200]
                 continue
-            out["trades"] += self.record_forward(fam["id"], n, result)
+            added = self.record_forward(fam["id"], n, result)
+            if added is None:
+                out.setdefault("failed", []).append(fam["id"])
+            else:
+                out["trades"] += added
         for fam in banded:
             move = self.judge_forward(fam["id"])
             if move:
@@ -227,10 +290,14 @@ class Gate:
         self.store.event("swarm.gate", None, {"action": "forward", **out})
         return out
 
-    def record_forward(self, fid: str, n: int, result: Mapping[str, Any]) -> int:
-        """A nightly replay's run (a trial) and its trades as the family's nightly forward record (the latest run replaces
-        the record whole: every forward day is rerun each night)."""
+    def record_forward(self, fid: str, n: int, result: Mapping[str, Any]) -> int | None:
+        """A nightly replay's run (a trial) and, ONLY when it ran cleanly, its trades as version n's nightly record (the
+        latest good run replaces that version's nightly record: every forward day is rerun each night). A replay that
+        erred, found no data or was disqualified leaves the record as it was (None, and a `forward_failed` event)."""
         self.store.add_run(fid, n, result, window="forward", stress=1.0, purpose="forward")
+        if result.get("status") != "ok":
+            self.store.event("swarm.gate", fid, {"action": "forward_failed", "version": n, "status": result.get("status")})
+            return None
         # The forward view carries each trade's day, P&L and maximum loss (no ids): a trade is (version, day, its place
         # that day).
         trades, seen = [], {}
@@ -239,16 +306,24 @@ class Gate:
                 continue
             k = seen[t.get("day")] = seen.get(t.get("day"), -1) + 1
             trades.append({"id": f"v{n}:{t.get('day')}:{k}", "day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")})
-        return self.store.replace_forward(fid, "nightly", trades)
+        return self.store.replace_forward(fid, "nightly", trades, version=n)
 
     def judge_forward(self, fid: str) -> dict[str, Any] | None:
+        """The banded version's forward record (`evidence.forward_record`: its own rows, one source a day); a Candidate
+        whose record is negative goes back to the Gym, and its version is never tuition again."""
         fam = self.store.family(fid)
         if fam is None or fam["band"] not in ("candidate", "probe", "sized"):
             return None
-        record = evidence.forward_record(self.store.forward(fid))
+        state = fam.get("state") or {}
+        n = state.get("banded_version")
+        record = evidence.forward_record(self.store.forward(fid), version=n)
         self.store.set_state(fid, forward=record)
         if record["negative"] and fam["band"] == "candidate":
             self.store.set_band(fid, "gym", reason=f"its forward record turned negative over {record['trades']} trades")
+            if state.get("banded_sha"):
+                version = self.store.version(fid, n)
+                if version is not None:
+                    self.outcome(fid, run_sha(version), "demoted")
             return {"family": fid, "to": "gym"}
         return None
 

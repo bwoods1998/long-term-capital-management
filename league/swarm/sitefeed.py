@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import DB_NAME, public
+from . import DB_NAME, evidence, public
 from .store import loads
 
 
@@ -41,11 +41,10 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
                                                 " inherited_trials, revisions FROM families")]
             totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
             spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
-            forward: dict[str, dict[str, dict[str, Any]]] = {}
-            for r in db.execute("SELECT family, source, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins"
-                                " FROM forward GROUP BY family, source"):
-                forward.setdefault(r["family"], {})[r["source"]] = {"trades": int(r["n"]), "wins": int(r["wins"] or 0),
-                                                                   "pnl_usd": round(float(r["pnl"] or 0.0), 2)}
+            rows: dict[str, list[dict[str, Any]]] = {}
+            for r in db.execute("SELECT family, source, day, pnl, max_loss, version FROM forward"):
+                rows.setdefault(r["family"], []).append(dict(r))
+            banded = {r["id"]: (loads(r["state"], {}) or {}).get("banded_version") for r in db.execute("SELECT id, state FROM families")}
         finally:
             db.close()
     except sqlite3.Error:
@@ -54,15 +53,20 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
     dead = sorted((f for f in fams if f["retired_at"]), key=lambda f: f["retired_at"], reverse=True)[:retired_shown]
     agents = []
     for f in alive + dead:
-        rec = forward.get(f["id"], {})
-        fwd = None
-        if rec:
-            fwd = {"trades": sum(v["trades"] for v in rec.values()), "wins": sum(v["wins"] for v in rec.values()),
-                   "pnl_usd": round(sum(v["pnl_usd"] for v in rec.values()), 2)}
+        # The same record the bands are judged on (`evidence.one_record`: the banded version's rows, one source a day).
+        counted = evidence.one_record(rows.get(f["id"], []), version=banded.get(f["id"]))
+        fwd = real = None
+        if counted:
+            fwd = {"trades": len(counted), "wins": sum(1 for r in counted if float(r["pnl"]) > 0),
+                   "pnl_usd": round(sum(float(r["pnl"]) for r in counted), 2)}
+            reals = [r for r in counted if r["source"] == "real"]
+            if reals:
+                real = {"trades": len(reals), "wins": sum(1 for r in reals if float(r["pnl"]) > 0),
+                        "pnl_usd": round(sum(float(r["pnl"]) for r in reals), 2)}
         agents.append({"id": f["id"], "family": f["lineage"], "mechanism": public.news_text(f["mechanism"]), "structure": f["structure"],
                        "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"], "retired_at": f["retired_at"],
                        "record": {"trials": int(f["trials"]) + int(f["inherited_trials"]), "revisions": int(f["revisions"]),
-                                  "forward": fwd, "real": rec.get("real")}})
+                                  "forward": fwd, "real": real}})
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}
     # The swarm's OWN spend since it began (its model calls and its Gym boxes; OpenAI through the gateway): the House's

@@ -232,14 +232,36 @@ class GateTests(RoundCase):
         self.assertEqual(self.store.looks(), [])
         self.assertEqual(len(self.store.refusals("a")), 1)
 
-    def test_openai_reviews_when_the_month_has_room(self):
+    def test_openai_reviews_and_astra_audits_when_the_month_has_room(self):
         self.ready()
         self.month.value = 100
         self.frontier_text = json.dumps({"verdict": "pass"})
         Gate(self.store, self.pool, self.router, self.settings).run()
-        self.assertEqual(self.asked[0]["model"], "gpt-6-sol")
+        self.assertEqual([a["model"] for a in self.asked], ["gpt-6-sol", "gpt-6-astra"])
         self.assertEqual(self.sail.bodies, [])
-        self.assertAlmostEqual(self.store.spent(["openai"]), 0.40)
+        self.assertAlmostEqual(self.store.spent(["openai"]), 0.80)
+        review = self.store.family("a")["state"]["review"]
+        self.assertEqual((review["route"], review["audit"]["route"]), ("openai", "openai"))
+
+    def test_an_audit_that_fails_costs_no_look(self):
+        self.ready()
+        self.month.value = 100
+        answers = iter([json.dumps({"verdict": "pass"}), json.dumps({"verdict": "fail", "reasons": ["counts sessions to the year"]})])
+        self.router.frontier_factory = lambda model: FakeFrontier(model, text=next(answers), asked=self.asked)
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(self.store.looks(), [])
+        self.assertEqual(self.store.refusals("a")[0]["stage"], "audit")
+
+    def test_without_openai_room_the_audit_is_recorded_as_the_sail_reviewer(self):
+        self.ready()
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(len(self.sail.bodies), 1, "no second Sail call")
+        review = self.store.family("a")["state"]["review"]
+        self.assertEqual(review["audit"]["route"], "sail-reviewer")
+        events = [e["payload"] for e in self.store.events_after(0) if e["kind"] == "swarm.gate" and e["payload"].get("action") == "review"]
+        self.assertTrue(events[0]["not_the_plans_reviewer"])
+        self.assertEqual(len(self.store.looks()), 1)
 
     def test_a_failing_holdout_is_a_fail_and_the_band_stays(self):
         self.ready()
@@ -265,12 +287,20 @@ class GateTests(RoundCase):
         self.assertTrue(self.store.get("leakage_alarm"))
         self.assertEqual(self.sail.bodies, [])
 
-    def test_no_gate_image_no_look(self):
+    def test_no_gate_image_no_look_but_the_review_runs_and_is_kept(self):
+        from league.swarm import bands
+
         self.ready()
         self.settings["gym"]["gate_checkpoint"] = None
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
         out = Gate(self.store, self.pool, self.router, self.settings).run()
         self.assertEqual(out["waiting"], ["a"])
         self.assertEqual(self.store.looks(), [])
+        self.assertEqual([r["family"] for r in bands.read(self.root)], ["a"], "reviewed and waiting: tuition may run it")
+        self.settings["gym"]["gate_checkpoint"] = "sbcp_gate"
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.assertEqual(len(self.sail.bodies), 1, "the review is not asked twice")
+        self.assertEqual(len(self.store.looks()), 1)
 
     def test_the_nightly_forward_records_trades_and_demotes_a_negative_candidate(self):
         self.ready()
@@ -290,6 +320,46 @@ class GateTests(RoundCase):
         gate.forward()
         self.assertEqual(len([t for t in self.store.forward("a") if t["source"] == "nightly"]), 25, "a rerun replaces, never doubles")
         self.assertEqual([j.gate for j in self.pool.jobs if j.window == "forward"], ["nightly forward replay"] * 2)
+
+    def test_a_failed_nightly_replay_keeps_the_record(self):
+        self.ready()
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        trades = [{"day": f"2026-09-{28 + i // 5}", "pnl": -5.0, "max_loss": 60.0} for i in range(19)]
+        self.answer = lambda job: {**weak(job), "trades": trades}
+        gate = Gate(self.store, self.pool, self.router, self.settings)
+        self.clock.advance(86400)
+        gate.forward()
+        self.assertEqual(len(self.store.forward("a")), 19)
+        self.answer = lambda job: {"status": "error", "trades": [], "summary": {}, "trials": 1, "run_id": "err"}
+        self.clock.advance(86400)
+        out = gate.forward()
+        self.assertEqual(len(self.store.forward("a")), 19, "an error never wipes the record")
+        self.assertIn("a", out["failed"])
+
+    def test_the_forward_record_is_the_banded_versions_alone(self):
+        self.ready()
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        self.store.add_forward("a", "shadow", [{"id": f"old{i}", "day": f"d{i}", "pnl": -4.0, "max_loss": 60.0, "version": 0}
+                                                for i in range(22)])
+        self.assertIsNone(Gate(self.store, self.pool, self.router, self.settings).judge_forward("a"),
+                          "another version's trades never judge this one")
+        self.assertEqual(self.store.family("a")["band"], "candidate")
+
+    def test_a_look_never_undoes_a_newer_validation(self):
+        self.ready()
+        self.pool.slow.add("a")
+        self.replies = [{"text": json.dumps({"verdict": "pass"})}]
+        Gate(self.store, self.pool, self.router, self.settings).run()
+        v2 = self.store.add_version("a", "NEEDS = {'roots': ['SPY']}\nPARAMS = {}\ndef decide(ctx):\n    return None\n", {}, author="x")
+        self.store.update_family("a", best_version=v2["n"])
+        self.store.set_state("a", validation_version=v2["n"], gate_ready=True)
+        job, late = self.pool.landing[0]
+        late(strong(job))
+        fam = self.store.family("a")
+        self.assertTrue(fam["state"]["gate_ready"], "the newer version still waits for its gate")
+        self.assertEqual(fam["best_version"], v2["n"])
 
     def test_the_swarm_never_makes_a_probe_or_a_sized(self):
         self.ready()

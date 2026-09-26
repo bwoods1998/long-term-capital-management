@@ -106,9 +106,22 @@ class HoldoutLine(unittest.TestCase):
         out = E.holdout_line(r, validation_sharpe=0.3, previous_ps=[], seed="s")
         self.assertTrue(out["passed"], out)
         self.assertFalse(E.holdout_line(r, validation_sharpe=5.0, previous_ps=[], seed="s")["checks"]["sharpe"])
-        self.assertFalse(E.holdout_line(r, validation_sharpe=0.3, previous_ps=[0.001] * 3 + [0.9] * 200, seed="s")["passed"])
+        rng = random.Random(8)
+        modest_daily = [rng.gauss(1.0, 10.0) for _ in range(180)]  # passes one look, not the 204th
+        modest = result("h", daily=modest_daily, pnl=sum(modest_daily))
+        alone = E.holdout_line(modest, validation_sharpe=0.1, previous_ps=[], seed="s")
+        self.assertTrue(alone["checks"]["holm"], alone["numbers"])
+        self.assertFalse(E.holdout_line(modest, validation_sharpe=0.1, previous_ps=[0.001] * 3 + [0.9] * 200, seed="s")["checks"]["holm"])
         losing = result("h", daily=[-x for x in daily], pnl=-sum(daily))
         self.assertFalse(E.holdout_line(losing, validation_sharpe=0.3, previous_ps=[], seed="s")["passed"])
+
+    def test_the_bootstrap_resolves_the_holm_threshold_however_many_looks(self):
+        rng = random.Random(4)
+        daily = [rng.gauss(30.0, 5.0) for _ in range(150)]  # overwhelming: every resampled mean above zero
+        r = result("h", daily=daily, pnl=sum(daily))
+        out = E.holdout_line(r, validation_sharpe=0.3, previous_ps=[0.9] * 120, seed="s")
+        self.assertTrue(out["checks"]["holm"], out["numbers"])
+        self.assertTrue(out["numbers"]["holm_reachable"])
 
     def test_the_leakage_alarm(self):
         self.assertFalse(E.leakage_alarm(9, 9))
@@ -116,14 +129,54 @@ class HoldoutLine(unittest.TestCase):
         self.assertTrue(E.leakage_alarm(10, 4))
 
 
+def rows(n, source="nightly", pnl=10.0, max_loss=100.0, version=None, day0=0):
+    return [{"source": source, "day": f"d{day0 + i:03d}", "pnl": pnl if i % 4 else -pnl / 2, "max_loss": max_loss, "version": version}
+            for i in range(n)]
+
+
 class Forward(unittest.TestCase):
+    """The forward record as the live path computes it (league/live/money.py, agreed through the main session)."""
+
     def test_sized_needs_twenty_trades_a_positive_mean_and_bound(self):
-        good = [{"pnl": 10.0 if i % 4 else -5.0, "max_loss": 100.0} for i in range(24)]
+        good = rows(24)
         self.assertTrue(E.forward_record(good)["sized"])
         self.assertFalse(E.forward_record(good[:19])["sized"])
-        bad = [{"pnl": -3.0, "max_loss": 100.0} for _ in range(20)]
+        bad = [{"source": "nightly", "day": f"d{i}", "pnl": -3.0, "max_loss": 100.0} for i in range(20)]
         self.assertTrue(E.forward_record(bad)["negative"])
         self.assertFalse(E.forward_record(bad[:19])["negative"])
+
+    def test_one_source_a_market_day_real_then_shadow_then_nightly(self):
+        same_days = rows(10, "nightly") + rows(10, "shadow")
+        out = E.forward_record(same_days)
+        self.assertEqual(out["trades"], 10, "the nightly replay and the shadow book of one day are one record")
+        self.assertFalse(out["sized"])
+        mixed = rows(3, "nightly") + [{"source": "real", "day": "d000", "pnl": -50.0, "max_loss": 100.0, "version": None}]
+        out = E.forward_record(mixed)
+        self.assertEqual(out["trades"], 3)
+        self.assertEqual(out["pnl_usd"], -50.0 + 10.0 + 10.0, "day d000 is the real trade")
+
+    def test_only_the_current_version_counts_once_rows_carry_versions(self):
+        old = rows(22, "shadow", pnl=-4.0, version=3)
+        new = rows(2, "nightly", pnl=10.5, version=7, day0=100)
+        out = E.forward_record(old + new, version=7)
+        self.assertEqual((out["trades"], out["negative"]), (2, False))
+        legacy = rows(5, "shadow")  # no version on any row: they all count
+        self.assertEqual(E.forward_record(legacy, version=7)["trades"], 5)
+
+    def test_negative_is_on_the_mean_return_and_trades_without_a_max_loss_are_not_returns(self):
+        rs = [{"source": "shadow", "day": f"d{i}", "pnl": 1.0 if i else -100.0, "max_loss": 100.0} for i in range(20)]
+        self.assertTrue(E.forward_record(rs)["negative"], "mean return below zero, though most trades won")
+        free = [{"source": "shadow", "day": f"d{i}", "pnl": 5.0, "max_loss": 0.0} for i in range(18)]
+        free += [{"source": "real", "day": f"r{i}", "pnl": 5.0 + i, "max_loss": 100.0} for i in range(2)]
+        out = E.forward_record(free)
+        self.assertEqual(out["trades"], 2)
+        self.assertFalse(out["sized"], "two returns are not twenty")
+
+    def test_ten_losing_real_trades_are_real_bad(self):
+        out = E.forward_record(rows(15, "shadow", day0=0) + [{"source": "real", "day": f"r{i}", "pnl": -1.0, "max_loss": 100.0}
+                                                              for i in range(10)])
+        self.assertTrue(out["real_bad"])
+        self.assertFalse(E.forward_record(rows(15, "shadow"))["real_bad"])
 
 
 class Bandit(unittest.TestCase):
