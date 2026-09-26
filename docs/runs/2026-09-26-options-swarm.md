@@ -898,6 +898,26 @@ and this record, and lifts the Saturday continuation's no-real-money scope.
 - **22:07Z Population.** 26 alive, up from 16 at the sprint's start. The deployed architect still asks
   for "3 to N"; main's #383 asks for the whole gap and ships in R1.
 
+- **22:34Z #388 merged** (`13963028`): Claude through the gateway, Claude-first architect and audit, and
+  the diagnostician.
+  - The review's nine findings and the verification's three follow-ups are fixed.
+  - Gateway: 267 tests. Python: 417 tests. CI green.
+- **22:37Z Gateway deployed** from main `13963028`, version `42e443bb`. The only change since the 16:49Z
+  deploy is the Claude route and its funded meter (`CLAUDE_USD` 100).
+- **22:39Z Claude probe**, run from the House:
+  - `GET /v1/claude/models` lists `claude-opus-5-5`, priced;
+  - one `claude-opus-5-5` call returned 200 with `end_turn` and structured JSON `{"ok":true}`,
+    cost $0.001, settled;
+  - `/v1/claude/request/probe-1` reads settled;
+  - health shows $99.999 remaining, geo `global` (no premium), 0 holds.
+
+  The House uses Claude from R1 on.
+- **22:33Z #389 fix verification:** 6 of 8 fixed, plus two new stuck-candidate paths:
+  - a non-ok 1.5x run never retried;
+  - robustness attempts charged at queue time.
+  
+  With robustness-job aging for liveness, these go back to B1.
+
 ## Scoreboard
 
 ### T0 (2026-09-26T06:23Z; repo figures at 06:40Z)
