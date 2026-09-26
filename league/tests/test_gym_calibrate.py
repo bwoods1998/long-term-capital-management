@@ -6,6 +6,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 try:
@@ -77,9 +78,29 @@ class Calibration(unittest.TestCase):
         with self.assertRaises(S.StoreRefused):
             self.store.trade_quote("SPY", DV)
 
+    def test_zero_print_contracts_remain_in_the_exposure(self):
+        w = synth.Writer(self.dir)
+        synth.flat_day(w, "SPY", D1, [
+            {"expiration": D1, "strike": 400, "right": "C", "quotes": {571: (1.00, 1.10)}},
+            {"expiration": D1, "strike": 400, "right": "P", "quotes": {571: (1.00, 1.10)}},
+        ], prices=400.0)
+        table = CAL.fit(self.store, ["SPY"], days=[D1], min_exposure=10)
+        # Same three single-leg side hits, twice the population. No put print is needed.
+        self.assertAlmostEqual(table["hazard"]["q2|s|d0|k0|t0"], round(CAL.wilson_lower(3, 236), 6))
+
+    def test_hits_need_the_corresponding_quote_and_a_known_spot(self):
+        chain = self.store.chain("SPY", D1)
+        chain.bid[600 - chain.open_min, :] = numpy.nan  # remove the mid print's quote exposure
+        chain.underlying.price[610 - chain.open_min] = numpy.nan  # remove the ask print's spot
+        with patch.object(self.store, "chain", return_value=chain):
+            table = CAL.fit(self.store, ["SPY"], days=[D1], min_exposure=10)
+        self.assertEqual(table["meta"]["fitted_on"]["single"], 0)
+        self.assertEqual(table["hazard"], {})
+
     def test_the_cli_writes_where_it_is_told_and_the_engine_uses_it(self):
         out = self.dir / "cal" / "fill_model.json"
         self.assertEqual(CAL.main(["--store", str(self.dir), "--roots", "SPY", "--out", str(out), "--min-exposure", "10"]), 0)
+        self.assertEqual(out.stat().st_mode & 0o777, 0o600)
         model = F.FillModel.load(out)
         self.assertNotEqual(model.version, "natural-only")
         self.assertEqual(model.source, str(out))
