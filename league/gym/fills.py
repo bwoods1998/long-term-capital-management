@@ -18,10 +18,11 @@ the fill model gives, a per-minute hazard looked up by
 
 The draw is keyed by (the contracts, the day, the minute, the side) with a fixed seed, never by the
 program: a trivial edit to a program cannot re-roll its luck, and two programs that send the same
-order at the same minute fill or miss together. The table is fitted from Train's `trade_quote`
-samples by `calibrate.py` and read from a gitignored file (`/data/calibration/fill_model.json` on a
-box, `.data/gym/fill_model.json` on the laptop, or GYM_FILL_MODEL); absent, every hazard is zero:
-natural fills only, the conservative default. A cell the table lacks is zero too: a table fitted
+order at the same minute fill or miss together. The table is a point estimate per cell, fitted from
+Train's `trade_quote` samples by `calibrate.py` (the estimator is described there), and read from a
+gitignored file: an explicit path, else GYM_FILL_MODEL, else `/data/calibration/fill_model.json` (the
+Gym and gate images), else `.data/gym/fill_model.json` under the code's root; absent, every hazard is
+zero: natural fills only. A cell the table lacks is zero too: a table fitted
 before the touch bucket existed (Sept 27, 2026) has no bucket-0 cells, so the touch never fills on it
 until the table is refitted.
 

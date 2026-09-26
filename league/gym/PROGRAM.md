@@ -125,17 +125,24 @@ An order meets the quotes of the minute AFTER your decision, and every chance in
 
 - **Natural** (long legs at the ask, short legs at the bid), or any limit at or through it, always
   fills, at the natural, up to the quoted size (the smallest leg's size over its ratio); the rest
-  keeps taking the natural as size appears.
-- **Mid, touch and better limits** (`"mid"`, `{"mid": k}`, `{"price": v}` short of the natural) work
-  until their `tif`. Each minute such a limit fills at its limit if the natural has come through it;
-  otherwise it fills with the calibrated fill model's per-minute probability for its distance from
-  the mid (with the legs, days to expiry, moneyness and time of day), and never on a minute after
-  which the mid holds still or moves your way (a passive fill is someone else's good trade). A
-  limit off the tick rounds to your own side of the book, so `"mid"` on a one-tick single leg is the
-  touch (the bid for a buy, the ask for a sale), and the touch fills only as often as Train's prints
-  there traded through the whole displayed queue ahead of you. A limit behind the touch fills only
-  when the market comes through it. The model is the 95% lower bound of Train's measured rates, and
-  a distance it has no data for never fills: passive fills are real but rarer than they look.
+  keeps taking the natural as size appears. It pays every leg's whole half-spread, in and out.
+- **Patient pricing is modelled, and it is often cheaper than the natural.** A limit short of the
+  natural (`{"mid": k}`: k ticks from the mid toward the natural; `"mid"`; `{"price": v}`) works for
+  its `tif` minutes (`"day"` by default). Each minute it has not filled, it fills AT ITS LIMIT if
+  the natural has come through it, and otherwise with the fill model's probability for that minute:
+  how often Train's recorded trades printed at or through that distance from the mid on a quoted
+  contract-minute like yours (days to expiry, moneyness, time of day; packages use complex-order
+  prints), a point estimate pooled toward coarser cells where data is thin. It never fills on a
+  minute after which the mid holds still or moves your way (a passive fill is someone else's good
+  trade). So a limit a tick or two inside the natural, or at the mid, with a `tif` of 10-30 minutes
+  can save much of the half-spread on entries and exits; what it costs is the fills you miss (the
+  market leaves without you) and the adverse selection of the ones you get. Your results' `fills`
+  show what your prices got: fill rate, the share filled at the natural, slippage from the mid in
+  half-spreads.
+- A limit off the tick rounds to your own side of the book, so `"mid"` on a one-tick single leg is
+  the touch (the bid for a buy, the ask for a sale): the touch fills only in minutes when Train's
+  prints there traded through the whole displayed queue ahead of you. A limit behind the touch
+  fills only when the market comes through it.
 
 A long wing with no bid is closed at zero. Fees: OCC, ORF, CAT on every contract, TAF and the SEC fee
 ($20.60 a million of premium) on sells, $0.50 plus exchange fees on index options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
