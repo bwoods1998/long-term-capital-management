@@ -471,6 +471,26 @@ clock never restarts.
   check. Separately, W5 is reproducing/fixing a researcher protocol defect where a refused Gym
   call could be described as a completed experiment; no evidence requirement is being loosened.
 
+- 17:00:15Z House release `20260926T164943Z-04457584301d` finished its ten-minute watch with
+  verdict **promoted**, every poll passing. At 17:05Z the House, swarm and nightly worker were
+  healthy on that release; real money remained off, no grant existed and the real-options book
+  was empty. Production Chromium also confirmed **$0.00 Profit** on the deployed site.
+- 17:05Z #373's independent review passed three additional service-factory probes and 31
+  focused regressions. Its gateway and Python 3.11 CI passed. Both #372 and #373 encountered
+  the same pre-existing Python 3.14 watchdog stress failure: one `ENOENT` while reading through
+  `current` during atomic symlink swaps. Twelve isolated repetitions passed locally and twelve
+  on the House; the full-suite failure remains under investigation, with neither PR merged.
+- 17:07Z The bounded protocol repair #374 (`57a6c016`) passed 55 researcher/loop tests on the
+  House, plus independent three-probe review. It keeps refused inputs in REVISE, records a
+  missing required tool call as a failed cycle, and preserves the sole dispatched-run allowance
+  and late trial accounting. Full CI is pending. This edge defect does **not** explain the
+  sampled terminal thoughts: all 150 recent terminal responses followed actual runs, and all
+  87 required calls in the last 300 requests contained a tool call. The separate observed waste
+  is researchers repeatedly testing no-op programs while declaring themselves finished. An
+  explicit Gym-only retirement action is being implemented, preserving evidence, population
+  floor, lineage, live exit ownership and existing thresholds; prose alone will never retire a
+  family.
+
 ### Monday pre-open and forward-run checklist (prepared Saturday; results still pending)
 
 This continuation prepares paper/shadow operation and leaves `real_money=false`, the grant
