@@ -560,6 +560,28 @@ clock never restarts.
   tests and full CI passed. It remains unmerged and undeployed until after Monday's close. An
   independent review of its money behavior, imports and deployment paths is underway; the next
   publisher merge will also need folding into the draft.
+- 18:20Z Site compatibility #12 is merged as `5abc570` and deployed as Worker
+  `e473bcbc-0200-480a-92e0-de2001d55b20`; both default and opt-in public reads return correctly.
+  Publisher #377 is merged as `60b34dd9`; release `20260926T181814Z-b4bc25619f84` passed canary
+  and restarted at 18:18:53Z, with its ten-minute watch still pending at this entry. The actual
+  public record contains 16 active agents, 13 with verified progress. Chromium production checks
+  at widths 1440, 390 and 320 found no overflow or page errors, correct 11-check detail, retained
+  keyboard focus, working automatic checkpoint refresh and Profit $0.00. Live transport connects;
+  this short observation had no new thought frame, so the earlier actual thought-rotation proof
+  remains the recorded evidence of incoming thought display. Default reads omit progress and
+  keep old tabs valid. Real-money config is false; the real options book has no positions or
+  orders and no grant is installed.
+- 18:25Z The owner clarified that each dot must give direct, dynamic sight of that agent's
+  progress to the next level. An additional local browser rehearsal verified increasing and
+  decreasing evidence move only the affected ring, an actual band change moves its dot to the
+  next stage, and the selected detail stays open. These were synthetic local fixtures, never
+  published to the real site; no claim that a production strategy has promoted.
+- 18:27Z Independent review of draft #375 found a rollback guard gap: assigned shares can
+  remain after option positions/orders disappear but before reconciliation freezes. The draft
+  now refuses a target missing exit support while assignment, shares or reconciliation mismatch
+  remain. Fix `669befe8` includes a synthetic actual assignment with a rate-limited share close;
+  126 affected tests passed, exact-head re-review and CI are pending. The draft also incorporates
+  #377 and its folded calendar import. It remains unmerged and undeployed.
 
 ### Final data/image adoption (prepared Saturday; waits for completion)
 
@@ -683,5 +705,21 @@ be reported as such. Venue cutoffs and refusals must be observed, not inferred f
 | 7 | Execution | no option order; the live path (#362) in its third verification |
 | 8 | Compute | Sail $99.17 (owner top-up pending; the guard brakes at $32: ~14 h at $4.6/h); OpenAI month $596.29 of $607 (unfunded: roles on Sail); ThetaData Standard |
 | 9 | Harness | House restarts: 3 (start, #363 deploy, watch); CI ~10-11 min; the session lost ~3 h to the usage limit |
+
+### T0 + 12 h (18:23Z Sept 26)
+
+Observed 18:22–18:24Z; counters advance during the read. Funding is not revenue.
+
+| # | Metric | T0 + 12 h |
+|---|---|---|
+| 1 | Net since reset | real-options P&L $0.00; Net is negative. Swarm ledger: Sail models $22.6394 plus estimated Gym boxes $7.4445; OpenAI $0.3199 settled plus an unresolved $2 hold. Gateway actual OpenAI spending since T0 is $2.06 across roles. House/data/build costs and subscription accrual must still be reconciled before stating an exact all-input Net. |
+| 2 | Data | core 3,760/3,760, holdout 920/920, 2022 1,255/1,255 and calibration 755/755 complete; names 8,626/23,740 with 150 vendor-empty tasks, back months 0/2,374, no failing stage. Completion worker is running ThetaData; final full-universe images and model are not yet ready/adopted. |
+| 3 | Gym throughput | 22,684.43 durable program-years and 16,358 trials; about 3,188 durable program-years/hour since 14:15Z. Median model cycle 47s, p90 87.9s, 99.7% under 180s. Earlier +8h throughput used the pool's 30,973 execution-year counter; that is not the durable-run total (9,465.52 at 14:15Z), so do not subtract those different counters. |
+| 4 | Search | database: 17 alive, 53 retired; heartbeat just before the next birth: 16 alive, 8 running; 1,758 cycles in the last hour. Population is refilling below its target of 48. The latest architect proposed/admitted one family for the gap that existed before the retirement wave. Retirement-floor refusals back off; they are not model/provider crashes. |
+| 5 | Evidence | 0 validation passes, 0 holdout looks/passes; no leakage alarm. No profitability has been demonstrated. The new site renders current prerequisite counts without private scores or invented readiness. |
+| 6 | Forward | no Candidate and no forward session yet. Nightly heartbeat fresh on the current release, next wake Tuesday September 29 06:00Z. Saturday preparation does not count as that run. |
+| 7 | Execution | no new real-option orders or positions; account equity $481.63/cash $481.60, plus legacy crypto dust. Real money off, no grant. Gateway's two earlier legacy orders are unchanged. Independent SPY paper proof is prepared for Monday, not yet observed in-session. |
+| 8 | Compute | Sail about $189.86–189.90; reserve $32, guard unbraked. Last-hour tracked cost $3.4006: Sail models $1.6391, estimated Gym $1.4416, OpenAI $0.3199. Funded Sail model cap remains $2.25/hour. OpenAI September $598.17/$707, $108.83 remaining; no October allowance added. |
+| 9 | Harness | current main `60b34dd9`; 834 text files / 323,380 lines across active league, ltcm, scripts, gateway and docs, excluding archive. Eight recorded watchdog restarts since T0. Main CI 11m09s (3.11), 12m06s (3.14), gateway 8s. Draft prune stays for after Monday close; its previous integrated head passes in under two minutes, latest guard fix awaits CI/review. |
 
 ## Report
