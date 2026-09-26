@@ -204,3 +204,25 @@ def old_ladder():
     from league.constitution import CONSTITUTION
 
     return patch.dict(CONSTITUTION["allocator"], {"enabled": False})
+
+
+class OpenGrant:
+    """A stand-in for the owner's grant of real money (`league/live_trading.py`) that releases every
+    live rung and names no capital: the House then sizes by the constitution's tuition, as it did
+    before the grant existed. For tests of OTHER mechanisms on a real-money House; the grant's own
+    rules are tested against the real store in `test_live_trading.py`. Since the options overhaul
+    (Sept 26, 2026) a House handed no grant has an empty store of its own: no real entry at all."""
+
+    def __init__(self, *, active: bool = True):
+        self.active = active
+
+    def allows_live(self, target_rung: int) -> bool:
+        return self.active and target_rung in (2, 3)
+
+    def live_authorization(self):
+        return None
+
+    live_trading = live_authorization
+
+    def close(self) -> None:
+        pass

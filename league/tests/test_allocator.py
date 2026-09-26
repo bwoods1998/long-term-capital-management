@@ -21,6 +21,7 @@ from league.economy import Economy, load_game
 from league.house import House, Settings
 from league.ledger import Ledger, now_iso
 from league.tests.fakes import Clock, FakeBroker
+from league.tests.fakes import OpenGrant
 from league.tests.test_house import BUYER, FakeAlpacaData, HouseCase
 from league.tests.test_ladder import LADDER, FakeAuditor, InProcessSandbox
 from league.venues import instrument_for
@@ -206,7 +207,7 @@ class HouseCaseReal(unittest.TestCase):
         self.auditor = FakeAuditor()
         self.house = House(
             Path(self.dir.name) / "house", brokers={"alpaca-paper": self.paper, "alpaca": self.real}, sandbox=InProcessSandbox(),
-            alpaca_data=self.data, clock=self.clock, settings=Settings(mark_every_seconds=0, research=False, real_money=True),
+            alpaca_data=self.data, clock=self.clock, grant=OpenGrant(), settings=Settings(mark_every_seconds=0, research=False, real_money=True),
             game=game, auditor=self.auditor)
         self.auditor.ledger = self.house.ledger
         self.price = 80000.0
@@ -497,7 +498,7 @@ class PerformanceFee(unittest.TestCase):
 class GrantAndDigest(unittest.TestCase):
     def test_the_money_digest_changes_and_the_grant_needs_ratifying(self):
         from league.campaigns import CampaignBudget, _grant_matches
-        from league.live_trading import policy
+        from league.campaigns import legacy_live_policy as policy
 
         grant = policy({"kalshi": "517.75", "alpaca": "500"})
         self.assertEqual(grant["constitution_digest"], money_digest())

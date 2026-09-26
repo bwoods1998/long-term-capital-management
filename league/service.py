@@ -121,6 +121,14 @@ def repair_engineer(house: House, frontier: Any, forge: Any) -> Any:
                     inbox=Path(house.root) / "repairs-inbox")
 
 
+def auto_update(config: dict[str, Any]) -> bool:
+    """Whether the in-box updater pulls main by itself: only when `config.json` says `"auto_update":
+    true`. A missing key means OFF (the options overhaul, Sept 26, 2026, trap 3: the old default of
+    on let the updater ship main's heads into a House that nobody had deployed; the prune ships as
+    the owner's deploys, and the updater stays off until the overhaul has run a day)."""
+    return config.get("auto_update", False) is True
+
+
 def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     """The Alpha Lab's box key when `config.json` `lab` names its box by id (`box_id`, the box
     `scripts/lab_box.py create` made, which `LabBox.from_config` binds under this same key) and is
@@ -132,9 +140,16 @@ def lab_box_key(config: dict[str, Any], *, canary: bool = False) -> str:
     return str(lab.get("box_key") or "lab")
 
 
+def performance_of(config: dict[str, Any]) -> dict[str, Any] | None:
+    """`config.json` `performance` once the reset has filled both `start_at` and `start_equity`; None before (the
+    publisher then shows the account's balance with no since-reset figure, rather than failing every minute)."""
+    performance = dict(config.get("performance") or {})
+    return performance if performance.get("start_at") and performance.get("start_equity") is not None else None
+
+
 def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, alpaca_data: Any) -> Any:
     """The options shadow account (`league/options_shadow.py`, Sept 25, 2026, the options-desk run's
-    Track S) beside the Kalshi shadow: every level-3 structure on practice, filled on the live option
+    Track S): every level-3 structure on practice, filled on the live option
     quotes the House's market-data client reads (read-only GETs through the gateway, on a canary too,
     which gets its own state file under its own root). On by default; `config.json`
     `options_structures.shadow.enabled: false` leaves it out. `options_structures.book` (read by the
@@ -154,27 +169,33 @@ def options_shadow_broker(root: Path, config: dict[str, Any], data_client: Any, 
 def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandbox: bool = False, research: bool = True,
           publish: bool = True, tape: str | None = None, game: dict[str, Any] | None = None, name_prefix: str = "league",
           merton: bool = True, canary: bool = False) -> House:
-    """`canary=True` is a House that can hurt nothing: a simulated Alpaca account instead of the
-    shared paper one (the real House reconciles that account to the cent, and a second trader on it
-    would break the reconciliation), its own Kalshi shadow state, no real venues, no publishing,
-    no research, no Merton. The watchdog runs new code this way before the House runs it."""
+    """The options House (the options overhaul, Sept 26, 2026, Wave 2a): the books are the Brokerage
+    Account (`alpaca`, only when `real_money`), the Alpaca practice account (`alpaca-paper`) and the
+    options shadow book (`options-shadow`). Nothing Kalshi (real or shadow), no Jev, no Alpha Lab, no
+    hypothesis foundry, no semantic lab, no feeds or recorders, no research traces, no campaign store,
+    burst or funded transport is built, and no config key that is absent switches one on. Real money
+    turns on only through the owner's grant (`league/live_trading.py`, `House.grant`), which the House
+    reads from its own state root.
+
+    The swarm (Wave 4) and the options live path (Wave 5) plug into the tick as `House.swarm` and
+    `House.options_live` (see `House.PLUGGABLE_STEPS`); both are None here until their builders fill them.
+
+    `canary=True` is a House that can hurt nothing: a simulated Alpaca account instead of the shared
+    paper one (the real House reconciles that account to the cent, and a second trader on it would
+    break the reconciliation), no real venue, no publishing, no research, no Merton. The watchdog runs
+    new code this way before the House runs it."""
     from ltcm.adapters import GatewaySigner, VenueClient
-    from ltcm.data.kalshi import KalshiMarketData
     from ltcm.data.news import News
-    from ltcm.history import History
     from ltcm.provider import Provider
-    from ltcm.sailbox import SailboxClient
 
     from .auditor import Auditor
     from .budget import Budget
-    from .campaigns import CampaignBudget
     from .commons import Commons, gateway_fetch
-    from .funded import FundedTransport
     from .frontier import Frontier
-    from .paper import KalshiShadowBroker
     from .publish import Publisher
+    from .sailbox import SailboxClient
     from .sandbox import LocalSandbox, SailSandbox
-    from .tapes import AlpacaData, KalshiData
+    from .tapes import AlpacaData
     from .venues import gateway_broker
 
     config = dict(config or load_config())
@@ -194,23 +215,22 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     gateway_url = config["gateway_url"]
     token = lambda: secret("GATEWAY_TOKEN")  # noqa: E731
     real_money = bool(config.get("real_money"))
+    feed, option_feed = config.get("alpaca_feed", "iex"), config.get("alpaca_option_feed", "indicative")
 
-    market_data = KalshiMarketData()
-    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue="alpaca-paper")
-    alpaca_data = AlpacaData(data_client, feed=config.get("alpaca_feed", "iex"))
-    kalshi_data = KalshiData(market_data, History(cache_dir=root / "cache"))
+    # Market data reads through the real account's credentials when real money is on (the gateway's kill switch stops
+    # orders, never reads), and through the practice account's otherwise (a canary, a House with real money off).
+    data_venue = "alpaca" if real_money else "alpaca-paper"
+    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue=data_venue)
+    alpaca_data = AlpacaData(data_client, feed=feed)
     if canary:
         from .sim import SimBroker, touch_from
 
         paper: Any = SimBroker(root / "alpaca-sim.json", touch_from(alpaca_data))
     else:
-        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
-                               option_feed=config.get('alpaca_option_feed', 'indicative'))
-    brokers: dict[str, Any] = {"alpaca-paper": paper, "kalshi-shadow": KalshiShadowBroker(root / "kalshi-shadow.json", market_data)}
+        paper = gateway_broker("alpaca-paper", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
+    brokers: dict[str, Any] = {"alpaca-paper": paper}
     if real_money:
-        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex"),
-                                          option_feed=config.get('alpaca_option_feed', 'indicative'))
-        brokers["kalshi"] = gateway_broker("kalshi", gateway_url=gateway_url, token=token())
+        brokers["alpaca"] = gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=feed, option_feed=option_feed)
     # Last: the House's passes walk the books in this order (the horizon rule's has no guard of its own for one
     # book), and practice must never stand in front of real money.
     shadow_options = options_shadow_broker(root, config, data_client, alpaca_data)
@@ -223,31 +243,21 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         sandbox = SailSandbox(SailboxClient(), root / "sandbox.json", image_checkpoint=config["agent_image_checkpoint"], name_prefix=name_prefix,
                               background_sleep=True)
 
-    campaigns = CampaignBudget(root / "campaigns.sqlite") if not canary else None
-    from .overnight import active
-    burst = active(campaigns, time.time)
     inference_cap = Decimal(str(config.get('inference_daily_cap_usd', '3.00')))
-    if burst:
-        inference_cap += Decimal(burst['policy']['caps_usd']['sail'])
     provider = Provider(root / "provider.sqlite", floor_cap_usd_per_day=inference_cap) if research else None
-    if provider is not None and campaigns is not None:
-        provider.transport = FundedTransport(provider.transport, campaigns)
     house_settings = Settings(
         tick_seconds=int(config.get("tick_seconds", 60)), mark_every_seconds=int(config.get("mark_every_seconds", 300)),
         real_money=real_money, replay_days=int(config.get("replay_days", 21)), research=research,
-        replay_timeout=120 if canary else 600, kalshi_replay_days=1 if canary else 7, kalshi_replay_markets=60 if canary else 2000,
-        # Deep replay over the history store and the sealed holdout (league/deep_replay.py): on by
-        # default, inert until `python -m league.history ingest` has fetched a strategy's inputs.
-        deep_replay=bool(config.get("deep_replay", True)), holdout_gate=bool(config.get("holdout_gate", True)),
-        # The Alpha Lab's own box (league/lab.py, league/labbox.py): its key, when config.json names one; none on a canary.
-        lab_box=lab_box_key(config, canary=canary),
-        # K1 (Sept 25, 2026): flagged founder rows seated into a full league (league/kalshi_founders.py); never on a canary.
-        kalshi_founders=bool(config.get("kalshi_founders", True)) and not canary,
+        replay_timeout=120 if canary else 600,
+        # Cut with the prune (Wave 2b deletes them): the stock/crypto history store and its sealed holdout, the Alpha
+        # Lab, Kalshi's founders and survey, and the credit economy's wake gate, culling and payouts. The options
+        # swarm's Gym (league/gym/) and its evidence lines replace them; nothing here turns one back on.
+        deep_replay=False, holdout_gate=False, history_coverage=False, lab_box="", kalshi_founders=False,
+        niche_survey_hours=0.0, credit_economy=False,
     )
     house = House(
-        root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=kalshi_data, provider=provider,
+        root, brokers=brokers, sandbox=sandbox, alpaca_data=alpaca_data, kalshi_data=None, provider=provider,
         game=game, settings=house_settings, kill_switch=gateway_kill_switch(gateway_url, token) if real_money else None,
-        campaigns=campaigns,
     )
     # The same clock as the House: `open_requests` drops a request nothing has closed after three
     # days, and a Commons reading a different clock would measure that window against the wrong now.
@@ -256,98 +266,18 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
                             clock=house.clock, fetch=gateway_fetch(gateway_url, token))
     if house.researcher is not None:
         house.researcher.commons = house.commons
-    frontier = Frontier(gateway_url, token, spend_guard=campaigns)
+    frontier = Frontier(gateway_url, token)
     house.frontier = frontier
     if config.get("options_history", True) and not canary:
-        # Listed-option history (market-data GETs only): the options desk's replay and the
-        # equity desks' IV/skew/activity features. Empty until ingested; then refreshed daily.
+        # Listed-option history (market-data GETs only): the options desk's replay. Empty until ingested; then
+        # refreshed daily. Superseded by the Gym (league/gym/) and deleted with it in Wave 2b.
         from .options_history import OptionsHistory, gateway_get
-        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(paper), ledger=house.ledger, clock=house.clock)
-    if config.get("feeds", True) and not canary:
-        # Live sports scoreboards and perpetual funding / open interest, and Deribit's DVOL and OKX's
-        # settled funding as backfilled point-in-time history (league/feeds.py): public, keyless hosts
-        # already on the House box's allowlist, recorded on a lane of their own. Agents ask for them
-        # in NEEDS["feeds"]; replay uses the live ones once recorded, the backfilled ones at once.
-        from .feeds import FeedRecorder
-        house.feeds = FeedRecorder(house, root / "feeds.sqlite")
-    # The continuous midpoint-direction labeler is off unless the config turns it back on. It burned
-    # about $1/h of Jev's $20 lifetime allowance ($16.04 spent at the gateway by Sept 22, 2026), and
-    # the capped evaluation of its own store found no tradable value: its labels predicted whether a
-    # midpoint moves, not which way, and no threshold trade beat the spread
-    # (docs/design/2026-09-22-jev-sensor.md).
-    if campaigns is not None and campaigns.burst() and config.get("semantic_lab", False):
-        from .semantic_lab import JevClient, SemanticLab
-        house.semantic_lab = SemanticLab(root, JevClient(gateway_url, token), house.ledger,
-                                         active=campaigns.running, clock=house.clock,
-                                         proposer=frontier, burst=campaigns.burst())
-    if house.researcher is not None and campaigns is not None:
-        from .fast_research import FastResearch, ResearchRouter, MODEL as RESEARCH_MODEL, load_routes
-
-        routes = load_routes()
-        fast = FastResearch(root / 'fast-research.sqlite',
-            Frontier(gateway_url, token, model=RESEARCH_MODEL, spend_guard=campaigns),
-            house.ledger, balance=house.economy.balance, clock=house.clock, cache=routes.get('cache'))
-        if burst:
-            from .overnight import policy_with_turbo
-            routes = {'enabled': True, 'cohort': burst['id'], 'fraction': policy_with_turbo(burst)['luna_fraction']}
-        from .routing import TaskRouter
-
-        task_router = TaskRouter(house.ledger, clock=house.clock, config=load_routes().get('routing'))
-        house.researcher.provider = ResearchRouter(provider, fast, routes, tier=house.frontier_tier, task_router=task_router)
-        house.researcher.routes = task_router
-    if house.lab is not None:
-        # The lab box config.json names, bound into the House's sandbox (league/labbox.py). A release
-        # without that module, or a lab block switched off, runs without the lab.
-        try:
-            from .labbox import LabBox
-
-            # Bound under the key the House was built with (`lab_box_key`), checking tapes against
-            # the House's own sealed window.
-            box = LabBox.from_config(sandbox, config, clock=house.clock, holdout=house.holdout_window)
-        except ImportError as exc:
-            house.alert("warning", f"the Alpha Lab is off: {type(exc).__name__}: {str(exc)[:160]}")
-            box = None
-        if box is not None:
-            house.lab.use_box(box)
-        else:
-            house.lab.close()
-            house.lab = None
-            if house.researcher is not None:
-                house.researcher.lab = None
-    if not canary and house.researcher is not None and config.get("research_traces", True):
-        # Private research transcripts with their cost and outcome, for eventual fine-tuning.
-        from .traces import TraceStore
-
-        house.researcher.traces = TraceStore(root, house.ledger, clock=house.clock)
-    if not canary and house.researcher is not None:
-        # Jev for every researcher (`classify`): one question over many records, at cost.
-        from .semantic_lab import JevClient
-        house.researcher.jev = JevClient(gateway_url, token)
-    jev = dict(config.get("jev") or {})
-    if not canary and jev.get("enabled", True):
-        # Jev as the cheap sensor in front of expensive work: research gate, explicit inactivity,
-        # triage into repair reports, hypothesis links, exposure groups. Capped and cached here;
-        # the gateway's lifetime allowance stays the authority (league/jev.py).
-        from .jev import Sensor
-        from .semantic_lab import JevClient
-        from .sensors import JevFloor
-
-        sensor = Sensor(root / "jev.sqlite", JevClient(gateway_url, token), clock=house.clock,
-                        daily_usd=str(jev.get("daily_usd", "0.25")), daily_calls=int(jev.get("daily_calls", 400)),
-                        purpose_calls=jev.get("purpose_calls") or None)
-        house.jev_floor = JevFloor(house, sensor, jev)
-        if house.jev_floor.gate is not None and getattr(house.researcher, "routes", None) is not None:
-            # Sept 24, 2026 (L2): an agent under the abstention lock researches on the cheapest profile.
-            house.researcher.routes.lock = house.jev_floor.gate.lock_profile
-        if house.jev_floor.gate is not None and house.researcher is not None:
-            # Review of #311 (Sept 25, 2026, F4): the teacher's control arm does not read the lesson that
-            # names it during the window the lift measures (`ResearchGate.withheld`).
-            house.researcher.withheld = house.jev_floor.gate.withheld
+        reader = brokers["alpaca"] if real_money else paper
+        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(reader), ledger=house.ledger, clock=house.clock)
     if not canary:
         from .frontier import FrontierMonth
 
-        # The gateway's month is also OpenAI's meter: each reading feeds the campaign (Sept 24, 2026).
-        house.frontier_month = FrontierMonth(gateway_url, token, meter=campaigns)
+        house.frontier_month = FrontierMonth(gateway_url, token)
     house.auditor = Auditor(
         frontier, house.ledger, house.economy, house.evaluator,
         live_agents=lambda: [{"agent": a.id, "family": a.family, "niche": a.niche} for a in house.registry.living() if house.evaluator.rung(a.id) >= 2],
@@ -367,55 +297,33 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Always built with Merton: switched off in league/engineer.json it still reports (free),
         # and buys nothing.
         house.engineer = repair_engineer(house, frontier, house.merton.forge)
-    if merton and (house.game.get("hypotheses") or {}).get("enabled", True):
-        # Merton writes hypothesis cards for the desks where the evidence is, and replay admits
-        # them; routine refill stops breeding random mutations (league/hypotheses.py).
-        from .hypotheses import Foundry, foundry_model
-
-        # Its cards are judged by replay before any seat, so it writes on the model game.json names
-        # (GPT-6 Sol from Sept 22, 2026: about a fifth of Astra's price, a call every quarter hour
-        # inside the same daily budget); the auditor and the engineer keep Astra.
-        model = foundry_model(house.game)
-        writer = frontier if model in (None, frontier.model) else Frontier(gateway_url, token, model=model, spend_guard=campaigns)
-        house.hypotheses = Foundry(house, writer)
     if house.researcher is not None and frontier is not None:
         # An agent may hire Merton with its own credits, whether or not his pull-request roles run:
         # what a good record buys is better thinking.
         from .merton import Merton as _Merton
 
         house.researcher.merton = house.merton or _Merton(frontier, None, house.ledger, evidence=lambda role: {})
-        if campaigns is not None:
-            from .grants import ResearchGrants
-
-            house.researcher.grants = ResearchGrants.funded(root / 'grants.sqlite', gateway_url, token,
-                house.ledger, campaigns, clock=house.clock)
     if provider is not None:
-        # The owner's recorded Sail top-ups raise the account meter's monthly line as well as the
-        # campaign's ceiling: otherwise the meter stops the floor with the new credit unspent.
-        house.budget = Budget(house.ledger, lambda: provider.check_balance(),
-                              topped_up=(lambda month: campaigns.topped_up("sail", month)) if campaigns is not None else None)
+        house.budget = Budget(house.ledger, lambda: provider.check_balance())
     if not canary and REPO.parent.name == "releases" and not local_sandbox:
         # On the House box only: a daily checkpoint of the box itself, so the ledger (every agent's
         # code, record and journal) outlives the one disk it lives on.
         from .backup import Backup
 
         house.backup = Backup(SailboxClient(), house.ledger)
-    if not canary and REPO.parent.name == "releases" and config.get("auto_update", True):
+    if not canary and REPO.parent.name == "releases" and auto_update(config):
         # On the House box the code runs from <base>/releases/<id>: there, main is pulled every
         # half hour and handed to the watchdog. On a developer's machine nothing updates itself.
         from .updater import Updater
 
         house.updater = Updater(REPO.parent.parent)
     if publish:
-        # The balance chart is the REAL accounts whatever the agents are doing, so the publisher
-        # reads them (balances only) even while every book is practice.
-        readers = {
-            "alpaca": brokers.get("alpaca") or gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=config.get("alpaca_feed", "iex")),
-            "kalshi": brokers.get("kalshi") or gateway_broker("kalshi", gateway_url=gateway_url, token=token()),
-        }
+        # The balance chart is the REAL account whatever the agents are doing, so the publisher
+        # reads it (balances only) even while every book is practice.
+        readers = {"alpaca": brokers.get("alpaca") or gateway_broker("alpaca", gateway_url=gateway_url, token=token(), feed=feed)}
         house.publisher = Publisher(
             config["site_url"], lambda: secret("CAPITAL_PUBLISH_TOKEN"), root / "publish.json", tape=tape or config.get("site_tape"),
-            performance=config.get("performance"), real_brokers=readers,
+            performance=performance_of(config), real_brokers=readers,
             gateway_url=gateway_url, gateway_token=token,
         )
     return house

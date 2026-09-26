@@ -12,6 +12,7 @@ family at its measured capacity gets no House mutation and is marked in the pack
 """
 
 from __future__ import annotations
+import unittest
 
 from unittest.mock import patch
 
@@ -58,6 +59,7 @@ class Brief(FoundryCase):
         self.assertIn("rates", DESK_FEEDS["kalshi-open"])
         self.assertIn("odds", DESK_FEEDS["kalshi-sports"])
 
+    @unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
     def test_the_game_file_sends_calls_to_the_deep_markets_and_closes_the_two_crypto_desks(self):
         foundry = load_game()["hypotheses"]
         self.assertEqual(set(foundry["fast_desks"]),
@@ -67,6 +69,7 @@ class Brief(FoundryCase):
         self.assertEqual((foundry["first_transfer"]["family"], foundry["first_transfer"]["desk"]), ("weather-favorites", "kalshi-weather"))
 
 
+@unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
 class ClosedDesks(TransferCase):
     def test_no_card_on_a_closed_desk_until_a_family_there_is_positive_over_three_blocks(self):
         self.settings(closed_desks=[self.DESK], exploration_share=0, fast_share=0, transfer_share=0)
@@ -117,6 +120,7 @@ class ClosedDesks(TransferCase):
         self.assertIn("positive forward record over 3", self.foundry._closed_desks()[self.DESK])
 
 
+@unittest.skip('Wave 2b deletes the hypothesis foundry: the options overhaul (Sept 26, 2026) took its game.json block and the non-options desks out')
 class FirstTransfer(TransferCase):
     def test_the_weather_family_is_scaled_on_the_ensemble_first_then_ports_go_on(self):
         self.settings(transfer_share=1.0, fast_share=0, exploration_share=0,

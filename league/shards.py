@@ -368,8 +368,8 @@ class ShardFunder:
                 return "the kill switch is engaged"
         except Exception as exc:  # noqa: BLE001 - a switch that cannot be read is engaged
             return f"the kill switch cannot be read ({type(exc).__name__})"
-        campaigns = getattr(house, "campaigns", None)
-        grant = campaigns.live_authorization() if campaigns is not None else None
+        guard = getattr(house, "grant", None)
+        grant = guard.live_authorization() if guard is not None else None
         if not grant or grant.get("active") is False or grant.get("revoked"):
             return "no live grant is active"
         try:

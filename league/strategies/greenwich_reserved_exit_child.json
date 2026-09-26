@@ -1,8 +1,0 @@
-{
-  "family": "open-lab-6e50b1",
-  "name": "greenwich_reserved_exit_child",
-  "repair": {
-    "key": "order_refusal:kalshi-shadow:sell exceeds position and shorting is not permitted (you hold # YES on this market; sell at most tha"
-  },
-  "why": "Corrected child of greenwich-l15ed4c: its exit logic resubmits the full holding without reserving working sells, consistent with three repeated oversell refusals. Subtract unfilled sell commitments on the same market and leg and reserve new exits within each decision. Preserve the parent's specialty, entry logic, parameters and exit triggers; qualify independently from rung 0."
-}

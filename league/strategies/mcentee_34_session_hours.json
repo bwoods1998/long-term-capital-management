@@ -1,9 +1,0 @@
-{
-  "family": "megacaps-reversion",
-  "name": "mcentee_34_session_hours",
-  "repair": {
-    "key": "strategy_defect:mcentee-34:76c339a411e9",
-    "parent": "mcentee-34"
-  },
-  "why": "Corrected child of mcentee-34: its regular_session() hard-coded 14:35-20:55 UTC, which is 9:35-15:55 New York time only in winter (EST). Under daylight time it sat idle from the 13:30Z open until 14:35Z and treated 20:00-20:55Z, after the close, as open. This child reads the session in America/New_York (9:35-15:55 local on weekdays, correct across DST) and keeps the parent's megacap two-session-pullback rules, NEEDS, parameters and $25 sizing unchanged. Born at rung 0 with no inherited record; it must pass replay and earn every gate on its own evidence."
-}

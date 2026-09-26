@@ -103,8 +103,8 @@ def resize(house: Any, agent: Any) -> dict[str, Any] | None:
     growth, alpha = _sizing_record(house, agent, book)
     account = book.account(agent.id)
     present = max(account.staked, Decimal(CONSTITUTION["rungs"]["2"]["stake_usd"]))
-    guard = getattr(house, 'campaigns', None)
-    pilot = guard.live_authorization() if guard else None
+    guard = getattr(house, 'grant', None)
+    pilot = guard.live_authorization() if guard is not None else None
     venue_cash = book.venue_cash or ZERO
     venue_caps = pilot['policy'].get('venue_capital_usd') if pilot else None
     if venue_caps:
@@ -113,9 +113,12 @@ def resize(house: Any, agent: Any) -> dict[str, Any] | None:
                                  alpha=alpha, family_lcb=_family_lcb(house, agent, book))
     equity = book.equity(agent.id)
     delta = target - equity
+    released = guard is not None and guard.allows_live(3)
+    if not released and (pilot or delta > 0):
+        # Real money grows only under the owner's active grant (`league/live_trading.py`); with no grant at all a
+        # shrink still returns cash, and under a revoked or unratified one nothing moves, as before.
+        return None
     if pilot:
-        if not guard.allows_live(3):
-            return None
         # Every promoted account stays inside the same experiment's risk envelope. A rung-3
         # label must not turn $25 of tuition into unrestricted venue capital.
         room = house.tuition()['headroom_usd']
@@ -162,8 +165,8 @@ def recommend(house: Any, accounts: dict[str, Decimal] | None = None) -> dict[st
     """The standing recommendation: where, on the evidence, the owner's next dollar belongs."""
     demand: dict[str, Decimal] = {"kalshi": ZERO, "alpaca": ZERO}
     ranked = []
-    guard = getattr(house, 'campaigns', None)
-    pilot = guard.live_authorization() if guard else None
+    guard = getattr(house, 'grant', None)
+    pilot = guard.live_authorization() if guard is not None else None
     for agent in house.registry.living():
         rung = house.evaluator.rung(agent.id)
         if rung < 2:

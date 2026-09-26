@@ -49,7 +49,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      - name: Install the Gym's dependencies when the tree pins them
+        # The Gym (league/gym/, Wave 3 of the options overhaul, Sept 26, 2026) needs numpy, pyarrow and polars; the rest
+        # of the repository is standard library only. Nothing to install on a tree without the file.
+        run: |
+          if [ -f requirements-gym.txt ]; then python3 -m pip install --disable-pip-version-check -r requirements-gym.txt; fi
       - name: Run the first run's runtime tests
+        # Both suites run until the full prune (Wave 2b) deletes ltcm/ and its tests.
         run: python3 -m unittest discover -s ltcm/tests -t .
       - name: Run the league's tests
         run: python3 -m unittest discover -s league/tests -t .

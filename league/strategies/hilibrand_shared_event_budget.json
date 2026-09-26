@@ -1,8 +1,0 @@
-{
-  "family": "crypto-strikes-lab-955dae",
-  "name": "hilibrand_shared_event_budget",
-  "repair": {
-    "key": "order_refusal:kalshi:one event may hold at most #% of the stake: KXBTCD-#SEP# would hold $# of this account's $# (holding"
-  },
-  "why": "Corrected child of hilibrand-lc04657, born on rung 0 with no inherited record. The parent checks individual strikes against an obsolete 30% market share, causing repeated 25% event-cap refusals. Preserve its hourly KXBTCD/KXETHD NO-favourite maker mechanism while sizing against one event budget shared by both legs, holdings at cost, remaining working buys and all earlier intents in the same decision. Requested cancellations release no capacity before confirmation; the child must qualify on its own evidence."
-}

@@ -18,6 +18,10 @@ from league.tests.test_book import BookCase
 from league.tests.test_house import BUYER, HouseCase
 from league.venues import instrument_for
 
+def setUpModule():
+    raise unittest.SkipTest('the Kalshi and crypto horizon rule left game.json with the options overhaul (Sept 26, 2026); Wave 2b deletes these tests with the rule')
+
+
 D = Decimal
 HOLDER = BUYER.replace("test-buyer", "test-holder").replace('''    if held:
         return {"intents": [{"symbol": "BTC/USD", "side": "sell", "quantity": held[0]["quantity"], "type": "market", "reason": "take it off"}],

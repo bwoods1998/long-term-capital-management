@@ -108,7 +108,7 @@ class EventSnapshot(HouseCase):
         code = BUYER.replace('"venue": "alpaca"', '"venue": "kalshi", "series": ["KXBTCD"]')
         agent = self.house.spawn('kalshi-test', 'test', code)
         broker = FakeBroker('kalshi', family='kalshi', cash='517.75')
-        self.house.campaigns = SimpleNamespace(live_authorization=lambda: {'policy': {'venue_capital_usd': {'kalshi': '517.75'}}}, close=lambda: None)
+        self.house.grant = SimpleNamespace(live_authorization=lambda: {'policy': {'venue_capital_usd': {'kalshi': '517.75'}}}, close=lambda: None)
         book = Book('kalshi', broker, self.house.ledger, fees=Fees('kalshi'), real_money=True, clock=self.clock,
                     event_capital_budget=lambda: self.house._event_capital_budget('kalshi'))
         book.reconcile()

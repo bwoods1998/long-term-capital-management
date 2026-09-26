@@ -1,8 +1,0 @@
-{
-  "family": "sports-central-over-under",
-  "name": "meriwether_central_under_maker_child",
-  "repair": {
-    "key": "order_refusal:kalshi:a real entry on sports-central-over-under must be a post-only limit until the family's pooled taker "
-  },
-  "why": "Corrected child of meriwether-h7d7702: replace refused market entries with post-only NO limits at the implied NO bid. Preserve KXMLBTOTAL, the day horizon, parameters, selection and conservative ask-based sizing. Start at rung 0 with no inherited qualification; judge independently and monitor recurrence of the real-entry liquidity refusal."
-}

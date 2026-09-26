@@ -1,8 +1,0 @@
-{
-  "family": "sports-central-over-under",
-  "name": "meriwether_central_under_passive_entry",
-  "repair": {
-    "key": "order_refusal:kalshi:a real entry on sports-central-over-under must be a post-only limit until the family's pooled taker "
-  },
-  "why": "Corrected child of meriwether-h7d7702: its market NO buys repeatedly violate the family post-only entry restriction. Preserve the KXMLBTOTAL day-horizon central-UNDER selection and conservative ask-plus-taker-fee budget, but submit post-only limits at the implied NO bid rounded down to cents on every rung. Born on rung 0 with no inherited record; qualification and forward verification remain required."
-}
