@@ -74,7 +74,15 @@ class Architect:
 
     def refilling(self) -> bool:
         """Fewer families live than the swarm starts with."""
-        return len(self.store.families(alive=True)) < int(self.settings.get("population", {}).get("start", 48))
+        return len(self.store.families(alive=True)) < self.population()[0]
+
+    def population(self) -> tuple[int, int]:
+        from .lifecycle import Lifecycle
+        pop = self.settings.get("population", {})
+        start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
+        if not Lifecycle(self.store, self.settings, clock=self.clock).burst():
+            start, ceiling = min(16, start), min(16, ceiling)
+        return start, ceiling
 
     def due(self) -> bool:
         from .lifecycle import Lifecycle
@@ -87,9 +95,8 @@ class Architect:
     def want(self) -> int:
         """How many families this pass may admit: the gap to the start while refilling (at most `max_refill`), else
         `max_new`; never past the ceiling."""
-        pop = self.settings.get("population", {})
         alive = len(self.store.families(alive=True))
-        start, ceiling = int(pop.get("start", 48)), int(pop.get("ceiling", 96))
+        start, ceiling = self.population()
         n = min(int(self.cfg.get("max_refill", 12)), start - alive) if alive < start else int(self.cfg.get("max_new", 6))
         return max(0, min(n, ceiling - alive))
 
@@ -157,8 +164,8 @@ class Architect:
             declared = self.store.family(str(row.get("parent"))) if row.get("parent") else None
             parent = declared["id"] if declared and declared["structure"] == structure else (same[-1]["id"] if same else None)
             prior = dead[-1]["lineage"] if dead and not parent else None
-            with self.store.lock:
-                if len(self.store.families(alive=True)) >= int(self.settings.get("population", {}).get("ceiling", 96)):
+            with self.store.atomic():
+                if len(self.store.families(alive=True)) >= self.population()[1]:
                     break
                 fam = self.store.add_family(spec, origin="architect", parent=parent, prior_lineage=prior)
                 living.add((mechanism.lower()[:80], tuple(roots), structure))
@@ -183,7 +190,7 @@ class Architect:
                 # Claim before dispatch; a crash/ambiguous answer is not another paid pass after restart.
                 self.store.put("daily_architect", {"period": life.period()["id"], "status": "dispatched", "at": began})
         self.store.put("architect_at", began)
-        room = int(self.settings.get("population", {}).get("ceiling", 96)) - len(self.store.families(alive=True))
+        room = self.population()[1] - len(self.store.families(alive=True))
         if room <= 0 and not daily:
             out = {"born": [], "why": "the population is at its ceiling"}
             self.store.event("swarm.architect", None, out)
