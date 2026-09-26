@@ -33,32 +33,56 @@ class Proc:
 
 
 class HookCase(unittest.TestCase):
+    """A fake process table: `self.procs[pid] = (cmdline, start)`; `hold(pid)` takes the swarm's lock as that process
+    would (a real flock on the lock file, from another open file description), `let_go()` drops it."""
+
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.root = Path(self.dir.name) / "state"
         self.root.mkdir()
         self.clock = Clock()
-        self.alive: set[int] = set()
         self.signals: list[tuple[int, int]] = []
         self.spawned: list[Proc] = []
+        self.procs: dict[int, tuple[str, str]] = {}
+        self.held = None
+        self.addCleanup(self.let_go)
+
+    def swarm_cmd(self):
+        return f"/usr/bin/python3 -m league.swarm run --root {self.root}"
 
     def kill(self, pid, sig):
-        if pid not in self.alive:
+        if pid not in self.procs:
             raise ProcessLookupError(pid)
         if sig:
             self.signals.append((pid, sig))
             if sig == signal.SIGKILL:
-                self.alive.discard(pid)
+                self.procs.pop(pid, None)
+                self.let_go()
 
     def spawn(self):
         proc = Proc(1000 + len(self.spawned))
-        self.alive.add(proc.pid)
+        self.procs[proc.pid] = (self.swarm_cmd(), f"t{proc.pid}")
         self.spawned.append(proc)
         return proc
 
+    def hold(self, pid, *, start=None, release="/rel/A"):
+        import fcntl
+
+        self.let_go()
+        self.held = open(self.root / "swarm.lock", "a+")
+        fcntl.flock(self.held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.procs.setdefault(pid, (self.swarm_cmd(), start or f"t{pid}"))
+        (self.root / "swarm.lock").write_text(json.dumps({"pid": pid, "start": start or self.procs[pid][1], "release": release}))
+
+    def let_go(self):
+        if self.held is not None:
+            self.held.close()
+            self.held = None
+
     def step(self, config=ON):
-        return SwarmStep(self.root, config=config, clock=self.clock, spawn=self.spawn, kill=self.kill, code_dir=Path("/rel/A"))
+        return SwarmStep(self.root, config=config, clock=self.clock, spawn=self.spawn, kill=self.kill, code_dir=Path("/rel/A"),
+                         proc=lambda pid: self.procs.get(pid))
 
     def beat(self, pid, *, at=None, release="/rel/A", started=None):
         (self.root / "swarm.heartbeat").write_text(json.dumps({"pid": pid, "at": self.clock() if at is None else at, "release": release,
@@ -69,10 +93,21 @@ class Supervise(HookCase):
     def test_it_starts_the_swarm_once_and_leaves_a_healthy_one_alone(self):
         step = self.step()
         self.assertEqual(step.supervise()["action"], "started")
+        self.hold(1000)
         self.beat(1000)
         self.clock.advance(20)
         self.assertNotIn("action", step.supervise())
         self.assertEqual(len(self.spawned), 1)
+
+    def test_a_live_child_that_has_not_yet_beaten_or_locked_is_running(self):
+        step = self.step()
+        self.beat(77, at=self.clock() - 3600)  # an old swarm's last heartbeat, its pid dead
+        step.supervise()
+        for _ in range(4):
+            self.clock.advance(31)
+            out = step.supervise()
+            self.assertNotEqual(out.get("action"), "started", out)
+        self.assertEqual(len(self.spawned), 1, "never a second swarm while the first lives")
 
     def test_disabled_or_stopped_it_starts_nothing(self):
         self.assertEqual(self.step(config={"swarm": {"enabled": False}}).supervise()["idle"], "disabled")
@@ -84,7 +119,7 @@ class Supervise(HookCase):
         step = self.step()
         self.assertEqual(step.supervise(may_start=False)["idle"], "the House is not open for business")
         self.assertEqual(self.spawned, [])
-        step.supervise()
+        self.hold(1000)
         self.beat(1000)
         self.assertNotIn("idle", step.supervise(may_start=False))
         self.assertEqual(self.signals, [])
@@ -92,6 +127,7 @@ class Supervise(HookCase):
     def test_a_stale_heartbeat_is_a_hang_it_terminates_then_kills_then_restarts(self):
         step = self.step()
         step.supervise()
+        self.hold(1000)
         self.beat(1000)
         self.clock.advance(300)
         self.assertIn("stale", step.supervise()["action"])
@@ -99,24 +135,57 @@ class Supervise(HookCase):
         self.clock.advance(31)
         self.assertEqual(step.supervise()["action"], "terminating")
         self.assertEqual(self.signals[-1], (1000, signal.SIGKILL))
+        self.spawned[0].code = -9
         self.clock.advance(60)
         self.assertEqual(step.supervise()["action"], "started")
 
     def test_a_swarm_on_another_release_is_restarted(self):
-        self.alive.add(77)
+        self.hold(77, release="/rel/OLD")
         self.beat(77, release="/rel/OLD")
         out = self.step().supervise()
         self.assertIn("another release", out["action"])
+        self.assertEqual(self.signals, [(77, signal.SIGTERM)])
 
-    def test_a_start_that_never_beats_backs_off(self):
+    def test_it_never_signals_a_pid_that_is_not_the_swarm(self):
+        self.hold(77, release="/rel/OLD")
+        self.beat(77, release="/rel/OLD")
+        self.procs[77] = ("/usr/bin/python3 -m league run --root /workspace/state", "t77")  # the pid now belongs to the House
+        out = self.step().supervise()
+        self.assertEqual(self.signals, [])
+        self.assertIn("cannot verify", out["action"])
+
+    def test_it_never_signals_a_reused_pid(self):
+        self.hold(77, start="t-old", release="/rel/OLD")
+        self.beat(77, release="/rel/OLD")
+        self.procs[77] = (self.swarm_cmd(), "t-new")  # same number, another process start
+        self.step().supervise()
+        self.assertEqual(self.signals, [])
+
+    def test_it_never_signals_itself(self):
+        import os
+
+        self.hold(os.getpid(), release="/rel/OLD")
+        self.beat(os.getpid(), release="/rel/OLD")
+        self.step().supervise()
+        self.assertEqual(self.signals, [])
+
+    def test_a_start_that_dies_before_it_locks_backs_off(self):
         step = self.step()
         step.supervise()
-        self.alive.clear()
+        self.spawned[-1].code = 1
         self.clock.advance(31)
         self.assertEqual(step.supervise()["action"], "started")
-        self.alive.clear()
+        self.spawned[-1].code = 1
         self.clock.advance(31)
         self.assertIn("waiting", step.supervise()["action"])
+
+    def test_the_log_is_rotated_at_a_start(self):
+        from league.swarm.hook import rotate_log
+
+        log = self.root / "swarm.log"
+        log.write_bytes(b"x" * 1000)
+        rotate_log(log, max_bytes=500)
+        self.assertEqual((log.exists(), (self.root / "swarm.log.1").stat().st_size), (False, 1000))
 
     def test_a_tick_never_raises_into_the_house(self):
         class BrokenLedger:
@@ -140,19 +209,20 @@ class Mirror(HookCase):
         fam = store.add_family(SPEC, origin="seed")
         store.event("swarm.born", fam["id"], {"mechanism": fam["mechanism"], "parent": None})
         store.event("swarm.cycle", fam["id"], {"cycle": 1})
+        store.event("swarm.pool", None, {"action": "box_ready"})
         store.set_band(fam["id"], "candidate", reason="passed its holdout look")
         store.event("swarm.note", fam["id"], {"text": "condors pay on quiet days"})
         ledger = Ledger(self.root / "ledger.sqlite")
         self.addCleanup(ledger.close)
         step = self.step()
-        self.assertEqual(step.mirror(ledger), 4)
+        self.assertEqual(step.mirror(ledger), 5)
         self.assertEqual(step.mirror(ledger), 0)
         rows = list(ledger.iter())
-        self.assertEqual([r.kind for r in rows], ["swarm.born", "swarm.band", "swarm.note"], "cycles stay in the swarm's own table")
+        self.assertEqual([r.kind for r in rows], ["swarm.born", "swarm.band", "swarm.note"], "cycles and pool rows stay in the swarm's table")
         self.assertEqual([r.public for r in rows], [True, True, True])
         self.assertTrue(all(r.agent == "condor-vrp" for r in rows))
         (self.root / "swarm-mirror.json").unlink()
-        self.assertEqual(step.mirror(ledger), 4, "a lost cursor re-mirrors idempotently")
+        self.assertEqual(step.mirror(ledger), 5, "a lost cursor re-mirrors idempotently")
         self.assertEqual(len(list(ledger.iter())), 3)
         store.close()
         # The tape: a note is the agent's note, a birth and a band move are the swarm's news.

@@ -32,14 +32,14 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import HEARTBEAT, LOG_FILE, bands as bands_mod, public, settings as settings_mod, sitefeed
+from . import HEARTBEAT, LOCK_FILE, LOG_FILE, bands as bands_mod, public, settings as settings_mod, sitefeed
 from .store import SwarmStore
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 PUBLIC_KINDS = ("swarm.born", "swarm.retired", "swarm.band", "swarm.note")
-#: Kept in the swarm's own table only: a cycle a minute a family is thousands of rows an hour, and the House ledger is
-#: append-only on a small disk. The hourly `swarm.tournament` row carries their totals (cycles, trials, spend).
-SKIPPED_KINDS = ("swarm.cycle",)
+#: Kept in the swarm's own table only: a cycle a minute a family is thousands of rows an hour (and the pool's rows follow
+#: the boxes), and the House ledger is append-only on a small disk. The hourly `swarm.tournament` row carries their totals.
+SKIPPED_KINDS = ("swarm.cycle", "swarm.pool")
 MIRROR_CURSOR = "swarm-mirror.json"
 
 
@@ -48,7 +48,8 @@ class SwarmStep:
 
     def __init__(self, root: str | Path, *, config: Mapping[str, Any] | None = None, python: str = sys.executable,
                  code_dir: Path = CODE_DIR, clock: Callable[[], float] = time.time, spawn: Callable[..., Any] | None = None,
-                 kill: Callable[[int, int], None] = os.kill, mirror_limit: int = 200):
+                 kill: Callable[[int, int], None] = os.kill, mirror_limit: int = 200,
+                 proc: Callable[[int], tuple[str, str] | None] | None = None):
         self.root = Path(root)
         self.config = config
         self.python = python
@@ -56,11 +57,14 @@ class SwarmStep:
         self.clock = clock
         self.spawn = spawn or self._popen
         self.kill = kill
+        self.proc = proc or read_proc
         self.mirror_limit = int(mirror_limit)
         self.last_start = float("-inf")
         self.failed_starts = 0
-        self.terminating: tuple[int, float] | None = None
+        self.terminating: tuple[int, float, str | None] | None = None
         self.child: Any = None
+        self.child_locked = False
+        self.child_accounted = True
 
     # ------------------------------------------------------------------ the House calls this
     def tick(self, house: Any = None, open_for_business: bool = True) -> dict[str, Any]:
@@ -82,17 +86,34 @@ class SwarmStep:
         except (OSError, ValueError):
             return None
 
-    def alive(self, pid: int | None) -> bool:
-        if not pid:
-            return False
-        if self.child is not None and getattr(self.child, "pid", None) == pid:
-            if self.child.poll() is not None:  # our own child that exited: reap it
-                return False
+    def lock_info(self) -> dict[str, Any]:
         try:
-            self.kill(int(pid), 0)
-        except (OSError, ProcessLookupError):
+            return json.loads((self.root / LOCK_FILE).read_text() or "{}")
+        except (OSError, ValueError):
+            return {}
+
+    def locked(self) -> bool:
+        """A swarm process holds the single-instance lock (`<state>/swarm.lock`, an exclusive flock it keeps for its life):
+        the one test of "a swarm is running" that a reused pid or a slow first heartbeat cannot fool."""
+        return lock_held(self.root / LOCK_FILE)
+
+    def child_alive(self) -> bool:
+        return self.child is not None and self.child.poll() is None
+
+    def verified(self, pid: Any, start: Any) -> bool:
+        """`pid` is the swarm this House runs: never this process or its parent, its command line is `league.swarm` on
+        this state root, and it started when the lock says it did (a reused pid fails that)."""
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
             return False
-        return True
+        if pid <= 1 or pid in (os.getpid(), os.getppid()):
+            return False
+        seen = self.proc(pid)
+        if not seen:
+            return False
+        cmdline, started = seen
+        return "league.swarm" in cmdline and str(self.root) in cmdline and (start is None or str(started) == str(start))
 
     def stopped(self) -> str:
         for stop in (self.root / "STOP", self.root.parent / "STOP", self.root / "swarm.stop"):
@@ -104,51 +125,58 @@ class SwarmStep:
         settings = settings_mod.load(self.root, config=self.config)
         now = self.clock()
         beat = self.heartbeat() or {}
-        pid = beat.get("pid")
-        try:
-            pid = int(pid) if pid else int((self.root / "swarm.pid").read_text().strip())
-        except (OSError, ValueError):
-            pid = None
-        running = self.alive(pid)
+        lock = self.lock_info()
+        held = self.locked()
+        if held and self.child_alive():
+            self.child_locked = True
+        running = held or self.child_alive()
         age = now - float(beat.get("at") or 0.0) if beat else None
-        info: dict[str, Any] = {"enabled": bool(settings.get("enabled")), "pid": pid if running else None,
+        info: dict[str, Any] = {"enabled": bool(settings.get("enabled")), "running": running, "pid": lock.get("pid") if held else None,
                                 "heartbeat_age": None if age is None else round(age, 1), "release": beat.get("release")}
         if self.terminating is not None:
-            tpid, since = self.terminating
-            if self.alive(tpid):
-                if now - since >= 30:
+            tpid, since, tstart = self.terminating
+            if running:
+                if now - since >= 30 and self.verified(tpid, tstart):
                     self._signal(tpid, signal.SIGKILL)
                 info["action"] = "terminating"
                 return info
             self.terminating = None
-            running = False
         why_not = "" if settings.get("enabled") else "disabled"
         why_not = why_not or self.stopped()
         if why_not:
             info["idle"] = why_not
             return info  # the swarm leaves by itself on a STOP file or when disabled; nothing to start
         if running:
+            if not held:
+                return info  # our child, still starting: it has not taken the lock yet
             stale = age is not None and age >= float(settings.get("stale_heartbeat_seconds", 240)) and \
                 now - self.last_start >= float(settings.get("stale_heartbeat_seconds", 240))
-            other = beat.get("release") not in (None, str(self.code_dir)) and now - float(beat.get("started_at") or 0) > 60
+            release = lock.get("release") or beat.get("release")
+            other = release not in (None, str(self.code_dir)) and now - float(beat.get("started_at") or 0) > 60
             if stale or other:
-                self._signal(int(pid), signal.SIGTERM)
-                self.terminating = (int(pid), now)
-                info["action"] = "restart: " + ("its heartbeat is stale" if stale else "it runs another release")
+                why = "its heartbeat is stale" if stale else "it runs another release"
+                if self.verified(lock.get("pid"), lock.get("start")):
+                    self._signal(int(lock["pid"]), signal.SIGTERM)
+                    self.terminating = (int(lock["pid"]), now, lock.get("start"))
+                    info["action"] = "restart: " + why
+                else:
+                    info["action"] = f"restart wanted ({why}), but it cannot verify the lock's pid as the swarm: not signalling"
             return info
         if not may_start:
             info["idle"] = "the House is not open for business"
             return info
-        backoff = min(1800.0, 30.0 * (2 ** min(self.failed_starts, 6)))
+        if self.child is not None and not self.child_accounted:
+            self.child_accounted = True  # the last start has ended: did it ever take the lock (run), or die first?
+            self.failed_starts = 0 if self.child_locked else self.failed_starts + 1
+        backoff = min(1800.0, 30.0 * (2 ** max(0, min(self.failed_starts, 7) - 1)))
         if now - self.last_start < backoff:
             info["action"] = f"waiting {backoff - (now - self.last_start):.0f} s to start"
             return info
-        if self.last_start > float("-inf") and (not beat or float(beat.get("at") or 0) < self.last_start):
-            self.failed_starts += 1  # the last start never beat
-        else:
-            self.failed_starts = 0
         self.last_start = now
+        self.child_locked = False
+        self.child_accounted = False
         try:
+            rotate_log(self.root / LOG_FILE)
             self.child = self.spawn()
             info["action"] = "started"
             info["pid"] = getattr(self.child, "pid", None)
@@ -231,6 +259,43 @@ class SwarmStep:
 
     def site_inputs(self) -> dict[str, Any]:
         return sitefeed.site_inputs(self.root)
+
+
+def lock_held(path: Path) -> bool:
+    """Someone holds an exclusive flock on `path` (tried without waiting, released at once)."""
+    import fcntl
+
+    if not path.exists():
+        return False
+    try:
+        with open(path, "a+") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return True
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return False
+
+
+def read_proc(pid: int) -> tuple[str, str] | None:
+    """(the command line, the start time in clock ticks) of a live process, from /proc; None when it is gone."""
+    try:
+        cmdline = Path(f"/proc/{int(pid)}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        stat = Path(f"/proc/{int(pid)}/stat").read_text()
+        return cmdline, stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def rotate_log(path: Path, *, max_bytes: int = 20 * 2 ** 20) -> None:
+    """Keep the swarm's log bounded: over `max_bytes` it becomes `<log>.1` (the one before is dropped)."""
+    try:
+        if path.stat().st_size > max_bytes:
+            path.replace(path.with_name(path.name + ".1"))
+    except OSError:
+        pass
 
 
 def public_payload(kind: str, payload: dict[str, Any], names: list[str]) -> dict[str, Any] | None:

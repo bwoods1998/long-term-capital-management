@@ -186,6 +186,40 @@ class Process(LoopCase):
         (self.root.parent / "current").symlink_to(self.root.parent / "releases" / "NEW")
         self.assertIn("release changed", sw.should_stop())
 
+    def test_a_second_swarm_will_not_run_while_one_holds_the_lock(self):
+        import fcntl
+
+        with open(self.root / "swarm.lock", "a+") as other:
+            fcntl.flock(other.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            sw = self.swarm()
+            sw.lock_tries = 2
+            self.assertEqual(sw.run(once=True), 0)
+            self.assertEqual(self.store.families(), [], "it did nothing")
+        sw = self.swarm()
+        self.assertEqual(sw.run(once=True), 0)
+        info = json.loads((self.root / "swarm.lock").read_text())
+        self.assertEqual(info["pid"], __import__("os").getpid())
+        self.assertIn("start", info)
+        self.assertEqual(len(self.store.families()), 48)
+
+    def test_the_first_heartbeat_comes_before_any_network_call(self):
+        seen = []
+
+        class SlowPool(GymPool):
+            def adopt(inner):
+                seen.append((self.root / "swarm.heartbeat").exists())
+                return 0
+
+        self.pool = SlowPool(self.store, self.box_sail, self.settings, allowed=lambda k: True,
+                             driver_factory=lambda client, box: FakeDriver(client, box))
+        self.swarm().run(once=True)
+        self.assertEqual(seen, [True])
+
+    def test_its_log_is_bounded(self):
+        (self.root / "swarm.log").write_bytes(b"x" * 2000)
+        self.swarm().bound_log(max_bytes=1000)
+        self.assertLess((self.root / "swarm.log").stat().st_size, 1000)
+
     def test_run_once_and_stop(self):
         sw = self.swarm()
         self.assertEqual(sw.run(once=True), 0)

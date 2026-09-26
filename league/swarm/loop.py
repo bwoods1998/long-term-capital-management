@@ -30,7 +30,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from . import HEARTBEAT, PID_FILE, settings as settings_mod
+from . import HEARTBEAT, LOCK_FILE, LOG_FILE, PID_FILE, settings as settings_mod
 from .architect import Architect
 from .gate import Gate
 from .guard import SailGuard, provider_reader
@@ -287,6 +287,7 @@ class Swarm:
         if self.clock() - self._beat >= float(self.settings.get("heartbeat_seconds", 20)):
             self._beat = self.clock()
             self.heartbeat()
+            self.bound_log()
 
     def run(self, *, once: bool = False) -> int:
         """The process: seed, start the workers, loop until asked to stop."""
@@ -294,11 +295,17 @@ class Swarm:
             os.nice(int(self.settings.get("nice", 10)))
         except OSError:
             pass
+        if not self.take_lock():
+            log("not starting: another swarm holds the lock (one swarm per state root)")
+            return 0
         (self.root / PID_FILE).write_text(str(os.getpid()))
         why = self.should_stop()
         if why:
             log(f"not starting: {why}")
+            self.release_lock()
             return 0
+        self._beat = self.clock()
+        self.heartbeat({"starting": True})  # before any network call: the House sees it alive at once
         born = self.seed()
         if born:
             log(f"seeded {len(born)} families")
@@ -334,7 +341,55 @@ class Swarm:
             self.store.event("swarm.status", None, {"action": "stopped", "why": self.why_stopped or "asked"})
             self.heartbeat({"stopped": self.why_stopped or "asked"})
             log(f"stopped: {self.why_stopped or 'asked'}")
+            self.release_lock()
         return 0
+
+    def bound_log(self, max_bytes: int = 50 * 2 ** 20) -> None:
+        """The swarm's own log (its stdout, opened for appending by the House) never grows past `max_bytes`: it is cut
+        back to empty, and says so (the House also rotates it at each start)."""
+        path = self.root / LOG_FILE
+        try:
+            if path.stat().st_size > max_bytes:
+                os.truncate(path, 0)
+                log(f"the log passed {max_bytes // 2 ** 20} MB and was cut")
+        except OSError:
+            pass
+
+    # ------------------------------------------------------------------ one swarm per state root
+    lock_tries = 10
+
+    def take_lock(self) -> bool:
+        """An exclusive flock on `<root>/swarm.lock`, held for the process's life (the kernel drops it when the process
+        dies), with this process's pid, start time and release written in it. Tried for a few seconds: the House's
+        supervisor tests the lock with a moment's flock of its own."""
+        import fcntl
+
+        handle = open(self.root / LOCK_FILE, "a+")  # noqa: SIM115 - held until release_lock
+        for attempt in range(max(1, int(self.lock_tries))):
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if attempt == int(self.lock_tries) - 1:
+                    handle.close()
+                    return False
+                time.sleep(0.5)
+        from .hook import read_proc
+
+        seen = read_proc(os.getpid())
+        handle.seek(0)
+        handle.truncate()
+        handle.write(json.dumps({"pid": os.getpid(), "start": seen[1] if seen else None, "release": str(CODE_DIR),
+                                 "at": self.clock()}))
+        handle.flush()
+        self._lock_handle = handle
+        return True
+
+    def release_lock(self) -> None:
+        handle = getattr(self, "_lock_handle", None)
+        if handle is not None:
+            handle.close()
+            self._lock_handle = None
 
 
 def _config() -> dict[str, Any]:
