@@ -183,6 +183,16 @@ class Gates(LiveCase):
         self.assertEqual(self.families.rows["condor"]["band"], "candidate")
         self.assertEqual(self.venue.sent, [])
 
+    def test_only_a_filled_credit_order_marks_credit_as_accepted(self):
+        self.venue.fill = "none"
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        self.run_to(9, 32)
+        self.assertEqual(len(self.venue.sent), 1)                          # sent and working, not filled
+        self.assertFalse(live.state.get("credit_accepted", False))
+        self.venue.fill = "natural"
+        self.run_to(9, 33)
+        self.assertTrue(live.state.get("credit_accepted", False))
+
     def test_reconciliation_freezes_entries_on_the_second_reading_and_exits_still_go(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 2, "opens": 3})])
         self.venue.held["SPY261016C00600000"] = D(1)                      # something the book does not hold

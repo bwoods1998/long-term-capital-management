@@ -60,8 +60,10 @@ KNOWN_DUST = {"LTCUSD": Decimal("0.000373062")}
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
 
-def client_id(oid: int, family: str) -> str:
-    return f"{PREFIX}{int(oid):07d}-{_SLUG.sub('-', str(family).lower())[:40].strip('-')}"
+def client_id(oid: int, family: str, *, nonce: str = "") -> str:
+    """`lv-<state nonce>-<row id>-<family>`: the live state's nonce makes a new or rolled-back state's ids new."""
+    head = f"{PREFIX}{nonce}-" if nonce else PREFIX
+    return f"{head}{int(oid):07d}-{_SLUG.sub('-', str(family).lower())[:40].strip('-')}"
 
 
 def limit_price(value: float, action: str) -> str:
@@ -478,7 +480,8 @@ class RealBook:
         with self.state.transaction():
             oid = self._next("orders", "oid")
             price = f"{round(abs(limit_value), 2):.2f}" if action == "close_leg" else limit_price(limit_value, action)
-            order = ROrder(oid, client_id(oid, family), instance, family, action, type_, root, list(legs), int(qty),
+            order = ROrder(oid, client_id(oid, family, nonce=str(self.state.get("nonce") or "")), instance, family, action,
+                           type_, root, list(legs), int(qty),
                            float(limit_value), price, tif, self.clock(), day, int(minute),
                            pid=pid, forced=forced, reserve=float(reserve), max_loss=float(max_loss), fees_est=float(fees_est),
                            tuition=tuition, why=str(why)[:300])
@@ -617,12 +620,17 @@ class RealBook:
             if units > order.filled_qty and value is not None:
                 dq = units - order.filled_qty
                 increment = (value * units - order.fill_value * order.filled_qty) / dq
-                if order.action == "close_leg":
-                    self._book_leg(order, dq, increment)
-                else:
-                    self._book(order, dq, increment, prices)
-                order.fill_value = value
-                order.filled_qty = units
+                # The fill, the position and the order's progress commit together: a crash between them would book the
+                # same fill again at the next reading.
+                with self.state.transaction():
+                    if order.action == "close_leg":
+                        self._book_leg(order, dq, increment)
+                    else:
+                        self._book(order, dq, increment, prices)
+                    order.fill_value = value
+                    order.filled_qty = units
+                    order.updated_at = self.clock()
+                    self.state.upsert("orders", order.row(), "oid")
         if status in TERMINAL:
             if fill is None and dec(row.get("filled_qty")) not in (None, Decimal(0)):
                 # Filled at the venue, legs not readable yet: keep it working until they are.
@@ -665,6 +673,8 @@ class RealBook:
             self._save_position(pos)
             self.state.execute("INSERT INTO fills(oid, pid, qty, value, fees, at) VALUES(?,?,?,?,?,?)",
                                (order.oid, pos.pid, dq, value, fees, now))
+            if pos.type in self.table.credit_types:
+                self.state.put("credit_accepted", True)   # a real credit order FILLED: the venue takes credit structures
             code = _code(pos)
             self.record("book.fill", {"source": "venue", "side": "buy", "real_money": True, "quantity": dq,
                                       "instrument": {"market_id": code, "asset_class": "option", "multiplier": 100},

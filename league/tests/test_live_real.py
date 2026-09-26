@@ -38,10 +38,10 @@ class Prices(unittest.TestCase):
         self.assertEqual(limit_price(-0.0, "close"), "0.00")
 
     def test_the_multi_leg_body_is_the_gateways(self):
-        order = ROrder(7, client_id(7, "Condor VRP!"), "i", "condor-vrp", "open", "debit_vertical", "SPY", legs(), 3, 0.55,
-                       "0.55", None, 0.0, "2026-09-28", 10)
+        order = ROrder(7, client_id(7, "Condor VRP!", nonce="a1b2c3"), "i", "condor-vrp", "open", "debit_vertical", "SPY", legs(), 3,
+                       0.55, "0.55", None, 0.0, "2026-09-28", 10)
         body = mleg_body(order)
-        self.assertEqual(body["client_order_id"], "lv-0000007-condor-vrp")
+        self.assertEqual(body["client_order_id"], "lv-a1b2c3-0000007-condor-vrp")
         self.assertEqual({k: body[k] for k in ("order_class", "qty", "type", "limit_price", "time_in_force")},
                          {"order_class": "mleg", "qty": "3", "type": "limit", "limit_price": "0.55", "time_in_force": "day"})
         self.assertEqual([(l["side"], l["position_intent"], l["ratio_qty"]) for l in body["legs"]],
@@ -165,6 +165,36 @@ class OrderPath(unittest.TestCase):
         self.venue.fill = "natural"
         again.ingest(self.venue.orders())
         self.assertEqual(sum(p.qty for p in again.positions.values()), 2)
+
+    def test_a_new_live_state_never_reuses_a_client_id(self):
+        order = self.open()
+        other = RealBook(LiveState(Path(self.dir.name) / "fresh.sqlite", clock=self.clock), self.venue, M.Table.from_constitution(),
+                         clock=self.clock)
+        again = other.new_order(instance="f@1:r", family="f", action="open", type_="debit_vertical", root="SPY", legs=legs(605.0),
+                                qty=1, limit_value=0.5, tif=None, day="2026-09-28", minute=30)
+        self.assertEqual(again.oid, order.oid)                      # the same row id in a new state ...
+        self.assertNotEqual(again.client_id, order.client_id)       # ... never the same client order id
+        other.state.close()
+
+    def test_a_fill_and_the_orders_progress_are_one_commit(self):
+        self.venue.fill = "none"
+        order = self.open()
+        self.venue.fill = "natural"
+        real_upsert = self.book.state.upsert
+
+        def crash_on_order(table, row, key):
+            if table == "orders":
+                raise RuntimeError("the House died here")
+            return real_upsert(table, row, key)
+
+        self.book.state.upsert = crash_on_order
+        with self.assertRaises(RuntimeError):
+            self.book.ingest(self.venue.orders())
+        self.book.state.upsert = real_upsert
+        again = RealBook(LiveState(self.path, clock=self.clock), self.venue, M.Table.from_constitution(), clock=self.clock)
+        again.ingest(self.venue.orders())
+        self.assertEqual(sum(p.qty for p in again.positions.values()), 2, "booked once, not twice")
+        self.assertEqual(len(again.state.rows("SELECT * FROM fills")), 1)
 
     def test_a_partial_fill_then_a_cancel_leaves_what_filled(self):
         self.venue.fill = "partial"

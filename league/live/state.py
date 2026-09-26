@@ -81,6 +81,11 @@ class LiveState:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
+        self._depth = 0
+        if self.get("nonce") is None:
+            # Once, when the state is made: part of every client order id, so a new or rolled-back state never sends an
+            # id the venue has seen (it refuses a duplicate, and a lookup by it would find the old order).
+            self.put("nonce", os.urandom(3).hex())
 
     def close(self) -> None:
         with self.lock:
@@ -133,17 +138,24 @@ class LiveState:
 
 
 class _Tx:
+    """One transaction; a transaction opened inside another joins it (only the outermost commits or rolls back)."""
+
     def __init__(self, state: LiveState):
         self.state = state
 
     def __enter__(self) -> LiveState:
         self.state.lock.acquire()
-        self.state.db.execute("BEGIN IMMEDIATE")
+        depth = getattr(self.state, "_depth", 0)
+        if depth == 0:
+            self.state.db.execute("BEGIN IMMEDIATE")
+        self.state._depth = depth + 1
         return self.state
 
     def __exit__(self, kind: Any, value: Any, tb: Any) -> None:
         try:
-            self.state.db.execute("COMMIT" if kind is None else "ROLLBACK")
+            self.state._depth -= 1
+            if self.state._depth == 0:
+                self.state.db.execute("COMMIT" if kind is None else "ROLLBACK")
         finally:
             self.state.lock.release()
 

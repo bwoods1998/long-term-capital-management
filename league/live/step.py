@@ -1300,8 +1300,6 @@ class OptionsLive:
                               why=str(intent.get("note") or intent.get("tag") or "")[:200])
         book.send(sent)
         self._instance_spent(inst.key, day)
-        if sent.status in ("working", "filled") and order.type in self.table.credit_types:
-            self.state.put("credit_accepted", True)
         out.setdefault("orders", []).append({"oid": sent.oid, "family": inst.family, "action": "open", "qty": qty,
                                              "status": sent.status, "sizing": plan.reason})
         return None if sent.status in ("working", "filled", "unknown") else f"{sent.status}: {sent.answer.get('error')}"
