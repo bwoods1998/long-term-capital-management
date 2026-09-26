@@ -310,6 +310,55 @@ def _hms(minute: int) -> str:
     return f"{minute // 60:02d}:{minute % 60:02d}:00"
 
 
+class Listings:
+    """One `option_list_contracts` request per (day, group of roots) instead of one per root-day.
+
+    `peers(task)` names the roots fetched together with a task's root (the other roots of its stage
+    on that day). The first task of a day fetches for the group; the others wait for it and read
+    the cache. A root the group request did not return is fetched on its own, so nothing is lost.
+    """
+
+    def __init__(self, peers: Callable[[sl.Task], Sequence[str]] | None = None, keep_days: int = 64):
+        self.peers = peers
+        self.keep_days = keep_days
+        self.cache: dict[tuple[dt.date, int], dict[str, list[dt.date]]] = {}
+        self.locks: dict[tuple[dt.date, int], threading.Lock] = {}
+        self.guard = threading.Lock()
+
+    def expiries(self, task: sl.Task, theta: "Theta", max_dte: int) -> list[dt.date]:
+        import frames as fr
+
+        group = sorted(set(self.peers(task)) | {task.root}) if self.peers else [task.root]
+        if len(group) == 1:
+            listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=max_dte)
+            return fr.expirations(listed, task.day, max_dte=max_dte) if listed is not None else []
+        key = (task.day, task.stage)
+        with self.guard:
+            lock = self.locks.setdefault(key, threading.Lock())
+        with lock:
+            if key not in self.cache:
+                listed = theta.call("option_list_contracts", "quote", task.day, group, max_dte=max_dte)
+                by_root: dict[str, list[dt.date]] = {root: [] for root in group}
+                if listed is not None and listed.height:
+                    for (root,), part in listed.group_by(["symbol"]):
+                        by_root[str(root)] = fr.expirations(part, task.day, max_dte=max_dte)
+                with self.guard:
+                    self.cache[key] = by_root
+                    if len(self.cache) > self.keep_days:
+                        for old in sorted(self.cache)[: len(self.cache) - self.keep_days]:
+                            self.cache.pop(old, None)
+                            self.locks.pop(old, None)
+            found = self.cache.get(key, {}).get(task.root)
+        if found:
+            return found
+        listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=max_dte)
+        return fr.expirations(listed, task.day, max_dte=max_dte) if listed is not None else []
+
+
+#: The runner's listing cache (set by `run`; None fetches per root).
+LISTINGS: Listings | None = None
+
+
 def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -> dict[str, Any]:
     """Do one task; journal its files; return the task record (not yet journaled)."""
     import frames as fr  # polars, on the box
@@ -330,8 +379,7 @@ def run_task(task: sl.Task, theta: Theta, store: Store, calendar: sl.Calendar) -
         written.append(record)
 
     if task.job == "day":
-        listed = theta.call("option_list_contracts", "quote", task.day, task.root, max_dte=sl.EXPIRY_LIST_DTE)
-        expiries = fr.expirations(listed, task.day, max_dte=sl.EXPIRY_LIST_DTE) if listed is not None else []
+        expiries = (LISTINGS or Listings()).expiries(task, theta, sl.EXPIRY_LIST_DTE)
         if not expiries:
             return {"status": "empty", "why": "no contracts quoted"}
         store.save_expiries(task.root, task.day, expiries)
@@ -836,8 +884,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             import multiprocessing
             from concurrent.futures import ProcessPoolExecutor
 
-            global POOL
+            global POOL, LISTINGS
             POOL = ProcessPoolExecutor(max_workers=args.decoders, mp_context=multiprocessing.get_context("spawn"))
+            groups: dict[tuple[dt.date, int], set[str]] = {}
+            for task in tasks:
+                if task.job == "day":
+                    groups.setdefault((task.day, task.stage), set()).add(task.root)
+            LISTINGS = Listings(lambda t: sorted(groups.get((t.day, t.stage), {t.root})))
             try:
                 return Runner(tasks, theta, store, calendar, threads=args.threads).run()
             finally:

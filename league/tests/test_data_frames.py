@@ -201,3 +201,35 @@ class ImagesPrune(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(pl is None, "polars/pyarrow are not installed here (they are on the data box)")
+class GroupedListings(unittest.TestCase):
+    def test_one_request_per_day_for_the_group_and_a_fallback_for_a_missing_root(self):
+        import threading
+
+        import backfill as bf
+
+        calls = []
+
+        class Theta:
+            def call(self, method, kind, day, symbol, max_dte):
+                calls.append(symbol)
+                roots = symbol if isinstance(symbol, list) else [symbol]
+                rows = [(r, "2024-03-15") for r in roots if r != "QQQ" or not isinstance(symbol, list)]
+                return pl.DataFrame({"symbol": [r[0] for r in rows], "expiration": [r[1] for r in rows],
+                                     "strike": [1.0] * len(rows), "right": ["C"] * len(rows)})
+
+        listings = bf.Listings(lambda t: ["SPY", "QQQ", "IWM"])
+        tasks = [sl.Task(1, "day", root, DAY) for root in ("SPY", "QQQ", "IWM", "SPY")]
+        results = {}
+        threads = [threading.Thread(target=lambda t=t: results.__setitem__(t.root, listings.expiries(t, Theta(), 45)))
+                   for t in tasks]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(results["SPY"], [dt.date(2024, 3, 15)])
+        self.assertEqual(results["QQQ"], [dt.date(2024, 3, 15)])  # not in the group answer: fetched alone
+        self.assertEqual(sum(1 for c in calls if isinstance(c, list)), 1)
+        self.assertEqual([c for c in calls if not isinstance(c, list)], ["QQQ"])
