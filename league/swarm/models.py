@@ -81,7 +81,7 @@ class ModelRouter:
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
         cost = float(response.cost_usd or 0)
         if cost:
-            self.store.add_spend(kind, cost, family=family, detail={"profile": profile, "key": key[:120]})
+            self.store.add_spend(kind, cost, family=family.split(":", 1)[0], detail={"profile": profile, "key": key[:120], "desk": family})
         return response
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:
@@ -123,29 +123,38 @@ class ModelRouter:
         return max(0.0, min(month_room, cap_room))
 
     def ask(self, *, role: str, system: str, user: str, family: str | None, key: str, openai_model: str | None, sail_profile: str,
-            max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0) -> dict[str, Any]:
-        """A one-shot question for a role (the architect, the reviewer, a rewrite). OpenAI first when it has
-        `need_usd` of room, else (or on any refusal) Sail. Returns {text, json, route, model, cost_usd}."""
+            max_output: int = 8000, effort: str = "medium", need_usd: float = 1.0, desk: str | None = None,
+            cap_usd_day: float | None = None) -> dict[str, Any]:
+        """A one-shot question for a role (the architect, the reviewer, the auditor, a rewrite). OpenAI first when it has
+        `need_usd` of room, else (or on any refusal) Sail. `desk` and `cap_usd_day` are the Provider's fuse for the Sail
+        call (a family's role gets its own small one; the swarm's floor cap otherwise). An OpenAI call books a hold of
+        `need_usd` BEFORE it is sent and settles it after (a refusal to $0; a call lost in flight keeps the hold), so the
+        swarm's OpenAI cap never undercounts. Returns {text, json, route, model, cost_usd}."""
         errors = []
         if openai_model and self.openai_room() >= need_usd:
+            hold = float(need_usd)
+            self.store.add_spend("openai", hold, family=family, detail={"role": role, "hold": key[:120]})
             try:
                 frontier = self.frontier_factory(openai_model)  # type: ignore[misc]
                 answer = frontier.ask(system=system, user=user, agent=f"swarm-{role}", max_output_tokens=min(int(max_output), 16000),
                                       effort=effort)
                 cost = float(answer.cost_usd or 0)
-                if cost:
-                    self.store.add_spend("openai", cost, family=family, detail={"role": role, "model": openai_model})
+                self.store.add_spend("openai", cost - hold, family=family, detail={"role": role, "model": openai_model, "settles": key[:120]})
                 if answer.status == "completed" and answer.text.strip():
                     return {"text": answer.text, "json": extract_json(answer.text), "route": "openai", "model": openai_model,
                             "cost_usd": cost}
                 errors.append(f"openai answered {answer.status}")
             except Exception as exc:  # noqa: BLE001 - every OpenAI failure falls back to Sail
+                status = getattr(exc, "status", None)
+                if isinstance(status, int) and 400 <= status < 500:
+                    self.store.add_spend("openai", -hold, family=family, detail={"role": role, "refused": status})
                 errors.append(f"openai: {type(exc).__name__}: {str(exc)[:160]}")
         items = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
-            response = self.sail(sail_profile, items, family=family or "swarm", key=key, effort=effort, max_output=max_output,
+            response = self.sail(sail_profile, items, family=desk or family or "swarm", key=key, effort=effort, max_output=max_output,
                                  cache_key=f"swarm-{role}", tool_choice="auto",
-                                 cap_usd_day=float(self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
+                                 cap_usd_day=float(cap_usd_day if cap_usd_day is not None else
+                                                   self.settings.get("researcher", {}).get("floor_usd_day", 60.0)),
                                  kind="sail_model")
         except Exception as exc:  # noqa: BLE001
             raise ModelError("; ".join(errors + [f"sail: {type(exc).__name__}: {getattr(exc, 'code', '') or str(exc)[:160]}"])) from None

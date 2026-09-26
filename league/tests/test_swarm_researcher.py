@@ -137,6 +137,35 @@ class ModelCycles(ResearcherCase):
         self.assertIn("another family", output["reason"])
         self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
 
+    def test_a_date_in_the_parameter_overrides_is_refused_before_the_gym(self):
+        self.run_first()
+        for bad in ({"vrp_min": 2025}, {"vrp_min": 20250102}, {"vrp_min": 2025.0}):
+            self.steps = [{"calls": [("gym_run", {"params": bad})]}, {"text": "ok"}]
+            self.researcher().cycle(self.fam["id"])
+            self.assertIn("date", json.loads(calls_in(self.sail.bodies[-1])[-1]["output"])["reason"].lower())
+        self.assertEqual(len(self.pool.jobs), 1, "none reached the Gym")
+
+    def test_rewrites_are_asap_on_their_own_small_fuse_and_wait_for_the_pace(self):
+        self.run_first()
+        self.assertEqual(self.settings["researcher"]["rewrite_profile"], "pro_asap")
+        self.store.update_family(self.fam["id"], stall=5)
+        r = self.researcher()
+        r.pace = lambda: True  # over the swarm's hourly pace: no rewrite now
+        self.steps = [{"text": "ok"}]
+        out = r.cycle(self.fam["id"])
+        self.assertNotIn("rewrite_asked", out)
+        r.pace = lambda: False
+        self.steps = [{"text": "```python\n" + self.code + "\n```"}, {"text": "ok"}]
+        r.cycle(self.fam["id"])
+        body = self.sail.bodies[-2]
+        self.assertEqual(body["model"], "deepseek-ai/DeepSeek-V4-Pro-0813")
+        import sqlite3
+
+        db = sqlite3.connect(str(self.provider.path))
+        desks = {row[0] for row in db.execute("SELECT desk_id FROM requests")}
+        db.close()
+        self.assertIn(f"{self.fam['id']}:rewrite", desks, "the rewrite has its own fuse")
+
     @unittest.skipUnless(GYM, "the Gym's safety check")
     def test_a_date_literal_is_refused_before_the_gym(self):
         self.run_first()
@@ -222,15 +251,15 @@ class ModelCycles(ResearcherCase):
         self.steps = [{"text": "Here it is:\n```python\n" + self.code.replace("'vrp_min': 1.2", "'vrp_min': 1.25") + "\n```\nWider."},
                       {"text": "ok"}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertEqual(out.get("rewrite_asked"), "pro_balanced", out)
+        self.assertEqual(out.get("rewrite_asked"), "pro_asap", out)
         self.assertEqual(self.sail.bodies[0]["model"], "deepseek-ai/DeepSeek-V4-Pro-0813")
         fam = self.store.family(self.fam["id"])
         self.assertEqual((fam["rewrites"], fam["stall"]), (1, 0))
         self.assertTrue(fam["state"]["rewrite_ready"]["code"])
         self.steps = [{"text": "ok"}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertEqual(out.get("rewrite"), "pro_balanced", "the rewrite is the next cycle's run")
-        self.assertEqual(self.store.latest_version(self.fam["id"])["author"], "pro_balanced")
+        self.assertEqual(out.get("rewrite"), "pro_asap", "the rewrite is the next cycle's run")
+        self.assertEqual(self.store.latest_version(self.fam["id"])["author"], "pro_asap")
         self.assertIsNone(self.store.family(self.fam["id"])["state"]["rewrite_ready"])
 
     def test_rewrites_are_spaced_and_capped(self):

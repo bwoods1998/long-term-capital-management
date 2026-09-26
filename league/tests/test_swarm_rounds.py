@@ -161,6 +161,22 @@ class TournamentTests(RoundCase):
         self.assertEqual(born_events[-1]["payload"]["parent"], "a")
         del fam
 
+    def test_a_fork_onto_a_root_a_retired_sibling_searched_inherits_its_trials_and_looks(self):
+        self.family("a")
+        self.store.add_run("a", 1, result("x"), window="train", stress=1.0, purpose="train")
+        self.store.set_state("a", validation_numbers={"mean": 0.05, "t": 2.5, "sharpe_daily": 0.2, "quarters": "4/4"})
+        t = Tournament(self.store, self.pool, self.settings)
+        [first] = t.forks(self.store.families(alive=True))
+        for i in range(50):
+            self.store.add_run(first, 1, result(f"c{i}"), window="train", stress=1.0, purpose="train")
+        self.store.add_look(first, 1, "sha-c1", passed=False, p_value=0.5, detail={})
+        self.store.retire(first, "no improvement")
+        self.store.set_state("a", forked_at=0)
+        [second] = t.forks(self.store.families(alive=True))
+        self.assertEqual(self.store.family(second)["roots"], self.store.family(first)["roots"])
+        self.assertEqual(self.store.lineage_trials(second), 1 + 50)
+        self.assertEqual(self.store.lineage_looks(second), 1)
+
     def test_a_validation_failure_is_recorded_not_raised(self):
         self.family("a")
         self.pool.fail.add("a")
@@ -405,6 +421,21 @@ class ArchitectTests(RoundCase):
         out = Architect(self.store, self.router, self.settings).run()
         self.assertEqual(out["route"], "sail")
 
+    def test_a_proposal_on_a_retired_familys_slice_continues_its_lineage(self):
+        old = self.family("fly", structure="iron_butterfly", roots=["SPY"])
+        for i in range(30):
+            self.store.add_run("fly", 1, result(f"f{i}"), window="train", stress=1.0, purpose="train")
+        self.store.add_look("fly", 1, "sha-fly", passed=False, p_value=0.4, detail={})
+        self.store.retire("fly", "no improvement in 30 revisions")
+        rows = [{"slug": "fly-again", "mechanism": "Sell the afternoon's at-the-money decay with an iron butterfly on quiet days.",
+                 "structure": "iron_butterfly", "roots": ["SPY"], "dte": [0, 1]}]
+        [born] = Architect(self.store, self.router, self.settings).admit(rows)
+        fam = self.store.family(born)
+        self.assertEqual((fam["parent"], fam["lineage"]), ("fly", "fly"))
+        self.assertEqual(self.store.lineage_trials(born), 30)
+        self.assertEqual(self.store.lineage_looks(born), 1)
+        del old
+
     def test_every_four_hours(self):
         a = Architect(self.store, self.router, self.settings, clock=self.clock)
         self.assertTrue(a.due())
@@ -414,6 +445,21 @@ class ArchitectTests(RoundCase):
         self.assertFalse(a.due())
         self.clock.advance(2)
         self.assertTrue(a.due())
+
+    def test_an_openai_call_is_held_before_it_is_sent_and_settled_after(self):
+        class Refused(Exception):
+            status = 402
+
+        self.month.value = 500
+        self.router.frontier_factory = lambda model: FakeFrontier(model, fail=Refused("HTTP 402 month"))
+        self.replies = [{"text": json.dumps({"families": []})}]
+        Architect(self.store, self.router, self.settings).run()
+        self.assertAlmostEqual(self.store.spent(["openai"]), 0.0, msg="a refusal is not billed")
+        self.router.frontier_factory = lambda model: FakeFrontier(model, fail=TimeoutError("the gateway did not answer"))
+        self.replies = [{"text": json.dumps({"families": []})}]
+        self.clock.advance(20000)
+        Architect(self.store, self.router, self.settings).run()
+        self.assertAlmostEqual(self.store.spent(["openai"]), 2.0, msg="a call lost in flight keeps its hold")
 
     def test_the_openai_cap_is_the_swarms_too(self):
         self.month.value = 500

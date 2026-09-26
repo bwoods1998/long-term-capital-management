@@ -132,6 +132,7 @@ class Swarm:
         self.scheduler = Scheduler(self.store, clock=clock)
         self.researcher = Researcher(self.store, self.router, self.pool, self.settings, clock=clock,
                                      starter=lambda spec: program_for(spec))
+        self.researcher.pace = self.over_pace
         self.tournament = Tournament(self.store, self.pool, self.settings, clock=clock)
         self.gate = Gate(self.store, self.pool, self.router, self.settings, clock=clock)
         self.architect = Architect(self.store, self.router, self.settings, clock=clock)

@@ -82,6 +82,25 @@ THE CONTRACT (league/CONTRACT.md)
 """
 
 CODE_BLOCK = re.compile(r"```(?:python)?\s*\n(.*?)```", re.S)
+_YEAR_TEXT = re.compile(r"(?<![0-9])(?:19|20)[0-9]{2}[-/.][01]?[0-9][-/.][0-3]?[0-9](?![0-9])|(?<![0-9])20(?:19|2[0-9]|30)(?![0-9])")
+
+
+def date_like(value: Any) -> bool:
+    """The Gym's date rule (league/gym/safety.py) applied to a parameter override: a number from 2019 to 2030 (a year), a
+    YYYYMMDD integer, or a string holding a year or an ISO date; lists are checked element by element."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(date_like(v) for v in value)
+    if isinstance(value, str):
+        return bool(_YEAR_TEXT.search(value))
+    if isinstance(value, (int, float)):
+        if 2019 <= value <= 2030:
+            return True
+        if float(value).is_integer() and 19_000_101 <= value <= 20_301_231:
+            v = int(value)
+            return 1 <= (v // 100) % 100 <= 12 and 1 <= v % 100 <= 31
+    return False
 
 
 def needs_of(code: str) -> dict[str, Any] | None:
@@ -153,6 +172,7 @@ class Researcher:
         self.starter = starter
         self.background = background
         self._rewriting: dict[str, Any] = {}
+        self.pace: Callable[[], bool] = lambda: False  # the swarm's hourly spend at its pace: no rewrite starts
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -204,6 +224,11 @@ class Researcher:
                 return {"error": "you have no version yet: pass `code`"}
             code = latest["code"]
         code = str(code)
+        dated = [k for k, v in (args.get("params") or {}).items()] if isinstance(args.get("params"), dict) else []
+        dated = [k for k in dated if date_like(args["params"][k])]
+        if dated:
+            return {"status": "refused", "reason": f"a date or a year in the parameter overrides ({', '.join(dated)}): no program may "
+                                                   "see the calendar", "hint": "use relative measures, never a date, a year or a level"}
         note = str(args.get("note") or "").strip()
         if note:
             self.store.note(fam["id"], note)
@@ -465,6 +490,8 @@ class Researcher:
         state = fam.get("state") or {}
         now = self.clock()
         today = [t for t in (state.get("rewrite_times") or []) if now - float(t) < 86400]
+        if self.pace():
+            return False
         if fid in self._rewriting or state.get("rewrite_ready") or len(today) >= int(self.cfg.get("rewrites_per_day", 4)) \
                 or (today and now - max(float(t) for t in today) < 3600 * float(self.cfg.get("rewrite_min_hours", 1.0))):
             return False
@@ -491,7 +518,8 @@ class Researcher:
         def job() -> None:
             try:
                 answer = self.router.ask(role="rewrite", system=self.system, user=user, family=fid, key=key, openai_model=None,
-                                         sail_profile=profile, max_output=12000, effort="medium")
+                                         sail_profile=profile, max_output=12000, effort="medium", desk=f"{fid}:rewrite",
+                                         cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)))
                 match = CODE_BLOCK.search(answer.get("text") or "")
                 if match:
                     self.store.set_state(fid, rewrite_ready={"code": match.group(1), "profile": profile, "at": self.clock()})
@@ -529,4 +557,4 @@ class Researcher:
         self.store.event("swarm.note", fid, {"text": text})
 
 
-__all__ = ["Researcher", "TOOLS", "needs_of", "check_code", "sanitize"]
+__all__ = ["Researcher", "TOOLS", "needs_of", "check_code", "sanitize", "date_like"]

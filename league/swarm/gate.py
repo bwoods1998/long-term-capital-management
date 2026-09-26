@@ -86,7 +86,8 @@ class Gate:
                                  key=f"swarm:{fam['id']}:review:{version['n']}:{self.store.get('review_attempt:' + fam['id'], 0)}",
                                  openai_model=self.cfg.get("review_openai_model"), sail_profile=str(self.cfg.get("review_sail_profile",
                                                                                                                    "pro_balanced")),
-                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5)
+                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="medium", need_usd=0.5,
+                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)))
         verdict = (answer.get("json") or {}).get("verdict")
         return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
                 "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],
@@ -106,7 +107,8 @@ class Gate:
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
                                  key=f"swarm:{fam['id']}:audit:{version['n']}", openai_model=model,
                                  sail_profile=str(self.cfg.get("review_sail_profile", "pro_balanced")),
-                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need)
+                                 max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
+                                 desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)))
         verdict = (answer.get("json") or {}).get("verdict")
         return {"verdict": verdict if verdict in ("pass", "fail") else "unclear",
                 "reasons": [str(r)[:300] for r in ((answer.get("json") or {}).get("reasons") or [])][:6],

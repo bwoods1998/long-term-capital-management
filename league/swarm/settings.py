@@ -26,9 +26,10 @@ DEFAULTS: dict[str, Any] = {
         "profile": "flash_asap",
         "long_profile": "flash41_asap",
         "long_history_chars": 10 ** 9,
-        # One rewrite after a stall of `stall_revisions`: V4-Pro balanced, Kimi-K3 balanced for the top ten; asked in the
-        # background (V4-Pro's balanced window took over five minutes on Sept 26), capped and spaced.
-        "rewrite_profile": "pro_balanced",
+        # One rewrite after a stall of `stall_revisions`: V4-Pro asap, Kimi-K3 balanced for the top ten; asked in the
+        # background, capped and spaced, never over the swarm's hourly pace.
+        "rewrite_profile": "pro_asap",  # balanced took minutes on Sept 26 (the main session chose asap)
+        "rewrite_usd_day": 1.0,         # a family's rewrites a day, on their own fuse
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
         "stall_revisions": 5,
@@ -100,6 +101,7 @@ DEFAULTS: dict[str, Any] = {
         "review_openai_model": "gpt-6-sol",
         "review_sail_profile": "pro_balanced",
         "review_max_output_tokens": 6000,
+        "review_usd_day": 1.0,          # a family's reviews and audits a day, on their own fuse
         "every_seconds": 300,
         "gate_box_idle_sleep_seconds": 300,
     },

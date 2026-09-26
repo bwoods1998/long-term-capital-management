@@ -163,6 +163,7 @@ class Tournament:
         allowed there), with the parent's best program as its first version."""
         roots = [r for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION)]
         taken = {tuple(f["roots"]) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
+        parent_line = fam.get("lineage") or fam["id"]
         for root in roots:
             if (root,) in taken or root in fam["roots"]:
                 continue
@@ -172,7 +173,9 @@ class Tournament:
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
                          "structure": fam["structure"], "roots": [root]})
             spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
-            child = self.store.add_family(spec, origin="fork", parent=fam["id"])
+            # A slice this lineage searched before (a retired sibling's): its trials and looks come too.
+            extra_trials, extra_looks = self.store.slice_spent(parent_line, [root], exclude=[fam["id"]])
+            child = self.store.add_family(spec, origin="fork", parent=fam["id"], extra_trials=extra_trials, extra_looks=extra_looks)
             best = self.store.version(fam["id"], self.candidate_version(fam))
             if best and best.get("code"):
                 code = best["code"]

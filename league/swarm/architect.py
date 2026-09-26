@@ -108,10 +108,14 @@ class Architect:
             spec = {"id": row.get("slug") or mechanism, "mechanism": mechanism, "structure": structure, "roots": roots, "dte": [lo, hi],
                     "rejection": str(row.get("rejection") or "")[:400], "sketch": str(row.get("sketch") or "")[:800],
                     "lessons": lessons}
-            fam = self.store.add_family(spec, origin="architect")
+            # A slice a retired family searched (same structure and roots) continues that lineage: it inherits its
+            # trials and holdout looks, so re-proposing an idea never resets the count its evidence is deflated by.
+            dead = [f for f in self.store.families(alive=False) if f["structure"] == structure and sorted(f["roots"]) == sorted(roots)]
+            parent = dead[-1]["id"] if dead else None
+            fam = self.store.add_family(spec, origin="architect", parent=parent)
             if spec["sketch"]:
                 self.store.note(fam["id"], f"The architect's sketch: {spec['sketch']}")
-            self.store.event("swarm.born", fam["id"], {"parent": None, "mechanism": mechanism, "structure": structure,
+            self.store.event("swarm.born", fam["id"], {"parent": parent, "mechanism": mechanism, "structure": structure,
                                                         "roots": roots, "origin": "architect"})
             born.append(fam["id"])
         return born
