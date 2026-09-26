@@ -175,6 +175,11 @@ positive stretch) is being verified before C-money's brief fixes M1 and M3 for t
 `earned-live-20260921` ratified 20:11:48Z on `d7d910fe` (active), `ops.started` 20:13:21Z, watch verdict promoted, **watch
 ended 20:21:56Z** (the Kalshi run's K1 may start from 20:52Z).
 
+**Deploy B STARTS at 02:22:58Z Sept 26** (main `206e7952`; pre-flight 02:22Z: CI green, only M1-M5 and C8 rows change against the
+running release, nothing in flight). The owner sold the proven family's AZ-SD and LAD-SF positions (and NYM-WSH) by hand
+at about 02:15Z, so no real family game is in play; the real Kalshi book froze on those sales at 02:16Z (cash +$15.48,
+positions AZ-SD -11, LAD-SF -13, NYM-WSH -16), which B's watch reads as inherited.
+
 **Deploy B moves up (01:22Z Sept 26, the owner asked why wait):** it starts as soon as the proven family's last two
 real games of the night settle (KXMLBTOTAL AZ-SD, first pitch 01:40Z; LAD-SF, 02:15Z; the other four settled 00:19-01:16Z:
 PIT-DET -$7.33 and TEX-MIN -$6.61 when the totals went over, TB-PHI +$3.93, ATL-MIA +$5.87), not at a fixed 06:00Z; the
