@@ -76,6 +76,7 @@ class ModelRouter:
             except Exception as exc:  # noqa: BLE001 - a rate limit or a 5xx is waited out twice (a 502 was seen on Sept 26)
                 code = str(getattr(exc, "code", "") or "")
                 if attempt >= 2 or not any(code.startswith(f"provider_http_{s}") for s in (429, 500, 502, 503, 504, 529)):
+                    self._book_unsettled(kind, profile, family, key, exc)
                     raise
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
@@ -83,6 +84,24 @@ class ModelRouter:
         if cost:
             self.store.add_spend(kind, cost, family=family.split(":", 1)[0], detail={"profile": profile, "key": key[:120], "desk": family})
         return response
+
+    def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
+        """A call that failed after it was sent (a poll or transport timeout: Sail may have run it and billed it) is
+        booked at the Provider's hold for it, so the swarm's own meter never undercounts; a call the Provider released
+        (refused outright, never accepted) costs nothing. Best effort: never raises."""
+        try:
+            request = self.provider.request_id_for(family, key[:200])
+            with self.provider._lock:
+                row = self.provider._db.execute("SELECT status, reserved_usd, cost_usd FROM requests WHERE id=?", (request,)).fetchone()
+        except Exception:  # noqa: BLE001 - a fake Provider, or no row: nothing known to book
+            return
+        if row is None or row["status"] == "abandoned":
+            return
+        usd = float(row["cost_usd"] if row["cost_usd"] is not None else row["reserved_usd"] or 0)
+        if usd > 0:
+            self.store.add_spend(kind, usd, family=family.split(":", 1)[0],
+                                 detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": str(getattr(exc, "code", "")
+                                                                                                               or type(exc).__name__)[:80]})
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:
         """Blank the request bodies and responses of settled calls older than an hour in the swarm's Provider file. Each

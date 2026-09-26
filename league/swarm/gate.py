@@ -62,6 +62,8 @@ class Gate:
         self.router = router
         self.settings = settings
         self.clock = clock
+        #: No Gym job survives its process: a look marked in flight before this moment is owed again.
+        self.started_at = clock()
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -94,19 +96,18 @@ class Gate:
                 "route": answer.get("route"), "model": answer.get("model"), "cost_usd": answer.get("cost_usd")}
 
     # ------------------------------------------------------------------ the audit
-    def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any]) -> dict[str, Any]:
-        """The gate's audit (plan: GPT-6 Astra, high, standard): asked through the gateway ONLY when the OpenAI month has
-        room; otherwise no second call is made and the record says the Sail reviewer stood in for it."""
+    def audit(self, fam: Mapping[str, Any], version: Mapping[str, Any], *, attempt: int = 0) -> dict[str, Any]:
+        """The gate's audit (plan: GPT-6 Astra, high, standard) through the gateway when the OpenAI month has room; else a
+        SECOND, DIFFERENT model on Sail (`audit_sail_profile`, Kimi-K3 balanced: the reviewer is DeepSeek-V4-Pro), never a
+        pass-through."""
         model = self.cfg.get("audit_openai_model", "gpt-6-astra")
         need = float(self.cfg.get("audit_need_usd", 1.0))
-        if not model or self.router.openai_room() < need:
-            return {"verdict": "pass", "route": "sail-reviewer", "model": None,
-                    "note": "OpenAI had no room: the Sail reviewer's verdict stands for the audit"}
+        use_openai = bool(model) and self.router.openai_room() >= need
         user = (f"AUDIT. Family {fam['id']}: {fam['mechanism']}\nStructure {fam['structure']}, roots {', '.join(fam['roots'])}.\n\n"
                 f"```python\n{version['code']}\n```\nPARAMS overrides: {json.dumps(version.get('params') or {})}")
         answer = self.router.ask(role="audit", system=REVIEW, user=user, family=fam["id"],
-                                 key=f"swarm:{fam['id']}:audit:{version['n']}", openai_model=model,
-                                 sail_profile=str(self.cfg.get("review_sail_profile", "pro_balanced")),
+                                 key=f"swarm:{fam['id']}:audit:{version['n']}:{attempt}", openai_model=model if use_openai else None,
+                                 sail_profile=str(self.cfg.get("audit_sail_profile", "k3_balanced")),
                                  max_output=int(self.cfg.get("review_max_output_tokens", 6000)), effort="high", need_usd=need,
                                  desk=f"{fam['id']}:review", cap_usd_day=float(self.cfg.get("review_usd_day", 1.0)))
         verdict = (answer.get("json") or {}).get("verdict")
@@ -120,8 +121,10 @@ class Gate:
         self.store.set_state(fid, gate_outcome={"sha": sha, "result": result, "at": self.clock()})
 
     def refuse(self, fam: Mapping[str, Any], n: int, sha: str, stage: str, reasons: list[str], out: dict[str, Any]) -> None:
+        """A refusal, recorded; the version's gate place is cleared only if it is still the one validated."""
         self.store.refuse(fam["id"], n, stage, "; ".join(reasons) or f"refused by the {stage}")
-        self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gated_sha=sha, gate_ready=False):
+            return
         self.outcome(fam["id"], sha, "refused")
         self.tell(fam["id"], f"fail (the {stage}: " + "; ".join(reasons)[:400] + ")")
         out["refused"].append(fam["id"])
@@ -137,8 +140,17 @@ class Gate:
                                                       "passes": sum(1 for x in self.store.looks() if x["passed"])})
             out["alarm"] = True
             return out
+        limit = float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 1200
         for fam in self.store.families(alive=True):
             state = fam.get("state") or {}
+            inflight = state.get("look_inflight") or {}
+            if inflight.get("sha"):
+                at = float(inflight.get("at") or 0)
+                if at < self.started_at or self.clock() - at > limit:
+                    # Its job died with a process (no Gym job survives one), or never came back: the look is owed again.
+                    self.owe(fam["id"], int(inflight.get("n") or 0), str(inflight["sha"]))
+                    fam = self.store.family(fam["id"]) or fam
+                    state = fam.get("state") or {}
             if fam["band"] != "gym" or not state.get("gate_ready"):
                 continue
             n = state.get("validation_version")
@@ -148,11 +160,13 @@ class Gate:
             sha = run_sha(version)
             if self.store.looked(sha) or state.get("gated_sha") == sha:
                 continue
+            if (state.get("look_inflight") or {}).get("sha") == sha:
+                continue  # its look is in flight
             if self.store.lineage_looks(fam["id"]) >= evidence.LOOKS_PER_LINEAGE:
                 self.refuse(fam, n, sha, "rations", ["the lineage's three holdout looks are spent"], out)
                 continue
             review = state.get("review") if (state.get("review") or {}).get("sha") == sha else None
-            if review is None:  # the review and the audit, once a version: also what tuition needs before any look
+            if review is None:  # the review, once a version (kept, so an audit asked again does not redo it)
                 try:
                     review = self.review(fam, version)
                 except Exception as exc:  # noqa: BLE001 - no reviewer, no look
@@ -166,19 +180,34 @@ class Gate:
                     if attempts < 3:
                         continue
                     review = {**review, "verdict": "fail", "reasons": ["the reviewer could not reach a verdict three times"]}
-                if review["verdict"] == "pass":
-                    try:
-                        audit = self.audit(fam, version)
-                    except Exception as exc:  # noqa: BLE001
-                        self.store.event("swarm.gate", fam["id"], {"action": "audit_error", "version": n, "error": str(exc)[:300]})
-                        continue
-                    self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
-                    if audit["verdict"] != "pass":
-                        review = {**review, "verdict": "fail", "stage": "audit",
-                                  "reasons": audit.get("reasons") or ["the audit could not reach a verdict"]}
-                    review["audit"] = audit
                 review = {**review, "sha": sha, "version": n}
-                self.store.set_state(fam["id"], review=review)
+                if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
+                    continue  # the tournament validated a newer version meanwhile: this one is not the gate's
+            if review["verdict"] == "pass" and "audit" not in review:  # the audit: a second reader, before any look
+                attempts = int(self.store.get("audit_attempt:" + sha, 0))
+                try:
+                    audit = self.audit(fam, version, attempt=attempts)
+                except Exception as exc:  # noqa: BLE001
+                    self.store.event("swarm.gate", fam["id"], {"action": "audit_error", "version": n, "error": str(exc)[:300]})
+                    continue
+                self.store.event("swarm.gate", fam["id"], {"action": "audit", "version": n, **audit})
+                if audit["verdict"] == "unclear":
+                    self.store.put("audit_attempt:" + sha, attempts + 1)
+                    if attempts + 1 < 3:
+                        continue  # asked again next round, like an unclear review
+                    audit = {**audit, "verdict": "fail", "reasons": ["the audit could not reach a verdict three times"]}
+                review = {**review, "audit": audit}
+                if audit["verdict"] != "pass":
+                    review = {**review, "verdict": "fail", "stage": "audit",
+                              "reasons": audit.get("reasons") or ["the audit could not reach a verdict"]}
+                if review.get("route") != "openai" or audit.get("route") != "openai":
+                    self.store.event("swarm.status", fam["id"], {
+                        "action": "not_the_plans_reviewer", "alert": True, "version": n,
+                        "review": review.get("model"), "audit": audit.get("model"),
+                        "text": "a holdout look was reviewed without the plan's OpenAI models (GPT-6 Sol and Astra): "
+                                "the OpenAI month has no room, so Sail models stood in"})
+                if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, review=review):
+                    continue
             if review["verdict"] != "pass":
                 self.refuse(fam, n, sha, review.get("stage") or "review", review.get("reasons") or [], out)
                 continue
@@ -200,12 +229,17 @@ class Gate:
         waiting is recorded and judged when it lands (`finish`), against the validation it was sent for."""
         n = int(version["n"])
         vsharpe = ((fam.get("state") or {}).get("validation_numbers") or {}).get("sharpe_daily")
-        self.store.set_state(fam["id"], gated_sha=sha, gate_ready=False)
+        # Compare-and-set under the store's lock: only the version still validated is looked at; the marker says a look
+        # is in flight (not `gated_sha`: a look cut off by a restart must be owed, not forgotten).
+        if not self.store.compare_and_set_state(fam["id"], {"validation_version": n}, gate_ready=False,
+                                                look_inflight={"sha": sha, "n": n, "at": self.clock()}):
+            return None
         job = GymJob(family=fam["id"], version=n, code=version["code"], params=version.get("params") or {}, window="holdout",
                      roots=tuple(fam["roots"]), gate=f"holdout look {fam['id']} v{n}", purpose="holdout", priority=10.0)
         try:
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 600,
-                                   late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe))
+                                   late=lambda r: self.finish(fam["id"], version, sha, r, validation_sharpe=vsharpe),
+                                   late_fail=lambda why: self.owe(fam["id"], n, sha))
         except PoolError as exc:
             self.store.event("swarm.gate", fam["id"], {"action": "look_failed", "version": n, "error": str(exc)[:300]})
             if job.result is None and job.late is None:  # it never ran (or the Gym failed it): the look is still owed
@@ -214,12 +248,19 @@ class Gate:
         return self.finish(fam["id"], version, sha, result, validation_sharpe=vsharpe)
 
     def owe(self, fid: str, n: int, sha: str) -> None:
-        """The look did not happen: the version is still owed one (if it is still the one validated), three tries."""
+        """The look did not happen: the version is still owed one (if it is still the one validated), three tries; after
+        the third it is refused as the Gym could not look (never forgotten)."""
+        if self.store.looked(sha):
+            return
         tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
         self.store.put(f"look_tries:{sha}", tries)
-        state = (self.store.family(fid) or {}).get("state") or {}
-        if tries < 3 and state.get("validation_version") == n:
-            self.store.set_state(fid, gated_sha=None, gate_ready=True)
+        if tries < 3:
+            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=None, gate_ready=True, look_inflight=None)
+        else:
+            self.store.refuse(fid, n, "gym", "the gate box could not make this holdout look three times")
+            self.store.compare_and_set_state(fid, {"validation_version": n}, gated_sha=sha, gate_ready=False, look_inflight=None)
+            self.store.event("swarm.status", fid, {"action": "look_failed_three_times", "alert": True, "version": n,
+                                                   "text": "the gate box could not make a holdout look three times"})
 
     def finish(self, fid: str, version: Mapping[str, Any], sha: str, result: Mapping[str, Any], *,
                validation_sharpe: Any = None) -> bool | None:
@@ -239,6 +280,7 @@ class Gate:
         previous = [x["p_value"] for x in self.store.looks() if x["p_value"] is not None]
         line = evidence.holdout_line(result, validation_sharpe=validation_sharpe, previous_ps=previous, seed=sha)
         self.store.add_look(fid, n, sha, passed=line["passed"], p_value=line["p"], detail=line)
+        self.store.set_state(fid, look_inflight=None, gated_sha=sha)
         self.store.event("swarm.gate", fid, {"action": "look", "version": n, "passed": line["passed"],
                                              "_line": line})  # the numbers stay private (underscore)
         if not line["numbers"].get("holm_reachable", True):

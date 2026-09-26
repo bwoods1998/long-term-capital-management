@@ -38,7 +38,7 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
         db.row_factory = sqlite3.Row
         try:
             fams = [dict(r) for r in db.execute("SELECT id, lineage, mechanism, structure, band, born_at, retired_at, trials,"
-                                                " inherited_trials, revisions FROM families")]
+                                                " revisions, spec FROM families")]
             totals = dict(db.execute("SELECT COALESCE(SUM(trials),0) AS trials, COALESCE(SUM(program_years),0) AS years FROM runs").fetchone())
             spend = {r["kind"]: float(r["usd"] or 0.0) for r in db.execute("SELECT kind, SUM(usd) AS usd FROM spend GROUP BY kind")}
             rows: dict[str, list[dict[str, Any]]] = {}
@@ -49,6 +49,23 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
             db.close()
     except sqlite3.Error:
         return {}
+    # A family's trials are its lineage's (`SwarmStore.lineage_trials`: every member, and any lineage its root was born
+    # on the slice of), the count its evidence is deflated by.
+    by_line: dict[str, int] = {}
+    prior: dict[str, str] = {}
+    for f in fams:
+        by_line[f["lineage"]] = by_line.get(f["lineage"], 0) + int(f["trials"] or 0)
+        before = (loads(f["spec"], {}) or {}).get("prior_lineage")
+        if f["id"] == f["lineage"] and before:
+            prior[f["id"]] = str(before)
+
+    def lineage_trials(line: str) -> int:
+        seen: list[str] = []
+        while line and line not in seen:
+            seen.append(line)
+            line = prior.get(line, "")
+        return sum(by_line.get(x, 0) for x in seen)
+
     alive = [f for f in fams if not f["retired_at"]]
     dead = sorted((f for f in fams if f["retired_at"]), key=lambda f: f["retired_at"], reverse=True)[:retired_shown]
     agents = []
@@ -59,13 +76,14 @@ def site_inputs(root: str | Path, *, retired_shown: int = 24) -> dict[str, Any]:
         if counted:
             fwd = {"trades": len(counted), "wins": sum(1 for r in counted if float(r["pnl"]) > 0),
                    "pnl_usd": round(sum(float(r["pnl"]) for r in counted), 2)}
-            reals = [r for r in counted if r["source"] == "real"]
-            if reals:
-                real = {"trades": len(reals), "wins": sum(1 for r in reals if float(r["pnl"]) > 0),
-                        "pnl_usd": round(sum(float(r["pnl"]) for r in reals), 2)}
+        # Real money is every real trade the family made, whichever version made it.
+        reals = [r for r in rows.get(f["id"], []) if r["source"] == "real"]
+        if reals:
+            real = {"trades": len(reals), "wins": sum(1 for r in reals if float(r["pnl"]) > 0),
+                    "pnl_usd": round(sum(float(r["pnl"]) for r in reals), 2)}
         agents.append({"id": f["id"], "family": f["lineage"], "mechanism": public.news_text(f["mechanism"]), "structure": f["structure"],
                        "band": "retired" if f["retired_at"] else f["band"], "born_at": f["born_at"], "retired_at": f["retired_at"],
-                       "record": {"trials": int(f["trials"]) + int(f["inherited_trials"]), "revisions": int(f["revisions"]),
+                       "record": {"trials": lineage_trials(f["lineage"]), "revisions": int(f["revisions"]),
                                   "forward": fwd, "real": real}})
     gym = {"as_of": _iso(time.time()), "trials": int(totals["trials"]), "market_years": round(float(totals["years"]), 1),
            "families_alive": len(alive), "families_retired": len(fams) - len(alive)}

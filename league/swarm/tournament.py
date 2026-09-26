@@ -94,6 +94,7 @@ class Tournament:
         if fam is None:
             return None
         years = float((result.get("summary") or {}).get("days") or 0) / 252.0 * max(1, len(fam["roots"]))
+        stale = fam.get("validated_version") is not None and int(fam["validated_version"]) > int(n)
         row = self.store.add_run(fid, n, result, window="validation", stress=1.0, purpose="validation", program_years=years)
         stressed = evidence.stressed_of(result)
         if isinstance(result.get("stress_1.5"), dict):
@@ -101,6 +102,8 @@ class Tournament:
             self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
                                         "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
                                program_years=years)
+        if stale:  # an older version's result landed after a newer one was judged: its trials count, its verdict does not
+            return None
         fam = self.store.family(fid) or fam
         line = evidence.validation_line(result, stressed, lineage_trials=self.store.lineage_trials(fid),
                                         trial_sharpes=self.store.lineage_trial_sharpes(fid))
@@ -173,9 +176,10 @@ class Tournament:
             spec.update({"id": f"{fam['id'].split('-on-')[0]}-on-{root.lower()}", "mechanism": fam["mechanism"],
                          "structure": fam["structure"], "roots": [root]})
             spec.pop("signal", None)  # its first version is the parent's program on the new root, not a starter
-            # A slice this lineage searched before (a retired sibling's): its trials and looks come too.
-            extra_trials, extra_looks = self.store.slice_spent(parent_line, [root], exclude=[fam["id"]])
-            child = self.store.add_family(spec, origin="fork", parent=fam["id"], extra_trials=extra_trials, extra_looks=extra_looks)
+            # Its trials count through the lineage. A slice the lineage looked at before (a retired sibling's) costs
+            # its looks too; the parent's ancestors' looks already come through the parent.
+            _, extra_looks = self.store.slice_spent(parent_line, [root], exclude=self.store.ancestors(fam["id"]))
+            child = self.store.add_family(spec, origin="fork", parent=fam["id"], extra_looks=extra_looks)
             best = self.store.version(fam["id"], self.candidate_version(fam))
             if best and best.get("code"):
                 code = best["code"]

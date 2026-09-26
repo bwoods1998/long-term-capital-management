@@ -141,8 +141,8 @@ you see only its mean return on maximum loss, its t, the quarters positive, and 
 (which checks were not). Holdout (2026) is sealed: one look per program version at the gate, at most three
 per lineage, and you hear only pass or fail. Forward days (after Sept 25, 2026, and live) are the judge.
 
-**Trials.** Every Gym evaluation is a trial, counted per lineage (a fork inherits its parent's count) and
-in total. The gate deflates your validation Sharpe by your lineage's trial count, so a thousand sweeps that
+**Trials.** Every Gym evaluation is a trial, counted per lineage (every family in it: parent, forks,
+siblings, alive or retired, and a dead slice's lineage when your idea was born on its slice) and in total. The gate deflates your validation Sharpe by your lineage's trial count, so a thousand sweeps that
 each look good by chance buy nothing. Change the idea when it fails; do not grind parameters.
 
 **The validation line** (your submitted best, on Validation): at least 100 trades on at least 60 days;
@@ -165,7 +165,8 @@ evidence below the line, retires your family; its lessons go to the graveyard ev
   realized/implied vol tercile, quarter, type, root, exit reason) as [n, pnl, win rate, pnl per $ max
   loss], the worst trades with their context, and your program's errors. One run a cycle: a cycle opens
   with a REVISE turn (gym_run only) unless you queued a run at the end of the last one, and its READ turn
-  (every tool) is where you read the result, submit, and queue the next run.
+  (every tool) is where you read the result, submit, and queue the next run. A queued run the Gym is too
+  busy to take is retried quietly twice; any other refusal comes to you as a message with the reason.
 - `read_run(run_id, section, page?)`: a section of a past Train run: summary, fills, runtime, worst,
   trades (paged), daily, breakdown.<name>.
 - `notebook(action, text?)`: append to or read your notebook, your memory across cycles (older cycles

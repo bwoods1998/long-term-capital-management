@@ -164,6 +164,16 @@ def sanitize(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+#: A queued run the Gym could not run for a passing reason (busy, restarting, superseded) is retried this many times
+#: before the model hears why; any other Gym error goes to the model at once.
+PENDING_RETRIES = 2
+TRANSIENT = ("did not answer", "abandoned before it ran", "superseded")
+
+
+def transient(error: str) -> bool:
+    return any(t in error for t in TRANSIENT)
+
+
 class Researcher:
     """Runs cycles for any family (one call per cycle; the loop's workers call it concurrently)."""
 
@@ -390,13 +400,21 @@ class Researcher:
             result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
             out["tool_calls"] += 1
             if result.get("status") == "gym_error":
-                # The Gym could not run it: no model is paid to read that. The run stays queued for the next cycle and
-                # the family backs off (the scheduler's cooldown on an error).
                 out["error"] = f"gym: {str(result.get('error') or '')[:200]}"
-                self.store.save_convo(fid, cycles, pending)
-                return
-            current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
-            gym_done = True
+                tries = int(pending.get("tries") or 0) + 1
+                if transient(str(result.get("error") or "")) and tries <= PENDING_RETRIES:
+                    # A busy or restarting Gym: no model is paid to read that. The run stays queued for the next cycle
+                    # and the family backs off (the scheduler's cooldown on an error).
+                    self.store.save_convo(fid, cycles, {**pending, "tries": tries})
+                    if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
+                        self.request_rewrite(fam, out)
+                    return
+                # The Gym will not run it (or failed it three times): the model hears why and revises.
+                current.append({"role": "user", "content": "The gym_run you queued last cycle could not run: "
+                                                           f"{str(result.get('error') or '')[:600]}. {result.get('hint') or ''}"})
+            else:
+                current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
+                gym_done = True
             fam = self.store.family(fid) or fam
         pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
         if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
