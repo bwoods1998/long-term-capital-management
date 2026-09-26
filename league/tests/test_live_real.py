@@ -226,6 +226,14 @@ class OrderPath(unittest.TestCase):
         self.venue.submit_mode = "gateway"
         order = self.open(strike=605.0)
         self.assertEqual((order.status, order.dispatched), ("refused", False))
+        self.venue.submit_mode = "ok"
+        from league.live.venue import Submitted
+
+        original = self.venue.submit
+        self.venue.submit = lambda body, exit: Submitted(False, {"error": "equity unread", "cap": "equity"}, "HTTP 503", status=503)
+        order = self.open(strike=610.0)
+        self.venue.submit = original
+        self.assertEqual((order.status, order.dispatched), ("refused", False))    # never dispatched, never counted
         # The gateway's day cap counts what reached the venue, not what the gateway refused.
         exposure = self.book.exposure("f", day="2026-09-28", week_start="2026-09-28")
         rejected = self.book.state.rows("SELECT max_loss FROM orders WHERE status='rejected'")[0]["max_loss"]

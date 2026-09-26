@@ -165,6 +165,18 @@ class OneSourceOfTruth(unittest.TestCase):
         # A type the venue cannot close in one order is refused by the table's bounds before any comparison.
         self.assertIn("real_types", " ".join(self.tree(types=["calendar"], gateway="calendar")))
 
+    def test_the_gateways_caps_are_the_money_tables(self):
+        self.assertEqual(self.tree(), [])
+        for var, value in (("MAX_ORDER_MAX_LOSS_USD", "1500"), ("MAX_ORDER_EQUITY_SHARE", "0.2"), ("MAX_DAY_EQUITY_SHARE", "1.5"),
+                           ("MAX_DAY_ORDERS", "400"), ("MAX_DAY_OPEN_ORDERS", "280"), ("CREDIT_MIN_EQUITY_USD", "1000")):
+            import re as _re
+
+            text = _re.sub(rf'"{var}": "[^"]*"', f'"{var}": "{value}"', self.wrangler, count=1)
+            (self.root / "league" / "constitution.py").write_text(self.constitution, encoding="utf-8")
+            (self.root / "gateway" / "wrangler.jsonc").write_text(text, encoding="utf-8")
+            refused = ci.check_structures(self.root)
+            self.assertTrue(any(var in p for p in refused), (var, refused))
+
     def test_a_money_row_outside_its_range_is_refused(self):
         refused = self.tree(replace={'"daily_stop_share": "0.25",': '"daily_stop_share": "0.50",'})
         self.assertIn("options_money.daily_stop_share = '0.50' is outside [0.15, 0.35]", " ".join(refused))

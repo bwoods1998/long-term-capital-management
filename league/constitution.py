@@ -716,7 +716,7 @@ CONSTITUTION: dict[str, Any] = {
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
         "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.15", "day_equity_share": "1.0",
-                    "max_day_orders": 300},
+                    "max_day_orders": 300, "max_day_open_orders": 250},
     },
 }
 
@@ -777,13 +777,14 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "gateway.order_equity_share": ("0", "0.15"),
     "gateway.day_equity_share": ("0", "1.0"),
     "gateway.max_day_orders": ("1", "300"),
+    "gateway.max_day_open_orders": ("1", "300"),
 }
 #: The five types the venue closes in one order: the only ones real money may open this run.
 OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "order_path.max_orders_day", "order_path.max_requests_minute",
-                   "order_path.expiry_close_lead_minutes", "gateway.max_day_orders")
+                   "order_path.expiry_close_lead_minutes", "gateway.max_day_orders", "gateway.max_day_open_orders")
 
 
 def options_money_problems(constitution: dict[str, Any] | None = None) -> list[str]:
@@ -817,7 +818,23 @@ def options_money_problems(constitution: dict[str, Any] | None = None) -> list[s
                         f"paper round trip and the owner): {real!r}")
     if table.get("credit_types") != list(OPTIONS_CREDIT_TYPES):
         problems.append(f"options_money.credit_types is exactly {list(OPTIONS_CREDIT_TYPES)}")
+    gate = table.get("gateway") if isinstance(table.get("gateway"), dict) else {}
+    try:
+        if int(gate.get("max_day_open_orders", 0)) >= int(gate.get("max_day_orders", 0)):
+            problems.append("options_money.gateway.max_day_open_orders must leave exits room under max_day_orders")
+    except (TypeError, ValueError):
+        pass
     return problems
+
+#: The gateway's `wrangler.jsonc` vars that repeat the money table: `league.ci` requires them equal.
+GATEWAY_VARS = {
+    "MAX_ORDER_MAX_LOSS_USD": "gateway.order_max_loss_usd",
+    "MAX_ORDER_EQUITY_SHARE": "gateway.order_equity_share",
+    "MAX_DAY_EQUITY_SHARE": "gateway.day_equity_share",
+    "MAX_DAY_ORDERS": "gateway.max_day_orders",
+    "MAX_DAY_OPEN_ORDERS": "gateway.max_day_open_orders",
+    "CREDIT_MIN_EQUITY_USD": "credit_min_equity_usd",
+}
 
 #: Grants recorded before the money digest existed pinned the whole constitution. Such a grant
 #: stays valid only while the money rules are EXACTLY those in force when it was granted:
@@ -830,4 +847,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = '502be7357db767366479e5c0c668ee5f17e01f725fa309f1c533cf7dbcea9781'
+PINNED_DIGEST = '88b1dd95cc26006b31286e6e8e89fd324a19f09e888bcfc2b839cbe23da356a5'

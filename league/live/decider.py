@@ -165,6 +165,33 @@ def child_main() -> None:  # pragma: no cover - run as a subprocess
 
 
 # --------------------------------------------------------------------------------------------- the House's side
+#: The longest a minute's batch may hold the House's minute (the live step runs a few seconds past the minute).
+MAX_BATCH_SECONDS = 40.0
+
+
+def batch_deadline(timeout: float, jobs: int) -> float:
+    """How long the House waits for a batch: 5 s plus each call's limit and a margin, never past `MAX_BATCH_SECONDS`."""
+    return min(MAX_BATCH_SECONDS, 5.0 + (float(timeout) + 0.25) * int(jobs))
+
+
+def protect_house_process() -> bool:
+    """The House's process made undumpable (Linux `prctl(PR_SET_DUMPABLE, 0)`): its `/proc/<pid>/environ` and memory,
+    where the gateway token lives, are then root's, not readable by a child of the same user (a program that escaped
+    the Gym's sandbox in the decider). True when set. The child runs as the House's user and in its network: this
+    closes the one path to the token that needs no escape past the interpreter (the review of #362, m16)."""
+    import sys as _sys
+
+    if not _sys.platform.startswith("linux"):
+        return False
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.prctl(4, 0, 0, 0, 0) == 0           # PR_SET_DUMPABLE = 4
+    except (OSError, AttributeError):
+        return False
+
+
 class _Base:
     def __init__(self, *, timeout: float = 1.0, max_errors: int = 25):
         self.timeout, self.max_errors = float(timeout), int(max_errors)
@@ -198,8 +225,7 @@ class _Base:
         if not jobs:
             return {}
         with self.lock:
-            deadline = 5.0 + (self.timeout + 0.25) * len(jobs)
-            answer = self._ask(("decide", dict(snaps), dict(unders), list(jobs)), deadline)
+            answer = self._ask(("decide", dict(snaps), dict(unders), list(jobs)), batch_deadline(self.timeout, len(jobs)))
             if not answer.get("ok"):
                 raise DeciderError(answer.get("error") or "the decider failed")
             return answer["results"]
@@ -226,6 +252,7 @@ class Decider(_Base):
         self.pid: int | None = None
 
     def _spawn(self) -> None:
+        protect_house_process()
         err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
         env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
                "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}

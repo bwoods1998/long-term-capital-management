@@ -80,6 +80,28 @@ class TheChild(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE, "numpy not installed")
+class TheHousesSide(unittest.TestCase):
+    def test_a_batch_never_holds_the_minute(self):
+        from league.live.decider import batch_deadline
+
+        self.assertLessEqual(batch_deadline(1.0, 500), 40.0)
+        self.assertEqual(batch_deadline(1.0, 2), 5.0 + 2 * 1.25)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux prctl")
+    def test_the_house_process_is_not_readable_by_a_child_of_its_uid(self):
+        import ctypes
+
+        from league.live.decider import protect_house_process
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            self.assertTrue(protect_house_process())
+            self.assertEqual(libc.prctl(3, 0, 0, 0, 0), 0)          # PR_GET_DUMPABLE: 0, /proc/<pid>/environ is root's
+        finally:
+            libc.prctl(4, 1, 0, 0, 0)                               # PR_SET_DUMPABLE back for the rest of the tests
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
 class AHungChild(unittest.TestCase):
     def test_the_house_kills_it_restarts_it_and_reloads_every_program(self):
         class Stuck(Decider):

@@ -70,6 +70,12 @@ class Orders(unittest.TestCase):
         refused = self.a.submit(self.body, exit=False)
         self.assertEqual((refused.ok, refused.unknown), (False, False))
         self.assertEqual(refused.order, {"error": "The real account's equity has not been read", "cap": "equity"})
+        # Every refusal the gateway makes before forwarding names its cap, 4xx or 5xx: none is an unknown outcome.
+        for status, cap in ((424, "positions"), (503, "credentials"), (403, "day_open_orders")):
+            self.t.route("POST", "/v2/orders", status, {"error": "refused before forwarding", "cap": cap})
+            answer = self.a.submit(self.body, exit=False)
+            self.assertEqual((answer.ok, answer.unknown, answer.sent), (False, False, True), cap)
+            self.assertEqual(answer.order["cap"], cap)
         # A 502 from the gateway ("did not answer") or no answer at all: unknown, looked up by client id.
         self.t.route("POST", "/v2/orders", 502, {"error": "The alpaca API did not answer."})
         self.assertTrue(self.a.submit(self.body, exit=False).unknown)

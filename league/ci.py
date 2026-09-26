@@ -356,6 +356,33 @@ def gateway_structures(root: Path = REPO) -> tuple[list[str], list[str]]:
     return sorted(set(names)), []
 
 
+def gateway_caps_problems(root: Path, table: dict[str, Any], names: dict[str, str]) -> list[str]:
+    """The gateway's caps that repeat the options money table (`constitution.GATEWAY_VARS`), equal to it: a cap changes
+    only with the money row it repeats (the review of #362, m17)."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        text = (root / "gateway" / "wrangler.jsonc").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"gateway/wrangler.jsonc: {exc}"]
+    problems = []
+    for var, path in names.items():
+        found = re.findall(rf'^\s*"{var}"\s*:\s*"([^"]*)"', text, flags=re.M)
+        node: Any = table
+        for key in path.split("."):
+            node = node.get(key) if isinstance(node, dict) else None
+        if len(found) != 1:
+            problems.append(f"gateway/wrangler.jsonc: {var} must be set once (it repeats options_money.{path})")
+            continue
+        try:
+            same = Decimal(found[0]) == Decimal(str(node))
+        except (InvalidOperation, ValueError):
+            same = False
+        if not same:
+            problems.append(f"gateway/wrangler.jsonc: {var} is {found[0]!r} but options_money.{path} is {node!r}: they change together")
+    return problems
+
+
 def check_structures(root: Path = REPO) -> list[str]:
     """ONE source of truth for the structure types real money may open, and the money rows inside their bounds.
 
@@ -388,6 +415,8 @@ def check_structures(root: Path = REPO) -> list[str]:
                   f"option_spread_real_types {constitution.get('allocator', {}).get('option_spread_real_types')}")
     gateway, unreadable = gateway_structures(root)
     problems += unreadable
+    if table is not None and isinstance(table, dict):
+        problems += gateway_caps_problems(root, table, namespace.get("GATEWAY_VARS") or {})
     if not problems and gateway != wanted:
         problems.append(f"gateway/wrangler.jsonc: OPTION_STRUCTURES_REAL admits {gateway or 'none'} on the real account, "
                         f"but the constitution opens {wanted or 'none'} ({source}): the two change together, in one deploy")
