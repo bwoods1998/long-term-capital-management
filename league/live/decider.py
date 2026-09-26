@@ -11,8 +11,9 @@ decisions a minute. What that buys:
   program (their memory starts again) and counts the batch as errors: the House's own minute is never held.
 - **Memory.** The child's address space is capped (`RLIMIT_AS`).
 - **Secrets.** The child starts with an empty environment (no GATEWAY_TOKEN, no SAIL_API_KEY) and `-E -s`; the House
-  reads its answers as JSON, never pickle, so a program that escaped the Gym's sandbox still could not hand the House an
-  object to run.
+  process is undumpable (its `/proc/<pid>/environ` is root's); the child runs in its own network namespace (loopback
+  only) wherever the box allows one; the House reads its answers as JSON, never pickle, so a program that escaped the
+  Gym's sandbox still could not hand the House an object to run, reach the gateway, or read the token.
 
 The parent sends each minute's `Snapshot`s once (pickled; the House is the trusted side), keyed by (root, minute
 index), and each instance's account rows with the minute index it decides on; the child slices each instance's chain with the Gym's own `Snapshot.view(slice_index(...))`, builds the ctx with
@@ -95,7 +96,12 @@ def _handle(message: Any, runners: dict, reply: Any) -> bool:
                 out[job["key"]] = {"intents": intents, "stats": runner.stats()}
             reply({"ok": True, "results": out})
         elif kind == "ping":
-            reply({"ok": True, "pid": os.getpid(), "env": sorted(os.environ)})
+            try:  # the child's own network namespace's interfaces (/proc/self/net is per namespace; /sys is not remounted)
+                lines = open("/proc/self/net/dev", encoding="utf-8").read().splitlines()[2:]
+                interfaces = sorted(line.split(":", 1)[0].strip() for line in lines if ":" in line)
+            except OSError:
+                interfaces = None
+            reply({"ok": True, "pid": os.getpid(), "env": sorted(os.environ), "interfaces": interfaces})
         elif kind == "quit":
             reply({"ok": True})
             return False
@@ -174,6 +180,18 @@ def batch_deadline(timeout: float, jobs: int) -> float:
     return min(MAX_BATCH_SECONDS, 5.0 + (float(timeout) + 0.25) * int(jobs))
 
 
+def _netns_available() -> bool:
+    """Whether this box lets an unprivileged process make a network namespace (probed once)."""
+    import shutil
+
+    if not shutil.which("unshare"):
+        return False
+    try:
+        return subprocess.run(["unshare", "--net", "--map-root-user", "true"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def protect_house_process() -> bool:
     """The House's process made undumpable (Linux `prctl(PR_SET_DUMPABLE, 0)`): its `/proc/<pid>/environ` and memory,
     where the gateway token lives, are then root's, not readable by a child of the same user (a program that escaped
@@ -250,13 +268,21 @@ class Decider(_Base):
         self.memory_mb, self.python, self.log = int(memory_mb), python, log
         self.proc: subprocess.Popen | None = None
         self.pid: int | None = None
+        #: The child runs in its own network namespace (`unshare --net --map-root-user`: loopback only, no route to the
+        #: gateway, Sail or anywhere) wherever the box allows an unprivileged one; decided once, at the first spawn.
+        self.netns: bool | None = None
 
     def _spawn(self) -> None:
         protect_house_process()
         err = open(self.log, "ab") if self.log else subprocess.DEVNULL  # noqa: SIM115
         env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": "/tmp", "LIVE_DECIDER_MEMORY_MB": str(self.memory_mb),
                "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
-        self.proc = subprocess.Popen([self.python, "-E", "-s", "-m", "league.live.decider"], cwd=str(REPO), env=env,
+        if self.netns is None:
+            self.netns = _netns_available()
+        command = [self.python, "-E", "-s", "-m", "league.live.decider"]
+        if self.netns:
+            command = ["unshare", "--net", "--map-root-user", *command]
+        self.proc = subprocess.Popen(command, cwd=str(REPO), env=env,
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, close_fds=True)
         if err is not subprocess.DEVNULL:
             err.close()

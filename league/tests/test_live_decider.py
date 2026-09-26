@@ -67,6 +67,16 @@ class TheChild(unittest.TestCase):
         snaps, unders = {("SPY", 30): snapshot()}, {("SPY", 2, 30): underlying_view("SPY", [600.0, 600.1])}
         self.assertEqual(self.decider.decide(snaps, unders, [job("v")]), inline.decide(snaps, unders, [job("v")]))
 
+    def test_the_child_has_no_network_where_the_box_allows_a_namespace(self):
+        import shutil
+
+        if not (shutil.which("unshare") and subprocess.run(["unshare", "--net", "--map-root-user", "true"],
+                                                            capture_output=True).returncode == 0):
+            self.skipTest("no unprivileged network namespace here")
+        ping = self.decider.ping()
+        self.assertTrue(self.decider.netns)
+        self.assertEqual(ping.get("interfaces"), ["lo"])                    # only loopback: no route to the gateway
+
     def test_a_program_that_never_returns_is_cut_off_and_counted(self):
         self.decider.load("loop", LOOP, {}, "loop")
         answer = self.decider.decide({("SPY", 30): snapshot()}, {("SPY", 0, 30): underlying_view("SPY", [600.0])}, [job("loop")])["loop"]
