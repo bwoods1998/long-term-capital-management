@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from decimal import Decimal
 from typing import Any, Callable, Mapping, Sequence
 
@@ -81,27 +82,73 @@ class ModelRouter:
                 attempt += 1
                 self.sleep(float(getattr(exc, "retry_after", None) or 5 * 3 ** attempt))
         cost = float(response.cost_usd or 0)
-        if cost:
-            self.store.add_spend(kind, cost, family=family.split(":", 1)[0], detail={"profile": profile, "key": key[:120], "desk": family})
+        held = self._take_hold(key)  # booked when an earlier ask of this key timed out: the cost replaces it
+        if cost - held:
+            detail = {"profile": profile, "key": key[:120], "desk": family, **({"replaces_hold": round(held, 6)} if held else {})}
+            self.store.add_spend(kind, cost - held, family=family.split(":", 1)[0], detail=detail)
         return response
+
+    #: Errors after which Sail may have run (and billed) a call whose answer never came back.
+    UNCONFIRMED = ("provider_poll_timeout", "provider_transport_timeout", "provider_transport_unconfirmed")
+
+    def _row(self, key: str) -> Any:
+        try:
+            with self.provider._lock:
+                return self.provider._db.execute("SELECT status, reserved_usd, cost_usd, response_id FROM requests WHERE request_key=?",
+                                                 (key[:200],)).fetchone()
+        except Exception:  # noqa: BLE001 - a fake Provider: nothing known
+            return None
+
+    def _take_hold(self, key: str) -> float:
+        with self.store.lock:
+            holds = dict(self.store.get("unsettled") or {})
+            hold = holds.pop(key[:200], None)
+            if hold is not None:
+                self.store.put("unsettled", holds)
+        return float((hold or {}).get("usd") or 0.0)
 
     def _book_unsettled(self, kind: str, profile: str, family: str, key: str, exc: BaseException) -> None:
         """A call that failed after it was sent (a poll or transport timeout: Sail may have run it and billed it) is
-        booked at the Provider's hold for it, so the swarm's own meter never undercounts; a call the Provider released
-        (refused outright, never accepted) costs nothing. Best effort: never raises."""
-        try:
-            request = self.provider.request_id_for(family, key[:200])
-            with self.provider._lock:
-                row = self.provider._db.execute("SELECT status, reserved_usd, cost_usd FROM requests WHERE id=?", (request,)).fetchone()
-        except Exception:  # noqa: BLE001 - a fake Provider, or no row: nothing known to book
-            return
-        if row is None or row["status"] == "abandoned":
+        booked ONCE at the Provider's hold for it, and remembered (kv `unsettled`), so the swarm's own meter never
+        undercounts: its settled cost later replaces the hold (`sail`, `settle_holds`), and a hold the Provider
+        releases is reversed. A call the venue refused, or an HTTP error with nothing accepted, costs nothing."""
+        row = self._row(key)
+        code = str(getattr(exc, "code", "") or "")
+        if row is None or row["status"] == "abandoned" or (not row["response_id"] and code not in self.UNCONFIRMED):
             return
         usd = float(row["cost_usd"] if row["cost_usd"] is not None else row["reserved_usd"] or 0)
-        if usd > 0:
+        if usd <= 0:
+            return
+        with self.store.lock:
+            holds = dict(self.store.get("unsettled") or {})
+            if key[:200] in holds:
+                return  # booked when it first failed: never twice
+            holds[key[:200]] = {"usd": usd, "kind": kind, "family": family.split(":", 1)[0], "at": time.time()}
+            self.store.put("unsettled", holds)
             self.store.add_spend(kind, usd, family=family.split(":", 1)[0],
-                                 detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": str(getattr(exc, "code", "")
-                                                                                                               or type(exc).__name__)[:80]})
+                                 detail={"profile": profile, "key": key[:120], "desk": family, "unsettled": code or type(exc).__name__})
+
+    def settle_holds(self) -> int:
+        """True up the holds booked for unanswered calls once the Provider knows: its settled cost replaces the hold,
+        a released (abandoned) request reverses it. Returns how many were settled."""
+        n = 0
+        for key, hold in list((self.store.get("unsettled") or {}).items()):
+            row = self._row(key)
+            if row is None:
+                continue
+            if row["status"] == "abandoned" and row["cost_usd"] is None:
+                delta = -float(hold["usd"])
+            elif row["cost_usd"] is not None and row["status"] not in ("prepared", "dispatched"):
+                delta = float(row["cost_usd"]) - float(hold["usd"])
+            else:
+                continue  # still unknown: the hold stands
+            if self._take_hold(key) == 0.0:
+                continue  # settled by a caller meanwhile
+            if delta:
+                self.store.add_spend(hold.get("kind") or "sail_model", delta, family=hold.get("family"),
+                                     detail={"key": key[:120], "settles_hold": round(float(hold["usd"]), 6)})
+            n += 1
+        return n
 
     def compact(self, *, older_than_seconds: float = 3600.0) -> int:
         """Blank the request bodies and responses of settled calls older than an hour in the swarm's Provider file. Each

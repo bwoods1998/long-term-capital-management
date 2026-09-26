@@ -6,6 +6,7 @@ import copy
 import importlib.util
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -394,6 +395,94 @@ class RateLimits(unittest.TestCase):
             self.assertEqual(store.spent(["sail_model"]), booked)
             prov.close()
             store.close()
+
+
+class Holds(unittest.TestCase):
+    """A call that fails after it was sent is booked at its hold ONCE; its settled cost replaces the hold, never adds to it
+    (S7). Sail answers the POST 'in progress' and the Provider stops polling at once (poll_timeout 0)."""
+
+    def setUp(self):
+        from ltcm.provider import Provider
+
+        from league.tests.swarm_fakes import response_payload
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.store = SwarmStore(Path(self.dir.name))
+        self.addCleanup(self.store.close)
+        self.done = False
+        self.fail_code = None
+        payload = {}
+
+        def transport(method, route, body=None, idempotency_key=None):
+            from ltcm.provider import ProviderError
+
+            if self.fail_code:
+                raise ProviderError(self.fail_code)
+            if method == "POST":
+                payload.update(response_payload(body["model"], text="ok"))
+                return {"id": payload["id"], "status": "in_progress", "model": body["model"]}
+            if self.done:
+                return payload
+            return {"id": payload["id"], "status": "in_progress", "model": payload["model"]}
+
+        self.prov = Provider(Path(self.dir.name) / "p.sqlite", transport=transport, floor_cap_usd_per_day="100", poll_timeout=0,
+                             sleep=lambda s: None)
+        self.addCleanup(self.prov.close)
+        self.router = ModelRouter(self.store, self.prov, settings=copy.deepcopy(S.DEFAULTS), sleep=lambda s: None)
+        self.items = [{"role": "user", "content": "hi"}]
+
+    def ask(self, key="k1"):
+        return self.router.sail("k3_balanced", self.items, family="f:audit", key=key, max_output=6000)
+
+    def cost(self):
+        return float(self.prov._db.execute("SELECT cost_usd FROM requests").fetchone()[0])
+
+    def test_a_timed_out_call_asked_again_books_its_cost_not_its_hold_and_its_cost(self):
+        from ltcm.provider import ProviderError
+
+        for _ in range(3):  # three rounds while it is still running: one hold
+            with self.assertRaises(ProviderError):
+                self.ask()
+        hold = float(self.prov._db.execute("SELECT reserved_usd FROM requests").fetchone()[0])
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), hold, places=6)
+        self.done = True
+        self.ask()
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), self.cost(), places=6)
+
+    def test_a_hold_the_provider_settles_or_releases_later_is_trued_up(self):
+        from ltcm.provider import ProviderError
+
+        with self.assertRaises(ProviderError):
+            self.ask("k1")
+        with self.assertRaises(ProviderError):
+            self.ask("k2")
+        self.done = True
+        self.prov.reconcile_stale(now=time.time() + 3600)  # the loop's sweep: both settle
+        self.router.settle_holds()
+        costs = sum(float(r[0]) for r in self.prov._db.execute("SELECT cost_usd FROM requests"))
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), costs, places=6)
+        self.assertEqual(self.store.get("unsettled") or {}, {})
+
+    def test_a_released_hold_is_reversed(self):
+        from ltcm.provider import ProviderError
+
+        self.fail_code = "provider_transport_timeout"  # the POST's answer was lost: Sail may or may not have it
+        with self.assertRaises(ProviderError):
+            self.ask()
+        self.assertGreater(self.store.spent(["sail_model"]), 0)
+        self.prov.reconcile_stale(now=time.time() + 3600)  # never accepted: the Provider releases its hold
+        self.assertEqual(self.prov._db.execute("SELECT status FROM requests").fetchone()[0], "abandoned")
+        self.router.settle_holds()
+        self.assertAlmostEqual(self.store.spent(["sail_model"]), 0.0, places=9)
+
+    def test_a_server_error_nothing_accepted_books_nothing(self):
+        from ltcm.provider import ProviderError
+
+        self.fail_code = "provider_http_503"
+        with self.assertRaises(ProviderError):
+            self.ask()
+        self.assertEqual(self.store.spent(["sail_model"]), 0.0)
 
 
 class Compaction(ResearcherCase):

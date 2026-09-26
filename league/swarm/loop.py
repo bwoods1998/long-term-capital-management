@@ -265,6 +265,7 @@ class Swarm:
             self.guard.check()
             try:  # requests a stopped process left in flight: settled or released (their holds would count forever)
                 self.router.provider.reconcile_stale()
+                self.router.settle_holds()  # what the swarm booked for unanswered calls, trued up
             except Exception:  # noqa: BLE001
                 pass
             try:  # old conversations out of the Provider's file (the disk)
