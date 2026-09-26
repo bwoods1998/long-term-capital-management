@@ -10,7 +10,7 @@ import inspect
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from league import service
 from league.live_trading import LiveGrant
@@ -93,10 +93,17 @@ class Build(BuildCase):
         self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca"}, "market data reads through the real account")
         self.assertFalse(house.grant.allows_live(2), "an empty root has no grant: no real entry")
 
-    def test_without_real_money_market_data_reads_through_the_practice_account(self):
+    def test_without_real_money_old_market_data_uses_the_entitled_real_account(self):
         with patch("ltcm.adapters.VenueClient") as client:
-            self.build(real_money=False, config=NO_LIVE)
-        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca-paper"})
+            house = self.build(real_money=False, config={**NO_LIVE, "options_history": True})
+        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca"})
+        self.assertNotIn("alpaca", house.books)
+        self.assertEqual([venue for venue, _ in self.made], ["alpaca-paper"])
+        client.return_value.request.return_value = (200, {"snapshots": {}})
+        house.options_history.get("/v1beta1/options/snapshots/SPY", {"feed": "opra"})
+        client.return_value.request.assert_called_once_with(
+            "GET", "https://data.alpaca.markets/v1beta1/options/snapshots/SPY?feed=opra",
+            headers={}, what="options history /v1beta1/options/snapshots/SPY")
 
     def test_no_absent_key_switches_a_cut_feature_on(self):
         config = {k: v for k, v in service.load_config().items()
@@ -131,16 +138,35 @@ class TheLivePath(BuildCase):
 
     def test_the_live_path_owns_the_alpaca_accounts(self):
         from league.live.step import OptionsLive
+        from league.live.venue import Account
 
-        with patch("ltcm.adapters.VenueClient") as client:
+        def make_client(*args, **kwargs):
+            made = Mock(venue=kwargs["venue"])
+            made.request.return_value = (200, {})
+            return made
+
+        with patch("ltcm.adapters.VenueClient", side_effect=make_client) as client, \
+                patch("league.live.venue.Account", wraps=Account) as account:
             house = self.build(real_money=False, config=LIVE)
         self.assertEqual(house.books, {})
         self.assertIsInstance(house.options_live, OptionsLive)
         self.assertIsNone(house.options_live.real, "no real account without real money")
+        self.assertIsNone(house.options_live.book)
+        self.assertFalse(house.options_live.real_money)
         self.assertEqual(house.options_live.paper.venue, "alpaca-paper")
+        self.assertEqual([kw["venue"] for _, kw in account.call_args_list], ["alpaca-paper"],
+                         "real market-data authentication must not construct a real execution account")
+        self.assertEqual(house.options_live.market.client.venue, "alpaca")
+        self.assertEqual(house.options_live.paper.client.venue, "alpaca-paper")
         self.assertIs(house.options_live.grant, house.grant)
-        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca-paper"})
+        self.assertFalse(house.grant.allows_live(2))
+        self.assertEqual(house.options_live.real_block(), "real money is off (config.json real_money)")
+        self.assertEqual({kw["venue"] for _, kw in client.call_args_list}, {"alpaca", "alpaca-paper"})
         self.assertTrue(all(isinstance(kw.get("gateway").headers(), dict) for _, kw in client.call_args_list if kw.get("gateway")))
+        self.assertEqual(house.options_live.market.stocks(["SPY"]), {})
+        house.options_live.market.client.request.assert_called_once_with(
+            "GET", "https://data.alpaca.markets/v2/stocks/snapshots?symbols=SPY&feed=sip", what="stock snapshots")
+        house.options_live.paper.client.request.assert_not_called()
 
     def test_with_real_money_it_trades_the_brokerage_account_and_reads_through_it(self):
         from league.tests.test_sandbox import FakeSail

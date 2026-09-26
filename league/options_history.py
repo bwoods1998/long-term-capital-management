@@ -367,14 +367,22 @@ def _retrying(call: Callable[[], Any], *, attempts: int = 3, pause: float = 2.0)
             time.sleep(pause * (attempt + 1))
 
 
-def gateway_get(broker: Any) -> Callable[[str, Mapping[str, Any]], Any]:
-    """`get(path, params)` through an `AlpacaBroker` in gateway mode: the market-data host for
-    `/v1beta1`, the trading host for `/v2/options/contracts` (the gateway picks the host)."""
+def gateway_get(broker: Any = None, *, client: Any = None) -> Callable[[str, Mapping[str, Any]], Any]:
+    """GETs through a broker's client or a dedicated data client, without an execution account.
+
+    `/v1beta1` uses the market-data host; `/v2/options/contracts` uses the trading host.
+    The gateway chooses the credential from the client's venue, independently of these hosts.
+    """
+    if client is None:
+        client, data_base, trading_base = broker.client, broker.data, broker.base
+    else:
+        data_base, trading_base = "https://data.alpaca.markets", "https://api.alpaca.markets"
+
     def get(path: str, params: Mapping[str, Any]) -> Any:
-        base = broker.data if path.startswith("/v1beta") else broker.base
+        base = data_base if path.startswith("/v1beta") else trading_base
         pairs = [(k, v) for k, v in params.items() if v is not None and v != ""]
         url = base + path + ("?" + urllib.parse.urlencode(pairs, safe=",:") if pairs else "")
-        status, payload = _retrying(lambda: broker.client.request("GET", url, headers={}, what=f"options history {path}"))
+        status, payload = _retrying(lambda: client.request("GET", url, headers={}, what=f"options history {path}"))
         if status != 200:
             detail = payload.get("error") or payload.get("message") if isinstance(payload, dict) else str(payload)[:200]
             raise HistoryError(f"HTTP {status} {detail}")

@@ -199,7 +199,8 @@ def options_live(house: House, root: Path, config: dict[str, Any], *, real_money
     def client(venue: str) -> Any:
         return VenueClient(None, gateway_url=gateway_url, gateway=signer, venue=venue)
 
-    market = MarketData(client("alpaca" if real_money else "alpaca-paper"), option_feed=str(config.get("alpaca_option_feed", "opra")),
+    # OPRA/SIP entitlement belongs to the real account even while all execution is shadow/paper.
+    market = MarketData(client("alpaca"), option_feed=str(config.get("alpaca_option_feed", "opra")),
                         stock_feed=str(config.get("alpaca_feed", "sip")))
     real = LiveAccount(client("alpaca"), venue="alpaca", max_requests_minute=table.max_requests_minute) if real_money else None
     paper = LiveAccount(client("alpaca-paper"), venue="alpaca-paper", max_requests_minute=table.max_requests_minute)
@@ -277,10 +278,9 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
     real_money = bool(config.get("real_money"))
     feed, option_feed = config.get("alpaca_feed", "iex"), config.get("alpaca_option_feed", "indicative")
 
-    # Market data reads through the real account's credentials when real money is on (the gateway's kill switch stops
-    # orders, never reads), and through the practice account's otherwise (a canary, a House with real money off).
-    data_venue = "alpaca" if real_money else "alpaca-paper"
-    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue=data_venue)
+    # Market data uses the entitled real account independently of execution (including a canary).
+    # This client is passed to readers only; real execution accounts still require real_money below.
+    data_client = VenueClient(None, gateway_url=gateway_url, gateway=GatewaySigner(token()), venue="alpaca")
     alpaca_data = AlpacaData(data_client, feed=feed)
     live_on = live_enabled(config, canary=canary)
     brokers: dict[str, Any] = {}
@@ -342,8 +342,8 @@ def build(root: str | Path, *, config: dict[str, Any] | None = None, local_sandb
         # Listed-option history (market-data GETs only): the options desk's replay. Empty until ingested; then
         # refreshed daily. Superseded by the Gym (league/gym/) and deleted with it in Wave 2b.
         from .options_history import OptionsHistory, gateway_get
-        reader = brokers["alpaca"] if real_money else paper
-        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(reader), ledger=house.ledger, clock=house.clock)
+        house.options_history = OptionsHistory(root / "options_history.sqlite", gateway_get(client=data_client),
+                                               ledger=house.ledger, clock=house.clock)
     if not canary:
         from .frontier import FrontierMonth
 
