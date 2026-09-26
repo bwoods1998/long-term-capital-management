@@ -80,7 +80,7 @@ class Nightly:
     def __init__(self, *, data: Any, gate: Any, images: dict[str, Any], save: Callable[[dict[str, Any]], None],
                  checkpoint: Callable[[], str], calendar: sl.Calendar, last_backfill_args: str | None,
                  gym_box_ids: Sequence[str] = (), log: Callable[[str], None] = print,
-                 clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc)):
+                 clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc), rehearsal: bool = False):
         self.data, self.gate, self.images, self.save = data, gate, images, save
         self.checkpoint = checkpoint
         self.calendar = calendar
@@ -88,15 +88,20 @@ class Nightly:
         self.gym_box_ids = set(gym_box_ids)
         self.log = log
         self.clock = clock
+        #: A rehearsal copies a day the data box already holds (a holdout day) to a rehearsal gate box,
+        #: skips the pull, and records under `nightly_rehearsals`, never as the gate's state.
+        self.rehearsal = rehearsal
 
     def state(self, day: dt.date) -> dict[str, Any]:
+        if self.rehearsal:
+            return self.images.setdefault("nightly_rehearsals", {}).setdefault(day.isoformat(), {})
         nights = self.images.setdefault("gate", {}).setdefault("forward_days", {})
         return nights.setdefault(day.isoformat(), {})
 
     def run(self, day: dt.date | None = None, *, dry_run: bool = False) -> dict[str, Any]:
         now = self.clock()
         day = day or target_day(now, self.calendar)
-        if sl.window_of(day) != "forward":
+        if sl.window_of(day) != "forward" and not (self.rehearsal and sl.window_of(day) == "holdout"):
             raise ValueError(f"{day} is {sl.window_of(day)}, not a forward day")
         if not self.calendar.is_trading(day):
             return {"day": day.isoformat(), "skipped": "not a trading day"}
@@ -115,7 +120,7 @@ class Nightly:
         if was_running:
             self.data.stop_backfill()
         try:
-            if not state.get("pulled"):
+            if not state.get("pulled") and not self.rehearsal:
                 for stage in (7, 8):  # the day's chains, then (needing them) the back months
                     ok, out = self.data.run(f"backfill.py run --stages {stage} --forward-days {day.isoformat()} "
                                             "--threads 8 --passes 3 --pause 120", timeout=5400)
@@ -133,7 +138,8 @@ class Nightly:
         files = [r for r in records if r.get("type") == "file"]
         if not files:
             raise RuntimeError(f"the data box holds no files for {day}")
-        if any(r.get("window") != "forward" for r in files):
+        allowed = ("forward", "holdout") if self.rehearsal else ("forward",)
+        if any(r.get("window") not in allowed for r in files):
             raise RuntimeError("a record that is not a forward day was about to reach the gate")
 
         # 2. the copy, file by file, checked on arrival
@@ -157,9 +163,10 @@ class Nightly:
         # 3. the gate's new checkpoint
         checkpoint = self.checkpoint()
         state["checkpoint"] = checkpoint
-        gate = self.images.setdefault("gate", {})
-        gate["current_checkpoint"] = checkpoint
-        gate.setdefault("checkpoints", []).append({"id": checkpoint, "day": day.isoformat(), "at": self.clock().isoformat()})
+        if not self.rehearsal:
+            gate = self.images.setdefault("gate", {})
+            gate["current_checkpoint"] = checkpoint
+            gate.setdefault("checkpoints", []).append({"id": checkpoint, "day": day.isoformat(), "at": self.clock().isoformat()})
         self.save(self.images)
         self.gate.sleep(None)
         if not self.data.backfill_running():
@@ -214,12 +221,12 @@ class BoxHandle:
         self.api.exec(self.box_id, command, timeout=60, background=True)
 
 
-def real_job() -> Nightly:
+def real_job(*, rehearsal_gate: str | None = None) -> Nightly:
     import boxlib as bl
 
     api = bl.client()
     images = bl.read_json(bl.IMAGES)
-    gate = (images.get("gate") or {}).get("current") or {}
+    gate = {"box_id": rehearsal_gate} if rehearsal_gate else ((images.get("gate") or {}).get("current") or {})
     if not gate.get("box_id"):
         raise SystemExit("no gate image recorded in .data/gym/images.json; build it first (images.py build gate)")
     gym_ids = [e.get("box_id") for e in (images.get("gym") or {}).get("history", []) if e.get("box_id")]
@@ -235,11 +242,12 @@ def real_job() -> Nightly:
         from images import checkpoint_with_retry
 
         row = checkpoint_with_retry(api, gate["box_id"], name=f"ltcm-gate-{bl.now().replace(':', '')}",
-                                    ttl_seconds=365 * 86400)
+                                    ttl_seconds=(2 if rehearsal_gate else 365) * 86400)
         return row["checkpoint_id"]
 
     return Nightly(data=data, gate=gate_handle, images=images, save=lambda d: bl.write_json(bl.IMAGES, d),
-                   checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids)
+                   checkpoint=checkpoint, calendar=calendar, last_backfill_args=last_args, gym_box_ids=gym_ids,
+                   rehearsal=bool(rehearsal_gate))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -248,6 +256,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--day", default=None)
     r.add_argument("--dry-run", action="store_true")
+    rh = sub.add_parser("rehearse", help="copy a holdout day the data box holds to a rehearsal gate box")
+    rh.add_argument("--gate-box", required=True)
+    rh.add_argument("--day", required=True)
     sub.add_parser("schedule")
     sub.add_parser("status")
     args = parser.parse_args(argv)
@@ -255,6 +266,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         import boxlib as bl
 
         print(json.dumps((bl.read_json(bl.IMAGES).get("gate") or {}).get("forward_days", {}), indent=1))
+        return 0
+    if args.cmd == "rehearse":
+        job = real_job(rehearsal_gate=args.gate_box)
+        print(json.dumps(job.run(dt.date.fromisoformat(args.day)), indent=1, default=str))
         return 0
     job = real_job()
     if args.cmd == "schedule":

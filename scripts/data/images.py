@@ -195,7 +195,7 @@ def checkpoint_with_retry(api: Any, box: str, *, name: str, ttl_seconds: int, at
 
 
 def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Callable[[float], None] = time.sleep,
-          ttl_days: int = 365, rehearsal: bool = False) -> dict[str, Any]:
+          ttl_days: int = 365, rehearsal: bool = False, keep: bool = False) -> dict[str, Any]:
     """Build one image. `rehearsal` runs every step on whatever the store holds now, then
     terminates the fork and records the result under `rehearsals` (never as the current image)."""
     api = api or bl.client()
@@ -266,8 +266,11 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
         say(f"  checkpoint {label}: {row['checkpoint_id']} ({time.time() - started:.0f}s)")
     record = bl.read_json(bl.IMAGES)
     if rehearsal:
-        api.terminate(box)
-        record.setdefault("rehearsals", []).append({"kind": kind, "version": version, "box_id": box, "terminated": True,
+        if keep:
+            api.sleep(box)
+        else:
+            api.terminate(box)
+        record.setdefault("rehearsals", []).append({"kind": kind, "version": version, "box_id": box, "terminated": not keep,
                                                     "checkpoints": checkpoints, "ttl_days": ttl_days, "at": bl.now(),
                                                     "passed": facts["passed"], "files": facts["files"],
                                                     "checkpoint_errors": errors})
@@ -311,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--force", action="store_true")
     b.add_argument("--ttl-days", type=int, default=365)
     b.add_argument("--rehearsal", action="store_true", help="every step on the store as it is; the fork is terminated")
+    b.add_argument("--keep", action="store_true", help="with --rehearsal: leave the fork asleep (for a nightly rehearsal)")
     v = sub.add_parser("verify")
     v.add_argument("kind", choices=sorted(KINDS))
     v.add_argument("--checkpoint", default=None)
@@ -318,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "build":
         print(json.dumps(build(args.kind, version=args.version, force=args.force or args.rehearsal,
-                               ttl_days=args.ttl_days, rehearsal=args.rehearsal), indent=1))
+                               ttl_days=args.ttl_days, rehearsal=args.rehearsal, keep=args.keep), indent=1))
     elif args.cmd == "verify":
         print(json.dumps(verify(args.kind, args.checkpoint), indent=1))
     else:

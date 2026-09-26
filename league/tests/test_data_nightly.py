@@ -234,3 +234,21 @@ class ForwardStage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Rehearsal(unittest.TestCase):
+    def test_a_rehearsal_copies_a_holdout_day_without_a_pull_and_leaves_the_gate_record_alone(self):
+        day = dt.date(2026, 9, 23)
+        data = FakeData(day)
+        gate, images = FakeGate(), {"gate": {"current_checkpoint": "sbcp_real"}}
+        nightly, _, checkpoints = job(data, gate, images, now=dt.datetime(2026, 9, 26, 7, 0, tzinfo=UTC))
+        nightly.rehearsal = True
+        # FakeData stamps its records with the day's window: holdout here
+        result = nightly.run(day)
+        self.assertNotIn(("run", "backfill.py", "run"), data.calls)
+        self.assertEqual(images["gate"]["current_checkpoint"], "sbcp_real")
+        self.assertEqual(images["nightly_rehearsals"]["2026-09-23"]["checkpoint"], checkpoints[-1])
+        self.assertTrue(result["checkpoint"])
+        nightly.rehearsal = False
+        with self.assertRaises(ValueError):
+            nightly.run(day)
