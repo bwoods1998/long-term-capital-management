@@ -10315,6 +10315,16 @@ class House:
     #:   researchers' inner loop, the hourly tournament and bandit, forks and retirements, the architect and the gate.
     PLUGGABLE_STEPS = ("options_live", "swarm")
 
+    def _step_health(self, name: str) -> Any:
+        step = getattr(self, name, None)
+        health = getattr(step, "health", None)
+        if not callable(health):
+            return None
+        try:
+            return health()
+        except Exception as exc:  # noqa: BLE001 - one step's health never costs health.json
+            return {"error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
     def site_inputs(self) -> dict[str, Any]:
         """The site's inputs from the two pluggable steps (the publisher's `site_inputs` hook, `league/publish.py`): the
         swarm's (`gym`, `agents`, and `compute`: the swarm's own spend) and the live path's (`structures`: the open real
@@ -10740,6 +10750,9 @@ class House:
             # The options overhaul (Sept 26, 2026): which of the tick's pluggable steps are filled, and whether the
             # credit economy still runs (off in the options House).
             "pluggable_steps": {name: getattr(self, name, None) is not None for name in self.PLUGGABLE_STEPS},
+            # The live options path (Wave 5): its last minute, what shuts real entries, the stops, reconciliation, the
+            # paper proof and each live program instance (`league/live/step.py` `OptionsLive.health`).
+            "options_live": self._step_health("options_live"),
             "credit_economy": bool(self.settings.credit_economy),
             "promotion_status": [dict(row) for agent in self.registry.living()
                                  if (row := self._state.get('promotion_status', {}).get(agent.id))
