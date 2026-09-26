@@ -20,15 +20,20 @@ DEFAULTS: dict[str, Any] = {
     # The population (plan: 48 at the start of the training burst, a ceiling of 96, a floor of 16).
     "population": {"start": 48, "ceiling": 96, "floor": 16},
     "researcher": {
-        # DeepSeek-V4-Flash at asap for the inner loop; V4.1-Flash once a history is long (cheaper cached reads).
+        # DeepSeek-V4-Flash at asap for the inner loop. V4.1-Flash (`long_profile`) is for long, well-cached histories:
+        # measured Sept 26 at the cache share a trimmed history gets (44-66%), it cost four times V4-Flash a call, so it
+        # is off unless `long_history_chars` is lowered.
         "profile": "flash_asap",
         "long_profile": "flash41_asap",
-        "long_history_chars": 60000,
-        # One rewrite after a stall of `stall_revisions`: V4-Pro balanced, Kimi-K3 balanced for the top ten.
+        "long_history_chars": 10 ** 9,
+        # One rewrite after a stall of `stall_revisions`: V4-Pro balanced, Kimi-K3 balanced for the top ten; asked in the
+        # background (V4-Pro's balanced window took over five minutes on Sept 26), capped and spaced.
         "rewrite_profile": "pro_balanced",
         "top_rewrite_profile": "k3_balanced",
         "top_rewrite_families": 10,
         "stall_revisions": 5,
+        "rewrites_per_day": 4,
+        "rewrite_min_hours": 1.0,
         # Measured Sept 26 on a cycle's revise turn: effort low spent 1,800-3,800 reasoning tokens (100-180 s under load);
         # minimal and none spent none (28-64 s for the same turn, the whole program rewritten). Minimal keeps a cycle
         # under three minutes; the stall's rewrite thinks harder on a stronger model.
@@ -38,12 +43,15 @@ DEFAULTS: dict[str, Any] = {
         "min_call_seconds": 75,         # a later model call starts only with this much of the cycle left
         "max_tool_calls": 8,            # a cycle's tool calls
         "cycle_seconds": 170,           # a cycle's wall-time budget (target under 3 minutes)
-        "history_cycles": 4,            # cycles of conversation kept; older ones live in the notebook
+        "history_cycles": 4,            # cycles of conversation kept (older ones live in the notebook) ...
+        "history_trim_to": 2,           # ... cut back to this many at once, so the cached prefix holds for a few cycles
+        "old_output_chars": 2500,       # tool outputs older than the last cycle, shortened to this
         "concurrency": 48,              # researchers in flight at once
-        # Measured Sept 26 (DeepSeek-V4-Flash asap, effort low): $0.001-0.003 a cycle, so ~25 cycles an hour is ~$1.8 a
-        # family a day. The fuses are loose; the guard's burst cap and the House's line are the brakes.
-        "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap)
-        "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap)
+        # The swarm's model spend an hour (Sail models + OpenAI over the last hour): a researcher starts no cycle above it.
+        # Measured Sept 26: 22 researchers at ~44 s cycles spent ~$5/h before the cache fixes; the plan's figure is $1-2/h.
+        "usd_per_hour": 4.0,
+        "family_usd_day": 3.0,          # each family's daily model budget (the Provider's desk cap): a fuse
+        "floor_usd_day": 150.0,         # every model call of the swarm together, a day (the Provider's floor cap): a fuse
         "idle_seconds": 5,              # between a family's cycles
         "note_every_cycles": 6,         # a public note to the tape at most this often per family
     },

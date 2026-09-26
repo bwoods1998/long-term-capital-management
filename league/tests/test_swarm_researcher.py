@@ -60,7 +60,7 @@ class ResearcherCase(unittest.TestCase):
         return step(body) if callable(step) else step
 
     def researcher(self):
-        return Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, starter=program_for)
+        return Researcher(self.store, self.router, self.pool, self.settings, clock=self.clock, starter=program_for, background=False)
 
 
 class FirstCycle(ResearcherCase):
@@ -188,17 +188,38 @@ class ModelCycles(ResearcherCase):
         self.assertIn('"t": 1.2', status)
         self.assertIn("The gate's last answer: fail.", status)
 
-    def test_a_stall_buys_one_rewrite_from_a_stronger_model(self):
+    def test_a_stall_buys_one_rewrite_from_a_stronger_model_asked_in_the_background(self):
         self.run_first()
         self.store.update_family(self.fam["id"], stall=5)
-        self.steps = [{"text": "Here it is:\n```python\n" + self.code.replace("vrp_min\": 1.2", "vrp_min\": 1.25") + "\n```\nWider."},
+        self.steps = [{"text": "Here it is:\n```python\n" + self.code.replace("'vrp_min': 1.2", "'vrp_min': 1.25") + "\n```\nWider."},
                       {"text": "ok"}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertEqual(out.get("rewrite"), "pro_balanced", out)
+        self.assertEqual(out.get("rewrite_asked"), "pro_balanced", out)
         self.assertEqual(self.sail.bodies[0]["model"], "deepseek-ai/DeepSeek-V4-Pro-0813")
         fam = self.store.family(self.fam["id"])
-        self.assertEqual(fam["rewrites"], 1)
+        self.assertEqual((fam["rewrites"], fam["stall"]), (1, 0))
+        self.assertTrue(fam["state"]["rewrite_ready"]["code"])
+        self.steps = [{"text": "ok"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(out.get("rewrite"), "pro_balanced", "the rewrite is the next cycle's run")
         self.assertEqual(self.store.latest_version(self.fam["id"])["author"], "pro_balanced")
+        self.assertIsNone(self.store.family(self.fam["id"])["state"]["rewrite_ready"])
+
+    def test_rewrites_are_spaced_and_capped(self):
+        self.run_first()
+        r = self.researcher()
+        for _ in range(2):
+            self.store.update_family(self.fam["id"], stall=5)
+            self.steps = [{"text": "no code"}, {"text": "ok"}]
+            r.cycle(self.fam["id"])
+        self.assertEqual(self.store.family(self.fam["id"])["rewrites"], 1, "an hour apart")
+        self.assertIn("no program", self.store.family(self.fam["id"])["state"]["rewrite_error"])
+        for _ in range(6):
+            self.clock.advance(3601)
+            self.store.update_family(self.fam["id"], stall=5)
+            self.steps = [{"text": "no code"}, {"text": "ok"}]
+            r.cycle(self.fam["id"])
+        self.assertEqual(self.store.family(self.fam["id"])["rewrites"], 4, "four a day")
 
     def test_a_top_ten_family_stalls_into_kimi(self):
         self.run_first()
@@ -209,7 +230,7 @@ class ModelCycles(ResearcherCase):
         self.settings["researcher"]["top_rewrite_families"] = 1
         self.steps = [{"text": "```python\n" + self.code + "\n```"}, {"text": "ok"}]
         out = self.researcher().cycle(self.fam["id"])
-        self.assertEqual(out.get("rewrite"), "k3_balanced")
+        self.assertEqual(out.get("rewrite_asked"), "k3_balanced")
         self.assertEqual(self.sail.bodies[0]["model"], "moonshotai/Kimi-K3")
 
     def test_a_spent_budget_ends_the_cycle_quietly(self):
@@ -251,6 +272,18 @@ class RateLimits(unittest.TestCase):
                 router.sail("flash_asap", [{"role": "user", "content": "hi"}], family="f", key="k2")
             prov.close()
             store.close()
+
+
+class History(ResearcherCase):
+    def test_history_is_cut_in_chunks_and_old_outputs_shortened(self):
+        r = self.researcher()
+        cycles = [{"cycle": i, "items": [{"type": "function_call", "call_id": f"c{i}", "name": "gym_run", "arguments": "{}"},
+                                         {"type": "function_call_output", "call_id": f"c{i}", "output": "x" * 9000}]} for i in range(4)]
+        kept = r.trim(cycles)
+        self.assertEqual([c["cycle"] for c in kept], [0, 1, 2, 3], "up to four kept whole")
+        self.assertTrue(all(len(c["items"][1]["output"]) < 3000 for c in kept[:-1]))
+        self.assertEqual(len(kept[-1]["items"][1]["output"]), 9000, "the last cycle whole")
+        self.assertEqual([c["cycle"] for c in r.trim(cycles + [{"cycle": 4, "items": []}])], [3, 4], "then cut back to two at once")
 
 
 class Helpers(unittest.TestCase):

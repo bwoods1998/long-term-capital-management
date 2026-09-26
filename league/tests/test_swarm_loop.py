@@ -162,6 +162,19 @@ class Process(LoopCase):
         self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [], "no researcher cycles")
         self.assertEqual(self.box_sail.forks, [])
 
+    def test_researchers_hold_while_the_last_hours_spend_is_at_the_pace(self):
+        sw = self.swarm()
+        sw.seed()
+        self.settings["researcher"]["usd_per_hour"] = 1.0
+        self.store.add_spend("sail_model", 1.2)
+        self.assertTrue(sw.over_pace())
+        worker = threading.Thread(target=sw._worker, args=(0,), daemon=True)
+        worker.start()
+        time.sleep(0.3)
+        sw.stop.set()
+        worker.join(10)
+        self.assertEqual([e for e in self.store.events_after(0) if e["kind"] == "swarm.cycle"], [])
+
     def test_it_leaves_on_a_stop_file_or_a_new_release(self):
         sw = self.swarm()
         self.assertEqual(sw.should_stop(), "")

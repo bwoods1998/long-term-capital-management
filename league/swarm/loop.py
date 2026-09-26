@@ -141,6 +141,7 @@ class Swarm:
         self.started_at = clock()
         self.why_stopped = ""
         self._beat = float("-inf")
+        self._pace = (float("-inf"), 0.0)
 
     # ------------------------------------------------------------------ the population
     def seed(self) -> list[str]:
@@ -205,11 +206,23 @@ class Swarm:
         gym = self.settings.get("gym", {})
         return bool(gym.get("enabled")) and bool(gym.get("image_checkpoint"))
 
+    def over_pace(self) -> bool:
+        """The swarm's model spend over the last hour is at `researcher.usd_per_hour` (read at most every 10 s)."""
+        now = self.clock()
+        cached = self._pace
+        if now - cached[0] >= 10.0:
+            spent = self.store.spent(["sail_model", "openai"], since=now - 3600)
+            cached = self._pace = (now, spent)
+        return cached[1] >= float(self.settings.get("researcher", {}).get("usd_per_hour", 4.0))
+
     def _worker(self, index: int) -> None:
         idle = float(self.settings.get("researcher", {}).get("idle_seconds", 5))
         while not self.stop.is_set():
             if not self.guard.allows() or not self.gym_ready() or index >= int(self.settings.get("researcher", {}).get("concurrency", 48)):
                 self.sleep(5.0)
+                continue
+            if self.over_pace():
+                self.sleep(10.0)
                 continue
             fid = self.scheduler.take(idle_seconds=idle)
             if fid is None:
@@ -248,6 +261,10 @@ class Swarm:
         if getattr(self.guard, "due", lambda: True)():
             was = not self.guard.allows()
             self.guard.check()
+            try:  # requests a stopped process left in flight: settled or released (their holds would count forever)
+                self.router.provider.reconcile_stale()
+            except Exception:  # noqa: BLE001
+                pass
             if not self.guard.allows():
                 if not was:
                     log(f"guard: brake ({getattr(self.guard, 'reason', '')})")

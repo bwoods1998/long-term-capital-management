@@ -16,8 +16,9 @@ not, and which checks were not); of the holdout only the gate's pass or fail. Ne
 Gym enforces it; the safety check refuses date literals before a program reaches the Gym).
 
 STALLS. Five revisions without a better Train score (`evidence.score`) buy ONE rewrite from a stronger
-model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), then
-the counter starts again.
+model (DeepSeek-V4-Pro balanced; Kimi-K3 balanced for the top ten families by the bandit's share), asked
+in the background (a cycle never waits for it) and run as the family's next cycle's Gym run; at most
+`rewrites_per_day` a family, `rewrite_min_hours` apart; then the counter starts again.
 
 Every cycle is a `swarm.cycle` event; a notebook entry becomes a public `swarm.note` (the site's tape,
 masked there for quotes) at most every `note_every_cycles` cycles. Standard library only.
@@ -140,7 +141,8 @@ class Researcher:
     """Runs cycles for any family (one call per cycle; the loop's workers call it concurrently)."""
 
     def __init__(self, store: SwarmStore, router: Any, pool: Any, settings: Mapping[str, Any], *, contract: str | None = None,
-                 clock: Callable[[], float] = time.time, starter: Callable[[Mapping[str, Any]], tuple[str, dict]] | None = None):
+                 clock: Callable[[], float] = time.time, starter: Callable[[Mapping[str, Any]], tuple[str, dict]] | None = None,
+                 background: bool = True):
         self.store = store
         self.router = router
         self.pool = pool
@@ -149,6 +151,8 @@ class Researcher:
         self.contract = contract if contract is not None else CONTRACT.read_text(encoding="utf-8")
         self.system = ROLE + self.contract
         self.starter = starter
+        self.background = background
+        self._rewriting: dict[str, Any] = {}
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -325,24 +329,31 @@ class Researcher:
     def _model_cycle(self, fam: dict[str, Any], out: dict[str, Any]) -> None:
         fid = fam["id"]
         cycles, pending = self.store.convo(fid)
-        keep = int(self.cfg.get("history_cycles", 4))
-        cycles = [c for c in cycles if isinstance(c, dict)][-keep:]
+        cycles = self.trim([c for c in cycles if isinstance(c, dict)])
         n = int(fam["cycles"]) + 1
         current: list[dict[str, Any]] = []
         deadline = self.clock() + float(self.cfg.get("cycle_seconds", 170))
         gym_done = False
-        author = "model"
-        if pending:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
+        ready = (fam.get("state") or {}).get("rewrite_ready")
+        if ready and ready.get("code"):  # a stronger model's rewrite came back: it is this cycle's run
+            self.store.set_state(fid, rewrite_ready=None)
+            view = self._gym_run(fam, {"code": ready["code"], "why": f"a rewrite by {ready.get('profile')} after a stall"}, out,
+                                 author=str(ready.get("profile") or "rewrite"))
+            current.append({"role": "user", "content": f"After revisions without progress a stronger model ({ready.get('profile')}) "
+                                                       f"rewrote your program:\n```python\n{ready['code']}\n```\nIts Train diagnostic:\n"
+                                                       f"{json.dumps(view, default=str)[:9000]}"})
+            out["rewrite"] = ready.get("profile")
+            gym_done = True
+            fam = self.store.family(fid) or fam
+        if pending and not gym_done:  # the run asked for at the end of the last cycle (its call was answered "queued" then)
             result = self._execute(fam, "gym_run", pending.get("arguments") or {}, out, author=pending.get("author") or "model")
             current.append({"role": "user", "content": f"The gym_run you queued last cycle ran:\n{json.dumps(result, default=str)[:12000]}"})
             out["tool_calls"] += 1
             gym_done = True
-            pending = None
             fam = self.store.family(fid) or fam
-        if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)) and not gym_done:
-            if self._rewrite(fam, out, current):
-                gym_done = True
-                fam = self.store.family(fid) or fam
+        pending = None  # run, or superseded by the rewrite (its call was answered "queued" last cycle)
+        if int(fam.get("stall") or 0) >= int(self.cfg.get("stall_revisions", 5)):
+            self.request_rewrite(fam, out)
         current.append({"role": "user", "content": self.status(fam)})
         max_calls = int(self.cfg.get("max_model_calls", 3))
         max_tools = int(self.cfg.get("max_tool_calls", 8))
@@ -404,47 +415,84 @@ class Researcher:
             if stop or pending:
                 break
         cycles.append({"cycle": n, "items": [i for i in current if i.get("type") != "reasoning"]})
-        self.store.save_convo(fid, cycles[-keep:], pending)
+        self.store.save_convo(fid, cycles, pending)
         out["pending_run"] = bool(pending)
 
-    def _rewrite(self, fam: Mapping[str, Any], out: dict[str, Any], current: list[dict[str, Any]]) -> bool:
-        """The stall's one rewrite from a stronger model: a new program from the mechanism, the notebook and the
-        latest diagnostic, run as this cycle's Gym run."""
+    def trim(self, cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The history a call carries. Cut in CHUNKS (beyond `history_cycles`, back to `history_trim_to`) so the cached
+        prefix stays the same for several cycles in a row (measured Sept 26: trimming one cycle every cycle held the
+        cache share near 44%); tool outputs older than the last cycle shortened to `old_output_chars`."""
+        keep = int(self.cfg.get("history_cycles", 4))
+        if len(cycles) > keep:
+            cycles = cycles[-int(self.cfg.get("history_trim_to", 2)):]
+        limit = int(self.cfg.get("old_output_chars", 2500))
+        out = []
+        for i, cycle in enumerate(cycles):
+            if i < len(cycles) - 1:
+                items = []
+                for item in cycle.get("items", []):
+                    if item.get("type") == "function_call_output" and len(str(item.get("output") or "")) > limit:
+                        item = {**item, "output": str(item["output"])[:limit] + " ...(shortened; read_run has it)"}
+                    elif item.get("role") == "user" and len(str(item.get("content") or "")) > 2 * limit:
+                        item = {**item, "content": str(item["content"])[:2 * limit] + " ...(shortened)"}
+                    items.append(item)
+                cycle = {**cycle, "items": items}
+            out.append(cycle)
+        return out
+
+    def request_rewrite(self, fam: Mapping[str, Any], out: dict[str, Any]) -> bool:
+        """A stall buys ONE rewrite from a stronger model, asked in the background (V4-Pro's balanced window took minutes
+        on Sept 26; a cycle never waits for it): the program comes back into the family's state and is the run of its
+        next cycle. At most `rewrites_per_day` a family a day, `rewrite_min_hours` apart; the stall counter restarts."""
+        fid = fam["id"]
+        state = fam.get("state") or {}
+        now = self.clock()
+        today = [t for t in (state.get("rewrite_times") or []) if now - float(t) < 86400]
+        if fid in self._rewriting or state.get("rewrite_ready") or len(today) >= int(self.cfg.get("rewrites_per_day", 4)) \
+                or (today and now - max(float(t) for t in today) < 3600 * float(self.cfg.get("rewrite_min_hours", 1.0))):
+            return False
         weight_rank = sorted((f.get("weight") or 0.0 for f in self.store.families(alive=True)), reverse=True)
         top = int(self.cfg.get("top_rewrite_families", 10))
         is_top = bool(weight_rank) and (fam.get("weight") or 0.0) >= weight_rank[min(top, len(weight_rank)) - 1] > 0
         profile = str(self.cfg.get("top_rewrite_profile" if is_top else "rewrite_profile", "pro_balanced"))
-        latest = self.store.latest_version(fam["id"])
-        best = self.store.version(fam["id"], fam.get("best_version")) or latest
-        runs = self.store.runs(fam["id"], window="train", limit=1)
+        latest = self.store.latest_version(fid)
+        best = self.store.version(fid, fam.get("best_version")) or latest
+        runs = self.store.runs(fid, window="train", limit=1)
         last_view = diagnostics.train_view(self.store.run_result(runs[0]["run_id"]) or {}) if runs else {}
-        notes = "\n".join(f"- {n['text'][:400]}" for n in self.store.notebook(fam["id"], limit=10))
+        notes = "\n".join(f"- {n['text'][:400]}" for n in self.store.notebook(fid, limit=10))
         user = (f"{self.brief(fam)}\n\nThis family has gone {fam['stall']} revisions without a better Train score. Write a NEW "
                 f"program for the same mechanism, structure and roots that fixes what the diagnostics show. Reply with the "
                 f"whole file in one ```python block, then one sentence on what changed.\n\nIts notebook:\n{notes or '(empty)'}\n\n"
                 f"Its best version so far:\n```python\n{(best or {}).get('code') or ''}\n```\n\nThe latest Train diagnostic:\n"
                 f"{json.dumps(last_view, default=str)[:8000]}")
-        try:
-            answer = self.router.ask(role="rewrite", system=self.system, user=user, family=fam["id"],
-                                     key=f"swarm:{fam['id']}:rewrite:{int(fam.get('rewrites') or 0)}:{int(fam.get('revisions') or 0)}",
-                                     openai_model=None, sail_profile=profile, max_output=12000, effort="medium")
-        except Exception as exc:  # noqa: BLE001
-            out["rewrite_error"] = str(exc)[:200]
-            self.store.bump(fam["id"], rewrites=1)
-            self.store.update_family(fam["id"], stall=0)
-            return False
-        out["cost_usd"] = round(out["cost_usd"] + float(answer.get("cost_usd") or 0), 6)
-        self.store.bump(fam["id"], rewrites=1)
-        self.store.update_family(fam["id"], stall=0)
-        match = CODE_BLOCK.search(answer.get("text") or "")
-        if not match:
-            out["rewrite_error"] = "the rewrite carried no program"
-            return False
-        view = self._gym_run(fam, {"code": match.group(1), "why": f"a rewrite by {profile} after a stall"}, out, author=profile)
-        out["rewrite"] = profile
-        current.append({"role": "user", "content": f"After {fam['stall']} revisions without progress, a stronger model ({profile}) "
-                                                   f"rewrote your program:\n```python\n{match.group(1)}\n```\nIts Train diagnostic:\n"
-                                                   f"{json.dumps(view, default=str)[:9000]}"})
+        key = f"swarm:{fid}:rewrite:{int(fam.get('rewrites') or 0)}:{int(fam.get('revisions') or 0)}"
+        self.store.bump(fid, rewrites=1)
+        self.store.update_family(fid, stall=0)
+        self.store.set_state(fid, rewrite_times=today + [now])
+        out["rewrite_asked"] = profile
+
+        def job() -> None:
+            try:
+                answer = self.router.ask(role="rewrite", system=self.system, user=user, family=fid, key=key, openai_model=None,
+                                         sail_profile=profile, max_output=12000, effort="medium")
+                match = CODE_BLOCK.search(answer.get("text") or "")
+                if match:
+                    self.store.set_state(fid, rewrite_ready={"code": match.group(1), "profile": profile, "at": self.clock()})
+                else:
+                    self.store.set_state(fid, rewrite_error="the rewrite carried no program")
+            except Exception as exc:  # noqa: BLE001 - a failed rewrite is recorded; the family goes on
+                self.store.set_state(fid, rewrite_error=f"{type(exc).__name__}: {str(exc)[:200]}")
+            finally:
+                self._rewriting.pop(fid, None)
+
+        if self.background:
+            import threading
+
+            thread = threading.Thread(target=job, name=f"rewrite-{fid}", daemon=True)
+            self._rewriting[fid] = thread
+            thread.start()
+        else:
+            job()
         return True
 
     def _public_note(self, fid: str, out: Mapping[str, Any]) -> None:
