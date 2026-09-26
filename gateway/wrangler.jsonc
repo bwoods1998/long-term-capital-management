@@ -60,7 +60,7 @@
     // in the day's opening maximum loss. MAX_DAY_ORDERS counts every order, exits included (under the
     // venue's 390 a day), and no order opens once the day's orders reach MAX_DAY_OPEN_ORDERS: the
     // last 50 are kept for exits. A single contract bought to open goes only when
-    // OPTION_STRUCTURES_REAL names long_call or long_put (it names neither). The real venue's stock
+    // OPTION_STRUCTURES_REAL names long_call or long_put (it names both since the sprint). The real venue's stock
     // orders close assigned shares only, and its crypto orders are refused. MAX_ORDER_USD_ALPACA ($75
     // of premium) is gone: MAX_ORDER_USD, MAX_ORDER_USD_KALSHI and MAX_DAY_USD ($4,000 of notional a
     // day, as before) bound Kalshi alone (the review of Wave 5, m17).
@@ -70,8 +70,11 @@
     "MAX_DAY_USD_ALPACA": "10000",
     "MAX_DAY_ORDERS": "300",
     "MAX_DAY_OPEN_ORDERS": "250",
+    // Sept 26, 2026 (the sprint, docs/goals/LTCM_SWARM_SPRINT.md "Money on Monday", owner decision D4): one
+    // opening order may lose 25% of equity (was 15%), so the constitution's $100 one-contract Probe floor fits at
+    // $481.63 of equity ($120.40); the $1,000 absolute cap is unchanged, and never above funded money.
     "MAX_ORDER_MAX_LOSS_USD": "1000",
-    "MAX_ORDER_EQUITY_SHARE": "0.15",
+    "MAX_ORDER_EQUITY_SHARE": "0.25",
     "MAX_DAY_EQUITY_SHARE": "1.0",
     "CREDIT_MIN_EQUITY_USD": "2000",
     "EQUITY_CAP_MAX_AGE_MS": "120000",
@@ -149,8 +152,12 @@
     // Sept 26, 2026 (the options-swarm run, Wave 5): the five types Alpaca closes in one order. The
     // credit types (credit_vertical, iron_condor, iron_butterfly) open only while the gateway's own
     // reading of the account's equity is at least CREDIT_MIN_EQUITY_USD; debit types need no
-    // threshold. Every open still meets the caps by maximum loss above. Keep opens off for paper readiness.
-    "OPTION_STRUCTURES_REAL": "off",
+    // threshold. Every open still meets the caps by maximum loss above.
+    // Sept 26, 2026 (the sprint, B4; owner decisions D1 and D4): real opens ON for exactly the constitution's
+    // `options_money.real_types` under $2,000 of equity -- the two debit structures and a single long call or put
+    // (buy_to_open, closed with sell_to_close). The credit types come back only with a deposit to $2,000, in one
+    // deploy with the constitution and a re-ratified grant. league.ci holds this line equal to the constitution.
+    "OPTION_STRUCTURES_REAL": "debit_vertical,long_butterfly,long_call,long_put",
 
     // Watchdog.
     "CHECKPOINT_URL": "https://blakewoods.us/api/capital/checkpoint",

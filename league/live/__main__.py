@@ -3,8 +3,11 @@
     python3 -m league.live --root /workspace/state --status
     python3 -m league.live --root /workspace/state --release-drawdown     # lift the drawdown stop's pause
     python3 -m league.live --root /workspace/state --clear-assignment     # lift an assignment's freeze on real entries
+    python3 -m league.live --root /workspace/state --calibration          # the D3 calibration samples, read-only
 
-Nothing here sends an order or reads a venue: it reads and writes the live state (`<root>/live.sqlite`).
+Nothing here sends an order or reads a venue: it reads and writes the live state (`<root>/live.sqlite`). `--calibration`
+only reads `<root>/calibration.sqlite` (per cell: attempts, outcomes, fill rate, mean fill against the mid in ticks); it
+prints quotes-derived numbers to the owner's terminal, never anywhere public.
 """
 
 from __future__ import annotations
@@ -24,7 +27,15 @@ def main(argv: list[str] | None = None) -> dict:
     action.add_argument("--status", action="store_true", help="Print the live path's state (the default).")
     action.add_argument("--release-drawdown", action="store_true", help="Owner: lift the drawdown stop's pause.")
     action.add_argument("--clear-assignment", action="store_true", help="Owner: lift the freeze an assignment set.")
+    action.add_argument("--calibration", action="store_true",
+                        help="Read-only: the D3 calibration round trips' samples per cell (league/live/calibration.py).")
     args = parser.parse_args(argv)
+    if args.calibration:
+        from .calibration import report
+
+        out = report(args.root)
+        print(json.dumps(out, indent=2, default=str))
+        return out
     path = args.root / STATE_FILE
     if not path.exists():
         raise SystemExit(f"no live state at {path}")

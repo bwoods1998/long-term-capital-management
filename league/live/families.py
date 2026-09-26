@@ -12,6 +12,12 @@ The options-swarm run, Wave 5 (Sept 26, 2026), the interface agreed with Wave 4 
 - `SwarmStore(root).set_band(family, band, reason=...)`: the live path alone moves candidate <-> probe <-> sized (the
   money table is its; the swarm moves gym <-> candidate and retires families).
 
+- `league.swarm.bands.observe(root)` -> the OBSERVE band (the sprint, B4, Sept 26, 2026): one shadow-only row per alive
+  Gym-band family with a validated version (`observe: True`). The live path runs each as a shadow instance
+  `<family>@<version>:o`, its version pinned for the session. An observe row is admitted for SHADOW opens only, while the
+  family is alive, still in the Gym band, and the pinned version's code and parameters are what the instance runs; it is
+  never real, never tuition, never a forward row, and an observe row never stands in for any other band's row.
+
 `MemoryFamilies` is the same API in memory, for tests and for a House without the swarm.
 """
 
@@ -30,7 +36,12 @@ def _entry_matches(row: Mapping[str, Any] | None, expected: Mapping[str, Any], r
     if (not row or row.get("version") != expected.get("version") or row.get("code") != expected.get("code")
             or (row.get("params") or {}) != (expected.get("params") or {})):
         return False
+    if bool(row.get("observe")) != bool(expected.get("observe")):
+        return False  # an observe row admits only an observe instance, and only an observe row admits one
     band = row.get("band")
+    if expected.get("observe"):
+        # The observe band: shadow opens only, while the family is alive and still in the Gym band. Never real.
+        return not real and band == "gym" and not expected.get("tuition")
     if not real:
         return band in ("candidate", "probe", "sized")
     if band != expected.get("band"):
@@ -55,10 +66,16 @@ class SwarmFamilies:
             self._store = SwarmStore(self.root)
         return self._store
 
-    def read(self) -> list[dict]:
+    def read(self, family: str | None = None) -> list[dict]:
         from ..swarm import bands
 
-        return [dict(row) for row in bands.read(self.root)]
+        return [dict(row) for row in bands.read(self.root, family=family)]
+
+    def observe(self, family: str | None = None, version: int | None = None) -> list[dict]:
+        """The observe band's rows (`bands.observe`): shadow only, never real, never a forward row."""
+        from ..swarm import bands
+
+        return [dict(row) for row in bands.observe(self.root, family=family, version=version)]
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
@@ -66,11 +83,23 @@ class SwarmFamilies:
 
     @contextmanager
     def admit_open(self, expected: Mapping[str, Any], *, real: bool):
-        """Serialize current eligibility with durable local order admission, never with venue/network work."""
+        """Serialize current eligibility with durable local order admission, never with venue/network work. One family's
+        row is read (the live path asks once a minute per instance). An observe instance is shadow only: it is admitted
+        against its PINNED version's row (`bands.observe(family=, version=)`), read-only, without the store's write lock,
+        and never for a real open."""
+        family = str(expected["family"])
+        if expected.get("observe"):
+            if real:
+                yield False
+                return
+            with self.lock:
+                row = next(iter(self.observe(family, int(expected.get("version") or 0))), None)
+            yield _entry_matches(row, expected, False)
+            return
         with self.lock, self._db().atomic():
-            row = next((r for r in self.read() if r["family"] == expected["family"]), None)
+            row = next((r for r in self.read(family) if r["family"] == family), None)
             evidence_current = (not real or expected.get("tuition") or
-                                self._db().forward(str(expected["family"])) == expected.get("forward_rows"))
+                                self._db().forward(family) == expected.get("forward_rows"))
             yield _entry_matches(row, expected, real) and evidence_current
 
     def add_forward(self, family: str, source: str, trades: Iterable[Mapping[str, Any]]) -> int:
@@ -127,16 +156,35 @@ class SwarmFamilies:
 class MemoryFamilies:
     """In memory (tests; a House whose swarm is off). Rows as `SwarmFamilies.read` returns them."""
 
-    def __init__(self, rows: Iterable[Mapping[str, Any]] = ()):
+    def __init__(self, rows: Iterable[Mapping[str, Any]] = (), observed: Iterable[Mapping[str, Any]] = ()):
         self.rows = {str(r["family"]): dict(r) for r in rows}
+        #: The observe band: {family: {version: row}} (a row as `bands.observe` gives it); `observe()` returns each
+        #: family's highest version (its current validated one); a family popped from here is retired or promoted.
+        self.observed: dict[str, dict[int, dict]] = {}
+        for r in observed:
+            self.observed.setdefault(str(r["family"]), {})[int(r["version"])] = dict(r, observe=True, band="gym")
         self.forward: dict[str, dict[tuple[str, str], dict]] = {}
         self.moves: list[tuple[str, str, str]] = []
         self.promotions: dict[str, float] = {}
         self.lock = threading.Lock()
 
-    def read(self) -> list[dict]:
+    def read(self, family: str | None = None) -> list[dict]:
         with self.lock:
-            return [copy.deepcopy(r) for r in self.rows.values() if r.get("band") != "retired"]
+            return [copy.deepcopy(r) for r in self.rows.values() if r.get("band") != "retired"
+                    and (family is None or r["family"] == family)]
+
+    def observe(self, family: str | None = None, version: int | None = None) -> list[dict]:
+        with self.lock:
+            out = []
+            for fid, versions in sorted(self.observed.items()):
+                if (family is not None and fid != family) or not versions:
+                    continue
+                row = versions.get(int(version)) if version is not None else versions[max(versions)]
+                if row is not None:
+                    out.append(copy.deepcopy(row))
+            # As `bands.observe`: the likeliest first (validation t), then by id.
+            out.sort(key=lambda r: (r.get("validation_t") is None, -(r.get("validation_t") or 0.0), r["family"]))
+            return out
 
     def forward_rows(self, family: str) -> list[dict]:
         with self.lock:
@@ -144,6 +192,10 @@ class MemoryFamilies:
 
     @contextmanager
     def admit_open(self, expected: Mapping[str, Any], *, real: bool):
+        if expected.get("observe"):
+            row = next(iter(self.observe(str(expected["family"]), int(expected.get("version") or 0))), None)
+            yield (not real) and _entry_matches(row, expected, False)
+            return
         with self.lock:
             family = str(expected["family"])
             rows = [dict(v, source=k[0]) for k, v in sorted(self.forward.get(family, {}).items())]

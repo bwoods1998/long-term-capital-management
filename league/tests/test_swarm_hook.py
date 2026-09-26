@@ -290,9 +290,11 @@ class Reads(HookCase):
                                                 "code", "params", "run_sha", "typical_max_loss_usd", "seed_era", "forward"})
         self.assertIn("# tuition", rows["tuition"]["code"])
         self.assertEqual((rows["tuition"]["typical_max_loss_usd"], rows["tuition"]["seed_era"]), (45.0, True))
+        bands._bundle_cache = None  # a process caches the bundle's version (`bands.BUNDLE_TTL`); new code is a new process
         with patch("league.gym.driver.build_bundle", return_value=(b"", "changed-code")):
             self.assertEqual([r["family"] for r in bands.read(self.root)], ["condor-vrp"],
                              "new Gym code requires tuition validation again; existing forward bands remain")
+        bands._bundle_cache = None
         (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "expanded-image"}}))
         self.assertEqual([r["family"] for r in bands.read(self.root)], ["condor-vrp"],
                          "new data requires tuition validation again; existing forward bands remain")

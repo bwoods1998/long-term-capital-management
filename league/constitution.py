@@ -703,20 +703,33 @@ CONSTITUTION: dict[str, Any] = {
     # - `order_path`: the House's own order governor (under the venue's professional-customer line and rate limits);
     #   `gateway`: the caps the Cloudflare gateway enforces from its own reading of the account (repeated here so the
     #   House refuses first and says why).
+    # - `calibration`: the D3 real-fill calibration round trips (`league/live/calibration.py`): 1-lot SPY and QQQ debit
+    #   verticals the House itself sends at mid (then one tick worse) and closes, only to measure real fills, never
+    #   evidence for any family: at most `day_usd` of maximum loss opened a day.
+    #
+    # THE SPRINT (docs/goals/LTCM_SWARM_SPRINT.md, Sept 26, 2026; the owner's decisions D1, D3 and D4, all "yes"): the
+    # table at the bold end of the plan's ranges -- Probe 5% a structure with a $100 one-contract floor, the family 15%,
+    # the book 90%, the daily stop 35%, the drawdown stop 60%, tuition $200 a day -- and the calibration's $50 a day (D3).
+    # Real types under $2,000 of equity are exactly the four debit types the venue closes in one order: debit verticals,
+    # long butterflies, and long calls and puts (one contract bought to open, sold to close; B4). The credit types are
+    # NOT real types now: they return (with the gateway's list, in one deploy) only once a deposit takes equity to $2,000
+    # and the grant is ratified again. The gateway's per-order equity share is 25% so a $100 Probe fits at $481.63 of
+    # equity (its $1,000 absolute cap unchanged; never above funded money).
     "options_money": {
-        "real_types": ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly"],
+        "real_types": ["debit_vertical", "long_butterfly", "long_call", "long_put"],
         "credit_types": ["credit_vertical", "iron_condor", "iron_butterfly"],
         "credit_min_equity_usd": "2000",
-        "probe": {"max_loss_share": "0.03", "open_per_family": 3, "family_share": "0.12", "floor_usd": "60"},
+        "probe": {"max_loss_share": "0.05", "open_per_family": 3, "family_share": "0.15", "floor_usd": "100"},
         "sized": {"min_trades": 20, "confidence": "0.80", "kelly_fraction": "0.25", "max_loss_share": "0.10",
                   "family_share": "0.30", "min_probe_real_trades": 5, "min_probe_sessions": 1},
-        "book_share": "0.70",
-        "daily_stop_share": "0.25",
-        "drawdown_stop_share": "0.50",
-        "tuition": {"day_usd": "100", "week_usd": "300"},
+        "book_share": "0.90",
+        "daily_stop_share": "0.35",
+        "drawdown_stop_share": "0.60",
+        "tuition": {"day_usd": "200", "week_usd": "300"},
+        "calibration": {"day_usd": "50"},
         "order_path": {"max_orders_day": 250, "max_requests_minute": 150, "bp_buffer": "0.10",
                        "near_money_share": "0.01", "expiry_close_lead_minutes": 10},
-        "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.15", "day_equity_share": "1.0",
+        "gateway": {"order_max_loss_usd": "1000", "order_equity_share": "0.25", "day_equity_share": "1.0",
                     "max_day_orders": 300, "max_day_open_orders": 250},
     },
 }
@@ -772,6 +785,8 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "drawdown_stop_share": ("0.40", "0.60"),
     "tuition.day_usd": ("0", "200"),
     "tuition.week_usd": ("0", "600"),
+    # D3 (the sprint, Sept 26, 2026): the calibration round trips' maximum loss opened a day, $50 at most.
+    "calibration.day_usd": ("0", "50"),
     "credit_min_equity_usd": ("2000", "2000"),
     "order_path.max_orders_day": ("1", "250"),
     "order_path.max_requests_minute": ("1", "150"),
@@ -779,13 +794,20 @@ OPTIONS_MONEY_BOUNDS: dict[str, tuple[str, str]] = {
     "order_path.near_money_share": ("0", "0.05"),
     "order_path.expiry_close_lead_minutes": ("1", "30"),
     "gateway.order_max_loss_usd": ("0", "1000"),
-    "gateway.order_equity_share": ("0", "0.15"),
+    # The sprint (Sept 26, 2026, "Money on Monday"): "the per-order maximum-loss cap is set so the Probe floor fits (never
+    # above funded money)": 25% of $481.63 is $120.40, over the $100 floor; the $1,000 absolute cap stands.
+    "gateway.order_equity_share": ("0", "0.25"),
     "gateway.day_equity_share": ("0", "1.0"),
     "gateway.max_day_orders": ("1", "300"),
     "gateway.max_day_open_orders": ("1", "300"),
 }
-#: The five types the venue closes in one order: the only ones real money may open this run.
-OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly")
+#: The types the venue closes in one order: the only ones real money may open this run. The five multi-leg types, and
+#: since the sprint (B4, Sept 26, 2026) a long call and a long put (one contract bought to open and sold to close).
+OPTIONS_REAL_TYPES = ("debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly", "long_call",
+                      "long_put")
+#: The single-contract real types: `league/ci.py` reads the gateway's `OPTION_STRUCTURES_REAL` with these beside the
+#: structure spec's types (`league/structure_core.py` TYPES), as the gateway's `SINGLE_LEG_TYPES` does.
+OPTIONS_SINGLE_TYPES = ("long_call", "long_put")
 OPTIONS_CREDIT_TYPES = ("credit_vertical", "iron_condor", "iron_butterfly")
 #: Rows read as whole counts.
 _OPTIONS_COUNTS = ("probe.open_per_family", "sized.min_trades", "sized.min_probe_real_trades", "sized.min_probe_sessions", "order_path.max_orders_day", "order_path.max_requests_minute",
@@ -852,4 +874,4 @@ LEGACY_GRANT_DIGESTS = {
 
 #: Pinned by `league/tests/test_constitution.py`. Changing the constitution means changing this
 #: line too, in a commit the owner makes: CI refuses any other author's change to this file.
-PINNED_DIGEST = 'dcf8d3723a13727038f49aeca25b478e305a6c932f7f6823add1c6055128db42'
+PINNED_DIGEST = '4f4edaf52f917f90e89d42acc021bebf51c999d662daacf804255d7c7837448d'

@@ -22,6 +22,19 @@ if HAVE:
     from league.tests.live_fakes import CONDOR, MONDAY, VERTICAL, Clock, Grant, Market, Venue, at, family, iso
 
 
+def credit_table():
+    """The money table with the credit types among the real types again (as after a deposit to $2,000 and a
+    re-ratification): the tests of credit structures' real mechanics (condors, broken legs) run on it."""
+    import copy
+
+    from league.constitution import CONSTITUTION
+
+    c = copy.deepcopy(CONSTITUTION)
+    c["options_money"]["real_types"] = ["debit_vertical", "credit_vertical", "iron_condor", "iron_butterfly", "long_butterfly",
+                                        "long_call", "long_put"]
+    return M.Table.from_constitution(c)
+
+
 class Ledger:
     def __init__(self):
         self.rows = []
@@ -49,16 +62,19 @@ class LiveCase(unittest.TestCase):
         self.notices = []
         self.grant = Grant()
         self.killed = False
+        # The D3 calibration round trips run by default once real money, the grant and the paper proof allow; they send
+        # their own orders, so the tests that are not about them switch them off (`league/tests/test_live_singles.py`).
+        (self.root / "swarm.json").write_text(json.dumps({"live": {"calibration": False}}))
 
     def tearDown(self):
         if getattr(self, "live", None) is not None:
             self.live.state.close()
         self.dir.cleanup()
 
-    def make(self, rows, *, real_money=True, config=None):
-        self.families = MemoryFamilies(rows)
+    def make(self, rows, *, real_money=True, config=None, table=None, observed=()):
+        self.families = MemoryFamilies(rows, observed)
         self.live = OptionsLive(self.root, market=self.market, real=self.venue, paper=self.paper, families=self.families,
-                                grant=self.grant, kill_switch=lambda: self.killed, decider=InlineDecider(),
+                                grant=self.grant, kill_switch=lambda: self.killed, decider=InlineDecider(), table=table,
                                 config={"require_paper_proof": False, **(config or {})}, real_money=real_money,
                                 performance={"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"},
                                 clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
@@ -82,13 +98,13 @@ class RoundTrip(LiveCase):
         out = self.run_to(9, 31)
         self.assertEqual(out["state"], "session")
         self.assertEqual(sorted(live.instances), ["vert@1:r", "vert@1:s"])
-        # The real open: sized by maximum loss (3% of the lower of equity 5,481.65 and the grant's 5,500), not by the
+        # The real open: sized by maximum loss (5% of the lower of equity 5,481.65 and the grant's 5,500), not by the
         # program's qty of 2.
         [sent] = [b for b in self.venue.sent]
         self.assertEqual(sent["order_class"], "mleg")
         real = next(iter(live.book.positions.values()))
         unit = real.max_loss_share * 100 + 2 * (real.fees / real.qty)
-        self.assertEqual(real.qty, int(D("164.4495") // D(str(round(unit, 2)))))
+        self.assertEqual(real.qty, int(D("274.0825") // D(str(round(unit, 2)))))
         self.assertGreater(real.qty, 2)
         [(buy, agent)] = self.ledger.of("book.fill")
         self.assertEqual((agent, buy["side"], buy["real_money"], buy["source"]), ("vert", "buy", True, "venue"))
@@ -174,7 +190,7 @@ class Gates(LiveCase):
     def test_a_tripped_stop_shuts_entries_but_not_exits(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 3, "opens": 2})])
         self.run_to(9, 31)
-        self.venue.equity = D("4000")                                      # -27% on the day: the daily stop
+        self.venue.equity = D("3500")                                      # -36% on the day: the daily stop
         self.run_to(9, 45)
         self.assertTrue(live.stops.daily_tripped)
         self.assertIn("daily stop", " ".join(self.refusals()))
@@ -201,7 +217,8 @@ class Gates(LiveCase):
         self.assertEqual(self.venue.sent, [])
 
     def test_credit_opens_follow_equity_alone_even_after_a_credit_fill(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor", params={"hold": 600})])
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor", params={"hold": 600})],
+                         table=credit_table())
         self.run_to(9, 31)
         self.assertEqual(len(self.venue.sent), 1)                          # a credit structure filled at $5,481.65
         self.venue.equity = D("1999.99")
@@ -235,9 +252,11 @@ class OrderPathInTheLoop(LiveCase):
         timed = VERTICAL.replace('"limit": "natural", "tag": "t"', '"limit": {"price": 0.01}, "tif": 3, "tag": "t"')
         self.venue.fill = "none"
         live = self.make([family("vert", timed, band="probe", params={"hold": 600})])
-        self.run_to(9, 33)
-        self.assertEqual(self.venue.cancels, [])
+        # Sent at 9:31 with tif 3: the Gym gives it the quotes of 9:32 through 9:35, so it rests through the House's 9:34
+        # pass and is cancelled at its 9:35 pass (the engine's `_expiry`: arrival + tif).
         self.run_to(9, 34)
+        self.assertEqual(self.venue.cancels, [])
+        self.run_to(9, 35)
         self.assertEqual(len(self.venue.cancels), 1)
         self.assertEqual(self.venue.book[0]["status"], "canceled")
 
@@ -561,7 +580,7 @@ class ShadowHeldLegs(LiveCase):
 
 class BrokenLegs(LiveCase):
     def test_long_legs_are_never_sold_while_a_short_leg_is_still_held(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
         self.run_to(9, 31)
         [pos] = live.book.positions.values()
         lp, sp, sc, lc = sorted(pos.legs, key=lambda l: (not l.is_call, l.strike))[::-1][::-1] if False else (None, None, None, None)
@@ -695,7 +714,7 @@ class VerificationRound(LiveCase):
         self.assertTrue(any("expiry cutoff" in p["why"] for p, a in self.ledger.of("live.refusal") if a == "vert"))
 
     def test_a_waiting_exit_of_a_structure_broken_since_is_left_to_the_legs_closes(self):
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
         self.run_to(9, 31)
         [pos] = live.book.positions.values()
         put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)
@@ -771,7 +790,7 @@ class VerificationRound(LiveCase):
 
     def test_a_broken_leg_left_at_the_close_is_sent_again_at_the_next_open(self):
         self.clock.set(at(MONDAY, 15, 40))
-        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")])
+        live = self.make([family("condor", CONDOR, band="probe", structure="iron_condor")], table=credit_table())
         self.run_to(15, 40)
         [pos] = live.book.positions.values()
         put_short = next(l for l in pos.legs if l.side < 0 and not l.is_call)

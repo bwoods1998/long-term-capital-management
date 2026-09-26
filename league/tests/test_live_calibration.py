@@ -1,0 +1,263 @@
+"""The D3 real-fill calibration round trips (`league/live/calibration.py`; the sprint, Sept 26, 2026): 1-lot SPY debit
+verticals the House sends at the mid, then one tick worse, and closes at the mid, one tick under, then the natural; only
+with real money on, the grant active and the paper proof passed; at most the constitution's $50 of maximum loss a day;
+through the real book's order path; recorded in their own file; never evidence, never on the site. With the fakes of
+`live_fakes` (the venue's shapes, invented numbers)."""
+
+import io
+import json
+import os
+import sqlite3
+import unittest
+from contextlib import redirect_stdout
+from decimal import Decimal as D
+
+from league.tests.test_live_step import HAVE, LiveCase
+
+if HAVE:
+    from league.gym import venue as V
+    from league.live import calibration as C
+    from league.live.__main__ import main as live_main
+    from league.live.step import OptionsLive
+    from league.live.decider import InlineDecider
+    from league.tests.live_fakes import MONDAY, VERTICAL, at, family
+
+HOLD_600C = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958}
+PARAMS = {}
+STATE = {"opened": 0}
+
+def decide(ctx):
+    if STATE["opened"] or ctx.positions or ctx.orders:
+        return []
+    STATE["opened"] = 1
+    return [{"open": "long_call", "root": "SPY", "qty": 1, "limit": "natural",
+             "legs": [{"side": "long", "right": "C", "dte": 1, "strike": 600.0}]}]
+'''
+
+
+@unittest.skipUnless(HAVE, "numpy not installed")
+class CalibrationCase(LiveCase):
+    def setUp(self):
+        super().setUp()
+        self.switch(True)
+
+    def switch(self, on: bool) -> None:
+        (self.root / "swarm.json").write_text(json.dumps({"live": {"calibration": on, "observe": False}}))
+
+    def start(self, rows=(), *, hh=9, mm=59, proof=True, **kw):
+        self.clock.set(at(MONDAY, hh, mm))
+        live = self.make(list(rows), **kw)
+        if proof:
+            live.state.put("paper_proof", {"schema": 2, "status": "passed", "open_witness": True, "close_witness": True})
+        return live
+
+    def mine(self):
+        return [b for b in self.venue.sent if str(b.get("client_order_id") or "").endswith("house-calibration")]
+
+    def samples(self):
+        db = sqlite3.connect(self.root / C.FILE)
+        db.row_factory = sqlite3.Row
+        try:
+            return [dict(r) for r in db.execute("SELECT * FROM samples ORDER BY oid")]
+        finally:
+            db.close()
+
+    def mid_of(self, body):
+        value = 0.0
+        for leg in body["legs"]:
+            bid, ask = self.market.quote(leg["symbol"])
+            role = 1 if leg["position_intent"] in ("buy_to_open", "sell_to_close") else -1
+            value += role * 0.5 * (bid + ask)
+        return value
+
+
+class RoundTrip(CalibrationCase):
+    def test_a_round_trip_at_the_slot_at_the_mid_recorded_and_never_evidence(self):
+        self.venue.fill = "limit"                                          # a resting order the market comes through
+        live = self.start([family("vert", VERTICAL, band="candidate")], real_money=True)
+        self.run_to(10, 1)
+        opened, closed = self.mine()
+        self.assertEqual((opened["order_class"], opened["qty"], opened["time_in_force"]), ("mleg", "1", "day"))
+        (a, b) = opened["legs"]
+        self.assertEqual(([a["side"], a["position_intent"]], [b["side"], b["position_intent"]]),
+                         (["buy", "buy_to_open"], ["sell", "sell_to_open"]))
+        self.assertEqual(a["symbol"][:3], "SPY")
+        self.assertEqual(int(b["symbol"][-8:]) - int(a["symbol"][-8:]), 1000, "calls one dollar wide")
+        mid = self.mid_of(opened)
+        self.assertAlmostEqual(float(opened["limit_price"]), V.round_price(mid, 0.01, up=False), places=6)
+        self.assertLessEqual(float(opened["limit_price"]) * 100, 50.0, "inside the day's $50")
+        self.assertEqual([leg["position_intent"] for leg in closed["legs"]], ["sell_to_close", "buy_to_close"])
+        self.assertLess(float(closed["limit_price"]), 0, "a debit structure's close receives a credit")
+        self.assertEqual(live.book.positions, {})
+        # Recorded: one row an attempt, each ended, with its quotes at submit and the venue's times.
+        rows = self.samples()
+        self.assertEqual([(r["cell"], r["outcome"], r["filled_qty"]) for r in rows],
+                         [("SPY:open:mid", "filled", 1), ("SPY:close:mid", "filled", 1)])
+        for r in rows:
+            quote = json.loads(r["quote"])
+            self.assertEqual(len(quote["legs"]), 2)
+            self.assertTrue(all(leg["bid"] is not None and leg["ask"] is not None for leg in quote["legs"]))
+            self.assertIsNotNone(r["mid"])
+            self.assertIsNotNone(r["natural"])
+            self.assertIsNotNone(r["filled_at"])
+            self.assertIsNotNone(r["submitted_at"])
+            self.assertEqual(r["fees_source"], "book_estimate")
+        self.assertEqual(rows[0]["trip"], rows[1]["trip"])
+        self.assertEqual(oct(os.stat(self.root / C.FILE).st_mode & 0o777), "0o600")
+        # Never evidence, never a family's, never on the site; the ledger's rows are the House's own.
+        self.assertEqual(self.families.forward, {})
+        [trade] = live.book.closed_trades()
+        self.assertEqual(trade["family"], C.FAMILY)
+        self.assertEqual(live.state.rows("SELECT pid FROM forward_exports"), [{"pid": trade["pid"]}])
+        self.assertTrue(all(a == C.FAMILY for p, a in self.ledger.of("book.fill")))
+        self.assertFalse([row for row in live.site_inputs()["structures"] if row["real"] or row["agent"] == C.FAMILY])
+        # Counted in the day's order governor: two legs an order.
+        self.assertEqual(live.book.count_today(MONDAY.isoformat()), 4)
+        # The owner's report, read-only.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report = live_main(["--root", str(self.root), "--calibration"])
+        cell = report["cells"]["SPY:open:mid"]
+        self.assertEqual((cell["attempts"], cell["filled"], cell["fill_rate"]), (1, 1, 1.0))
+        self.assertIsNotNone(cell["mean_fill_vs_mid_ticks"])
+        self.assertIn("SPY:close:mid", json.loads(out.getvalue())["cells"])
+
+    def test_an_unfilled_mid_is_repriced_once_a_tick_worse_then_given_up_across_a_restart(self):
+        self.venue.fill = "none"
+        live = self.start(real_money=True)
+        self.run_to(10, 2)
+        [first] = self.mine()
+        # A new House process in the middle of the round trip: its state is the live state's.
+        live.state.close()
+        self.live = OptionsLive(self.root, market=self.market, real=self.venue, paper=self.paper, families=self.families,
+                                grant=self.grant, kill_switch=lambda: self.killed, decider=InlineDecider(),
+                                config={"require_paper_proof": False}, real_money=True,
+                                performance={"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"},
+                                clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
+                                notify=self.notices.append)
+        self.clock.set(self.clock() + 60)
+        self.run_to(10, 5)
+        self.assertEqual(len(self.venue.cancels), 1, "its five minutes (tif 4: the Gym's minutes m+1..m+5) ran out at 10:05")
+        self.assertEqual(len(self.mine()), 1)
+        self.run_to(10, 6)
+        first_, second = self.mine()
+        self.assertEqual(second["legs"], first["legs"], "the same contracts")
+        at_mid, over = self.samples()
+        self.assertAlmostEqual(at_mid["limit_value"], V.round_price(at_mid["mid"], 0.01, up=False), places=6)
+        self.assertAlmostEqual(over["limit_value"], min(V.round_price(over["mid"] + 0.01, 0.01, up=False), over["natural"]),
+                               places=6, msg="the then mid plus one tick, never past the natural")
+        self.assertEqual(over["ticks"], 1)
+        self.run_to(10, 40)
+        self.assertEqual(len(self.mine()), 2, "once, then nothing more this slot")
+        self.assertEqual([(r["cell"], r["outcome"]) for r in self.samples()],
+                         [("SPY:open:mid", "cancelled"), ("SPY:open:mid+1", "cancelled")])
+        self.assertEqual(self.live.book.positions, {})
+        self.assertIsNone(self.live.state.get("calibration")["trip"])
+
+    def test_the_close_goes_at_the_mid_then_a_tick_under_then_the_natural(self):
+        modes = ["limit", "none", "none", "natural"]
+
+        def next_mode(body):
+            self.venue.fill = modes.pop(0) if modes else "natural"
+
+        self.venue.on_submit = next_mode
+        live = self.start(real_money=True)
+        self.run_to(10, 14)
+        opened, *closes = self.mine()
+        self.assertEqual(len(closes), 3)
+        at_mid, under, natural = self.samples()[1:]
+        # Each at the then quotes, as the Gym's rules price them (rounded passively: a sale asks the tick above).
+        self.assertAlmostEqual(at_mid["limit_value"], V.round_price(at_mid["mid"], 0.01, up=True), places=6)
+        self.assertAlmostEqual(under["limit_value"], max(V.round_price(under["mid"] - 0.01, 0.01, up=True), under["natural"]),
+                               places=6)
+        self.assertEqual(under["ticks"], 1)
+        self.assertAlmostEqual(natural["limit_value"], natural["natural"], places=6)
+        self.assertEqual([float(c["limit_price"]) for c in closes],
+                         [-round(r["limit_value"], 2) for r in (at_mid, under, natural)], "a close receives: a credit")
+        self.assertEqual(live.book.positions, {})
+        self.assertEqual([r["cell"] for r in self.samples()],
+                         ["SPY:open:mid", "SPY:close:mid", "SPY:close:mid-1", "SPY:close:natural"])
+        self.assertEqual([r["outcome"] for r in self.samples()], ["filled", "cancelled", "cancelled", "filled"])
+
+
+class Limits(CalibrationCase):
+    def test_the_days_fifty_dollars_admit_one_round_trip(self):
+        self.venue.fill = "limit"
+        live = self.start(real_money=True)
+        self.run_to(10, 2)
+        self.assertEqual(len(self.mine()), 2)
+        used = live.calibration.day_used(MONDAY.isoformat())
+        self.assertGreater(used, D("30"))
+        self.assertLessEqual(used, live.table.calibration_day)
+        self.clock.set(at(MONDAY, 12, 30))
+        self.run_to(12, 32)
+        self.assertEqual(len(self.mine()), 2, "the 12:30 slot finds no room under the day's $50")
+        self.assertIn("the day's calibration cap", live.state.get("calibration")["why"])
+        self.assertEqual(live.state.get("calibration")["slots"], {"day": MONDAY.isoformat(), "fired": [600, 750]})
+
+    def test_nothing_goes_before_the_paper_proof_and_the_slot_waits_for_it(self):
+        self.venue.fill = "limit"
+        self.paper.fill = "none"
+        live = self.start(real_money=True, proof=False)
+        self.run_to(10, 5)
+        self.assertEqual(self.mine(), [])
+        live.state.put("paper_proof", {"schema": 2, "status": "passed", "open_witness": True, "close_witness": True})
+        self.run_to(10, 7)
+        self.assertEqual(len(self.mine()), 2, "inside the slot's window: it goes once the proof passed")
+
+    def test_nothing_goes_with_real_money_off(self):
+        self.start(real_money=False)
+        self.run_to(10, 10)
+        self.assertEqual(self.venue.sent, [])
+
+    def test_nothing_goes_with_the_switch_off_or_the_grant_inactive_or_the_kill_switch(self):
+        for case in ("switch", "grant", "kill"):
+            with self.subTest(case=case):
+                self.venue.sent.clear()
+                self.switch(case != "switch")
+                self.grant.active = case != "grant"
+                self.killed = case == "kill"
+                live = self.start(real_money=True)
+                self.run_to(10, 6)
+                self.assertEqual(self.mine(), [], case)
+                live.state.close()
+                self.live = None
+                for name in ("live.sqlite", "live.sqlite-wal", "live.sqlite-shm", "live-shadow.json", C.FILE):
+                    try:
+                        (self.root / name).unlink()
+                    except FileNotFoundError:
+                        pass
+        self.grant.active, self.killed = True, False
+
+    def test_contracts_an_agent_holds_are_never_used(self):
+        self.venue.fill = "limit"
+        live = self.start([family("call", HOLD_600C, band="probe", structure="long_call")], real_money=True, mm=58)
+        self.run_to(10, 0)
+        held = {leg.symbol for p in live.book.positions.values() if p.family == "call" for leg in p.legs}
+        self.assertEqual(len(held), 1)
+        [opened] = [b for b in self.mine() if b.get("legs") and b["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertFalse({leg["symbol"] for leg in opened["legs"]} & held)
+
+
+class Recorder(CalibrationCase):
+    def test_a_recorder_that_cannot_write_never_raises_alerts_once_and_starts_no_round_trip(self):
+        (self.root / C.FILE).mkdir()
+        self.venue.fill = "limit"
+        live = self.start(real_money=True)
+        self.run_to(10, 5)
+        self.assertEqual(self.mine(), [])
+        told = [text for lvl, text in self.alerts if "calibration's samples could not be recorded" in text]
+        self.assertEqual(len(told), 1)
+        recorder = C.Recorder(self.root, alert=lambda *a: None)
+        self.assertFalse(recorder.submitted({"oid": 1}))
+        self.assertIsNone(recorder.counts())
+
+    def test_the_outcomes(self):
+        self.assertEqual([C.outcome_of(s, q) for s, q in (("filled", 1), ("cancelled", 0), ("expired", 1), ("rejected", 0),
+                                                          ("refused", 0), ("working", 0), ("lost", 0))],
+                         ["filled", "cancelled", "partial", "rejected", "rejected", None, None])
+
+
+if __name__ == "__main__":
+    unittest.main()

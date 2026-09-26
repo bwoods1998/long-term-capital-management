@@ -31,7 +31,7 @@ const usd = dollars => {
 //: The vars as wrangler.jsonc deploys them (pinned against the file below).
 const DEPLOYED = {
   MAX_ORDER_USD: '75', MAX_ORDER_USD_KALSHI: '75', MAX_DAY_USD: '4000', MAX_DAY_USD_ALPACA: '10000', MAX_DAY_ORDERS: '300', MAX_DAY_OPEN_ORDERS: '250',
-  MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.15', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
+  MAX_ORDER_MAX_LOSS_USD: '1000', MAX_ORDER_EQUITY_SHARE: '0.25', MAX_DAY_EQUITY_SHARE: '1.0', CREDIT_MIN_EQUITY_USD: '2000',
   EQUITY_CAP_MAX_AGE_MS: '120000', CAP_TIMEZONE: 'America/New_York',
 };
 const env = (extra = {}) => ({
@@ -59,13 +59,15 @@ const send = async (body, { settings = {}, gate = gateAt(settings), tape = alpac
 const buy = (limit, qty = '1', extra = {}) => ({ symbol: 'SPY261016C00740000', qty, side: 'buy', type: 'limit', limit_price: limit,
   position_intent: 'buy_to_open', time_in_force: 'day', ...extra });
 const VERTICAL = [leg(occ(580), BTO), leg(occ(581), STO)];
+const CALL_740 = 'SPY261016C00740000';
+const PUT_600 = 'SPY261016P00600000';
 const HOLDING = [{ symbol: occ(580), qty: '5', side: 'long' }, { symbol: occ(581), qty: '-5', side: 'short' }];
 const SHARES = [{ symbol: 'AAPL', qty: '100', qty_available: '100', side: 'long', asset_class: 'us_equity' }];
 const SALE = { symbol: 'AAPL', qty: '100', side: 'sell', type: 'market', time_in_force: 'day', client_order_id: 'oi-assign-1' };
 
 // ------------------------------------------------------------------------------------------------ the numbers
 
-test('the deployed vars are the plan\'s: $1,000 or 15% an order, 100% of equity a day inside $10,000, 250 of 300 orders open, credit from $2,000, a two-minute reading', () => {
+test('the deployed vars are the sprint\'s: $1,000 or 25% an order, 100% of equity a day inside $10,000, 250 of 300 orders open, credit from $2,000, a two-minute reading', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const deployed = name => {
     const lines = config.split('\n').filter(line => line.includes(`"${name}"`));
@@ -74,8 +76,11 @@ test('the deployed vars are the plan\'s: $1,000 or 15% an order, 100% of equity 
   for (const [name, value] of Object.entries(DEPLOYED)) assert.equal(deployed(name), value, name);
   assert.equal(deployed('MAX_ORDER_USD_ALPACA'), 0, 'the $75 premium cap is gone from the deployed vars');
   const limits = maxLossCaps(DEPLOYED);
-  assert.deepEqual(limits, { orderLimitMicro: usd('1000'), orderShare: 150000n, dayShare: M, dayLimitMicro: usd('10000'), creditMinMicro: usd('2000'),
+  assert.deepEqual(limits, { orderLimitMicro: usd('1000'), orderShare: 250000n, dayShare: M, dayLimitMicro: usd('10000'), creditMinMicro: usd('2000'),
     maxAgeMs: 120000, maxDayOpenOrders: 250 });
+  // The sprint (D4, Sept 26, 2026): the constitution's $100 one-contract Probe floor fits at the account's $481.63.
+  assert.equal(orderCapMicro(limits, usd('481.63')), usd('120.4075'));
+  assert.ok(orderCapMicro(limits, usd('481.63')) >= usd('100'));
 });
 
 test('the caps come from vars, and a malformed or out-of-range value falls back to the documented default', () => {
@@ -101,8 +106,8 @@ test('the caps come from vars, and a malformed or out-of-range value falls back 
 
 // ------------------------------------------------------------------------------------------------ the gate
 
-test('per order: an open at the cap passes and one cent over is refused; the cap is the lower of $1,000 and 15% of equity', () => {
-  for (const [equity, cap] of [['5000.00', '750.00'], ['10000.00', '1000.00'], ['481.65', '72.24']]) {
+test('per order: an open at the cap passes and one cent over is refused; the cap is the lower of $1,000 and 25% of equity', () => {
+  for (const [equity, cap] of [['3000.00', '750.00'], ['10000.00', '1000.00'], ['481.65', '120.41']]) {
     const gate = gateWith(equity);
     const over = open(gate, (Number(cap) + 0.01).toFixed(2));
     assert.equal(over.ok, false, equity);
@@ -318,19 +323,34 @@ test('exits are never blocked by the equity read: closes, buy-backs, sells to cl
 
 // ------------------------------------------------------------------------------------------------ through the front door
 
-test('per order through the front door: at $5,000 of equity a $750.00 open passes and $750.01 is refused, a structure or a single contract', async () => {
+test('per order through the front door: at $3,000 of equity a $750.00 open passes and $750.01 is refused, a structure or a single contract', async () => {
   const gate = gateAt(LONGS);
-  const tape = alpacaVenue({ equity: '5000.00' });
+  const tape = alpacaVenue({ equity: '3000.00' });
   for (const [body, fits] of [
     [buy('7.5001'), false], [buy('7.50'), true],
     [mleg(VERTICAL, '0.750001', { qty: '10' }), false], [mleg(VERTICAL, '0.75', { qty: '10' }), true],
   ]) {
     const { status, body: answer } = await send(body, { gate, tape, settings: LONGS });
     assert.equal(status, fits ? 200 : 403, JSON.stringify(body));
-    if (!fits) assert.match(answer.error, /exceeds the per-order cap of \$750\.00 \(the lower of \$1000\.00 and 15% of \$5000\.00 equity\)\.$/);
+    if (!fits) assert.match(answer.error, /exceeds the per-order cap of \$750\.00 \(the lower of \$1000\.00 and 25% of \$3000\.00 equity\)\.$/);
   }
   assert.equal(tape.orders().length, 2);
   assert.equal(gate.maxLossStatus(NOW).day_open_max_loss_usd, '1500.00');
+});
+
+test('the sprint (D1, D4): at $481.63 of equity a $100.00 long call or put, the Probe floor, passes the per-order cap and $121.00 is refused', async () => {
+  const settings = { OPTION_STRUCTURES_REAL: 'debit_vertical,long_butterfly,long_call,long_put' };
+  for (const symbol of [CALL_740, PUT_600]) {
+    const gate = gateAt(settings);
+    const tape = alpacaVenue({ equity: '481.63' });
+    const fits = await send(buy('1.00', '1', { symbol }), { gate, tape, settings });
+    assert.equal(fits.status, 200, symbol);
+    assert.equal(gate.maxLossStatus(NOW).day_open_max_loss_usd, '100.00');
+    const over = await send(buy('1.21', '1', { symbol }), { gate, tape, settings });
+    assert.equal(over.status, 403);
+    assert.match(over.body.error, /exceeds the per-order cap of \$120\.40 \(the lower of \$1000\.00 and 25% of \$481\.63 equity\)\.$/);
+    assert.equal(tape.orders().length, 1);
+  }
 });
 
 test('the day\'s opening maximum loss accumulates through the front door; closes pass a spent day and are not counted in it', async () => {
@@ -508,7 +528,7 @@ test('health reports the reading and its age, the per-order cap now, the day\'s 
   assert.deepEqual(body.max_loss, {
     venue: 'alpaca',
     equity: { usd: '2500.00', read_at: '2026-09-28T14:00:00.000Z', age_seconds: 30, ok: true, error: null, fresh: true, max_age_seconds: 120 },
-    order_cap_usd: '375.00', max_order_max_loss_usd: '1000.00', order_equity_share: '0.15',
+    order_cap_usd: '625.00', max_order_max_loss_usd: '1000.00', order_equity_share: '0.25',
     day_open_max_loss_usd: '70.00', day_open_cap_usd: '2500.00', day_equity_share: '1', max_day_usd_alpaca: '10000.00',
     opens_admitted: true, credit_opens_admitted: true, credit_min_equity_usd: '2000.00',
     orders_today: 1, max_day_open_orders: 250, max_day_orders: 300,

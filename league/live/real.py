@@ -23,8 +23,12 @@ to. It is the only writer of real orders, and every rule of the order path is en
   within `near_money_share` of the money is closed with one multi-leg order from `expiry_close_lead_minutes` before the
   close cutoff (15:10 ET; 15:25 SPY/QQQ), re-sent at the natural each minute with a growing concession until it fills
   (legs left at a physically settled expiry become shares the account cannot carry).
-- **Types.** Real money opens only the five one-order-closeable types (`options_money.real_types`), credit types only
-  once credit is allowed; `day` time in force; an order is never replaced, only cancelled and sent anew.
+- **Types.** Real money opens only the one-order-closeable types `options_money.real_types` names, credit types only
+  once credit is allowed; `day` time in force; an order is never replaced, only cancelled and sent anew. A LONG CALL or
+  a LONG PUT (the sprint, B4, Sept 26, 2026) is one contract: it opens with a single-leg `buy_to_open` limit and closes
+  with a single-leg `sell_to_close` limit (`single_body`), both at a positive premium on the contract's tick; its
+  maximum loss is its premium (plus fees). On its expiry day it is closed before the close cutoff whatever its
+  moneyness while it has a bid (`OptionsLive._expiry_close`): the account cannot carry the 100 shares an exercise brings.
 
 Fills: a multi-leg parent's `legs` give each leg's cumulative `filled_qty` and `filled_avg_price`; the structure has
 filled as many whole units as every leg covers (a leg ahead of the others waits), at the value sum(side x ratio x leg
@@ -55,6 +59,8 @@ from .state import LiveState, dumps, loads
 from .venue import TERMINAL, WORKING, Account, Submitted, dec, occ_parts
 
 PREFIX = "lv-"
+#: The real types that are one contract bought to open (the sprint, B4): single-leg orders, not `mleg`.
+SINGLE_TYPES = ("long_call", "long_put")
 #: The Brokerage Account's legacy crypto dust, below the venue's minimum order: a known holding outside P&L.
 KNOWN_DUST = {"LTCUSD": Decimal("0.000373062")}
 _SLUG = re.compile(r"[^a-z0-9-]+")
@@ -135,6 +141,8 @@ class RPosition:
         return self.max_loss_share * V.MULTIPLIER * self.qty
 
     def code(self) -> str:
+        if self.type in SINGLE_TYPES:
+            return self.legs[0].symbol
         spec = core.classify(self.type, [core.leg(leg.symbol, leg.side, leg.ratio) for leg in self.legs])
         return spec.code
 
@@ -248,6 +256,31 @@ def single_leg_body(order: ROrder) -> dict[str, Any]:
     return {"symbol": leg.symbol, "qty": str(order.qty), "side": "sell" if selling else "buy", "type": "limit",
             "limit_price": order.limit_price, "time_in_force": "day",
             "position_intent": "sell_to_close" if selling else "buy_to_close", "client_order_id": order.client_id}
+
+
+def is_single(order: ROrder) -> bool:
+    """A long call or put's own open or close: one long contract, a single-leg order (never `mleg`)."""
+    return (order.type in SINGLE_TYPES and order.action in ("open", "close") and len(order.legs) == 1
+            and order.legs[0].side > 0 and order.legs[0].ratio == 1)
+
+
+def single_body(order: ROrder) -> dict[str, Any]:
+    """A long call or put (the sprint, B4): opened with a buy_to_open, closed with a sell_to_close, `qty` contracts at a
+    positive premium limit (the gateway's `optionNotional`: long premium only, a whole number of contracts, a limit)."""
+    leg = order.legs[0]
+    opening = order.action == "open"
+    return {"symbol": leg.symbol, "qty": str(order.qty), "side": "buy" if opening else "sell", "type": "limit",
+            "limit_price": order.limit_price, "time_in_force": "day",
+            "position_intent": "buy_to_open" if opening else "sell_to_close", "client_order_id": order.client_id}
+
+
+def order_body(order: ROrder) -> dict[str, Any]:
+    """The venue's body for any order this book sends."""
+    if order.action == "close_leg":
+        return single_leg_body(order)
+    if is_single(order):
+        return single_body(order)
+    return mleg_body(order)
 
 
 def leg_fees(root: str, legs: Sequence[RLeg], prices: Sequence[float], qty: int, action: str) -> float:
@@ -501,9 +534,12 @@ class RealBook:
     def new_order(self, *, instance: str, family: str, action: str, type_: str, root: str, legs: list[RLeg], qty: int,
                   limit_value: float, tif: int | None, day: str, minute: int, pid: int | None = None, forced: bool = False,
                   reserve: float = 0.0, max_loss: float = 0.0, fees_est: float = 0.0, tuition: bool = False, why: str = "") -> ROrder:
+        single = type_ in SINGLE_TYPES and action in ("open", "close") and len(legs) == 1
         with self.state.transaction():
             oid = self._next("orders", "oid")
-            price = f"{round(abs(limit_value), 2):.2f}" if action == "close_leg" else limit_price(limit_value, action)
+            # A single contract's limit is its premium, positive, whether it buys or sells (never Alpaca's signed mleg price).
+            price = (f"{round(abs(limit_value), 2):.2f}" if action == "close_leg" or single
+                     else limit_price(limit_value, action))
             order = ROrder(oid, client_id(oid, family, nonce=self.state.nonce), instance, family, action,
                            type_, root, list(legs), int(qty),
                            float(limit_value), price, tif, self.clock(), day, int(minute),
@@ -516,7 +552,7 @@ class RealBook:
 
     def send(self, order: ROrder) -> ROrder:
         """POST the order written as `pending`. Never retried (the module docstring)."""
-        body = single_leg_body(order) if order.action == "close_leg" else mleg_body(order)
+        body = order_body(order)
         self._count_dispatch(order)
         result: Submitted = self.account.submit(body, exit=order.action != "open")
         order.attempts += 1
@@ -642,7 +678,12 @@ class RealBook:
         order.dispatched = True
         order.venue_id = str(row.get("id") or order.venue_id or "") or order.venue_id
         status = str(row.get("status") or "")
-        if order.action == "close_leg":
+        # The venue's own times, kept for the calibration's samples and the owner's record (never a decision's input).
+        stamps = {k: row.get(k) for k in ("submitted_at", "filled_at", "canceled_at", "expired_at", "failed_at")
+                  if isinstance(row.get(k), str) and row.get(k) and order.answer.get(k) != row.get(k)}
+        if stamps:
+            order.answer = {**order.answer, **stamps}
+        if order.action == "close_leg" or is_single(order):
             fill = _single_fill(order, row)
         else:
             fill = structure_fill(order, row)
@@ -705,9 +746,8 @@ class RealBook:
             self._save_position(pos)
             self.state.execute("INSERT INTO fills(oid, pid, qty, value, fees, at) VALUES(?,?,?,?,?,?)",
                                (order.oid, pos.pid, dq, value, fees, now))
-            code = _code(pos)
             self.record("book.fill", {"source": "venue", "side": "buy", "real_money": True, "quantity": dq,
-                                      "instrument": {"market_id": code, "asset_class": "option", "multiplier": 100},
+                                      "instrument": _instrument(pos),
                                       "max_loss_usd": round(pos.max_loss_share * V.MULTIPLIER * dq, 2),
                                       "reason": order.why[:240], "_price": value, "_fees": fees, "_order": order.oid},
                         agent=order.family)
@@ -796,7 +836,7 @@ class RealBook:
         self.closed_since.setdefault(pos.instance, []).append({"id": pos.pid, "type": pos.type, "root": pos.root, "pnl": pnl,
                                                                "reason": reason, "tag": pos.tag})
         self.record("book.fill", {"source": "venue", "side": "sell", "real_money": True, "quantity": pos.opened_qty,
-                                  "instrument": {"market_id": _code(pos), "asset_class": "option", "multiplier": 100},
+                                  "instrument": _instrument(pos),
                                   "realized": pnl, "entry_reason": pos.tag, "reason": reason,
                                   "_exit_value": pos.exit_value_qty / max(1, pos.opened_qty), "_pid": pos.pid},
                     agent=pos.family)
@@ -963,6 +1003,8 @@ def _single_fill(order: ROrder, row: Mapping[str, Any]) -> tuple[int, float | No
 
 
 def _collateral(type_: str, legs: Sequence[RLeg]) -> Decimal:
+    if type_ in SINGLE_TYPES:
+        return Decimal(0)  # a long call or put: its premium is its maximum loss
     spec = core.classify(type_, [core.leg(leg.symbol, leg.side, leg.ratio) for leg in legs])
     return spec.collateral
 
@@ -982,6 +1024,16 @@ def _code(pos: RPosition) -> str:
         return ""
 
 
+def _instrument(pos: RPosition) -> dict[str, Any]:
+    """The ledger's instrument of a position: a structure's code; a long call or put as the one option it is (its
+    underlying, right and expiry, the publisher's single-option shape; never its strike or a price)."""
+    if pos.type in SINGLE_TYPES and len(pos.legs) == 1:
+        leg = pos.legs[0]
+        return {"market_id": leg.symbol, "asset_class": "option", "multiplier": 100, "symbol": pos.root,
+                "right": "call" if leg.is_call else "put", "expiry": leg.expiry}
+    return {"market_id": _code(pos), "asset_class": "option", "multiplier": 100}
+
+
 def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
     """A resolved Gym order's legs as OCC contracts of today's chain."""
     out = []
@@ -992,5 +1044,5 @@ def real_legs(order: L.Order, chain: Any) -> list[RLeg]:
     return out
 
 
-__all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "limit_price", "client_id", "structure_fill", "real_legs",
-           "leg_fees", "PREFIX", "KNOWN_DUST"]
+__all__ = ["RealBook", "RLeg", "RPosition", "ROrder", "mleg_body", "single_leg_body", "single_body", "order_body", "is_single",
+           "limit_price", "client_id", "structure_fill", "real_legs", "leg_fees", "PREFIX", "KNOWN_DUST", "SINGLE_TYPES"]
