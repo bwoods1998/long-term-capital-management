@@ -564,6 +564,35 @@ def compile_store(store: Store, calendar: sl.Calendar, *, windows: Sequence[str]
     return {"files": len(files), "calendar_days": len(cal_rows), "expiry_rows": len(exp_rows)}
 
 
+def export_subset(store: Store, out_root: Path, roots: Sequence[str], days: Sequence[dt.date],
+                  calendar: sl.Calendar, kinds: Sequence[str] = ("nbbo", "underlying", "oi")) -> dict[str, Any]:
+    """Copy some root-days into a new store-layout directory with their own calendar, expiries and
+    manifest (the Gym builder's laptop sample). Only Train/Validation days may leave this way."""
+    import frames as fr
+
+    for day in days:
+        if sl.window_of(day) not in ("train", "validation"):
+            raise SystemExit(f"{day} is not Train or Validation; a sample never carries the holdout")
+    files = [r for r in store.journal.files().values()
+             if r["root"] in roots and sl.as_date(r["date"]) in set(days) and r["kind"] in kinds]
+    out_root.mkdir(parents=True, exist_ok=True)
+    (out_root / "VERSION").write_text(sl.STORE_VERSION + "\n")
+    for record in files:
+        target = out_root / record["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(store.root / record["path"], target)
+    present = sorted({sl.as_date(r["date"]) for r in files})
+    fr.write(fr.calendar_frame([(d, *calendar.hours(d)) for d in present]), out_root / "calendar.parquet")
+    exp_rows = []
+    for root in roots:
+        for day in present:
+            for expiry in store.load_expiries(root, day) or []:
+                exp_rows.append((root, day, expiry))
+    fr.write(fr.expiries_frame(exp_rows), out_root / "expiries.parquet")
+    fr.write(fr.manifest_frame(files), out_root / "manifest.parquet")
+    return {"files": len(files), "days": [d.isoformat() for d in present], "expiry_rows": len(exp_rows)}
+
+
 def prune(store: Store, keep: Sequence[str], *, drop_key: bool, drop_work: bool, calendar: sl.Calendar) -> dict[str, Any]:
     """Delete every store file outside `keep` (by the date in its path), recompile, then optionally
     delete the key and the working area. Used on a fork that becomes the Gym image."""
@@ -673,6 +702,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ad = sub.add_parser("adopt")
     ad.add_argument("--records", required=True)
     sub.add_parser("verify")
+    sm = sub.add_parser("sample", help="export some Train root-days as a store-layout tarball")
+    sm.add_argument("--roots", required=True)
+    sm.add_argument("--days", required=True)
+    sm.add_argument("--out", default=f"{sl.WORK_ROOT}/sample.tar")
     one = sub.add_parser("one", help="run one task now and print its record (a smoke test)")
     one.add_argument("task", help="JOB:ROOT:YYYY-MM-DD, e.g. day:SPY:2024-03-13")
     one.add_argument("--stage", type=int, default=0)
@@ -773,6 +806,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(adopt(store, args.records, calendar)))
     elif args.cmd == "verify":
         print(json.dumps(verify(store)))
+    elif args.cmd == "sample":
+        import tarfile
+
+        staging = store.work / "sample-staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        result = export_subset(store, staging / "store", [r.strip() for r in args.roots.split(",") if r.strip()],
+                               [dt.date.fromisoformat(d.strip()) for d in args.days.split(",") if d.strip()], calendar)
+        with tarfile.open(args.out, "w") as tar:
+            tar.add(staging / "store", arcname="store")
+        shutil.rmtree(staging, ignore_errors=True)
+        digest, size = sl.sha256_file(args.out)
+        print(json.dumps({**result, "tar": args.out, "sha256": digest, "bytes": size}))
     return 0
 
 

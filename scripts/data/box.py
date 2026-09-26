@@ -206,6 +206,38 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+SAMPLE_DAYS = ("2024-01-31,2024-02-13,2024-03-15,2024-04-15,2024-06-12,"
+               "2024-07-11,2024-08-05,2024-09-18,2024-11-06,2024-11-29")
+
+
+def cmd_sample(args: argparse.Namespace) -> int:
+    """Export Train root-days from the box and unpack them on the laptop (gitignored)."""
+    import hashlib
+    import io
+    import shutil
+    import tarfile
+
+    api = bl.client()
+    box = bl.data_box_id()
+    bl.ensure_running(api, box)
+    bl.push_code(api, box)
+    result = bl.run_py(api, box, f"backfill.py sample --roots {shlex.quote(args.roots)} --days {shlex.quote(args.days)}",
+                       timeout=900).check()
+    info = json.loads(result.stdout.strip().splitlines()[-1])
+    blob = api.download(box, info["tar"], timeout=900)
+    if hashlib.sha256(blob).hexdigest() != info["sha256"]:
+        raise SystemExit("the sample's checksum does not match what the box wrote")
+    dest = Path(args.dest).expanduser()
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(blob)) as tar:
+        tar.extractall(dest.parent, filter="data")
+    api.exec(box, ["rm", "-f", info["tar"]], timeout=60)
+    say(f"sample at {dest}: {info['files']} files, days {info['days']}, {len(blob)} bytes (sha256 {info['sha256'][:12]})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -234,6 +266,11 @@ def main(argv: list[str] | None = None) -> int:
     z = sub.add_parser("sleep")
     z.add_argument("--wake-at", default=None)
     z.set_defaults(func=cmd_sleep)
+    sp = sub.add_parser("sample")
+    sp.add_argument("--roots", default="SPY,XSP")
+    sp.add_argument("--days", default=SAMPLE_DAYS)
+    sp.add_argument("--dest", default="~/Work/long-term-capital-management/.data/gym-sample/store")
+    sp.set_defaults(func=cmd_sample)
     r = sub.add_parser("run")
     r.add_argument("--timeout", type=int, default=900)
     r.add_argument("rest", nargs=argparse.REMAINDER)
