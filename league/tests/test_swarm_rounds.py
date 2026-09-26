@@ -294,6 +294,16 @@ class ArchitectTests(RoundCase):
         out = Architect(self.store, self.router, self.settings).run()
         self.assertEqual(out["route"], "sail")
 
+    def test_every_four_hours(self):
+        a = Architect(self.store, self.router, self.settings, clock=self.clock)
+        self.assertTrue(a.due())
+        self.replies = [{"text": json.dumps({"families": []})}]
+        a.run()
+        self.clock.advance(4 * 3600 - 1)
+        self.assertFalse(a.due())
+        self.clock.advance(2)
+        self.assertTrue(a.due())
+
     def test_the_openai_cap_is_the_swarms_too(self):
         self.month.value = 500
         self.store.add_spend("openai", 149.5)

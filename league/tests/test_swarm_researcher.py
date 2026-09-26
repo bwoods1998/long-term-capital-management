@@ -200,6 +200,18 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(fam["rewrites"], 1)
         self.assertEqual(self.store.latest_version(self.fam["id"])["author"], "pro_balanced")
 
+    def test_a_top_ten_family_stalls_into_kimi(self):
+        self.run_first()
+        for i in range(3):
+            other = self.store.add_family({**family_spec(self.spec), "id": f"other-{i}"}, origin="seed")
+            self.store.update_family(other["id"], weight=0.01)
+        self.store.update_family(self.fam["id"], stall=5, weight=0.5)
+        self.settings["researcher"]["top_rewrite_families"] = 1
+        self.steps = [{"text": "```python\n" + self.code + "\n```"}, {"text": "ok"}]
+        out = self.researcher().cycle(self.fam["id"])
+        self.assertEqual(out.get("rewrite"), "k3_balanced")
+        self.assertEqual(self.sail.bodies[0]["model"], "moonshotai/Kimi-K3")
+
     def test_a_spent_budget_ends_the_cycle_quietly(self):
         self.run_first()
         self.settings["researcher"]["family_usd_day"] = 0.000001
