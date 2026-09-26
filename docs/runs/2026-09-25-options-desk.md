@@ -255,6 +255,12 @@ run's `config.json` change is its own new `options_structures` key).
   accepted again from 02:24:20Z (#342). **G may start from 03:05:19Z.** Main moved to `69539d3a` (Merton's #353, strategy files
   only, merged 02:49:19Z): merged into `g/integration` (`e34d90c6`, `league.ci` passes, money digest `be1e3ce9`, gateway
   215/215); **G starts when CI is green on `e34d90c6` (about 03:15Z)**, the exact start written here first.
+  **Deploy G STARTS at 03:06:00Z Sept 26** (pre-flight 03:05Z: CI green on `e34d90c6` at 03:05:38Z, all jobs; main `69539d3a`
+  unchanged since; the three runs' records read (forward-first `c9726f7a`: B verified, the owner-sale fix rides C; Kalshi
+  `b97db4c2`: no rows by hand; Jev `428d93a2`: the order proceeds); no deploy in flight; no real Kalshi family's game in play
+  (the owner sold AZ-SD, LAD-SF and NYM-WSH; CIN-TOR starts about 19:07Z)). Steps: #344 merged; the gateway (`npx wrangler
+  deploy --tag <sha>` from `~/Work/ltcm-deploy/gateway` at the new main, every gateway test re-run first); then the House
+  (`floor_box.py deploy` through the ratify wrapper; ratify on `be1e3ce9` within a minute of promotion).
 
 **Requests to the forward-first run (06:05Z; also a comment on its PR #297):**
 
