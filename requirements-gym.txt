@@ -1,0 +1,6 @@
+# The Gym's engine (league/gym/): numpy, pyarrow and polars, pinned. numpy 2.5 needs Python 3.12+,
+# so the 3.11 CI job takes the last 2.4 release; the Gym boxes run 3.12+.
+numpy==2.5.3; python_version >= "3.12"
+numpy==2.4.4; python_version < "3.12"
+pyarrow==25.0.1
+polars==1.44.2
