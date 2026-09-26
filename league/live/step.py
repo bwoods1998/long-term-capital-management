@@ -978,13 +978,23 @@ class OptionsLive:
                     intent: Mapping[str, Any] | None = None) -> str | None:
         book = self.book
         assert book is not None
-        snap = day.snapshot(pos.root, mi)
         chain = day.chains.get(pos.root)
-        if snap is None or chain is None:
+        if chain is None:
             return "no chain for this root now"
         idx = chain.index_of(np.array([leg.key for leg in pos.legs], dtype=np.int64))
         if (idx < 0).any():
             return "a leg of this position is not in today's chain"
+        snap = day.snapshot(pos.root, mi)
+        if forced:
+            # A forced close must go even when this minute's read failed: the latest minute of the last five whose
+            # quotes cover every leg prices it (the concession grows each try).
+            for back in range(0, 6):
+                candidate = day.snapshot(pos.root, mi - back) if mi - back >= 0 else None
+                if candidate is not None and bool(np.isfinite(candidate.bid[idx]).all() and np.isfinite(candidate.ask[idx]).all()):
+                    snap = candidate
+                    break
+        if snap is None:
+            return "no chain for this root now"
         legs = tuple(L.LegFill(int(i), leg.key, leg.side, leg.ratio, 0, leg.strike, leg.is_call) for leg, i in zip(pos.legs, idx))
         rules = day.rules[pos.root]
         try:

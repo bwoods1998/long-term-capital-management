@@ -367,6 +367,18 @@ class AMissedClose(LiveCase):
         self.assertTrue(level > 0)
 
 
+class ExpiryDayWithoutData(LiveCase):
+    def test_the_near_money_close_goes_on_the_last_quoted_minute_when_the_chain_read_fails(self):
+        self.clock.set(at(MONDAY, 14, 58))
+        live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600, "dte": 0})])
+        self.run_to(14, 58)
+        self.assertEqual(len(live.book.positions), 1)
+        self.run_to(15, 14)
+        self.market.dead.add("SPY")                                       # the 15:15 read fails
+        self.run_to(15, 15)
+        self.assertEqual(self.venue.sent[-1]["legs"][0]["position_intent"], "sell_to_close")
+
+
 class Restart(LiveCase):
     def test_a_restart_resumes_the_books(self):
         live = self.make([family("vert", VERTICAL, band="probe", params={"hold": 600})])
