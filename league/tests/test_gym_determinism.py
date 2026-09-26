@@ -112,3 +112,57 @@ class Determinism(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MUTATOR = '''
+NEEDS = {"roots": ["SPY"], "dte": [0, 2], "band": 0.03, "cadence": 30}
+PARAMS = {"marks": [1.0]}
+def decide(ctx):
+    ctx.params["marks"].append(ctx.minute)
+    if len(ctx.params["marks"]) % 7 == 0 and not ctx.positions:
+        return [{"open": "long_call", "legs": [{"side": "long", "right": "C", "dte": 1, "atm": 0}], "qty": 1}]
+    return [{"close": p["id"]} for p in ctx.positions if p["held_minutes"] > 90]
+'''
+
+
+@unittest.skipUnless(HAVE, "numpy/pyarrow not installed (requirements-gym.txt)")
+class Isolation(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp(prefix="gym-iso-")
+        synth.generate(cls.dir, roots=("SPY",), days=synth.weekdays(dt.date(2023, 5, 1), 3), strikes_each_side=5, max_dte=3)
+        cls.store = S.Store(cls.dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def test_a_program_that_mutates_its_params_touches_only_its_own_run(self):
+        program = R.load_program(MUTATOR, name="mutator")
+        cfg = E.RunConfig(window="train", roots=("SPY",))
+        [alone] = E.run([program], self.store, cfg)
+        pair = E.run([program, program], self.store, cfg)
+        [again] = E.run([program], self.store, cfg)
+        self.assertEqual(program.params, {"marks": [1.0]})
+        self.assertGreater(alone["summary"]["trades"], 0)
+        self.assertEqual({alone["result_sha"], again["result_sha"], pair[0]["result_sha"], pair[1]["result_sha"]},
+                         {alone["result_sha"]})
+
+    def test_rules_are_read_only_and_a_compute_budget_disqualifies(self):
+        code = MUTATOR.replace('ctx.params["marks"].append(ctx.minute)', 'ctx.rules["SPY"]["types"].append("naked_call")')
+        [r] = E.run([R.load_program(code)], self.store, E.RunConfig(window="train", roots=("SPY",)))
+        self.assertTrue(any("AttributeError" in m for m in r["runtime"]["messages"]), r["runtime"])
+        [slow] = E.run([R.load_program(MUTATOR)], self.store, E.RunConfig(window="train", roots=("SPY",), max_decide_seconds=0.0))
+        self.assertEqual(slow["status"], "disqualified")
+        self.assertIn("budget", slow["runtime"]["disqualified"])
+
+    def test_a_failed_worker_unit_is_reported_not_fatal(self):
+        from unittest import mock
+        from league.gym import batch as B
+        jobs = [("mutator", MUTATOR, {})]
+        with mock.patch.object(B, "_unit", side_effect=RuntimeError("worker died")):
+            doc = B.run_batch(jobs, store_root=self.dir, window="train", roots=["SPY"], workers=1)
+        [r] = doc["results"]
+        self.assertEqual((r["status"], r["trials"]), ("error", 0))
+        self.assertIn("worker died", r["reason"])
+        self.assertEqual(doc["batch"]["trials"], 0)

@@ -28,6 +28,7 @@ result (`results.py` hashes it). numpy only here; the store reader brings pyarro
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import math
 import time
@@ -56,6 +57,7 @@ class RunConfig:
     timeout: float = 1.0             # seconds a decide call may take
     max_errors: int = 25             # errors before a program is disqualified
     max_orders_day: int = 60         # orders (opens and closes) a program may send a day
+    max_decide_seconds: float = 900.0  # a program's decide calls may take this long in all, a run
     start: dt.date | None = None     # cut the window (the inner loop's segments)
     end: dt.date | None = None
     fill_model: F.FillModel = field(default_factory=F.FillModel)
@@ -296,7 +298,9 @@ class Account:
         self.cfg = cfg
         self.roots = roots
         self.needs = program.needs
-        self.runner = program.start(timeout=cfg.timeout, max_errors=cfg.max_errors)
+        self.runner = program.start(timeout=cfg.timeout, max_errors=cfg.max_errors, budget_seconds=cfg.max_decide_seconds)
+        #: The run's own copy: a program that mutates a list in ctx.params changes it for this run only.
+        self.params = copy.deepcopy(program.params)
         self.cash = float(cfg.capital)
         self.equity_prev = float(cfg.capital)
         self.positions: dict[int, Position] = {}
@@ -313,7 +317,6 @@ class Account:
         self.rejects_since: list[str] = []
         self.orders_today = 0
         self.session = 0
-        self.traded_days: set[int] = set()
 
     # ------------------------------------------------------------------ helpers
     def _id(self) -> int:
@@ -456,7 +459,6 @@ class Account:
                 info={**order.extra, "filled_minute": day.open_min + mi}, tag=order.tag, note=order.note,
                 idx=np.array([leg.idx for leg in snap_legs], dtype=np.int64))
             self.positions[pid] = pos
-            self.traded_days.add(day.ordinal)
         else:
             total = pos.opened_qty + qty
             pos.entry = (pos.entry * pos.opened_qty + price * qty) / total
@@ -602,7 +604,7 @@ class Account:
         ctx = build_ctx(minute=day.open_min + mi, open_minute=day.open_min, close_minute=day.close_min, weekday=day.weekday,
                         chains=chains, underlyings=unders, positions=positions, orders=self._order_rows(day, mi),
                         cash=self.cash, equity=self.equity(), budget=self.cfg.capital, buying_power=self.buying_power(),
-                        params=self.program.params, rules={r: day.rules_rows[r] for r in chains}, events=day.events,
+                        params=self.params, rules={r: day.rules_rows[r] for r in chains}, events=day.events,
                         events_next=day.events_next, closed=self.closed_since, rejects=self.rejects_since,
                         roots=tuple(chains))
         self.closed_since = []

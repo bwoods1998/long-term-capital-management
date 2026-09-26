@@ -221,8 +221,9 @@ class Program:
     run_sha: str
     _compiled: Any = field(repr=False, default=None)
 
-    def start(self, *, timeout: float = DEFAULT_TIMEOUT, max_errors: int = DEFAULT_MAX_ERRORS) -> "Runner":
-        return Runner(self, timeout=timeout, max_errors=max_errors)
+    def start(self, *, timeout: float = DEFAULT_TIMEOUT, max_errors: int = DEFAULT_MAX_ERRORS,
+              budget_seconds: float | None = None) -> "Runner":
+        return Runner(self, timeout=timeout, max_errors=max_errors, budget_seconds=budget_seconds)
 
 
 def load_program(code: str, *, name: str = "program", params: Mapping[str, Any] | None = None) -> Program:
@@ -250,10 +251,13 @@ def _fresh_namespace() -> dict[str, Any]:
 class Runner:
     """One run's instance of a program: its module globals persist from call to call (its memory)."""
 
-    def __init__(self, program: Program, *, timeout: float = DEFAULT_TIMEOUT, max_errors: int = DEFAULT_MAX_ERRORS):
+    def __init__(self, program: Program, *, timeout: float = DEFAULT_TIMEOUT, max_errors: int = DEFAULT_MAX_ERRORS,
+                 budget_seconds: float | None = None):
         self.program = program
         self.timeout = float(timeout)
         self.max_errors = int(max_errors)
+        #: All of a run's decide calls together may take this long (None: no limit); then disqualified.
+        self.budget_seconds = None if budget_seconds is None else float(budget_seconds)
         self.calls = 0
         self.errors = 0
         self.timeouts = 0
@@ -303,6 +307,9 @@ class Runner:
         if not self._alarm and spent > self.timeout:
             self.timeouts += 1
             self._error(f"decide ran past {self.timeout:.2f} s")
+            return []
+        if self.budget_seconds is not None and self.seconds > self.budget_seconds and not self.disqualified:
+            self.disqualified = f"decide used {self.seconds:.0f} s, over the run's budget of {self.budget_seconds:.0f} s"
             return []
         return normalize_intents(raw, self._error)
 

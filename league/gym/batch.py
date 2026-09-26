@@ -74,6 +74,7 @@ def _chunks(items: Sequence[Any], n: int) -> list[list[Any]]:
 def _unit(args: tuple) -> list[tuple[int, int, dict]]:
     """One worker's share: a list of (job index, program) over one segment, run together."""
     store_root, gate_reason, cfg_kw, seg_index, segment, jobs, detail = args
+    _cap_memory()
     import pyarrow
 
     pyarrow.set_cpu_count(1)          # N workers already use the cores; no thread pools on top
@@ -91,6 +92,28 @@ def _unit(args: tuple) -> list[tuple[int, int, dict]]:
     programs = [load_program(code, name=name, params=params) for _, (name, code, params) in jobs]
     results = E.run(programs, store, cfg)
     return [(job_index, seg_index, result) for (job_index, _), result in zip(jobs, results)]
+
+
+def _cap_memory() -> None:
+    """A worker's address space is capped (GYM_WORKER_MEMORY_GB, default 6): a program that allocates
+    without end meets a MemoryError it is charged for, not the box's OOM killer."""
+    try:
+        import resource
+
+        limit = int(float(os.environ.get("GYM_WORKER_MEMORY_GB", "6")) * (1 << 30))
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        if hard == resource.RLIM_INFINITY or hard > limit:
+            resource.setrlimit(resource.RLIMIT_AS, (limit, hard if hard != resource.RLIM_INFINITY else resource.RLIM_INFINITY))
+    except (ImportError, ValueError, OSError):  # pragma: no cover - not every platform has it
+        pass
+
+
+def _failed(unit: tuple, why: str) -> list[tuple[int, int, dict]]:
+    """A unit whose worker died: each of its programs gets an error result (no trial is counted)."""
+    return [(job_index, unit[3], {"program": job[0], "status": "error", "reason": why[:500], "trials": 0,
+                                  "summary": {}, "fills": {}, "daily": [], "trades": [], "data_version": "",
+                                  "runtime": {"calls": 0, "errors": 0, "timeouts": 0, "messages": [why[:200]], "disqualified": None}})
+            for job_index, job in unit[5]]
 
 
 def _trim(result: dict, detail: str) -> dict:
@@ -127,18 +150,31 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
     units = [(store_root, gate_reason, dict(cfg_kw), s, seg, chunk, detail)
              for s, seg in enumerate(segments) for chunk in _chunks(valid, per_segment) if chunk]
     parts: dict[int, dict[int, dict]] = {}
+    produced: list[tuple[int, int, dict]] = []
     if workers <= 1 or len(units) <= 1:
-        produced = [row for unit in units for row in _unit(unit)]
+        for unit in units:
+            try:
+                produced += _unit(unit)
+            except Exception as exc:  # the engine itself failed on this unit: say so, keep the rest
+                produced += _failed(unit, f"{type(exc).__name__}: {exc}")
     else:
+        from concurrent.futures import ProcessPoolExecutor
+
         methods = multiprocessing.get_all_start_methods()
         ctx = multiprocessing.get_context("forkserver" if "forkserver" in methods else "spawn")
-        with ctx.Pool(processes=min(workers, len(units))) as pool:
-            produced = [row for rows in pool.imap_unordered(_unit, units) for row in rows]
+        with ProcessPoolExecutor(max_workers=min(workers, len(units)), mp_context=ctx) as pool:
+            futures = [(unit, pool.submit(_unit, unit)) for unit in units]
+            for unit, future in futures:
+                try:
+                    produced += future.result()
+                except Exception as exc:  # a worker died (BrokenProcessPool) or the engine failed
+                    produced += _failed(unit, f"{type(exc).__name__}: {exc}")
     for job_index, seg_index, result in produced:
         parts.setdefault(job_index, {})[seg_index] = result
     for job_index, by_segment in parts.items():
-        merged = R.merge([by_segment[s] for s in sorted(by_segment)])
-        out[job_index] = _trim(merged, detail)
+        pieces = [by_segment[s] for s in sorted(by_segment)]
+        broken = [p for p in pieces if p.get("status") == "error"]
+        out[job_index] = broken[0] if broken else _trim(R.merge(pieces), detail)
     finished = [r for r in out if r is not None]
     program_years = sum(len(r.get("daily") or []) / 252.0 * max(1, len(r.get("roots") or [])) for r in finished
                         if r.get("status") != "refused") if detail == "full" else \

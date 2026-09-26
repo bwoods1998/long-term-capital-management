@@ -79,7 +79,7 @@ class Rules:
 
     def as_dict(self) -> dict:
         row = asdict(self)
-        row["types"] = [t for t in STRUCTURE_TYPES if self.calendars or t not in ("calendar", "diagonal")]
+        row["types"] = tuple(t for t in STRUCTURE_TYPES if self.calendars or t not in ("calendar", "diagonal"))
         return row
 
 
