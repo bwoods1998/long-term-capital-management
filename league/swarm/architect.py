@@ -102,12 +102,14 @@ class Architect:
         return out
 
     def prompt(self) -> str:
+        alive = self.store.families(alive=True)
+        living_ids = {f["id"] for f in alive}
         board = (self.store.get("leaderboard") or {}).get("board") or []
         living = [{"family": r["family"], "band": r["band"], "structure": r["structure"], "roots": r["roots"],
-                   "validation": r.get("validation"), "share": r.get("share")} for r in board[:60]]
+                   "validation": r.get("validation"), "share": r.get("share")} for r in board if r["family"] in living_ids][:60]
         if not living:
             living = [{"family": f["id"], "structure": f["structure"], "roots": f["roots"], "mechanism": f["mechanism"][:160]}
-                      for f in self.store.families(alive=True)][:60]
+                      for f in alive][:60]
         graves = [{"family": g["family"], "structure": g["structure"], "roots": g["roots"], "lesson": g["lesson"][:400]}
                   for g in self.store.graveyard(limit=20)]
         want = self.want()

@@ -67,6 +67,10 @@ class Tournament:
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
+            current = self.store.family(fam["id"])
+            if current is None or current.get("retired_at"):
+                continue
+            fam = current
             n = self.candidate_version(fam)
             if n is None:
                 continue
@@ -87,6 +91,8 @@ class Tournament:
                 continue
             job = GymJob(family=fam["id"], version=n, code=version["code"], params=version["params"], window="validation",
                          roots=tuple(fam["roots"]), stress=1.0, purpose="validation", priority=1.0)
+            if (self.store.family(fam["id"]) or {}).get("retired_at"):
+                continue
             jobs.append((fam, n, self.pool.submit(job)))
         deadline = self.clock() + timeout
         for fam, n, job in jobs:
@@ -129,11 +135,11 @@ class Tournament:
                 self.store.add_run(fid, n, {"run_id": f"{row['run_id']}-s15", "status": twin.get("status") or "ok", "trials": 1,
                                             "summary": dict(twin)}, window="validation", stress=evidence.STRESS, purpose="validation",
                                    program_years=years)
-        with self.store.lock:  # the candidate check and the verdict's writes, never interleaved with another judge
+        with self.store.atomic():  # also exclude another connection retiring the family while this verdict writes
             fam = self.store.family(fid) or fam
             image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
             bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
-            if self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
+            if fam.get("retired_at") or self.candidate_version(fam) != int(n) or result.get("gym_image") != image or result.get("gym_bundle") != bundle:
                 return None  # stale: its trials count, its verdict does not
             return self._verdict(fid, fam, n, result, counted=record)
 
@@ -200,7 +206,7 @@ class Tournament:
         for _, fam in scored[: int(self.cfg.get("fork_top", 3))]:
             if alive + len(born) >= ceiling:
                 break
-            with self.store.lock:
+            with self.store.atomic():
                 if len(self.store.families(alive=True)) >= ceiling:
                     break
                 child = self.fork(fam)
@@ -211,6 +217,9 @@ class Tournament:
     def fork(self, fam: Mapping[str, Any]) -> str | None:
         """A child on the next root of the universe the parent does not trade (index roots only for types
         allowed there), with the parent's best program as its first version."""
+        fam = self.store.family(fam["id"]) or fam
+        if fam.get("retired_at"):
+            return None
         roots = [r for r in self.settings.get("gym", {}).get("roots", UNIVERSE_ROTATION)]
         taken = {tuple(f["roots"]) for f in self.store.families(alive=True) if f["mechanism"] == fam["mechanism"]}
         for root in roots:
@@ -242,12 +251,9 @@ class Tournament:
 
     # ------------------------------------------------------------------ 5. retirements
     def retirements(self, fams: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        floor = int(self.settings.get("population", {}).get("floor", 16))
-        alive = len(fams)
         out = []
         for fam in sorted(fams, key=lambda f: (f.get("weight") or 0.0)):
-            if alive - len(out) <= floor:
-                break
+            fam = self.store.family(fam["id"]) or fam
             if fam["band"] != "gym":
                 continue  # a Candidate or better is judged by its forward record, not here
             why = None
@@ -262,22 +268,20 @@ class Tournament:
                         and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
                     why = f"its trial-adjusted evidence fell below the line (deflated Sharpe probability {dsr:.3f})"
             if why:
-                self.retire(fam, why)
-                out.append({"family": fam["id"], "why": why})
+                if self.retire(fam, why):
+                    out.append({"family": fam["id"], "why": why})
         return out
 
-    def retire(self, fam: Mapping[str, Any], why: str) -> None:
-        state = fam.get("state") or {}
-        notes = self.store.notebook(fam["id"], limit=4)
-        lesson = (f"{fam['structure']} on {', '.join(fam['roots'])}: {why}. Tried {fam.get('revisions')} versions over "
-                  f"{self.store.lineage_trials(fam['id'])} lineage trials; best Train score {fam.get('best_train')}; best validation "
-                  f"{json_safe(state.get('validation_view'))}. Last notes: " + " | ".join(n["text"][:240] for n in notes))
-        self.store.bury(fam["id"], lesson, {"validation": state.get("validation_view"), "best_train": fam.get("best_train")})
-        self.store.retire(fam["id"], why)
+    def retire(self, fam: Mapping[str, Any], why: str) -> bool:
+        result = self.store.retire_gym(fam["id"], why, floor=int(self.settings.get("population", {}).get("floor", 16)),
+                                       source="tournament")
+        if result["status"] != "retired" or result.get("already_retired"):
+            return False
         try:
             self.pool.cancel_family(fam["id"])
         except Exception:  # noqa: BLE001
             pass
+        return True
 
     # ------------------------------------------------------------------ the whole round
     def run(self) -> dict[str, Any]:
