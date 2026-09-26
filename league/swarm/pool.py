@@ -19,7 +19,9 @@
   guard reads the balance itself). A sleeping box books nothing.
 - NAMES. Every box is `ltcm-swarm-<token>-<kind>-<epoch>-<n>`; the token is the store's own (kv
   `pool_token`), so a pool sweeps (`reconcile`) only its own strays, never another state root's (a laptop
-  trial's) boxes, and never one forked in the last `reconcile_grace_seconds`.
+  trial's) boxes, and never one forked in the last `reconcile_grace_seconds`. Stage 1 (Sept 26, 10:22Z) named
+  its boxes `ltcm-swarm-<kind>-<epoch>-<n>` without a token: `adopt` takes back every box the store knows
+  whatever its name, and `reconcile` also ends an untokened one it does not know (`LEGACY_NAME`).
 - CAP. `max_boxes` counts every live box of the kind the pool holds or the store records.
 
 The Gym's driver (`league.gym.driver.GymDriver`) is imported when a box starts; tests hand in fakes.
@@ -31,6 +33,7 @@ from __future__ import annotations
 import datetime as dt
 import itertools
 import math
+import re
 import secrets
 import threading
 import time
@@ -103,6 +106,8 @@ class Box:
 
 
 AWAKE = ("starting", "ready", "busy")
+#: A box name from before the per-store token (the stage-1 release): ours, whichever store made it.
+LEGACY_NAME = re.compile(r"^ltcm-swarm-(gym|gate)-\d+-\d+$")
 
 
 def forked_at(row: Mapping[str, Any]) -> float | None:
@@ -376,7 +381,7 @@ class GymPool:
             box_id, name = str(row.get("sailbox_id") or row.get("id") or ""), str(row.get("name") or "")
             if name in in_flight:
                 continue  # its POST has not returned: ours, not a stray
-            if not name.startswith(mine) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
+            if not (name.startswith(mine) or LEGACY_NAME.match(name)) or box_id in known or str(row.get("status")) in ("terminated", "terminating",
                                                                                             "failed", "create_failed"):
                 continue
             born = forked_at(row)
@@ -659,11 +664,12 @@ class GymPool:
         self.reconcile()
         return n
 
-    def scale_to_zero(self, why: str) -> int:
-        """The guard's brake: every Gym and gate box to sleep now (a running batch finishes first)."""
+    def scale_to_zero(self, why: str, *, busy: bool = False) -> int:
+        """The guard's brake: every Gym and gate box to sleep now (a running batch finishes first). A stopping process
+        passes `busy`: its running batches die with it, so their boxes sleep too."""
         n = 0
         with self._lock:
-            boxes = [b for b in self.boxes.values() if b.state in ("ready", "starting")]
+            boxes = [b for b in self.boxes.values() if b.state in (("ready", "starting", "busy") if busy else ("ready", "starting"))]
         for box in boxes:
             if not box.id.startswith("pending-"):
                 self._sleep(box)

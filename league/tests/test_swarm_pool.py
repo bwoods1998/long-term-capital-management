@@ -249,6 +249,30 @@ class Boxes(PoolCase):
         pool.adopt()
         self.assertEqual(self.sail.terminated, ["sb_stray"], "another store's boxes and a box made minutes ago are left alone")
 
+    def test_boxes_named_before_the_token_are_adopted_when_known_and_ended_when_stray(self):
+        """Stage 1 named its boxes `ltcm-swarm-<kind>-<epoch>-<n>` (no token): the release after it takes them over."""
+        old = int(self.clock()) - 3600
+        self.store.upsert_box("sb_known", kind="gym", version="sbcp_11111111-aaaa", state="asleep",
+                              detail={"name": f"ltcm-swarm-gym-{old}-1"})
+        self.sail.extra = [{"sailbox_id": "sb_known", "name": f"ltcm-swarm-gym-{old}-1", "status": "sleeping"},
+                           {"sailbox_id": "sb_lost", "name": f"ltcm-swarm-gym-{old}-2", "status": "running"},
+                           {"sailbox_id": "sb_gate", "name": f"ltcm-swarm-gate-{old}-3", "status": "running"},
+                           {"sailbox_id": "sb_new", "name": f"ltcm-swarm-gym-{int(self.clock()) - 60}-4", "status": "running"},
+                           {"sailbox_id": "sb_other", "name": f"ltcm-swarm-0a0a0a-gym-{old}-1", "status": "running"},
+                           {"sailbox_id": "sb_w1", "name": "ltcm-gym-image-v1", "status": "running"}]
+        pool = self.pool()
+        self.assertEqual(pool.adopt(), 1)
+        self.assertEqual(pool.boxes["sb_known"].state, "asleep", "a box the store knows is adopted, whatever its name")
+        self.assertEqual(sorted(self.sail.terminated), ["sb_gate", "sb_lost"], "untokened strays older than the grace end")
+
+    def test_stopping_sleeps_busy_boxes_too_the_brake_does_not(self):
+        pool = self.pool()
+        box = self.ready_box(pool)
+        box.state = "busy"
+        self.assertEqual(pool.scale_to_zero("brake"), 0, "the guard's brake lets a running batch finish")
+        self.assertEqual(pool.scale_to_zero("stopped", busy=True), 1, "a stopping process loses the batch anyway")
+        self.assertEqual(self.sail.slept, [box.id])
+
     def test_the_cap_counts_the_stores_live_boxes_too(self):
         for i in range(6):
             self.store.upsert_box(f"sb_row{i}", kind="gym", version="sbcp_11111111-aaaa", state="ready", detail={})
