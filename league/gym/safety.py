@@ -7,10 +7,12 @@ Gym's rules on top:
 
 - imports: `math` and `numpy` only (plus `from __future__ import annotations`); no submodule import;
 - no underscore attribute, no attribute assignment, no frame or code object, no `getattr` with a
-  computed name, none of `league.safety.BANNED_NAMES` (eval, exec, open, globals, ...), and no `print`;
+  computed name, none of `league.safety.BANNED_NAMES` (eval, exec, open, globals, ...), no `print`, no
+  `repr` (an object's repr carries its address: not deterministic), no bare `except:`, no
+  BaseException family, and no return/break/continue in a `finally` (each could swallow the timeout);
 - numpy's doors to files, memory, randomness and dates are shut by name: `load`, `save*`, `fromfile`,
   `tofile`, `memmap`, `lib`, `ctypes`, `ctypeslib`, `random`, `datetime64`, `busday_*`, `base`,
-  `setflags`, `seterr`, `testing`, ... (`NUMPY_BANNED`);
+  `setflags`, `flags`, `seterr`, `testing`, ... (`NUMPY_BANNED`);
 - no date: an integer or float literal from 2019 to 2030 (a year), an eight-digit YYYYMMDD integer,
   or a string holding an ISO date or such a year is refused. The models know what happened in those
   years; a program that could recognize one could replay it.
@@ -41,11 +43,15 @@ NUMPY_BANNED = frozenset({
     # randomness (a program is deterministic) and the calendar
     "random", "datetime64", "timedelta64", "datetime_data", "datetime_as_string", "busday_count", "busday_offset",
     "is_busday", "busdaycalendar",
+    # an array's flags: `arr.flags["WRITEABLE"] = True` is a subscript, not an attribute assignment
+    "flags",
 })
 #: Output, class machinery, and the two builtins whose answers change from one process to the next
 #: (`id` is an address, `hash` of a string is salted per process): a program is deterministic.
 EXTRA_BANNED_NAMES = frozenset({"print", "type", "object", "super", "classmethod", "staticmethod", "property",
-                                "id", "hash", "dir", "aiter", "anext"})
+                                "id", "hash", "dir", "aiter", "anext", "repr", "ascii",
+                                # the family the runtime's timeout belongs to: a program never catches it
+                                "BaseException", "SystemExit", "KeyboardInterrupt", "GeneratorExit"})
 _YEAR_TEXT = re.compile(r"(?<![0-9])(?:19|20)[0-9]{2}[-/.][01]?[0-9][-/.][0-3]?[0-9](?![0-9])|(?<![0-9])20(?:19|2[0-9]|30)(?![0-9])")
 
 
@@ -145,6 +151,13 @@ def check_program(code: str) -> None:
                     refuse(node, "a string naming a year or a date is not allowed; a program never names the calendar")
         elif isinstance(node, ast.MatchClass):
             refuse(node, "class patterns are not allowed")
+        elif isinstance(node, ast.ExceptHandler) and node.type is None:
+            refuse(node, "a bare `except:` is not allowed; catch Exception or a narrower error")
+        elif isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))) and node.finalbody:
+            for inner in node.finalbody:
+                for sub in ast.walk(inner):
+                    if isinstance(sub, (ast.Return, ast.Break, ast.Continue)):
+                        refuse(sub, "return, break or continue inside `finally` is not allowed (it swallows errors)")
 
     decides = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "decide"]
     if len(decides) != 1:

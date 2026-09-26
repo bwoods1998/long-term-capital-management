@@ -115,6 +115,7 @@ class Underlying:
     low: np.ndarray | None = None
     close: np.ndarray | None = None
     volume: np.ndarray | None = None
+    settle: np.ndarray | None = None     # a recorded settlement level (optional column `settle`)
 
 
 @dataclass
@@ -291,6 +292,8 @@ class Store:
         manifest has none): part of every run's identity."""
         manifest = self.manifest()
         digest = hashlib.sha256(STORE_VERSION.encode())
+        # The calendar decides sessions, half days and the event flags: it is part of every run's data.
+        digest.update(b"calendar=" + hashlib.sha256((self.root / "calendar.parquet").read_bytes()).hexdigest().encode())
         for day in days:
             for root in sorted(set(r.upper() for r in roots)):
                 for kind in ("nbbo", "underlying", "oi"):
@@ -334,7 +337,7 @@ class Store:
             np.maximum.accumulate(idx, out=idx)
             price = np.where(idx >= 0, price[np.maximum(idx, 0)], np.nan)
         return Underlying(price=price, open=grid("open"), high=grid("high"), low=grid("low"), close=grid("close"),
-                          volume=grid("volume"))
+                          volume=grid("volume"), settle=grid("settle"))
 
     def chain(self, root: str, day: dt.date) -> DayChain:
         """One root's day of one-minute NBBO as [minute, contract] grids, with the underlying and OI."""

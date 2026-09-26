@@ -96,7 +96,8 @@ class Determinism(unittest.TestCase):
         v = RS.view(results[0], "validation")
         self.assertNotIn("trades", v)
         self.assertNotIn("daily", v)
-        self.assertNotIn("2023", RS.canonical(v))
+        hashes = ("run_id", "run_sha", "program_sha", "result_sha", "data_version", "fill_model", "code", "tables")
+        self.assertNotIn("2023", RS.canonical({k: x for k, x in v.items() if k not in hashes}))
         self.assertEqual(set(RS.view(results[0], "gate")), {"run_id", "status", "trials"})
 
     def test_segments_merge_into_one_trial(self):

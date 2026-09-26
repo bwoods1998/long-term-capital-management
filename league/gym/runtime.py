@@ -168,7 +168,7 @@ def _importer(name: str, globals: Any = None, locals: Any = None, fromlist: Any 
 _SAFE_BUILTIN_NAMES = (
     "abs", "all", "any", "bool", "callable", "chr", "complex", "dict", "divmod", "enumerate", "filter", "float",
     "frozenset", "getattr", "hasattr", "int", "isinstance", "iter", "len", "list", "map", "max", "min", "next", "ord",
-    "pow", "range", "repr", "reversed", "round", "set", "slice", "sorted", "str", "sum", "tuple", "zip",
+    "pow", "range", "reversed", "round", "set", "slice", "sorted", "str", "sum", "tuple", "zip",
     "ArithmeticError", "AssertionError", "Exception", "IndexError", "KeyError", "LookupError", "OverflowError",
     "RuntimeError", "StopIteration", "TypeError", "ValueError", "ZeroDivisionError", "True", "False", "None",
 )
@@ -182,12 +182,22 @@ def _safe_builtins() -> dict[str, Any]:
     return out
 
 
-class ProgramTimeout(Exception):
-    """A decide call ran past its limit."""
+class ProgramTimeout(BaseException):
+    """A decide call ran past its limit. A BaseException, so a program's `except Exception` cannot
+    swallow it (bare `except:` and the BaseException family are refused by the safety check)."""
+
+
+#: True only while a program's code runs under the alarm: a SIGALRM handled after the call has
+#: returned (a signal is handled between bytecodes) must not raise inside the engine.
+_ARMED = False
+#: The alarm re-fires this often after its first shot, so a program that keeps running (a loop in a
+#: `finally` block) is interrupted again until it unwinds.
+REARM_SECONDS = 0.02
 
 
 def _on_alarm(signum: int, frame: Any) -> None:
-    raise ProgramTimeout("decide ran past its time limit")
+    if _ARMED:
+        raise ProgramTimeout("decide ran past its time limit")
 
 
 _ALARM_INSTALLED = False
@@ -207,14 +217,17 @@ LOAD_TIMEOUT = 5.0
 
 
 def _limited(fn: Any, seconds: float) -> Any:
-    """fn() under a wall-clock alarm where one can be set (the main thread)."""
+    """fn() under a re-arming wall-clock alarm where one can be set (the main thread)."""
+    global _ARMED
     if not _can_alarm():
         return fn()
-    signal.setitimer(signal.ITIMER_REAL, seconds)
+    _ARMED = True
+    signal.setitimer(signal.ITIMER_REAL, seconds, REARM_SECONDS)
     try:
         return fn()
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        _ARMED = False
+        signal.setitimer(signal.ITIMER_REAL, 0.0, 0.0)
 
 
 def _where(exc: BaseException) -> str:
@@ -298,13 +311,7 @@ class Runner:
         self.calls += 1
         began = time.perf_counter()
         try:
-            if self._alarm:
-                signal.setitimer(signal.ITIMER_REAL, self.timeout)
-            try:
-                raw = self._decide(ctx)
-            finally:
-                if self._alarm:
-                    signal.setitimer(signal.ITIMER_REAL, 0.0)
+            raw = _limited(lambda: self._decide(ctx), self.timeout) if self._alarm else self._decide(ctx)
         except ProgramTimeout:
             self.timeouts += 1
             self._error(f"decide ran past {self.timeout:.2f} s")
@@ -318,7 +325,8 @@ class Runner:
         finally:
             spent = time.perf_counter() - began
             self.seconds += spent
-        if not self._alarm and spent > self.timeout:
+        if spent > self.timeout:
+            # Whatever the program did with the alarm, a call that ran past its limit returns nothing.
             self.timeouts += 1
             self._error(f"decide ran past {self.timeout:.2f} s")
             return []

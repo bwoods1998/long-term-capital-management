@@ -46,6 +46,19 @@ if TYPE_CHECKING:  # pragma: no cover
     from .store import DayChain, Store
 
 
+def settlement_level(u: Any) -> float:
+    """The level an expiring option settles or is exercised against: the store's recorded settlement
+    (`settle`) where it has one, else the last one-minute bar's close, else the price in force at the
+    close minute. For XSP and SPXW that last fallback is the 16:00 snapshot of the index, an
+    approximation of the official SPX close (a few hundredths of a point off on a normal day)."""
+    for series in (u.settle, u.close, u.price):
+        if series is not None:
+            known = series[np.isfinite(series)]
+            if known.size:
+                return float(known[-1])
+    return float("nan")
+
+
 @dataclass
 class RunConfig:
     """One run's settings (every one of them is part of the run's hash)."""
@@ -152,6 +165,7 @@ class DayData:
     def __init__(self, store: "Store", day: dt.date, roots: Sequence[str], events: EventCalendar, history: History,
                  ordinal: int):
         self.day = day
+        self.store = store
         self.ordinal = ordinal
         self.weekday = day.weekday()
         self.open_min, self.close_min = store.session(day)
@@ -288,6 +302,8 @@ class Working:
     pid: int = 0                  # the position an open creates / a close closes
     forced: bool = False          # the venue's liquidation
     filled: int = 0
+    seen: bool = False            # met a two-sided quote at least once
+    aggressive: bool = False      # marketable when it first met one: its remainder keeps taking the natural
 
 
 class Account:
@@ -360,6 +376,9 @@ class Account:
         for pos in self.positions.values():
             chain = day.chains.get(pos.root)
             pos.idx = chain.index_of(pos.keys) if chain is not None else np.full(len(pos.legs), -1)
+        for pos in list(self.positions.values()):
+            if int(pos.expirations.min()) < day.ordinal:
+                self._settle_missed(day, pos)      # its expiry fell on a day the run did not replay
 
     def step(self, day: DayData, mi: int, decide: bool) -> None:
         if self.orders:
@@ -403,8 +422,13 @@ class Account:
             price, qty = natural, work.remaining
         else:
             marketable = natural <= order.limit + 1e-9 if opening else natural >= order.limit - 1e-9
+            if not work.seen:
+                work.seen, work.aggressive = True, marketable
             if marketable:
-                price = natural if mi == work.arrival_mi else order.limit
+                # A taking order (and its remainder after a size-capped fill) takes the natural, the
+                # better of it and the limit; a resting order the market later comes through fills at
+                # its own limit.
+                price = natural if work.aggressive else order.limit
             else:
                 span = natural - mid
                 q = (order.limit - mid) / span if abs(span) > 1e-12 else 1.0
@@ -412,9 +436,16 @@ class Account:
                 money = (sum(strikes) / len(strikes)) / snap.spot - 1.0 if np.isfinite(snap.spot) else 0.0
                 dte = min(int(snap.dte[leg.idx]) for leg in legs)
                 p = self.cfg.fill_model.p(q, len(legs), dte, money, snap.minute)
-                if p <= 0.0 or F.draw([leg.key for leg in legs], day.ordinal, snap.minute, "buy" if opening else "sell") >= p:
+                if p <= 0.0 or not self._adverse(day, mi, order.root, legs, mid, opening):
+                    return
+                if F.draw([leg.key for leg in legs], day.ordinal, snap.minute, "buy" if opening else "sell") >= p:
                     return
                 price = order.limit
+                if stress != 1.0:
+                    # Stress charges a passive fill too: (stress - 1) x the structure's half-spread.
+                    plain, _ = L.natural_value(snap, legs, order.action)
+                    extra = (stress - 1.0) * abs(plain - mid)
+                    price = price + extra if opening else price - extra
             qty = min(work.remaining, cap)
             if qty <= 0:
                 return
@@ -440,6 +471,24 @@ class Account:
             self._drop(work, None)
         elif work.filled == qty:
             self.counts["partial_fills"] += 1
+
+    @staticmethod
+    def _adverse(day: DayData, mi: int, root: str, legs: Sequence[L.LegFill], mid: float, buying: bool) -> bool:
+        """Adverse selection: a passive order is filled by someone who wants the other side, so it never
+        fills on a minute after which the structure moves in its favour (a buyer is not filled just
+        before the mid rises; a seller not just before it falls). The engine reads the NEXT minute's
+        quotes to decide this; the program never sees them."""
+        chain = day.chains.get(root)
+        nxt = mi + 1
+        if chain is None or nxt >= day.minutes:
+            return False
+        value = 0.0
+        for leg in legs:
+            bid, ask = float(chain.bid[nxt, leg.idx]), float(chain.ask[nxt, leg.idx])
+            if not (math.isfinite(bid) and math.isfinite(ask)):
+                return False
+            value += leg.side * leg.ratio * 0.5 * (bid + ask)
+        return value <= mid + 1e-9 if buying else value >= mid - 1e-9
 
     def _open_fill(self, day: DayData, mi: int, work: Working, price: float, qty: int, fees: float) -> None:
         order = work.order
@@ -711,10 +760,9 @@ class Account:
         self.session += 1
 
     def _expire(self, day: DayData, pos: Position) -> None:
+        """A position whose earliest leg expires today, at the close."""
         chain = day.chains.get(pos.root)
-        price = chain.underlying.price if chain is not None else np.zeros(0)
-        known = price[np.isfinite(price)]
-        level = float(known[-1]) if known.size else math.nan
+        level = settlement_level(chain.underlying) if chain is not None else math.nan
         if not math.isfinite(level):
             # No underlying today (a hole in the store): the position leaves at its last mark, and says so.
             value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
@@ -725,15 +773,49 @@ class Account:
             pos.exit_day, pos.exit_mi, pos.reason, pos.qty = day.ordinal, day.minutes - 1, "expired_without_data", 0
             self._finish(pos, day)
             return
+        self._settle(day, pos, level, exit_day=day.ordinal, exit_mi=day.minutes - 1, late_legs_from_end=True)
+
+    def _settle_missed(self, day: DayData, pos: Position) -> None:
+        """A position whose expiry fell BETWEEN run days (no chain that day): settled against that day's
+        recorded underlying, or, where the store has none, against today's first price as a data hole."""
+        from .store import from_ordinal
+
         near = int(pos.expirations.min())
-        value = 0.0
-        shares = 0.0
-        later = False
+        expiry = from_ordinal(near)
+        level, hole = math.nan, False
+        if day.store is not None and day.store.has("underlying", pos.root, expiry):
+            level = settlement_level(day.store.underlying(pos.root, expiry))
+        if not math.isfinite(level):
+            chain = day.chains.get(pos.root)
+            known = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
+            level, hole = (float(known[0]), True) if known.size else (math.nan, True)
+        if not math.isfinite(level):
+            pos.reason = "expired_without_data"
+            value = pos.last_mark if math.isfinite(pos.last_mark) else pos.entry
+            cash = value * venue.MULTIPLIER * pos.qty
+            self.cash += cash
+            pos.cash += cash
+            pos.exit_value_qty += value * pos.qty
+            pos.exit_day, pos.exit_mi, pos.qty = day.ordinal, 0, 0
+            self._finish(pos, day)
+            return
+        self._settle(day, pos, level, exit_day=day.ordinal if hole else near, exit_mi=0 if hole else day.minutes - 1,
+                     late_legs_from_end=False, hole=hole, shares_now=True)
+
+    def _settle(self, day: DayData, pos: Position, level: float, *, exit_day: int, exit_mi: int, late_legs_from_end: bool,
+                hole: bool = False, shares_now: bool = False) -> None:
+        """Exercise and settle the earliest expiry at `level`: cash-settled index legs and equity legs at
+        $0.01 in the money, an equity short leg assigned into shares (marked to the next session's first
+        price; `shares_now` when that session is today). Legs expiring later (a calendar's back month)
+        leave at their NATURAL price with their fees, never at a mid."""
+        near = int(pos.expirations.min())
+        value, shares, fees, later = 0.0, 0.0, 0.0, False
         for leg, exp, i in zip(pos.legs, pos.expirations, pos.idx):
             if int(exp) != near:
                 later = True
-                mid = self._last_mid(day, pos.root, int(i))
-                value += leg.side * leg.ratio * (mid if math.isfinite(mid) else 0.0)
+                price = self._leg_exit_price(day, pos.root, int(i), leg.side, from_end=late_legs_from_end)
+                value += leg.side * leg.ratio * price
+                fees += venue.leg_fee(pos.root, leg.ratio * pos.qty, price, sell=leg.side > 0)
                 continue
             intrinsic = max(0.0, level - leg.strike) if leg.is_call else max(0.0, leg.strike - level)
             if not math.isfinite(intrinsic) or intrinsic < 0.01:
@@ -741,38 +823,51 @@ class Account:
             value += leg.side * leg.ratio * intrinsic
             if not venue.is_index(pos.root):
                 shares += (1.0 if leg.is_call else -1.0) * leg.side * leg.ratio * venue.MULTIPLIER * pos.qty
-        cash = value * venue.MULTIPLIER * pos.qty
+        cash = value * venue.MULTIPLIER * pos.qty - fees
         self.cash += cash
         pos.cash += cash
+        pos.fees += fees
         pos.exit_value_qty += value * pos.qty
-        pos.exit_day, pos.exit_mi = day.ordinal, day.minutes - 1
+        pos.exit_day, pos.exit_mi = exit_day, exit_mi
         if later:
             pos.reason = "forced_mark"
         elif venue.is_index(pos.root):
-            pos.reason = "settled"
+            pos.reason = "settled_data_hole" if hole else "settled"
             self.counts["settled"] += 1
         else:
-            pos.reason = "exercised"
+            pos.reason = "exercised_data_hole" if hole else "exercised"
             self.counts["exercised"] += 1
         pos.qty = 0
-        if shares and math.isfinite(level):
+        if shares and not shares_now:
             pos.info["shares"] = shares
             self.positions.pop(pos.pid, None)
             self.pending_shares.append((pos, pos.root, shares, level))
-        else:
-            self._finish(pos, day)
+            return
+        if shares:
+            chain = day.chains.get(pos.root)
+            known = chain.underlying.price[np.isfinite(chain.underlying.price)] if chain is not None else np.zeros(0)
+            gap = float(shares) * ((float(known[0]) if known.size else level) - level)
+            self.cash += gap
+            pos.cash += gap
+            pos.info["shares"] = shares
+            pos.info["share_gap"] = round(gap, 2)
+        self._finish(pos, day)
 
     @staticmethod
-    def _last_mid(day: DayData, root: str, i: int, back: int = 30) -> float:
-        """A contract's mid at the close, or at the last minute of the final half hour that quoted it."""
+    def _leg_exit_price(day: DayData, root: str, i: int, side: int, *, from_end: bool, back: int = 30) -> float:
+        """What closing one leg gets at its natural: a long leg sold at its bid, a short bought at its ask;
+        at the close (or the last quoted minute of the final half hour), or, `from_end` False, at the
+        first quoted minute of the day. 0 for a long leg and nothing known; the short's ask unknown is
+        taken at the leg's last value the engine can see, else 0 (a short back month is rare)."""
         chain = day.chains.get(root)
         if chain is None or i < 0:
-            return math.nan
-        for m in range(day.minutes - 1, max(-1, day.minutes - 1 - back), -1):
+            return 0.0
+        minutes = range(day.minutes - 1, max(-1, day.minutes - 1 - back), -1) if from_end else range(1, min(day.minutes, 1 + back))
+        for m in minutes:
             bid, ask = float(chain.bid[m, i]), float(chain.ask[m, i])
             if math.isfinite(bid) and math.isfinite(ask):
-                return 0.5 * (bid + ask)
-        return math.nan
+                return bid if side > 0 else ask
+        return 0.0
 
     def _mark(self, day: DayData, pos: Position, mi: int) -> None:
         chain = day.chains.get(pos.root)
@@ -808,6 +903,43 @@ class Account:
         pos.qty = 0
         pos.exit_day, pos.exit_mi, pos.reason = day.ordinal, day.minutes - 2, reason
         self._finish(pos, day)
+
+
+# --------------------------------------------------------------------------- identity
+_CODE_DIGEST: str | None = None
+
+
+def code_digest() -> str:
+    """A hash of the engine's code: every file of league/gym and the league modules it imports (the
+    same files the sealed-box bundle carries)."""
+    global _CODE_DIGEST
+    if _CODE_DIGEST is None:
+        import hashlib
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[2]
+        files = [repo / "league" / name for name in ("__init__.py", "safety.py", "structure_core.py", "stats.py")]
+        files += sorted(p for p in (repo / "league" / "gym").rglob("*.py") if "__pycache__" not in p.parts)
+        digest = hashlib.sha256()
+        for path in sorted(files, key=lambda p: p.relative_to(repo).as_posix()):
+            digest.update(path.relative_to(repo).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+        _CODE_DIGEST = digest.hexdigest()[:16]
+    return _CODE_DIGEST
+
+
+def tables_digest() -> str:
+    """A hash of the tables a run depends on beyond the store: events, rates, fees, ticks, the fill seed."""
+    import hashlib
+    import json
+
+    from . import events as EV
+
+    body = {"fomc": sorted(d.isoformat() for d in EV.FOMC), "cpi": sorted(d.isoformat() for d in EV.CPI),
+            "jobs": sorted(d.isoformat() for d in EV.JOBS), "rates": [[d.isoformat(), r] for d, r in EV.RATES],
+            "fees": [venue.OCC_FEE, venue.ORF_FEE, venue.CAT_FEE, venue.TAF_FEE, venue.SEC_RATE, venue.INDEX_FEE,
+                     sorted(venue.EXCHANGE_FEE.items()), venue.XSP_LARGE_ORDER_FEE],
+            "ticks": [sorted(venue.PENNY_ALL), sorted(venue.NICKEL), venue.NET_TICK], "seed": F.SEED}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
 # --------------------------------------------------------------------------- the run
@@ -873,7 +1005,9 @@ def run(programs: Sequence[Program], store: "Store", cfg: RunConfig, *, days: Se
             progress(n + 1, len(days), day)
     elapsed = time.perf_counter() - began
     data_version = store.data_version(all_roots, days) if days else "no-days"
-    return [R.build(a, cfg, days, data_version, regimes, elapsed / max(1, len(accounts))) for a in accounts]
+    code, tables = code_digest(), tables_digest()
+    return [R.build(a, cfg, days, data_version, regimes, elapsed / max(1, len(accounts)), code=code, tables=tables)
+            for a in accounts]
 
 
 __all__ = ["RunConfig", "run", "Account", "DayData", "History"]

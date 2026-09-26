@@ -14,8 +14,9 @@ the Gym and the House can never disagree about it:
                     rules={root: rules_for(root).as_dict()}, events=..., events_next=...)
 
 A program never sees a date or a year: days to expiry, minutes since midnight ET, the weekday, and
-event booleans only. Every array it is handed is a read-only copy (a view of the engine's day grid
-would carry the rest of the day in its `.base`, and `base` is refused by the safety check as well).
+event booleans only. Every array it is handed is a copy over an immutable buffer (a view of the
+engine's day grid would carry the rest of the day in its `.base`; `base` and `flags` are refused by
+the safety check as well), so no program can change what its batch-mates see.
 
 Implied vol and the greeks are computed on the mid (`greeks.py`) only when a program first reads one,
 for the contracts it was shown, and cached in the snapshot (so a batch of programs pays once).
@@ -34,8 +35,12 @@ _NAN = float("nan")
 
 
 def _ro(array: np.ndarray) -> np.ndarray:
-    array.flags.writeable = False
-    return array
+    """A read-only array over an IMMUTABLE buffer (a bytes object): numpy refuses to make it writeable
+    again, whatever a program tries (`setflags`, `flags[...]`), so views shared by a batch's programs
+    stay what the engine made them."""
+    array = np.ascontiguousarray(array)
+    out = np.frombuffer(array.tobytes(), dtype=array.dtype)
+    return out if array.ndim == 1 else out.reshape(array.shape)
 
 
 class Snapshot:
@@ -92,6 +97,9 @@ class Snapshot:
     @property
     def n(self) -> int:
         return int(self.strike.shape[0])
+
+    def __repr__(self) -> str:
+        return f"Snapshot({self.root}, minute {self.minute}, {self.n} contracts)"
 
     def greeks_for(self, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """(iv, delta, gamma, theta, vega) of the contracts at `idx`, computing what is not yet known."""
@@ -176,6 +184,9 @@ class ChainView:
     def __len__(self) -> int:
         return self.n
 
+    def __repr__(self) -> str:  # no address: a program's output must not depend on where memory lies
+        return f"ChainView({self.root}, minute {self.minute}, {self.n} contracts)"
+
     def _g(self, k: int) -> np.ndarray:
         if self._greeks is None:
             self._greeks = tuple(_ro(np.array(a)) for a in self._snap.greeks_for(self._idx))
@@ -223,6 +234,9 @@ class UnderlyingView:
         self.lows = _ro(lows)
         self.prior_close = float(closes[-1]) if closes.shape[0] else _NAN
 
+    def __repr__(self) -> str:
+        return f"UnderlyingView({self.root}, {self.prices.shape[0]} minutes, {self.closes.shape[0]} sessions)"
+
 
 def underlying_view(root: str, prices_today: Sequence[float], *, closes: Sequence[float] = (), opens: Sequence[float] = (),
                     highs: Sequence[float] = (), lows: Sequence[float] = ()) -> UnderlyingView:
@@ -266,6 +280,9 @@ class Ctx:
     def __init__(self, **values: Any):
         for name in self.__slots__:
             object.__setattr__(self, name, values.get(name))
+
+    def __repr__(self) -> str:
+        return f"Ctx(minute {self.minute})"
 
 
 def build_ctx(*, minute: int, open_minute: int, close_minute: int, weekday: int, chains: Mapping[str, ChainView],

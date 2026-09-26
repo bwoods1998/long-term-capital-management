@@ -2,15 +2,20 @@
 
 One result per program per run (one TRIAL: one run of one program version over one window). Keys:
 
-- identity: `run_id` (a hash of the program's code and parameters, the store files read, the engine
-  version, the window and the run's settings), `program`, `program_sha`, `run_sha`, `params`,
-  `window`, `roots`, `engine`, `data_version`, `fill_model`, `stress`, `capital`, `trials` (1);
+- identity: `run_id` (a hash of the program's code and parameters, the store files read and the
+  calendar, the engine's code (`code`), its event, rate, fee and tick tables (`tables`), the window
+  and the run's settings), `program`, `program_sha`, `run_sha`, `params`, `window`, `roots`,
+  `engine`, `data_version`, `fill_model`, `stress`, `capital`, `trials` (1);
 - `status`: ok, disqualified (the program erred or timed out too often: `runtime.messages` says
   how), or no_data;
-- `summary`: trades, days, days_traded, pnl, pnl_per_max_loss, mean_return_on_max_loss and its
-  t statistic, win_rate, profit_factor, sharpe (daily, annualized by sqrt 252) and sharpe_daily,
-  max_drawdown (dollars and a fraction of capital), turnover (maximum loss opened a year over
-  capital), fees, quarters_positive;
+- `summary`: trades, days, days_traded, pnl, pnl_per_max_loss; `t_daily` and
+  `mean_return_on_max_loss_daily`, the one-sample t and mean of the DAILY return on maximum loss
+  (each entry day's P&L over its maximum loss: THE statistic of the validation line, so splitting a
+  position into lots cannot raise it); `t_stat` and `mean_return_on_max_loss` per trade (for
+  diagnosis only); win_rate, profit_factor, sharpe (daily P&L, annualized by sqrt 252), sharpe_daily,
+  skew_daily and kurt_daily (the deflated Sharpe's inputs), max_drawdown (dollars and a fraction of
+  capital), turnover (maximum loss opened a year over capital), fees, quarters_positive,
+  median_max_loss_per_structure (one structure's maximum loss, USD: for sizing);
 - `fills`: orders, opens, closes, filled, partial, cancelled, expired, rejected with their reasons,
   liquidated, settled, exercised, fill_rate, the share of fills at the natural, the mean slippage
   from the mid a share and in half-spreads;
@@ -22,8 +27,8 @@ One result per program per run (one TRIAL: one run of one program version over o
 - `runtime`: the program's calls, errors, timeouts, seconds and first error messages;
 - `result_sha`: a hash of everything above but the timing, so two runs of the same inputs agree.
 
-`view(result, "validation")` is what a researcher may see of a validation run: no trades, no dates,
-no daily series. Standard library only.
+`view(result, window)` is what leaves a run of each window (validation: no trades, no dates, no daily
+series; holdout and forward: the gate's inputs only). Standard library only.
 """
 
 from __future__ import annotations
@@ -104,6 +109,29 @@ def _tercile(value: float | None, cuts: tuple[float, float] | None) -> str:
     return "low" if value < cuts[0] else "mid" if value < cuts[1] else "high"
 
 
+def _t(xs: Sequence[float]) -> tuple[float | None, float | None]:
+    """(mean, one-sample t) of xs; t is None under two points or with no variance."""
+    if not xs:
+        return None, None
+    mean = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return mean, None
+    sd = math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
+    return mean, (mean / sd * math.sqrt(len(xs)) if sd > 0 else None)
+
+
+def daily_returns(trades: Sequence[dict]) -> list[float]:
+    """One return a trading day with entries: that day's P&L over that day's maximum loss (trades
+    grouped by entry day). The evidence lines are tested on these, not on trades: five trades on one
+    day are one day's evidence, and splitting a position into lots must not raise its t."""
+    pnl: dict[str, float] = {}
+    risk: dict[str, float] = {}
+    for t in trades:
+        pnl[t["day"]] = pnl.get(t["day"], 0.0) + float(t["pnl"])
+        risk[t["day"]] = risk.get(t["day"], 0.0) + float(t["max_loss"])
+    return [pnl[d] / risk[d] for d in sorted(pnl) if risk[d] > 0]
+
+
 def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: float) -> dict[str, Any]:
     """The run's statistics (the module docstring lists them)."""
     pnl_days = [float(d[1]) for d in daily]
@@ -119,6 +147,15 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
         sd = math.sqrt(sum((r - mean_rom) ** 2 for r in roms) / (len(roms) - 1))
         t_stat = mean_rom / sd * math.sqrt(len(roms)) if sd > 0 else None
     daily_sharpe = stats.sharpe(pnl_days) if len(pnl_days) >= 2 else None
+    by_day = daily_returns(trades)
+    mean_daily, t_daily = _t(by_day)
+    per_structure = sorted(t["max_loss"] / max(1, int(t.get("qty") or 1)) for t in trades)
+    median_structure = None
+    if per_structure:
+        k = len(per_structure)
+        median_structure = per_structure[k // 2] if k % 2 else 0.5 * (per_structure[k // 2 - 1] + per_structure[k // 2])
+    skew = stats.skewness(pnl_days)
+    kurt = stats.kurtosis(pnl_days)
     curve, peak, drawdown = 0.0, 0.0, 0.0
     for x in pnl_days:
         curve += x
@@ -134,6 +171,11 @@ def summarize(trades: Sequence[dict], daily: Sequence[Sequence[Any]], capital: f
         "pnl_per_max_loss": round(total / risk, 5) if risk > 0 else None,
         "mean_return_on_max_loss": None if mean_rom is None else round(mean_rom, 5),
         "t_stat": None if t_stat is None else round(t_stat, 4),
+        "mean_return_on_max_loss_daily": None if mean_daily is None else round(mean_daily, 6),
+        "t_daily": None if t_daily is None else round(t_daily, 4),
+        "skew_daily": None if skew is None else round(skew, 5),
+        "kurt_daily": None if kurt is None else round(kurt, 5),
+        "median_max_loss_per_structure": None if median_structure is None else round(median_structure, 2),
         "win_rate": round(sum(t["pnl"] > 0 for t in trades) / n, 4) if n else None,
         "profit_factor": round(wins / losses, 4) if losses > 0 else (None if wins == 0 else float("inf")),
         "sharpe_daily": None if daily_sharpe is None else round(daily_sharpe, 5),
@@ -161,7 +203,7 @@ def fill_stats(account: Any) -> dict[str, Any]:
 
 
 def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, regimes: Mapping[str, Mapping[str, Mapping[str, float]]],
-          seconds: float) -> dict[str, Any]:
+          seconds: float, *, code: str = "", tables: str = "") -> dict[str, Any]:
     """The result of one program's run (the module docstring)."""
     program = account.program
     trades = sorted(account.trades, key=lambda t: (t["day"], t.get("entry_minute") or 0, t["id"]))
@@ -172,7 +214,7 @@ def build(account: Any, cfg: Any, days: Sequence[dt.date], data_version: str, re
         return ((regimes.get(t["day"]) or {}).get(t["root"]) or {}).get(name)
 
     identity = {"program_sha": program.sha, "run_sha": program.run_sha, "params": program.params,
-                "roots": list(account.roots), "data_version": data_version, **cfg.identity()}
+                "roots": list(account.roots), "data_version": data_version, "code": code, "tables": tables, **cfg.identity()}
     status = "ok"
     if account.runner.disqualified:
         status = "disqualified"
@@ -227,8 +269,8 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
     fills["reject_reasons"] = dict(sorted(reasons.items()))
     sent = fills.get("opens", 0) + fills.get("closes", 0)
     fills["fill_rate"] = round(fills.get("filled", 0) / sent, 4) if sent else None
-    identity_keys = ("program_sha", "run_sha", "params", "roots", "data_version", "window", "capital", "stress",
-                     "max_orders_day", "fill_model", "engine")
+    identity_keys = ("program_sha", "run_sha", "params", "roots", "data_version", "code", "tables", "window", "capital",
+                     "stress", "max_orders_day", "fill_model", "engine")
     identity = {k: first.get(k) for k in identity_keys}
     identity["data_version"] = sha([p["data_version"] for p in parts])[:24]
     identity["segments"] = [[p.get("start"), p.get("end")] for p in parts]
@@ -253,25 +295,59 @@ def merge(parts: Sequence[dict]) -> dict[str, Any]:
     return result
 
 
-def view(result: Mapping[str, Any], level: str) -> dict[str, Any]:
-    """What a researcher may see of a result: "train" everything; "validation" the statistics and
-    breakdowns without trades, dates or the daily series; "gate" the status alone (the gate itself
-    answers pass or fail)."""
-    if level == "train":
+STRESS_KEYS = ("trades", "days_traded", "pnl", "pnl_per_max_loss", "mean_return_on_max_loss_daily", "t_daily", "sharpe_daily")
+_HIDDEN_FROM_VALIDATION = ("trades", "daily", "worst", "start", "end", "segments", "seconds")
+
+
+def view(result: Mapping[str, Any], window: str) -> dict[str, Any]:
+    """What leaves a run of `window`, the one place these rules live:
+
+    - "train": everything (a researcher sees all of Train);
+    - "validation": the statistics a line needs and the breakdowns, with NO trades, NO dates and NO
+      daily series (quarters become q1..q4): summary (sharpe_daily, days, skew_daily, kurt_daily,
+      t_daily, days_traded, trades, quarters_positive, median_max_loss_per_structure, ...), fills,
+      runtime counts, and `stress_1.5` when the batch ran the stress twin;
+    - "holdout": for the gate only (a researcher hears pass or fail): the summary and the daily P&L
+      series (the day-block bootstrap), no trades;
+    - "forward": for the gate and the forward record only: the summary, the daily series and each
+      trade's day, P&L and maximum loss;
+    - "gate": the status alone."""
+    if window == "train":
         return dict(result)
-    if level == "validation":
-        keep = ("run_id", "program", "program_sha", "run_sha", "params", "window", "roots", "engine", "fill_model",
-                "stress", "capital", "trials", "status", "needs", "summary", "fills")
-        out = {k: result.get(k) for k in keep}
+    keep_always = ("run_id", "program", "program_sha", "run_sha", "params", "window", "roots", "engine", "code", "tables",
+                   "fill_model", "stress", "capital", "trials", "status", "reason", "needs", "summary", "fills")
+    if window == "validation":
+        out = {k: result.get(k) for k in keep_always if k in result}
         breakdown = dict(result.get("breakdown") or {})
         quarters = breakdown.pop("quarter", {})
         breakdown["quarter"] = {f"q{i + 1}": v for i, (_, v) in enumerate(sorted(quarters.items()))}
         out["breakdown"] = breakdown
         out["runtime"] = {k: (result.get("runtime") or {}).get(k) for k in ("calls", "errors", "timeouts", "disqualified")}
+        if "stress_1.5" in result:
+            out["stress_1.5"] = dict(result["stress_1.5"])
+        for hidden in _HIDDEN_FROM_VALIDATION:
+            out.pop(hidden, None)
         return out
-    if level == "gate":
+    if window == "holdout":
+        out = {k: result.get(k) for k in keep_always if k in result}
+        out["daily"] = [list(d) for d in result.get("daily") or []]
+        out["runtime"] = dict(result.get("runtime") or {})
+        if "stress_1.5" in result:
+            out["stress_1.5"] = dict(result["stress_1.5"])
+        return out
+    if window == "forward":
+        out = view(result, "holdout")
+        out["trades"] = [{"day": t.get("day"), "pnl": t.get("pnl"), "max_loss": t.get("max_loss")} for t in result.get("trades") or []]
+        return out
+    if window == "gate":
         return {"run_id": result.get("run_id"), "status": result.get("status"), "trials": result.get("trials", 1)}
-    raise ValueError("level is train, validation or gate")
+    raise ValueError("window is train, validation, holdout, forward or gate")
 
 
-__all__ = ["build", "merge", "view", "summarize", "sha", "canonical", "ENGINE_VERSION"]
+def stress_block(result: Mapping[str, Any]) -> dict[str, Any]:
+    """The stress twin's figures a validation view carries (`stress_1.5`)."""
+    summary = result.get("summary") or {}
+    return {"stress": result.get("stress"), "status": result.get("status"), **{k: summary.get(k) for k in STRESS_KEYS}}
+
+
+__all__ = ["build", "merge", "view", "stress_block", "summarize", "daily_returns", "sha", "canonical", "ENGINE_VERSION"]

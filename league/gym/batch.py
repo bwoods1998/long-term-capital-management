@@ -14,7 +14,14 @@ runs differ slightly, and each is deterministic.
 
 The output (FILE, JSON): {"batch": {...the run's settings, trials, program-years, seconds...},
 "results": [one result per (program, parameters), in DIR's order; a program the safety check
-refuses gets {"status": "refused", "reason": ...}]}.
+refuses gets {"status": "refused", "reason": ...}]}. Each result is `results.view(result, window)`:
+Train returns everything (or `--detail summary`); a validation run returns the validation view only
+(no trades, dates or daily series), runs a 1.5x-stress twin and carries its figures as `stress_1.5`,
+and refuses `--start`/`--end`; holdout and forward runs return the gate's inputs.
+
+Each unit (a worker's share of programs over one segment) runs in its own process with a deadline
+(`--unit-timeout`, default 30 s a program-day and at least 30 minutes): past it the process is killed
+and its programs come back as errors, so a program stuck in C code cannot hang a Gym box.
 
 Exit codes: 0 done; 2 bad arguments or no programs; 3 the store lacks the data (the message names
 it: the box is missing data); 4 a sealed window without the gate. `--check` only reports what the
@@ -73,7 +80,9 @@ def _chunks(items: Sequence[Any], n: int) -> list[list[Any]]:
 
 def _unit(args: tuple) -> list[tuple[int, int, dict]]:
     """One worker's share: a list of (job index, program) over one segment, run together."""
-    store_root, gate_reason, cfg_kw, seg_index, segment, jobs, detail = args
+    store_root, gate_reason, cfg_kw, seg_index, segment, jobs, detail, hang = args
+    if hang:  # fault injection for the runaway-worker test only
+        time.sleep(float(hang))
     _cap_memory()
     import pyarrow
 
@@ -116,6 +125,62 @@ def _failed(unit: tuple, why: str) -> list[tuple[int, int, dict]]:
             for job_index, job in unit[5]]
 
 
+def _child(unit: tuple, conn: Any) -> None:
+    """A worker process: run one unit and send its rows (or its error) back."""
+    try:
+        conn.send(("ok", _unit(unit)))
+    except BaseException as exc:  # noqa: BLE001 - whatever killed the unit is reported, not raised
+        conn.send(("error", f"{type(exc).__name__}: {exc}"))
+    finally:
+        conn.close()
+
+
+def _run_units(units: list[tuple], workers: int, timeout: float | None) -> list[tuple[int, int, dict]]:
+    """Each unit in its own process, at most `workers` at once; a unit past its deadline is KILLED
+    (a runaway program in C code outlives any alarm) and its programs reported as errors."""
+    methods = multiprocessing.get_all_start_methods()
+    ctx = multiprocessing.get_context("forkserver" if "forkserver" in methods else "spawn")
+    pending = list(units)
+    running: list[list[Any]] = []
+    produced: list[tuple[int, int, dict]] = []
+    while pending or running:
+        while pending and len(running) < max(1, workers):
+            unit = pending.pop(0)
+            reader, writer = ctx.Pipe(duplex=False)
+            proc = ctx.Process(target=_child, args=(unit, writer), daemon=True)
+            proc.start()
+            writer.close()
+            limit = timeout if timeout else _default_timeout(unit)
+            running.append([proc, reader, unit, time.time() + limit, limit])
+        for item in list(running):
+            proc, reader, unit, deadline, limit = item
+            if reader.poll(0.05):
+                try:
+                    kind, payload = reader.recv()
+                except (EOFError, OSError):
+                    kind, payload = "error", f"the worker died (exit {proc.exitcode})"
+                proc.join(10)
+                produced += payload if kind == "ok" else _failed(unit, payload)
+                running.remove(item)
+            elif not proc.is_alive():
+                proc.join(1)
+                produced += _failed(unit, f"the worker died (exit {proc.exitcode})")
+                running.remove(item)
+            elif time.time() > deadline:
+                proc.kill()
+                proc.join(10)
+                produced += _failed(unit, f"the unit timed out after {limit:.0f} s and its worker was killed")
+                running.remove(item)
+    return produced
+
+
+def _default_timeout(unit: tuple) -> float:
+    """Generous: 30 s a program-day, at least half an hour."""
+    segment, jobs = unit[4], unit[5]
+    days = (segment[1] - segment[0]).days + 1 if segment and segment[0] and segment[1] else 252
+    return max(1800.0, 30.0 * days * max(1, len(jobs)))
+
+
 def _trim(result: dict, detail: str) -> dict:
     if detail == "summary":
         return {k: v for k, v in result.items() if k not in ("trades", "daily")}
@@ -125,12 +190,17 @@ def _trim(result: dict, detail: str) -> dict:
 def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window: str, roots: Sequence[str], workers: int = 1,
               split: int = 1, stress: float = 1.0, capital: float = 10_000.0, start: dt.date | None = None,
               end: dt.date | None = None, fill_model_path: str | None = None, gate_reason: str | None = None,
-              detail: str = "full") -> dict:
-    """Run the jobs and return the output document (the module docstring)."""
+              detail: str = "full", unit_timeout: float | None = None, stress_twin: bool = True,
+              _fault_hang: float = 0.0, _raw: bool = False) -> dict:
+    """Run the jobs and return the output document (the module docstring). What each result carries
+    is `results.view(result, window)`: a validation run returns the validation view only (no trade,
+    date or daily series) with its 1.5x-stress twin's figures as `stress_1.5`, and takes no date cut."""
     from . import results as R
     from .runtime import CodeRefused, load_program
     from .store import Store, mint_gate_capability
 
+    if window == "validation" and (start or end):
+        raise ValueError("a validation run is the whole window: no start or end cut")
     began = time.time()
     gate = mint_gate_capability(store_root, gate_reason) if gate_reason else None
     store = Store(store_root, gate=gate)
@@ -147,43 +217,46 @@ def run_batch(jobs: Sequence[tuple[str, str, dict]], *, store_root: str, window:
     segments = _segments(days, split) if days else [(start, end)]
     cfg_kw = {"window": window, "roots": roots, "stress": float(stress), "capital": float(capital), "fill_model_path": fill_model_path}
     per_segment = max(1, math.ceil(max(1, workers) / len(segments)))
-    units = [(store_root, gate_reason, dict(cfg_kw), s, seg, chunk, detail)
+    units = [(store_root, gate_reason, dict(cfg_kw), s, seg, chunk, detail, _fault_hang)
              for s, seg in enumerate(segments) for chunk in _chunks(valid, per_segment) if chunk]
     parts: dict[int, dict[int, dict]] = {}
     produced: list[tuple[int, int, dict]] = []
-    if workers <= 1 or len(units) <= 1:
-        for unit in units:
+    if (workers <= 1 or len(units) <= 1) and not unit_timeout and not _fault_hang:
+        for unit in units:  # in this process: no hard kill (the CLI's default is a worker per core)
             try:
                 produced += _unit(unit)
             except Exception as exc:  # the engine itself failed on this unit: say so, keep the rest
                 produced += _failed(unit, f"{type(exc).__name__}: {exc}")
     else:
-        from concurrent.futures import ProcessPoolExecutor
-
-        methods = multiprocessing.get_all_start_methods()
-        ctx = multiprocessing.get_context("forkserver" if "forkserver" in methods else "spawn")
-        with ProcessPoolExecutor(max_workers=min(workers, len(units)), mp_context=ctx) as pool:
-            futures = [(unit, pool.submit(_unit, unit)) for unit in units]
-            for unit, future in futures:
-                try:
-                    produced += future.result()
-                except Exception as exc:  # a worker died (BrokenProcessPool) or the engine failed
-                    produced += _failed(unit, f"{type(exc).__name__}: {exc}")
+        produced = _run_units(units, workers, unit_timeout)
     for job_index, seg_index, result in produced:
         parts.setdefault(job_index, {})[seg_index] = result
+    twin: dict[int, dict] = {}
+    if window == "validation" and stress_twin and float(stress) == 1.0 and valid:
+        stressed = run_batch([jobs[i] for i, _ in valid], store_root=store_root, window=window, roots=roots, workers=workers,
+                             split=split, stress=1.5, capital=capital, fill_model_path=fill_model_path, gate_reason=gate_reason,
+                             detail="full", unit_timeout=unit_timeout, stress_twin=False, _raw=True)
+        twin = {i: r for (i, _), r in zip(valid, stressed["results"])}
     for job_index, by_segment in parts.items():
         pieces = [by_segment[s] for s in sorted(by_segment)]
         broken = [p for p in pieces if p.get("status") == "error"]
-        out[job_index] = broken[0] if broken else _trim(R.merge(pieces), detail)
+        result = broken[0] if broken else R.merge(pieces)
+        if job_index in twin and twin[job_index]:
+            result["stress_1.5"] = R.stress_block(twin[job_index])
+        if _raw:
+            out[job_index] = result
+        elif window == "train":
+            out[job_index] = _trim(result, detail)
+        else:
+            out[job_index] = R.view(result, window)
     finished = [r for r in out if r is not None]
-    program_years = sum(len(r.get("daily") or []) / 252.0 * max(1, len(r.get("roots") or [])) for r in finished
-                        if r.get("status") != "refused") if detail == "full" else \
-        sum((r.get("summary") or {}).get("days", 0) / 252.0 * max(1, len(r.get("roots") or [])) for r in finished
-            if r.get("status") != "refused")
+    program_years = sum((r.get("summary") or {}).get("days", 0) / 252.0 * max(1, len(r.get("roots") or [])) for r in finished
+                        if r.get("status") not in ("refused", "error"))
     seconds = time.time() - began
+    dated = {} if window == "validation" else {"first_day": days[0].isoformat() if days else None,
+                                               "last_day": days[-1].isoformat() if days else None}
     return {"batch": {"engine": ENGINE_VERSION, "store": str(store_root), "window": window, "roots": list(roots),
-                      "days": len(days), "first_day": days[0].isoformat() if days else None,
-                      "last_day": days[-1].isoformat() if days else None, "workers": workers, "split": split,
+                      "days": len(days), **dated, "workers": workers, "split": split,
                       "stress": stress, "capital": capital, "programs": len(jobs),
                       "trials": sum(r.get("trials", 0) for r in finished), "program_years": round(program_years, 3),
                       "seconds": round(seconds, 2),
@@ -214,6 +287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fill-model")
     parser.add_argument("--detail", choices=("full", "summary"), default="full")
     parser.add_argument("--gate", help="the gate's reason for opening sealed days (the store must carry its mark)")
+    parser.add_argument("--unit-timeout", type=float, default=None, help="seconds before a worker's unit is killed")
     parser.add_argument("--check", action="store_true", help="only report what the store holds")
     args = parser.parse_args(argv)
     roots = [r.strip().upper() for r in args.roots.split(",") if r.strip()]
@@ -240,10 +314,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return EXIT_MISSING
         doc = run_batch(jobs, store_root=args.store, window=args.window, roots=roots, workers=args.workers, split=args.split,
                         stress=args.stress, capital=args.capital, start=_date(args.start), end=_date(args.end),
-                        fill_model_path=args.fill_model, gate_reason=args.gate, detail=args.detail)
+                        fill_model_path=args.fill_model, gate_reason=args.gate, detail=args.detail,
+                        unit_timeout=args.unit_timeout)
     except StoreRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return EXIT_SEALED
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     except MissingData as exc:
         print(f"the box is missing data: {exc}", file=sys.stderr)
         return EXIT_MISSING

@@ -76,8 +76,11 @@ class Writer:
             "ask_size": pa.array(np.asarray(ask_size, dtype=np.int32)[order])})
         self._record("nbbo", root, day, _write(table, self.root / "nbbo" / root / f"{day.isoformat()}.parquet"))
 
-    def underlying(self, root: str, day: dt.date, minute: Any, price: Any) -> None:
-        table = pa.table({"minute": pa.array(np.asarray(minute).astype(np.int16)), "price": pa.array(np.asarray(price, dtype=np.float64))})
+    def underlying(self, root: str, day: dt.date, minute: Any, price: Any, *, extra: Mapping[str, Any] | None = None) -> None:
+        columns = {"minute": pa.array(np.asarray(minute).astype(np.int16)), "price": pa.array(np.asarray(price, dtype=np.float64))}
+        for name, values in (extra or {}).items():
+            columns[name] = pa.array(np.asarray(values, dtype=np.float64))
+        table = pa.table(columns)
         self._record("underlying", root, day, _write(table, self.root / "underlying" / root / f"{day.isoformat()}.parquet"))
 
     def oi(self, root: str, day: dt.date, *, expiration: Sequence[dt.date], strike: Any, right: Sequence[str], open_interest: Any) -> None:
@@ -122,11 +125,12 @@ def weekdays(start: dt.date, count: int, skip: Iterable[dt.date] = ()) -> list[d
 
 
 def flat_day(writer: Writer, root: str, day: dt.date, contracts: Sequence[Mapping[str, Any]], *, prices: Any,
-             open_min: int = 570, close_min: int = 960, size: int = 100) -> None:
+             open_min: int = 570, close_min: int = 960, size: int = 100, extra: Mapping[str, Any] | None = None) -> None:
     """A hand-set day: each contract {"expiration", "strike", "right", "quotes"[, "size"]} where quotes
-    maps a minute to (bid, ask[, size]) and holds until the next listed minute (a minute before the
-    first listed one has no row; a (None, None) entry ends the rows); `prices` is one price for the
-    whole day, or a {minute: price} step function."""
+    maps a minute to (bid, ask[, size[, ask_size]]) and holds until the next listed minute (a minute
+    before the first listed one has no row; a (None, None) entry ends the rows); `prices` is one price
+    for the whole day, or a {minute: price} step function; `extra` adds underlying columns (a
+    recorded `settle`, say)."""
     minutes = np.arange(open_min, close_min + 1)
     exp, strike, right, minute, bid, ask, sizes = [], [], [], [], [], [], []
     for c in contracts:
@@ -144,14 +148,16 @@ def flat_day(writer: Writer, root: str, day: dt.date, contracts: Sequence[Mappin
             minute.append(int(m))
             bid.append(float(current[0]))
             ask.append(float(current[1]))
-            sizes.append(int(current[2]) if len(current) > 2 else int(c.get("size", size)))
-    writer.nbbo(root, day, expiration=exp, strike=strike, right=right, minute=minute, bid=bid, ask=ask, bid_size=sizes, ask_size=sizes)
+            both = int(current[2]) if len(current) > 2 else int(c.get("size", size))
+            sizes.append((both, int(current[3]) if len(current) > 3 else both))
+    writer.nbbo(root, day, expiration=exp, strike=strike, right=right, minute=minute, bid=bid, ask=ask,
+                bid_size=[b for b, _ in sizes], ask_size=[a for _, a in sizes])
     if isinstance(prices, Mapping):
         steps = sorted((int(m), float(p)) for m, p in prices.items())
         series = [next((p for s, p in reversed(steps) if s <= m), steps[0][1]) for m in minutes]
     else:
         series = [float(prices)] * len(minutes)
-    writer.underlying(root, day, minutes, series)
+    writer.underlying(root, day, minutes, series, extra={k: [float(v)] * len(minutes) for k, v in (extra or {}).items()})
 
 
 def generate(root_dir: str | Path, *, roots: Sequence[str] = ("SPY",), days: Sequence[dt.date], seed: int = 7,
