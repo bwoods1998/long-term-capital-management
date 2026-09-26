@@ -341,6 +341,78 @@ class TheMinute(ObserveCase):
         db.close()
 
 
+class SecondRead(ObserveCase):
+    """The review of #390: the observe band's reads come later in the minute and never rewrite what the real phase
+    recorded, never outlast the minute's time, and never lose a remade account's trades."""
+
+    def test_a_later_read_of_the_minute_fills_only_empty_cells(self):
+        from league.live.chains import LiveChain
+        from league.tests.live_fakes import iso
+
+        chain = LiveChain("SPY", MONDAY, 570, 960)
+        t = at(MONDAY, 9, 45)
+        row = lambda bid, ask: {"latestQuote": {"bp": bid, "ap": ask, "bs": 10, "as": 10, "t": iso(t)}}  # noqa: E731
+        first, other = "SPY260929C00600000", "SPY260929C00601000"
+        chain.record(15, {first: row(1.00, 1.02)}, open_epoch=at(MONDAY, 9, 30, 0))
+        chain.record(15, {first: row(1.50, 1.52), other: row(0.60, 0.62)}, open_epoch=at(MONDAY, 9, 30, 0), only_empty=True)
+        i, j = chain.column(first), chain.column(other)
+        self.assertEqual((chain.bid[15, i], chain.ask[15, i]), (1.00, 1.02), "the real phase's quote stands")
+        self.assertEqual((chain.bid[15, j], chain.ask[15, j]), (0.60, 0.62), "an empty cell is filled")
+        chain.record(16, {first: row(1.50, 1.52)}, open_epoch=at(MONDAY, 9, 30, 0))
+        self.assertEqual(chain.bid[16, i], 1.50, "a new minute is written as ever")
+
+    def test_observe_reads_have_a_short_timeout_and_stop_when_the_minutes_time_is_spent(self):
+        qqq = VERTICAL.replace('"SPY"', '"QQQ"')
+        live = self.make([], observed=[observed("obs", code=qqq)])
+        self.run_to(9, 33)
+        self.assertEqual({t for r, t in self.market.chain_timeouts if r == "QQQ"}, {5.0})
+        live._decision_budget = lambda: 2.0                              # a slow minute: under the ten-second floor
+        del self.market.chain_timeouts[:]
+        out = self.run_to(9, 34)
+        self.assertNotIn("QQQ", [r for r, _ in self.market.chain_timeouts])
+        self.assertGreaterEqual(out.get("observe_reads_skipped", 0), 1)
+
+    def test_a_remade_account_keeps_its_trades_apart(self):
+        from league.live.observe import ObserveStore
+        import sqlite3
+
+        store = ObserveStore(self.root)
+        trade = {"id": 1, "day": "2026-09-28", "pnl": 3.0, "max_loss": 50.0}
+        self.assertTrue(store.add("obs@1:o", "obs", 1, [trade], account="first"))
+        self.assertTrue(store.add("obs@1:o", "obs", 1, [trade], account="first"), "the same trade again: once")
+        self.assertTrue(store.add("obs@1:o", "obs", 1, [dict(trade, pnl=-2.0)], account="remade"))
+        store.close()
+        db = sqlite3.connect(self.root / "observe.sqlite")
+        self.assertEqual(db.execute("SELECT account, pnl FROM trades ORDER BY seq").fetchall(), [("first", 3.0), ("remade", -2.0)])
+        db.close()
+        from league.live.shadow import ShadowAccount, needs_of
+
+        needs = needs_of({"roots": ["SPY"], "dte": [0, 3], "band": 0.03, "cadence": 1, "history": 0, "start": 571, "end": 958})
+        a, b = (ShadowAccount(instance="obs@1:o", family="obs", needs=needs, params={}, capital=10000.0) for _ in range(2))
+        self.assertNotEqual(a.nonce, b.nonce)
+        self.assertEqual(ShadowAccount.from_state(a.to_state()).nonce, a.nonce, "kept across a restart")
+
+    def test_a_spent_budget_is_counted_never_alerted(self):
+        from league.live.decider import BudgetSpent
+
+        main, other = InlineDecider(), InlineDecider()
+
+        def spent(*args, **kwargs):
+            raise BudgetSpent("the decider's minute budget is exhausted")
+
+        other.decide = spent
+        self.families = MemoryFamilies([], [observed("obs")])
+        self.live = OptionsLive(self.root, market=self.market, real=self.venue, paper=self.paper, families=self.families,
+                                grant=self.grant, kill_switch=lambda: self.killed, decider=main, observe_decider=other,
+                                config={"require_paper_proof": False}, real_money=False,
+                                performance={"start_at": "2026-09-26T06:25:30.000Z", "start_equity": "481.65"},
+                                clock=self.clock, record=self.ledger, alert=lambda lvl, text: self.alerts.append((lvl, text)),
+                                notify=self.notices.append)
+        self.run_to(9, 40)
+        self.assertFalse([t for _, t in self.alerts if "budget" in t])
+        self.assertGreater(self.live.health()["budget_spent"]["observe_decider"], 3)
+
+
 class Switches(ObserveCase):
     def test_a_malformed_swarm_json_switches_observe_and_calibration_off_and_says_so_once(self):
         (self.root / "swarm.json").write_text("{\"live\": {\"calibration\": true,")      # cut short

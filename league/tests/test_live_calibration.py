@@ -249,7 +249,9 @@ class TheReview(CalibrationCase):
         self.assertFalse([b for b in self.mine() if b["legs"][0]["symbol"].startswith("SPY")], "SPY left to the family")
         self.assertTrue([b for b in self.mine() if b["legs"][0]["symbol"].startswith("QQQ")], "QQQ goes instead")
 
-    def test_it_is_never_profit_and_its_net_is_a_cost(self):
+    def test_it_is_never_profit_and_never_a_compute_line(self):
+        # The review of #390: the site's figure after compute is the equity's change less compute, and equity already
+        # carries the calibration's result, so publishing it as compute too would count it twice.
         from league import trading_profit
 
         self.assertEqual(trading_profit.CALIBRATION_FAMILY, C.FAMILY)
@@ -260,12 +262,22 @@ class TheReview(CalibrationCase):
         self.assertNotEqual(trade["pnl"], 0)
         at = "2026-09-28T14:05:00.000Z"
         self.assertEqual(trading_profit.snapshot(self.root, live, at=at)["pnl_usd"], "0.00", "no family traded")
-        cost = live.site_inputs()["compute"]["other_usd"]
-        self.assertEqual(D(cost), max(D(0), -D(str(trade["pnl"]))).quantize(D("0.01")))
-        rows = [{"family": C.FAMILY, "status": "closed", "cash": "12.50"}, {"family": C.FAMILY, "status": "closed", "cash": "-20"}]
-        self.assertEqual(trading_profit.calibration_cost(rows), "7.50")
-        self.assertEqual(trading_profit.calibration_cost(rows[:1]), "0.00", "a gain costs nothing and is not Profit")
-        self.assertIsNone(trading_profit.calibration_cost([]))
+        self.assertNotIn("compute", live.site_inputs())
+
+    def test_it_requotes_its_contracts_just_before_it_sends(self):
+        # The review of #390 (lens 2): it sends after the minute's decider batch, so it prices from a fresh read of its
+        # two contracts, never from the minute-start snapshot alone.
+        self.venue.fill = "limit"
+        live = self.start(real_money=True)
+        self.run_to(9, 59)
+        reads = len(self.market.contract_reads)
+        self.run_to(10, 0)
+        opened = self.mine()[0]
+        symbols = sorted(leg["symbol"] for leg in opened["legs"])
+        self.assertIn(symbols, self.market.contract_reads[reads:])
+        for row in self.samples():
+            self.assertEqual(json.loads(row["quote"])["source"], "requote", row["cell"])
+        del live
 
 
 class Limits(CalibrationCase):

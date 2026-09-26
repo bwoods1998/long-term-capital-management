@@ -277,18 +277,28 @@ class MarketData:
         self.calls = 0
         self.minute_calls = Rate(100000)
 
-    def _get(self, path: str, params: Mapping[str, Any], what: str) -> Any:
+    def _get(self, path: str, params: Mapping[str, Any], what: str, *, timeout: float | None = None) -> Any:
         query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         self.calls += 1
         self.minute_calls.take(force=True)
-        status, payload = self.client.request("GET", f"{DATA_BASE}{path}?{query}", what=what)
+        # A shorter timeout for this request only (the observe band's reads): the client's own is restored after it.
+        old = getattr(self.client, "timeout", None)
+        shorter = timeout is not None and isinstance(old, (int, float)) and timeout < old
+        if shorter:
+            self.client.timeout = float(timeout)
+        try:
+            status, payload = self.client.request("GET", f"{DATA_BASE}{path}?{query}", what=what)
+        finally:
+            if shorter:
+                self.client.timeout = old
         if not 200 <= status < 300:
             message = payload.get("message") if isinstance(payload, dict) else payload
             raise VenueError(f"market data {what}: HTTP {status} {str(message or '')[:200]}")
         return payload
 
     def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from: float | None = None,
-              strike_to: float | None = None, max_pages: int = MAX_PAGES) -> dict[str, dict[str, Any]]:
+              strike_to: float | None = None, max_pages: int = MAX_PAGES,
+              timeout: float | None = None) -> dict[str, dict[str, Any]]:
         """Every contract of `underlying` in the window: {OCC: snapshot row}, all pages (VenueError past `max_pages`:
         nothing of a partial chain is returned)."""
         out: dict[str, dict[str, Any]] = {}
@@ -298,7 +308,8 @@ class MarketData:
             page = self._get(f"/v1beta1/options/snapshots/{urllib.parse.quote(underlying.upper(), safe='')}", {
                 "feed": self.option_feed, "limit": 1000, "expiration_date_gte": expiry_from, "expiration_date_lte": expiry_to,
                 "strike_price_gte": None if strike_from is None else f"{strike_from:.3f}",
-                "strike_price_lte": None if strike_to is None else f"{strike_to:.3f}", "page_token": token}, f"chain {underlying}")
+                "strike_price_lte": None if strike_to is None else f"{strike_to:.3f}", "page_token": token}, f"chain {underlying}",
+                timeout=timeout)
             if not isinstance(page, dict) or not isinstance(page.get("snapshots") or {}, dict):
                 raise VenueError(f"chain {underlying}: no snapshots map")
             out.update(page.get("snapshots") or {})
@@ -307,13 +318,13 @@ class MarketData:
                 return out
         raise VenueError(f"chain {underlying}: more than {pages} pages")
 
-    def contracts(self, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
+    def contracts(self, symbols: Iterable[str], *, timeout: float | None = None) -> dict[str, dict[str, Any]]:
         """Snapshots of named contracts (100 a request)."""
         names = sorted({str(s).upper() for s in symbols if s})
         out: dict[str, dict[str, Any]] = {}
         for i in range(0, len(names), 100):
             page = self._get("/v1beta1/options/snapshots", {"symbols": ",".join(names[i:i + 100]), "feed": self.option_feed},
-                             "contracts")
+                             "contracts", timeout=timeout)
             out.update((page or {}).get("snapshots") or {})
         return out
 

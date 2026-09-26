@@ -6,8 +6,9 @@ Every historical position is counted, even after its family leaves the public ro
 Missing marks or unresolved inventory produce an unknown result, never an invented zero.
 
 The D3 calibration round trips (`league/live/calibration.py`, family `house:calibration`) are the House's own
-measurement, not trading: their positions and their pending orders are left out of Profit here, and their realized net
-is published as a cost instead (`OptionsLive.site_inputs` -> `compute.other_usd`), so it still counts against Net.
+measurement, not trading: their positions and their pending orders are left out of Profit here. They are not published
+as a cost either: the site's figure after compute is the account's equity change less compute, and equity already
+carries their result.
 """
 from __future__ import annotations
 
@@ -80,21 +81,6 @@ def marked_value(row: Mapping[str, Any], day: Any) -> tuple[Decimal, str] | None
     mark_at = (dt.datetime.combine(chain.day, dt.time(), tzinfo=ZoneInfo('America/New_York'))
                + dt.timedelta(minutes=chain.open_min + minute)).astimezone(dt.timezone.utc)
     return mark * int(row['qty']) * 100, mark_at.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
-
-def calibration_cost(rows: Sequence[Mapping[str, Any]]) -> str | None:
-    """The calibration round trips' realized net as a cost (dollars, never negative: a gain costs nothing and is not
-    Profit), from their CLOSED positions' cash (fees included). None when there is none."""
-    closed = [row for row in rows if row.get('family') == CALIBRATION_FAMILY and row.get('status') == 'closed']
-    if not closed:
-        return None
-    try:
-        net = sum((Decimal(str(row['cash'])) for row in closed), Decimal(0))
-    except (InvalidOperation, ValueError, TypeError, KeyError):
-        return None
-    if not net.is_finite():
-        return None
-    return format(max(Decimal(0), -net).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), '.2f')
 
 
 def snapshot(root: str | Path, live: Any, *, at: str, never_traded: bool = False) -> dict[str, Any]:

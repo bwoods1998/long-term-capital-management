@@ -63,7 +63,7 @@ from ..gym.ctx import order_row, position_row
 from . import money as M
 from .calibration import FAMILY as CALIBRATION_FAMILY, Calibration
 from .chains import LiveDay, from_ordinal, ordinal, session_minutes, trading_days_around, uses_parity
-from .decider import DeciderError, ProgramRefused, MAX_BATCH_SECONDS
+from .decider import BudgetSpent, DeciderError, ProgramRefused, MAX_BATCH_SECONDS
 from .families import MemoryFamilies
 from .observe import ObserveStore
 from .paper import PaperProof
@@ -97,6 +97,7 @@ DEFAULTS = {
     # this many, each root at most this many pages (a root over it is skipped this minute; nothing read is dropped).
     "observe_read_calls": 40,
     "observe_read_pages": 3,
+    "observe_read_timeout_seconds": 5.0,   # each observe read's own timeout (a slow API never holds the minute)
     # Observe programs loaded a minute, after the real batch, only while this much of the minute's budget remains.
     "observe_loads_minute": 16,
     "observe_load_floor_seconds": 10.0,
@@ -172,6 +173,8 @@ class OptionsLive:
         self._switches: dict[str, Any] | None = None
         self._switches_told = False
         self.observe_store = ObserveStore(self.root, alert=self.alert, clock=clock)
+        #: Decider batches skipped because the minute's budget was spent, by child ("decider", "observe_decider").
+        self.budget_spent: dict[str, int] = {}
         self.state = LiveState(self.root / STATE_FILE, clock=clock)
         self.shadow = ShadowBook(self.root / SHADOW_FILE, fill_model=fill_model or F.FillModel.load())
         self.book = RealBook(self.state, real, self.table, clock=clock, record=self.record) if real is not None else None
@@ -902,11 +905,13 @@ class OptionsLive:
         held = self._held_symbols(phase)
         changed = recorded = False
         levels = dict(self.state.get("levels", {}) or {})
-        pages = {"max_pages": int(self.settings["observe_read_pages"])} if observe else {}
+        pages = ({"max_pages": int(self.settings["observe_read_pages"]),
+                  "timeout": float(self.settings["observe_read_timeout_seconds"])} if observe else {})
         for root, (lo, hi, band) in roots.items():
-            if observe and self.market.minute_calls.used() >= int(self.settings["observe_read_calls"]):
+            if observe and (self.market.minute_calls.used() >= int(self.settings["observe_read_calls"])
+                            or self._decision_budget() < float(self.settings["observe_load_floor_seconds"])):
                 out["observe_reads_skipped"] = out.get("observe_reads_skipped", 0) + 1
-                continue  # the minute's data budget is spent: the observe band reads this root next minute
+                continue  # the minute's data or time budget is spent: the observe band reads this root next minute
             chain = day.chain(root)
             if root in priced:
                 spot = float(chain.underlying.price[mi])
@@ -926,11 +931,13 @@ class OptionsLive:
                                              expiry_to=(day.day + dt.timedelta(days=min(hi, lo + 1))).isoformat(), **pages)
                 extra = [s for s in held.get(root, ()) if s not in rows]
                 if extra:
-                    rows.update(self.market.contracts(extra))
+                    rows.update(self.market.contracts(extra, **({"timeout": pages["timeout"]} if observe else {})))
             except Exception as exc:  # noqa: BLE001 - this root has no snapshot this minute
                 out.setdefault("data_errors", []).append(f"{root}: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
-            changed |= chain.record(mi, rows, open_epoch=open_epoch)
+            # The observe phase adds contracts and fills cells still empty this minute; it never overwrites a quote the
+            # real phase recorded (the Candidates' shadow books, forward evidence, step on the minute's own quotes).
+            changed |= chain.record(mi, rows, open_epoch=open_epoch, only_empty=observe)
             recorded = True
             if root not in priced:
                 level = chain.parity(mi, spot) if uses_parity(root) else spot
@@ -1174,6 +1181,11 @@ class OptionsLive:
         try:
             jobs.sort(key=lambda job: self.instances[job["key"]].kind != "real")
             return decider.decide(snaps, unders, jobs, budget_seconds=self._decision_budget())
+        except BudgetSpent:
+            # The minute's budget was spent before the batch went (nothing sent, the child kept): counted, never alerted.
+            out[label] = "the minute's budget was spent: this batch waits for the next minute"
+            self.budget_spent[label] = self.budget_spent.get(label, 0) + 1
+            return {}
         except DeciderError as exc:
             out[label] = str(exc)[:200]
             self.alert("warning", f"live: {'the observe band: ' if label != 'decider' else ''}{exc}")
@@ -1985,7 +1997,8 @@ class OptionsLive:
         if _is_observe(acc.instance):
             # Never a forward row: the private post-mortem store only (`league/live/observe.py`). Offered again next
             # minute if it cannot be written.
-            if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), trades):
+            if not self.observe_store.add(acc.instance, acc.family, _version_of(acc.instance), trades,
+                                          account=getattr(acc, "nonce", "")):
                 acc.exported -= len(trades)
             return
         version = _version_of(acc.instance)
@@ -2157,17 +2170,9 @@ class OptionsLive:
                              "expiry": from_ordinal(int(pos.expirations.min())).isoformat(), "quantity": pos.qty, "real": False,
                              "opened_at": None, "max_loss_usd": round(pos.max_loss_share * V.MULTIPLIER * pos.qty, 2),
                              "pnl_usd": round((mark - pos.entry) * V.MULTIPLIER * pos.qty, 2) if math.isfinite(mark) else None})
-        out: dict[str, Any] = {"structures": rows}
-        if self.book is not None:
-            # The calibration round trips are never Profit (`league/trading_profit.py`): their realized net is a cost,
-            # the schema's `compute.other_usd` (the House adds it to the other steps' part by part).
-            from ..trading_profit import calibration_cost
-
-            cost = calibration_cost(self.state.rows("SELECT family, status, cash FROM positions WHERE family=?",
-                                                    (CALIBRATION_FAMILY,)))
-            if cost is not None:
-                out["compute"] = {"other_usd": cost}
-        return out
+        # The calibration round trips are never Profit (`league/trading_profit.py`) and never a compute line either: the
+        # site's figure after compute is the equity's change less compute, and equity already carries their result.
+        return {"structures": rows}
 
     def health(self) -> dict:
         with self._lock:
@@ -2186,6 +2191,7 @@ class OptionsLive:
                 # Read from the House's thread: the live state (its own lock) and the last minute's switches only; the
                 # calibration's samples file belongs to the minute thread (`python -m league.live --calibration` reads it).
                 "observe": {"switches": dict(self._switches or {}), "pins": self.state.get("observe_pins")},
+                "budget_spent": dict(self.budget_spent),
                 "calibration": self.calibration.status() if self.calibration is not None else None}
 
 

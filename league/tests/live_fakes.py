@@ -51,6 +51,8 @@ class Market:
         self.expiries, self.width = tuple(expiries), width
         self.calls = 0
         self.chain_reads: list[tuple[str, Any]] = []   # (root, max_pages) of every chain read, in order
+        self.chain_timeouts: list[tuple[str, Any]] = []  # (root, timeout) of every chain read
+        self.contract_reads: list[list[str]] = []       # the symbols of every named-contract read
         self.minute_calls = Rate(100000)
         self.dead: set[str] = set()      # roots whose chain read fails
         self.overrides: dict[str, tuple[float, float, int, int]] = {}
@@ -92,9 +94,10 @@ class Market:
         return float(q["bp"]), float(q["ap"])
 
     def chain(self, underlying: str, *, expiry_from: str, expiry_to: str, strike_from=None, strike_to=None,
-              max_pages=None) -> dict:
+              max_pages=None, timeout=None) -> dict:
         self.calls += 1
         self.chain_reads.append((underlying, max_pages))
+        self.chain_timeouts.append((underlying, timeout))
         self.minute_calls.take(force=True)
         if underlying in self.dead:
             raise RuntimeError("market data HTTP 500")
@@ -110,8 +113,10 @@ class Market:
             out[sym] = row
         return out
 
-    def contracts(self, symbols: Iterable[str]) -> dict:
+    def contracts(self, symbols: Iterable[str], timeout=None) -> dict:
         self.calls += 1
+        symbols = list(symbols)
+        self.contract_reads.append(sorted(symbols))
         out = {}
         for sym in symbols:
             rows = self.rows(occ_parts(sym)[0])

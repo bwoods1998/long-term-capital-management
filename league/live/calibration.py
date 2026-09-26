@@ -39,8 +39,8 @@ orders of the minute, so it takes only what they left):
 
 NEVER EVIDENCE, NEVER PROFIT: the orders and positions belong to `FAMILY` ("house:calibration", never a swarm family's
 slug), whose closed trades never reach a forward record (`OptionsLive._export_real`), whose structures the site never
-shows, which Profit leaves out (`league/trading_profit.py`; their realized net is published as a cost,
-`compute.other_usd`), and whose positions the House takes for an orphan's only in the session's last minutes.
+shows, which Profit leaves out (`league/trading_profit.py`; the equity-based figure after compute carries their result
+already), and whose positions the House takes for an orphan's only in the session's last minutes.
 
 RECORDS (`Recorder`, `<state>/calibration.sqlite`, mode 0600): one row per attempt (per order), written in one transaction
 when it is sent and completed in one when it ends: the order and client order ids; the symbol, legs, cell (symbol x
@@ -60,6 +60,7 @@ import math
 import os
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
 from ..gym import legs as L
@@ -474,13 +475,32 @@ class Calibration:
                  for leg, k in zip(legs, idx)]
         return snap, fills
 
-    def _quote(self, snap: Any, fills: Sequence[L.LegFill], legs: Sequence[RLeg], action: str, minute: int) -> dict:
-        natural, _ = L.natural_value(snap, fills, action)
-        mid = L.mid_value(snap, fills)
-        return {"legs": [{"symbol": leg.symbol, "side": leg.side, "bid": _num(snap.bid[f.idx]), "ask": _num(snap.ask[f.idx]),
-                          "bid_size": _int(snap.bid_size[f.idx]), "ask_size": _int(snap.ask_size[f.idx])}
-                         for leg, f in zip(legs, fills)],
-                "mid": _num(mid), "natural": _num(natural), "spot": _num(snap.spot), "minute": int(minute)}
+    def _quote(self, snap: Any, legs: Sequence[RLeg], action: str, minute: int) -> dict | None:
+        """The two contracts' NBBO read afresh just before the order goes (it goes after the minute's decider batch, so
+        the minute-start snapshot may be stale), the structure's mid and natural from it; None when the read fails or a
+        leg has no two-sided quote (nothing is sent this minute)."""
+        from .venue import quote_of
+
+        try:
+            rows = self.live.market.contracts([leg.symbol for leg in legs])
+        except Exception:  # noqa: BLE001 - no fresh quote, no order this minute
+            return None
+        out, natural, mid = [], 0.0, 0.0
+        opening = action == "open"
+        for leg in legs:
+            row = rows.get(leg.symbol) if isinstance(rows, Mapping) else None
+            if not isinstance(row, Mapping):
+                return None
+            bid, ask, bid_size, ask_size, stamp = quote_of(row)
+            if not (math.isfinite(bid) and math.isfinite(ask) and ask > 0 and 0 <= bid <= ask):
+                return None
+            buying = (leg.side > 0) == opening
+            natural += leg.side * leg.ratio * (ask if buying else bid)
+            mid += leg.side * leg.ratio * 0.5 * (bid + ask)
+            out.append({"symbol": leg.symbol, "side": leg.side, "bid": bid, "ask": ask, "bid_size": _int(bid_size),
+                        "ask_size": _int(ask_size), "quote_at": stamp})
+        return {"legs": out, "mid": round(mid, 6), "natural": round(natural, 6), "spot": _num(snap.spot),
+                "minute": int(minute), "source": "requote"}
 
     def _send_open(self, day: Any, mi: int, symbol: str, legs: list[RLeg], offset: str, trip: str, out: dict) -> ROrder | str:
         live, book, table = self.live, self.live.book, self.live.table
@@ -489,15 +509,17 @@ class Calibration:
         if got is None:
             return "its contracts are not in this minute's chain"
         snap, fills = got
-        quote = self._quote(snap, fills, legs, "open", day.open_min + mi)
+        quote = self._quote(snap, legs, "open", day.open_min + mi)
+        if quote is None:
+            return "no fresh two-sided quote on both legs"
         natural, mid = quote["natural"], quote["mid"]
-        if natural is None or mid is None or not (natural > 0 and mid > 0):
+        if not (natural > 0 and mid > 0):
             return "no two-sided quote on both legs"
         rule, _ = OPEN_OFFSETS[offset]
         limit = L.limit_value(rule, "open", natural, mid, TICK)
         if not 0 < limit < WIDTH - 1e-9:
             return f"a debit of {limit:.2f} on a vertical {WIDTH:.0f} wide can never pay"
-        prices = [float(snap.ask[f.idx]) if f.side > 0 else float(snap.bid[f.idx]) for f in fills]
+        prices = [row["ask"] if row["side"] > 0 else row["bid"] for row in quote["legs"]]
         fees = L.order_fees(symbol, fills, prices, 1, "open")
         max_loss = round(limit * V.MULTIPLIER, 2)
         unit = M.D(round(max_loss + 2 * fees, 2))
@@ -574,18 +596,19 @@ class Calibration:
         if got is None:
             return
         snap, fills = got
-        quote = self._quote(snap, fills, pos.legs, "close", day.open_min + mi)
-        if quote["natural"] is None or quote["mid"] is None:
-            return
+        quote = self._quote(snap, pos.legs, "close", day.open_min + mi)
+        if quote is None:
+            return                                          # no fresh quote: tried again next minute
         if offset == "natural" and quote["natural"] <= TICK + 1e-9:
             return  # nothing bids for it: a natural of a tick or less cannot fill (it is left to expire, or the backstop)
         rule, _ = CLOSE_OFFSETS[offset]
         try:
-            order = L.resolve_close({"close": pos.pid, "limit": rule}, pos.type, fills, pos.qty, snap, day.rules[pos.root],
-                                    position=pos.pid)
+            limit = L.limit_value(rule, "close", quote["natural"], quote["mid"], TICK)
         except L.Refused as exc:
             live.record("live.calibration", {"pid": pos.pid, "action": "close", "offset": offset, "held": str(exc)[:200]})
             return
+        prices = [row["bid"] if row["side"] > 0 else row["ask"] for row in quote["legs"]]
+        order = SimpleNamespace(qty=pos.qty, limit=limit, fees=L.order_fees(pos.root, fills, prices, pos.qty, "close"))
         value = max(TICK, round(order.limit, 2))            # a debit structure is never given away for nothing
         # Charged to the day's order budget like a program's close; only the true last resort (the session's last
         # minutes, or the House's own expiry close) may use the room kept for the House's exits.

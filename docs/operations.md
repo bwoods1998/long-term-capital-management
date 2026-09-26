@@ -379,7 +379,7 @@ round trip at a time, within a strict $50 bound on the day's possible loss: a ne
 today's realized calibration loss (net, floored at zero) plus what is still held or working plus its own
 maximum loss stays within $50; a closed round trip frees its maximum loss. Only with real money on, the
 grant active, real entries open and the paper proof passed; family
-`house:calibration`, never evidence and never Profit (its net is a cost, `compute.other_usd`). Samples:
+`house:calibration`, never evidence and never Profit (the equity-based figure after compute carries it). Samples:
 `/workspace/state/calibration.sqlite` (0600), read with
 `python3 -m league.live --root /workspace/state --calibration` (per cell: attempts, outcomes, fill rate,
 mean fill against the mid in ticks, median seconds to fill). Off by default: `swarm.json`

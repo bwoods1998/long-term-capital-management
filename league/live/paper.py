@@ -33,7 +33,7 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
-from .real import RLeg, limit_price, structure_fill, ROrder
+from .real import RLeg, limit_price, single_body, structure_fill, ROrder
 from .state import LiveState
 from .venue import TERMINAL, Account
 
@@ -216,7 +216,7 @@ class PaperProof:
                 row["why"] = "the proof's call has no bid to sell it at"
                 self._put(row)
                 return row
-            body.update(symbol=symbols[0], qty="1", side="sell", position_intent="sell_to_close", limit_price=f"{bid:.2f}")
+            body = _single(symbols[0], "close", bid, cid)
         elif cleanup:
             symbol, qty = remaining[0]
             price = float(snap.ask[idx[0]] if qty < 0 else snap.bid[idx[0]])
@@ -283,8 +283,7 @@ class PaperProof:
                        attempt=f"{prefix}-{day.replace('-', '')}-{self.state.nonce}-{row['tries']}",
                        open_witness=False, close_witness=False)
             if self.kind == "single":
-                body = {"symbol": symbols[0], "qty": "1", "side": "buy", "type": "limit", "limit_price": f"{natural:.2f}",
-                        "time_in_force": "day", "position_intent": "buy_to_open", "client_order_id": row["attempt"] + "-o"}
+                body = _single(symbols[0], "open", natural, row["attempt"] + "-o")
             else:
                 body = {"order_class": "mleg", "qty": "1", "type": "limit", "limit_price": limit_price(round(natural, 2), "open"),
                         "time_in_force": "day", "client_order_id": row["attempt"] + "-o",
@@ -379,6 +378,13 @@ class PaperProof:
 
     def _event(self, what: str, detail: Mapping[str, Any]) -> None:
         self.state.event(f"{self.key}.{what}", dict(detail))
+
+
+def _single(symbol: str, action: str, price: float, cid: str) -> dict:
+    """The single-leg proof's order body, built by the real route's own `single_body` so the two cannot drift."""
+    order = ROrder(0, cid, "paper-proof", "paper-proof", action, "long_call", ROOT, [RLeg(symbol, 1, 1, True, 0.0, "", 0)],
+                   1, float(price), f"{float(price):.2f}", None, 0.0, "", 0)
+    return single_body(order)
 
 
 __all__ = ["PaperProof"]

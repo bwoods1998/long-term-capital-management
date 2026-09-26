@@ -23,9 +23,9 @@ MAX_ROWS = 50_000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT, instance TEXT NOT NULL, family TEXT NOT NULL, version INTEGER,
-    trade_id TEXT NOT NULL, day TEXT, pnl REAL, max_loss REAL, recorded_at REAL NOT NULL, body TEXT NOT NULL,
-    UNIQUE(instance, trade_id));
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, instance TEXT NOT NULL, account TEXT NOT NULL, family TEXT NOT NULL,
+    version INTEGER, trade_id TEXT NOT NULL, day TEXT, pnl REAL, max_loss REAL, recorded_at REAL NOT NULL,
+    body TEXT NOT NULL, UNIQUE(instance, account, trade_id));
 CREATE INDEX IF NOT EXISTS trades_family ON trades(family, day);
 """
 
@@ -53,18 +53,22 @@ class ObserveStore:
             self.db = db
         return self.db
 
-    def add(self, instance: str, family: str, version: int | None, trades: Iterable[Mapping[str, Any]]) -> bool:
-        """The trades of one observe instance, each once (by its id), in one transaction. False when not written."""
-        rows = [(str(instance), str(family), version, str(t.get("id")), str(t.get("day") or ""), _num(t.get("pnl")),
-                 _num(t.get("max_loss")), self.clock(), json.dumps(dict(t), sort_keys=True, default=str)) for t in trades]
+    def add(self, instance: str, family: str, version: int | None, trades: Iterable[Mapping[str, Any]], *,
+            account: str = "") -> bool:
+        """The trades of one observe instance's shadow account (`account`: its nonce, as trade ids restart when an account
+        is made again under the same key), each once by (instance, account, trade id), in one transaction. False when not
+        written."""
+        rows = [(str(instance), str(account), str(family), version, str(t.get("id")), str(t.get("day") or ""),
+                 _num(t.get("pnl")), _num(t.get("max_loss")), self.clock(), json.dumps(dict(t), sort_keys=True, default=str))
+                for t in trades]
         if not rows:
             return True
         try:
             db = self._connect()
             with db:
                 db.execute("BEGIN IMMEDIATE")
-                db.executemany("INSERT OR IGNORE INTO trades(instance, family, version, trade_id, day, pnl, max_loss, "
-                               "recorded_at, body) VALUES(?,?,?,?,?,?,?,?,?)", rows)
+                db.executemany("INSERT OR IGNORE INTO trades(instance, account, family, version, trade_id, day, pnl, "
+                               "max_loss, recorded_at, body) VALUES(?,?,?,?,?,?,?,?,?,?)", rows)
                 over = int(db.execute("SELECT count(*) FROM trades").fetchone()[0]) - self.max_rows
                 if over > 0:
                     db.execute("DELETE FROM trades WHERE seq IN (SELECT seq FROM trades ORDER BY seq LIMIT ?)", (over,))
