@@ -9,7 +9,7 @@ import { createGate } from '../lib/gate.mjs';
 import { formatUsdMicro } from '../lib/money.mjs';
 import { memoryStore, TOKEN } from './helpers.mjs';
 
-const KEY = 'sk-ant-test-never-leaves-the-worker';
+const KEY = 'anthropic-test-key-never-leaves-the-worker';
 const OPUS = { input: 4, cache_write: 5, cache_read: 0.2, output: 20 };
 const SONNET = { input: 2, cache_write: 2.5, cache_read: 0.2, output: 10 };
 const MODELS = JSON.stringify({ 'claude-opus-5-5': OPUS, 'claude-sonnet-5': SONNET });
