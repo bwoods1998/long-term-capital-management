@@ -102,11 +102,11 @@ class ModelCycles(ResearcherCase):
         first = self.sail.bodies[0]
         self.assertEqual(first["prompt_cache_key"], f"swarm-{self.fam['id']}")
         self.assertIn("THE CONTRACT", first["input"][0]["content"])
-        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run"], "required"),
-                         "the revise turn runs something")
+        self.assertEqual(([t["name"] for t in first["tools"]], first["tool_choice"]), (["gym_run", "retire"], "required"),
+                         "the revise turn takes an explicit research action")
         second = self.sail.bodies[1]
         self.assertEqual(([t["name"] for t in second["tools"]], second["tool_choice"]),
-                         (["gym_run", "read_run", "notebook", "graveyard", "submit"], "auto"), "the read turn has every tool")
+                         (["gym_run", "read_run", "notebook", "graveyard", "submit", "retire"], "auto"), "the read turn has every tool")
         self.assertEqual(first["reasoning"]["effort"], "minimal")
         self.assertEqual(first["model"], "deepseek-ai/DeepSeek-V4-Flash-0731")
         self.assertEqual(self.store.spent(["sail_model"]) > 0, True)
@@ -220,8 +220,8 @@ class ModelCycles(ResearcherCase):
         self.assertEqual(scheduler.take(), self.fam["id"])
         out = researcher.cycle(self.fam["id"])
         self.assertEqual((out["model_calls"], out["tool_calls"], len(self.pool.jobs)), (1, 0, 1))
-        self.assertIn("required gym_run returned no tool call", out["error"])
-        self.assertEqual(out["protocol_error"], "required gym_run returned no tool call")
+        self.assertIn("required research action returned no tool call", out["error"])
+        self.assertEqual(out["protocol_error"], "required research action returned no tool call")
         self.assertEqual(self.store.family(self.fam["id"])["trials"], 1)
         self.assertEqual(len(self.steps), 1, "no unbounded model retry")
         self.assertEqual(self.store.convo(self.fam["id"])[0][-1]["cycle"], 2, "the failed response remains auditable")

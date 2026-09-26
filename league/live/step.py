@@ -755,7 +755,7 @@ class OptionsLive:
         results = self._decide(day, jobs, out)
         for key, acc in shadow_due.items():
             answer = results.get(key) or {}
-            self._isolated(key, lambda: (self._stats(key, answer), acc.apply(day, mi - 1, answer.get("intents") or [])))
+            self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
         for key, inst in real_due.items():
             answer = results.get(key) or {}
             self._isolated(key, lambda: (self._stats(key, answer),
@@ -787,7 +787,17 @@ class OptionsLive:
                 acc.last_mi = -1
             if smi <= acc.last_mi:
                 continue
+            if inst is not None and inst.mode == "live":
+                try:
+                    with self.families.admit_open(self._entry_identity(inst), real=False) as allowed:
+                        if not allowed:
+                            inst.mode = "wind_down"
+                except Exception:  # noqa: BLE001 - missing entry permission never blocks an owned exit
+                    inst.mode = "wind_down"
+                    acc._reject("its entry eligibility could not be read")
             try:
+                if inst is None or inst.mode == "wind_down":
+                    acc.wind_down(day, smi)  # withdraw old shadow opens before this minute can fill them
                 acc.pre(day, smi)
             except Exception as exc:  # noqa: BLE001 - one account's trouble stays its own
                 self._isolated(key, lambda exc=exc: (_ for _ in ()).throw(exc))
@@ -804,6 +814,34 @@ class OptionsLive:
                 jobs.append(job)
                 due[key] = acc
         return due
+
+    @staticmethod
+    def _entry_identity(inst: Instance) -> dict[str, Any]:
+        return {"family": inst.family, "version": inst.version, "code": inst.code, "params": inst.params,
+                "band": inst.band, "tuition": inst.tuition}
+
+    def _shadow_intents(self, key: str, acc: ShadowAccount, day: LiveDay, mi: int,
+                        intents: Iterable[Mapping[str, Any]]) -> None:
+        inst = self.instances.get(key)
+        for intent in intents:
+            if isinstance(intent, Mapping) and "open" in intent:
+                if inst is None or inst.mode != "live":
+                    acc._reject("its family or version is no longer eligible to open")
+                    continue
+                try:
+                    with self.families.admit_open(self._entry_identity(inst), real=False) as allowed:
+                        if allowed:
+                            acc.apply(day, mi, [intent])
+                        else:
+                            inst.mode = "wind_down"
+                            acc._reject("its family or version is no longer eligible to open")
+                except Exception:  # noqa: BLE001 - the rest of this batch may contain an owned close
+                    inst.mode = "wind_down"
+                    acc._reject("its entry eligibility could not be read")
+            else:
+                acc.apply(day, mi, [intent])  # owned closes and cancellations do not need entry permission
+        if inst is None or inst.mode == "wind_down":
+            acc.wind_down(day, mi)
 
     def _decide(self, day: LiveDay, jobs: list[dict], out: dict) -> dict[str, dict]:
         if not jobs:
@@ -831,7 +869,7 @@ class OptionsLive:
         results = self._decide(day, jobs, out)
         for key, acc in due.items():
             answer = results.get(key) or {}
-            self._isolated(key, lambda: (self._stats(key, answer), acc.apply(day, mi - 1, answer.get("intents") or [])))
+            self._isolated(key, lambda: (self._stats(key, answer), self._shadow_intents(key, acc, day, mi - 1, answer.get("intents") or [])))
         self._export_shadow()
         self.shadow.save()
 
@@ -1524,8 +1562,11 @@ class OptionsLive:
         if order.type in L.DEBIT and top is not None and order.limit >= top - 1e-9:
             return f"a debit of {order.limit:.2f} on a {order.type} worth at most {top:.2f} can never pay"
         unit = M.D(round(order.max_loss_share * V.MULTIPLIER + 2 * order.fees, 2))
-        family_rows = self.families.forward_rows(inst.family) if inst.band == "sized" else []
-        fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if family_rows else None
+        family_rows = self.families.forward_rows(inst.family) if not inst.tuition else []
+        fwd = M.forward_stats(family_rows, self.table.sized_confidence, version=inst.version) if not inst.tuition else None
+        if fwd is not None and (fwd.negative or (inst.band == "sized" and (not M.sized_ok(self.table, fwd) or fwd.real_bad))):
+            self._families_at = float("-inf")
+            return "its current forward evidence no longer qualifies for this real band"
         week_start = (day.day - dt.timedelta(days=day.day.weekday())).isoformat()
         plan = M.plan_open(self.table, band=inst.band, tuition=inst.tuition, equity=sizing, unit=unit, fwd=fwd,
                            exposure=book.exposure(inst.family, day=today, week_start=week_start))
@@ -1548,10 +1589,18 @@ class OptionsLive:
         if not self._instance_budget(inst.key, day):
             return f"order budget: {int(self.settings['instance_orders_day'])} orders a day (the Gym's)"
         tif = order.tif
-        sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
-                              qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
-                              max_loss=max_loss, fees_est=fees, tuition=inst.tuition,
-                              why=str(intent.get("note") or intent.get("tag") or "")[:200])
+        identity = dict(self._entry_identity(inst), forward_rows=family_rows)
+        with self.families.admit_open(identity, real=True) as allowed:
+            if allowed:
+                sent = book.new_order(instance=inst.key, family=inst.family, action="open", type_=order.type, root=root, legs=legs,
+                                      qty=qty, limit_value=order.limit, tif=tif, day=today, minute=mi, reserve=reserve,
+                                      max_loss=max_loss, fees_est=fees, tuition=inst.tuition,
+                                      why=str(intent.get("note") or intent.get("tag") or "")[:200])
+        if not allowed:
+            inst.mode = "exit_only"
+            self._persist_instance(inst)
+            self._cancel_inactive_opens()
+            return "its family or version is no longer eligible to open"
         book.send(sent)
         if sent.dispatched:
             self._instance_spent(inst.key, day)

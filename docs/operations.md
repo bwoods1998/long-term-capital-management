@@ -81,3 +81,5 @@ After close, reconcile every fill and remaining position, preserve unknowns, rep
 ## Research pacing
 
 In `swarm.json`, `researcher.usd_per_hour` keeps the combined Sail-model and OpenAI trailing-hour pace. The optional `researcher.sail_usd_per_hour` sets an independently funded Sail pace; absent or null keeps the combined behavior. OpenAI holds still count against the separate burst cap and funded gateway month. Invalid, nonfinite or negative limits pause research. `swarm.heartbeat` reports `status.researcher_pace` with scope, limit, spend and reason, so a paced loop can be distinguished from a publication delay.
+
+A Gym researcher can call `retire(reason)` to abandon its whole family. Retirement stops queued research, keeps the best programs and every trial/look, and leaves existing positions under their exit owner. Researchers and the tournament share the same atomic population-floor check. A floor refusal ends the cycle and uses the existing increasing error cooldown (up to thirty minutes); it does not retire the family. The raw reason stays private in its notebook and graveyard; the public event carries only filtered prose.

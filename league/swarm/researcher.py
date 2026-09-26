@@ -8,7 +8,8 @@ first cycle runs its starter program without a model call (seeds only).
 
 THE TOOLS (`TOOLS`): `gym_run` (a new version on Train; its compact diagnostic), `read_run` (a section of
 a past Train run), `notebook` (append / read: its memory), `graveyard` (lessons of retired families),
-`submit` (make a version its best: the tournament validates it). The contract (`league/CONTRACT.md`) is
+`submit` (make a version its best: the tournament validates it), `retire` (explicitly abandon the entire Gym family,
+subject to the population floor). The contract (`league/CONTRACT.md`) is
 the shared, cached prefix of every call; each family's calls carry its own `prompt_cache_key`.
 
 WHAT IT SEES. Train in full; of Validation only the mean, t, quarters positive and the line (met or
@@ -70,10 +71,15 @@ TOOLS: list[dict[str, Any]] = [
                                       "runs your best on Validation and, if it meets the line, sends it to the gate.",
      "parameters": {"type": "object", "properties": {"run_id": {"type": "string"}, "note": {"type": "string"}},
                     "required": ["run_id"]}},
+    {"name": "retire", "description": "End research on your entire Gym family when you abandon its mechanism, not merely "
+                                     "its latest version. This is final: best programs, evidence and trial counts remain; "
+                                     "no further runs or tools start. Only Gym families above the population minimum can retire.",
+     "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Why the entire mechanism "
+                    "is abandoned; retained in the private notebook and graveyard."}}, "required": ["reason"]}},
 ]
 
-#: A REVISE turn offers gym_run alone. A missing required tool call fails the cycle and uses the normal backoff.
-TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0]]
+#: A REVISE turn requires an explicit research action; a missing call fails and uses the normal backoff.
+TOOLS_REVISE: list[dict[str, Any]] = [TOOLS[0], TOOLS[-1]]
 
 ROLE = """You are a researcher in the LTCM options swarm. You own one family and improve its program in the Gym.
 Work in short cycles. REVISE: call gym_run with your revised program (the whole file in `code`, or only `params` to
@@ -81,6 +87,9 @@ change parameters) and put what you learned from the last run in its `note`. REA
 submit the run if it is your best; queue your next gym_run (it opens your next cycle); use read_run, graveyard or the
 notebook only when the diagnostic leaves you unsure. Keep every program inside the contract below; the Gym refuses
 anything else. Reply with tool calls; keep prose short.
+If you conclude the entire family's mechanism should be abandoned, call retire with your reason in either REVISE or
+READ instead of repeating an empty or unchanged program. Retirement is final for the family and preserves its best
+program and all evidence. A rejected version alone is not retirement; the population minimum may refuse retirement.
 Your notes (the notebook and gym_run's note) are PUBLIC: they may appear on the public site. Write the mechanism and your
 reasoning there, never a threshold, level, delta, ratio, date or any other fitted value, in digits or in words; the
 numbers belong in your program and in the diagnostics, which stay private.
@@ -239,11 +248,14 @@ class Researcher:
         if notes:
             parts.append("Your notebook (latest):\n" + "\n".join(f"- {n['text'][:300]}" for n in notes))
         parts.append("Now: if a run just came back, read it (submit it if it is your best) and queue your next gym_run; "
-                     "otherwise revise and call gym_run, with what you learned in its note.")
+                     "otherwise revise and call gym_run, with what you learned in its note. If you abandon the entire "
+                     "mechanism, call retire with your reason.")
         return "\n".join(parts)
 
     # ------------------------------------------------------------------ tools
     def _gym_run(self, fam: Mapping[str, Any], args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> dict[str, Any]:
+        if self._terminal(fam["id"], out):
+            return {"status": "retired", "reason": "the family is retired; no run started"}
         code = args.get("code")
         if not code:
             latest = self.store.latest_version(fam["id"])
@@ -277,7 +289,10 @@ class Researcher:
         if extra:
             return {"status": "refused", "reason": f"your family trades {', '.join(fam['roots'])}; NEEDS names {', '.join(extra)} "
                                                    "(another root is another family: say so in your notebook)"}
-        version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
+        with self.store.atomic():
+            if self._terminal(fam["id"], out):
+                return {"status": "retired", "reason": "the family is retired; no run started"}
+            version = self.store.add_version(fam["id"], code, params, author=author, note=str(args.get("why") or "")[:300])
         job = GymJob(family=fam["id"], version=version["n"], code=code, params=params, window="train", roots=tuple(fam["roots"]),
                      stress=stress, purpose="train", priority=float(fam.get("weight") or 0.0))
         began = self.clock()
@@ -287,6 +302,8 @@ class Researcher:
                 self.store.add_run(fid, n, result, window="train", stress=stress, purpose="train",
                                    program_years=days / 252.0 * max(1, len(fam["roots"])))
 
+            if self._terminal(fam["id"], out):
+                return {"status": "retired", "reason": "the family is retired; no run started"}
             result = self.pool.run(job, timeout=float(self.settings.get("gym", {}).get("run_timeout_seconds", 900)) + 120, late=late)
         except PoolError as exc:
             out["gym_error"] = str(exc)[:300]
@@ -302,19 +319,39 @@ class Researcher:
         view["version"] = version["n"]
         view["run_id"] = run["run_id"]
         score = evidence.score(result.get("summary")) if stress == 1.0 and result.get("status") == "ok" else None
-        current = self.store.family(fam["id"]) or {}
-        if score is not None and (current.get("best_train") is None or score > float(current["best_train"])):
-            self.store.update_family(fam["id"], best_train=score, stall=0)
-            self.store.set_state(fam["id"], best_train_run=run["run_id"], best_train_version=version["n"])
-            view["new_best_train_score"] = round(score, 3)
-            out["improved"] = True
+        with self.store.atomic():
+            current = self.store.family(fam["id"]) or {}
+            if not current.get("retired_at") and score is not None and (current.get("best_train") is None or score > float(current["best_train"])):
+                self.store.update_family(fam["id"], best_train=score, stall=0)
+                self.store.set_state(fam["id"], best_train_run=run["run_id"], best_train_version=version["n"])
+                view["new_best_train_score"] = round(score, 3)
+                out["improved"] = True
         view["train_score"] = None if score is None else round(score, 3)
         out["score"] = view["train_score"]
         return view
 
     def _execute(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any], *, author: str) -> Any:
+        if name == "retire":
+            result = self.store.retire_gym(fam["id"], args.get("reason"),
+                                           floor=int(self.settings.get("population", {}).get("floor", 16)), source="researcher")
+            if result["status"] == "retired":
+                out["retired"] = True
+                try:
+                    self.pool.cancel_family(fam["id"])
+                except Exception:  # queued work is also rejected by durable-state checks on the next cycle
+                    pass
+            elif result.get("deferred") == "population_floor":
+                out["retirement_deferred"] = True
+                out["error"] = "retirement deferred: the population is at its minimum"
+            return result
         if name == "gym_run":
             return self._gym_run(fam, args, out, author=author)
+        with self.store.atomic():  # local tools cannot change the best or notebook after another connection retires it
+            if self._terminal(fam["id"], out):
+                return {"status": "refused", "reason": "the family is retired; no further tools run"}
+            return self._local_tool(fam, name, args, out)
+
+    def _local_tool(self, fam: Mapping[str, Any], name: str, args: Mapping[str, Any], out: dict[str, Any]) -> Any:
         if name == "read_run":
             run = self.store.run(str(args.get("run_id") or ""))
             if run is None or run["family"] != fam["id"] or run["window"] != "train":
@@ -349,6 +386,13 @@ class Researcher:
             return {"ok": True, "best_version": int(run["version"]), "next": "the tournament validates it within the hour"}
         return {"error": f"unknown tool {name}"}
 
+    def _terminal(self, fid: str, out: dict[str, Any]) -> bool:
+        fam = self.store.family(fid)
+        retired = fam is None or bool(fam.get("retired_at"))
+        if retired:
+            out["retired"] = True
+        return retired
+
     # ------------------------------------------------------------------ one cycle
     def cycle(self, fid: str) -> dict[str, Any]:
         began = self.clock()
@@ -377,8 +421,9 @@ class Researcher:
         items = [{"role": "user", "content": f"Cycle 1: your family's starter program (version 1) ran on Train.\n\n```python\n{code}\n```"
                                              f"\n\nIts diagnostic:\n{json.dumps(view, default=str)}"}]
         self.store.save_convo(fam["id"], [{"cycle": 1, "items": items}])
-        if view.get("status") == "ok" and view.get("run_id"):
-            self.store.update_family(fam["id"], best_version=int(view["version"]))
+        with self.store.atomic():
+            if view.get("status") == "ok" and view.get("run_id") and not self._terminal(fam["id"], out):
+                self.store.update_family(fam["id"], best_version=int(view["version"]))
         out["starter"] = True
 
     def _profile(self, history_chars: int) -> str:
@@ -439,13 +484,15 @@ class Researcher:
         # starts only with `min_call_seconds` of the cycle's budget left, so a cycle stays under three minutes.
         min_call = float(self.cfg.get("min_call_seconds", 75))
         while out["model_calls"] < max_calls and (out["model_calls"] == 0 or deadline - self.clock() >= min_call):
+            if self._terminal(fid, out):
+                break
             history = [i for c in cycles for i in c.get("items", [])]
             items = [{"role": "system", "content": self.system}, {"role": "user", "content": self.brief(fam)}]
             items += sanitize(history + current)
             chars = sum(len(json.dumps(i, default=str)) for i in items)
             profile = self._profile(chars)
             key = f"swarm:{fid}:c{n}:m{out['model_calls']}:{int(fam.get('revisions') or 0)}"
-            # REVISE (no successful run this cycle): gym_run alone, required. READ (a completed run came back): every tool.
+            # REVISE requires running or explicitly retiring; READ follows a completed run and offers every tool.
             revise = not gym_done
             response = self.router.sail(profile, items, family=fid, key=key, tools=TOOLS_REVISE if revise else TOOLS,
                                         effort=str(self.cfg.get("reasoning_effort", "minimal")),
@@ -462,11 +509,21 @@ class Researcher:
                 if response.output_text:
                     out["text"] = response.output_text[:600]
                 if revise:
-                    out["protocol_error"] = "required gym_run returned no tool call"
+                    out["protocol_error"] = "required research action returned no tool call"
                     out.setdefault("error", f"model protocol: {out['protocol_error']}")
                 break
             stop = False
             for call in calls:
+                if out.get("retirement_deferred"):
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps({"status": "refused", "reason": "this cycle is deferred at the population minimum"})})
+                    stop = True
+                    continue
+                if self._terminal(fid, out):
+                    current.append({"type": "function_call_output", "call_id": call.call_id,
+                                    "output": json.dumps({"status": "refused", "reason": "the family is retired; no further tools run"})})
+                    stop = True
+                    continue
                 if call.name == "gym_run" and (out.get("run_id") or "gym_error" in out or
                                               self.clock() > deadline - 30 or out["tool_calls"] >= max_tools) \
                         and pending is None and not call.error:
@@ -497,11 +554,21 @@ class Researcher:
                 current.append({"type": "function_call_output", "call_id": call.call_id,
                                 "output": json.dumps(result, default=str)[:12000]})
                 fam = self.store.family(fid) or fam
+                if self._terminal(fid, out) or out.get("retirement_deferred"):
+                    stop = True
             if stop or pending:
                 break
+        if self._terminal(fid, out) or out.get("retirement_deferred"):
+            if pending:
+                for item in current:
+                    if item.get("type") == "function_call_output" and item.get("call_id") == pending.get("call_id"):
+                        reason = ("the family retired before the queued run started" if out.get("retired") else
+                                  "the cycle is deferred at the population minimum")
+                        item["output"] = json.dumps({"status": "cancelled", "reason": reason})
+            pending = None
         cycles.append({"cycle": n, "items": [i for i in current if i.get("type") != "reasoning"]})
         self.store.save_convo(fid, cycles, pending)
-        out["pending_run"] = bool(pending)
+        out["pending_run"] = bool(self.store.convo(fid)[1])
 
     def trim(self, cycles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The history a call carries. Cut in CHUNKS (beyond `history_cycles`, back to `history_trim_to`) so the cached
@@ -530,6 +597,9 @@ class Researcher:
         on Sept 26; a cycle never waits for it): the program comes back into the family's state and is the run of its
         next cycle. At most `rewrites_per_day` a family a day, `rewrite_min_hours` apart; the stall counter restarts."""
         fid = fam["id"]
+        fam = self.store.family(fid) or fam
+        if self._terminal(fid, out):
+            return False
         state = fam.get("state") or {}
         now = self.clock()
         today = [t for t in (state.get("rewrite_times") or []) if now - float(t) < 86400]
@@ -553,19 +623,29 @@ class Researcher:
                 f"Its best version so far:\n```python\n{(best or {}).get('code') or ''}\n```\n\nThe latest Train diagnostic:\n"
                 f"{json.dumps(last_view, default=str)[:8000]}")
         key = f"swarm:{fid}:rewrite:{int(fam.get('rewrites') or 0)}:{int(fam.get('revisions') or 0)}"
-        self.store.bump(fid, rewrites=1)
-        self.store.update_family(fid, stall=0)
-        self.store.set_state(fid, rewrite_times=today + [now])
+        with self.store.atomic():
+            if self._terminal(fid, out):
+                return False
+            self.store.bump(fid, rewrites=1)
+            self.store.update_family(fid, stall=0)
+            self.store.set_state(fid, rewrite_times=today + [now])
         out["rewrite_asked"] = profile
 
         def job() -> None:
             try:
+                if (self.store.family(fid) or {}).get("retired_at"):
+                    return
                 answer = self.router.ask(role="rewrite", system=self.system, user=user, family=fid, key=key, openai_model=None,
                                          sail_profile=profile, max_output=12000, effort="medium", desk=f"{fid}:rewrite",
                                          cap_usd_day=float(self.cfg.get("rewrite_usd_day", 1.0)))
                 match = CODE_BLOCK.search(answer.get("text") or "")
                 if match:
-                    self.store.set_state(fid, rewrite_ready={"code": match.group(1), "profile": profile, "at": self.clock()})
+                    value = {"code": match.group(1), "profile": profile, "at": self.clock()}
+                    with self.store.atomic():
+                        if (self.store.family(fid) or {}).get("retired_at"):
+                            self.store.set_state(fid, rewrite_after_retirement=value)
+                        else:
+                            self.store.set_state(fid, rewrite_ready=value)
                 else:
                     self.store.set_state(fid, rewrite_error="the rewrite carried no program")
             except Exception as exc:  # noqa: BLE001 - a failed rewrite is recorded; the family goes on
@@ -587,17 +667,23 @@ class Researcher:
         """A notebook entry to the site's tape (as `swarm.note`), at most every `note_every_cycles` cycles, and only its
         plain-word sentences: no digit, no code, no parameter name of the program (`public.note_text`; the notebook
         keeps everything, privately)."""
+        if (self.store.family(fid) or {}).get("retired_at"):
+            return
         latest = self.store.latest_version(fid) or {}
         names = public.param_names_of(latest.get("code")) + list((latest.get("params") or {}).keys())
         text = public.note_text(out.get("note"), param_names=names)
         if not text:
             return
-        state = (self.store.family(fid) or {}).get("state") or {}
-        last = int(state.get("public_note_cycle") or -10**6)
-        if int(out.get("cycle") or 0) - last < int(self.cfg.get("note_every_cycles", 6)):
-            return
-        self.store.set_state(fid, public_note_cycle=int(out.get("cycle") or 0))
-        self.store.event("swarm.note", fid, {"text": text})
+        with self.store.atomic():
+            fam = self.store.family(fid) or {}
+            if fam.get("retired_at"):
+                return
+            state = fam.get("state") or {}
+            last = int(state.get("public_note_cycle") or -10**6)
+            if int(out.get("cycle") or 0) - last < int(self.cfg.get("note_every_cycles", 6)):
+                return
+            self.store.set_state(fid, public_note_cycle=int(out.get("cycle") or 0))
+            self.store.event("swarm.note", fid, {"text": text})
 
 
 __all__ = ["Researcher", "TOOLS", "needs_of", "check_code", "sanitize", "date_like"]
