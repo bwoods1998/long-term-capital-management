@@ -290,7 +290,8 @@ class Gate:
         self.clear_marker(fid, sha)
         if self.store.looked(sha):
             return
-        if ((self.store.family(fid) or {}).get("state") or {}).get("validation_version") != n:
+        fam = self.store.family(fid) or {}
+        if fam.get("retired_at") or (fam.get("state") or {}).get("validation_version") != n:
             return
         tries = int(self.store.get(f"look_tries:{sha}", 0)) + 1
         self.store.put(f"look_tries:{sha}", tries)

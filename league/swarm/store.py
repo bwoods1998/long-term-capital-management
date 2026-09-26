@@ -434,22 +434,57 @@ class SwarmStore:
             raise ValueError(band)
         with self._lock:
             fam = self.family(fid)
-            if fam is None or fam["band"] == band:
+            if fam is None or fam["retired_at"] or fam["band"] == band:
                 return None
-            if not self._exec("UPDATE families SET band=?, band_since=? WHERE id=? AND band=?",
+            if not self._exec("UPDATE families SET band=?, band_since=? WHERE id=? AND band=? AND retired_at IS NULL",
                                (band, self.now(), fid, fam["band"])).rowcount:
                 return None
             self.event("swarm.band", fid, {"band_from": fam["band"], "band_to": band, "reason": reason})
             return fam["band"]
 
-    def retire(self, fid: str, reason: str) -> bool:
-        with self._lock:
+    def retire(self, fid: str, reason: str, *, public_reason: str | None = None) -> bool:
+        with self.atomic():
             fam = self.family(fid)
             if fam is None or fam["retired_at"]:
                 return False
             self.update_family(fid, retired_at=self.now(), retire_reason=reason, band="retired", band_since=self.now())
-            self.event("swarm.retired", fid, {"cause": reason, "band_from": fam["band"]})
+            self.set_state(fid, rewrite_ready=None, gate_ready=False)
+            self._exec("UPDATE convo SET pending=NULL, updated_at=? WHERE family=?", (self.now(), fid))
+            self.event("swarm.retired", fid, {"cause": reason if public_reason is None else public_reason, "band_from": fam["band"]})
             return True
+
+    def retire_gym(self, fid: str, reason: Any, *, floor: int, source: str) -> dict[str, Any]:
+        """One Gym retirement across researcher/tournament connections; evidence and look reservations survive."""
+        if not isinstance(reason, str) or not reason.strip():
+            return {"status": "refused", "reason": "retirement needs a nonempty reason string"}
+        reason = reason.strip()[:2000]
+        from . import public
+
+        with self.atomic():
+            fam = self.family(fid)
+            if fam is None:
+                return {"status": "refused", "reason": "no such family"}
+            if fam["retired_at"]:
+                return {"status": "retired", "already_retired": True}
+            if fam["band"] != "gym":
+                return {"status": "refused", "reason": "only a Gym family can retire through research"}
+            alive = self._one("SELECT COUNT(*) AS n FROM families WHERE retired_at IS NULL")["n"]
+            if int(alive) <= max(0, int(floor)):
+                return {"status": "refused", "deferred": "population_floor",
+                        "reason": "the population is at its minimum; retirement was not applied"}
+            state = fam.get("state") or {}
+            notes = self.notebook(fid, limit=4)
+            lesson = (f"{fam['structure']} on {', '.join(fam['roots'])}: {reason}. Tried {fam.get('revisions')} versions over "
+                      f"{self.lineage_trials(fid)} lineage trials; best Train score {fam.get('best_train')}; best validation "
+                      f"{dumps(state.get('validation_view'))}. Last notes: " + " | ".join(n["text"][:240] for n in notes))
+            self.note(fid, f"Retired by {source}: {reason}")
+            self.bury(fid, lesson, {"validation": state.get("validation_view"), "best_train": fam.get("best_train"),
+                                   "best_version": fam.get("best_version")})
+            latest = self.latest_version(fid) or {}
+            names = public.param_names_of(latest.get("code")) + list((latest.get("params") or {}).keys())
+            cause = public.note_text(reason, param_names=names) or "the family left the Gym after review"
+            self.retire(fid, reason, public_reason=cause)
+            return {"status": "retired", "already_retired": False}
 
     def _lineages_from(self, line: str | None) -> list[str]:
         out: list[str] = []
@@ -839,9 +874,13 @@ class SwarmStore:
         return loads(row["items"], []), loads(row["pending"], None)
 
     def save_convo(self, fid: str, items: list[dict[str, Any]], pending: Any = None) -> None:
-        self._exec("INSERT INTO convo(family, items, pending, updated_at) VALUES(?,?,?,?) ON CONFLICT(family) DO UPDATE SET"
-                   " items=excluded.items, pending=excluded.pending, updated_at=excluded.updated_at",
-                   (fid, dumps(items), dumps(pending) if pending is not None else None, self.now()))
+        with self.atomic():
+            fam = self.family(fid)
+            if fam is None or fam["retired_at"]:
+                pending = None
+            self._exec("INSERT INTO convo(family, items, pending, updated_at) VALUES(?,?,?,?) ON CONFLICT(family) DO UPDATE SET"
+                       " items=excluded.items, pending=excluded.pending, updated_at=excluded.updated_at",
+                       (fid, dumps(items), dumps(pending) if pending is not None else None, self.now()))
 
 
 __all__ = ["SwarmStore", "ALIVE", "BANDS", "STRUCTURES", "CLOSEABLE", "slugify", "code_sha", "dumps", "loads", "iso"]

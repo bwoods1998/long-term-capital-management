@@ -386,6 +386,33 @@ class BandRace(LiveCase):
         self.assertEqual(live.instances["vert@1:r"].mode, "exit_only")
         self.assertTrue(live.book.positions)
 
+    def test_self_retired_gym_tuition_keeps_its_position_exit_owner(self):
+        import json
+        from league.gym.driver import build_bundle
+        from league.swarm.gate import run_sha
+
+        live, store, _ = self.swarm_live("gym")
+        (self.root / "swarm.json").write_text(json.dumps({"gym": {"image_checkpoint": "synthetic-image"}}))
+        version = store.add_version("vert", VERTICAL, {"hold": 2}, author="synthetic")
+        sha = run_sha(version)
+        store.set_state("vert", validation_version=version["n"], validation_line={"passed": True},
+                        validation_image="synthetic-image", validation_bundle=build_bundle()[1],
+                        review={"sha": sha, "verdict": "pass", "audit": {"verdict": "pass"}})
+        self.run_to(9, 31)
+        key = f"vert@{version['n']}:t"
+        self.assertTrue(live.book.positions)
+        self.assertTrue(live.instances[key].tuition)
+        retired = store.retire_gym("vert", "The research mechanism failed.", floor=0, source="researcher")
+        self.assertEqual(retired["status"], "retired")
+        live.sync_families(self.clock(), force=True)
+        self.assertEqual(live.instances[key].mode, "exit_only")
+        self.assertTrue(live.book.positions, "retirement does not discard venue inventory")
+        self.run_to(9, 35)
+        self.assertFalse(live.book.positions)
+        opens = [body for body in self.venue.sent if body["legs"][0]["position_intent"] == "buy_to_open"]
+        self.assertEqual(len(opens), 1, "the retired tuition program cannot reopen")
+        self.assertEqual(store.forward("vert"), [], "tuition remains outside qualifying forward evidence")
+
     def test_missing_forward_evidence_does_not_start_a_real_instance(self):
         live = self.make([family("vert", VERTICAL)])
         live.account_row = self.venue.account()

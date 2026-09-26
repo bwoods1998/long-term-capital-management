@@ -181,7 +181,10 @@ class GymPool:
         """Queue a job. A family has at most one Train job waiting: a newer one supersedes it (its waiter, if any, is
         told; it never ran), so a backlog of orphaned versions cannot build up."""
         job.created = self.clock()
-        with self._wake:
+        with self._wake, self.store.atomic():
+            if (self.store.family(job.family) or {}).get("retired_at"):
+                self._fail(job, "the family retired before dispatch")
+                return job
             if job.purpose == "train" and not job.gate:
                 for old in [j for j in self.queue if j.family == job.family and j.purpose == "train" and not j.gate]:
                     self.queue.remove(old)
@@ -235,6 +238,16 @@ class GymPool:
 
     def _take(self, box: Box) -> list[GymJob]:
         """The next batch for `box` (called under the lock)."""
+        # Retirement commits before cancel_family takes the pool lock. Serialize the final queue handoff with
+        # that commit too; after this handoff work is in flight and its result must still count. No network here.
+        with self._lock, self.store.atomic():
+            for job in list(self.queue):
+                if (self.store.family(job.family) or {}).get("retired_at"):
+                    self.queue.remove(job)
+                    self._fail(job, "the family retired before dispatch")
+            return self._take_active(box)
+
+    def _take_active(self, box: Box) -> list[GymJob]:
         gate = box.kind == "gate"
         mine = [j for j in self.queue if bool(j.gate) == gate]
         if not mine:
