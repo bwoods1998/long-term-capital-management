@@ -102,6 +102,36 @@ class CalibrationReceipt(unittest.TestCase):
 
 
 class CompletionReadiness(unittest.TestCase):
+    def test_incomplete_idle_backfill_resumes_under_the_shared_lease(self):
+        class Lease:
+            held = False
+            def __enter__(self):
+                self.held = True
+                return self
+            def __exit__(self, *args): self.held = False
+            def check(self): assert self.held
+        lease = Lease()
+        starts = []
+        running = [False]
+        def start(args):
+            self.assertTrue(lease.held)
+            starts.append(args)
+            running[0] = True
+        data = SimpleNamespace(box_id="sb_data", wake=lambda: None,
+                               download=lambda _: b'{"stages": {}}',
+                               backfill_running=lambda: running[0], start_backfill=start)
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
+            bl.write_json(bl.DATA_BOX, {"box_id": "sb_data", "runs": [{"args": "--stages 1,2,3,4,5,6"}]})
+            ops = object.__new__(complete.Operations)
+            ops.data, ops.api = data, object()
+            with patch.object(bl, "RemoteLease", return_value=lease):
+                status = ops.theta_status()
+                again = ops.theta_status()
+            self.assertTrue(status["resumed"])
+            self.assertFalse(status["ready"])
+            self.assertFalse(again["resumed"])
+            self.assertEqual(starts, ["--stages 1,2,3,4,5,6"])
+
     def test_every_theta_stage_must_finish_before_sip(self):
         progress = {"stages": {str(s): {"planned": 10, "done": 10, "failing": 0} for s in complete.STAGES}}
         self.assertTrue(complete.theta_ready(progress, False))
@@ -182,6 +212,20 @@ class CompletionReadiness(unittest.TestCase):
     def test_disabled_completion_opens_no_vendor_client(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(complete, "Operations", side_effect=AssertionError("no API")):
             self.assertEqual(complete.Completion(Path(tmp)).tick(), {"phase": "disabled"})
+
+    def test_stop_during_forward_job_cannot_start_a_completion_job(self):
+        with tempfile.TemporaryDirectory() as tmp, bl.using_state(Path(tmp)):
+            state = Path(tmp)
+            bl.write_json(state / "calendar.json", {"exceptions": {}})
+            bl.write_json(state / "completion-config.json", {"enabled": True})
+            def tick():
+                (state / "nightly.stop").touch()
+                return {"phase": "waiting"}
+            with patch.object(nightly, "Controller", return_value=SimpleNamespace(tick=tick)), \
+                    patch.object(complete.Completion, "tick") as completion_tick, \
+                    patch.object(nightly.signal, "signal"):
+                self.assertEqual(nightly.daemon(state, state / "ready.json", poll=0.01), 0)
+            completion_tick.assert_not_called()
 
 
 class ProcessIdentity(unittest.TestCase):

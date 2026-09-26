@@ -185,6 +185,26 @@ class Night(unittest.TestCase):
         result = nightly.run()
         self.assertTrue(result["checkpoint"])
 
+    def test_lease_lost_during_checkpoint_never_publishes_or_reuses_success(self):
+        data, gate, records = FakeData(self.DAY), FakeGate(), {}
+        nightly, saved, checkpoints = job(data, gate, records, now=self.NOW)
+        held = [True]
+        def check():
+            if not held[0]:
+                raise RuntimeError("lease expired")
+        def checkpoint():
+            held[0] = False
+            return "sbcp_unowned"
+        nightly.check_lease, nightly.checkpoint = check, checkpoint
+        with self.assertRaisesRegex(RuntimeError, "lease expired"):
+            nightly.run()
+        self.assertNotIn("checkpoint", nightly.state(self.DAY))
+        self.assertNotIn("current_checkpoint", records["gate"])
+        self.assertTrue(all("sbcp_unowned" not in value for value in saved))
+        held[0] = True
+        nightly.checkpoint = lambda: "sbcp_owned"
+        self.assertEqual(nightly.run()["checkpoint"], "sbcp_owned")
+
     def test_sip_relay_runs_before_restart_and_failure_keeps_day_pending(self):
         data, gate, images = FakeData(self.DAY), FakeGate(), {}
         nightly, _, checkpoints = job(data, gate, images, now=self.NOW)

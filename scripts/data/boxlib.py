@@ -191,7 +191,11 @@ class RemoteLease:
 
     def check(self) -> None:
         """Reconfirm ownership before mutating or publishing an image."""
-        if self.failed or not self.command("renew"):
+        try:
+            owned = not self.failed and self.command("renew")
+        except Exception:
+            owned = False
+        if not owned:
             self.failed = True
             raise RuntimeError("the data operation lease was lost; refusing image publication")
 
@@ -204,6 +208,7 @@ class RemoteLease:
         except Exception:
             released = False
         if kind is None and (self.failed or not released):
+            self.failed = True
             raise RuntimeError("the data operation lease was lost; retry before publishing a checkpoint")
 
 

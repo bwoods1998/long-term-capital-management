@@ -198,13 +198,17 @@ def verify_inside(api: Any, box: str, kind: str, *, sleep: Callable[[float], Non
 
 
 def checkpoint_with_retry(api: Any, box: str, *, name: str, ttl_seconds: int, attempts: int = 6,
-                          sleep: Callable[[float], None] = time.sleep, errors: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                          sleep: Callable[[float], None] = time.sleep, errors: list[dict[str, Any]] | None = None,
+                          check_lease: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """Sail's checkpoint API has failed for hours at a time (Sept 25; Sept 26 06:35Z and 07:00Z on the
     House box): retry with backoff and keep every error, verbatim, for the record."""
     delay = 30.0
     for attempt in range(1, attempts + 1):
+        check_lease()
         try:
-            return api.checkpoint(box, name=name, ttl_seconds=ttl_seconds, timeout=1800)
+            result = api.checkpoint(box, name=name, ttl_seconds=ttl_seconds, timeout=1800)
+            check_lease()
+            return result
         except bl.SailboxError as error:
             entry = {"at": bl.now(), "box": box, "name": name, "attempt": attempt, "status": error.status,
                      "error": str(error)[:500]}
@@ -255,14 +259,15 @@ def build(kind: str, *, version: str, force: bool, api: Any = None, sleep: Calla
         api = api or bl.client()
         data_box = bl.data_box_id()
         bl.ensure_running(api, data_box)
-        with bl.RemoteLease(api, data_box):
+        with bl.RemoteLease(api, data_box) as lease:
             return _build(kind, version=version, force=force, api=api, sleep=sleep, ttl_days=ttl_days,
-                          rehearsal=rehearsal, keep=keep, needs=needs, roots=roots)
+                          rehearsal=rehearsal, keep=keep, needs=needs, roots=roots, check_lease=lease.check)
 
 
 def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[float], None],
            ttl_days: int, rehearsal: bool, keep: bool, needs: tuple[int, ...] | None = None,
-           roots: tuple[str, ...] | None = None) -> dict[str, Any]:
+           roots: tuple[str, ...] | None = None,
+           check_lease: Callable[[], None] = lambda: None) -> dict[str, Any]:
     api = api or bl.client()
     spec = dict(KINDS[kind])
     if needs:
@@ -290,18 +295,21 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
         last_args = (bl.read_json(bl.DATA_BOX).get("runs") or [{}])[-1].get("args")
         if not last_args:
             raise RuntimeError("cannot stop a backfill without its restart arguments")
+        check_lease()
         data.stop_backfill()
         say("  backfill stopped for the checkpoint")
     try:
         source = checkpoint_with_retry(api, data_box, name=f"ltcm-data-for-{kind}-{version}",
                                        ttl_seconds=(2 if rehearsal else 30) * 86400,
-                                       sleep=sleep, errors=errors)
+                                       sleep=sleep, errors=errors, check_lease=check_lease)
     finally:
         if was_running and last_args:
+            check_lease()
             data.start_backfill(last_args)
             say("  backfill restarted")
     say(f"  data box checkpoint {source['checkpoint_id']}")
     # 3. fork, seal first, stop anything carried over
+    check_lease()
     fork = api.from_checkpoint(source["checkpoint_id"], name=f"ltcm-{kind}-image-{version}", timeout=1800)
     box = fork["sailbox_id"]
     say(f"  fork {box}; sealing")
@@ -309,6 +317,7 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     api.exec(box, ["bash", "-c", "pkill -f '[b]ackfill.py|[u]niverse.py|[m]ultiprocessing|[l]ocking.py serve' ; "
                                   "rm -f /data/work/backfill.pid; true"], timeout=60)
     # 4. prune
+    check_lease()
     prune_args = spec["prune"] + (f" --roots {','.join(roots)}" if roots else "")
     pruned = bl.run_py(api, box, f"backfill.py prune {prune_args}", timeout=3600).check()
     say(f"  pruned: {pruned.stdout.strip().splitlines()[-1]}")
@@ -320,6 +329,7 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     scrub = api.exec(box, ["bash", "-c", SCRUB], timeout=900)
     say(f"  memory: {scrub.stdout.strip() or scrub.output[-300:]}")
     # 5. verify
+    check_lease()
     facts = verify_inside(api, box, kind)
     say(f"  inside: {json.dumps({k: facts[k] for k in ('passed', 'problems', 'files', 'first_date', 'last_date', 'manifest_windows', 'network')})}")
     if not facts["passed"]:
@@ -330,9 +340,10 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     started = time.time()
     for label in (("a",) if rehearsal else ("a", "b")):
         row = checkpoint_with_retry(api, box, name=f"ltcm-{kind}-image-{version}-{label}", ttl_seconds=ttl_days * 86400,
-                                    sleep=sleep, errors=errors)
+                                    sleep=sleep, errors=errors, check_lease=check_lease)
         checkpoints.append(row["checkpoint_id"])
         say(f"  checkpoint {label}: {row['checkpoint_id']} ({time.time() - started:.0f}s)")
+    check_lease()
     record = bl.read_json(bl.IMAGES)
     if rehearsal:
         if keep:
@@ -343,6 +354,7 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
                                                     "checkpoints": checkpoints, "ttl_days": ttl_days, "at": bl.now(),
                                                     "passed": facts["passed"], "files": facts["files"],
                                                     "checkpoint_errors": errors})
+        check_lease()
         bl.write_json(bl.IMAGES, record)
         return record["rehearsals"][-1]
     api.sleep(box)
@@ -354,6 +366,7 @@ def _build(kind: str, *, version: str, force: bool, api: Any, sleep: Callable[[f
     }
     record.setdefault(kind, {}).update({"current": entry})
     record[kind].setdefault("history", []).append(entry)
+    check_lease()
     bl.write_json(bl.IMAGES, record)
     return entry
 
@@ -384,7 +397,7 @@ def finish(kind: str, box: str, *, version: str, source_checkpoint: str, ttl_day
     for label in ("a", "b"):
         lease.check()
         row = checkpoint_with_retry(api, box, name=f"ltcm-{kind}-image-{version}-{label}", ttl_seconds=ttl_days * 86400,
-                                    sleep=sleep, errors=errors)
+                                    sleep=sleep, errors=errors, check_lease=lease.check)
         checkpoints.append(row["checkpoint_id"])
         say(f"  checkpoint {label}: {row['checkpoint_id']}")
     api.sleep(box)

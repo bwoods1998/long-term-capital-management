@@ -56,12 +56,27 @@ class Operations:
         self.data.wake()
         progress = json.loads(self.data.download("/data/work/progress.json"))
         running = self.data.backfill_running()
+        resumed = False
+        if not running and not theta_ready(progress, False):
+            # The vendor runner intentionally exits after a bounded set of retries. A transient
+            # outage must not strand completion forever with an incomplete, idle queue.
+            with bl.RemoteLease(self.api, self.data.box_id) as lease:
+                progress = json.loads(self.data.download("/data/work/progress.json"))
+                running = self.data.backfill_running()
+                if not running and not theta_ready(progress, False):
+                    args = (bl.read_json(bl.DATA_BOX).get("runs") or [{}])[-1].get("args")
+                    if not args:
+                        raise RuntimeError("incomplete backfill has no recorded restart arguments")
+                    lease.check()
+                    self.data.start_backfill(args)
+                    running, resumed = self.data.backfill_running(), True
         ready = theta_ready(progress, running)
         if ready:
             universe = json.loads(self.data.download("/data/work/universe.json"))
             # Rank/spread measurements stay on the data box. Only root identities are needed here.
             bl.write_json(bl.UNIVERSE, {key: universe[key] for key in ("core", "names", "roots")})
-        return {"ready": ready, "running": running, "stages": progress.get("stages", {}), "at": progress.get("at")}
+        return {"ready": ready, "running": running, "resumed": resumed,
+                "stages": progress.get("stages", {}), "at": progress.get("at")}
 
     def relay_chunk(self, start: dt.date, end: dt.date) -> dict:
         from sip import relay_day

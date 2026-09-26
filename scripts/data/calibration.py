@@ -143,6 +143,7 @@ def prepare_pair(*, version: str, api: Any = None, existing: bool = False) -> di
         finally:
             for entry in (gym, gate):
                 try:
+                    lease.check()
                     api.sleep(entry["box_id"])
                 except Exception:
                     pass
