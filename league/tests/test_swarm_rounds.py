@@ -84,6 +84,9 @@ class RoundCase(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.settings = copy.deepcopy(S.DEFAULTS)
         self.settings["gym"]["gate_checkpoint"] = "sbcp_gate"
+        # These rounds test validation and the gate themselves: a best's robustness runs are the researcher's
+        # (league/tests/test_swarm_search.py tests the tournament waiting for them).
+        self.settings["tournament"]["require_robustness"] = False
         self.answer = strong
         self.pool = FakeGymPool(lambda job: self.answer(job))
         self.replies: list = []

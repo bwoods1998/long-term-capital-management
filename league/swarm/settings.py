@@ -99,6 +99,8 @@ DEFAULTS: dict[str, Any] = {
         "retire_evaluations": 2000,
         "retire_dsr_below": 0.05,       # trial-adjusted evidence below the line (after `retire_min_validations`)
         "retire_min_validations": 6,
+        # A version is validated only after its 1.5x-stress Train robustness run came back with a profit (Sept 26).
+        "require_robustness": True,
         "fork_min_t": 1.0,              # a family forks when its validation t is at least this and it is in the top
         "fork_top": 3,
         "fork_cooldown_hours": 6,

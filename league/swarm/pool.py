@@ -13,7 +13,9 @@
   bandit's share), then the oldest; a short batch waits `batch_wait_seconds` for company.
 - ROBUSTNESS runs (a new best version re-run on Train at 1.5x the half-spread and at the mid, Sept 26) have the lowest
   priority (`ROBUSTNESS_PRIORITY`): a box takes them only when nothing else waits AND another Gym box is free (ready or
-  asleep), so they fill idle boxes and never delay a researcher's run or a validation.
+  asleep), so they fill idle boxes and never delay a researcher's run or a validation. They never start, grow or keep
+  awake a box (`manage` counts only other work), and a family's queued runs of a version that is no longer its best
+  are superseded.
 - FAILURES. A root the box's store lacks fails its job at once with the Gym's own words; a batch that
   errs or times out is retried once on another box, then its jobs fail. A failure never kills the pool.
 - COST. Every awake second of a box (starting, ready and idle, busy, resuming) is booked at `box_usd_hour`
@@ -194,6 +196,12 @@ class GymPool:
                 for old in [j for j in self.queue if j.family == job.family and j.purpose == "train" and not j.gate]:
                     self.queue.remove(old)
                     self._fail(old, "superseded by a newer version before it ran")
+            if job.purpose == "robustness":
+                fam = self.store.family(job.family) or {}
+                current = {job.version, fam.get("best_version"), (fam.get("state") or {}).get("best_train_version")}
+                for old in [j for j in self.queue if j.family == job.family and j.purpose == "robustness" and j.version not in current]:
+                    self.queue.remove(old)
+                    self._fail(old, "superseded by a newer best before it ran")
             self.queue.append(job)
             self._wake.notify_all()
         return job
@@ -220,9 +228,11 @@ class GymPool:
     def run(self, job: GymJob, timeout: float | None = None, *, late: Any = None, late_fail: Any = None) -> dict[str, Any]:
         return self.wait(self.submit(job), timeout, late=late, late_fail=late_fail)
 
-    def queued(self, kind: str | None = None) -> int:
+    def queued(self, kind: str | None = None, *, robustness: bool = True) -> int:
+        """Jobs waiting (of `kind`); `robustness=False` leaves out the robustness runs (they never drive the boxes)."""
         with self._lock:
-            return sum(1 for j in self.queue if kind is None or (kind == "gate") == bool(j.gate))
+            return sum(1 for j in self.queue if (kind is None or (kind == "gate") == bool(j.gate))
+                       and (robustness or j.purpose != "robustness"))
 
     def cancel_family(self, family: str) -> None:
         with self._lock:
@@ -613,12 +623,12 @@ class GymPool:
                 idle = now - (box.last_used or now)
                 limit = float(g.get("idle_sleep_seconds", 600)) if kind == "gym" else float(
                     self.settings.get("gate", {}).get("gate_box_idle_sleep_seconds", 300))
-                if not allowed or (idle >= limit and not self.queued(kind)):
+                if not allowed or (idle >= limit and not self.queued(kind, robustness=False)):
                     self._sleep(box)
                     out["slept"] += 1
             if not allowed:
                 continue
-            demand = self.queued(kind)
+            demand = self.queued(kind, robustness=False)  # robustness runs fill the boxes other work keeps; they start none
             if not demand and kind == "gym" and self.unavailable(kind) and now >= self.fork_after.get(kind, 0.0) \
                     and not [b for b in boxes if b.kind == kind and b.state == "starting"]:
                 demand = 1  # the researchers idle while the Gym is unavailable: one probe fork after each backoff finds it back

@@ -139,8 +139,18 @@ def validation_words(line: Mapping[str, Any] | None) -> str:
 _OLD_VIEW = re.compile(r"best validation (?:\{[^{}]*\}?|null|None)")
 
 
+#: A figure after "validation" or "deflated" and the statistic's words ("validation t 1.9", "(deflated Sharpe probability
+#: 0.012)", "validation mean: 0.01"), or after "t =": what old fork notes, retirement reasons and notes carried.
+_FIGURE = re.compile(r"\b((?:validation|deflated)(?:[ \t]+(?:t|mean|sharpe|probability|dsr|return|returns|pnl|p&l|trades|days|"
+                     r"quarters|daily|traded|on|of|the|per|was|is|at))*)[ \t]*[:=]?[ \t]*(?!(?:19|20)\d\d\b)-?\d+(?:\.\d+)?(?:/\d+)?",
+                     re.I)  # a year ("Validation 2025") is the window's name, not a figure
+_T_IS = re.compile(r"\bt[ \t]*=[ \t]*-?\d+(?:\.\d+)?")
+
+
 def scrub(text: Any) -> str:
-    """A lesson with any pre-D2 validation view taken out (D2a): it said Validation's numbers and failed checks."""
+    """Text a model reads (graveyard lessons, notes) with Validation's figures taken out (D2a): a pre-D2 validation view
+    (its numbers and failed checks), a figure after "validation" or "deflated" (old fork notes' "validation t", old
+    retirement reasons' deflated Sharpe probability), and any "t =" figure."""
 
     def verdict(match: re.Match) -> str:
         try:
@@ -151,7 +161,9 @@ def scrub(text: Any) -> str:
             return "best validation: " + ("line met" if view.get("line_met") else "line not met")
         return "best validation: not recorded"
 
-    return _OLD_VIEW.sub(verdict, str(text or ""))
+    out = _OLD_VIEW.sub(verdict, str(text or ""))
+    out = _FIGURE.sub(lambda m: f"{m.group(1)} (withheld)", out)
+    return _T_IS.sub("t = (withheld)", out)
 
 
 __all__ = ["train_view", "section", "validation_view", "validation_words", "scrub"]

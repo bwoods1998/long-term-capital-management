@@ -453,5 +453,8 @@ The sprint's search settings (Sept 26), all in `swarm.json` without a deploy: `r
 `researcher.top_max_output_tokens` (12000) put the bandit's top ten on the stronger Sail profile inside the same
 hourly pace; `architect.agenda` (default empty) closes every architect request as the operator's research agenda
 (at most 4,000 characters); `population.reseed_max` (default 0, off) founds the seeds' mechanisms again on roots they
-never tried while the population is below its start and the architect is not due. The robust Train objective,
-its robustness runs (1.5x and mid, at the pool's lowest priority) and the D2 validation line are code, not settings.
+never tried while the population is below its start and the architect is not due; `tournament.require_robustness`
+(default true) validates a version only after its 1.5x Train robustness run came back with a profit. The robust Train
+objective, its robustness runs (1.5x and mid, at the pool's lowest priority, never starting or keeping a box awake) and
+the D2 validation line are code, not settings. The objective's one-time migration beats the heartbeat while it runs,
+skips a family it already moved and empties (never keeps) the best of a family it cannot rescore.

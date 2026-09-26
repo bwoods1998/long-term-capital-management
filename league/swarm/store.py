@@ -37,6 +37,7 @@ import re
 import sqlite3
 import threading
 import time
+import zlib
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -739,7 +740,7 @@ class SwarmStore:
             return None
         try:
             return json.loads(gzip.decompress((self.root / row["path"]).read_bytes()))
-        except (OSError, ValueError):
+        except (OSError, ValueError, EOFError, zlib.error):  # a missing, truncated or corrupt file is unreadable, never a crash
             return None
 
     def runs(self, fid: str, *, window: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

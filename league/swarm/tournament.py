@@ -1,7 +1,8 @@
 """The hourly tournament: validation, the bandit, forks, retirements, lessons, the leaderboard.
 
 1. VALIDATION. Every living family whose best version (submitted, else its best Train score) has not been
-   validated yet runs on Validation once; the Gym runs its 1.5x-half-spread twin in the same batch (two
+   validated yet runs on Validation once, but only after that version's 1.5x-stress Train robustness run came back
+   with a profit (`tournament.require_robustness`, Sept 26: a version that loses at 1.5x never reaches the gate); the Gym runs its 1.5x-half-spread twin in the same batch (two
    trials, counted) and returns only the validation VIEW (no trades, dates or daily series). The
    researcher is told only whether the line was met and how many of its checks passed (D2a). A version runs on
    its own NEEDS roots (a family's roots may have moved since).
@@ -32,7 +33,7 @@ from typing import Any, Callable, Mapping
 
 from . import diagnostics, evidence
 from .pool import GymJob, PoolError
-from .researcher import MAX_ROOTS, needs_roots, with_roots
+from .researcher import MAX_ROOTS, needs_roots, robust_at_stress, with_roots
 from .store import CLOSEABLE, SwarmStore
 
 UNIVERSE_ROTATION = ("SPY", "QQQ", "IWM", "SPXW")
@@ -71,6 +72,7 @@ class Tournament:
         jobs = []
         errors = {}
         judged = {}
+        waiting: list[str] = []
         image = self.pool.image("gym") if callable(getattr(self.pool, "image", None)) else None
         bundle = self.pool.bundle() if callable(getattr(self.pool, "bundle", None)) else None
         for fam in fams:
@@ -82,6 +84,9 @@ class Tournament:
             if n is None:
                 continue
             state = fam.get("state") or {}
+            if self.cfg.get("require_robustness", True) and not robust_at_stress(state, n):
+                waiting.append(fam["id"])  # its robustness run at 1.5x has not landed (or lost): not validated yet
+                continue
             if n == fam.get("validated_version") and state.get("validation_image") == image and state.get("validation_bundle") == bundle:
                 continue
             if state.get("validation_image") != image or state.get("validation_bundle") != bundle:
@@ -112,7 +117,7 @@ class Tournament:
             row = self.judge(fam["id"], n, result)
             if row is not None:
                 judged[fam["id"]] = row
-        return {"queued": len(jobs), "judged": judged, "errors": errors}
+        return {"queued": len(jobs), "judged": judged, "errors": errors, "waiting_robustness": waiting}
 
     def recorded_validation(self, fid: str, n: int) -> dict[str, Any] | None:
         """The full result of a validation this version already had on the Gym image in use now (the same program on the
@@ -273,7 +278,8 @@ class Tournament:
                 dsr = (line.get("numbers") or {}).get("dsr")
                 if int(fam.get("validations") or 0) >= int(self.cfg.get("retire_min_validations", 6)) and dsr is not None \
                         and dsr < float(self.cfg.get("retire_dsr_below", 0.05)):
-                    why = f"its trial-adjusted evidence fell below the line (deflated Sharpe probability {dsr:.3f})"
+                    # No figure in the reason: it becomes a graveyard lesson researchers read (D2a).
+                    why = "its trial-adjusted evidence fell below the line (the deflated Sharpe probability)"
             if why:
                 if self.retire(fam, why):
                     out.append({"family": fam["id"], "why": why})

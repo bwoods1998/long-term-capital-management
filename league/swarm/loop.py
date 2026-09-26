@@ -381,9 +381,13 @@ class Swarm:
         born = self.seed()
         if born:
             log(f"seeded {len(born)} families")
-        moved = migrate_objective(self.store)  # once per store: the bests chosen anew under the robust Train objective
-        if moved["migrated"]:
-            log(f"train objective: {moved['migrated']} families' bests chosen anew, {moved['with_best']} with an eligible best")
+        try:  # once per store: the bests chosen anew under the robust Train objective, beating so the House waits for it
+            moved = migrate_objective(self.store, beat=lambda: self.heartbeat({"starting": True, "migrating": True}))
+            if moved["migrated"] or moved["failed"]:
+                log(f"train objective: {moved['migrated']} families' bests chosen anew, {moved['with_best']} with an eligible best, "
+                    f"{moved['failed']} emptied after an error")
+        except Exception:  # noqa: BLE001 - the migration never keeps the swarm from starting; it runs again next start
+            log(f"train objective migration failed: {traceback.format_exc()[-800:]}")
         adopted = self.pool.adopt() if hasattr(self.pool, "adopt") else 0
         self.store.event("swarm.status", None, {"action": "started", "pid": os.getpid(), "release": str(CODE_DIR), "adopted": adopted,
                                                 "families": len(self.store.families(alive=True))})

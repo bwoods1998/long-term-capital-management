@@ -26,8 +26,8 @@ THE VALIDATION LINE (a family's best program, on Validation 2025):
   - positive at 1.5x the half-spread (the stress run's P&L after fees).
 
 THE TRAIN OBJECTIVE (`train_score`, the sprint's "robust Train objective", Sept 26): a version is scored on its WORST
-Train year (the `t_daily` of each year with data, the Gym's `by_year`), times the share of Train quarters that were
-positive. It is eligible to be a family's best only with at least 40 trades on at least 20 traded days in EVERY Train
+Train year (the `t_daily` of each year its own roots had data, the Gym's `by_year`), times the share of those years'
+quarters that were positive. It is eligible to be a family's best only with at least 40 trades on at least 20 traded days in EVERY Train
 year with data; a version whose 1.5x-stress Train run loses is never the best (`researcher.py`). The full-window t
 with a 30-trade floor it replaced rewarded sparse filters that could never meet the line's frequency.
 
@@ -208,6 +208,9 @@ def train_score(result: Mapping[str, Any]) -> dict[str, Any]:
     in every year; `why` names the first year short of it."""
     years = years_of(result)
     k, n = quarters_positive(result.get("summary") or {})
+    quarters = [v for r in years.values() for v in ((r.get("quarter_pnl") or {}).values() if isinstance(r.get("quarter_pnl"), Mapping) else [])]
+    if quarters:  # the quarters the program's own roots had data in (the Gym's per-year block), not its batch company's
+        k, n = sum(1 for v in quarters if _num(v) is not None and v > 0), len(quarters)
     out: dict[str, Any] = {"score": None, "eligible": False, "why": None, "worst_year": None, "quarters": f"{k}/{n}",
                            "years": {y: {"trades": int(r.get("trades") or 0), "days_traded": int(r.get("days_traded") or 0),
                                          "pnl": _num(r.get("pnl")), "t_daily": _num(r.get("t_daily"))} for y, r in sorted(years.items())}}
