@@ -123,15 +123,18 @@ class NothingFromTheFuture(unittest.TestCase):
                     if not name.startswith("_"):
                         walk(getattr(value, name), depth + 1)
             elif isinstance(value, np.ndarray):
-                self.assertIsNone(value.base, "a view of the engine's grid would carry the rest of the day")
+                # never a view of the engine's grid (it would carry the rest of the day), never writeable
+                self.assertNotIsInstance(value.base, np.ndarray)
                 self.assertFalse(value.flags.writeable)
+                with self.assertRaises(ValueError):
+                    value.setflags(write=True)
             elif isinstance(value, (int, float)) and not isinstance(value, bool) and depth <= 1:
                 self.assertFalse(2019 <= value <= 2030, value)
 
         walk(ctx)
         for name in ("iv", "delta", "gamma", "theta", "vega"):
             arr = getattr(ctx.chain, name)
-            self.assertIsNone(arr.base)
+            self.assertNotIsInstance(arr.base, np.ndarray)
             self.assertFalse(arr.flags.writeable)
         with self.assertRaises(ValueError):
             ctx.chain.bid[0] = 1.0

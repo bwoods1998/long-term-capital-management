@@ -115,8 +115,12 @@ def natural_value(snap: Snapshot, legs: Sequence[LegFill], action: str, *, stres
             bid, ask = max(0.0, mid - half), mid + half
         buying = (leg.side > 0) == (action == "open")
         price = ask if buying else bid
-        size = int(snap.ask_size[leg.idx] if buying else snap.bid_size[leg.idx])
         value += leg.side * leg.ratio * price
+        if action == "close" and leg.side > 0 and price <= 0.0:
+            # A long wing with no bid is closed at zero: a zero bid shows no size, and letting it cap
+            # the package would leave a stop that can never get out.
+            continue
+        size = int(snap.ask_size[leg.idx] if buying else snap.bid_size[leg.idx])
         cap = min(cap, size // leg.ratio)
     return value, max(0, cap)
 
@@ -280,8 +284,9 @@ def resolve_legs(snap: Snapshot, specs: Any, rules: venue.Rules) -> list[LegFill
 
 
 # --------------------------------------------------------------------------- structure rules
-def classify(type_: str, root: str, legs: Sequence[LegFill], rules: venue.Rules) -> float:
-    """Validate the structure (the House's own classifier for multi-leg types); return its collateral a share."""
+def classify(type_: str, root: str, legs: Sequence[LegFill], rules: venue.Rules) -> tuple[float, float | None]:
+    """Validate the structure (the House's own classifier for multi-leg types); return its collateral a
+    share and the most it can be worth a share where that is bounded (None where not)."""
     if type_ not in venue.STRUCTURE_TYPES:
         raise Refused(f"'open' is one of {', '.join(venue.STRUCTURE_TYPES)}")
     if type_ in ("calendar", "diagonal") and not rules.calendars:
@@ -291,7 +296,7 @@ def classify(type_: str, root: str, legs: Sequence[LegFill], rules: venue.Rules)
             raise Refused(f"a {type_} is one long leg")
         if legs[0].is_call != (type_ == "long_call"):
             raise Refused(f"a {type_}'s leg is a {'call' if type_ == 'long_call' else 'put'}")
-        return 0.0
+        return 0.0, None
     occ_root = "".join(ch for ch in root.upper() if ch.isalpha())[:6] or "X"
     try:
         spec = core.classify(type_, [
@@ -300,7 +305,7 @@ def classify(type_: str, root: str, legs: Sequence[LegFill], rules: venue.Rules)
             for x in legs])
     except ValueError as exc:
         raise Refused(str(exc)) from None
-    return float(spec.collateral)
+    return float(spec.collateral), (None if spec.max_value is None else float(spec.max_value))
 
 
 def max_loss_share(type_: str, value: float, collateral: float) -> float:
@@ -348,12 +353,15 @@ def resolve_open(intent: Mapping[str, Any], snap: Snapshot, rules: venue.Rules, 
     if type_ in ("calendar", "diagonal") and not rules.calendars:
         raise Refused(f"{root} options are index options: every leg has one expiry (no calendars or diagonals)")
     legs = resolve_legs(snap, intent.get("legs"), rules)
-    collateral = classify(type_, root, legs, rules)
+    collateral, top = classify(type_, root, legs, rules)
     natural, _ = natural_value(snap, legs, "open", stress=stress)
     mid = mid_value(snap, legs)
     if not (math.isfinite(natural) and math.isfinite(mid)):
         raise Refused("a leg has no quote now")
     limit = limit_value(intent.get("limit", "natural"), "open", natural, mid, tick_of(root, legs, natural))
+    if type_ not in CREDIT and top is not None and limit >= top - 1e-9:
+        # structure_core.held_limit's rule: a debit at or over what the structure can ever be worth.
+        raise Refused(f"a debit of {limit:.2f} on a {type_} worth at most {top:.2f} can never pay")
     loss = max_loss_share(type_, limit, collateral)
     prices = _leg_prices(snap, legs, "open")
     unit_fees = order_fees(root, legs, prices, 1, "open") * 2.0  # open and close, a structure

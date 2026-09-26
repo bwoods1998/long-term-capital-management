@@ -19,10 +19,12 @@ def decide(ctx):
 ```
 
 Rules (a program that breaks one is refused before it runs): imports `math` and `numpy` only; no
-`print`, `open`, `eval`, `exec`, classes, decorators, generators, `id`, `hash` or `type`; no attribute
-starting with `_`; no attribute assignment (keep state in dicts); no numpy file, memory, random or date
-functions (`np.load`, `np.save`, `np.random`, `np.datetime64`, `.tofile`, `.base`, ...); **no year or
-date literal** (an integer 2019-2030, a YYYYMMDD integer, a string holding a year or an ISO date).
+`print`, `repr`, `open`, `eval`, `exec`, classes, decorators, generators, `id`, `hash` or `type`; no
+attribute starting with `_`; no attribute assignment (keep state in dicts); no numpy file, memory,
+random or date functions (`np.load`, `np.save`, `np.random`, `np.datetime64`, `.tofile`, `.base`,
+`.flags`, ...); no bare `except:`, no `BaseException`, no `return`/`break`/`continue` inside `finally`;
+**no year or date literal** (an integer 2019-2030, a YYYYMMDD integer, a string holding a year or an
+ISO date). The arrays you are handed are read-only.
 A decide call has 1 second, a run's calls 900 seconds in all; 25 errors or timeouts disqualify the
 run. Be deterministic: same inputs, same outputs.
 
@@ -116,13 +118,17 @@ Size: `qty`, or `max_loss` dollars (the most whole structures whose maximum loss
 
 An order meets the quotes of the minute AFTER your decision. A limit at or through the natural price
 (long legs at the ask, short legs at the bid) fills at the natural, up to the quoted size (the
-smallest leg's size over its ratio); the rest keeps working. A limit better than the natural works
-until its tif: it fills at its limit when the natural comes through it, and otherwise only with the
-fill model's calibrated probability for that distance from the mid (none at all until the model is
-calibrated: assume mid orders do not fill). Draws are keyed by contract and minute, not by you.
+smallest leg's size over its ratio); the rest keeps taking the natural as size appears. A limit
+better than the natural works until its tif: it fills at its limit when the natural comes through it,
+and otherwise only with the fill model's calibrated probability for that distance from the mid (none
+at all until the model is calibrated: assume mid orders do not fill), and never on a minute after
+which the market moves your way (a passive fill is someone else's good trade). Draws are keyed by
+contract and minute, not by you. A long wing with no bid is closed at zero.
 Fees: OCC, ORF, CAT on every contract, TAF and SEC on sells, $0.50 plus exchange fees on index
 options. Buying power: an open reserves (maximum loss + fees) x 1.1; a credit position holds its
-collateral. The gate also runs you at 1.5x the half-spread: an edge that lives inside the spread fails.
+collateral. A debit at or over a bounded structure's width is refused. The gate also runs you at 1.5x
+the half-spread (passive fills pay the extra half-spread too): an edge that lives inside the spread
+fails.
 
 ## The venue's clock
 
@@ -130,14 +136,18 @@ Options trade 09:30-16:00 ET (13:00 on a half day). On a contract expiring today
 from 15:00; no closing order from 15:10 (15:25 SPY/QQQ); from 15:30 whatever remains of an equity
 position is liquidated at the natural. Equity options are physically settled: a short leg left in the
 money becomes shares, marked to the next session's first price. XSP and SPXW are cash-settled at the
-close (hold them to expiry if you like; no calendars there). At the end of a run everything open is
-closed at the natural.
+close (the recorded settlement where the store has one, else the 16:00 index level; hold them to
+expiry if you like; no calendars there). An expiry on a day the run did not replay settles all the
+same. At the end of a run everything open is closed at the natural.
 
 ## What a run tells you
 
-`summary` (trades, P&L, P&L per dollar of maximum loss, its t statistic, win rate, profit factor,
-Sharpe on daily P&L, drawdown, turnover, fees, quarters positive), `fills` (fill rate, fills at the
-natural, slippage, rejects and why), `breakdown` by weekday, time of day, DTE, realized and implied vol
-tercile, quarter, type, root and exit reason, the `worst` trades with their context, and on Train
-every trade. Every run is one trial and is counted: many runs that each look good by chance are how
-a search fools itself, so the gate deflates for them.
+`summary` (trades, days_traded, P&L, P&L per dollar of maximum loss, `t_daily` (the t of the DAILY
+return on maximum loss: the statistic the validation line tests; five lots on one day are one day's
+evidence), win rate, profit factor, Sharpe on daily P&L with its skew and kurtosis, drawdown,
+turnover, fees, quarters positive, the median maximum loss of one structure), `fills` (fill rate,
+fills at the natural, slippage, rejects and why), `breakdown` by weekday, time of day, DTE, realized
+and implied vol tercile, quarter, type, root and exit reason, and on Train the `worst` trades with
+their context and every trade. A validation run shows the statistics and breakdowns only (no trades,
+no dates, no daily series) plus its 1.5x-stress twin. Every run is one trial and is counted: many
+runs that each look good by chance are how a search fools itself, so the gate deflates for them.

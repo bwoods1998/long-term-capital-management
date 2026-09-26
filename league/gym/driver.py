@@ -179,6 +179,8 @@ class GymDriver:
         """Run `programs` ({name: code} or {name: (code, params or [params, ...])}) and return the batch's document."""
         if not programs:
             raise GymError("no programs to run")
+        if window == "validation" and (start or end):
+            raise GymError("a validation run is the whole window: no start or end cut")
         q = shlex.quote
         settings = {"window": window, "roots": [r.upper() for r in roots], "workers": int(workers), "split": int(split),
                     "stress": float(stress), "capital": float(capital), "detail": detail, "start": start, "end": end,
